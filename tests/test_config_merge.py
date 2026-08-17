@@ -1,6 +1,6 @@
 """Unit-тесты для config_modules.merge.deep_merge."""
 
-from config_modules.merge import deep_merge
+from gc_core.config_modules.merge import deep_merge
 
 
 def test_scalar_override():

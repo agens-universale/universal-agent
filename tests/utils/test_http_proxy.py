@@ -14,7 +14,7 @@ class TestResolveProxies:
     # ------------------------------------------------------------------
 
     def test_config_proxy_non_empty_wins_over_env(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         config_proxy = "socks5h://proxy.example:1080"
         environ = {"HTTPS_PROXY": "http://env-proxy:8080"}
@@ -27,7 +27,7 @@ class TestResolveProxies:
         assert result["https"] == config_proxy
 
     def test_config_proxy_strips_whitespace(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         config_proxy = "  socks5h://proxy.example:1080  \n"
         environ = {}
@@ -44,7 +44,7 @@ class TestResolveProxies:
     # ------------------------------------------------------------------
 
     def test_empty_config_falls_back_to_https_proxy(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {"HTTPS_PROXY": "http://env-proxy:8080"}
         url = "https://api.openai.com/v1/chat/completions"
@@ -56,7 +56,7 @@ class TestResolveProxies:
         assert result["https"] == "http://env-proxy:8080"
 
     def test_empty_config_falls_back_to_http_proxy(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {"HTTP_PROXY": "http://env-proxy:8080"}
         url = "https://api.openai.com/v1/chat/completions"
@@ -68,7 +68,7 @@ class TestResolveProxies:
         assert result["https"] == "http://env-proxy:8080"
 
     def test_empty_config_falls_back_to_all_proxy(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {"ALL_PROXY": "socks5://env-proxy:1080"}
         url = "https://api.openai.com/v1/chat/completions"
@@ -80,7 +80,7 @@ class TestResolveProxies:
         assert result["https"] == "socks5://env-proxy:1080"
 
     def test_env_priority_https_over_http_over_all(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {
             "HTTPS_PROXY": "http://https-env:8080",
@@ -96,7 +96,7 @@ class TestResolveProxies:
         assert result["https"] == "http://https-env:8080"
 
     def test_lowercase_env_falls_back_when_uppercase_absent(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {"https_proxy": "http://lowercase:8080"}
         url = "https://api.openai.com/v1/chat/completions"
@@ -112,14 +112,14 @@ class TestResolveProxies:
     # ------------------------------------------------------------------
 
     def test_empty_config_and_empty_env_returns_none(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         result = resolve_proxies("", {}, "https://api.openai.com/v1/chat/completions")
 
         assert result is None
 
     def test_none_config_and_empty_env_returns_none(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         result = resolve_proxies(None, {}, "https://api.openai.com/v1/chat/completions")
 
@@ -130,7 +130,7 @@ class TestResolveProxies:
     # ------------------------------------------------------------------
 
     def test_no_proxy_bypasses_config_proxy(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         config_proxy = "http://proxy.example:8080"
         environ = {"NO_PROXY": "api.openai.com, localhost"}
@@ -142,7 +142,7 @@ class TestResolveProxies:
         assert result is None or result == {}
 
     def test_no_proxy_bypasses_env_proxy(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {
             "HTTPS_PROXY": "http://env-proxy:8080",
@@ -155,7 +155,7 @@ class TestResolveProxies:
         assert result is None or result == {}
 
     def test_no_proxy_lowercase(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {
             "HTTPS_PROXY": "http://env-proxy:8080",
@@ -168,7 +168,7 @@ class TestResolveProxies:
         assert result is None or result == {}
 
     def test_no_proxy_not_matching_returns_proxy(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {
             "HTTPS_PROXY": "http://env-proxy:8080",
@@ -182,7 +182,7 @@ class TestResolveProxies:
         assert result["https"] == "http://env-proxy:8080"
 
     def test_no_proxy_wildcard_subdomain(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {
             "HTTPS_PROXY": "http://env-proxy:8080",
@@ -199,7 +199,7 @@ class TestResolveProxies:
     # ------------------------------------------------------------------
 
     def test_result_is_dict_with_http_and_https_keys(self):
-        from utils.http_proxy import resolve_proxies
+        from gc_core.utils.http_proxy import resolve_proxies
 
         environ = {"HTTPS_PROXY": "http://env-proxy:8080"}
         url = "https://api.openai.com/v1/chat/completions"

@@ -4,13 +4,10 @@ from pathlib import Path
 
 import yaml
 
-import config as cfgmod
-from config import load_config
-from config_modules.strip_tags_projection import (
-    StripTagsProjectionConfig,
-    normalize_strip_tags_projection_config,
-)
-from message_projection import configure_for_model_tags, project_text_for_model
+from gc_core import config as cfgmod
+from gc_core.config import load_config
+from gc_core.config_modules.strip_tags_projection import StripTagsProjectionConfig, normalize_strip_tags_projection_config
+from gc_core.message_projection import configure_for_model_tags, project_text_for_model
 
 _SAMPLE = "<think>t</think><redacted_thinking>r</redacted_thinking>ok"
 

@@ -24,16 +24,9 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(_repo_root))
     __package__ = "recommended_mcp"
 
-from mcp_runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
-from mcp_runtime.state import save_runtime_state
-from mcp_runtime.venv import (
-    active_pip_python,
-    ensure_mcp_venv,
-    pip_argv,
-    pip_install_argv,
-    pip_install_target,
-    query_installed_version,
-)
+from gc_core.mcp_runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
+from gc_core.mcp_runtime.state import save_runtime_state
+from gc_core.mcp_runtime.venv import active_pip_python, ensure_mcp_venv, pip_argv, pip_install_argv, pip_install_target, query_installed_version
 from recommended_mcp.manifest import (
     MCPEntry,
     load_agent_dep_dir,
@@ -136,7 +129,7 @@ def uninstall_entry(entry: MCPEntry, root: Path) -> None:
         if not pkg:
             print(f"[warn] {entry.name}: npm_package не задан — деинсталл пропущен")
             return
-        from config_modules.env_vars import gc_paths
+        from gc_core.config_modules.env_vars import gc_paths
         agent_dep_dir = gc_paths()["data"]
         npm = _node_install_paths(agent_dep_dir)["npm"]
         print(f"[uninstall] {entry.name}: npm uninstall -g {pkg}")
@@ -590,7 +583,7 @@ def main() -> int:
     print(f"[state] {state.bin_dir}")
     paths = _node_install_paths(agent_dep_dir)
     if paths["npx"].exists():
-        from config_modules.env_vars import gc_paths
+        from gc_core.config_modules.env_vars import gc_paths
 
         cache = gc_paths()["cache"]
         print(f"[paths] config command: {paths['npx']}")

@@ -1,12 +1,8 @@
 import json
 
-from tools.fs.file_info import FileInfo
-from tools.fs.read_file import (
-    ReadFile,
-    DEFAULT_READ_FILE_CHAR_LIMIT,
-    DEFAULT_READ_FILE_MAX_BYTES,
-)
-from utils.file_text import sha256_hex_of_bytes
+from gc_core.tools.fs.file_info import FileInfo
+from gc_core.tools.fs.read_file import ReadFile, DEFAULT_READ_FILE_CHAR_LIMIT, DEFAULT_READ_FILE_MAX_BYTES
+from gc_core.utils.file_text import sha256_hex_of_bytes
 
 
 from tests.helpers.tool_ctx import with_local_ctx

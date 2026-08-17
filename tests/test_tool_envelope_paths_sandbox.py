@@ -1,8 +1,8 @@
 import json
 
 from tests.harbor_support.fakes import bind_os_backend
-from backends.protocol import FsBackend
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.backends.protocol import FsBackend
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 
 class RecordingSandboxBackend(FsBackend):

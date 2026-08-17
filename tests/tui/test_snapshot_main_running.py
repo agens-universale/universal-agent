@@ -6,7 +6,7 @@ pytest.importorskip("pytest_textual_snapshot")
 
 
 def test_main_running_snapshot(snap_compare, tmp_path):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     # подготовка: один user message в data, meta — status running
     (tmp_path / "meta_cli_7f3a9b1c.json").write_text(

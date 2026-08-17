@@ -3,22 +3,16 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from summarize.memory_suggestions import request_patch_replace
-from summarize.prompt_loading import (
-    MEMORY_PATCH_SUBAGENT_GUIDANCE_PLACEHOLDER,
-    MEMORY_PATCH_SUBAGENT_GUIDANCE_TEXT,
-    load_memory_patch_replace_prompt,
-)
-from summarize.summary_spec import (
-    MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
-    SUMMARY_SECTIONS,
-)
-from summarize.working_memory_gateway import MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER, REGISTER_ORDER
+from gc_core.summarize.memory_suggestions import request_patch_replace
+from gc_core.summarize.prompt_loading import MEMORY_PATCH_SUBAGENT_GUIDANCE_PLACEHOLDER, MEMORY_PATCH_SUBAGENT_GUIDANCE_TEXT, load_memory_patch_replace_prompt
+from gc_core.summarize.summary_spec import MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER, SUMMARY_SECTIONS
+from gc_core.summarize.working_memory_gateway import MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER, REGISTER_ORDER
+from tests.paths import ASSETS
 
 
 def _prompt_path() -> str:
     root = Path(__file__).resolve().parent.parent
-    return str(root / "prompts" / "chat_completions_memory_patch_replace.md")
+    return str(ASSETS / "prompts" / "chat_completions_memory_patch_replace.md")
 
 
 def test_patch_replace_template_has_placeholders_on_disk():
@@ -65,7 +59,7 @@ def test_request_patch_replace_injects_subagent_guidance_in_system_only(monkeypa
         return "<goal>keep</goal>"
 
     monkeypatch.setattr(
-        "summarize.memory_suggestions.request_summary_text",
+        "gc_core.summarize.memory_suggestions.request_summary_text",
         _fake_summary_text,
     )
     ctx = SimpleNamespace(config_dict={}, logger=None)

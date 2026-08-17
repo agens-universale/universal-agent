@@ -1,7 +1,7 @@
 """Паритет stream ↔ non-stream: стрим-ошибка (SSE error в 200-стриме) идёт через
 ту же адаптивную политику ретраев, что и HTTP-ошибка того же кода."""
-import request_backend_policy as policy
-from utils.chat_completions_stream import BackendStreamError
+from gc_core import request_backend_policy as policy
+from gc_core.utils.chat_completions_stream import BackendStreamError
 
 
 def test_policy_retries_stream_error_then_succeeds(monkeypatch):

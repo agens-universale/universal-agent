@@ -1,5 +1,5 @@
 import pytest
-from config_modules.tui import TuiConfig
+from gc_core.config_modules.tui import TuiConfig
 
 
 def test_tui_default_stream_display_minimal():
@@ -25,8 +25,8 @@ def test_tui_rejects_removed_flags():
 
 def test_flatten_exposes_tui_stream_display(tmp_path, monkeypatch):
     """Значение из config.yml доходит до плоского config_dict (overlay нейтрализованы)."""
-    import config as cfgmod
-    import mcp_runtime.paths as mpaths
+    from gc_core import config as cfgmod
+    from gc_core.mcp_runtime import paths as mpaths
 
     monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
     monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
@@ -38,7 +38,7 @@ def test_flatten_exposes_tui_stream_display(tmp_path, monkeypatch):
 
 
 def test_tui_bang_shell_defaults():
-    from config_modules.tui import BangShellConfig, TuiConfig
+    from gc_core.config_modules.tui import BangShellConfig, TuiConfig
 
     assert TuiConfig().bang_shell == BangShellConfig()
     assert TuiConfig().bang_shell.enabled is True
@@ -48,8 +48,8 @@ def test_tui_bang_shell_defaults():
 
 
 def test_flatten_exposes_tui_bang_shell(tmp_path, monkeypatch):
-    import config as cfgmod
-    import mcp_runtime.paths as mpaths
+    from gc_core import config as cfgmod
+    from gc_core.mcp_runtime import paths as mpaths
 
     monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
     monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
@@ -65,7 +65,7 @@ def test_flatten_exposes_tui_bang_shell(tmp_path, monkeypatch):
 
 
 def test_tui_file_view_defaults():
-    from config_modules.tui import FileViewConfig, TuiConfig
+    from gc_core.config_modules.tui import FileViewConfig, TuiConfig
 
     assert TuiConfig().file_view == FileViewConfig()
     assert TuiConfig().file_view.enabled is True
@@ -74,8 +74,8 @@ def test_tui_file_view_defaults():
 
 
 def test_flatten_exposes_tui_file_view(tmp_path, monkeypatch):
-    import config as cfgmod
-    import mcp_runtime.paths as mpaths
+    from gc_core import config as cfgmod
+    from gc_core.mcp_runtime import paths as mpaths
 
     monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
     monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
@@ -93,8 +93,8 @@ def test_flatten_exposes_tui_file_view(tmp_path, monkeypatch):
 
 
 def test_flatten_file_view_page_lines_null(tmp_path, monkeypatch):
-    import config as cfgmod
-    import mcp_runtime.paths as mpaths
+    from gc_core import config as cfgmod
+    from gc_core.mcp_runtime import paths as mpaths
 
     monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
     monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")

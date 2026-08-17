@@ -1,5 +1,5 @@
 """probe-расширение model_picker: статусы, 401-приоритет, POST-пинг, latency."""
-import model_picker as mp
+from gc_core import model_picker as mp
 
 
 def _ok_get(payload):

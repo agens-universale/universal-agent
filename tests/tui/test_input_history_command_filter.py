@@ -1,7 +1,7 @@
 """InputHistory не хранит слэш-команды — ни при append, ни при load."""
 import json
 
-from tui.services.input_history import InputHistory
+from gc_tui.services.input_history import InputHistory
 
 
 def test_append_skips_commands(tmp_path):

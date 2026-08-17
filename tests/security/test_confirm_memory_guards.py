@@ -9,8 +9,8 @@ import json
 import os
 import types
 
-from security import confirm_port as cp
-from security.permission_store import PermissionStore
+from gc_core.security import confirm_port as cp
+from gc_core.security.permission_store import PermissionStore
 
 
 def _tui_ctx(choice):
@@ -36,8 +36,8 @@ def _tui_ctx(choice):
 
 def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
     """[deny] write vне периметра: повтор не переспрашивает; сообщение инструктивно."""
-    from security.path_policy import enforce_write_guard
-    from config_modules import env_vars
+    from gc_core.security.path_policy import enforce_write_guard
+    from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
@@ -90,8 +90,8 @@ def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
 
 def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
     """url_policy ask: declined URL не переспрашивает; сообщение инструктивно."""
-    from security.url_policy import enforce_url_policy
-    from config_modules import env_vars
+    from gc_core.security.url_policy import enforce_url_policy
+    from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
@@ -146,8 +146,8 @@ def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
 
 def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
     """read_guard ask: declined path не переспрашивает; сообщение инструктивно."""
-    from security.read_guard import enforce_read_guard
-    from config_modules import env_vars
+    from gc_core.security.read_guard import enforce_read_guard
+    from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
@@ -202,8 +202,8 @@ def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
 
 def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
     """command_moderation ask, judge unavailable: decline кэшируется; сообщение инструктивно."""
-    from security.command_moderation import moderate_command_execution
-    from config_modules import env_vars
+    from gc_core.security.command_moderation import moderate_command_execution
+    from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
@@ -262,8 +262,8 @@ def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
 
 def test_command_guard_decline_caches(monkeypatch, tmp_path):
     """command_guard tripwire ask: decline кэшируется при повторе."""
-    from security.command_guard import enforce_command_guard
-    from config_modules import env_vars
+    from gc_core.security.command_guard import enforce_command_guard
+    from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 

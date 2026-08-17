@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import processing_responses as pr
+from gc_core import processing_responses as pr
 
 
 DIRTY_THINK = "<think>длинное рассуждение агента</think>"

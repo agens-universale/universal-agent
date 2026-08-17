@@ -11,17 +11,18 @@ Layering under test: schema defaults < bench defaults < profile overrides < runt
 import sys
 from pathlib import Path
 
-from config import flatten_app_config
-from config_modules.root import AppConfig, resolve_paths
+from gc_core.config import flatten_app_config
+from gc_core.config_modules.root import AppConfig, resolve_paths
 
 _HARBOR_DIR = Path(__file__).resolve().parents[1] / "harbor"
 if str(_HARBOR_DIR) not in sys.path:
     sys.path.insert(0, str(_HARBOR_DIR))
 
 from adapters.gc_cli_config import build_gc_cli_config  # noqa: E402
+from tests.paths import ASSETS
 
-_PROMPTS = _HARBOR_DIR.parent / "prompts"
-_SKILLS = _HARBOR_DIR.parent / "skills"
+_PROMPTS = ASSETS / "prompts"
+_SKILLS = ASSETS / "skills"
 
 
 def _config(overrides: dict | None = None) -> dict:

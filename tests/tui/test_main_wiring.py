@@ -19,7 +19,7 @@ def test_main_assembles_stack_dry_run(monkeypatch, tmp_path):
         encoding="utf-8",
     )
 
-    from tui import app as tui_app
+    from gc_tui import app as tui_app
     called: dict = {}
 
     class _FakeApp:
@@ -31,10 +31,10 @@ def test_main_assembles_stack_dry_run(monkeypatch, tmp_path):
             return None
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("mcp_daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
-    monkeypatch.setattr("mcp_daemon_autostart.shutdown_mcp_daemons", lambda: None)
+    monkeypatch.setattr("gc_core.mcp_daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
+    monkeypatch.setattr("gc_core.mcp_daemon_autostart.shutdown_mcp_daemons", lambda: None)
 
-    from tui import main
+    from gc_tui import main
     rc = main(argv=["--config", str(cfg_path)])
     assert rc == 0
     # Path comparison should be OS-tolerant (Windows backslash vs YAML's POSIX forward slash)
@@ -64,7 +64,7 @@ def test_main_auto_mcp_default_starts_and_stops_daemons(monkeypatch, tmp_path):
     """gc-ua по умолчанию поднимает HTTP/SSE MCP-daemon'ы (без явного -a)."""
     pytest.importorskip("textual")
 
-    from tui import app as tui_app
+    from gc_tui import app as tui_app
 
     class _FakeApp:
         def __init__(self, **kw):
@@ -80,15 +80,15 @@ def test_main_auto_mcp_default_starts_and_stops_daemons(monkeypatch, tmp_path):
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "mcp_daemon_autostart.ensure_mcp_daemons",
+        "gc_core.mcp_daemon_autostart.ensure_mcp_daemons",
         lambda cfg: calls.append("ensure"),
     )
     monkeypatch.setattr(
-        "mcp_daemon_autostart.shutdown_mcp_daemons",
+        "gc_core.mcp_daemon_autostart.shutdown_mcp_daemons",
         lambda: calls.append("shutdown"),
     )
 
-    from tui import main
+    from gc_tui import main
 
     cfg_path = _cfg_for_main(tmp_path)
     rc = main(argv=["--config", str(cfg_path)])
@@ -99,7 +99,7 @@ def test_main_auto_mcp_default_starts_and_stops_daemons(monkeypatch, tmp_path):
 def test_main_no_auto_mcp_skips_daemons(monkeypatch, tmp_path):
     pytest.importorskip("textual")
 
-    from tui import app as tui_app
+    from gc_tui import app as tui_app
 
     class _FakeApp:
         def __init__(self, **kw):
@@ -115,15 +115,15 @@ def test_main_no_auto_mcp_skips_daemons(monkeypatch, tmp_path):
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "mcp_daemon_autostart.ensure_mcp_daemons",
+        "gc_core.mcp_daemon_autostart.ensure_mcp_daemons",
         lambda cfg: calls.append("ensure"),
     )
     monkeypatch.setattr(
-        "mcp_daemon_autostart.shutdown_mcp_daemons",
+        "gc_core.mcp_daemon_autostart.shutdown_mcp_daemons",
         lambda: calls.append("shutdown"),
     )
 
-    from tui import main
+    from gc_tui import main
 
     cfg_path = _cfg_for_main(tmp_path)
     rc = main(argv=["--config", str(cfg_path), "--no-auto-mcp"])
@@ -135,7 +135,7 @@ def test_main_auto_mcp_flag_still_works(monkeypatch, tmp_path):
     """Явный -a совместим с дефолтом (ensure+shutdown)."""
     pytest.importorskip("textual")
 
-    from tui import app as tui_app
+    from gc_tui import app as tui_app
 
     class _FakeApp:
         def __init__(self, **kw):
@@ -151,15 +151,15 @@ def test_main_auto_mcp_flag_still_works(monkeypatch, tmp_path):
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "mcp_daemon_autostart.ensure_mcp_daemons",
+        "gc_core.mcp_daemon_autostart.ensure_mcp_daemons",
         lambda cfg: calls.append("ensure"),
     )
     monkeypatch.setattr(
-        "mcp_daemon_autostart.shutdown_mcp_daemons",
+        "gc_core.mcp_daemon_autostart.shutdown_mcp_daemons",
         lambda: calls.append("shutdown"),
     )
 
-    from tui import main
+    from gc_tui import main
 
     cfg_path = _cfg_for_main(tmp_path)
     rc = main(argv=["--config", str(cfg_path), "-a"])

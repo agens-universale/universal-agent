@@ -1,9 +1,9 @@
 import unittest
 
-from message_format.dialog_history import format_last_dialog_steps, group_into_turns, split_turns_into_char_batches
-from summarize.summary_validation import is_valid_summary_text, validate_summary_text
+from gc_core.message_format.dialog_history import format_last_dialog_steps, group_into_turns, split_turns_into_char_batches
+from gc_core.summarize.summary_validation import is_valid_summary_text, validate_summary_text
 from tests.helpers.summary_sample import valid_summary_xml_for_tests
-from message_policy.user_message_policy import append_user_log_entries
+from gc_core.message_policy.user_message_policy import append_user_log_entries
 
 
 class ThreadSummarizerTest(unittest.TestCase):

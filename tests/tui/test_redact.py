@@ -1,4 +1,4 @@
-from tui.services.redact import redact_secrets
+from gc_tui.services.redact import redact_secrets
 
 
 def test_masks_secret_keys_deeply():

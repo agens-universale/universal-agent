@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from diff_tui import git_ops
+from gc_tui.diff_tui import git_ops
 
 
 def _has_git() -> bool:

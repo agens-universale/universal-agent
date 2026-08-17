@@ -1,5 +1,5 @@
 """ToolCallRow waiting phase (D9): · without elapsed until execute starts."""
-from tui.widgets.tool_call_row import ToolCallRow
+from gc_tui.widgets.tool_call_row import ToolCallRow
 
 
 def test_waiting_row_shows_dim_dot_without_elapsed():
@@ -62,7 +62,7 @@ def test_set_live_status_on_running_row():
 
 
 def test_reconcile_batch_phases_first_active_rest_waiting():
-    from tui.services.subagent_progress import reconcile_batch_phases
+    from gc_tui.services.subagent_progress import reconcile_batch_phases
 
     a = ToolCallRow(call_id="a", tool_name="t1", args_summary="", waiting=True)
     b = ToolCallRow(call_id="b", tool_name="t2", args_summary="", waiting=True)
@@ -74,7 +74,7 @@ def test_reconcile_batch_phases_first_active_rest_waiting():
 
 
 def test_reconcile_after_first_done_promotes_second():
-    from tui.services.subagent_progress import reconcile_batch_phases
+    from gc_tui.services.subagent_progress import reconcile_batch_phases
 
     a = ToolCallRow(call_id="a", tool_name="t1", args_summary="", waiting=True)
     b = ToolCallRow(call_id="b", tool_name="t2", args_summary="", waiting=True)

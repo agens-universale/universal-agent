@@ -4,8 +4,8 @@ import pytest
 
 def test_palette_shows_all_commands_no_limit():
     pytest.importorskip("textual")
-    from tui.commands import build_default_registry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
     palette = CommandPalette(reg, initial_filter="")
@@ -20,7 +20,7 @@ def test_palette_shows_all_commands_no_limit():
 @pytest.mark.asyncio
 async def test_palette_opens_on_slash_and_filters():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         await pilot.press("/")
@@ -38,8 +38,8 @@ async def test_palette_opens_on_slash_and_filters():
 async def test_palette_opens_on_dot_only_and_closes_on_more_typing(tmp_path):
     """Ровно `.` открывает палитру (RU-раскладка); дальше печатаем — закрывается."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_palette import CommandPalette
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -64,8 +64,8 @@ async def test_palette_opens_on_dot_only_and_closes_on_more_typing(tmp_path):
 async def test_palette_dot_enter_executes_selected(tmp_path):
     """Enter по палитре, открытой через `.`, выполняет /команду — не шлёт `.`."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.help import HelpScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.help import HelpScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -84,7 +84,7 @@ async def test_palette_dot_enter_executes_selected(tmp_path):
 async def test_palette_dot_tab_completes_with_slash(tmp_path):
     """Tab из палитры по `.` подставляет /name — не `.name`."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -99,7 +99,7 @@ async def test_palette_dot_tab_completes_with_slash(tmp_path):
 @pytest.mark.asyncio
 async def test_palette_closes_on_esc():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         await pilot.press("/")
@@ -114,10 +114,10 @@ async def test_palette_enter_inserts_command_with_args(tmp_path):
     /view — команда с arg_file: следом за подстановкой открывается file-picker
     (состояние 3b), как /export открывает arg-picker — см. соседний тест."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
-    from tui.widgets.command_palette import CommandPalette
-    from tui.widgets.file_picker import FilePicker
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
+    from gc_tui.widgets.command_palette import CommandPalette
+    from gc_tui.widgets.file_picker import FilePicker
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -139,11 +139,11 @@ async def test_palette_enter_inserts_export_then_field_enter_runs(tmp_path, monk
     """Из палитры Enter только подставляет `/export `; выполнение — следующим Enter в поле."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from thread_store import append_new_thread_messages
-    from tui.app import TuiApp
-    from tui.services.stores.file_store import FileTaskStore
-    from tui.widgets.arg_picker import ArgPicker
-    from tui.widgets.command_palette import CommandPalette
+    from gc_core.thread_store import append_new_thread_messages
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stores.file_store import FileTaskStore
+    from gc_tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.command_palette import CommandPalette
 
     append_new_thread_messages(
         str(tmp_path), "cli", "tid1",
@@ -177,7 +177,7 @@ async def test_palette_enter_inserts_export_then_field_enter_runs(tmp_path, monk
 @pytest.mark.asyncio
 async def test_palette_enter_executes_selected():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         await pilot.press("/")
@@ -190,7 +190,7 @@ async def test_palette_enter_executes_selected():
         # Input cleared
         assert pilot.app.query_one("#cmdinput").text == ""
         # The selected command (skills) ran — pushed SkillsScreen
-        from tui.screens.skills import SkillsScreen
+        from gc_tui.screens.skills import SkillsScreen
         assert isinstance(pilot.app.screen, SkillsScreen)
         # Typed prefix did NOT run as a literal command
         assert not pilot.app.query(".palette")
@@ -200,8 +200,8 @@ async def test_palette_enter_executes_selected():
 async def test_palette_closes_after_space_after_command_name(tmp_path):
     """После '/export ' (с пробелом) палитра не должна быть видна."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_palette import CommandPalette
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
 
@@ -230,8 +230,8 @@ async def test_palette_closes_after_space_after_command_name(tmp_path):
 async def test_palette_first_row_selected_on_open(tmp_path):
     """При открытии палитры подсвечена первая строка (а не «никакая»)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_palette import CommandPalette
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -248,8 +248,8 @@ def test_descriptions_align_to_common_name_column():
     """Спека 2026-07-18 §4: описания всех строк начинаются в общей колонке —
     имя паддируется до самого длинного имени среди видимых строк + 3 пробела."""
     pytest.importorskip("textual")
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = CommandRegistry()
     reg.register(Command("s", (), "", "короткое"))
@@ -266,7 +266,7 @@ def test_descriptions_align_to_common_name_column():
 
 def test_registry_does_not_contain_main():
     pytest.importorskip("textual")
-    from tui.commands import build_default_registry
+    from gc_tui.commands import build_default_registry
     reg = build_default_registry()
     assert reg.lookup("main") is None
 
@@ -275,9 +275,9 @@ def test_registry_does_not_contain_main():
 async def test_palette_hugs_content(tmp_path):
     """Рамка палитры обнимает список (height: auto) — не растянута на весь экран."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_palette import CommandPalette
-    from tui.commands import build_default_registry
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_palette import CommandPalette
+    from gc_tui.commands import build_default_registry
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:
@@ -298,9 +298,9 @@ async def test_palette_keys_hint_has_air_above(tmp_path):
     в настройках) — иначе читается как ещё один пункт списка. «Нет совпадений» воздуха
     не получает: там отделять нечего."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_palette import CommandPalette
-    from tui.commands import build_default_registry
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_palette import CommandPalette
+    from gc_tui.commands import build_default_registry
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:

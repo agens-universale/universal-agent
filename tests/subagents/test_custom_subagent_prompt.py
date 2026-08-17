@@ -5,8 +5,8 @@
 """
 from types import SimpleNamespace
 
-from run_context import create_run_context
-from tools.subagents.runner import SubagentRunner
+from gc_core.run_context import create_run_context
+from gc_core.tools.subagents.runner import SubagentRunner
 
 CUSTOM_MARKER = "User-defined role"
 BASE_MARKER = "Runtime contract"

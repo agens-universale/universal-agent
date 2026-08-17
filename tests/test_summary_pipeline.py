@@ -2,19 +2,17 @@ import tempfile
 import types
 
 from intent_fixtures import intent_user_ask_texts, meta_intent_log, user_ask_records
-from intent_log import append_user_ask, serialize_for_meta
-from summarize.compaction import (
-    maybe_run_summary_compaction,
-)
-from thread_store import ThreadSession, append_new_thread_messages, save_thread_meta
+from gc_core.intent_log import append_user_ask, serialize_for_meta
+from gc_core.summarize.compaction import maybe_run_summary_compaction
+from gc_core.thread_store import ThreadSession, append_new_thread_messages, save_thread_meta
 from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 TS = "2026-05-30T11:35:08Z"
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("summarize.thread_summarizer.request_summary_text", fake)
-    monkeypatch.setattr("summarize.summary_llm_steps.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.request_summary_text", fake)
 
 
 def _ctx(trigger_chars: int = 1):
@@ -113,14 +111,14 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             thread_id=thread_id,
         )
 
-        monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         _patch_chat_completion(
             monkeypatch,
             lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
         )
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
         monkeypatch.setattr(
-            "summarize.memory_suggestions.request_patch_replace",
+            "gc_core.summarize.memory_suggestions.request_patch_replace",
             lambda **_k: empty_patch,
         )
 
@@ -205,14 +203,14 @@ def test_persist_batch_writes_user_intent_log_to_meta():
 
 
 def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(
         monkeypatch,
         lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
     )
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
-        "summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.request_patch_replace",
         lambda **_k: empty_patch,
     )
 
@@ -239,14 +237,14 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
 
 
 def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkeypatch):
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(
         monkeypatch,
         lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
     )
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
-        "summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.request_patch_replace",
         lambda **_k: empty_patch,
     )
 

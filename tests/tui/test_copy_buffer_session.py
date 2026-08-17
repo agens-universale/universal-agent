@@ -28,8 +28,8 @@ class _MockStore:
 @pytest.mark.asyncio
 async def test_push_session_copy_buffer_writes_meta(tmp_path, monkeypatch):
     """_push_session_copy_buffer читает existing и пишет prepend через update_tui_meta."""
-    from tui.app import TuiApp
-    from tui.services import clipboard_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -46,7 +46,7 @@ async def test_push_session_copy_buffer_writes_meta(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_push_session_copy_buffer_no_store_noop(tmp_path, monkeypatch):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -59,8 +59,8 @@ async def test_push_session_copy_buffer_no_store_noop(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_ctrl_c_with_selection_pushes_session_buffer(tmp_path, monkeypatch):
     """Ctrl+C + selection → copy_out + push в copy_buffer meta."""
-    from tui.app import TuiApp
-    from tui.services import clipboard_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
 
     copied: list = []
     stop_called = {"flag": False}
@@ -101,8 +101,8 @@ async def test_ctrl_c_with_selection_pushes_session_buffer(tmp_path, monkeypatch
 @pytest.mark.asyncio
 async def test_ctrl_c_without_selection_stops_no_push(tmp_path, monkeypatch):
     """Регресс: Ctrl+C без выделения → stop, copy_buffer не пишется."""
-    from tui.app import TuiApp
-    from tui.services import clipboard_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
 
     stop_called = {"flag": False}
 
@@ -147,8 +147,8 @@ async def test_ctrl_c_without_selection_stops_no_push(tmp_path, monkeypatch):
 async def test_push_session_buffer_blocked_on_copy_buffer_screen(tmp_path, monkeypatch):
     """B8: когда CopyBufferScreen on top — push в сессию не происходит."""
     from textual.screen import Screen
-    from tui.app import TuiApp
-    from tui.services import clipboard_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
 
     class _MarkerScreen(Screen):
         """Screen-маркер: имитирует CopyBufferScreen (без TextArea)."""

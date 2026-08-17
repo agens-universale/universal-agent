@@ -2,7 +2,7 @@
 import hashlib
 from types import SimpleNamespace
 
-from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+from gc_core.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 
 
 class FakeBackend:
@@ -159,7 +159,7 @@ class FakeBackend:
 
 def bind_os_backend(tool, backend, *, config_dict=None):
     """Attach ``backend`` via minimal RunContext-like ``_ctx`` (unit/diff tests)."""
-    from execution_workspace import build_execution_workspace
+    from gc_core.execution_workspace import build_execution_workspace
 
     cfg = config_dict if config_dict is not None else {}
     tool._ctx = SimpleNamespace(

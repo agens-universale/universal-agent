@@ -6,27 +6,27 @@ from types import SimpleNamespace
 
 
 def test_schema_default_is_smart():
-    from config_modules.tui import TuiConfig
+    from gc_core.config_modules.tui import TuiConfig
     cfg = TuiConfig()
     assert cfg.finish_gate_mode == "smart"
     assert cfg.text_answer_mode == "judge"
 
 
 def test_schema_accepts_smart():
-    from config_modules.tui import TuiConfig
+    from gc_core.config_modules.tui import TuiConfig
     assert TuiConfig(finish_gate_mode="smart").finish_gate_mode == "smart"
     assert TuiConfig(finish_gate_mode="on").finish_gate_mode == "on"
     assert TuiConfig(finish_gate_mode="off").finish_gate_mode == "off"
 
 
 def test_schema_rejects_unknown_mode():
-    from config_modules.tui import TuiConfig
+    from gc_core.config_modules.tui import TuiConfig
     with pytest.raises(Exception):
         TuiConfig(finish_gate_mode="maybe")
 
 
 def test_state_counter_starts_zero_and_resets_on_flush():
-    from states import State
+    from gc_core.states import State
     st = State.__new__(State)          # без тяжёлого __init__ (get_project_data и т.п.)
     st.turn_tool_calls = 0
     st.current_user_intent = []
@@ -38,7 +38,7 @@ def test_state_counter_starts_zero_and_resets_on_flush():
 
 
 def test_apply_finish_gate_mode_projects_smart():
-    from tui.toggles import apply_finish_gate_mode
+    from gc_tui.toggles import apply_finish_gate_mode
     cfg = {"tui_finish_gate_mode": "smart", "tui_finish_gate_mode_explicit": True}
     apply_finish_gate_mode(cfg)
     assert cfg["strict_turn_finish_validation"] is True     # судья потенциально включён
@@ -46,7 +46,7 @@ def test_apply_finish_gate_mode_projects_smart():
 
 
 def test_apply_finish_gate_mode_on_off_unchanged():
-    from tui.toggles import apply_finish_gate_mode
+    from gc_tui.toggles import apply_finish_gate_mode
     on = {"tui_finish_gate_mode": "on", "tui_finish_gate_mode_explicit": True}
     apply_finish_gate_mode(on)
     assert on["strict_turn_finish_validation"] is True and on["finish_gate_smart"] is False
@@ -56,7 +56,7 @@ def test_apply_finish_gate_mode_on_off_unchanged():
 
 
 def _guard(cfg, turn_tool_calls):
-    from intent_guard.guard import FinishGateGuard
+    from gc_core.intent_guard.guard import FinishGateGuard
     ctx = SimpleNamespace(config_dict=cfg)
     state = SimpleNamespace(parent_state_id=None, turn_tool_calls=turn_tool_calls)
     return FinishGateGuard(ctx=ctx, state=state)
@@ -81,8 +81,8 @@ def test_cli_server_unaffected_no_smart_key():
 def test_mid_turn_user_ask_does_not_reset_tool_counter():
     """Реальная mid-turn реплика (как после drain pending → persist) не трогает
     turn_tool_calls — сброс только через flush на границе хода."""
-    from intent_log.user_turn import append_user_asks_from_messages
-    from states import State
+    from gc_core.intent_log.user_turn import append_user_asks_from_messages
+    from gc_core.states import State
 
     st = State.__new__(State)
     st.turn_tool_calls = 4
@@ -101,9 +101,9 @@ def test_mid_turn_user_ask_does_not_reset_tool_counter():
 def test_technical_user_message_does_not_reset_tool_counter():
     """Technical user (reject судьи / bounce / bad args) не сбрасывает счётчик
     и не попадает в current_user_intent."""
-    from intent_log.user_turn import append_user_asks_from_messages
-    from processing_responses import _make_technical_feedback_user_message
-    from states import State
+    from gc_core.intent_log.user_turn import append_user_asks_from_messages
+    from gc_core.processing_responses import _make_technical_feedback_user_message
+    from gc_core.states import State
 
     st = State.__new__(State)
     st.turn_tool_calls = 3
@@ -126,10 +126,10 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
     import json
     import logging
 
-    import intent_guard.guard as intent_guard_guard
-    import processing_responses as pr
-    from intent_guard.validation_result import ValidationResult
-    from states import State
+    from gc_core.intent_guard import guard as intent_guard_guard
+    from gc_core import processing_responses as pr
+    from gc_core.intent_guard.validation_result import ValidationResult
+    from gc_core.states import State
 
     gate_calls: list = []
 

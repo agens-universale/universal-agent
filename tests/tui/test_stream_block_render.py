@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tui.services.stream_sink import StreamSink, format_stream_block, format_reasoning_line
+from gc_tui.services.stream_sink import StreamSink, format_stream_block, format_reasoning_line
 
 
 def test_block_text_from_sink_answer_wins():
@@ -56,7 +56,7 @@ def _write_task(tmp_path, tid):
 @pytest.mark.asyncio
 async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -99,7 +99,7 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
 async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
     """Task-switch path: _reset_render_state must remove the StreamBlock AND reset the sink."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -130,7 +130,7 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
 @pytest.mark.asyncio
 async def test_stream_block_cleared_when_run_not_running(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def __init__(self) -> None:
@@ -165,9 +165,9 @@ async def test_reasoning_line_below_committed_rows(tmp_path):
     зафиксированных canonical-виджетов, а не поверх них."""
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.stream_block import StreamBlock
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -225,8 +225,8 @@ async def test_reasoning_block_cleared_when_tool_row_renders(tmp_path):
     """Fix A: StreamBlock снимается когда рендерится canonical tool-call строка,
     чтобы не дрейфовать выше неё."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -267,8 +267,8 @@ async def test_no_reasoning_block_in_validating_phase(tmp_path):
     """Fix B: StreamBlock не показывается в фазе validating
     (после финального ответа, пока идёт intent_guard)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -299,7 +299,7 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
     """tui_stream_display=minimal: answer delta → NO StreamBlock shown,
     but sink is NOT reset (counter preserved)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -335,8 +335,8 @@ async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
     """tui_stream_display=answer_reasoning: think-only delta → reasoning StreamBlock
     IS shown (mode enables reasoning line)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -370,8 +370,8 @@ async def test_show_reasoning_line_false_hides_reasoning_block(tmp_path):
     """tui_stream_display=answer: think delta → NO StreamBlock shown,
     but sink is NOT reset (counter/indicator unaffected)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
         def is_running(self) -> bool: return True

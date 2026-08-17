@@ -28,7 +28,7 @@ async def test_footer_left_empty_state_no_back_no_stop_no_export():
     """Empty state: F-hotkeys chrome; без /mcp, [Esc], /stop, /export, Ctrl+a."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
@@ -54,7 +54,7 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
     """Task active, no active_runner → тот же набор команд, /stop НЕТ."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "idle1"
     _write_task(tmp_path, tid)
@@ -85,7 +85,7 @@ async def test_footer_left_task_running_shows_stop(tmp_path):
     """Task active + active_runner.is_running() → /stop вместо config/settings."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -120,7 +120,7 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
     """Когда runner перестаёт is_running() → /stop исчезает в следующий тик."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def __init__(self) -> None:
@@ -158,7 +158,7 @@ async def test_footer_badge_counts_update_notice():
     счётчика признак исчезает вместе с карточкой при скролле."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         pilot.app._update_available = True

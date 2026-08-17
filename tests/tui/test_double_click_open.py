@@ -26,9 +26,9 @@ def _write(tmp_path, tid):
 async def test_ctrl_click_tool_row_opens_detail_screen(tmp_path):
     pytest.importorskip("textual")
     from textual import events
-    from tui.app import TuiApp
-    from tui.screens.tool_call_detail import ToolCallDetailScreen
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     tid = "t1"
     _write(tmp_path, tid)
@@ -52,9 +52,9 @@ async def test_ctrl_click_tool_row_opens_detail_screen(tmp_path):
 @pytest.mark.asyncio
 async def test_enter_on_focused_row_opens_detail_screen(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.tool_call_detail import ToolCallDetailScreen
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     tid = "t3"
     _write(tmp_path, tid)
@@ -80,10 +80,10 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
     До фикса: prose/code Static не имели event_no — клик буллил к соседу."""
     pytest.importorskip("textual")
     from textual import events
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
-    from tui.widgets.agent_reply_line import AgentReplyLine
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.trace_row import TraceRow
 
     tid = "agent_click"
     # Сценарий: user → tool_call → agent (с кодом). Цель — кликнуть по prose
@@ -148,9 +148,9 @@ async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
     а не по соседнему TraceRow (prose)."""
     pytest.importorskip("textual")
     from textual import events
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     tid = "agent_click_panel"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
@@ -199,9 +199,9 @@ async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
 async def test_single_click_does_not_open_viewer(tmp_path):
     pytest.importorskip("textual")
     from textual import events
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     tid = "t2"
     _write(tmp_path, tid)

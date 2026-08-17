@@ -9,9 +9,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from tests.paths import ASSETS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SKILL_DIR = PROJECT_ROOT / "skills" / "skill-creator"
+SKILL_DIR = ASSETS / "skills" / "skill-creator"
 
 
 def _make_complete_dev_dir(skill_dir: Path) -> Path:
@@ -52,15 +53,15 @@ def _registry():
     saved = {
         name: sys.modules.pop(name)
         for name in list(sys.modules)
-        if name == "tools" or name.startswith("tools.")
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
     }
     try:
-        from tools.skills.registry import SkillsRegistry  # noqa: E402
+        from gc_core.tools.skills.registry import SkillsRegistry
 
-        yield SkillsRegistry(skills_root=str(PROJECT_ROOT / "skills"))
+        yield SkillsRegistry(skills_root=str(ASSETS / "skills"))
     finally:
         for name in list(sys.modules):
-            if name == "tools" or name.startswith("tools."):
+            if name == "gc_core.tools" or name.startswith("gc_core.tools."):
                 sys.modules.pop(name, None)
         sys.modules.update(saved)
 
@@ -77,7 +78,7 @@ def _sample_skill() -> tuple[Path, str]:
     sys.path.insert(0, str(SKILL_DIR / "scripts"))
     import package_skill as _ps  # noqa: E402
 
-    for cand in sorted((PROJECT_ROOT / "skills").glob("**/SKILL.md")):
+    for cand in sorted((ASSETS / "skills").glob("**/SKILL.md")):
         skill_dir = cand.parent
         if skill_dir == SKILL_DIR or SKILL_DIR in skill_dir.parents:
             continue
@@ -212,16 +213,17 @@ def test_package_skill_explicit_source_layer(tmp_path):
         assert "**Слой-источник:** user" in readme, readme[:500]
 
 
-@pytest.mark.parametrize("skill_subpath, expected_layer", [
+@pytest.mark.parametrize("base, skill_subpath, expected_layer", [
     # Project layer: under <cwd>/.gc/skills/
-    (".gc/skills/test-skill", "project"),
-    # System layer: under <repo>/skills/
-    ("skills/test-skill", "system"),
+    ("repo", ".gc/skills/test-skill", "project"),
+    # System layer: под каталогом скиллов ДИСТРИБУТИВА. До разбиения на пакеты
+    # это был <repo>/skills/, теперь ассеты принадлежат gc-core.
+    ("assets", "skills/test-skill", "system"),
 ])
-def test_package_skill_auto_detects_source_layer(tmp_path, skill_subpath, expected_layer):
+def test_package_skill_auto_detects_source_layer(tmp_path, base, skill_subpath, expected_layer):
     """Without --source-layer, README should auto-detect from path."""
-    # Build a minimal valid skill at the given location relative to PROJECT_ROOT
-    skill_dir = PROJECT_ROOT / skill_subpath
+    root = PROJECT_ROOT if base == "repo" else ASSETS
+    skill_dir = root / skill_subpath
     cleanup_needed = not skill_dir.exists()
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_md = skill_dir / "SKILL.md"
@@ -385,7 +387,7 @@ def test_package_skill_cleanup_permission_error_does_not_block(tmp_path, monkeyp
     out_dir.mkdir()
 
     # Direct import approach (subprocess can't be easily monkeypatched):
-    sys.path.insert(0, str(PROJECT_ROOT / "skills" / "skill-creator" / "scripts"))
+    sys.path.insert(0, str(ASSETS / "skills" / "skill-creator" / "scripts"))
     import importlib
     if "package_skill" in sys.modules:
         importlib.reload(sys.modules["package_skill"])

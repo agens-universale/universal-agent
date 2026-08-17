@@ -13,9 +13,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+from tests.paths import ASSETS
 
 
-PACK_DIR = Path(__file__).resolve().parents[1] / "skills" / "supercoder"
+PACK_DIR = ASSETS / "skills" / "supercoder"
 
 EXPECTED_SKILL_IDS = {
     "using-supercoder",
@@ -99,7 +100,7 @@ def test_reference_file_present(skill_id, slug):
 
 def test_registry_default_list_returns_only_bootstrap(tmp_path):
     """default list_skills() возвращает bootstrap supercoder + flat-скиллы. Internal скрыты."""
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent  # <repo>/skills
     reg = SkillsRegistry(
@@ -116,7 +117,7 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
 
 def test_registry_pack_param_returns_all_10_internals(tmp_path):
     """list_skills(pack='supercoder') возвращает все 10 internal."""
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent
     reg = SkillsRegistry(

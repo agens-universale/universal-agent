@@ -6,7 +6,7 @@ import pytest
 
 
 def _app(tmp_path, yaml_text):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(yaml_text, encoding="utf-8")
     app = TuiApp(config={})
@@ -19,7 +19,7 @@ def _app(tmp_path, yaml_text):
 
 def test_apply_rigor_preset_writes_pair_to_session(tmp_path):
     pytest.importorskip("textual")
-    from tui.toggles import apply_toggle, toggle_state
+    from gc_tui.toggles import apply_toggle, toggle_state
     app, cfg_file = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
     got = apply_toggle(app, "rigor", "low")
     assert got == "low"
@@ -35,7 +35,7 @@ def test_apply_toggle_rejects_custom(tmp_path):
     пара) — apply_toggle(..., "custom") обязан упасть ValueError, роутинг
     (main.py) обязан перехватывать её ДО apply_toggle через is_preset_custom."""
     pytest.importorskip("textual")
-    from tui.toggles import apply_toggle
+    from gc_tui.toggles import apply_toggle
     app, cfg_file = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')
     original = cfg_file.read_text(encoding="utf-8")
 
@@ -52,7 +52,7 @@ def test_nonstandard_pair_shows_custom_step_onto_preset_replaces_it(tmp_path):
     попасть на custom (она не позиция трека, ревизия 4) — цикл идёт от idx 0
     (эффективное вне spec.names) и заменяет пару целиком."""
     pytest.importorskip("textual")
-    from tui.toggles import next_toggle_value, apply_toggle, toggle_state, preset_track_extra
+    from gc_tui.toggles import next_toggle_value, apply_toggle, toggle_state, preset_track_extra
     # глобал СТАНДАРТНЫЙ (medium), сессия накручена в дикую пару on+allow через детальные
     app, _ = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
     app.apply_session_overrides({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"})
@@ -113,7 +113,7 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
     отображаемого custom заменяет пару и уводит на пресет — дети остаются
     видны. Весь роутинг — через `pilot.press`, как делает пользователь."""
     pytest.importorskip("textual")
-    from tui.toggles import toggle_state
+    from gc_tui.toggles import toggle_state
     app, cfg_file = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
     original = cfg_file.read_text(encoding="utf-8")
     async with app.run_test() as pilot:
@@ -185,9 +185,9 @@ def test_filtered_gate_row_is_dimmed_child_flat():
     принадлежность пресету («owning preset», `_owning_preset`) — чистые
     данные, видимость родителя её больше не гейтит."""
     pytest.importorskip("textual")
-    from tui import palette as p
-    from tui.commands import build_default_registry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui import palette as p
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
     state = {"rigor": "high", "gate": "on", "answers": "deny"}
@@ -213,8 +213,8 @@ def test_filter_matching_parent_shows_children_flat():
     «ri» матчит только /rigor (регулярная зона под этим фильтром пуста) —
     дети /gate,/answers появляются сразу, без навигации."""
     pytest.importorskip("textual")
-    from tui.commands import build_default_registry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
     state = {"rigor": "medium", "gate": "smart", "answers": "judge"}
@@ -233,7 +233,7 @@ def test_preset_custom_hint_two_states(tmp_path):
     (курсор на custom, пара ещё стандартна) умерло вместе с курсором — хинт
     теперь зовётся, только когда custom реально отображён."""
     pytest.importorskip("textual")
-    from tui.toggles import preset_custom_hint
+    from gc_tui.toggles import preset_custom_hint
 
     # 1) пара нестандартна ИЗ-ЗА самого глобала (оверрайдов пары нет).
     app1, _ = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')

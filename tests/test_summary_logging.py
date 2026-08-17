@@ -3,18 +3,7 @@
 import json
 from types import SimpleNamespace
 
-from summarize.summary_logging import (
-    SummaryCompactionLog,
-    append_summary_trace_record,
-    log_compaction_started,
-    log_memory_patch_skipped_multi_batch,
-    log_memory_patch_wm_unchanged,
-    log_summary_message_body,
-    log_summary_raw_text,
-    log_summary_slice_fallback,
-    resolve_summary_trace_path,
-    trigger_reason_label,
-)
+from gc_core.summarize.summary_logging import SummaryCompactionLog, append_summary_trace_record, log_compaction_started, log_memory_patch_skipped_multi_batch, log_memory_patch_wm_unchanged, log_summary_message_body, log_summary_raw_text, log_summary_slice_fallback, resolve_summary_trace_path, trigger_reason_label
 
 
 def test_summary_slice_fallback_logs_warning():

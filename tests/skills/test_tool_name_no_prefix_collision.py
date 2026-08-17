@@ -5,7 +5,7 @@
 дописывает виденный суффикс. `skills_load` ⊂ `skills_load_reference` — ровно эта
 ловушка. См. docs/specs/2026-06-25-skills-tool-namespace-decollision-design.md.
 """
-from tools.skills.skills_tools import get_skills_tools_data
+from gc_core.tools.skills.skills_tools import get_skills_tools_data
 
 
 def test_skills_tool_names_have_no_prefix_collision():

@@ -7,14 +7,14 @@ LABEL5 = "[Вставка #1 · 5 строк]"
 
 
 async def _input(pilot):
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.widgets.command_input import CommandTextArea
     return pilot.app.screen.query_one("#cmdinput", CommandTextArea)
 
 
 @pytest.mark.asyncio
 async def test_large_paste_becomes_chip():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG6)
@@ -26,7 +26,7 @@ async def test_large_paste_becomes_chip():
 @pytest.mark.asyncio
 async def test_small_paste_inserted_as_text():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste("short")
@@ -38,7 +38,7 @@ async def test_small_paste_inserted_as_text():
 @pytest.mark.asyncio
 async def test_second_same_paste_expands_inline():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)
@@ -53,7 +53,7 @@ async def test_second_same_paste_expands_inline():
 @pytest.mark.asyncio
 async def test_different_paste_in_window_makes_new_chip():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)
@@ -68,7 +68,7 @@ async def test_different_paste_in_window_makes_new_chip():
 @pytest.mark.asyncio
 async def test_submission_text_concatenates_in_order():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)          # плашка #1 в начале
@@ -82,7 +82,7 @@ async def test_submission_text_concatenates_in_order():
 @pytest.mark.asyncio
 async def test_enter_resets_chip_state(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _Fake:                                  # no-op executor: Enter не должен
         def run(self, messages, *, thread_id, **kw):  # строить реальный AgentExecutor
@@ -108,7 +108,7 @@ async def test_bracketed_paste_collapses_without_raw_duplicate():
     prevent_default → базовый TextArea._on_paste тоже вставлял event.text."""
     pytest.importorskip("textual")
     from textual import events
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp.post_message(events.Paste(BIG5))
@@ -123,7 +123,7 @@ async def test_bracketed_paste_small_inserted_once():
     """Маленькая bracketed-вставка попадает в буфер РОВНО один раз (не дублируется)."""
     pytest.importorskip("textual")
     from textual import events
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp.post_message(events.Paste("short"))
@@ -138,7 +138,7 @@ async def test_cr_separated_paste_collapses_like_lf():
     should_collapse считает \\n — без нормализации многострочная \\r-вставка <500
     симв не сворачивалась (уходила инлайн). _handle_paste нормализует \\r→\\n."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste("a\rb\rc\rd\re")   # 5 строк через \r, <500 симв
@@ -151,7 +151,7 @@ async def test_cr_separated_paste_collapses_like_lf():
 async def test_crlf_paste_normalized_inline():
     """Маленькая \\r\\n-вставка (read_clipboard на Windows) — инлайн без мусорных \\r."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste("a\r\nb")
@@ -164,7 +164,7 @@ async def test_expand_works_always_no_timer():
     """Разворот по повторной вставке последней пасты — без лимита времени: после
     сворачивания _expand_chip_id держится, авто-таймера закрытия нет."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)
@@ -182,7 +182,7 @@ async def test_paste_after_chip_cleared_from_buffer():
     """Если плашку стёрли из буфера (Esc-clear / text=\"\"), повторный Ctrl+V тем же
     текстом не должен молча no-op'ить в ветке «развернуть» — снова плашка."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)
@@ -201,10 +201,10 @@ async def test_paste_after_chip_cleared_from_buffer():
 async def test_ctrl_v_pastes_when_focus_on_trace(tmp_path, monkeypatch):
     """Кликнули трейс во время run → фокус не в инпуте; Ctrl+V всё равно вставляет."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
-    from tui.widgets.trace_row import TraceRow
-    import tui.services.os_ops as os_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.services import os_ops as os_ops
 
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "из трейса")
 

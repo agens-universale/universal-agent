@@ -1,9 +1,9 @@
 """Раннер с кастомным сабагентом: прокидывание allow/stop в дочерний ран."""
 from types import SimpleNamespace
 
-from run_context import create_run_context
-from tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY
-from tools.subagents.runner import SubagentRunner
+from gc_core.run_context import create_run_context
+from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY
+from gc_core.tools.subagents.runner import SubagentRunner
 
 REQUIRED = (
     "turn_finish",
@@ -86,7 +86,7 @@ class TestChildConfig:
         assert child["stop_tools"] == ["exec_python"]
         assert child[SUBAGENT_TOOLS_STOP_KEY] == ["exec_command"]
 
-        from tools import build_tools_data
+        from gc_core.tools import build_tools_data
 
         data, _spec, _descr, _mcp = build_tools_data(child)
         assert "exec_python" not in data   # глобальный запрет

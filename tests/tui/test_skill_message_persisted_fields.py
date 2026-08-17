@@ -11,9 +11,9 @@ import pytest
 async def test_skill_prompt_start_gets_display_and_skill(tmp_path, monkeypatch):
     """auto-create: runner.start получает display_query/skill_loaded."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tools.skills.skill_delivery as sd
-    import tools.skills.registry as sreg
+    from gc_tui.app import TuiApp
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
@@ -56,9 +56,9 @@ async def test_skill_prompt_start_gets_display_and_skill(tmp_path, monkeypatch):
 async def test_skill_continuation_start_gets_display_and_skill(tmp_path, monkeypatch):
     """continuation (задача есть, run не идёт): runner.start получает display_query/skill_loaded."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tools.skills.skill_delivery as sd
-    import tools.skills.registry as sreg
+    from gc_tui.app import TuiApp
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
@@ -108,9 +108,9 @@ async def test_skill_continuation_start_gets_display_and_skill(tmp_path, monkeyp
 async def test_skill_inline_during_run_add_message_gets_fields(tmp_path, monkeypatch):
     """inline /skill во время run: add_message получает display_content и skill_loaded."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tools.skills.skill_delivery as sd
-    import tools.skills.registry as sreg
+    from gc_tui.app import TuiApp
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")

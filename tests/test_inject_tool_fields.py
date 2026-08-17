@@ -7,13 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import tools as tools_pkg
-from tools import apply_tool, build_tools_data, WrongFunctionArgumentsException
-from tools.inject_tool_fields import (
-    apply_injected_fields_to_spec,
-    resolve_inject_tool_fields,
-    strip_injected_tool_args,
-)
+from gc_core import tools as tools_pkg
+from gc_core.tools import apply_tool, build_tools_data, WrongFunctionArgumentsException
+from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec, resolve_inject_tool_fields, strip_injected_tool_args
 
 _REASON = "reason"
 _REASON_DESC = (
@@ -29,11 +25,11 @@ def _reason_fields(**extra: str) -> dict[str, str]:
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    stale = [name for name in sys.modules if name == "tools" or name.startswith("tools.")]
+    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
     for name in stale:
         sys.modules.pop(name, None)
     yield
-    stale = [name for name in sys.modules if name == "tools" or name.startswith("tools.")]
+    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
     for name in stale:
         sys.modules.pop(name, None)
 
@@ -268,7 +264,7 @@ class TestApplyTool:
         assert received["args"] == {"path": "/tmp/x", "content": "y"}
 
     def test_mcp_wrapper_does_not_receive_synthetic_reason(self):
-        from tools.connect_mcp.agent_tools import MCPToolWrapper
+        from gc_core.tools.connect_mcp.agent_tools import MCPToolWrapper
 
         spec = _write_to_file_spec()
         apply_injected_fields_to_spec(spec, _reason_fields())
@@ -287,7 +283,7 @@ class TestApplyTool:
                 "injected_fields": [_REASON],
             }
         }
-        with patch("tools.connect_mcp.agent_tools.call_mcp_tool") as mock_call:
+        with patch("gc_core.tools.connect_mcp.agent_tools.call_mcp_tool") as mock_call:
             mock_call.return_value = "mcp ok"
             apply_tool(
                 tool_name="mcp_test_tool",
@@ -332,7 +328,7 @@ class TestApplyTool:
 
         run_agent_func = MagicMock()
         with patch.object(tools_pkg, "is_subagent_tool", return_value=True):
-            with patch("tools.subagents.runner.SubagentRunner") as MockRunner:
+            with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
                 instance = MockRunner.return_value
                 instance.run.return_value = "done"
                 apply_tool(

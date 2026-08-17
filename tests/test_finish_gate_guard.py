@@ -3,10 +3,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from intent_log import ACTION_USER_ASK, append_user_ask, flush
-from intent_guard import guard as intent_guard_guard_module
-from intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
-from intent_guard.validation_result import ValidationResult
+from gc_core.intent_log import ACTION_USER_ASK, append_user_ask, flush
+from gc_core.intent_guard import guard as intent_guard_guard_module
+from gc_core.intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
+from gc_core.intent_guard.validation_result import ValidationResult
 
 
 class ResolveFinishGateMaxRejectionsTest(unittest.TestCase):
@@ -27,7 +27,7 @@ class ResolveFinishGateMaxRejectionsTest(unittest.TestCase):
 
 class JudgeAvailableTest(unittest.TestCase):
     def test_matches_backend_only(self) -> None:
-        from intent_guard.guard import judge_available
+        from gc_core.intent_guard.guard import judge_available
         self.assertTrue(judge_available({"backend_api_mode": "chat_completions"}))
         self.assertFalse(judge_available({"backend_api_mode": "responses"}))
         self.assertFalse(judge_available({}))

@@ -20,9 +20,9 @@ async def test_skill_plus_prompt_shows_marker_and_reply():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
-    from tui.services.trace_render import render_thread_readonly
-    from tui.widgets.trace_row import TraceRow
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.services.trace_render import render_thread_readonly
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     records = [_rec({
         "role": "user",
@@ -57,9 +57,9 @@ async def test_mid_run_delivery_shows_only_marker():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
-    from tui.services.trace_render import render_thread_readonly
-    from tui.widgets.trace_row import TraceRow
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.services.trace_render import render_thread_readonly
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     records = [_rec({
         "role": "user",
@@ -92,9 +92,9 @@ async def test_normal_user_record_no_marker():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
-    from tui.services.trace_render import render_thread_readonly
-    from tui.widgets.trace_row import TraceRow
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.services.trace_render import render_thread_readonly
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     records = [_rec({
         "role": "user",

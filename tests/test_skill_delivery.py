@@ -1,4 +1,4 @@
-from tools.skills.skill_delivery import build_skill_delivery
+from gc_core.tools.skills.skill_delivery import build_skill_delivery
 
 
 class _Reg:

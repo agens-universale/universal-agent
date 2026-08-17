@@ -1,9 +1,4 @@
-from message_policy.chat_completions import (
-    coalesce_consecutive_assistant_tool_calls,
-    inject_assistant_after_orphan_tool_outputs,
-    prepare_chat_completion_messages_for_api,
-    repair_tool_call_pairing,
-)
+from gc_core.message_policy.chat_completions import coalesce_consecutive_assistant_tool_calls, inject_assistant_after_orphan_tool_outputs, prepare_chat_completion_messages_for_api, repair_tool_call_pairing
 
 
 def test_repair_tool_call_pairing_keeps_only_answered_calls():

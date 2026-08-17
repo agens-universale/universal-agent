@@ -1,4 +1,4 @@
-from message_policy.user_message_policy import build_invalid_tool_call_feedback_message
+from gc_core.message_policy.user_message_policy import build_invalid_tool_call_feedback_message
 
 
 def test_large_file_hint_shown_for_fs_write_file():

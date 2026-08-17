@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_at_opens_file_picker(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
@@ -27,7 +27,7 @@ async def test_at_opens_file_picker(tmp_path):
 @pytest.mark.asyncio
 async def test_complete_dir_keeps_picker_and_file_closes(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
@@ -58,7 +58,7 @@ async def test_complete_dir_keeps_picker_and_file_closes(tmp_path):
 @pytest.mark.asyncio
 async def test_submit_with_attachment_sends_pair(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     (tmp_path / "a.py").write_text("x", encoding="utf-8")
     captured = {}
@@ -96,7 +96,7 @@ async def test_submit_with_attachment_sends_pair(tmp_path):
 @pytest.mark.asyncio
 async def test_arrows_navigate_picker_not_history(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     # несколько записей верхнего уровня, чтобы было что листать
     (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
@@ -132,7 +132,7 @@ async def test_arrows_navigate_picker_not_history(tmp_path):
 @pytest.mark.asyncio
 async def test_esc_closes_picker_not_clear_hint(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
 
@@ -157,7 +157,7 @@ async def test_esc_closes_picker_not_clear_hint(tmp_path):
 @pytest.mark.asyncio
 async def test_submit_without_attachment_single_message(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     captured = {}
 

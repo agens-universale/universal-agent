@@ -24,9 +24,9 @@ def _write(d, name, payloads):
 @pytest.mark.asyncio
 async def test_all_segments_raw_plus_markers(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import SummaryMarker
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import SummaryMarker
+    from gc_tui.widgets.user_reply import UserReplyContainer
     threads = tmp_path / "threads"; threads.mkdir()
     _write(threads, f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl",
            [{"role": "user", "content": "сег0"}])

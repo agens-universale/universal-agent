@@ -7,7 +7,8 @@ rendered prompt.
 """
 from pathlib import Path
 
-from project_memory import attach_status_to_prompt_vars
+from gc_core.project_memory import attach_status_to_prompt_vars
+from tests.paths import ASSETS
 
 
 def test_attach_status_with_no_memory_file(tmp_path, monkeypatch):
@@ -81,7 +82,7 @@ def test_attach_status_does_not_leak_path_or_tool_name(tmp_path, monkeypatch):
 
 def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
     """End-to-end: attach status + render full system prompt template."""
-    from utils.local_render_system_prompt import render_system_prompt
+    from gc_core.utils.local_render_system_prompt import render_system_prompt
 
     (tmp_path / ".gc").mkdir()
     (tmp_path / ".gc" / "project_memory.md").write_text("seeded body", encoding="utf-8")
@@ -91,7 +92,7 @@ def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
     attach_status_to_prompt_vars(prompt_vars)
 
     repo_root = Path(__file__).resolve().parent.parent
-    template = (repo_root / "prompts" / "chat_completions_system_prompt.md").read_text(
+    template = (ASSETS / "prompts" / "chat_completions_system_prompt.md").read_text(
         encoding="utf-8"
     )
 
@@ -110,7 +111,7 @@ def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
 
 
 def test_subagent_prompt_template_renders_empty_status(tmp_path, monkeypatch):
-    from utils.local_render_system_prompt import render_system_prompt
+    from gc_core.utils.local_render_system_prompt import render_system_prompt
 
     monkeypatch.chdir(tmp_path)
     prompt_vars: dict = {}
@@ -118,7 +119,7 @@ def test_subagent_prompt_template_renders_empty_status(tmp_path, monkeypatch):
 
     repo_root = Path(__file__).resolve().parent.parent
     template = (
-        repo_root / "prompts" / "chat_completions_subagent_system_prompt.md"
+        ASSETS / "prompts" / "chat_completions_subagent_system_prompt.md"
     ).read_text(encoding="utf-8")
 
     rendered = render_system_prompt(

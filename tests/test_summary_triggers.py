@@ -10,22 +10,23 @@ from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from tests.paths import module_dir
 
 
 def teardown_module(_module) -> None:
     for mod in ("agent_executor", "run_summary_coordinator"):
         sys.modules.pop(mod, None)
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    real_tools = importlib.import_module("tools")
-    proc = sys.modules.get("processing_responses")
+    real_tools = importlib.import_module("gc_core.tools")
+    proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.apply_tool = real_tools.apply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
-    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
         cycle_stop_mod.apply_tool = real_tools.apply_tool
 
@@ -37,19 +38,19 @@ run_summary_coordinator_module = None
 def setup_module(_module) -> None:
     global agent_executor_module, run_summary_coordinator_module
     _stub_tools_modules()
-    tools_pkg = sys.modules["tools"]
-    import processing_responses as pr
+    tools_pkg = sys.modules["gc_core.tools"]
+    from gc_core import processing_responses as pr
 
     pr.apply_tool = tools_pkg.apply_tool
     pr.WrongFunctionArgumentsException = tools_pkg.WrongFunctionArgumentsException
-    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
         cycle_stop_mod.apply_tool = tools_pkg.apply_tool
 
     for mod in ("agent_executor", "run_summary_coordinator"):
         sys.modules.pop(mod, None)
-    import agent_executor as ae
-    import run_summary_coordinator as rsc
+    from gc_core import agent_executor as ae
+    from gc_core import run_summary_coordinator as rsc
 
     agent_executor_module = ae
     run_summary_coordinator_module = rsc
@@ -57,10 +58,10 @@ def setup_module(_module) -> None:
 
 def _stub_tools_modules() -> None:
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
 
-    tools_pkg = types.ModuleType("tools")
+    tools_pkg = types.ModuleType("gc_core.tools")
 
     class _WrongFunctionArgumentsException(Exception):
         def to_llm_feedback(self):
@@ -76,17 +77,17 @@ def _stub_tools_modules() -> None:
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     root = Path(__file__).resolve().parents[1]
-    tools_dir = root / "src" / "tools"
+    tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
-    sys.modules["tools"] = tools_pkg
+    sys.modules["gc_core.tools"] = tools_pkg
 
-    skills_pkg = types.ModuleType("tools.skills")
+    skills_pkg = types.ModuleType("gc_core.tools.skills")
     skills_pkg.__path__ = []
-    sys.modules["tools.skills"] = skills_pkg
+    sys.modules["gc_core.tools.skills"] = skills_pkg
 
-    registry_mod = types.ModuleType("tools.skills.registry")
+    registry_mod = types.ModuleType("gc_core.tools.skills.registry")
     registry_mod.get_skills_registry = lambda _cfg, **_kw: _SkillsRegistryStub()
-    sys.modules["tools.skills.registry"] = registry_mod
+    sys.modules["gc_core.tools.skills.registry"] = registry_mod
 
 
 class _SkillsRegistryStub:
@@ -349,7 +350,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 self.assertEqual(result, "ok")
 
             from intent_fixtures import intent_user_ask_texts
-            from intent_log import deserialize_list
+            from gc_core.intent_log import deserialize_list
 
             with open(meta_path, "r", encoding="utf-8") as fd:
                 saved_meta = json.load(fd)

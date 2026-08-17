@@ -1,6 +1,6 @@
 import unittest
 
-from utils.convertations import output_chat_completion_to_response, get_output_list
+from gc_core.utils.convertations import output_chat_completion_to_response, get_output_list
 
 
 def _base_payload():

@@ -10,8 +10,8 @@ async def _open(pilot, scr, app, name):
 
 
 async def test_section_titles_show_section_name(tmp_path, monkeypatch):
-    import app_version, updater.check as check_mod, tui.app as app_mod
-    from tui.screens.settings import SettingsScreen
+    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     from tests.tui.conftest import open_settings_section
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
@@ -29,8 +29,8 @@ async def test_section_titles_show_section_name(tmp_path, monkeypatch):
 
 
 async def test_mcp_space_uninstalled_flashes_title_note(tmp_path, monkeypatch):
-    import app_version, tui.app as app_mod
-    from tui.screens.settings import SettingsScreen
+    from gc_core import app_version; from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     from tests.tui.conftest import open_settings_section
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))

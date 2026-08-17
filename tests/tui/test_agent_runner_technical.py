@@ -1,7 +1,7 @@
 """AgentRunner.start прокидывает технический компаньон вторым user-сообщением."""
 import time
 
-from tui.services.agent_runner import AgentRunner
+from gc_tui.services.agent_runner import AgentRunner
 
 
 class _CaptureExecutor:

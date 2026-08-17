@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from states import State
-from tools.registry import get_builtin_tools_data
-import tools.session.session_compact as session_compact_module
-from tools.session.session_compact import SessionCompact, TRIGGER_REASON
+from gc_core.states import State
+from gc_core.tools.registry import get_builtin_tools_data
+from gc_core.tools.session import session_compact as session_compact_module
+from gc_core.tools.session.session_compact import SessionCompact, TRIGGER_REASON
 
 
 def _state(*, backend_api_mode="chat_completions", messages=None):
@@ -104,7 +104,7 @@ def test_session_compact_reports_compaction_failure(monkeypatch):
 def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
     monkeypatch,
 ):
-    from processing_responses import process_tool_calls
+    from gc_core.processing_responses import process_tool_calls
 
     sys_m = {"role": "system", "content": "s", "id": "sys"}
     call = {
@@ -136,9 +136,9 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
             return json.dumps({"tool": "session_compact", "ok": True, "compacted": True})
         return "{}"
 
-    monkeypatch.setattr("processing_responses.apply_tool", fake_apply_tool)
+    monkeypatch.setattr("gc_core.processing_responses.apply_tool", fake_apply_tool)
     monkeypatch.setattr(
-        "processing_responses.maybe_store_and_wrap_tool_output",
+        "gc_core.processing_responses.maybe_store_and_wrap_tool_output",
         lambda tool_res, **_kw: tool_res,
     )
 
@@ -157,7 +157,7 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
 
 
 def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
-    from processing_responses import process_tool_calls
+    from gc_core.processing_responses import process_tool_calls
 
     sys_m = {"role": "system", "content": "s", "id": "sys"}
     compact_call = {
@@ -196,9 +196,9 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
             return json.dumps({"tool": "session_compact", "ok": True})
         return json.dumps({"tool": "session_think", "ok": True})
 
-    monkeypatch.setattr("processing_responses.apply_tool", fake_apply_tool)
+    monkeypatch.setattr("gc_core.processing_responses.apply_tool", fake_apply_tool)
     monkeypatch.setattr(
-        "processing_responses.maybe_store_and_wrap_tool_output",
+        "gc_core.processing_responses.maybe_store_and_wrap_tool_output",
         lambda tool_res, **_kw: tool_res,
     )
 

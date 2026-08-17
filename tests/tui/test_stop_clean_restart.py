@@ -7,8 +7,8 @@ async def test_cmd_stop_sets_indicator_cancelled():
     """После _cmd_stop (при живом индикаторе) индикатор переходит в состояние
     «cancelled» («■ Отменено») — отдельная [stopped]-строка в трейсе не добавляется."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -36,8 +36,8 @@ async def test_cmd_stop_no_stopped_trace_row_when_run_cancelled():
     """При отмене активного прогона отдельная инфо-строка в трейс НЕ
     добавляется (статус «Отменено» виден на строке индикатора)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -60,7 +60,7 @@ async def test_cmd_stop_no_stopped_trace_row_when_run_cancelled():
 async def test_cmd_stop_marks_runner_stopped_and_clears_active():
     """После stop active_runner=None — следующий get_runner создаст свежий."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -81,8 +81,8 @@ async def test_cmd_stop_marks_runner_stopped_and_clears_active():
 async def test_cmd_stop_no_active_runner_renders_meta():
     """_cmd_stop когда runner не активен → «· нет активного запуска» (без [stopped])."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen

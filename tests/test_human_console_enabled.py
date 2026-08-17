@@ -1,4 +1,4 @@
-from utils.logging_module import human_console_enabled
+from gc_core.utils.logging_module import human_console_enabled
 
 
 def test_text_format_with_console_trace_prints():

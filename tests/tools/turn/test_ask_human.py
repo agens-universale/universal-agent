@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from tools.turn.ask_human import AskHuman
+from gc_core.tools.turn.ask_human import AskHuman
 
 
 def test_ask_human_multiline(monkeypatch):

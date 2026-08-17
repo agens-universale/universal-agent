@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 
-from message_policy.stop_persist import is_persist_discarded
-from tools.simple_tool_base import AbstractSimpleTool
+from gc_core.message_policy.stop_persist import is_persist_discarded
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 def _unique_id_factory():
@@ -75,7 +75,7 @@ def _statuses(outs: list) -> list[str]:
 
 
 def test_stop_before_any_tool_emits_b_for_all(monkeypatch):
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     applied = _patch_process_tool_calls(monkeypatch, pr)
     state = _state(stop_requested=True)
@@ -97,7 +97,7 @@ def test_stop_before_any_tool_emits_b_for_all(monkeypatch):
 
 
 def test_stop_after_first_tool_a_then_b_for_rest(monkeypatch):
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     state = _state()
     applied: list[str] = []
@@ -129,7 +129,7 @@ def test_stop_after_first_tool_a_then_b_for_rest(monkeypatch):
 
 def test_successful_first_then_stop_before_second_gives_ok_then_b(monkeypatch):
     """Первый тул успел с ok=true; stop до второго → B, не A на первом."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     state = _state()
     applied: list[str] = []
@@ -158,7 +158,7 @@ def test_successful_first_then_stop_before_second_gives_ok_then_b(monkeypatch):
 
 def test_single_tool_batch_stop_only_a_no_b(monkeypatch):
     """Один call в batch + stop mid-apply → только A, без лишнего B."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     state = _state()
 
@@ -183,7 +183,7 @@ def test_single_tool_batch_stop_only_a_no_b(monkeypatch):
 
 def test_stop_does_not_apply_remaining_even_if_names_differ(monkeypatch):
     """Хвост batch с разными тулами — ни один не apply_tool."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     state = _state()
     applied = []
@@ -214,7 +214,7 @@ def test_stop_does_not_apply_remaining_even_if_names_differ(monkeypatch):
 
 def test_no_stop_runs_full_batch(monkeypatch):
     """Регрессия: без stop все тулы исполняются как раньше."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     applied = _patch_process_tool_calls(monkeypatch, pr)
     state = _state()
@@ -237,7 +237,7 @@ def test_no_stop_runs_full_batch(monkeypatch):
 
 def test_pairing_persist_despite_discard_writes(monkeypatch):
     """A/B при stop пишутся даже если discard_writes_after_stop."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     persisted: list = []
     state = _state(discard_writes_after_stop=True)
@@ -270,7 +270,7 @@ def test_pairing_persist_despite_discard_writes(monkeypatch):
 
 def test_pairing_writes_state_even_without_persist_callback(monkeypatch):
     """callback=None — всё равно закрываем orphans в state.messages."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     state = _state(discard_writes_after_stop=True, stop_requested=True)
     _patch_process_tool_calls(monkeypatch, pr)
@@ -286,7 +286,7 @@ def test_pairing_writes_state_even_without_persist_callback(monkeypatch):
 
 def test_pairing_persist_clears_allow_flag_after(monkeypatch):
     """allow_pairing_persist не протекает наружу после commit."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     state = _state(discard_writes_after_stop=True, stop_requested=True)
     seen_flags: list[bool] = []
@@ -309,7 +309,7 @@ def test_pairing_persist_clears_allow_flag_after(monkeypatch):
 
 
 def test_maybe_persist_blocks_non_pairing_when_discard_stop():
-    from processing_responses import _maybe_persist
+    from gc_core.processing_responses import _maybe_persist
 
     state = _state(discard_writes_after_stop=True, stop_requested=True)
     called = []
@@ -336,7 +336,7 @@ def test_is_persist_discarded_matrix():
 
 def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
     """Повторный filter: уже лежащие в state outputs не дублируются."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     existing = {
         "id": "fco_pre",
@@ -374,7 +374,7 @@ def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
 
 
 def test_b_status_differs_from_cycle_stop_fallback():
-    from message_policy.user_stop import not_started_due_to_user_stop_output
+    from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
 
     cycle = json.loads(AbstractSimpleTool.fallback_tool_output_on_cycle_stop("fs_read_file"))
     user = json.loads(not_started_due_to_user_stop_output("fs_read_file"))
@@ -385,7 +385,7 @@ def test_b_status_differs_from_cycle_stop_fallback():
 
 def test_stop_abort_still_appends_finalizer_skip_outputs(monkeypatch):
     """После abort remaining + skip-output'ы второго finalizer'а в возврате."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     state = _state(stop_requested=True)
     _patch_process_tool_calls(monkeypatch, pr)

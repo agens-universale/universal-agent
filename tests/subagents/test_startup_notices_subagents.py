@@ -3,7 +3,7 @@
 Молча пропущенный файл — та же беда, что `stop_tools` с опечаткой: оператор
 что-то написал, оно не сработало, и в логе он это не увидит.
 """
-from startup_notices import collect_startup_notices
+from gc_core.startup_notices import collect_startup_notices
 
 
 def _write(d, filename, body):
@@ -112,13 +112,13 @@ class TestAllAtOnce:
 class TestResilience:
     def test_notices_do_not_crash_startup(self, tmp_path, monkeypatch):
         """Сбой дискавери не должен ронять старт — уведомления вторичны."""
-        import startup_notices as mod
+        from gc_core import startup_notices as mod
 
         def _boom(*_a, **_kw):
             raise RuntimeError("дискавери сломался")
 
         monkeypatch.setattr(
-            "tools.subagents.registry.resolve_subagent_definitions", _boom
+            "gc_core.tools.subagents.registry.resolve_subagent_definitions", _boom
         )
         assert mod.collect_startup_notices(
             {"subagents_dir": str(tmp_path)}, set(), None, is_tui=True
@@ -130,6 +130,6 @@ class TestResilience:
         cfg = {"subagents_dir": str(tmp_path)}
         _notices(cfg)
         (tmp_path / "b.md").write_text(_valid("beta"), encoding="utf-8")
-        from tools.subagents.registry import resolve_subagent_definitions
+        from gc_core.tools.subagents.registry import resolve_subagent_definitions
 
         assert list(resolve_subagent_definitions(cfg)) == ["subagent_alpha"]

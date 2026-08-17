@@ -126,8 +126,8 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
         def get_state(self):
             return partial_state
 
-    monkeypatch.setattr("run_context.create_run_context", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr("agent_executor.AgentExecutor", FakeExecutor)
+    monkeypatch.setattr("gc_core.run_context.create_run_context", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", FakeExecutor)
 
     agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m", session_id="s",
                           gc_cli_config={"completions_url": "http://test/v1/chat/completions"})

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from config_origin import Origin, origins
+from gc_core.config_origin import Origin, origins
 
 
 def _write(path: Path, text: str) -> str:
@@ -25,7 +25,7 @@ def _no_managed_overlay_by_default(tmp_path, monkeypatch):
     они сами переопределяют managed_config_path поверх этой заглушки.
     """
     monkeypatch.setattr(
-        "mcp_runtime.paths.managed_config_path",
+        "gc_core.mcp_runtime.paths.managed_config_path",
         lambda: tmp_path / "no-managed-overlay-here.yml",
     )
 
@@ -48,7 +48,7 @@ def test_managed_overlay_overrides_base(tmp_path, monkeypatch):
     base = _write(tmp_path / "config.yml", "agent:\n  model: base-model\n")
     managed = tmp_path / "gc" / "config.local.yml"
     _write(managed, "agent:\n  model: managed-model\n")
-    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: managed)
+    monkeypatch.setattr("gc_core.mcp_runtime.paths.managed_config_path", lambda: managed)
     monkeypatch.chdir(tmp_path)      # нет .gc/ → проектного оверлея нет
 
     got = origins(base, ["agent.model"])["agent.model"]
@@ -63,7 +63,7 @@ def test_project_wins_over_managed(tmp_path, monkeypatch):
     base = _write(tmp_path / "config.yml", "agent:\n  model: base-model\n")
     managed = tmp_path / "gc" / "config.local.yml"
     _write(managed, "agent:\n  model: managed-model\n")
-    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: managed)
+    monkeypatch.setattr("gc_core.mcp_runtime.paths.managed_config_path", lambda: managed)
     proj_dir = tmp_path / "proj"
     _write(proj_dir / ".gc" / "config.yml", "agent:\n  model: proj-model\n")
     monkeypatch.chdir(proj_dir)

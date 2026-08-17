@@ -12,7 +12,7 @@ import pytest
 async def test_two_submit_attempts_first_collapsed(tmp_path):
     """If two submit_solution agent events occur, the first should collapse to a marker."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Static
 
     tid = "t1"
@@ -86,7 +86,7 @@ async def test_submit_solutions_in_different_turns_not_collapsed(tmp_path):
     """Two submit_solutions separated by a real user message → both kept as full content."""
     pytest.importorskip("textual")
     import json
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Static
 
     tid = "t1"
@@ -153,7 +153,7 @@ async def test_submit_solution_retry_removes_all_widgets_of_previous_multi_block
     pytest.importorskip("textual")
     import json
     from pathlib import Path
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "collapse_multi"
     # Первая submit_solution с прозой + fenced-блоком (multi-widget рендер).

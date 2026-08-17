@@ -1,4 +1,4 @@
-from tui.services.stream_sink import select_stream_render
+from gc_tui.services.stream_sink import select_stream_render
 
 
 def test_minimal_is_none():

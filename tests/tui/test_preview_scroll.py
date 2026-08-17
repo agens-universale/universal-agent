@@ -12,8 +12,8 @@ import pytest
 async def test_preview_trace_scrolls_when_overflow(tmp_path):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
-    from tui.screens.preview import PreviewScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.preview import PreviewScreen
 
     msgs = [{"payload": {"id": f"m{i}", "role": "assistant",
                          "content": f"строка ответа номер {i}"}} for i in range(60)]
@@ -35,7 +35,7 @@ async def test_main_trace_still_follows_content(tmp_path):
     import json
     from pathlib import Path
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "pv1"
     meta = {"thread_id": tid, "status": "running",

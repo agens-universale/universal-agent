@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from config_modules import env_vars
-from mcp_runtime.env import augment_process_env, resolve_mcp_command
-from mcp_runtime.paths import mcp_bin_dir, mcp_env_root, runtime_state_path
-from mcp_runtime.state import load_runtime_state, save_runtime_state
+from gc_core.config_modules import env_vars
+from gc_core.mcp_runtime.env import augment_process_env, resolve_mcp_command
+from gc_core.mcp_runtime.paths import mcp_bin_dir, mcp_env_root, runtime_state_path
+from gc_core.mcp_runtime.state import load_runtime_state, save_runtime_state
 
 
 def test_paths_under_gc_data(tmp_path: Path, monkeypatch) -> None:
@@ -53,10 +53,10 @@ def test_augment_process_env_prepends_bin(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_managed_config_path(monkeypatch, tmp_path):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars, "gc_paths", lambda: {"config": tmp_path / "cfg",
                                                        "data": tmp_path / "d",
                                                        "cache": tmp_path / "c",
                                                        "state": tmp_path / "s"})
-    from mcp_runtime.paths import managed_config_path
+    from gc_core.mcp_runtime.paths import managed_config_path
     assert managed_config_path() == (tmp_path / "cfg" / "config.local.yml")

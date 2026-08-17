@@ -3,19 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-from intent_log import (
-    ACTION_TOOL_AGGREGATED,
-    ACTION_USER_ASK,
-    IntentRecord,
-    append_tool_aggregated,
-    append_user_ask,
-    flush,
-    read_page,
-    serialize,
-)
-from tools.session.read_user_intent_log import ReadUserIntentLog
-from tools.registry import get_builtin_tools_data
+from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_USER_ASK, IntentRecord, append_tool_aggregated, append_user_ask, flush, read_page, serialize
+from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
+from gc_core.tools.registry import get_builtin_tools_data
 
 
 FIXED_TS = "2026-05-30T11:35:08Z"
@@ -162,7 +153,7 @@ def test_registered_only_for_chat_completions():
 def test_records_to_jsonl_lines_round_trip_for_guard_path():
     import json
 
-    from intent_log import records_to_jsonl_lines
+    from gc_core.intent_log import records_to_jsonl_lines
 
     current = append_user_ask([], "open ask", user_turn_seq=1, ts=FIXED_TS)
     current = append_tool_aggregated(

@@ -5,7 +5,7 @@ pytest.importorskip("textual")
 
 def _mk_thread(tmp_path, tid, overrides):
     """Реальный тред с сохранёнными сессионными настройками."""
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.services.stores.file_store import FileTaskStore
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
     store.update_tui_meta(tid, {"session_settings": overrides})
 
@@ -23,7 +23,7 @@ class _StubRunner:
 @pytest.mark.asyncio
 async def test_opening_thread_applies_its_settings(tmp_path):
     """Возврат к треду восстанавливает его значения."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk_thread(tmp_path, "t-own", {"tui.finish_gate_mode": "off"})
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
                  config={"model": "M", "tui_finish_gate_mode": "on"})
@@ -37,7 +37,7 @@ async def test_opening_thread_applies_its_settings(tmp_path):
 async def test_opening_thread_without_settings_falls_back_to_default(tmp_path):
     """Тред без своих значений (старый) — умолчание из конфига, прежние
     переопределения окна снимаются."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk_thread(tmp_path, "t-plain", {})
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
                  config={"model": "M", "tui_finish_gate_mode": "on"})
@@ -55,7 +55,7 @@ async def test_init_auto_create_inherits_session_overrides(tmp_path):
     Иначе attach_active_task (вызывается следом) читает пустые meta и сбрасывает
     живые настройки сессии к умолчанию конфига — регрессия, которую чинит
     _begin_auto_created_task для всех входов (текст, inline /skill, /init)."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
                  config={"model": "M", "tui_finish_gate_mode": "on"})
     rec = _StubRunner()
@@ -68,7 +68,7 @@ async def test_init_auto_create_inherits_session_overrides(tmp_path):
         tid = app.tui_state.active_task_id
         assert tid is not None
 
-        from tui.services.stores.file_store import FileTaskStore
+        from gc_tui.services.stores.file_store import FileTaskStore
         store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
         saved = (store.get_task_meta(tid).get("tui") or {}).get("session_settings")
         assert saved == {"tui.finish_gate_mode": "off"}
@@ -81,7 +81,7 @@ async def test_freetext_auto_create_inherits_session_overrides(tmp_path):
     """Свободный текст (основной путь) на пустой сессии создаёт тред через
     единую точку автосоздания: новый тред обязан унести ТЕКУЩИЕ сессионные
     переопределения. Если убрать persist_session_overrides(), тест падает."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
                  config={"model": "M", "tui_finish_gate_mode": "on"})
     rec = _StubRunner()
@@ -98,7 +98,7 @@ async def test_freetext_auto_create_inherits_session_overrides(tmp_path):
         tid = app.tui_state.active_task_id
         assert tid is not None
 
-        from tui.services.stores.file_store import FileTaskStore
+        from gc_tui.services.stores.file_store import FileTaskStore
         store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
         saved = (store.get_task_meta(tid).get("tui") or {}).get("session_settings")
         assert saved == {"tui.finish_gate_mode": "off"}
@@ -112,7 +112,7 @@ async def test_attach_without_settings_change_keeps_warm_runner(tmp_path):
     применены в окне, — пересобирать нечего. Пересборка тянет MCP-дискавери внутри
     worker-потока, и пользователь ждёт её до начала хода (переключение через
     /sessions, второе сообщение автосозданного треда)."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk_thread(tmp_path, "t-same", {"tui.finish_gate_mode": "off"})
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
                  config={"model": "M", "tui_finish_gate_mode": "on"})
@@ -129,7 +129,7 @@ async def test_attach_without_settings_change_keeps_warm_runner(tmp_path):
 async def test_attach_with_other_settings_invalidates_runner(tmp_path):
     """Обратная сторона: значения треда РЕАЛЬНО другие — раннер обязан пересобраться,
     иначе ход пойдёт на конфиге прошлого треда."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk_thread(tmp_path, "t-other", {"tui.finish_gate_mode": "off"})
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
                  config={"model": "M", "tui_finish_gate_mode": "on"})
@@ -154,7 +154,7 @@ async def test_two_windows_with_different_threads_are_independent(tmp_path):
     первого); нигде в tests/tui/ так не делают, см. test_session_lock_tui.py,
     где «другое окно» эмулируется на уровне lock-файла, а не вторым живым
     инстансом."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk_thread(tmp_path, "t-a", {"tui.finish_gate_mode": "off"})
     _mk_thread(tmp_path, "t-b", {"tui.finish_gate_mode": "on"})
     cfg = {"model": "M", "tui_finish_gate_mode": "on"}
@@ -181,8 +181,8 @@ async def test_settings_screen_open_picks_up_default_saved_by_other_window(tmp_p
     Открытие /settings обязано подхватить чужую запись через freshness-проверку
     по mtime config.yml, а не показывать/наследовать конфиг, с которым окно
     было создано."""
-    from tui.app import TuiApp
-    from tui.screens.settings import SettingsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.settings import SettingsScreen
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
@@ -217,8 +217,8 @@ async def test_entering_settings_section_picks_up_other_window_default(tmp_path)
     """Вход в секцию /settings при уже открытом экране подхватывает чужую правку
     глобала (дизайн 2026-07-21 §4: свежесть в двух точках — открытие Settings и
     вход в секцию). _sync_config_from_app зовёт reload_config_if_changed явно."""
-    from tui.app import TuiApp
-    from tui.screens.settings import SettingsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.settings import SettingsScreen
     from tests.tui.conftest import open_settings_section
 
     cfg_file = tmp_path / "config.yml"
@@ -249,8 +249,8 @@ async def test_config_screen_open_does_not_reload_other_window_default(tmp_path)
     """/config больше НЕ подхватывает чужую правку глобала (дизайн 2026-07-21 §4):
     автоперечитку сняли со всех экранов, кроме Settings. Окно показывает базу, с
     которой живёт; свежесть — только на пути /settings (тесты ниже)."""
-    from tui.app import TuiApp
-    from tui.screens.config import ConfigScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")

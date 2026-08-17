@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from tui.app import TuiApp
-from tui.models import TraceEvent
-from tui.services.stores.file_store import FileTaskStore
+from gc_tui.app import TuiApp
+from gc_tui.models import TraceEvent
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 class _DeadRunner:
@@ -97,7 +97,7 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
         assert app.tui_state.ask_human_state is None, "ask_human_state должен быть сброшен"
         assert app.active_runner is None, "active_runner должен быть обнулён (clean-restart pattern)"
         # Индикатор в состоянии cancelled (вместо [stopped]-строки в трейсе).
-        from tui.widgets.thinking_indicator import ThinkingIndicator
+        from gc_tui.widgets.thinking_indicator import ThinkingIndicator
         assert screen._thinking is not None, "ThinkingIndicator должен остаться (cancelled-state)"
         assert screen._thinking._state == "cancelled", (
             f"ThinkingIndicator должен быть в состоянии 'cancelled', got {screen._thinking._state!r}"
@@ -139,7 +139,7 @@ async def test_after_esc_stop_user_can_continue_thread(tmp_path):
     # get_runner вернёт его как есть (см. tui/app.py::get_runner).
     cap = _CapturingRunner()
     app._executor_factory = lambda: object()  # type: ignore[assignment]
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.services.stores.file_store import FileTaskStore
     async with app.run_test() as pilot:
         screen = app.screen
         screen._active_task_id = thread_id
@@ -148,7 +148,7 @@ async def test_after_esc_stop_user_can_continue_thread(tmp_path):
         await pilot.pause()
 
         # Симулируем submit: юзер пишет текст + Enter (как продолжение треда).
-        from tui.widgets.command_input import CommandTextArea
+        from gc_tui.widgets.command_input import CommandTextArea
         inp = screen.query_one("#cmdinput")
         inp.text = "продолжаем"
         screen.on_command_text_area_submitted(
@@ -167,7 +167,7 @@ async def test_after_esc_stop_user_can_continue_thread(tmp_path):
 async def test_esc_in_zombie_state_unmounts_banner_and_falls_through(tmp_path):
     """Zombie ask_human-state (нет/мёртв runner): Esc не съедается —
     banner снят, Esc-state-machine отработала (пустой input → модалка выхода)."""
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.screens.confirm import ConfirmScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         screen = app.screen
@@ -233,7 +233,7 @@ async def test_attach_with_dangling_ask_human_unmounts_banner_with_meta_line(tmp
         assert screen._ask_human_banner is None
         assert app.tui_state.ask_human_state is None
         # Проверка meta-строки: смотрим TraceRow widgets (как в Task 2 tests).
-        from tui.widgets.trace_row import TraceRow
+        from gc_tui.widgets.trace_row import TraceRow
         trace_text = " ".join(
             f"{getattr(w, '_prefix', '')}{getattr(w, '_content', '')}"
             for w in screen.query(TraceRow)
@@ -299,7 +299,7 @@ async def test_attach_compacted_answered_ask_human_no_remnant(tmp_path):
         await pilot.pause()
         assert scr._ask_human_banner is None
         assert app.tui_state.ask_human_state is None
-        from tui.widgets.trace_row import TraceRow
+        from gc_tui.widgets.trace_row import TraceRow
         trace_text = " ".join(
             f"{getattr(w, '_prefix', '')}{getattr(w, '_content', '')}"
             for w in scr.query(TraceRow)
@@ -379,14 +379,14 @@ async def test_enter_in_zombie_continues_thread_as_new_user_message(tmp_path):
         cap = _CapturingRunner()
         app.active_runner = cap
         # Banner снят recovery-блоком. ask_human_state == None — submit пойдёт обычным путём.
-        from tui.widgets.command_input import CommandTextArea
+        from gc_tui.widgets.command_input import CommandTextArea
         inp = screen.query_one("#cmdinput")
         inp.text = "продолжаем"
         screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="продолжаем"))
         await pilot.pause()
         assert started, "runner.start должен быть вызван для продолжения треда"
         assert started[0]["thread_id"] == thread_id
-        from tui.widgets.user_reply import UserReplyContainer
+        from gc_tui.widgets.user_reply import UserReplyContainer
         assert list(screen.query(UserReplyContainer))
 
 

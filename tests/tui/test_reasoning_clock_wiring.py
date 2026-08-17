@@ -1,8 +1,8 @@
 """Проводка ReasoningClock в TraceScreen: когнитивные тул-события + stream-источник."""
 import pytest
 
-from tui.models import TraceEvent
-from tui.services.reasoning_clock import ReasoningClock
+from gc_tui.models import TraceEvent
+from gc_tui.services.reasoning_clock import ReasoningClock
 
 
 class _FakeClock:
@@ -26,7 +26,7 @@ def _result_ev(call_id: str) -> TraceEvent:
 @pytest.mark.asyncio
 async def test_cognitive_call_lights_reasoning_and_accumulates(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -43,7 +43,7 @@ async def test_cognitive_call_lights_reasoning_and_accumulates(tmp_path):
 @pytest.mark.asyncio
 async def test_non_cognitive_call_ignored(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -58,7 +58,7 @@ async def test_worldly_call_interrupts_episode(tmp_path):
     """Не-когнитивный тул (действие в мире) между двумя когнитивными рвёт эпизод:
     второе раздумье считается заново, а не суммируется."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -84,7 +84,7 @@ async def test_cognitive_call_without_call_id_does_not_interrupt(tmp_path):
     """Когнитивный тул без call_id — no-op, НЕ рвёт эпизод (не проваливается в interrupt).
     Следующая когнитивная операция продолжает тот же эпизод (склейка)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -102,7 +102,7 @@ async def test_cognitive_call_without_call_id_does_not_interrupt(tmp_path):
 @pytest.mark.asyncio
 async def test_reset_on_user_send_clears_clock(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -118,7 +118,7 @@ async def test_reset_on_user_send_clears_clock(tmp_path):
 @pytest.mark.asyncio
 async def test_stream_source_pump_edge(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -137,7 +137,7 @@ async def test_stream_source_pump_edge(tmp_path):
 @pytest.mark.asyncio
 async def test_indicator_gets_clock(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen
         scr._show_thinking_indicator(state="thinking")

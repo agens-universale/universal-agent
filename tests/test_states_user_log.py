@@ -1,15 +1,11 @@
 import json
 
-from intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK
-from intent_log.user_turn import (
-    append_user_ask_deduped,
-    append_user_asks_from_messages,
-    init_subagent_open_turn,
-)
-from intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
-from message_policy.user_message_policy import extract_real_user_message_text
-from persistence.state_serializer import StateSerializer
-from states import State
+from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK
+from gc_core.intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages, init_subagent_open_turn
+from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
+from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+from gc_core.persistence.state_serializer import StateSerializer
+from gc_core.states import State
 
 
 def _make_state() -> State:
@@ -123,7 +119,7 @@ def test_init_subagent_open_turn_without_policy_filter():
 
 
 def test_seed_user_ask_appends_only_to_current():
-    from intent_log import append_user_ask
+    from gc_core.intent_log import append_user_ask
 
     state = _make_state()
     state.user_intent_log = append_user_ask(
@@ -172,7 +168,7 @@ def test_multiple_user_asks_at_open_turn_like_agent_executor():
 
 
 def test_flush_moves_current_to_log_without_dedup():
-    from intent_log import append_user_ask
+    from gc_core.intent_log import append_user_ask
 
     state = _make_state()
     state.user_intent_log = append_user_ask(
@@ -260,9 +256,7 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
     state.shared.notes_md = "notes"
     state.shared.fetch_url_cache["https://example.com"] = {"content": "ok"}
 
-    from tools.session.stored_outputs.tool_call_outputs_store import (  # noqa: E402
-        ToolCallOutputRecord,
-    )
+    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
 
     state.tool_call_outputs_store.put(
         ToolCallOutputRecord(
@@ -290,7 +284,7 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
 
 
 def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
-    from intent_log import append_user_ask
+    from gc_core.intent_log import append_user_ask
 
     state = State(
         verbose=True,
@@ -362,9 +356,7 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     state.shared.fetch_url_cache["https://example.com/a"] = {"content": "AAA", "ts": "2026-05-06T11:00:00Z"}
     state.shared.fetch_url_cache["https://example.com/b"] = {"content": "BBB", "ts": "2026-05-06T11:01:00Z"}
 
-    from tools.session.stored_outputs.tool_call_outputs_store import (  # noqa: E402
-        ToolCallOutputRecord,
-    )
+    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
 
     state.tool_call_outputs_store.set_max_entries(5)
     state.tool_call_outputs_store.put(

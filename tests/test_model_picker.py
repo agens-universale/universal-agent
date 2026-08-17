@@ -1,4 +1,4 @@
-import model_picker as mp
+from gc_core import model_picker as mp
 
 
 def test_parse_config_models():

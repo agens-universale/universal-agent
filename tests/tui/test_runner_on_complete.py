@@ -1,4 +1,4 @@
-from tui.services.agent_runner import AgentRunner
+from gc_tui.services.agent_runner import AgentRunner
 
 class _Exec:
     last_terminal_outcome = "step_limit"

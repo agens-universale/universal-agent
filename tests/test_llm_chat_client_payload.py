@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from utils import llm_chat_client
+from gc_core.utils import llm_chat_client
 
 
 def _cfg(**overrides):

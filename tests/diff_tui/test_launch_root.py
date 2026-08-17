@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import tui as tui_pkg
+import gc_tui as tui_pkg
 
 
 def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
@@ -29,22 +29,22 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     fake_mod.TuiApp = FakeApp
 
     monkeypatch.setattr(
-        tui_pkg.importlib, "import_module", lambda name: fake_mod if name == "tui.app" else MagicMock()
+        tui_pkg.importlib, "import_module", lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock()
     )
     monkeypatch.setattr(
-        "config.load_config",
+        "gc_core.config.load_config",
         lambda _path=None: {"threads_data_path": str(tmp_path / "threads")},
     )
-    monkeypatch.setattr("config.apply_cli_overrides", lambda _cfg: None)
-    monkeypatch.setattr("onboarding.is_unconfigured", lambda _cfg: False)
+    monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda _cfg: None)
+    monkeypatch.setattr("gc_core.onboarding.is_unconfigured", lambda _cfg: False)
     monkeypatch.setattr(
-        "thread_store.resolve_threads_dir",
+        "gc_core.thread_store.resolve_threads_dir",
         lambda _cfg: str(tmp_path / "threads"),
     )
-    monkeypatch.setattr("config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
-    monkeypatch.setattr("config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("gc_core.config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
+    monkeypatch.setattr("gc_core.config._project_local_config_path", lambda: None)
     monkeypatch.setattr(
-        "config_modules.env_vars.ensure_project_gc_dir",
+        "gc_core.config_modules.env_vars.ensure_project_gc_dir",
         lambda: None,
     )
 
@@ -83,22 +83,22 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     fake_mod.TuiApp = FakeApp
 
     monkeypatch.setattr(
-        tui_pkg.importlib, "import_module", lambda name: fake_mod if name == "tui.app" else MagicMock()
+        tui_pkg.importlib, "import_module", lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock()
     )
     monkeypatch.setattr(
-        "config.load_config",
+        "gc_core.config.load_config",
         lambda _path=None: {"threads_data_path": str(tmp_path / "threads")},
     )
-    monkeypatch.setattr("config.apply_cli_overrides", lambda _cfg: None)
-    monkeypatch.setattr("onboarding.is_unconfigured", lambda _cfg: False)
+    monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda _cfg: None)
+    monkeypatch.setattr("gc_core.onboarding.is_unconfigured", lambda _cfg: False)
     monkeypatch.setattr(
-        "thread_store.resolve_threads_dir",
+        "gc_core.thread_store.resolve_threads_dir",
         lambda _cfg: str(tmp_path / "threads"),
     )
-    monkeypatch.setattr("config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
-    monkeypatch.setattr("config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("gc_core.config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
+    monkeypatch.setattr("gc_core.config._project_local_config_path", lambda: None)
     monkeypatch.setattr(
-        "config_modules.env_vars.ensure_project_gc_dir",
+        "gc_core.config_modules.env_vars.ensure_project_gc_dir",
         lambda: None,
     )
 

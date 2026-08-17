@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import agent_executor as agent_executor_module
-from run_context import create_run_context
+from gc_core import agent_executor as agent_executor_module
+from gc_core.run_context import create_run_context
 
 
 def _config(tmp_path, log_format):

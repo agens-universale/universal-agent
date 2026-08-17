@@ -5,49 +5,49 @@ import pytest
 def test_compaction_label_with_chars():
     comp = {"messages_in_segment": 8, "chars_before": 12300,
             "chars_after": 3100, "synthesis": "x"}
-    from tui.services.trace_render import build_compaction_label
+    from gc_tui.services.trace_render import build_compaction_label
     assert build_compaction_label(1, comp) == "контекст сжат #1 · 8→1 · 12.3k→3.1k симв"
 
 
 def test_compaction_label_legacy_no_chars():
     comp = {"messages_in_segment": 5, "synthesis": "x"}
-    from tui.services.trace_render import build_compaction_label
+    from gc_tui.services.trace_render import build_compaction_label
     assert build_compaction_label(2, comp) == "контекст сжат #2 · 5→1"
 
 
 def test_render_code_block_with_lang():
     pytest.importorskip("textual")
-    from tui.services.trace_render import render_code_block
+    from gc_tui.services.trace_render import render_code_block
     w = render_code_block("print(1)", "python", event_no=1)
     assert w.has_class("code-block-panel")
 
 
 def test_render_code_block_unknown_lang_fallback():
     pytest.importorskip("textual")
-    from tui.services.trace_render import render_code_block
+    from gc_tui.services.trace_render import render_code_block
     w = render_code_block("x = 1", "no-such-lang-xyz", event_no=2)
     assert w.has_class("code-block-panel")
 
 
 def test_render_code_block_no_lang_fallback():
     pytest.importorskip("textual")
-    from tui.services.trace_render import render_code_block
+    from gc_tui.services.trace_render import render_code_block
     w = render_code_block("plain text", None, event_no=3)
     assert w.has_class("code-block-panel")
 
 
 def test_build_agent_widgets_prose():
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_agent_widgets
+    from gc_tui.services.trace_render import build_agent_widgets
     ws = build_agent_widgets("просто текст ответа", event_no=5)
     assert len(ws) == 1
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import TraceRow
     assert isinstance(ws[0], TraceRow)
 
 
 def test_build_agent_widgets_code_and_prose_order_and_focus():
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_agent_widgets
+    from gc_tui.services.trace_render import build_agent_widgets
     md = "вступление\n\n```python\nprint(1)\n```\n\nитог"
     ws = build_agent_widgets(md, event_no=7)
     # 3 виджета: proza, code-block, proza — в порядке
@@ -68,9 +68,9 @@ async def test_render_thread_readonly_kinds():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
-    from tui.services.trace_render import render_thread_readonly
-    from tui.widgets.user_reply import UserReplyContainer
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.services.trace_render import render_thread_readonly
+    from gc_tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     records = [
         _env({"role": "user", "content": "привет", "id": "m1"}),
@@ -113,8 +113,8 @@ async def test_render_segments_readonly_parity():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
-    from tui.services.trace_render import render_segments_readonly
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.services.trace_render import render_segments_readonly
+    from gc_tui.widgets.trace_row import TraceRow
 
     segments = [
         _seg([
@@ -162,7 +162,7 @@ async def test_render_segments_readonly_parity():
 
 def test_build_agent_widgets_has_bullet_prefix():
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_agent_widgets
+    from gc_tui.services.trace_render import build_agent_widgets
     ws = build_agent_widgets("просто текст", event_no=1)
     assert ws[0]._prefix == "● "
 
@@ -172,7 +172,7 @@ def test_build_intermediate_widgets_renders_code_block():
     становится панелью, а не сырой строкой с литеральными ```. Маркер «· »
     и класс line-intermediate сохранены."""
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_intermediate_widgets
+    from gc_tui.services.trace_render import build_intermediate_widgets
     md = "вступление\n\n```python\nprint(1)\n```"
     ws = build_intermediate_widgets(md, event_no=9)
     assert ws[0]._prefix == "· "
@@ -184,8 +184,8 @@ def test_build_intermediate_widgets_plain_text_single_row():
     """Простой текст (без markdown) — по-прежнему одна line-intermediate строка
     (паритет со старым поведением, инвариант превью)."""
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_intermediate_widgets
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.services.trace_render import build_intermediate_widgets
+    from gc_tui.widgets.trace_row import TraceRow
     ws = build_intermediate_widgets("промежуточный ответ", event_no=1)
     assert len(ws) == 1 and isinstance(ws[0], TraceRow)
     assert ws[0]._prefix == "· " and ws[0].has_class("line-intermediate")
@@ -193,8 +193,8 @@ def test_build_intermediate_widgets_plain_text_single_row():
 
 def test_build_block_widgets_no_bullet_prefix():
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_block_widgets
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.services.trace_render import build_block_widgets
+    from gc_tui.widgets.trace_row import TraceRow
     ws = build_block_widgets("просто текст", prose_bullet=False, event_no=1)
     assert len(ws) == 1 and isinstance(ws[0], TraceRow)
     assert ws[0]._prefix == ""
@@ -202,7 +202,7 @@ def test_build_block_widgets_no_bullet_prefix():
 
 def test_build_block_widgets_table_widget():
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_block_widgets
+    from gc_tui.services.trace_render import build_block_widgets
     ws = build_block_widgets("| A | B |\n|---|---|\n| 1 | 2 |",
                              prose_bullet=True, event_no=1)
     assert len(ws) == 1
@@ -213,7 +213,7 @@ def test_build_block_widgets_table_indent_only_with_bullet():
     """Трейс/превью (prose_bullet=True): таблица с отступом под текст (.table-indent).
     Баннер (prose_bullet=False): без отступа — вровень с прозой на колонке 0."""
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_block_widgets
+    from gc_tui.services.trace_render import build_block_widgets
     md = "| A | B |\n|---|---|\n| 1 | 2 |"
     trace = build_block_widgets(md, prose_bullet=True, event_no=1)
     banner = build_block_widgets(md, prose_bullet=False, event_no=1)
@@ -226,7 +226,7 @@ def test_build_block_widgets_code_indent_only_with_bullet():
     """Код-панель: отступ под текст в трейсе/превью (.code-indent), без отступа в баннере
     (как таблицы) — чтобы код в ask_human был вровень с прозой на колонке 0."""
     pytest.importorskip("textual")
-    from tui.services.trace_render import build_block_widgets
+    from gc_tui.services.trace_render import build_block_widgets
     md = "```python\nprint(1)\n```"
     trace = build_block_widgets(md, prose_bullet=True, event_no=1)
     banner = build_block_widgets(md, prose_bullet=False, event_no=1)
@@ -242,8 +242,8 @@ async def test_readonly_submit_note_label():
     import json as _json
     from textual.app import App
     from textual.containers import VerticalScroll
-    from tui.services.trace_render import render_segments_readonly
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.services.trace_render import render_segments_readonly
+    from gc_tui.widgets.trace_row import TraceRow
 
     segments = [{"index": 0, "compacted_by": None, "messages": [_env({
         "type": "function_call", "id": "fc", "call_id": "c", "name": "submit_solution",
@@ -269,8 +269,8 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
     пустая строка сверху (margin-top: 1), не прилипает к предыдущей строке."""
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -287,9 +287,9 @@ def test_dispatch_readonly_renders_todo_checklist():
     (паритет с живым путём main.py), а не ронять в generic line-meta."""
     pytest.importorskip("textual")
     import json
-    from tui.services.trace_mapper import map_message
-    from tui.services.trace_render import _dispatch_readonly
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.services.trace_mapper import map_message
+    from gc_tui.services.trace_render import _dispatch_readonly
+    from gc_tui.widgets.trace_row import TraceRow
 
     ev = map_message(
         {"type": "function_call", "name": "session_todo", "call_id": "c1",
@@ -321,15 +321,15 @@ def test_dispatch_readonly_renders_todo_checklist():
 def test_kind_literal_includes_todo():
     """C2: тип Kind должен объявлять 'todo' (честность контракта)."""
     from typing import get_args
-    from tui.models import Kind
+    from gc_tui.models import Kind
     assert "todo" in get_args(Kind)
 
 
 def test_todo_event_renders_rich_text_with_glyph_colors():
     """kind=todo → TraceRow с rich.Text (канон §2), а не plain-строкой."""
     from rich.text import Text as RichText
-    from tui.models import TraceEvent
-    from tui.services.trace_render import _dispatch_readonly
+    from gc_tui.models import TraceEvent
+    from gc_tui.services.trace_render import _dispatch_readonly
 
     todos = [{"content": "Шаг раз", "status": "completed"},
              {"content": "Шаг два", "status": "in_progress"}]
@@ -370,9 +370,9 @@ def test_readonly_error_msg_finalizes_its_call_row():
     а ошибка уезжает отдельной [!]-строкой — так выглядел битый session_todo.
     """
     pytest.importorskip("textual")
-    from tui.models import TraceEvent
-    from tui.services.trace_render import _dispatch_readonly
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.models import TraceEvent
+    from gc_tui.services.trace_render import _dispatch_readonly
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     mounted = []
 
@@ -401,8 +401,8 @@ def test_readonly_error_msg_finalizes_its_call_row():
 def test_readonly_error_msg_without_call_row_still_shown():
     """Ошибка без известного вызова — прежняя [!]-строка, ничего не теряем."""
     pytest.importorskip("textual")
-    from tui.models import TraceEvent
-    from tui.services.trace_render import _dispatch_readonly
+    from gc_tui.models import TraceEvent
+    from gc_tui.services.trace_render import _dispatch_readonly
 
     mounted = []
 

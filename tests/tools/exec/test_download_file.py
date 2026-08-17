@@ -4,7 +4,7 @@ import os
 import pytest
 import requests
 
-from tools.exec.download_file import DownloadFile
+from gc_core.tools.exec.download_file import DownloadFile
 
 
 from tests.helpers.tool_ctx import with_local_ctx

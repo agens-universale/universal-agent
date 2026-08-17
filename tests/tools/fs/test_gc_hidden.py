@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from tools.fs.list_files import ListFiles
-from tools.fs.search_files import SearchFiles
+from gc_core.tools.fs.list_files import ListFiles
+from gc_core.tools.fs.search_files import SearchFiles
 
 
 from tests.helpers.tool_ctx import with_local_ctx

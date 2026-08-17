@@ -5,11 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.deprecated.memory_files import (
-    MemoryFiles,
-    _DEFAULT_MAX_FILE_CHARS,
-    _DEFAULT_MAX_FILES,
-)
+from gc_core.tools.deprecated.memory_files import MemoryFiles, _DEFAULT_MAX_FILE_CHARS, _DEFAULT_MAX_FILES
 
 
 # ---------------------------------------------------------------------------

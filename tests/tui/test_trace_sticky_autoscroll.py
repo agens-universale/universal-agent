@@ -18,7 +18,7 @@ def _write_task(tmp_path, tid):
 
 
 def _app(tmp_path):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     return TuiApp(threads_dir=str(tmp_path), system="cli",
                   config={"model": "M", "backend_api_mode": "chat_completions"})
 

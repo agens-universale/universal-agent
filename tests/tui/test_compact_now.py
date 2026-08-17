@@ -1,7 +1,7 @@
 """compact_now: off-thread форс-сжатие, отказ если worker занят."""
 import time
 
-from tui.services.agent_runner import AgentRunner
+from gc_tui.services.agent_runner import AgentRunner
 
 
 def test_compact_now_runs_off_thread():

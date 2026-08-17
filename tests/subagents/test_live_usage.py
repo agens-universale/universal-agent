@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from tools.subagents.runner import SubagentRunner
-from usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
+from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
 
 
 class _FakeChildState:
@@ -34,7 +34,7 @@ def _wire_runner(monkeypatch, runner, child):
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
-    import tools.subagents.runner as runner_mod
+    from gc_core.tools.subagents import runner as runner_mod
     monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
     monkeypatch.setattr(
         runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}

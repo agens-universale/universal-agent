@@ -8,7 +8,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_new_when_idle_goes_to_empty_state(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "existing"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
@@ -41,8 +41,8 @@ async def test_new_when_idle_goes_to_empty_state(tmp_path):
 @pytest.mark.asyncio
 async def test_new_when_running_asks_confirm(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
 
     stop_called = {"flag": False}
 
@@ -86,8 +86,8 @@ async def test_new_when_running_asks_confirm(tmp_path):
 @pytest.mark.asyncio
 async def test_new_confirm_has_title_and_wording(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
 
     class _Fake:
         def __init__(self): self._evt = None
@@ -118,8 +118,8 @@ async def test_new_confirm_has_title_and_wording(tmp_path):
 async def test_new_confirm_yes_clears_runner_and_indicator(tmp_path):
     """Regression: после /new+yes индикатор «думаю» не висит, runner отвязан."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _Fake:
         def __init__(self): self._evt = None

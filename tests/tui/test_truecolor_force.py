@@ -3,7 +3,7 @@
 и градиент логотипа рендерится ступеньками (Windows)."""
 import os
 
-import tui
+import gc_tui as tui
 
 
 def _clear(monkeypatch):

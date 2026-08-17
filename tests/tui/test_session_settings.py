@@ -1,4 +1,4 @@
-from tui.session_settings import SESSION_KEYS, apply_overrides, diff_vs_base
+from gc_tui.session_settings import SESSION_KEYS, apply_overrides, diff_vs_base
 
 
 def test_session_keys_cover_toggle_keys():
@@ -53,7 +53,7 @@ def test_every_toggle_key_is_session_overridable():
     """Гвоздь расширяемости: тоггл, чей ключ забыли внести в белый список, молча
     не применялся бы — apply_overrides игнорирует неизвестный ключ, исключения нет,
     строка продолжает рендерить старое значение (переключатель выглядит залипшим)."""
-    from tui.toggles import TOGGLES
+    from gc_tui.toggles import TOGGLES
     # Пресет-тогглы (/rigor) не пишут напрямую — dotted="" (спека §6, Task 4);
     # проверка адресует только single-key тогглы.
     assert [s.dotted for s in TOGGLES.values() if s.dotted and s.dotted not in SESSION_KEYS] == []
@@ -61,7 +61,7 @@ def test_every_toggle_key_is_session_overridable():
 
 def test_new_session_key_works_without_code_changes(monkeypatch):
     """Расширяемость: новый ключ в белом списке проходит весь путь наложения."""
-    from tui import session_settings as ss
+    from gc_tui import session_settings as ss
     monkeypatch.setitem(
         ss.SESSION_KEYS, "tui.fake_mode",
         ss.SessionKey("tui.fake_mode", "tui_fake_mode", None),

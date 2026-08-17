@@ -4,13 +4,7 @@ from __future__ import annotations
 
 import json
 
-from intent_log import (
-    ACTION_USER_ASK,
-    IntentRecord,
-    append_user_ask,
-    records_to_jsonl_lines,
-    serialize_for_meta,
-)
+from gc_core.intent_log import ACTION_USER_ASK, IntentRecord, append_user_ask, records_to_jsonl_lines, serialize_for_meta
 
 TS = "2026-05-30T11:35:08Z"
 

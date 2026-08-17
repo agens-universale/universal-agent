@@ -21,8 +21,8 @@ def _write_thread_with_agent_reply(tmp_path, tid, content):
 @pytest.mark.asyncio
 async def test_prose_only_reply_renders_one_static_with_bullet(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     tid = "prose_only"
     _write_thread_with_agent_reply(tmp_path, tid, "Привет, я помогу.")
@@ -46,8 +46,8 @@ async def test_prose_only_reply_renders_one_static_with_bullet(tmp_path):
 async def test_reply_with_fenced_block_mounts_separate_panels(tmp_path):
     """prose + fenced + prose → 3 виджета: 2 prose-TraceRow + 1 code-block-panel."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     tid = "with_code"
     content = "Вот пример:\n```python\nx = 1\n```\nИ всё."
@@ -73,8 +73,8 @@ async def test_reply_with_fenced_block_mounts_separate_panels(tmp_path):
 async def test_continuation_widgets_have_cont_class(tmp_path):
     """Второй и далее prose-блоки в одной agent-реплике получают .line-agent-cont."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     tid = "multi_para"
     # Проза теперь режется на отдельные prose-блоки ТОЛЬКО границей code/table
@@ -110,7 +110,7 @@ async def test_continuation_widgets_have_cont_class(tmp_path):
 async def test_unknown_lang_falls_back_to_code_block_color(tmp_path):
     """fenced с неизвестным языком → panel остаётся, текст моноцветный (не падает)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "unknown_lang"
     content = "Код:\n```xyz_bogus_lang\nsome content here\n```"

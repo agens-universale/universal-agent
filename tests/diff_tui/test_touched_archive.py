@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from diff_tui.touched import TouchedJournal
-from thread_store import ThreadSession, delete_thread, touched_journal_path
+from gc_tui.diff_tui.touched import TouchedJournal
+from gc_core.thread_store import ThreadSession, delete_thread, touched_journal_path
 
 
 def test_summary_leaves_touched_journal_intact(tmp_path):
@@ -78,8 +78,8 @@ def test_delete_thread_removes_touched_and_legacy_archives(tmp_path):
 
 def test_legacy_gc_touched_json_ignored(tmp_path, monkeypatch):
     """Старый ``.gc/diffs/touched.json`` не читаем."""
-    from config_modules import env_vars
-    from diff_tui.service import DiffService
+    from gc_core.config_modules import env_vars
+    from gc_tui.diff_tui.service import DiffService
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     root = tmp_path / "proj"

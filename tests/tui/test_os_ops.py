@@ -1,8 +1,8 @@
 """os_ops: macOS/Linux/Windows адаптер."""
 from unittest.mock import patch, MagicMock
 
-from tui.services import os_ops
-from tui.services.os_ops import read_clipboard
+from gc_tui.services import os_ops
+from gc_tui.services.os_ops import read_clipboard
 
 
 def test_read_clipboard_windows_uses_winapi(monkeypatch):

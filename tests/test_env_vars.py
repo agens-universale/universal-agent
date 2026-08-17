@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from config_modules.env_vars import EnvVars
+from gc_core.config_modules.env_vars import EnvVars
 
 
 @pytest.fixture
@@ -120,7 +120,7 @@ def test_swarm_legacy_empty_means_none(clear_gc_env, monkeypatch):
     assert e.swarm_threads_dir is None
 
 
-from config_modules.env_vars import project_slug
+from gc_core.config_modules.env_vars import project_slug
 
 
 def test_project_slug_windows_path_double_dash():
@@ -150,8 +150,8 @@ def test_project_slug_uses_cwd_when_no_arg(monkeypatch, tmp_path):
     assert len(slug) > 0
 
 
-from config_modules.env_vars import gc_paths
-from config_modules import env_vars as env_vars_module
+from gc_core.config_modules.env_vars import gc_paths
+from gc_core.config_modules import env_vars as env_vars_module
 
 
 def _isolate_env(monkeypatch, **overrides):
@@ -235,7 +235,7 @@ def test_gc_paths_pointed_state_dir_overrides_gc_home(
     assert paths["cache"] == tmp_path / "home" / "cache"
 
 
-from config_modules.env_vars import effective_config_dir
+from gc_core.config_modules.env_vars import effective_config_dir
 
 
 def test_effective_config_dir_default_when_usable(clear_gc_env, monkeypatch, tmp_path):

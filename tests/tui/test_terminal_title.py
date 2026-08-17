@@ -1,5 +1,5 @@
 import io
-from tui.services.terminal_title import format_terminal_title, set_terminal_title
+from gc_tui.services.terminal_title import format_terminal_title, set_terminal_title
 
 
 def test_format_idle():

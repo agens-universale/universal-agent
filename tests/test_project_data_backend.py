@@ -1,7 +1,7 @@
 from typing import Optional
 
-from execution_workspace import ExecutionWorkspace, build_execution_workspace
-from utils.project_data import get_project_data
+from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
+from gc_core.utils.project_data import get_project_data
 
 
 class FakeSandboxBackend:

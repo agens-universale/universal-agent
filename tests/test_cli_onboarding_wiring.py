@@ -4,7 +4,7 @@ import sys
 # runs deterministically under any pytest invocation.
 sys.argv = ["gc-cli", "-q", "x"]
 
-import cli  # noqa: E402
+from gc_cli import cli
 
 
 def test_run_init_calls_wizard_review_all_when_interactive(monkeypatch, tmp_path):
@@ -13,7 +13,7 @@ def test_run_init_calls_wizard_review_all_when_interactive(monkeypatch, tmp_path
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
     monkeypatch.setattr(cli, "load_config", lambda _=None: {"model": "m"})
     seen = {}
-    import onboarding_wizard
+    from gc_cli import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run",
                         lambda cfg, path, *, review_all, io, mcp=None: seen.update(review_all=review_all) or True)
     assert cli._run_init() == 0
@@ -36,7 +36,7 @@ def test_run_init_no_mcp(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
     monkeypatch.setattr(cli, "load_config", lambda _=None: {"model": "m"})
     seen = {}
-    import onboarding_wizard
+    from gc_cli import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run",
                         lambda cfg, path, *, review_all, io, mcp=None: seen.update(mcp=mcp, review_all=review_all) or True)
     assert cli._run_init() == 0
@@ -55,7 +55,7 @@ def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
-    import onboarding_wizard
+    from gc_cli import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("run вызван")))
     assert cli.main() == 0
     assert "config.yml" in capsys.readouterr().err

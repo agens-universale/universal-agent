@@ -7,12 +7,9 @@ from __future__ import annotations
 
 import copy
 
-import processing_responses as pr
-from message_format.serialization import (
-    calc_history_chars_for_trigger,
-    message_raw_payload_chars_for_trigger,
-)
-from message_projection import project_assistant_text
+from gc_core import processing_responses as pr
+from gc_core.message_format.serialization import calc_history_chars_for_trigger, message_raw_payload_chars_for_trigger
+from gc_core.message_projection import project_assistant_text
 
 from .conftest import (
     DIRTY_THINK,

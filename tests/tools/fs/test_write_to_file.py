@@ -1,6 +1,6 @@
 import json
 
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 
 from tests.helpers.tool_ctx import with_local_ctx

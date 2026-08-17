@@ -9,7 +9,7 @@ import pytest
 async def test_footer_shows_session_cwd(tmp_path):
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "t1"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(

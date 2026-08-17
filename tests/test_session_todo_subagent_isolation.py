@@ -7,11 +7,11 @@ replace-семантика — субагент затирал план орке
 """
 import json
 
-from message_policy.todo_reminder import apply_todo_reminder
-from persistence.state_serializer import StateSerializer
-from states import SharedStateData, State
-from summarize.working_memory_gateway import read_session_todo_from_state
-from tools.session.todo import SessionTodo
+from gc_core.message_policy.todo_reminder import apply_todo_reminder
+from gc_core.persistence.state_serializer import StateSerializer
+from gc_core.states import SharedStateData, State
+from gc_core.summarize.working_memory_gateway import read_session_todo_from_state
+from gc_core.tools.session.todo import SessionTodo
 
 PARENT_ITEMS = [
     {"content": "Спроектировать", "status": "completed"},

@@ -1,9 +1,9 @@
-from tools import build_tools_data
-from tools.exec.execute_command import ExecuteCommand
-from tools.exec.run_python_code import RunPythonCode
-from tools.fs.apply_file_edits import ApplyFileEdits
-from tools.fs.read_file import ReadFile
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.tools import build_tools_data
+from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
+from gc_core.tools.fs.read_file import ReadFile
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 
 def test_harbor_pack_off_by_default():

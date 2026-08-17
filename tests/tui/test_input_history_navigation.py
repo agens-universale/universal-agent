@@ -6,7 +6,7 @@ import pytest
 async def test_traceScreen_initializes_history_fields():
     """TraceScreen.__init__ заводит поля _history/_history_index/_history_draft."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -21,8 +21,8 @@ async def test_traceScreen_initializes_history_fields():
 async def test_history_initialized_on_attach(tmp_path):
     """После attach_active_task — _history создан как InputHistory(project_dir)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.input_history import InputHistory
+    from gc_tui.app import TuiApp
+    from gc_tui.services.input_history import InputHistory
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -38,7 +38,7 @@ async def test_history_available_in_empty_state(tmp_path):
     pytest.importorskip("textual")
     import json
     from pathlib import Path
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     project_dir = Path(tmp_path)
     threads_dir = project_dir / "threads"
@@ -62,7 +62,7 @@ async def test_history_available_in_empty_state(tmp_path):
 async def test_history_prev_substitutes_last(tmp_path):
     """_history_prev подставляет последнюю запись и сохраняет draft."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -85,7 +85,7 @@ async def test_history_prev_substitutes_last(tmp_path):
 async def test_history_prev_walks_back(tmp_path):
     """Повторный _history_prev идёт дальше назад."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -106,7 +106,7 @@ async def test_history_prev_walks_back(tmp_path):
 async def test_history_next_restores_draft(tmp_path):
     """_history_next за newest возвращает draft."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -128,7 +128,7 @@ async def test_history_next_restores_draft(tmp_path):
 async def test_history_prev_noop_on_empty(tmp_path):
     """_history_prev на пустой истории — no-op."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -145,7 +145,7 @@ async def test_history_prev_noop_on_empty(tmp_path):
 async def test_up_arrow_triggers_history_prev_on_first_line(tmp_path):
     """↑ при курсоре на 1-й строке → history prev."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -165,7 +165,7 @@ async def test_cursor_visual_line_helpers_with_soft_wrap():
     строке. first/last_visual_line отражают визуальный ряд, а не логический."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.widgets.command_input import CommandTextArea
 
     class _Host(App):
         def compose(self) -> ComposeResult:
@@ -191,8 +191,8 @@ async def test_up_on_wrapped_lower_visual_line_does_not_trigger_history(tmp_path
     """↑ при курсоре на нижней ВИЗУАЛЬНОЙ строке переноса → курсор вверх, история
     не трогается (раньше логич. row 0 ложно звал history_prev — баг soft-wrap)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test(size=(24, 12)) as pilot:
         scr = pilot.app.screen
@@ -218,8 +218,8 @@ async def test_down_on_wrapped_upper_visual_line_moves_cursor_not_history(tmp_pa
     """↓ при курсоре на верхней визуальной строке переноса → курсор спускается на
     строку ниже (history_next не перехватывает)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test(size=(24, 12)) as pilot:
         scr = pilot.app.screen
@@ -245,7 +245,7 @@ async def test_down_on_wrapped_upper_visual_line_moves_cursor_not_history(tmp_pa
 async def test_send_appends_to_history_and_resets_state(tmp_path):
     """user-send append'ит в history + reset navigation state."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -265,7 +265,7 @@ async def test_send_appends_to_history_and_resets_state(tmp_path):
 async def test_text_change_resets_navigation_state(tmp_path):
     """Любая правка input → выход из режима навигации."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen

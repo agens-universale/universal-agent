@@ -1,7 +1,5 @@
 """Реестр команд: метаданные, lookup, closest-match (§4)."""
-from tui.commands import (
-    Command, CommandRegistry, build_default_registry, closest_command,
-)
+from gc_tui.commands import Command, CommandRegistry, build_default_registry, closest_command
 
 
 def test_register_and_lookup():
@@ -127,7 +125,7 @@ def test_default_registry_frequency_order():
 
 def test_hotkeys_match_app_bindings():
     """Каждый токен hotkey имеет совпадающую привязку в app.BINDINGS."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     binding_keys = {b.key for b in TuiApp.BINDINGS}
 
     def normalize(display: str) -> str:
@@ -184,8 +182,8 @@ def test_arg_file_and_is_toggle_are_mutually_exclusive():
 
 
 def test_toggle_descriptions_generated_from_specs():
-    from tui.commands import build_default_registry
-    from tui.toggles import TOGGLES
+    from gc_tui.commands import build_default_registry
+    from gc_tui.toggles import TOGGLES
     reg = build_default_registry()
     for name in ("gate", "answers"):
         cmd = reg.lookup(name)
@@ -201,8 +199,8 @@ async def test_f6_opens_settings_with_input_focused():
     app-биндинге виджет перехватывал клавишу, и хоткей был мёртв (баг master)."""
     import pytest as _pytest
     _pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.settings import SettingsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.settings import SettingsScreen
 
     app = TuiApp(config={})
     async with app.run_test() as pilot:

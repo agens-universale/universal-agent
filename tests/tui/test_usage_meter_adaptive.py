@@ -2,8 +2,8 @@
 адаптивная вёрстка (сессия уезжает под запрос, когда не хватает ширины)."""
 from rich.text import Text
 
-from usage.account import CATEGORY_MAIN, UsageAccount
-from tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
+from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+from gc_tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
 
 _PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
             "per_tokens": 1_000_000}

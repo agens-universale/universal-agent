@@ -1,5 +1,5 @@
 """ReasoningClock (Model B): эпизод (episode) + interrupt + debounce (live)."""
-from tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
+from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 
 
 class _FakeClock:
@@ -162,10 +162,7 @@ def test_start_idempotent():
 
 
 def test_cognitive_tools_membership():
-    from constants.tool_names import (
-        SESSION_THINK_TOOL_NAME, SESSION_MEMORY_TOOL_NAME, PROJECT_MEMORY_TOOL_NAME,
-        READ_USER_INTENT_LOG_NAME, READ_STORED_TOOL_OUTPUT_NAME,
-    )
+    from gc_core.constants.tool_names import SESSION_THINK_TOOL_NAME, SESSION_MEMORY_TOOL_NAME, PROJECT_MEMORY_TOOL_NAME, READ_USER_INTENT_LOG_NAME, READ_STORED_TOOL_OUTPUT_NAME
     assert COGNITIVE_TOOLS == frozenset({
         SESSION_THINK_TOOL_NAME, SESSION_MEMORY_TOOL_NAME, PROJECT_MEMORY_TOOL_NAME,
         READ_USER_INTENT_LOG_NAME, READ_STORED_TOOL_OUTPUT_NAME,

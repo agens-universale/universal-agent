@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_help_screen_lists_commands_from_registry():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/help"
@@ -20,8 +20,8 @@ async def test_help_screen_lists_commands_from_registry():
 @pytest.mark.asyncio
 async def test_viewer_screen_shows_content():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(ViewerScreen(
             title="test.txt",
@@ -36,8 +36,8 @@ async def test_viewer_screen_shows_content():
 async def test_viewer_header_shows_full_title_no_version():
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(ViewerScreen(title="skill · x · системный · /p/x",
                                            content="тело"))

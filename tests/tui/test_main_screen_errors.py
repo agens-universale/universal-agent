@@ -2,7 +2,7 @@
 ([!]+суть = red, путь = slate, подсказка = deep-dim)."""
 import pytest
 
-from tui.palette import DEEP_DIM
+from gc_tui.palette import DEEP_DIM
 
 
 def _rgb(hex_: str) -> str:
@@ -21,7 +21,7 @@ def _error_text(trace):
 @pytest.mark.asyncio
 async def test_command_error_suggestion_is_meta():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/statuz"

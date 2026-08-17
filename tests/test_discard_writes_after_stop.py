@@ -1,5 +1,5 @@
 """State.discard_writes_after_stop — флаг для guard перед persist после стопа."""
-from states import State
+from gc_core.states import State
 
 
 def _make_state() -> State:
@@ -38,7 +38,7 @@ def test_persist_callback_skipped_when_discard_and_stop():
     def callback(messages: list) -> None:
         persisted.append(messages)
 
-    from processing_responses import _maybe_persist
+    from gc_core.processing_responses import _maybe_persist
     _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert persisted == []
@@ -53,7 +53,7 @@ def test_persist_callback_called_when_not_discarding():
     def callback(messages: list) -> None:
         persisted.append(messages)
 
-    from processing_responses import _maybe_persist
+    from gc_core.processing_responses import _maybe_persist
     _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert len(persisted) == 1
@@ -68,7 +68,7 @@ def test_persist_callback_called_when_no_stop():
     def callback(messages: list) -> None:
         persisted.append(messages)
 
-    from processing_responses import _maybe_persist
+    from gc_core.processing_responses import _maybe_persist
     _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert len(persisted) == 1
@@ -78,7 +78,7 @@ def test_persist_callback_none_is_noop():
     """callback=None не падает."""
     state = _make_state()
     # Не должно бросать
-    from processing_responses import _maybe_persist
+    from gc_core.processing_responses import _maybe_persist
     _maybe_persist(None, [], state)
 
 
@@ -95,12 +95,12 @@ def _make_executor_cfg(tmp_path):
 
 def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
     """executor.run(discard_writes_after_stop=True) выставляет state.discard_writes_after_stop=True."""
-    from run_context import create_run_context
-    from agent_executor import AgentExecutor
+    from gc_core.run_context import create_run_context
+    from gc_core.agent_executor import AgentExecutor
 
     cfg = _make_executor_cfg(tmp_path)
     # Monkey-patch run_agent to immediately exit без HTTP
-    monkeypatch.setattr("agent_executor.run_agent", lambda *a, **kw: {"finished": True})
+    monkeypatch.setattr("gc_core.agent_executor.run_agent", lambda *a, **kw: {"finished": True})
     ctx = create_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
     ex.run([{"role": "user", "content": "x"}],
@@ -111,11 +111,11 @@ def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
 
 def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     """Без kwarg — state.discard_writes_after_stop остаётся False."""
-    from run_context import create_run_context
-    from agent_executor import AgentExecutor
+    from gc_core.run_context import create_run_context
+    from gc_core.agent_executor import AgentExecutor
 
     cfg = _make_executor_cfg(tmp_path)
-    monkeypatch.setattr("agent_executor.run_agent", lambda *a, **kw: {"finished": True})
+    monkeypatch.setattr("gc_core.agent_executor.run_agent", lambda *a, **kw: {"finished": True})
     ctx = create_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
     ex.run([{"role": "user", "content": "x"}],

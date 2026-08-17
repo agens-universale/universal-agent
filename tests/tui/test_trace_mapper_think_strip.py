@@ -1,4 +1,4 @@
-from tui.services.trace_mapper import _extract_assistant_text
+from gc_tui.services.trace_mapper import _extract_assistant_text
 
 
 def test_normal_single_think_stripped():

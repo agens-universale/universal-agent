@@ -25,16 +25,16 @@ CORE_REQUIRED = [
     "prompts/chat_completions_tui_special_instructions.md",
     "recommended_mcp/config.yml",
     "config.default.yml",
-    "config.py",          # src/ разворачивается в верхний уровень
-    "tui_entry.py",       # шим точки входа gc-ua обязан быть в ядре
-    "serve_entry.py",
+    "gc_core/config.py",
+    "gc_core/tui_entry.py",     # шим точки входа gc-ua обязан быть в ядре
+    "gc_core/serve_entry.py",
 ]
 
-CORE_FORBIDDEN = ["tui/", "diff_tui/", "rest_api/", "swarm/", "server.py",
-                  "server_cleanup_threads.py", "__init__.py", ".gitignore"]
+# Ядро не должно содержать код фронтендов — ради этого всё и затевалось.
+CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/"]
 
-MANIFESTS = {"gc_ua": ".", "gc_cli": "packaging/cli",
-             "gc_tui": "packaging/tui", "gc_server": "packaging/server"}
+MANIFESTS = {"gc_ua": ".", "gc_core": "packages/core", "gc_cli": "packages/cli",
+             "gc_tui": "packages/tui", "gc_server": "packages/server"}
 
 
 def _build_all(out: Path) -> dict:
@@ -59,7 +59,7 @@ def wheels(tmp_path_factory):
     return _build_all(tmp_path_factory.mktemp("dist"))
 
 
-def test_three_distributions_built(wheels):
+def test_all_distributions_built(wheels):
     assert set(wheels) == set(MANIFESTS), sorted(wheels)
 
 
@@ -71,7 +71,7 @@ def test_wheels_are_pairwise_disjoint(wheels):
 
 
 def test_core_wheel_bundles_assets(wheels):
-    names = wheels["gc_cli"]
+    names = wheels["gc_core"]
     for needed in CORE_REQUIRED:
         assert needed in names, f"{needed} нет в колесе ядра; образец {sorted(names)[:10]}"
     assert any(n.startswith("skills/") for n in names), "skills/ отсутствует"
@@ -83,7 +83,7 @@ def test_core_wheel_bundles_assets(wheels):
 def test_core_wheel_excludes_frontends(wheels):
     """Ради этого всё и затевалось: headless-установка не должна класть на диск
     код фронтендов."""
-    names = wheels["gc_cli"]
+    names = wheels["gc_core"]
     for bad in CORE_FORBIDDEN:
         hit = [n for n in names if n == bad or n.startswith(bad)]
         assert not hit, f"{bad} просочился в колесо ядра: {hit[:5]}"
@@ -91,15 +91,23 @@ def test_core_wheel_excludes_frontends(wheels):
 
 def test_tui_wheel_contents(wheels):
     names = wheels["gc_tui"]
-    assert {n.split("/")[0] for n in names} == {"tui", "diff_tui"}, sorted(names)[:10]
-    assert "tui/styles.tcss" in names, "стили TUI обязаны ехать вместе с пакетом"
+    assert {n.split("/")[0] for n in names} == {"gc_tui"}, sorted(names)[:10]
+    assert "gc_tui/styles.tcss" in names, "стили TUI обязаны ехать вместе с пакетом"
+    assert "gc_tui/diff_tui/tracking.py" in names, "diff_tui — часть TUI-профиля"
 
 
 def test_server_wheel_contents(wheels):
     names = wheels["gc_server"]
-    assert {n.split("/")[0] for n in names} == {
-        "server.py", "server_cleanup_threads.py", "rest_api", "swarm",
-    }, sorted(names)
+    assert {n.split("/")[0] for n in names} == {"gc_server"}, sorted(names)[:10]
+    for m in ("gc_server/server.py", "gc_server/rest_api/__init__.py",
+              "gc_server/swarm/runner.py"):
+        assert m in names, m
+
+
+def test_cli_wheel_contents(wheels):
+    names = wheels["gc_cli"]
+    assert {n.split("/")[0] for n in names} == {"gc_cli"}, sorted(names)[:10]
+    assert "gc_cli/cli.py" in names
 
 
 def test_every_profile_declares_all_commands():
@@ -107,9 +115,14 @@ def test_every_profile_declares_all_commands():
     дистрибутива. Поэтому команды объявляет каждый профиль — иначе установка
     листа дала бы окружение вообще без команд (проверено живьём)."""
     expected = {"gc-cli", "gc-ua", "gc-serve", "gc-mcp", "gc-mcp-install"}
-    for sub in MANIFESTS.values():
+    for name, sub in MANIFESTS.items():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
-        assert set(man["project"].get("scripts", {})) == expected, sub
+        got = set(man["project"].get("scripts", {}))
+        if name == "gc_core":
+            # gc-core — БИБЛИОТЕКА: команды в PATH не кладёт.
+            assert not got, "gc-core не должен объявлять точки входа"
+        else:
+            assert got == expected, sub
 
 
 def test_meta_pulls_every_profile():
@@ -119,7 +132,7 @@ def test_meta_pulls_every_profile():
     ver = root["project"]["version"]
     assert root["project"]["name"] == "gc-ua"
     assert set(root["project"]["dependencies"]) == {
-        f"gc-cli=={ver}", f"gc-tui=={ver}", f"gc-server=={ver}",
+        f"gc-core=={ver}", f"gc-cli=={ver}", f"gc-tui=={ver}", f"gc-server=={ver}",
     }
 
 
@@ -127,22 +140,23 @@ def test_versions_are_pinned_together():
     """Профили обязаны собираться из одного коммита: пины друг на друга точные."""
     root = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     ver = root["project"]["version"]
-    for sub in ("packaging/cli", "packaging/tui", "packaging/server"):
+    for sub in ("packages/core", "packages/cli", "packages/tui", "packages/server"):
         leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         assert leaf["project"]["version"] == ver, f"{sub} разошёлся по версии"
-    for sub in ("packaging/tui", "packaging/server"):
+    for sub in ("packages/cli", "packages/tui", "packages/server"):
         leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
-        assert f"gc-cli=={ver}" in leaf["project"]["dependencies"], sub
+        assert f"gc-core=={ver}" in leaf["project"]["dependencies"], sub
 
 
 def test_profile_subdirs_match_layout():
     """app_version.PROFILE_SUBDIRS — источник правды для переустановки; он обязан
     совпадать с реальной раскладкой манифестов."""
-    import app_version
+    from gc_core import app_version
     assert app_version.PROFILE_SUBDIRS == {
-        "gc-cli": "packaging/cli",
-        "gc-tui": "packaging/tui",
-        "gc-server": "packaging/server",
+        "gc-core": "packages/core",
+        "gc-cli": "packages/cli",
+        "gc-tui": "packages/tui",
+        "gc-server": "packages/server",
     }
     for name, sub in app_version.PROFILE_SUBDIRS.items():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))

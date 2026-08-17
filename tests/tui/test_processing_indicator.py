@@ -21,8 +21,8 @@ class _Runner:
 @pytest.mark.asyncio
 async def test_running_after_answer_shows_processing(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
     tid = "proc0000000000000000000000000001a"
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",

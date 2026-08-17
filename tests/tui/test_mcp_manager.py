@@ -1,11 +1,11 @@
 import pytest
 pytest.importorskip("textual")
 
-from tui.services.mcp_manager import McpManager, McpRow
+from gc_tui.services.mcp_manager import McpManager, McpRow
 
 
 def test_rows_merge_installable_wired_manual(monkeypatch):
-    import mcp_runtime.cli as cli
+    from gc_core.mcp_runtime import cli as cli
     monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office", "playwright"])
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "manual_server_names", lambda uc: ["corp-jira"])
@@ -24,7 +24,7 @@ def test_rows_manual_excludes_managed_names(monkeypatch):
     """Дедуп: сервер, попавший в mcp-servers рантайм-конфига (merge config.yml +
     config.local.yml) и одновременно управляемый (manifest/wired), НЕ дублируется
     в ручной блок — там только настоящие ручные (corp-jira)."""
-    import mcp_runtime.cli as cli
+    from gc_core.mcp_runtime import cli as cli
     monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office", "duckduckgo_search"])
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     # рантайм mcp-servers содержит и подключённый office, и ручной corp-jira
@@ -37,7 +37,7 @@ def test_rows_manual_excludes_managed_names(monkeypatch):
 
 
 def test_state_delegates(monkeypatch):
-    import mcp_runtime.cli as cli
+    from gc_core.mcp_runtime import cli as cli
     monkeypatch.setattr(cli, "load_manifest_entries", lambda config=None: ([], "root"))
     monkeypatch.setattr(cli, "installed_state",
                         lambda name, config=None, *, manifest=None: {"installed": True, "version": "1.2", "update": None})
@@ -48,7 +48,7 @@ def test_state_delegates(monkeypatch):
 def test_state_loads_manifest_once(monkeypatch):
     """Минор: манифест грузится один раз на фасад, а не per-строка (фоновый воркер
     зовёт state() для каждого сервера)."""
-    import mcp_runtime.cli as cli
+    from gc_core.mcp_runtime import cli as cli
     calls = {"n": 0}
     def _load(config=None):
         calls["n"] += 1
@@ -62,6 +62,6 @@ def test_state_loads_manifest_once(monkeypatch):
 
 
 def test_wave_glyph_shifts():
-    from tui.widgets.loading_wave import wave_glyph
+    from gc_tui.widgets.loading_wave import wave_glyph
     assert str(wave_glyph(0)) == "···" and str(wave_glyph(0)).__len__() == 3
     assert wave_glyph(0).spans != wave_glyph(1).spans

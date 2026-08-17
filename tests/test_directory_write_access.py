@@ -1,6 +1,6 @@
 import os
 
-from utils.directory_write_access import directory_allows_probe_write
+from gc_core.utils.directory_write_access import directory_allows_probe_write
 
 
 def test_probe_true_for_writable_dir(tmp_path):

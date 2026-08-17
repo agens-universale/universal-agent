@@ -2,7 +2,7 @@
 
 Если executor ещё не построен (factory не отработала) — None, без сборки.
 """
-from tui.services.agent_runner import AgentRunner
+from gc_tui.services.agent_runner import AgentRunner
 
 
 class _UsageExecutor:

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.paths import TUI_PKG
 
 
 # ---------------------------------------------------------------------------
@@ -19,9 +20,9 @@ async def test_skill_reply_no_duplicate_on_reconcile(tmp_path):
     """Полный live-цикл: отправка skill-реплики → polling видит её в .jsonl →
     реконсайл по wire (не по display) → НЕТ дубликата, pending исчезает."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.models import TraceEvent
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     wire = "Используй skill `x`.\nИНСТР\nдавай"
     display = "давай"
@@ -66,9 +67,9 @@ async def test_skill_reply_no_duplicate_on_reconcile(tmp_path):
 async def test_skill_reply_without_payload_falls_back_to_summary(tmp_path):
     """Если full_payload не dict — реконсайл идёт по ev.summary (старый путь)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.models import TraceEvent
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     text = "обычное сообщение"
 
@@ -108,8 +109,8 @@ async def test_mount_failed_skips_skill_message_via_display_content(tmp_path):
     user_messages_log хранит display_content='давай' (clean).
     После фикса: clean-контент находится в delivered_wires → НЕ монтируется как failed."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     wire = "Используй skill `x`.\nИНСТР\nдавай"
     display = "давай"
@@ -153,8 +154,8 @@ async def test_mount_failed_mounts_truly_orphaned_skill(tmp_path):
     """Негативный тест: skill-реплика, чей content НЕ в user_messages_log →
     настоящий orphan, должен быть смонтирован как [!] failed."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     wire = "Используй skill `x`.\nИНСТР\nдавай"
     display = "давай"
@@ -203,7 +204,7 @@ def test_skill_marker_css_rule_exists():
     from pathlib import Path
     import re
 
-    tcss = Path(__file__).parent.parent.parent / "src" / "tui" / "styles.tcss"
+    tcss = TUI_PKG / "styles.tcss"
     assert tcss.exists(), f"styles.tcss не найден: {tcss}"
     content = tcss.read_text(encoding="utf-8")
     assert ".skill-marker" in content, (
@@ -226,8 +227,8 @@ def test_skill_marker_css_rule_exists():
 async def test_skill_marker_has_css_class(tmp_path):
     """_mount_skill_marker добавляет CSS-класс skill-marker к смонтированному виджету."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

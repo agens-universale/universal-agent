@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_app_starts_and_renders_empty_state():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         left = pilot.app.query_one("#header-left")
@@ -21,7 +21,7 @@ async def test_app_starts_and_renders_empty_state():
 @pytest.mark.asyncio
 async def test_app_quits_on_slash_quit():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

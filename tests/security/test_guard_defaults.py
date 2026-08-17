@@ -1,6 +1,4 @@
-from config_modules.security import (
-    SecurityConfig, apply_cli_command_moderation_overrides,
-)
+from gc_core.config_modules.security import SecurityConfig, apply_cli_command_moderation_overrides
 
 
 def test_pydantic_defaults_on_ask():

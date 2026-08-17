@@ -1,5 +1,5 @@
 import json, types
-from security.read_guard import enforce_read_guard
+from gc_core.security.read_guard import enforce_read_guard
 
 
 class _Tool:
@@ -15,7 +15,7 @@ def _ctx(cwd):
 
 
 def test_operational_gc_read_denied_even_when_readguard_off(tmp_path, monkeypatch):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     ctx = types.SimpleNamespace(config_dict={"launch_root": str(tmp_path), "read_guard": {"enabled": False}},
                                 logger=None)
@@ -24,7 +24,7 @@ def test_operational_gc_read_denied_even_when_readguard_off(tmp_path, monkeypatc
 
 
 def test_skills_read_allowed(tmp_path, monkeypatch):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     (tmp_path / ".gc" / "skills" / "foo").mkdir(parents=True)
     (tmp_path / ".gc" / "skills" / "foo" / "SKILL.md").write_text("x", encoding="utf-8")

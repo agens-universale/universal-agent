@@ -2,7 +2,7 @@ import pytest
 
 
 def _screen(**over):
-    from tui.screens.onboarding import OnboardingScreen
+    from gc_tui.screens.onboarding import OnboardingScreen
     cfg = {"completions_url": "http://your-backend:PORT/v1/chat/completions",
            "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
            "model": "<ВПИШИТЕ_МОДЕЛЬ>"}
@@ -33,7 +33,7 @@ def test_summary_hides_template_sentinels():
 async def test_endpoint_restored_on_return(tmp_path):
     # ввёл адрес → далее → PgUp назад: значение восстановлено, а не пустое
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -54,7 +54,7 @@ async def test_endpoint_restored_on_return(tmp_path):
 async def test_token_restored_on_return(tmp_path):
     # ввёл токен → далее → PgUp назад: поле снова заполнено (масккировано), значение цело
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -80,7 +80,7 @@ async def test_token_not_cleared_on_skip_auth(tmp_path):
     # ввёл токен → далее → PgUp назад → выбрал «без авторизации» → далее → PgUp назад:
     # поле #onb-token всё ещё содержит исходный токен (не затёрт пустым выбором)
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -126,7 +126,7 @@ async def _final_blob(pilot, scr, *, mcp):
 @pytest.mark.asyncio
 async def test_final_summary_shows_mcp_row_none_selected(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -141,7 +141,7 @@ async def test_final_summary_shows_mcp_row_none_selected(tmp_path):
 @pytest.mark.asyncio
 async def test_final_summary_shows_mcp_when_selected(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -156,7 +156,7 @@ async def test_final_summary_shows_mcp_when_selected(tmp_path):
 async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
     # уже подключённый MCP помечен «установлен» и не переключается Space
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _McpInstalled:
         def installable_names(self): return ["office", "science"]
@@ -185,7 +185,7 @@ async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
 @pytest.mark.asyncio
 async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -200,7 +200,7 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
         app.exit = lambda *a, **k: exited.append(True)
         await pilot.press("escape")
         await pilot.pause()
-        from tui.screens.confirm import ConfirmScreen
+        from gc_tui.screens.confirm import ConfirmScreen
         assert isinstance(app.screen, ConfirmScreen)
         assert exited == []
         await pilot.press("y")
@@ -211,7 +211,7 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
 @pytest.mark.asyncio
 async def test_address_invalid_shows_error_valid_advances(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -234,7 +234,7 @@ async def test_address_invalid_shows_error_valid_advances(tmp_path):
 @pytest.mark.asyncio
 async def test_auth_no_auth_writes_empty(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -250,7 +250,7 @@ async def test_auth_no_auth_writes_empty(tmp_path):
 @pytest.mark.asyncio
 async def test_onboarding_auth_bearer_requires_token(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -271,7 +271,7 @@ async def test_onboarding_auth_bearer_requires_token(tmp_path):
 @pytest.mark.asyncio
 async def test_auth_token_bearer(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -286,10 +286,10 @@ async def test_auth_token_bearer(tmp_path):
 @pytest.mark.asyncio
 async def test_model_list_marks_and_pick(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from model_picker import ModelInfo
+    from gc_tui.app import TuiApp
+    from gc_core.model_picker import ModelInfo
     from tests.tui.conftest import wait_until
-    from tui.editors.model import ModelEditor
+    from gc_tui.editors.model import ModelEditor
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     fake = lambda *a, **k: [ModelInfo("Qwen", tool_capable=True),
                             ModelInfo("Flash", tool_capable=False)]
@@ -310,10 +310,10 @@ async def test_model_list_marks_and_pick(tmp_path):
 @pytest.mark.asyncio
 async def test_model_manual_fallback(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
     from tests.tui.conftest import wait_until
-    from tui.editors.model import ModelEditor
+    from gc_tui.editors.model import ModelEditor
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: None)   # список не получен
@@ -329,9 +329,9 @@ async def test_model_manual_fallback(tmp_path):
 @pytest.mark.asyncio
 async def test_onboarding_model_step_pgup_goes_back_with_filter(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
-    from model_picker import ModelInfo
+    from gc_core.model_picker import ModelInfo
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: [ModelInfo(id="glm-5.2-fp8", tool_capable=True),
@@ -357,9 +357,9 @@ async def test_onboarding_model_step_pgup_goes_back_with_filter(tmp_path):
 @pytest.mark.asyncio
 async def test_onboarding_model_step_filter_and_pick(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Input
-    from model_picker import ModelInfo
+    from gc_core.model_picker import ModelInfo
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: [ModelInfo(id="glm-5.2-fp8", tool_capable=True),
@@ -387,7 +387,7 @@ async def test_onboarding_model_step_filter_and_pick(tmp_path):
 @pytest.mark.asyncio
 async def test_mcp_space_toggles(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -403,9 +403,9 @@ async def test_mcp_space_toggles(tmp_path):
 @pytest.mark.asyncio
 async def test_summary_line_fills_as_steps_complete(tmp_path):
     """Строка сводки под степпером заполняется по ходу; токен маскируется."""
-    from tui.screens.onboarding import OnboardingScreen
+    from gc_tui.screens.onboarding import OnboardingScreen
     from textual.widgets import Static
-    import tui.app as app_mod
+    from gc_tui import app as app_mod
 
     app = app_mod.TuiApp(config={"completions_url": "", "chat_completion_headers": {},
                                  "model": ""})
@@ -426,9 +426,9 @@ async def test_summary_line_fills_as_steps_complete(tmp_path):
 @pytest.mark.asyncio
 async def test_final_commit_writes_and_calls_on_commit(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from tests.tui.conftest import wait_until
-    import onboarding_config_writer as w
+    from gc_core import onboarding_config_writer as w
     written = {}
     monkeypatch.setattr(w, "write_values", lambda path, vals, **kw: written.update(vals) or [])
     committed = []

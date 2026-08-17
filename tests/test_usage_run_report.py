@@ -1,7 +1,7 @@
 """Фаза 5: дельта прогона и сборка текстового отчёта."""
 
-from usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
-from usage.report import build_run_usage_report
+from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
+from gc_core.usage.report import build_run_usage_report
 
 _PRICING = {
     "enabled": True,
@@ -56,7 +56,7 @@ def test_build_report_empty_returns_none():
 
 def test_state_exposes_usage_and_last_run_in_memory():
     # На свежем State: usage пустой, last_run_usage = None (прогон не завершался).
-    from states import State
+    from gc_core.states import State
     st = State(
         verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
         max_steps=10, system_prompt_id="v1", use_server_subagents=False,
@@ -68,8 +68,8 @@ def test_state_exposes_usage_and_last_run_in_memory():
 
 def test_last_run_usage_survives_state_snapshot():
     # last_run_usage (UsageAccount) сериализуется/восстанавливается в session-снапшоте.
-    from states import State
-    from persistence.state_serializer import StateSerializer
+    from gc_core.states import State
+    from gc_core.persistence.state_serializer import StateSerializer
     st = State(
         verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
         max_steps=10, system_prompt_id="v1", use_server_subagents=False,

@@ -13,7 +13,7 @@ def _parse(argv, monkeypatch):
     """
     monkeypatch.setattr(sys, "argv", argv)
     import importlib
-    import arg_parser as ap_mod
+    from gc_cli import arg_parser as ap_mod
     importlib.reload(ap_mod)
     return ap_mod.run_args
 
@@ -41,7 +41,7 @@ def test_init_config_and_query_mutually_exclusive(monkeypatch):
     import importlib
     monkeypatch.setattr(sys, "argv", ["gc-cli", "--init-config", "-q", "hi"])
     with pytest.raises(SystemExit):
-        importlib.reload(importlib.import_module("arg_parser"))
+        importlib.reload(importlib.import_module("gc_cli.arg_parser"))
 
 
 def test_trace_id_both_spellings_are_the_same_flag(monkeypatch):
@@ -59,7 +59,7 @@ def test_trace_id_underscore_is_not_a_generic_override(monkeypatch):
     """
     monkeypatch.setattr(sys, "argv", ["gc-cli", "-q", "x", "--trace_id", "00123"])
     import importlib
-    import arg_parser as ap_mod
+    from gc_cli import arg_parser as ap_mod
     importlib.reload(ap_mod)
     assert ap_mod.run_args.trace_id == "00123"     # строка, не 83
     assert "trace_id" not in ap_mod.extra_config_overrides

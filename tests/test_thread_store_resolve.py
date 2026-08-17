@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from thread_store import resolve_threads_dir
+from gc_core.thread_store import resolve_threads_dir
 
 
 def test_resolve_threads_dir_returns_explicit_absolute(tmp_path):

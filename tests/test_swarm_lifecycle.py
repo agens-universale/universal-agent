@@ -18,8 +18,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import swarm.lifecycle as lc  # noqa: E402
-import swarm.storage as storage  # noqa: E402
+from gc_server.swarm import lifecycle as lc
+from gc_server.swarm import storage as storage
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +611,7 @@ def _make_fake_sandbox(tmp_path, swarm_id):
 
 def test_persist_agent_artifacts_default_under_threads_dir(tmp_path):
     """Без настроенного swarm_logs_dir — копирует .gc/logs в threads_dir/<id>/agent_logs."""
-    from swarm.lifecycle import _persist_agent_artifacts
+    from gc_server.swarm.lifecycle import _persist_agent_artifacts
     swarm_id = "generic_t1"
     sb = _make_fake_sandbox(tmp_path, swarm_id)
     threads_dir = str(tmp_path / "threads")
@@ -621,7 +621,7 @@ def test_persist_agent_artifacts_default_under_threads_dir(tmp_path):
 
 def test_persist_agent_artifacts_configured_dir(tmp_path):
     """С настроенным swarm_logs_dir — копирует в <swarm_logs_dir>/<id>/."""
-    from swarm.lifecycle import _persist_agent_artifacts
+    from gc_server.swarm.lifecycle import _persist_agent_artifacts
     swarm_id = "generic_t2"
     sb = _make_fake_sandbox(tmp_path, swarm_id)
     threads_dir = str(tmp_path / "threads")
@@ -634,5 +634,5 @@ def test_persist_agent_artifacts_configured_dir(tmp_path):
 
 def test_persist_agent_artifacts_missing_sandbox_noop(tmp_path):
     """Пустой sandbox_path — no-op, без ошибок."""
-    from swarm.lifecycle import _persist_agent_artifacts
+    from gc_server.swarm.lifecycle import _persist_agent_artifacts
     _persist_agent_artifacts(str(tmp_path / "threads"), "x", "")  # не падает

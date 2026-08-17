@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from run_context import create_run_context
+from gc_core.run_context import create_run_context
 
 
 def _base_config(tmp_path, **extra):

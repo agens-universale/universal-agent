@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def test_update_tui_meta_creates_skills_list(tmp_path):

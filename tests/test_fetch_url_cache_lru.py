@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 
-from states import SharedStateData
-from persistence.thread_meta_mapper import ThreadMetaMapper
-from tools.exec.fetch_url import FetchUrl
-from tools.exec.simple_fetch_url import SimpleFetchUrl
+from gc_core.states import SharedStateData
+from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.tools.exec.fetch_url import FetchUrl
+from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
 
 
 # ── Стаб shared/state для _get_cache ──────────────────────────────────────────

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
+from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
 
 
 def test_tool_start_for_session_todo_carries_items():
@@ -65,7 +65,7 @@ def _fc(name: str, call_id: str, arguments: str = "{}"):
 
 
 def _patch_process(monkeypatch, *, apply_return='{"ok": true}'):
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     monkeypatch.setattr(
         pr,
@@ -201,8 +201,8 @@ class TestEmitToolStartEnd:
         assert kinds == ["tool_start", "tool_end", "tool_start", "tool_end"]
 
     def test_wrong_arguments_emits_tool_end_then_raises(self, monkeypatch):
-        import processing_responses as pr
-        from tools import WrongFunctionArgumentsException
+        from gc_core import processing_responses as pr
+        from gc_core.tools import WrongFunctionArgumentsException
 
         def _boom(**kw):
             raise WrongFunctionArgumentsException("bad args", received_args="{}")

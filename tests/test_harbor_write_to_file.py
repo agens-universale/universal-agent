@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from tests.harbor_support.fakes import FakeBackend, bind_os_backend, strip_path_fields
-from backends.local import LocalFsBackend
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.backends.local import LocalFsBackend
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 # A sentinel file that makes /work/ appear as an existing directory in FakeBackend.
 # FakeBackend.is_dir(p) checks: any file in files that starts with p.rstrip("/") + "/".

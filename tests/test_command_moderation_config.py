@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from config import apply_cli_command_moderation_overrides, apply_cli_overrides, load_config
+from gc_core.config import apply_cli_command_moderation_overrides, apply_cli_overrides, load_config
 
 
 class CommandModerationConfigTest(unittest.TestCase):
@@ -119,7 +119,7 @@ if __name__ == "__main__":
 
 
 def test_denied_command_examples_field():
-    from config_modules.security import CommandModerationConfig
+    from gc_core.config_modules.security import CommandModerationConfig
     c = CommandModerationConfig(denied_command_examples=["rm -rf /", "curl x | sh"])
     assert c.denied_command_examples == ["rm -rf /", "curl x | sh"]
     assert CommandModerationConfig().denied_command_examples == []

@@ -1,11 +1,7 @@
 """visual.py: context lines + truncation (spec2 T14)."""
 from __future__ import annotations
 
-from diff_tui.visual import (
-    build_unified_diff,
-    build_visual_diff,
-    truncate_diff,
-)
+from gc_tui.diff_tui.visual import build_unified_diff, build_visual_diff, truncate_diff
 
 
 def test_truncate_diff_respects_max_chars():
@@ -49,7 +45,7 @@ def test_build_unified_diff_truncates(tmp_path):
 
 
 def test_build_created_file_diff_shows_content():
-    from diff_tui.visual import build_created_file_diff
+    from gc_tui.diff_tui.visual import build_created_file_diff
 
     out = build_created_file_diff("hello\n", tofile="new.py")
     assert "--- /dev/null" in out
@@ -58,7 +54,7 @@ def test_build_created_file_diff_shows_content():
 
 
 def test_build_created_file_diff_empty_file_not_blank():
-    from diff_tui.visual import build_created_file_diff
+    from gc_tui.diff_tui.visual import build_created_file_diff
 
     out = build_created_file_diff("", tofile="empty.txt")
     assert out.strip()
@@ -67,7 +63,7 @@ def test_build_created_file_diff_empty_file_not_blank():
 
 
 def test_preview_change_lines_skips_headers_for_created():
-    from diff_tui.visual import build_created_file_diff, preview_change_lines
+    from gc_tui.diff_tui.visual import build_created_file_diff, preview_change_lines
 
     body = build_created_file_diff("a\nb\nc\n", tofile="f.py")
     head, remaining = preview_change_lines(body, limit=3)

@@ -1,4 +1,4 @@
-import utils.connect_backend as cb
+from gc_core.utils import connect_backend as cb
 
 
 class _Resp:

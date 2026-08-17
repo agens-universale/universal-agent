@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import yaml
 
-from config import load_config
-from config_modules.backend import BackendConfig
-from utils import connect_backend
+from gc_core.config import load_config
+from gc_core.config_modules.backend import BackendConfig
+from gc_core.utils import connect_backend
 
 
 def test_backend_config_proxy_default_none():

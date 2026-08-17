@@ -17,8 +17,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import swarm.runner as runner  # noqa: E402
-import swarm.storage as storage  # noqa: E402
+from gc_server.swarm import runner as runner
+from gc_server.swarm import storage as storage
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ def base_swarm_cfg(tmp_path):
 @pytest.fixture
 def mock_popen():
     """Мок subprocess.Popen, который возвращает фейковый proc с pid=12345."""
-    with patch("swarm.runner.subprocess.Popen") as mock:
+    with patch("gc_server.swarm.runner.subprocess.Popen") as mock:
         proc = MagicMock()
         proc.pid = 12345
         mock.return_value = proc
@@ -500,7 +500,7 @@ def test_materialize_project_overlay_skipped_when_same_file(tmp_path, monkeypatc
 def test_materialize_applies_swarm_env_paths(tmp_path, monkeypatch):
     """SWARM_AGENTMD_PATH / SWARM_THREADS_DIR / SWARM_SKILLS_DIR оверрайдят paths.*"""
     import yaml as _yaml
-    from config_modules import env_vars as _ev
+    from gc_core.config_modules import env_vars as _ev
 
     host_cfg = tmp_path / "host.yml"
     host_cfg.write_text(

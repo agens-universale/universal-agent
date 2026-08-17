@@ -40,8 +40,8 @@ def _write_task(tmp_path, tid):
 async def test_status_with_active_task_opens_viewer_with_meta_and_runtime(tmp_path):
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
 
     tid = "st1"
     _write_task(tmp_path, tid)
@@ -67,8 +67,8 @@ async def test_status_with_active_task_opens_viewer_with_meta_and_runtime(tmp_pa
 async def test_status_without_active_task_shows_idle(tmp_path):
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -86,8 +86,8 @@ async def test_status_without_active_task_shows_idle(tmp_path):
 @pytest.mark.asyncio
 async def test_status_dash_dash_raw_accepted_no_crash(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

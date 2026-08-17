@@ -1,9 +1,9 @@
 """Билдеры rich.Text чек-листов — канон spec 2026-07-31 §1-§3."""
 from rich.text import Text
 
-from tui import palette
-from tui.services.todo_render import build_main_todo_lines, build_subagent_todo_lines
-from tui.services.trace_mapper import _todo_checklist_summary
+from gc_tui import palette
+from gc_tui.services.todo_render import build_main_todo_lines, build_subagent_todo_lines
+from gc_tui.services.trace_mapper import _todo_checklist_summary
 
 ITEMS = [
     {"content": "Изучить структуру", "status": "completed"},
@@ -93,7 +93,7 @@ def test_build_todo_rows_classes_per_channel():
     """Заголовок отличается классом по каналу, пункты — общим line-todo-item."""
     import pytest
     pytest.importorskip("textual")
-    from tui.services.todo_render import build_todo_rows
+    from gc_tui.services.todo_render import build_todo_rows
 
     main = build_todo_rows(ITEMS, subagent=False, indent="   ", event_no=7)
     assert len(main) == 4                       # заголовок + три пункта
@@ -115,8 +115,8 @@ def test_todo_block_is_single_focusable_widget():
     """
     import pytest
     pytest.importorskip("textual")
-    from tui.services.todo_render import build_todo_block
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.services.todo_render import build_todo_block
+    from gc_tui.widgets.trace_row import TraceRow
 
     block = build_todo_block(ITEMS, subagent=False, indent="   ", event_no=7)
     assert block.can_focus
@@ -131,7 +131,7 @@ def test_todo_block_is_single_focusable_widget():
 def test_todo_block_classes_by_channel():
     import pytest
     pytest.importorskip("textual")
-    from tui.services.todo_render import build_todo_block
+    from gc_tui.services.todo_render import build_todo_block
 
     main = build_todo_block(ITEMS, subagent=False)
     sub = build_todo_block(ITEMS, subagent=True)

@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from config_modules.env_vars import EnvVars
-from tools.skills.registry import _user_skills_root
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.env_vars import EnvVars
+from gc_core.tools.skills.registry import _user_skills_root
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def test_user_root_uses_gc_data_dir_override(monkeypatch, tmp_path):
     assert Path(root) == custom_data / "skills"
 
 
-from tools.skills.registry import _project_skills_root
+from gc_core.tools.skills.registry import _project_skills_root
 
 
 def test_project_root_is_cwd_dot_gc_skills(monkeypatch, tmp_path):

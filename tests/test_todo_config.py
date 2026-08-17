@@ -1,9 +1,4 @@
-from config_modules.todo import (
-    DEFAULT_TODO_REMINDER_STEPS,
-    TodoConfig,
-    normalize_todo_config,
-    todo_reminder_steps_from_config,
-)
+from gc_core.config_modules.todo import DEFAULT_TODO_REMINDER_STEPS, TodoConfig, normalize_todo_config, todo_reminder_steps_from_config
 
 
 def test_default_is_10():
@@ -36,6 +31,6 @@ def test_normalize_clamps_negative():
 
 
 def test_app_config_accepts_todo_section():
-    from config_modules.root import AppConfig
+    from gc_core.config_modules.root import AppConfig
     cfg = AppConfig(todo={"reminder_steps": 7})
     assert cfg.todo.reminder_steps == 7

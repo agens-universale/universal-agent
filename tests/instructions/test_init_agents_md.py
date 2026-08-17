@@ -1,4 +1,4 @@
-from instructions.init_agents_md import build_init_prompt
+from gc_core.instructions.init_agents_md import build_init_prompt
 
 
 def test_no_file_branch_instructs_create(tmp_path):

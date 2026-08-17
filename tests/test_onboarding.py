@@ -1,10 +1,10 @@
 """Онбординг первого запуска: детект ненастроенного конфига + текст-гайд."""
 import yaml
 
-import config
-import onboarding
-from bundled_assets import bundled_root
-from config_modules import env_vars
+from gc_core import config
+from gc_core import onboarding
+from gc_core.bundled_assets import bundled_root
+from gc_core.config_modules import env_vars
 
 
 def _default_yaml() -> dict:

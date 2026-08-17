@@ -1,9 +1,7 @@
 """discard_message_by_id: точечное удаление записи по payload.id (откат
 осиротевшей реплики при быстрой отмене). id-идентификация однозначна даже при
 повторном вводе того же текста."""
-from thread_store import (
-    ThreadSession, discard_message_by_id, load_thread_messages, save_thread_meta,
-)
+from gc_core.thread_store import ThreadSession, discard_message_by_id, load_thread_messages, save_thread_meta
 
 
 def _session(tmp_path):
@@ -30,7 +28,7 @@ def test_removes_only_matching_id(tmp_path):
     ids = [m.get("id") for m in msgs]
     assert "m_orphan" not in ids                 # осиротевшая удалена
     assert "m_resend" in ids and "a1" in ids     # повтор того же текста и вывод целы
-    from thread_store import load_thread_meta
+    from gc_core.thread_store import load_thread_meta
     assert load_thread_meta(str(tmp_path), "cli", "t1")["messages_count"] == 2
 
 

@@ -1,14 +1,6 @@
 import pytest
 
-from intent_log import (
-    ACTION_FINAL_ANSWER,
-    IntentRecord,
-    append_final_answer,
-    deserialize_list,
-    flush,
-    serialize_for_meta,
-    validate_record,
-)
+from gc_core.intent_log import ACTION_FINAL_ANSWER, IntentRecord, append_final_answer, deserialize_list, flush, serialize_for_meta, validate_record
 
 
 def test_final_answer_record_valid_and_stripped():

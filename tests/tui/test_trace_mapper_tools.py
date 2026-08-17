@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from tui.services.trace_mapper import map_message
+from gc_tui.services.trace_mapper import map_message
 
 
 def test_read_file_shows_path():

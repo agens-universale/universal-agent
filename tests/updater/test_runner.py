@@ -1,10 +1,5 @@
-from updater.source import UpdateSource
-from updater.runner import (
-    build_install_command,
-    build_install_target,
-    install_location_phrase,
-    spawn_detached_update,
-)
+from gc_core.updater.source import UpdateSource
+from gc_core.updater.runner import build_install_command, build_install_target, install_location_phrase, spawn_detached_update
 
 
 def test_command_with_ref():
@@ -33,9 +28,9 @@ def test_leaf_target_carries_subdirectory():
     полный профиль. Без имени и подкаталога `--update` на headless-установке
     молча раздул бы её до полной, а на gc-tui — потерял бы TUI."""
     src = UpdateSource(url="https://x/y", ref="master", commit="c",
-                       dist="gc-tui", subdirectory="packaging/tui")
+                       dist="gc-tui", subdirectory="packages/tui")
     assert build_install_target(src) == (
-        "gc-tui @ git+https://x/y@master#subdirectory=packaging/tui"
+        "gc-tui @ git+https://x/y@master#subdirectory=packages/tui"
     )
 
 
@@ -44,12 +39,12 @@ def test_subdirectory_recovered_from_profile_when_metadata_lacks_it():
     иначе переустановка листа не зарезолвится."""
     src = UpdateSource(url="https://x/y", ref=None, commit="c", dist="gc-cli")
     assert build_install_target(src) == (
-        "gc-cli @ git+https://x/y#subdirectory=packaging/cli"
+        "gc-cli @ git+https://x/y#subdirectory=packages/cli"
     )
 
 
 def test_spawn_detached_injects_command(tmp_path, monkeypatch):
-    import updater.runner as runner
+    from gc_core.updater import runner as runner
     monkeypatch.setattr(runner.tempfile, "tempdir", str(tmp_path))  # не сорить в %TEMP%
     captured = {}
     def _spawn(script_argv):
@@ -63,7 +58,7 @@ def test_spawn_detached_injects_command(tmp_path, monkeypatch):
 def test_install_location_phrase_platform_dependent(monkeypatch):
     """I4: «в отдельном окне» правда только на Windows (видимый CREATE_NEW_CONSOLE)
     — на POSIX спавн идёт без консоли (start_new_session), окно не появляется."""
-    import updater.runner as runner
+    from gc_core.updater import runner as runner
     monkeypatch.setattr(runner.os, "name", "nt")
     assert install_location_phrase() == "в отдельном окне"
     monkeypatch.setattr(runner.os, "name", "posix")
@@ -71,7 +66,7 @@ def test_install_location_phrase_platform_dependent(monkeypatch):
 
 
 def test_posix_script_shell_quotes_args(tmp_path, monkeypatch):
-    import updater.runner as runner
+    from gc_core.updater import runner as runner
     monkeypatch.setattr(runner.os, "name", "posix")
     monkeypatch.setattr(runner.tempfile, "tempdir", str(tmp_path))  # не сорить в %TEMP%
     paths = {}

@@ -1,8 +1,8 @@
 import pytest
 
-from config_modules import env_vars
-from config_modules.env_vars import EnvVars
-from rest_api.server_config import load_server_config
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.env_vars import EnvVars
+from gc_server.rest_api.server_config import load_server_config
 
 
 def test_server_config_path_from_env_vars(monkeypatch, tmp_path):
@@ -18,7 +18,7 @@ def test_server_config_path_from_env_vars(monkeypatch, tmp_path):
 
 def test_server_config_path_none_falls_back_to_default(monkeypatch, tmp_path):
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
-    monkeypatch.setattr("rest_api.server_config.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr("gc_server.rest_api.server_config.PROJECT_ROOT", str(tmp_path))
     cfg = load_server_config()
     assert cfg["server"]["host"] == "0.0.0.0"
     assert cfg["server"]["port"] == 8000

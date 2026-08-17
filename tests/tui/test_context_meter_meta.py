@@ -41,7 +41,7 @@ def _cfg(trigger=10_000, turn_end=1):
 async def test_context_meter_hidden_without_live_chars_key(tmp_path):
     """Нет meta.runtime.live_history_chars → метр скрыт; data_* не читаем."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "ctxm0000000000000000000000000003a"
     _write_task(tmp_path, tid, content="x" * 5000)  # data есть, ключа нет
@@ -65,7 +65,7 @@ async def test_context_meter_hidden_without_live_chars_key(tmp_path):
 async def test_context_meter_reads_meta_not_data(tmp_path):
     """Метр берёт chars из meta; расхождение с data_* игнорируется."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "ctxm0000000000000000000000000004a"
     # meta говорит 500; data — огромный текст (если бы сканировали — другой %)
@@ -99,7 +99,7 @@ async def test_context_meter_reads_meta_not_data(tmp_path):
 async def test_cmd_compact_antispam_uses_live_msg_count(tmp_path):
     """Антиспам сравнивает live_msg_count с last_compact_msg_count, не data_*."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "cmp00000000000000000000000000007a"
     # data пустой / 0 сообщений, но meta говорит count=3, baseline=3 → блок

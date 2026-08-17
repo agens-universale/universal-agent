@@ -1,5 +1,5 @@
 """trace_mapper: raw thread_store-payload → TraceEvent. Базовые kinds."""
-from tui.services.trace_mapper import map_message
+from gc_tui.services.trace_mapper import map_message
 
 
 def test_user_message():

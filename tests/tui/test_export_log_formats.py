@@ -1,7 +1,7 @@
 """/export log-txt|log-json — выгрузка сырых артефактов сессии."""
 import pytest
 
-from tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def test_read_raw_thread_jsonl_concatenates_archives_then_live(tmp_path):
@@ -36,7 +36,7 @@ def test_read_raw_thread_jsonl_keeps_leading_summary_lines(tmp_path):
 
 
 def _mk_app(tmp_path):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     return TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
 
 

@@ -7,11 +7,11 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from states import State, SharedStateData
-from tools.subagents import special_agent as special_agent_module
-from tools.subagents.special_agent import SpecialAgent
-from tools.subagents import runner as runner_module
-from tools.subagents.runner import SubagentRunner
+from gc_core.states import State, SharedStateData
+from gc_core.tools.subagents import special_agent as special_agent_module
+from gc_core.tools.subagents.special_agent import SpecialAgent
+from gc_core.tools.subagents import runner as runner_module
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state():

@@ -1,8 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from project_memory import get_hash, resolve_project_memory_path
-from project_memory.storage import content_hash
+from gc_core.project_memory import get_hash, resolve_project_memory_path
+from gc_core.project_memory.storage import content_hash
 
 
 def test_content_hash_missing_file_returns_none(tmp_path):

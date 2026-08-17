@@ -4,21 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from security.command_moderation import (
-    DANGEROUS_VERDICT,
-    JudgeResult,
-    JudgeUnavailable,
-    ModerationContext,
-    SAFE_VERDICT,
-    build_judge_payload,
-    decide_command_execution,
-    effective_command_cwd,
-    load_command_judge_prompt,
-    moderate_command_execution,
-    validate_judge_result,
-)
-from security.path_policy import WriteGuardConfig, ToolSecurityContext
-import security.command_moderation as command_moderation
+from gc_core.security.command_moderation import DANGEROUS_VERDICT, JudgeResult, JudgeUnavailable, ModerationContext, SAFE_VERDICT, build_judge_payload, decide_command_execution, effective_command_cwd, load_command_judge_prompt, moderate_command_execution, validate_judge_result
+from gc_core.security.path_policy import WriteGuardConfig, ToolSecurityContext
+from gc_core.security import command_moderation as command_moderation
+from tests.paths import ASSETS
 
 
 class _Logger:
@@ -420,7 +409,7 @@ def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
 
 
 def test_build_judge_payload_includes_denied_examples():
-    from security.command_moderation import build_judge_payload, ModerationContext
+    from gc_core.security.command_moderation import build_judge_payload, ModerationContext
     ctx = ModerationContext(
         tool_name="exec_command",
         launch_root="/work",
@@ -434,7 +423,7 @@ def test_build_judge_payload_includes_denied_examples():
 
 def test_load_config_maps_denied_examples(tmp_path):
     import yaml
-    from config import load_config
+    from gc_core.config import load_config
     p = tmp_path / "config.yml"
     p.write_text(yaml.safe_dump({"security": {"command_moderation": {
         "enabled": True, "mode": "deny", "denied_command_examples": ["rm -rf /"]}}}), encoding="utf-8")
@@ -444,8 +433,8 @@ def test_load_config_maps_denied_examples(tmp_path):
 
 def test_judge_prompt_documents_denied_examples_and_flag():
     from pathlib import Path
-    import config_modules
+    from gc_core import config_modules
     src = Path(config_modules.__file__).resolve().parents[1]
-    text = (src.parent / "prompts" / "security" / "command_judge_system.md").read_text(encoding="utf-8")
+    text = (ASSETS / "prompts" / "security" / "command_judge_system.md").read_text(encoding="utf-8")
     assert "How to use denied_command_examples" in text
     assert "operator_denied" in text

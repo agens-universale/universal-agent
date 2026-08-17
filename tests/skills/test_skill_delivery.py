@@ -1,4 +1,4 @@
-from tools.skills.skill_delivery import build_skill_delivery, skill_is_available
+from gc_core.tools.skills.skill_delivery import build_skill_delivery, skill_is_available
 
 
 class _FakeReg:

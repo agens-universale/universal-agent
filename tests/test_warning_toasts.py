@@ -1,5 +1,5 @@
 """warning_toasts: выбор warning-уведомлений для тоста при старте (кап + сводный)."""
-from startup_notices import Notice, warning_toasts
+from gc_core.startup_notices import Notice, warning_toasts
 
 
 def test_caps_at_three_and_summarizes_rest():

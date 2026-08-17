@@ -2,9 +2,9 @@
 
 from types import SimpleNamespace
 
-from intent_log.user_turn import init_subagent_open_turn
-from states import State, SharedStateData
-from tools.subagents.runner import SubagentRunner
+from gc_core.intent_log.user_turn import init_subagent_open_turn
+from gc_core.states import State, SharedStateData
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state(system_prompt=None):
@@ -153,7 +153,7 @@ class TestBuildInitialMessages:
         runner._build_initial_messages(child, "role", user_message)
         init_subagent_open_turn(child, "Implement feature X")
 
-        from intent_log import ACTION_USER_ASK
+        from gc_core.intent_log import ACTION_USER_ASK
 
         assert len(child.current_user_intent) == 1
         assert child.current_user_intent[0].action == ACTION_USER_ASK

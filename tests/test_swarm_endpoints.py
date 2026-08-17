@@ -60,7 +60,7 @@ def make_server(tmp_path):
     def factory(enabled=True):
         # Сбрасываем кеш server и зависимостей.
         for mod in list(sys.modules):
-            if mod in ("server",) or mod.startswith("server."):
+            if mod in ("server",) or mod.startswith("gc_server.server."):
                 del sys.modules[mod]
 
         threads_dir = tmp_path / "threads"
@@ -69,9 +69,9 @@ def make_server(tmp_path):
         sandbox_dir.mkdir(exist_ok=True)
 
         # Патчим load_*_config до импорта server'а, чтобы не зависеть от config.yml хоста.
-        with patch("rest_api.server_config.load_server_config", return_value=_minimal_server_config()), \
-             patch("rest_api.server_config.build_agent_config_for_server", return_value=_minimal_agent_config()):
-            import server as server_mod
+        with patch("gc_server.rest_api.server_config.load_server_config", return_value=_minimal_server_config()), \
+             patch("gc_server.rest_api.server_config.build_agent_config_for_server", return_value=_minimal_agent_config()):
+            from gc_server import server as server_mod
 
         # Подменяем SWARM_CONFIG прямо в модуле.
         server_mod.SWARM_CONFIG = {
@@ -103,7 +103,7 @@ def _seed_meta(threads_dir, sid, status, *, system="g", task_id=None, **extra):
     if task_id is None:
         rest = sid.removeprefix("swarm_")
         system, task_id = rest.split("_", 1) if "_" in rest else (system, rest)
-    import swarm.storage as storage
+    from gc_server.swarm import storage as storage
     storage.save_swarm_meta(
         threads_dir, sid,
         base_meta={"system": system, "task_id": task_id},
@@ -272,7 +272,7 @@ def stub_runner(monkeypatch):
         sid = _swarm_sid(system, task_id)
         calls.append((sid, payload, trace_id))
         # Симулируем, что start_swarm_process пишет meta (как реальный runner).
-        import swarm.storage as storage
+        from gc_server.swarm import storage as storage
         storage.save_swarm_meta(
             swarm_cfg["threads_dir"], sid,
             base_meta={"system": system, "task_id": task_id},
@@ -280,7 +280,7 @@ def stub_runner(monkeypatch):
         )
         return sid, 99999
 
-    monkeypatch.setattr("swarm.runner.start_swarm_process", fake_start)
+    monkeypatch.setattr("gc_server.swarm.runner.start_swarm_process", fake_start)
     return calls
 
 
@@ -472,7 +472,7 @@ def test_run_concurrent_posts_only_one_starts(make_server, stub_runner):
     def fake_start(swarm_cfg, *, system, task_id, payload, trace_id=None):
         sid = _swarm_sid(system, task_id)
         # Симулируем меdленный старт — записываем meta как running.
-        import swarm.storage as storage
+        from gc_server.swarm import storage as storage
         storage.save_swarm_meta(
             swarm_cfg["threads_dir"], sid,
             base_meta={"system": system, "task_id": task_id},
@@ -483,7 +483,7 @@ def test_run_concurrent_posts_only_one_starts(make_server, stub_runner):
         block_event.wait(timeout=2.0)  # держим lock
         return sid, 99999
 
-    import swarm.runner as runner_mod
+    from gc_server.swarm import runner as runner_mod
     runner_mod_orig = runner_mod.start_swarm_process
     runner_mod.start_swarm_process = fake_start
 
@@ -643,7 +643,7 @@ def test_shutdown_kills_active_sworms(make_server, monkeypatch):
     asyncio.run(server_mod._shutdown_swarm_processes())
 
     assert sigterm_calls == [12345]
-    import swarm.storage as storage
+    from gc_server.swarm import storage as storage
     meta = storage.load_swarm_meta(threads, sid)
     assert meta["swarm_meta"]["status"] == "unknown_failed"
     assert meta["swarm_meta"]["error_type"] == "server_shutdown"

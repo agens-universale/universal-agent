@@ -12,8 +12,8 @@ def _prose_rec(text):
 @pytest.mark.asyncio
 async def test_duplicate_agent_row_collapsed(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -28,8 +28,8 @@ async def test_duplicate_agent_row_collapsed(tmp_path):
 @pytest.mark.asyncio
 async def test_distinct_agent_rows_both_shown(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen

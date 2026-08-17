@@ -1,4 +1,4 @@
-from tui.widgets.thinking_indicator import ThinkingIndicator
+from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
 
 def test_cancelled_phrase_no_badge_when_unmounted():

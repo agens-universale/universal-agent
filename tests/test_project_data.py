@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from utils.project_data import get_project_data
+from gc_core.utils.project_data import get_project_data
 
 
 def _boom_platform_system():
@@ -80,14 +80,14 @@ def test_get_project_data_os_reflects_sys_platform(tmp_path, monkeypatch):
     [("win32", "Windows"), ("linux", "Linux"), ("linux2", "Linux"), ("darwin", "macOS")],
 )
 def test_os_label_maps_sys_platform(monkeypatch, plat, expected):
-    from utils.project_data import os_label
+    from gc_core.utils.project_data import os_label
 
     monkeypatch.setattr(sys, "platform", plat)
     assert os_label() == expected
 
 
 def test_os_label_does_not_call_platform_system(monkeypatch):
-    from utils.project_data import os_label
+    from gc_core.utils.project_data import os_label
 
     monkeypatch.setattr("platform.system", _boom_platform_system)
     assert os_label()  # непустая строка, без обращения к platform.system()

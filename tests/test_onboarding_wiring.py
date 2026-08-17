@@ -4,10 +4,10 @@ import sys
 # `import cli` парсит sys.argv на импорте (нужен -q или --init) — пиннем валидный.
 sys.argv = ["gc-cli", "-q", "x"]
 
-import cli  # noqa: E402
-import config  # noqa: E402
-import tui  # noqa: E402
-from config_modules import env_vars  # noqa: E402
+from gc_cli import cli
+from gc_core import config
+import gc_tui as tui
+from gc_core.config_modules import env_vars
 
 
 def _isolate(tmp_path, monkeypatch):
@@ -52,17 +52,17 @@ def test_tui_init_config_runs_review_and_exits(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     monkeypatch.setattr(tui, "_interactive", lambda: True)
 
-    import thread_store as ts_mod
+    from gc_core import thread_store as ts_mod
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
 
-    import mcp_daemon_autostart as mcp_da_mod
+    from gc_core import mcp_daemon_autostart as mcp_da_mod
     monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 
     captured = {}
 
     import sys
-    import tui.app as app_mod
+    from gc_tui import app as app_mod
     OrigTuiApp = app_mod.TuiApp
 
     class FakeTuiApp(OrigTuiApp):
@@ -74,7 +74,7 @@ def test_tui_init_config_runs_review_and_exits(tmp_path, monkeypatch):
             captured["ran"] = True
 
     monkeypatch.setattr(app_mod, "TuiApp", FakeTuiApp)
-    monkeypatch.setitem(sys.modules, "tui.app", app_mod)
+    monkeypatch.setitem(sys.modules, "gc_tui.app", app_mod)
 
     rc = tui.main(["--init-config"])
     assert rc == 0
@@ -105,5 +105,5 @@ def test_tui_proceeds_when_configured(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     cfg = config.load_config(None)
-    import onboarding
+    from gc_core import onboarding
     assert onboarding.is_unconfigured(cfg) is False

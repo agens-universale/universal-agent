@@ -6,9 +6,9 @@ import pytest
 async def test_think_not_rendered_via_trace_row():
     """Reasoning suppressed: kind=system/title=think does not mount any .line-think row."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.models import TraceEvent
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.trace_row import TraceRow
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -29,9 +29,9 @@ async def test_think_not_rendered_via_trace_row():
 async def test_submit_solution_note_renders_via_trace_row():
     """* note: <comment> монтируется как TraceRow с prefix='  * '."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.models import TraceEvent
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.trace_row import TraceRow
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -61,9 +61,9 @@ async def test_submit_solution_note_renders_via_trace_row():
 async def test_agent_prose_first_block_has_bullet_prefix():
     """Первый prose-блок агентской реплики имеет prefix '● '."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.models import TraceEvent
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.trace_row import TraceRow
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -89,7 +89,7 @@ async def test_tool_call_row_has_two_column_layout():
     """ToolCallRow содержит Horizontal с prefix (отступ-индент + статус-глиф, без '|-') и content."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -114,7 +114,7 @@ async def test_long_tool_args_wrap_inside_content_column():
     значит wrap content не выходит за границы своей колонки (rendering Textual'а)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     long_args = "command='" + ("very_long_path/" * 20) + "x.py'"
 
@@ -142,8 +142,8 @@ async def test_long_tool_args_wrap_inside_content_column():
 async def test_meta_lines_have_top_margin_class():
     """Все framework-события имеют CSS-класс .line-meta (margin-top: 1 из styles.tcss)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -163,9 +163,9 @@ async def test_todo_row_has_air_above_and_no_double_gap():
     разделение через margin-top следующего элемента), и ровно одной — не двумя."""
     pytest.importorskip("textual")
     import json
-    from tui.app import TuiApp
-    from tui.models import TraceEvent
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.trace_row import TraceRow
 
     def call_ev(no, name, args):
         return TraceEvent(
@@ -188,7 +188,7 @@ async def test_todo_row_has_air_above_and_no_double_gap():
         await pilot.pause()
 
         # v5: воздух живёт на блоке-контейнере, а не на строке заголовка.
-        from tui.widgets.todo_block import TodoBlock
+        from gc_tui.widgets.todo_block import TodoBlock
         blocks = list(scr.query(TodoBlock))
         assert len(blocks) == 1
         todo = blocks[0]

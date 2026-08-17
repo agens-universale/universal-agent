@@ -1,5 +1,5 @@
 import time
-import tools.connect_mcp.registry as reg
+from gc_core.tools.connect_mcp import registry as reg
 
 
 def test_on_progress_called_per_server(monkeypatch):
@@ -35,7 +35,7 @@ def test_on_progress_none_is_noop(monkeypatch):
 
 
 def test_on_progress_threads_through_build_tools_data(monkeypatch):
-    import tools as tools_pkg
+    from gc_core import tools as tools_pkg
     captured = {}
 
     def fake_get_mcp(config_dict, on_progress=None):
@@ -51,7 +51,7 @@ def test_on_progress_threads_through_build_tools_data(monkeypatch):
 
 
 def test_create_run_context_accepts_on_progress(monkeypatch):
-    import run_context as rc
+    from gc_core import run_context as rc
     captured = []
     monkeypatch.setattr(rc, "build_tools_data",
                         lambda cfg, on_progress=None, **_kwargs: (captured.append(on_progress) or ({}, [], [], {})))

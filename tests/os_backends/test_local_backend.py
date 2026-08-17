@@ -4,9 +4,9 @@ import sys
 
 import pytest
 
-from run_context import create_run_context
-from backends.local import LocalFsBackend
-from backends.protocol import ExecResult, FsBackend
+from gc_core.run_context import create_run_context
+from gc_core.backends.local import LocalFsBackend
+from gc_core.backends.protocol import ExecResult, FsBackend
 
 
 @pytest.fixture()
@@ -125,7 +125,7 @@ def test_default_cwd(be):
 def test_tool_backend_resolution():
     from types import SimpleNamespace
 
-    from tools.fs.read_file import ReadFile
+    from gc_core.tools.fs.read_file import ReadFile
 
     cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
     ctx = create_run_context(cfg)
@@ -213,7 +213,7 @@ def test_exec_reader_threads_are_daemon(be, monkeypatch):
     """A12: stdout/stderr readers must be daemon so mid-drain exit is not blocked."""
     import threading
 
-    from backends import local as local_mod
+    from gc_core.backends import local as local_mod
 
     created = []
     RealThread = threading.Thread
@@ -319,7 +319,7 @@ def test_run_python_timeout(be, tmp_path):
 def test_drain_pipe_publishes_captured_before_discard_finishes():
     """on_captured fires at hit_cap while remaining bytes are still being drained."""
     import threading
-    from backends.local import _drain_pipe
+    from gc_core.backends.local import _drain_pipe
 
     class SlowAfterCapPipe:
         def __init__(self):

@@ -5,12 +5,7 @@ display_name — единый источник имени для пикера и
 normalize_prompt_title — collapse whitespace + truncate до LAST_ACTUAL_MAX,
 порог обновления last_actual — LAST_ACTUAL_MIN по уже нормализованной строке.
 """
-from tui.services.session_title import (
-    LAST_ACTUAL_MAX,
-    LAST_ACTUAL_MIN,
-    display_name,
-    normalize_prompt_title,
-)
+from gc_tui.services.session_title import LAST_ACTUAL_MAX, LAST_ACTUAL_MIN, display_name, normalize_prompt_title
 
 
 # ---- display_name -------------------------------------------------------

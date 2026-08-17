@@ -10,9 +10,9 @@ import json
 
 import pytest
 
-from tools import build_tools_data
-from tools.schema_optional import resolve_optional_property_keys
-from utils.connect_backend import normalize_chat_completions_tools
+from gc_core.tools import build_tools_data
+from gc_core.tools.schema_optional import resolve_optional_property_keys
+from gc_core.utils.connect_backend import normalize_chat_completions_tools
 
 CONFIG = {
     "inject_tool_fields": {"reason": "One short sentence explaining this call."},

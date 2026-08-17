@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from tools.subagents.progress import QueueSubagentProgressSink, child_progress_enabled
+from gc_core.tools.subagents.progress import QueueSubagentProgressSink, child_progress_enabled
 
 
 def _child_ctx(sink, *, tool_name="subagent_worker"):
@@ -22,8 +22,8 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
 
 class TestChildCtxCopiesTuiConfirm:
     def test_build_child_ctx_copies_tui_confirm_and_tool_name(self, tmp_path):
-        from states import SharedStateData, State
-        from tools.subagents.runner import SubagentRunner
+        from gc_core.states import SharedStateData, State
+        from gc_core.tools.subagents.runner import SubagentRunner
 
         state = State(
             verbose=False,
@@ -78,7 +78,7 @@ class TestChildCtxCopiesTuiConfirm:
 
 class TestAskHumanEmit:
     def test_emits_ask_human_and_done_around_input(self, monkeypatch):
-        from tools.turn.ask_human import AskHuman
+        from gc_core.tools.turn.ask_human import AskHuman
 
         sink = QueueSubagentProgressSink()
         ctx = _child_ctx(sink)
@@ -98,7 +98,7 @@ class TestAskHumanEmit:
         assert evs[0].tool_name == "subagent_worker"
 
     def test_parent_without_parent_call_id_emits_nothing(self, monkeypatch):
-        from tools.turn.ask_human import AskHuman
+        from gc_core.tools.turn.ask_human import AskHuman
 
         sink = QueueSubagentProgressSink()
         ctx = SimpleNamespace(
@@ -118,7 +118,7 @@ class TestAskHumanEmit:
 
 class TestConfirmEmit:
     def test_emits_confirm_around_tui_confirm(self):
-        from security.confirm_port import request_confirm
+        from gc_core.security.confirm_port import request_confirm
 
         sink = QueueSubagentProgressSink()
         seen = {}

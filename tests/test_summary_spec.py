@@ -1,29 +1,8 @@
 import unittest
 
-from summarize.prompt_loading import default_prompt_path, load_prompt_template
-from summarize.summary_spec import (
-    SUMMARY_SECTIONS,
-    SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
-    SUMMARY_SECTIONS_PLACEHOLDER,
-    _SECTION_BODY_PATTERNS,
-    agent_summary_slice_mode,
-    agent_visible_section_tags,
-    hint_section_tags,
-    render_output_shape_for_prompt,
-    assemble_summary_xml,
-    extract_summary_bodies,
-    format_section_tags_for_repair,
-    merge_summary_bodies,
-    render_sections_for_prompt,
-    section_tags,
-    slice_summary,
-)
-from summarize.summary_validation import (
-    FALLBACK_SUMMARY,
-    merge_repaired_summary,
-    resolve_after_repair_failure,
-    validate_summary_text,
-)
+from gc_core.summarize.prompt_loading import default_prompt_path, load_prompt_template
+from gc_core.summarize.summary_spec import SUMMARY_SECTIONS, SUMMARY_OUTPUT_SHAPE_PLACEHOLDER, SUMMARY_SECTIONS_PLACEHOLDER, _SECTION_BODY_PATTERNS, agent_summary_slice_mode, agent_visible_section_tags, hint_section_tags, render_output_shape_for_prompt, assemble_summary_xml, extract_summary_bodies, format_section_tags_for_repair, merge_summary_bodies, render_sections_for_prompt, section_tags, slice_summary
+from gc_core.summarize.summary_validation import FALLBACK_SUMMARY, merge_repaired_summary, resolve_after_repair_failure, validate_summary_text
 from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 

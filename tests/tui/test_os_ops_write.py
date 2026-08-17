@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tui.services import os_ops
+from gc_tui.services import os_ops
 
 
 def _ok_run(captured):

@@ -1,8 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from run_context import create_run_context
-from tools.subagents.runner import SubagentRunner
+from gc_core.run_context import create_run_context
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def test_child_ctx_inherits_trace_id(tmp_path):

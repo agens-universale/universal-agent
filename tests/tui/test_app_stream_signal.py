@@ -14,7 +14,7 @@ def _write_task(tmp_path, tid):
 @pytest.mark.asyncio
 async def test_stream_signal_delegates_to_active_screen(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "sig1"
     _write_task(tmp_path, tid)

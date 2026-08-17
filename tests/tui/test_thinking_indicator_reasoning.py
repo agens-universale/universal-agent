@@ -1,5 +1,5 @@
 """ThinkingIndicator: хвост reasoning читается из ReasoningClock, токены — из sink."""
-from tui.widgets.thinking_indicator import ThinkingIndicator
+from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
 
 class _StubClock:

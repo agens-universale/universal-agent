@@ -1,5 +1,5 @@
 """ThinkingIndicator: состояние compressing → фикс-текст «сжимаю контекст…»."""
-from tui.widgets.thinking_indicator import ThinkingIndicator
+from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
 
 def test_compressing_state_renders_fixed_text():

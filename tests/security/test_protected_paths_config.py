@@ -1,4 +1,4 @@
-from config_modules.security import SecurityConfig
+from gc_core.config_modules.security import SecurityConfig
 
 
 def test_defaults_enabled_true():

@@ -10,10 +10,10 @@ pytest.importorskip("textual")
 from textual import events
 from textual.app import App, ComposeResult
 
-from tui.messages import OpenEventRequest, OpenToolCallDetailRequest
-from tui.widgets.trace_row import TraceRow
-from tui.widgets.tool_call_row import ToolCallRow
-from tui.widgets.user_reply import UserReplyContainer
+from gc_tui.messages import OpenEventRequest, OpenToolCallDetailRequest
+from gc_tui.widgets.trace_row import TraceRow
+from gc_tui.widgets.tool_call_row import ToolCallRow
+from gc_tui.widgets.user_reply import UserReplyContainer
 
 
 def _click(widget, *, ctrl=False, chain=1):
@@ -29,7 +29,7 @@ def test_focus_on_click_not_disabled():
     строку уже на MouseDown, выделение видно в момент нажатия (в т.ч. при
     Ctrl+клике до открытия экрана события). Явный focus() в on_click — лишь
     идемпотентная страховка, а не носитель поведения."""
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
     for cls in (TraceRow, ToolCallRow, UserReplyContainer, AgentReplyLine):
         assert cls.FOCUS_ON_CLICK is True, cls.__name__
 

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from config_modules.logging_config import LoggingConfig, RedactSecretsConfig
+from gc_core.config_modules.logging_config import LoggingConfig, RedactSecretsConfig
 
 
 def test_defaults_preserve_main():
@@ -32,7 +32,7 @@ def test_redact_secrets_shape():
 
 def test_load_config_emits_logging_keys(tmp_path, monkeypatch):
     import yaml
-    from config import load_config
+    from gc_core.config import load_config
     p = tmp_path / "config.yml"
     p.write_text(yaml.safe_dump({
         "logging": {"format": "jsonl", "log_level": "debug",

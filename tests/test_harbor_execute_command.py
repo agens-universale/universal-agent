@@ -2,8 +2,8 @@ import json
 from types import SimpleNamespace
 
 from tests.harbor_support.fakes import bind_os_backend
-from backends.protocol import ExecResult
-from tools.exec.execute_command import ExecuteCommand
+from gc_core.backends.protocol import ExecResult
+from gc_core.tools.exec.execute_command import ExecuteCommand
 
 
 class _RecordingFakeBackend:

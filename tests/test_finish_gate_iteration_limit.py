@@ -4,9 +4,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import intent_guard.guard as intent_guard_guard_module
-from intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
-from intent_guard.validation_result import ValidationResult
+from gc_core.intent_guard import guard as intent_guard_guard_module
+from gc_core.intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
+from gc_core.intent_guard.validation_result import ValidationResult
 
 
 def _reject_validation(**_kwargs):

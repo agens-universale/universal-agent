@@ -1,6 +1,6 @@
 """Метка-заголовок confirm/guard баннера — глиф шлюза вместо '?'."""
-from tui.widgets.confirm_banner import GUARD_GLYPH, build_guard_label
-from tui.palette import RUN_COLOR
+from gc_tui.widgets.confirm_banner import GUARD_GLYPH, build_guard_label
+from gc_tui.palette import RUN_COLOR
 
 
 def test_guard_label_uses_caution_glyph_not_question():

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from thread_store import read_subagent_trace
+from gc_core.thread_store import read_subagent_trace
 
 
 def _state(*, steps=3, max_steps=50):
@@ -43,7 +43,7 @@ def _fc(name: str, call_id: str, arguments: str = "{}"):
 
 
 def _patch_process(monkeypatch, *, apply_return='{"ok": true, "data": "hello"}'):
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     monkeypatch.setattr(
         pr,
@@ -112,8 +112,8 @@ class TestSidecarPersistCallResult:
         assert rows[1]["payload"]["call_id"] == "c_err"
 
     def test_error_kind_on_wrong_arguments(self, tmp_path, monkeypatch):
-        import processing_responses as pr
-        from tools import WrongFunctionArgumentsException
+        from gc_core import processing_responses as pr
+        from gc_core.tools import WrongFunctionArgumentsException
 
         def _boom(**kw):
             raise WrongFunctionArgumentsException("bad args", received_args="{}")
@@ -139,7 +139,7 @@ class TestSidecarPersistCallResult:
         assert "bad args" in rows[1]["payload"]["output"]
 
     def test_ask_human_not_persisted(self, tmp_path, monkeypatch):
-        from tools.subagents.progress import QueueSubagentProgressSink
+        from gc_core.tools.subagents.progress import QueueSubagentProgressSink
 
         pr = _patch_process(monkeypatch, apply_return='{"ok": true, "answer": "yes"}')
         sink = QueueSubagentProgressSink()

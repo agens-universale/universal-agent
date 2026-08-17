@@ -4,10 +4,10 @@ from unittest.mock import patch
 
 import pytest
 
-from config_modules import env_vars
-from project_memory.compaction import CompactionResult
-from tools.project.project_memory import ProjectMemory
-from tools.registry import get_builtin_tools_data
+from gc_core.config_modules import env_vars
+from gc_core.project_memory.compaction import CompactionResult
+from gc_core.tools.project.project_memory import ProjectMemory
+from gc_core.tools.registry import get_builtin_tools_data
 
 
 @pytest.fixture(autouse=True)
@@ -46,10 +46,7 @@ def test_tool_description_requires_action_and_content():
 
 
 def test_parse_and_validate_rejects_append_without_content():
-    from tools.arguments_validation import (
-        WrongFunctionArgumentsException,
-        parse_and_validate_tool_arguments,
-    )
+    from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 
     spec = ProjectMemory.tool_description()
     with pytest.raises(WrongFunctionArgumentsException):
@@ -168,7 +165,7 @@ def test_tool_append_overflow_triggers_compaction(tmp_path):
         captured["input"] = text
         return CompactionResult(ok=True, text="COMPACTED", error_type=None, error_message=None)
 
-    with patch("project_memory.compaction.compact_text", side_effect=fake_compact):
+    with patch("gc_core.project_memory.compaction.compact_text", side_effect=fake_compact):
         res = json.loads(tool(action="append", content=delta))
 
     # Combined text fed to compaction was existing + \n\n + delta, both stripped.
@@ -191,7 +188,7 @@ def test_tool_append_overflow_compaction_failed(tmp_path):
     failed = CompactionResult(
         ok=False, text="", error_type="backend_error", error_message="boom"
     )
-    with patch("project_memory.compaction.compact_text", return_value=failed):
+    with patch("gc_core.project_memory.compaction.compact_text", return_value=failed):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
@@ -208,7 +205,7 @@ def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
     over = CompactionResult(
         ok=True, text="z" * 10_001, error_type=None, error_message=None
     )
-    with patch("project_memory.compaction.compact_text", return_value=over):
+    with patch("gc_core.project_memory.compaction.compact_text", return_value=over):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
@@ -218,7 +215,7 @@ def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
 
 def test_tool_append_fast_path_does_not_call_compaction(tmp_path):
     tool = _make_tool(tmp_path)
-    with patch("project_memory.compaction.compact_text") as mocked:
+    with patch("gc_core.project_memory.compaction.compact_text") as mocked:
         json.loads(tool(action="append", content="small"))
     assert not mocked.called
 
@@ -242,7 +239,7 @@ def test_tool_write_over_max_chars_refuses_no_compaction(tmp_path):
     tool = _make_tool(tmp_path)
     huge = "x" * (10_001)
 
-    with patch("project_memory.compaction.compact_text") as mocked:
+    with patch("gc_core.project_memory.compaction.compact_text") as mocked:
         res = json.loads(tool(action="write", content=huge))
 
     assert res["ok"] is False

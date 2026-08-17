@@ -18,7 +18,7 @@ def _read_pending(threads_dir, tid):
 
 def test_wire_match_falls_back_to_meta_wire_content():
     """Пустой wire-cache, в meta есть wire_content → match работает."""
-    from tui.screens.main import TraceScreen
+    from gc_tui.screens.main import TraceScreen
 
     tid = "wire-meta-fallback"
     store = SimpleNamespace(
@@ -44,8 +44,8 @@ def test_wire_match_falls_back_to_meta_wire_content():
 
 def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
     """TUI снял pending с диска → set_tui_* их не возвращает (I1)."""
-    from run_summary_coordinator import set_tui_finalizing
-    from thread_store import ThreadSession, save_thread_meta, update_tui_meta
+    from gc_core.run_summary_coordinator import set_tui_finalizing
+    from gc_core.thread_store import ThreadSession, save_thread_meta, update_tui_meta
 
     tid = "t1"
     ts = ThreadSession(
@@ -77,7 +77,7 @@ def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
 
 def test_patch_runtime_flag_preserves_disk_tui(tmp_path):
     """Канон I1: runtime flag не воскрешает tui.pending."""
-    from thread_store import patch_runtime_flag, save_thread_meta, update_tui_meta
+    from gc_core.thread_store import patch_runtime_flag, save_thread_meta, update_tui_meta
 
     tid = "t2"
     session_meta = {
@@ -106,7 +106,7 @@ def test_patch_runtime_flag_preserves_disk_tui(tmp_path):
 async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
     """stream_reset: pending, чей content ∈ user_ask, удаляется из meta без re-attach."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "t-gc-delivered"
     with open(tmp_path / f"data_cli_{tid}.jsonl", "w", encoding="utf-8") as f:

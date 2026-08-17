@@ -1,4 +1,4 @@
-from config import load_config
+from gc_core.config import load_config
 
 
 def test_backend_stream_flagged_when_explicit(tmp_path):

@@ -2,23 +2,8 @@ import json
 
 import pytest
 
-from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-from intent_log import (
-    ACTION_TOOL_AGGREGATED,
-    ACTION_TOOL_RAW,
-    ACTION_USER_ASK,
-    IntentRecord,
-    append_tool_aggregated,
-    append_tool_raw,
-    append_user_ask,
-    deserialize_list,
-    flush,
-    read_info,
-    read_page,
-    serialize,
-    tail_preview,
-    validate_record,
-)
+from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK, IntentRecord, append_tool_aggregated, append_tool_raw, append_user_ask, deserialize_list, flush, read_info, read_page, serialize, tail_preview, validate_record
 
 
 FIXED_TS = "2026-05-30T11:35:08Z"
@@ -250,7 +235,7 @@ def test_tail_preview_returns_full_log_when_short():
 def test_records_to_jsonl_lines_emits_canonical_wire():
     import json
 
-    from intent_log import deserialize_list, records_to_jsonl_lines
+    from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
 
     records = [
         _user_ask("user line"),

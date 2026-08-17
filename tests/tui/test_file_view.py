@@ -3,28 +3,7 @@ from pathlib import Path
 
 from rich.syntax import Syntax
 
-from tui.services.file_view import (
-    DEFAULT_MAX_FILE_BYTES,
-    MSG_BINARY,
-    MSG_IS_DIR,
-    MSG_NOT_FOUND,
-    MSG_TOO_LARGE,
-    MSG_USAGE,
-    FileViewSettings,
-    OpenErr,
-    OpenOk,
-    ViewPositionStore,
-    clamp_start_line,
-    count_lines,
-    format_range_label,
-    is_probably_binary,
-    lexer_name_for_path,
-    open_for_view,
-    read_window,
-    resolve_view_path,
-    textarea_language_for_lexer,
-    view_window_renderable,
-)
+from gc_tui.services.file_view import DEFAULT_MAX_FILE_BYTES, MSG_BINARY, MSG_IS_DIR, MSG_NOT_FOUND, MSG_TOO_LARGE, MSG_USAGE, FileViewSettings, OpenErr, OpenOk, ViewPositionStore, clamp_start_line, count_lines, format_range_label, is_probably_binary, lexer_name_for_path, open_for_view, read_window, resolve_view_path, textarea_language_for_lexer, view_window_renderable
 
 
 def test_resolve_relative_uses_cwd(tmp_path):
@@ -197,7 +176,7 @@ def test_textarea_language_for_lexer_maps_aliases():
 
 
 def test_pygments_highlight_map_python_keywords():
-    from tui.services.file_view import pygments_highlight_map
+    from gc_tui.services.file_view import pygments_highlight_map
 
     mapped = pygments_highlight_map("def hello():\n    return 1\n", lexer="python")
     styles = {name for spans in mapped.values() for _, _, name in spans}

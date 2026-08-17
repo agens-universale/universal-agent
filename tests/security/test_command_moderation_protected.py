@@ -11,13 +11,8 @@ import json
 
 import pytest
 
-import security.command_moderation as cm
-from security.command_moderation import (
-    ModerationContext,
-    build_judge_payload,
-    decide_command_execution,
-    moderate_command_execution,
-)
+from gc_core.security import command_moderation as cm
+from gc_core.security.command_moderation import ModerationContext, build_judge_payload, decide_command_execution, moderate_command_execution
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +73,7 @@ def test_judge_unavailable_no_ctx_still_blocks(monkeypatch):
 def test_build_judge_payload_includes_never_touch_paths(monkeypatch, tmp_path):
     """build_judge_payload добавляет never_touch_paths из protected_paths."""
     from pathlib import Path
-    from security.protected_paths import ProtectedSet
+    from gc_core.security.protected_paths import ProtectedSet
 
     instr = tmp_path / "instructions.md"
     oper = tmp_path / ".gc"

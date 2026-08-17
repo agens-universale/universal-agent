@@ -8,8 +8,8 @@ pytest.importorskip("pytest_textual_snapshot")
 
 
 def test_event_focus_snapshot(snap_compare, tmp_path):
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     tid = "t1"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(

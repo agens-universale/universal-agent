@@ -9,13 +9,7 @@ from __future__ import annotations
 import os
 import pytest
 
-from security.read_guard import (
-    ReadGuardConfig,
-    ReadGuardViolation,
-    check_read_path_allowed,
-    expand_path_placeholders,
-    parse_read_guard_config,
-)
+from gc_core.security.read_guard import ReadGuardConfig, ReadGuardViolation, check_read_path_allowed, expand_path_placeholders, parse_read_guard_config
 
 
 @pytest.fixture
@@ -239,7 +233,7 @@ def test_extra_allowed_paths_bypasses_denied_and_roots(tmp_path):
 
 
 def test_resolve_skills_root_default_and_custom(tmp_path):
-    from security.read_guard import _resolve_skills_root
+    from gc_core.security.read_guard import _resolve_skills_root
     # Без skills_data_path → берёт <project_root>/skills.
     default = _resolve_skills_root({})
     assert default is not None

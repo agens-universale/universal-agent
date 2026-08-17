@@ -1,7 +1,7 @@
 import types
-from security import confirm_port as cp
-from security.confirm_port import confirm_available, request_confirm
-from security.permission_store import PermissionStore
+from gc_core.security import confirm_port as cp
+from gc_core.security.confirm_port import confirm_available, request_confirm
+from gc_core.security.permission_store import PermissionStore
 
 
 def _ctx(**kw):

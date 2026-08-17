@@ -3,11 +3,11 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from states import State, SharedStateData
-from tools.subagents import runner as runner_module
-from tools.subagents.runner import SubagentRunner
+from gc_core.states import State, SharedStateData
+from gc_core.tools.subagents import runner as runner_module
+from gc_core.tools.subagents.runner import SubagentRunner
 
-import run_summary_coordinator as run_summary_coordinator_module
+from gc_core import run_summary_coordinator as run_summary_coordinator_module
 
 
 def _make_orchestrator_state():

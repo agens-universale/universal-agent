@@ -3,12 +3,8 @@ import asyncio
 
 import pytest
 
-from tools.subagents.custom.file_definitions import SubagentDefinition
-from tools.subagents.custom.file_subagent import (
-    REQUIRED_TOOL_NAMES,
-    FileDefinedSubagent,
-    BoundFileSubagent,
-)
+from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
+from gc_core.tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES, FileDefinedSubagent, BoundFileSubagent
 
 REQUIRED = (
     "turn_finish",

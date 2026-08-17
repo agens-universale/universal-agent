@@ -4,7 +4,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_skills_cache_invalidated_on_run_end(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen
@@ -20,7 +20,7 @@ async def test_skills_cache_invalidated_on_run_end(tmp_path):
 async def test_skills_cache_kept_while_idle(tmp_path):
     """Без спадающего фронта (не было прогона) кэш не сбрасывается."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"}).run_test() as pilot:
         scr = pilot.app.screen

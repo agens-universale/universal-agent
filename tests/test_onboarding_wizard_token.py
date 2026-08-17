@@ -1,4 +1,4 @@
-import onboarding_wizard as wz
+from gc_cli import onboarding_wizard as wz
 
 
 def test_bare_key_gets_bearer():

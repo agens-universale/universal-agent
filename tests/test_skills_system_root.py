@@ -2,8 +2,8 @@
 editable, и в wheel (где src/ схлопнут и ../../.. промахивается мимо skills/)."""
 from pathlib import Path
 
-import tools.skills.registry as registry
-from bundled_assets import bundled_root
+from gc_core.tools.skills import registry as registry
+from gc_core.bundled_assets import bundled_root
 
 
 def test_system_skills_root_follows_bundled_root(monkeypatch):

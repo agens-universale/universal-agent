@@ -1,10 +1,10 @@
 import logging
 import os
 
-import intent_scope.final_answer as fa
-from intent_scope.final_answer import maybe_record_final_answer_intent
-from intent_scope.summarizer import summarize_final_answer_line
-from intent_scope.append import append_final_answer_to_current
+from gc_core.intent_scope import final_answer as fa
+from gc_core.intent_scope.final_answer import maybe_record_final_answer_intent
+from gc_core.intent_scope.summarizer import summarize_final_answer_line
+from gc_core.intent_scope.append import append_final_answer_to_current
 
 
 def test_summarize_empty_returns_empty():
@@ -12,7 +12,7 @@ def test_summarize_empty_returns_empty():
 
 
 def test_final_answer_prompt_file_exists_and_nonempty():
-    from intent_scope.summarizer import _resolve_final_answer_prompt_path
+    from gc_core.intent_scope.summarizer import _resolve_final_answer_prompt_path
 
     class _Ctx:
         intent_scope = None

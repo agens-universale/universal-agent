@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from constants.tool_names import SESSION_TODO_TOOL_NAME
-from tools.subagents.progress import brief_args_summary, todo_items_from_arguments
+from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
+from gc_core.tools.subagents.progress import brief_args_summary, todo_items_from_arguments
 
 ITEMS = [
     {"content": "Прочитать файлы", "status": "completed"},

@@ -9,9 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import tools.subagents.runner as runner_mod
-from tools.subagents.runner import SubagentRunner
-from usage.account import UsageAccount
+from gc_core.tools.subagents import runner as runner_mod
+from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.usage.account import UsageAccount
 
 BOOT_MARKER = "BOOTSTRAP-MARKER"
 

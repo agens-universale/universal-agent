@@ -1,4 +1,4 @@
-from tui.services.markdown_render import render_prose
+from gc_tui.services.markdown_render import render_prose
 
 
 def test_plain_prose_kept():

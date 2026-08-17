@@ -1,5 +1,5 @@
-from message_policy.todo_reminder import apply_todo_reminder, build_todo_reminder_text
-from states import SharedStateData, State
+from gc_core.message_policy.todo_reminder import apply_todo_reminder, build_todo_reminder_text
+from gc_core.states import SharedStateData, State
 
 OPEN_ITEMS = [
     {"content": "Шаг 1", "status": "completed"},
@@ -107,10 +107,7 @@ def test_reminder_counter_round_trips_through_meta():
     Без этого задача из серии коротких ходов (каждый короче reminder_steps)
     никогда не докатывается до напоминания: State строится заново на каждый run().
     """
-    from message_policy.tool_usage_notice.state import (
-        hydrate_tool_usage_notice_state,
-        persist_tool_usage_notice_state,
-    )
+    from gc_core.message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state, persist_tool_usage_notice_state
     from types import SimpleNamespace
 
     state = SimpleNamespace(todo_reminder_cnt=7, tool_usage_notice_cnt={},
@@ -126,10 +123,7 @@ def test_reminder_counter_round_trips_through_meta():
 
 def test_reminder_counter_survives_meta_merge_to_base():
     """Ключ попадает в base_meta перед сохранением треда (иначе потеряется на диске)."""
-    from message_policy.tool_usage_notice.state import (
-        merge_tool_usage_notice_meta_to_base,
-        persist_tool_usage_notice_state,
-    )
+    from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base, persist_tool_usage_notice_state
     from types import SimpleNamespace
 
     session_meta: dict = {}
@@ -150,7 +144,7 @@ def _cfg(steps: int = 1) -> dict:
 
 
 def _state(todos=None, cnt: int = 0):
-    from states import SharedStateData, State
+    from gc_core.states import SharedStateData, State
     st = State(verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
                max_steps=100, system_prompt_id="v1", use_server_subagents=False,
                shared=SharedStateData())

@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
-from states import State, SharedStateData
+from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
+from gc_core.states import State, SharedStateData
 
 
 def _state() -> State:
@@ -73,10 +73,10 @@ def test_apply_long_changed_hint_on_k_tick(monkeypatch):
             "stop_tools": [],
         }
     )
-    from message_policy.tool_usage_notice.state import set_project_memory_check_cnt
+    from gc_core.message_policy.tool_usage_notice.state import set_project_memory_check_cnt
 
     set_project_memory_check_cnt(meta, 2)
-    monkeypatch.setattr("project_memory.get_hash", lambda _ctx: "new_hash")
+    monkeypatch.setattr("gc_core.project_memory.get_hash", lambda _ctx: "new_hash")
 
     out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "x", "id": "u1"}],
@@ -107,10 +107,10 @@ def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
             "stop_tools": [],
         }
     )
-    from message_policy.tool_usage_notice.state import set_project_memory_check_cnt
+    from gc_core.message_policy.tool_usage_notice.state import set_project_memory_check_cnt
 
     set_project_memory_check_cnt(meta, 2)
-    monkeypatch.setattr("project_memory.get_hash", lambda _ctx: "new_hash")
+    monkeypatch.setattr("gc_core.project_memory.get_hash", lambda _ctx: "new_hash")
 
     out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "x", "id": "u1"}],

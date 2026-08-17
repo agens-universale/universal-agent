@@ -21,25 +21,25 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
 
     Returns the tui module (imported once so monkeypatches on it are stable).
     """
-    import tui as tui_mod
+    import gc_tui as tui_mod
 
     # ensure_project_gc_dir — side-effectful, short-circuit it
     monkeypatch.setattr(
-        "config_modules.env_vars.ensure_project_gc_dir", lambda: None, raising=False
+        "gc_core.config_modules.env_vars.ensure_project_gc_dir", lambda: None, raising=False
     )
     # Patch tui's own reference to ensure_project_gc_dir (it imports lazily inside main)
     # We'll patch via the module that main() uses at runtime:
-    import config_modules.env_vars as env_mod
+    from gc_core.config_modules import env_vars as env_mod
     monkeypatch.setattr(env_mod, "ensure_project_gc_dir", lambda: None)
 
     # Patch config functions used in main()
-    import config as cfg_mod
+    from gc_core import config as cfg_mod
     monkeypatch.setattr(cfg_mod, "load_config", lambda path=None: dict(config_dict))
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
     monkeypatch.setattr(cfg_mod, "user_config_path", lambda: tmp_path / "config.yml")
     monkeypatch.setattr(cfg_mod, "_bootstrap_user_config", lambda: True)
 
-    import onboarding as ob_mod
+    from gc_core import onboarding as ob_mod
     monkeypatch.setattr(ob_mod, "is_unconfigured", lambda cfg: unconfigured)
     monkeypatch.setattr(
         ob_mod, "setup_guide",
@@ -63,14 +63,14 @@ def test_non_tty_onboarding_prints_guide_and_returns_0(monkeypatch, tmp_path, ca
             print(onboarding.setup_guide(...), file=sys.stderr)
             return 0
     """
-    import tui as tui_mod
+    import gc_tui as tui_mod
 
     _patch_entry_prereqs(monkeypatch, tmp_path, config_dict={}, unconfigured=True)
 
     # Suppress tui.app import inside main() by providing a fake module
     import importlib
-    fake_app_mod = types.ModuleType("tui.app")
-    monkeypatch.setitem(sys.modules, "tui.app", fake_app_mod)
+    fake_app_mod = types.ModuleType("gc_tui.app")
+    monkeypatch.setitem(sys.modules, "gc_tui.app", fake_app_mod)
 
     # TTY gate → not interactive
     monkeypatch.setattr(tui_mod, "_interactive", lambda: False, raising=False)
@@ -98,7 +98,7 @@ def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
     The 'user quit' case is now handled inside the Textual app (on_commit not called).
     This replaces the old test that verified onboarding_wizard.run was called.
     """
-    import tui as tui_mod
+    import gc_tui as tui_mod
 
     _patch_entry_prereqs(monkeypatch, tmp_path, config_dict={}, unconfigured=True)
 
@@ -106,17 +106,17 @@ def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
 
     # resolve_threads_dir requires threads_data_path — patch it
-    import thread_store as ts_mod
+    from gc_core import thread_store as ts_mod
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
 
     # Also suppress mcp_daemon_autostart (imported in main)
-    import mcp_daemon_autostart as mcp_da_mod
+    from gc_core import mcp_daemon_autostart as mcp_da_mod
     monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 
     # Capture app attributes and intercept run()
     captured = {}
-    import tui.app as app_mod
+    from gc_tui import app as app_mod
 
     OrigTuiApp = app_mod.TuiApp
 
@@ -129,7 +129,7 @@ def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
             captured["ran"] = True
 
     monkeypatch.setattr(app_mod, "TuiApp", FakeTuiApp)
-    monkeypatch.setitem(sys.modules, "tui.app", app_mod)
+    monkeypatch.setitem(sys.modules, "gc_tui.app", app_mod)
 
     result = tui_mod.main([])
 

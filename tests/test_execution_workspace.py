@@ -1,12 +1,7 @@
-from execution_workspace import (
-    ExecutionWorkspace,
-    build_execution_workspace,
-    discover_backend_cwd,
-    resolve_execution_root,
-)
-from backends.local import LocalFsBackend
-from utils.project_data import get_project_data
-from utils.tool_report_paths import tool_report_abspath
+from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace, discover_backend_cwd, resolve_execution_root
+from gc_core.backends.local import LocalFsBackend
+from gc_core.utils.project_data import get_project_data
+from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
 class _Exec:

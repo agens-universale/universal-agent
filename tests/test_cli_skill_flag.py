@@ -7,8 +7,8 @@ sys.argv = ["gc-cli", "-q", "x"]
 
 import pytest
 
-import cli
-from tools.skills.skill_arg_resolver import SkillCatalog
+from gc_cli import cli
+from gc_core.tools.skills.skill_arg_resolver import SkillCatalog
 
 
 class _FakeReg:
@@ -33,7 +33,7 @@ def _cat():
 @pytest.fixture
 def _patch_reg(monkeypatch):
     monkeypatch.setattr(
-        "tools.skills.registry.get_skills_registry",
+        "gc_core.tools.skills.registry.get_skills_registry",
         lambda config_dict=None: _FakeReg(_cat()),
     )
 
@@ -47,7 +47,7 @@ def test_empty_does_not_build_registry(monkeypatch):
     def _boom(config_dict=None):
         raise AssertionError("registry must not be built when -s is empty")
 
-    monkeypatch.setattr("tools.skills.registry.get_skills_registry", _boom)
+    monkeypatch.setattr("gc_core.tools.skills.registry.get_skills_registry", _boom)
     assert cli._resolve_forced_skill("", {}) is None
     assert cli._resolve_forced_skill("   ", {}) is None
 
@@ -85,7 +85,7 @@ def test_ambiguous_soft_fallback_warns_with_suggestions(monkeypatch, capsys):
         pack_bootstrap={},
     )
     monkeypatch.setattr(
-        "tools.skills.registry.get_skills_registry",
+        "gc_core.tools.skills.registry.get_skills_registry",
         lambda config_dict=None: _FakeReg(cat),
     )
     out = cli._resolve_forced_skill("dup", {})
@@ -103,7 +103,7 @@ def test_fuzzy_ambiguous_soft_fallback_warns(monkeypatch, capsys):
         pack_bootstrap={},
     )
     monkeypatch.setattr(
-        "tools.skills.registry.get_skills_registry",
+        "gc_core.tools.skills.registry.get_skills_registry",
         lambda config_dict=None: _FakeReg(cat),
     )
     out = cli._resolve_forced_skill("foo-x", {})
@@ -118,7 +118,7 @@ def test_catalog_build_failure_soft_fallback_warns(monkeypatch, capsys):
     def _boom(config_dict=None):
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr("tools.skills.registry.get_skills_registry", _boom)
+    monkeypatch.setattr("gc_core.tools.skills.registry.get_skills_registry", _boom)
     out = cli._resolve_forced_skill("supercoder", {})
     assert out == "supercoder"
     err = capsys.readouterr().err

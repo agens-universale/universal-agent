@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from config_modules.env_vars import EnvVars, project_slug
-from swarm.config import build_swarm_config
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.env_vars import EnvVars, project_slug
+from gc_server.swarm.config import build_swarm_config
 
 
 @pytest.fixture

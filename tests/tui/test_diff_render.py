@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from tui.palette import CODE_BLOCK, ERR, MUTED, OK
+from gc_tui.palette import CODE_BLOCK, ERR, MUTED, OK
 
 
 def test_style_unified_diff_colors_plus_minus_and_headers():
     pytest.importorskip("rich")
-    from tui.services.diff_render import style_unified_diff
+    from gc_tui.services.diff_render import style_unified_diff
 
     raw = (
         "--- a/foo\n"
@@ -35,7 +35,7 @@ def test_style_unified_diff_colors_plus_minus_and_headers():
 
 def test_style_unified_diff_does_not_treat_file_headers_as_add_del():
     pytest.importorskip("rich")
-    from tui.services.diff_render import style_unified_diff
+    from gc_tui.services.diff_render import style_unified_diff
 
     styled = style_unified_diff("--- a\n+++ b\n+added\n-removed\n")
     styles = [str(style) for _, _, style in styled.spans]
@@ -46,7 +46,7 @@ def test_style_unified_diff_does_not_treat_file_headers_as_add_del():
 
 def test_render_unified_diff_widget_returns_static():
     pytest.importorskip("textual")
-    from tui.services.diff_render import render_unified_diff_widget
+    from gc_tui.services.diff_render import render_unified_diff_widget
 
     w = render_unified_diff_widget("+ok\n-bad\n")
     assert w is not None

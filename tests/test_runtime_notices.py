@@ -7,14 +7,9 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-import request_backend_policy as policy
-from runtime_notices import (
-    clear_runtime_notices,
-    collect_runtime_notices,
-    notice_from_llm_failure,
-    push_runtime_notice,
-)
-from startup_notices import Notice
+from gc_core import request_backend_policy as policy
+from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices, notice_from_llm_failure, push_runtime_notice
+from gc_core.startup_notices import Notice
 
 
 def _http_error(status: int, body: dict) -> requests.exceptions.HTTPError:
@@ -105,7 +100,7 @@ def test_listener_called_on_push():
     clear_runtime_notices()
     seen = []
 
-    from runtime_notices import register_runtime_notices_listener
+    from gc_core.runtime_notices import register_runtime_notices_listener
 
     register_runtime_notices_listener(lambda: seen.append(1))
     push_runtime_notice(Notice("info", "x", "msg"))

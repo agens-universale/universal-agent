@@ -1,34 +1,24 @@
 import types
 
 from intent_fixtures import meta_intent_log, user_ask_records
-from message_format.dialog_history import (
-    build_history_text,
-    group_into_turns,
-    message_text_limited,
-    split_turns_into_char_batches,
-    trim_history_to_max_dialogue_chars,
-    trim_original_user_messages_to_max_chars,
-)
-from summarize.compaction import apply_summary_state_patch
-from summarize.working_memory_gateway import WorkingMemoryDeltas
-from summarize.thread_summarizer import summarize_dialog_via_chat_completions
-from message_policy.user_message_policy import (
-    TECHNICAL_TYPE_DIALOG_SUMMARY,
-    wrap_technical_user_content,
-)
+from gc_core.message_format.dialog_history import build_history_text, group_into_turns, message_text_limited, split_turns_into_char_batches, trim_history_to_max_dialogue_chars, trim_original_user_messages_to_max_chars
+from gc_core.summarize.compaction import apply_summary_state_patch
+from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
+from gc_core.summarize.thread_summarizer import summarize_dialog_via_chat_completions
+from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 def _patch_chat_completion(monkeypatch, fake):
     """Патчит имя там, где оно связано после `from ... import ...`."""
-    monkeypatch.setattr("summarize.thread_summarizer.request_summary_text", fake)
-    monkeypatch.setattr("summarize.summary_llm_steps.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.request_summary_text", fake)
 
 
 def _patch_memory_patch_empty(monkeypatch):
     empty = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
-        "summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.request_patch_replace",
         lambda **_k: empty,
     )
 
@@ -83,7 +73,7 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
         calls.append(kwargs)
         return "should_not_happen"
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _never_call)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -106,7 +96,7 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
         calls.append(kwargs)
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -137,10 +127,10 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
             ),
         )
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     monkeypatch.setattr(
-        "summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.request_patch_replace",
         _fake_replace,
     )
 
@@ -192,9 +182,9 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
             ),
         )
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
 
     state = types.SimpleNamespace(
         default_model="test-model",
@@ -245,7 +235,7 @@ def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):
         assert "<project_data>" not in user_content
         return _valid_summary("single")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -280,9 +270,9 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
         replace_calls.append(kwargs)
         return types.SimpleNamespace(request_messages=[], raw_response="")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=4500),
@@ -469,7 +459,7 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
             return _valid_summary("compressed-summary")
         return _valid_summary("final-summary")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -537,14 +527,14 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
         return build_history_text(*args, **kwargs)
 
     monkeypatch.setattr(
-        "message_format.dialog_history.build_history_text",
+        "gc_core.message_format.dialog_history.build_history_text",
         wrapped,
     )
 
     def _fake_request(**_kwargs):
         return valid_summary_xml_for_tests(seed="x")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -567,7 +557,7 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -609,7 +599,7 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -640,7 +630,7 @@ def test_summarize_filters_technical_messages_from_user_intent_log(monkeypatch):
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -663,7 +653,7 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
             return "[assistant] raw transcript"
         return _valid_summary("repaired")
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -693,12 +683,12 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(m
         llm_calls["repair"] += 1
         return "<goal>repaired memory body</goal>"
 
-    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_summary)
     _patch_memory_patch_empty(monkeypatch)
-    monkeypatch.setattr("summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
     monkeypatch.setattr(
-        "summarize.memory_suggestions.request_memory_deltas_format_repair",
+        "gc_core.summarize.memory_suggestions.request_memory_deltas_format_repair",
         _fake_repair,
     )
 

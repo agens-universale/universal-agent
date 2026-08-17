@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_ctrl_c_copies_when_input_has_selection(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     copied: list = []
     stop_called = {"flag": False}
@@ -44,7 +44,7 @@ async def test_ctrl_c_copies_when_input_has_selection(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_ctrl_c_stops_run_when_nothing_selected(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     stop_called = {"flag": False}
 

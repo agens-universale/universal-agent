@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from config_modules.diff_tui import DiffTuiConfig
+from gc_core.config_modules.diff_tui import DiffTuiConfig
 
 
 def test_diff_tui_defaults():
@@ -21,7 +21,7 @@ def test_diff_tui_rejects_unknown_keys():
 
 
 def test_app_config_includes_diff_tui():
-    from config_modules.root import AppConfig
+    from gc_core.config_modules.root import AppConfig
 
     app = AppConfig()
     assert app.diff_tui.cache_max_orig == 500
@@ -32,8 +32,8 @@ def test_app_config_includes_diff_tui():
 
 def test_flatten_exposes_diff_tui(tmp_path, monkeypatch):
     """Значение из config.yml доходит до config_dict['diff_tui']."""
-    import config as cfgmod
-    import mcp_runtime.paths as mpaths
+    from gc_core import config as cfgmod
+    from gc_core.mcp_runtime import paths as mpaths
 
     monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
     monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")

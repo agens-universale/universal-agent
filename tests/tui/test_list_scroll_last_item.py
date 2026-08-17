@@ -20,8 +20,8 @@ async def test_skills_item_single_card_scrolls_both_wraps(monkeypatch):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
 
     scrolled: list = []
     monkeypatch.setattr(Static, "scroll_visible", lambda self, *a, **k: scrolled.append(self))
@@ -59,8 +59,8 @@ async def test_sessions_item_single_card_scrolls_both_wraps(tmp_path, monkeypatc
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
 
     for i in range(5):
         _seed_session(tmp_path, i)

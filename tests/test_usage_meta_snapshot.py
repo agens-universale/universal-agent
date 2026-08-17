@@ -5,8 +5,8 @@
 """
 from types import SimpleNamespace
 
-from agent_executor import AgentExecutor
-from usage.account import CATEGORY_MAIN, UsageAccount
+from gc_core.agent_executor import AgentExecutor
+from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
 
 def _executor_with_state(usage: UsageAccount, last_run):

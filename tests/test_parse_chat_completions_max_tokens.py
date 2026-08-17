@@ -1,6 +1,6 @@
 import unittest
 
-from config import parse_chat_completions_max_tokens
+from gc_core.config import parse_chat_completions_max_tokens
 
 
 class ParseChatCompletionsMaxTokensTest(unittest.TestCase):

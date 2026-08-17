@@ -9,7 +9,7 @@ def _coord(monkeypatch, calls, backend="chat_completions"):
     # импорта (старый объект), его force_compact_once читал бы run_summary_compaction
     # из СТАРОГО namespace, а monkeypatch по строке пропатчил бы НОВЫЙ → патч мимо,
     # звался бы реальный компактор. Берём класс и патчим атрибут ОДНОГО объекта.
-    rsc = importlib.import_module("run_summary_coordinator")
+    rsc = importlib.import_module("gc_core.run_summary_coordinator")
     state = types.SimpleNamespace(backend_api_mode=backend)
     coord = rsc.RunSummaryCoordinator(
         ctx=types.SimpleNamespace(), state=state, thread_session=None,

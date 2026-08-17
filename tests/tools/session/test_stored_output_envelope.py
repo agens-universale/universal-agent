@@ -9,12 +9,8 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME  # noqa: E402
-from tools.session.stored_outputs.envelope import (  # noqa: E402
-    build_stored_tool_output_payload,
-    dumps_stored_tool_output_payload,
-    utf8_byte_length,
-)
+from gc_core.constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME
+from gc_core.tools.session.stored_outputs.envelope import build_stored_tool_output_payload, dumps_stored_tool_output_payload, utf8_byte_length
 
 
 def test_truncated_page_includes_required_metadata_fields():

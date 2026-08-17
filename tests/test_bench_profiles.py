@@ -25,7 +25,7 @@ def _build(gc_cli_config):
     spec = importlib.util.spec_from_file_location(
         "gc_cli_external", REPO / "harbor" / "adapters" / "gc_cli_external.py")
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-    from summarize.config import parse_summary_trigger_chars
+    from gc_core.summarize.config import parse_summary_trigger_chars
     # completions_url: the adapter has no hardcoded default (fail-fast) — supply one.
     cfg = {"completions_url": "http://test/v1/chat/completions", **gc_cli_config}
     a = mod.GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg)

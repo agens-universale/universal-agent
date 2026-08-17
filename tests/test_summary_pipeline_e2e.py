@@ -4,17 +4,15 @@ import tempfile
 import types
 
 from intent_fixtures import intent_user_ask_texts
-from intent_log import deserialize_list
-from summarize.compaction import (
-    maybe_run_summary_compaction,
-)
-from thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
+from gc_core.intent_log import deserialize_list
+from gc_core.summarize.compaction import maybe_run_summary_compaction
+from gc_core.thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
 from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("summarize.thread_summarizer.request_summary_text", fake)
-    monkeypatch.setattr("summarize.summary_llm_steps.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.request_summary_text", fake)
 
 
 def _ctx():
@@ -94,14 +92,14 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state.user_intent_log = deserialize_list(["first request", "second request"])
         state.user_turn_seq = 1
 
-        monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         _patch_chat_completion(
             monkeypatch,
             lambda **_kwargs: _valid_summary("s"),
         )
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
         monkeypatch.setattr(
-            "summarize.memory_suggestions.request_patch_replace",
+            "gc_core.summarize.memory_suggestions.request_patch_replace",
             lambda **_k: empty_patch,
         )
 
@@ -218,14 +216,14 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         )
         state.user_turn_seq = 1
 
-        monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         _patch_chat_completion(
             monkeypatch,
             lambda **_kwargs: _valid_summary("s-tech"),
         )
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
         monkeypatch.setattr(
-            "summarize.memory_suggestions.request_patch_replace",
+            "gc_core.summarize.memory_suggestions.request_patch_replace",
             lambda **_k: empty_patch,
         )
 

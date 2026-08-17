@@ -1,7 +1,7 @@
 """format_duration: человекочитаемая длительность Nс / Nм Mс / Nч Mм."""
 import pytest
 
-from tui.services.duration_format import format_compact_int, format_duration
+from gc_tui.services.duration_format import format_compact_int, format_duration
 
 
 @pytest.mark.parametrize("seconds,expected", [

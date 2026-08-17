@@ -3,10 +3,7 @@ from __future__ import annotations
 
 import json
 
-from message_policy.user_stop import (
-    cancelled_by_user_output,
-    not_started_due_to_user_stop_output,
-)
+from gc_core.message_policy.user_stop import cancelled_by_user_output, not_started_due_to_user_stop_output
 
 
 def test_envelope_a_cancelled_by_user():

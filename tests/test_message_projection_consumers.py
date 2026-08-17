@@ -1,16 +1,9 @@
 """TDD: call-sites for_model — format_messages, serialization, extract."""
 
-from message_format.dialog_history import build_history_text
-from message_format.serialization import (
-    calc_history_chars_for_trigger,
-    message_raw_payload_chars_for_trigger,
-    message_text_for_summary,
-)
-from message_policy.no_tool_call_bounce import (
-    extract_last_assistant_text,
-    format_no_tool_call_bounce,
-)
-from utils.format_messages import format_message_chat_completions_to_send_backend
+from gc_core.message_format.dialog_history import build_history_text
+from gc_core.message_format.serialization import calc_history_chars_for_trigger, message_raw_payload_chars_for_trigger, message_text_for_summary
+from gc_core.message_policy.no_tool_call_bounce import extract_last_assistant_text, format_no_tool_call_bounce
+from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
 
 
 def test_format_canonical_assistant_strips_think_keeps_prose():

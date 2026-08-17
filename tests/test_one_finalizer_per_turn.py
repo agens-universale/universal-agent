@@ -1,6 +1,6 @@
 """S1: один turn-финализатор на ход — лишние tool_calls после первого финализатора
 не исполняются (получают synthetic skip-output)."""
-from processing_responses import split_at_first_finalizer
+from gc_core.processing_responses import split_at_first_finalizer
 
 
 def test_split_stops_after_first_finalizer():
@@ -33,7 +33,7 @@ def test_split_no_finalizer():
 
 def test_process_tool_calls_skips_second_finalizer(monkeypatch):
     """2× turn_ask_human → apply_tool вызван 1 раз; у 2-го — synthetic skip-output."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     calls = []
     monkeypatch.setattr(pr, "apply_tool",
@@ -63,7 +63,7 @@ def test_process_tool_calls_skips_second_finalizer(monkeypatch):
 def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
     """Не-блокирующие output'ы (session_memory) персистятся ДО запуска блокирующего
     turn_ask_human — иначе висят 'running', пока ждём ответ юзера."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     persisted = []
     order = []
@@ -106,7 +106,7 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
 def test_flush_skipped_outputs_before_ask_human(monkeypatch):
     """Skip-output'ы пропущенных (после 1-го финализатора) тулов тоже флашатся до
     блокирующего turn_ask_human — иначе пропущенный тул висит 'running' до ответа."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     persisted = []
 

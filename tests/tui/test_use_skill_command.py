@@ -9,7 +9,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_use_skill_no_active_task_stages(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -25,7 +25,7 @@ async def test_use_skill_no_active_task_stages(tmp_path):
 @pytest.mark.asyncio
 async def test_use_skill_running_sends_message_and_updates_meta(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     captured: list = []
 
@@ -74,7 +74,7 @@ async def test_use_skill_running_sends_message_and_updates_meta(tmp_path):
 async def test_use_skill_idle_task_stages_pending_no_error(tmp_path):
     """Задача активна, run не идёт (как после /sessions): /skill не ошибка → pending + meta."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "resumed2"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(

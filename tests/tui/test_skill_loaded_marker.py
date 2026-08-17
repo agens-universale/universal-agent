@@ -9,9 +9,9 @@ def _trace_texts(scr):
 @pytest.mark.asyncio
 async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tools.skills.skill_delivery as sd
-    import tools.skills.registry as sreg
+    from gc_tui.app import TuiApp
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills import registry as sreg
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
     monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: True)
@@ -36,7 +36,7 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
         assert "загружен" in joined
         assert "отправлен агенту" not in joined
         # маркер ПОСЛЕ реплики: порядок по mount-индексу виджетов в #trace
-        from tui.widgets.user_reply import UserReplyContainer
+        from gc_tui.widgets.user_reply import UserReplyContainer
         from textual.widgets import Static
         trace = scr.query_one("#trace")
         kids = list(trace.children)
@@ -68,9 +68,9 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_marker_not_found_when_unavailable(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tools.skills.skill_delivery as sd
-    import tools.skills.registry as sreg
+    from gc_tui.app import TuiApp
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills import registry as sreg
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
     monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: False)

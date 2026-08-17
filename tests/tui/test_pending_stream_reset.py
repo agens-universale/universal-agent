@@ -17,8 +17,8 @@ def _read_pending(threads_dir, tid):
 @pytest.mark.asyncio
 async def test_pending_record_survives_stream_reset(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     tid = "t-compact"
     # Существующий тред (thread_store-формат): 1 user-сообщение + meta.

@@ -1,6 +1,6 @@
 import pytest
 
-from tui.widgets.confirm_banner import ConfirmBanner, _fmt_field_value, _OPTIONS
+from gc_tui.widgets.confirm_banner import ConfirmBanner, _fmt_field_value, _OPTIONS
 
 
 def test_banner_has_three_options():
@@ -42,7 +42,7 @@ async def test_banner_renders_field_rows(tmp_path):
     """fields рендерятся строками cb-field; пустые значения пропускаются."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

@@ -5,18 +5,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from config import load_config
-from config_modules.agent import (
-    DEFAULT_EXEC_TIMEOUT_SEC,
-    AgentConfig,
-    exec_output_capture_max_chars_from_config_dict,
-)
-from backends.factory import resolve_os_backend
-from backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, ExecResult
-from config_modules.root import AppConfig
+from gc_core.config import load_config
+from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, AgentConfig, exec_output_capture_max_chars_from_config_dict
+from gc_core.backends.factory import resolve_os_backend
+from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, ExecResult
+from gc_core.config_modules.root import AppConfig
 from tests.helpers.tool_ctx import with_local_ctx
-from tools.exec.execute_command import ExecuteCommand
-from tools.exec.run_python_code import RunPythonCode
+from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_core.tools.exec.run_python_code import RunPythonCode
 
 
 def test_agent_config_timeout_default():
@@ -110,7 +106,7 @@ def test_execute_command_uses_config_default(monkeypatch):
         return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
 
     monkeypatch.setattr(
-        "backends.local.LocalFsBackend.exec",
+        "gc_core.backends.local.LocalFsBackend.exec",
         _fake_exec,
     )
     tool = with_local_ctx(ExecuteCommand, config_dict={"exec_timeout_sec": 600})
@@ -127,7 +123,7 @@ def test_run_python_uses_config_default(monkeypatch):
         return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
 
     monkeypatch.setattr(
-        "backends.local.LocalFsBackend.run_python",
+        "gc_core.backends.local.LocalFsBackend.run_python",
         _fake_run_python,
     )
     tool = with_local_ctx(RunPythonCode, config_dict={"exec_timeout_sec": 600})

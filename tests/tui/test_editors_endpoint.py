@@ -14,7 +14,7 @@ def _harness(editor):
 
 
 async def test_endpoint_editor_prefills_and_submits():
-    from tui.editors.endpoint import EndpointEditor
+    from gc_tui.editors.endpoint import EndpointEditor
     ed = EndpointEditor(current="https://host/v1/chat/completions")
     app = _harness(ed)
     async with app.run_test():
@@ -24,7 +24,7 @@ async def test_endpoint_editor_prefills_and_submits():
 
 
 async def test_endpoint_editor_rejects_invalid_url_and_shows_error():
-    from tui.editors.endpoint import EndpointEditor
+    from gc_tui.editors.endpoint import EndpointEditor
     from textual.widgets import Input
     ed = EndpointEditor(current="")
     app = _harness(ed)
@@ -36,7 +36,7 @@ async def test_endpoint_editor_rejects_invalid_url_and_shows_error():
 
 
 async def test_endpoint_editor_empty_input_means_keep_current():
-    from tui.editors.endpoint import EndpointEditor
+    from gc_tui.editors.endpoint import EndpointEditor
     ed = EndpointEditor(current="")
     app = _harness(ed)
     async with app.run_test():
@@ -46,7 +46,7 @@ async def test_endpoint_editor_empty_input_means_keep_current():
 
 async def test_endpoint_editor_no_hint_static_and_full_placeholder():
     """v2: hint-Static убран, полный текст живёт в ghost-placeholder поля."""
-    from tui.editors.endpoint import EndpointEditor
+    from gc_tui.editors.endpoint import EndpointEditor
     from textual.widgets import Input
     ed = EndpointEditor(current="")
     app = _harness(ed)

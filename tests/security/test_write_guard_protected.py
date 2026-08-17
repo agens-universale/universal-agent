@@ -1,7 +1,7 @@
 import json
 import types
 
-from security.path_policy import enforce_write_guard
+from gc_core.security.path_policy import enforce_write_guard
 
 
 class _Tool:
@@ -21,7 +21,7 @@ def _ctx(cwd, confirm=False):
 
 
 def test_operational_gc_write_denied(tmp_path, monkeypatch):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     ctx = _ctx(tmp_path)
     res = _Tool(ctx).write(path=str(tmp_path / ".gc" / "config.yml"), content="x")
@@ -29,7 +29,7 @@ def test_operational_gc_write_denied(tmp_path, monkeypatch):
 
 
 def test_operational_gc_write_denied_even_when_guard_disabled(tmp_path, monkeypatch):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     ctx = types.SimpleNamespace(
         config_dict={"launch_root": str(tmp_path), "write_guard": {"enabled": False}},
@@ -40,7 +40,7 @@ def test_operational_gc_write_denied_even_when_guard_disabled(tmp_path, monkeypa
 
 
 def test_skills_write_allowed(tmp_path, monkeypatch):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     ctx = _ctx(tmp_path)
     (tmp_path / ".gc" / "skills" / "foo").mkdir(parents=True)
@@ -52,8 +52,8 @@ def test_skills_write_allowed(tmp_path, monkeypatch):
 # TUI repro — guard ask должен идти через confirm-порт, не stdin
 # ---------------------------------------------------------------------------
 import types as _types
-import security.path_policy as _pp
-import security.confirm_port as _cp
+from gc_core.security import path_policy as _pp
+from gc_core.security import confirm_port as _cp
 
 
 def _ctx_ask_tui(launch_root, tui_confirm):
@@ -69,9 +69,9 @@ def _ctx_ask_tui(launch_root, tui_confirm):
 def test_instruction_file_confirm_cached_by_decision_key(tmp_path, monkeypatch):
     """Повторная запись инструкц-файла (AGENTS.md) в одном прогоне НЕ переспрашивает:
     первый ответ кэшируется по decision_key, остальные правки авто-проходят."""
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
-    from security.permission_store import PermissionStore
+    from gc_core.security.permission_store import PermissionStore
 
     calls = []
 
@@ -97,7 +97,7 @@ def test_instruction_file_confirm_cached_by_decision_key(tmp_path, monkeypatch):
 
 def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
     """TUI + mode=ask + banner подтверждает → запись проходит."""
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     # launch_root — подкаталог; файл снаружи него → WriteGuardViolation
     launch_root = tmp_path / "project"
@@ -116,7 +116,7 @@ def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
 
 def test_write_guard_ask_tui_declined(tmp_path, monkeypatch):
     """TUI + mode=ask + banner отклоняет → запись заблокирована."""
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     # launch_root — подкаталог; файл снаружи него → WriteGuardViolation
     launch_root = tmp_path / "project"

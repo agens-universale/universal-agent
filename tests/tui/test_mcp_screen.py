@@ -6,7 +6,7 @@ def _yaml_of(screen):
 
 
 def test_mcp_cards_text_shows_status_reason_tools():
-    from tui.screens.mcp import McpScreen
+    from gc_tui.screens.mcp import McpScreen
     snap = {
         "office": {"status": "connected", "reason": None, "description": "Read office docs",
                    "tools": [{"name": "mcp_office_read", "description": "d"}]},
@@ -26,7 +26,7 @@ def test_mcp_cards_text_shows_status_reason_tools():
 
 
 def test_mcp_cards_empty_when_no_snapshot():
-    from tui.screens.mcp import McpScreen
+    from gc_tui.screens.mcp import McpScreen
     scr = McpScreen(tools_snapshot=None)
     assert "после первого запуска" in scr.rendered_text()
 
@@ -34,8 +34,8 @@ def test_mcp_cards_empty_when_no_snapshot():
 @pytest.mark.asyncio
 async def test_mcp_screen_with_snapshot(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.mcp import McpScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.mcp import McpScreen
     cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x", "token": "T"}}}
     snap = {"search": {"status": "connected", "reason": None, "description": "web search",
                        "tools": [{"name": "search.web", "description": "web"}]}}
@@ -53,8 +53,8 @@ async def test_mcp_screen_with_snapshot(tmp_path):
 @pytest.mark.asyncio
 async def test_mcp_screen_no_snapshot_shows_note(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.mcp import McpScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.mcp import McpScreen
     cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
     async with app.run_test() as pilot:
@@ -67,8 +67,8 @@ async def test_mcp_screen_no_snapshot_shows_note(tmp_path):
 @pytest.mark.asyncio
 async def test_mcp_screen_empty(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.mcp import McpScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.mcp import McpScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
     async with app.run_test() as pilot:
         scr = McpScreen(config={"mcp-servers": {}}, tools_snapshot={})
@@ -80,13 +80,13 @@ async def test_mcp_screen_empty(tmp_path):
 async def test_mcp_screen_esc_returns_to_main(tmp_path):
     # Esc должен возвращать на главный экран, а не выходить из TUI.
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.main import TraceScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
     async with app.run_test() as pilot:
         pilot.app.screen._handle_command("mcp")
         await pilot.pause()
-        from tui.screens.mcp import McpScreen
+        from gc_tui.screens.mcp import McpScreen
         assert isinstance(app.screen, McpScreen)
         await pilot.press("escape")
         await pilot.pause()
@@ -97,8 +97,8 @@ async def test_mcp_screen_esc_returns_to_main(tmp_path):
 async def test_mcp_screen_has_header_and_footer(tmp_path):
     # Консистентность с прочими экранами: есть #header и #footer.
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.mcp import McpScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.mcp import McpScreen
     cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
     async with app.run_test() as pilot:
@@ -108,7 +108,7 @@ async def test_mcp_screen_has_header_and_footer(tmp_path):
 
 
 def test_mcp_card_reason_on_failed_line():
-    from tui.screens.mcp import McpScreen
+    from gc_tui.screens.mcp import McpScreen
     snap = {"computer": {"status": "failed", "reason": "команда не найдена",
                          "description": "GUI", "tools": []}}
     text = McpScreen(tools_snapshot=snap).rendered_text()
@@ -119,7 +119,7 @@ def test_mcp_card_reason_on_failed_line():
 
 def test_mcp_renderable_is_rich_text_with_styles():
     from rich.text import Text
-    from tui.screens.mcp import McpScreen
+    from gc_tui.screens.mcp import McpScreen
     snap = {"office": {"status": "connected", "reason": None, "description": "d",
                        "tools": [{"name": "mcp_office_x", "description": "y"}]}}
     rend = McpScreen(tools_snapshot=snap).cards[0]._renderable()
@@ -130,7 +130,7 @@ def test_mcp_renderable_is_rich_text_with_styles():
 # ---- ServerCard: свёрнутый/раскрытый рендер (spec 2026-06-10) ----
 
 def _card(name, info):
-    from tui.screens.mcp import ServerCard
+    from gc_tui.screens.mcp import ServerCard
     return ServerCard(name, info)
 
 

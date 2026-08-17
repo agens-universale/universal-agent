@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import requests
 
-from tools.exec import fetch_url as fetch_url_module
-from tools.exec.fetch_url import FetchUrl
-from tools.exec.simple_fetch_url import SimpleFetchUrl
+from gc_core.tools.exec import fetch_url as fetch_url_module
+from gc_core.tools.exec.fetch_url import FetchUrl
+from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
 
 
 from tests.helpers.tool_ctx import with_local_ctx

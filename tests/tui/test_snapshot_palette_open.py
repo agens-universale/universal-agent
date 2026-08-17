@@ -6,7 +6,7 @@ pytest.importorskip("pytest_textual_snapshot")
 
 
 def test_palette_open_snapshot(snap_compare, tmp_path):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "CodeAgent", "backend_api_mode": "chat_completions"})

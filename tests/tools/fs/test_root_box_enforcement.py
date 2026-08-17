@@ -1,11 +1,11 @@
 import base64
 import json
 
-from tools.fs.append_to_file import AppendToFile
-from tools.fs.file_info import FileInfo
-from tools.fs.save_base64_file import SaveBase64File
-from tools.fs.search_and_replace import SearchAndReplace
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.tools.fs.append_to_file import AppendToFile
+from gc_core.tools.fs.file_info import FileInfo
+from gc_core.tools.fs.save_base64_file import SaveBase64File
+from gc_core.tools.fs.search_and_replace import SearchAndReplace
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 
 from tests.helpers.tool_ctx import with_local_ctx

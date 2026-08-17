@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-import onboarding_config_writer as w
+from gc_core import onboarding_config_writer as w
 
 
 def test_replaces_sentinel_preserving_comment_and_indent():

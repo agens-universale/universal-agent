@@ -88,7 +88,7 @@ def load_manifest(path: Path) -> list[MCPEntry]:
 
 def default_agent_dep_dir() -> Path:
     """Корень для Node/npx: `gc_paths()['data']` (XDG на Linux, `~/.gc` на Windows)."""
-    from config_modules.env_vars import gc_paths
+    from gc_core.config_modules.env_vars import gc_paths
 
     return gc_paths()["data"]
 

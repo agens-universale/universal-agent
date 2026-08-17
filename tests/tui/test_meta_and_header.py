@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_header_left_welcome_when_fresh(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
         left, _right = scr._compose_header_segments()
@@ -17,7 +17,7 @@ async def test_header_left_welcome_when_fresh(tmp_path):
 @pytest.mark.asyncio
 async def test_header_left_session_when_active(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
     async with TuiApp(threads_dir=str(threads_dir)).run_test() as pilot:
@@ -38,7 +38,7 @@ async def test_header_left_session_when_active(tmp_path):
 async def test_meta_has_model_context_and_status(tmp_path):
     """footer-right содержит модель (мета-полоса удалена в Task 3; статус переезжает в Task 4)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     from textual.widgets import Static
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()

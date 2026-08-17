@@ -15,8 +15,8 @@ from types import SimpleNamespace
 import pytest
 
 from tests.harbor_support.fakes import FakeBackend, bind_os_backend, strip_path_fields
-from backends.local import LocalFsBackend
-from tools.fs.apply_file_edits import ApplyFileEdits
+from gc_core.backends.local import LocalFsBackend
+from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
 CONTENT_SHA = hashlib.sha256(CONTENT.encode("utf-8")).hexdigest()

@@ -1,5 +1,5 @@
 import time
-import tools.connect_mcp.registry as reg
+from gc_core.tools.connect_mcp import registry as reg
 
 
 def test_build_registry_parallel_and_status(monkeypatch):

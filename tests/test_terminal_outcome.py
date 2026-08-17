@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from states import State
+from gc_core.states import State
+from tests.paths import module_dir
 
 
 def _make_state(max_steps=2):
@@ -30,14 +31,14 @@ def test_terminal_outcome_defaults_none():
 
 def teardown_module(_module) -> None:
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    real_tools = importlib.import_module("tools")
-    proc = sys.modules.get("processing_responses")
+    real_tools = importlib.import_module("gc_core.tools")
+    proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.apply_tool = real_tools.apply_tool
         proc.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
-    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
         cycle_stop_mod.apply_tool = real_tools.apply_tool
 
@@ -49,19 +50,19 @@ run_agent = None
 def setup_module(_module) -> None:
     global processing_module, run_agent
     _stub_tools_modules()
-    import processing_responses as pm
-    from processing_responses import run_agent as ra
+    from gc_core import processing_responses as pm
+    from gc_core.processing_responses import run_agent as ra
     processing_module = pm
     run_agent = ra
-    pm.apply_tool = sys.modules["tools"].apply_tool
+    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
 
 
 def _stub_tools_modules() -> None:
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
 
-    tools_pkg = types.ModuleType("tools")
+    tools_pkg = types.ModuleType("gc_core.tools")
 
     class _WrongFunctionArgumentsException(Exception):
         def to_llm_feedback(self):
@@ -77,9 +78,9 @@ def _stub_tools_modules() -> None:
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_pkg.is_unknown_tool_output = _is_unknown_tool_output
     root = Path(__file__).resolve().parents[1]
-    tools_dir = root / "src" / "tools"
+    tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
-    sys.modules["tools"] = tools_pkg
+    sys.modules["gc_core.tools"] = tools_pkg
 
 
 def _make_ctx(**overrides):

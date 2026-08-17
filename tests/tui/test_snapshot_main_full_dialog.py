@@ -8,9 +8,9 @@ from tests.tui.fixtures.stub_executor import StubExecutor
 
 
 def test_main_full_dialog_snapshot(snap_compare, tmp_path):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.services.stores.file_store import FileTaskStore
 
     tid = "7f3a9b1c"
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="full_dialog")

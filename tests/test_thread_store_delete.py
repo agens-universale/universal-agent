@@ -1,6 +1,6 @@
 import os
 
-from thread_store import delete_thread
+from gc_core.thread_store import delete_thread
 
 
 def _touch(path: str) -> None:

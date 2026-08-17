@@ -5,7 +5,7 @@
 """
 from types import SimpleNamespace
 
-from tools.subagents.runner import SubagentRunner
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _runner(parent_tool_calls: int = 0) -> tuple[SubagentRunner, SimpleNamespace]:

@@ -1,4 +1,4 @@
-from project_memory.status import build_project_memory_status
+from gc_core.project_memory.status import build_project_memory_status
 
 
 def test_status_missing_file(tmp_path):

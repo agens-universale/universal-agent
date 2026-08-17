@@ -3,35 +3,36 @@ import sys
 import types
 from pathlib import Path
 
-from message_policy.user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
-from message_policy.user_message_policy import build_invalid_tool_call_feedback_message
-from states import State
+from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
+from gc_core.message_policy.user_message_policy import build_invalid_tool_call_feedback_message
+from gc_core.states import State
 from types import SimpleNamespace
-from utils.convertations import sanitize_messages_for_chat_completions
+from gc_core.utils.convertations import sanitize_messages_for_chat_completions
+from tests.paths import module_dir
 
 
 def teardown_module(_module) -> None:
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    real_tools = importlib.import_module("tools")
-    proc = sys.modules.get("processing_responses")
+    real_tools = importlib.import_module("gc_core.tools")
+    proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.apply_tool = real_tools.apply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
-    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
         cycle_stop_mod.apply_tool = real_tools.apply_tool
 
 
 def _stub_tools_modules() -> None:
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
 
-    tools_pkg = types.ModuleType("tools")
+    tools_pkg = types.ModuleType("gc_core.tools")
 
     class _WrongFunctionArgumentsException(Exception):
         def to_llm_feedback(self):
@@ -44,9 +45,9 @@ def _stub_tools_modules() -> None:
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_pkg.is_unknown_tool_output = lambda _output: False
     root = Path(__file__).resolve().parents[1]
-    tools_dir = root / "src" / "tools"
+    tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
-    sys.modules["tools"] = tools_pkg
+    sys.modules["gc_core.tools"] = tools_pkg
 
 
 processing_module = None
@@ -55,10 +56,10 @@ processing_module = None
 def setup_module(_module) -> None:
     global processing_module
     _stub_tools_modules()
-    import processing_responses as pm
+    from gc_core import processing_responses as pm
 
     processing_module = pm
-    pm.apply_tool = sys.modules["tools"].apply_tool
+    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
 
 
 def test_make_technical_feedback_message_wraps_generic_feedback():
@@ -123,7 +124,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         processing_module, "create_call_headers", _fake_create_call_headers
     )
     monkeypatch.setattr(
-        "request_backend_policy.request_backend_chat_completions",
+        "gc_core.request_backend_policy.request_backend_chat_completions",
         _fake_request_backend_chat_completions,
     )
 

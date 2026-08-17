@@ -9,8 +9,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_event_number_not_shown_on_focus(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     tid = "t1"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(

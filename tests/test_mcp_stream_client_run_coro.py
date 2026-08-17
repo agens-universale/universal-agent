@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from tools.connect_mcp.stream_client import _run_coro
+from gc_core.tools.connect_mcp.stream_client import _run_coro
 
 
 async def _coro_value():

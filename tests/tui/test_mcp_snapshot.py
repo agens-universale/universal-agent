@@ -1,5 +1,5 @@
 def test_build_mcp_tools_snapshot_groups_by_server():
-    from tools.mcp_snapshot import build_mcp_tools_snapshot
+    from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
     config = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
     # Реальная форма tools_data: ключ тула = mcp_<server>_<base>; значение содержит "description".
     tools_data = {
@@ -14,13 +14,13 @@ def test_build_mcp_tools_snapshot_groups_by_server():
 
 
 def test_build_mcp_tools_snapshot_empty_servers():
-    from tools.mcp_snapshot import build_mcp_tools_snapshot
+    from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
     assert build_mcp_tools_snapshot({}, {}) == {}
     assert build_mcp_tools_snapshot({"mcp-servers": {}}, {"read_file": {"description": "x"}}) == {}
 
 
 def test_snapshot_includes_status_and_description():
-    from tools.mcp_snapshot import build_mcp_tools_snapshot
+    from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
     config = {"mcp-servers": {
         "office": {"transport": "stdio", "command": "office-mcp", "description": "Read office docs"},
         "computer": {"transport": "stream_stdio", "command": "computer-mcp", "description": "GUI control"},
@@ -41,7 +41,7 @@ def test_snapshot_includes_status_and_description():
 
 
 def test_snapshot_without_status_defaults_unknown():
-    from tools.mcp_snapshot import build_mcp_tools_snapshot
+    from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
     config = {"mcp-servers": {"office": {"transport": "stdio", "command": "office-mcp"}}}
     snap = build_mcp_tools_snapshot(config, {}, None)
     assert snap["office"]["status"] == "unknown"
@@ -50,8 +50,8 @@ def test_snapshot_without_status_defaults_unknown():
 
 def test_update_runtime_meta_mcp_tools_visible_to_filestore(tmp_path):
     # Контракт: ядро пишет runtime.mcp_tools, TUI читает тот же meta-файл.
-    from thread_store import update_runtime_meta
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_core.thread_store import update_runtime_meta
+    from gc_tui.services.stores.file_store import FileTaskStore
     snap = {"search": [{"name": "mcp_search_web", "description": "web"}]}
     update_runtime_meta(str(tmp_path), "cli", "t1", {"mcp_tools": snap})
     store = FileTaskStore(str(tmp_path), system="cli")

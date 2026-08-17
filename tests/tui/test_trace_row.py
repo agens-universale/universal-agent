@@ -8,7 +8,7 @@ async def test_trace_row_composes_horizontal_with_two_statics():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from textual.widgets import Static
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import TraceRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -33,7 +33,7 @@ async def test_trace_row_kind_class_lands_on_widget():
     """
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import TraceRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -52,8 +52,8 @@ async def test_trace_row_ctrl_click_emits_open_event_request():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from textual import events
-    from tui.widgets.trace_row import TraceRow
-    from tui.messages import OpenEventRequest
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.messages import OpenEventRequest
 
     received: list[int] = []
 
@@ -85,8 +85,8 @@ async def test_trace_row_event_no_zero_does_not_emit():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from textual import events
-    from tui.widgets.trace_row import TraceRow
-    from tui.messages import OpenEventRequest
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.messages import OpenEventRequest
 
     received: list[int] = []
 
@@ -115,7 +115,7 @@ async def test_trace_row_focusable_default_true():
     самостоятельных одно-строчных событий: framework `[meta]`, `? think`, ...)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import TraceRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -132,7 +132,7 @@ async def test_trace_row_focusable_false_opts_out():
     """focusable=False → can_focus == False (для continuation prose, `* note:`)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import TraceRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -150,7 +150,7 @@ async def test_agent_reply_line_focusable_default_false():
     """Дефолт AgentReplyLine.can_focus == False (Static-наследник, обычно continuation)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -166,7 +166,7 @@ async def test_agent_reply_line_focusable_true_opt_in():
     """focusable=True → can_focus == True (для edge-case `только code-block`-событий)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     class _App(App):
         def compose(self) -> ComposeResult:

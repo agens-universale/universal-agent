@@ -12,8 +12,8 @@ _SKILLS = [
 async def test_rows_show_id_type_path():
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
@@ -31,8 +31,8 @@ async def test_rows_show_id_type_path():
 @pytest.mark.asyncio
 async def test_arrow_keys_move_selection():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
@@ -47,8 +47,8 @@ async def test_arrow_keys_move_selection():
 @pytest.mark.asyncio
 async def test_home_end_jump_selection():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
@@ -63,8 +63,8 @@ async def test_home_end_jump_selection():
 @pytest.mark.asyncio
 async def test_filter_narrows_by_id_and_path():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
@@ -82,16 +82,16 @@ async def test_filter_narrows_by_id_and_path():
 async def test_enter_opens_skill_viewer(monkeypatch):
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
-    from tui.screens.viewer import ViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
+    from gc_tui.screens.viewer import ViewerScreen
 
     class _Reg:
         def load_skill_detail(self, sid):
             return {"id": sid, "name": sid, "source": "user",
                     "root_path": "/usr/" + sid, "description": "d", "instructions": "i"}
 
-    monkeypatch.setattr("tools.skills.registry.get_skills_registry", lambda cfg: _Reg())
+    monkeypatch.setattr("gc_core.tools.skills.registry.get_skills_registry", lambda cfg: _Reg())
 
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS, config={"model": "M"}))
@@ -110,8 +110,8 @@ async def test_two_line_card_structure_and_count():
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
@@ -130,8 +130,8 @@ async def test_two_line_card_structure_and_count():
 @pytest.mark.asyncio
 async def test_filter_by_type_label():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
@@ -145,8 +145,8 @@ async def test_filter_by_type_label():
 async def test_skills_list_fills_screen_height():
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
     async with TuiApp().run_test(size=(80, 30)) as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()

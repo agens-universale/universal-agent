@@ -1,4 +1,4 @@
-from tui.screens.main import resolve_live_terminal_indicator_state as R
+from gc_tui.screens.main import resolve_live_terminal_indicator_state as R
 
 
 def test_step_limit_kind_preferred():

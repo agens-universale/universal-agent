@@ -3,13 +3,7 @@
 import json
 from pathlib import Path
 
-from thread_store import (
-    append_subagent_trace_record,
-    delete_thread,
-    read_subagent_trace,
-    reset_thread_files,
-    subagent_trace_path,
-)
+from gc_core.thread_store import append_subagent_trace_record, delete_thread, read_subagent_trace, reset_thread_files, subagent_trace_path
 
 
 def test_subagent_trace_path_shape(tmp_path: Path) -> None:
@@ -131,7 +125,7 @@ def test_reset_thread_files_removes_subagents_sidecar(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 import threading
 
-import thread_store as _ts
+from gc_core import thread_store as _ts
 
 
 def _append_call(threads_dir: str, seq_hint: int = 1) -> object:

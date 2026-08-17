@@ -1,5 +1,5 @@
-from tools.skills.registry import SkillsRegistry
-from tools.skills.skills_tools import get_skills_tools_data
+from gc_core.tools.skills.registry import SkillsRegistry
+from gc_core.tools.skills.skills_tools import get_skills_tools_data
 
 
 def test_skills_run_script_args_schema_is_strict_friendly(tmp_path):

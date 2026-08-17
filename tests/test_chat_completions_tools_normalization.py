@@ -2,10 +2,7 @@ import unittest
 
 from types import SimpleNamespace
 
-from utils.connect_backend import (
-    normalize_chat_completions_tools,
-    create_call_data_completions,
-)
+from gc_core.utils.connect_backend import normalize_chat_completions_tools, create_call_data_completions
 
 
 class ChatCompletionsToolsNormalizationTest(unittest.TestCase):

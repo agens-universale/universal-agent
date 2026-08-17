@@ -5,16 +5,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from tui.services.session_lock import (
-    TTL_SECONDS,
-    heartbeat,
-    is_fresh,
-    is_held_by_other,
-    lock_path,
-    read_lock,
-    release,
-    try_acquire,
-)
+from gc_tui.services.session_lock import TTL_SECONDS, heartbeat, is_fresh, is_held_by_other, lock_path, read_lock, release, try_acquire
 
 
 def _write_raw(path: Path, payload) -> None:
@@ -70,7 +61,7 @@ def test_empty_json_treated_as_stale(tmp_path):
 
 
 def test_acquire_lost_race(tmp_path, monkeypatch):
-    import tui.services.session_lock as mod
+    from gc_tui.services import session_lock as mod
 
     real_write = mod._write_lock
     calls = {"n": 0}

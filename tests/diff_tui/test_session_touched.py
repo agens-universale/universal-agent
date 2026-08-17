@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from diff_tui.service import DiffService
-from diff_tui.store import DiffStore
-from diff_tui.touched import TouchedJournal
-from runtime_notices import clear_runtime_notices
+from gc_core.config_modules import env_vars
+from gc_tui.diff_tui.service import DiffService
+from gc_tui.diff_tui.store import DiffStore
+from gc_tui.diff_tui.touched import TouchedJournal
+from gc_core.runtime_notices import clear_runtime_notices
 
 
 def _has_git() -> bool:

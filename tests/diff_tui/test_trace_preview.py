@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import json
 
-from config_modules import env_vars
-from diff_tui.service import DiffService
-from diff_tui.store import DiffStore
+from gc_core.config_modules import env_vars
+from gc_tui.diff_tui.service import DiffService
+from gc_tui.diff_tui.store import DiffStore
 
 
 def test_visual_diff_provides_preview_lines_for_pending(tmp_path, monkeypatch):
@@ -36,7 +36,7 @@ def test_visual_diff_provides_preview_lines_for_pending(tmp_path, monkeypatch):
 
 def test_created_file_preview_shows_content_not_headers(tmp_path, monkeypatch):
     """Trace-preview для created: +/- содержимое, не ---/+++/@@."""
-    from diff_tui.visual import preview_change_lines
+    from gc_tui.diff_tui.visual import preview_change_lines
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     root = tmp_path / "proj"

@@ -7,17 +7,17 @@ from unittest.mock import patch
 
 import yaml
 
-import config as cfgmod
-from config import load_config
-from intent_guard.validation_result import parse_validator_response
-from intent_scope.summarizer import build_fallback_aggregated_content
-from intent_log.user_turn import seed_subagent_current_user_intent
-from message_projection import configure_for_model_tags
-from project_memory import compaction
-from security import command_moderation
-from summarize import llm as summary_llm
-from summarize.summary_validation import merge_repaired_summary
-from summarize.working_memory_gateway import parse_memory_deltas
+from gc_core import config as cfgmod
+from gc_core.config import load_config
+from gc_core.intent_guard.validation_result import parse_validator_response
+from gc_core.intent_scope.summarizer import build_fallback_aggregated_content
+from gc_core.intent_log.user_turn import seed_subagent_current_user_intent
+from gc_core.message_projection import configure_for_model_tags
+from gc_core.project_memory import compaction
+from gc_core.security import command_moderation
+from gc_core.summarize import llm as summary_llm
+from gc_core.summarize.summary_validation import merge_repaired_summary
+from gc_core.summarize.working_memory_gateway import parse_memory_deltas
 
 _DIRTY_EXTRA = (
     "<think>t</think><redacted_thinking>r</redacted_thinking>"
@@ -73,7 +73,7 @@ def test_parse_memory_deltas_expects_projected_input():
 
 
 def test_merge_repaired_summary_on_clean_inputs():
-    from summarize.summary_spec import assemble_summary_xml, section_tags
+    from gc_core.summarize.summary_spec import assemble_summary_xml, section_tags
 
     repaired = assemble_summary_xml({t: f"- {t}" for t in section_tags()})
     merged = merge_repaired_summary(invalid_text=repaired, repaired_text=repaired)

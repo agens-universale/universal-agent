@@ -1,4 +1,4 @@
-from tui.services.onboarding_summary import summary_line
+from gc_tui.services.onboarding_summary import summary_line
 
 
 def test_skeleton_all_empty():

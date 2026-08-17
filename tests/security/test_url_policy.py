@@ -1,12 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from security.url_policy import (
-    enforce_url_policy,
-    match_url_blacklist,
-    parse_and_validate_url,
-    validate_url_policy,
-)
+from gc_core.security.url_policy import enforce_url_policy, match_url_blacklist, parse_and_validate_url, validate_url_policy
 
 
 class _Logger:
@@ -123,7 +118,7 @@ def test_enforce_url_policy_mode_allow_passes_with_audit():
 
 def test_enforce_url_policy_mode_ask_confirmed_passes(monkeypatch):
     """mode=ask + confirm → URL пропускается + audit policy_ask_confirmed."""
-    import security.confirm_port as _cp
+    from gc_core.security import confirm_port as _cp
     monkeypatch.setattr(_cp, "confirm_available", lambda ctx: True)
     monkeypatch.setattr(_cp, "request_confirm", lambda **_: True)
 
@@ -151,7 +146,7 @@ def test_enforce_url_policy_mode_ask_confirmed_passes(monkeypatch):
 
 def test_enforce_url_policy_mode_ask_declined_blocks(monkeypatch):
     """mode=ask + decline → блок, error.type = url_blocked_by_policy_cancelled_by_user."""
-    import security.confirm_port as _cp
+    from gc_core.security import confirm_port as _cp
     monkeypatch.setattr(_cp, "confirm_available", lambda ctx: True)
     monkeypatch.setattr(_cp, "request_confirm", lambda **_: False)
 

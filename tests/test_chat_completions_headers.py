@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from utils.connect_backend import create_call_headers
+from gc_core.utils.connect_backend import create_call_headers
 
 
 class _StateStub:

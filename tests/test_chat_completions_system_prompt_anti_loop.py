@@ -2,10 +2,11 @@
 
 import re
 from pathlib import Path
+from tests.paths import ASSETS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ORCHESTRATOR_PROMPT_PATH = REPO_ROOT / "prompts" / "chat_completions_system_prompt.md"
-SUBAGENT_PROMPT_PATH = REPO_ROOT / "prompts" / "chat_completions_subagent_system_prompt.md"
+ORCHESTRATOR_PROMPT_PATH = ASSETS / "prompts" / "chat_completions_system_prompt.md"
+SUBAGENT_PROMPT_PATH = ASSETS / "prompts" / "chat_completions_subagent_system_prompt.md"
 
 FORBIDDEN_BUILTIN_NAMES = (
     # to-be API names (§7.4)

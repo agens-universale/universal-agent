@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import run_summary_coordinator as rsc
-from run_summary_coordinator import RunSummaryCoordinator
+from gc_core import run_summary_coordinator as rsc
+from gc_core.run_summary_coordinator import RunSummaryCoordinator
 
 
 def _minimal_state(*, messages: list, backend_api_mode: str = "chat_completions"):

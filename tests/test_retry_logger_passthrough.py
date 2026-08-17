@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from utils.retry import retry_with_backoff
+from gc_core.utils.retry import retry_with_backoff
 
 
 def test_logger_kwarg_forwarded_when_function_accepts_it():

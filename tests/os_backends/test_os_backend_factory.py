@@ -2,10 +2,10 @@ import asyncio
 
 import pytest
 
-from run_context import create_run_context
-from backends.factory import parse_os_backend_kind, resolve_os_backend
-from backends.harbor import HarborBackend
-from backends.local import LocalFsBackend
+from gc_core.run_context import create_run_context
+from gc_core.backends.factory import parse_os_backend_kind, resolve_os_backend
+from gc_core.backends.harbor import HarborBackend
+from gc_core.backends.local import LocalFsBackend
 
 
 def test_parse_os_backend_defaults_to_local():
@@ -55,7 +55,7 @@ def test_create_run_context_sets_local_os_backend():
 
 
 def test_create_run_context_tui_wraps_tracking():
-    from diff_tui.tracking import TrackingFsBackend
+    from gc_tui.diff_tui.tracking import TrackingFsBackend
 
     ctx = create_run_context(
         {"backend_api_mode": "chat_completions", "save_logs": False},

@@ -1,6 +1,6 @@
 import pytest
 from textual.app import App
-from tui.widgets.stream_block import StreamBlock
+from gc_tui.widgets.stream_block import StreamBlock
 
 
 @pytest.mark.asyncio

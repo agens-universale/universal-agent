@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from persistence.thread_meta_mapper import ThreadMetaMapper
-from usage.account import CATEGORY_MAIN, CATEGORY_SUBAGENT, UsageAccount
+from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUBAGENT, UsageAccount
 
 
 def _fake_state(usage: UsageAccount) -> SimpleNamespace:

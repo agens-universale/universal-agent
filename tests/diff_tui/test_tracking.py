@@ -10,18 +10,18 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from diff_tui.paths import orig_key
-from diff_tui.store import DiffStore
-from diff_tui.touched import TouchedJournal
-from diff_tui.tracking import TrackingFsBackend, wrap_local_for_tui
-from execution_workspace import build_execution_workspace
+from gc_core.config_modules import env_vars
+from gc_tui.diff_tui.paths import orig_key
+from gc_tui.diff_tui.store import DiffStore
+from gc_tui.diff_tui.touched import TouchedJournal
+from gc_tui.diff_tui.tracking import TrackingFsBackend, wrap_local_for_tui
+from gc_core.execution_workspace import build_execution_workspace
 from tests.helpers.tool_ctx import local_ctx
-from backends.local import LocalFsBackend
-from tools.fs.append_to_file import AppendToFile
-from tools.fs.apply_file_edits import ApplyFileEdits
-from tools.fs.search_and_replace import SearchAndReplace
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.backends.local import LocalFsBackend
+from gc_core.tools.fs.append_to_file import AppendToFile
+from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
+from gc_core.tools.fs.search_and_replace import SearchAndReplace
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 
 def _has_git() -> bool:
@@ -265,10 +265,10 @@ def test_wrap_skips_non_local():
 
 
 def test_tools_do_not_import_diff_tui():
-    import tools.fs.write_to_file_tool as w
-    import tools.fs.append_to_file as a
-    import tools.fs.search_and_replace as s
-    import tools.fs.apply_file_edits as e
+    from gc_core.tools.fs import write_to_file_tool as w
+    from gc_core.tools.fs import append_to_file as a
+    from gc_core.tools.fs import search_and_replace as s
+    from gc_core.tools.fs import apply_file_edits as e
 
     for mod in (w, a, s, e):
         src = Path(mod.__file__).read_text(encoding="utf-8")

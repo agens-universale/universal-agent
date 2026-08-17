@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from project_memory import storage
-from project_memory.storage import ProjectMemoryError, ProjectMemoryStat
+from gc_core.project_memory import storage
+from gc_core.project_memory.storage import ProjectMemoryError, ProjectMemoryStat
 
 
 def test_stat_missing_returns_zero(tmp_path):

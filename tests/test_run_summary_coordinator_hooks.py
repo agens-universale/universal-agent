@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import run_summary_coordinator as rsc
-from run_summary_coordinator import RunSummaryCoordinator
+from gc_core import run_summary_coordinator as rsc
+from gc_core.run_summary_coordinator import RunSummaryCoordinator
 
 
 def _minimal_state(*, messages: list):
@@ -52,7 +52,7 @@ def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub)
     captured: dict = {}
 
     def capture(**kwargs):
-        from summarize.compaction import without_system_messages
+        from gc_core.summarize.compaction import without_system_messages
 
         st = kwargs["state"]
         captured["non_system"] = without_system_messages(list(st.messages))

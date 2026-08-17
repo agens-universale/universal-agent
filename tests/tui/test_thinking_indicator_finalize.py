@@ -35,7 +35,7 @@ async def wait_for_event_kind(pilot, kind: str) -> None:
 
 async def wait_for_indicator_state(pilot, state: str) -> None:
     """Дождаться state индикатора после смены _last_event_kind (лаг 1 тик poll)."""
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     def cond() -> bool:
         _screen(pilot)._poll_active()
@@ -190,8 +190,8 @@ async def test_submit_solution_event_switches_indicator_to_validating(tmp_path):
     """submit_solution-event переключает индикатор в режим "validating"
     немедленно + _last_event_kind == '_finalized'. Без 1.5с задержки."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     fake = _BlockingFake(
         records=[_submit_solution_record(report="Готово, вот ответ.")],
@@ -219,8 +219,8 @@ async def test_poll_active_keeps_validating_state_until_runner_exits(tmp_path):
     """После finalize индикатор остаётся в "validating" режиме на всех тиках
     поллинга, пока runner жив. Не переключается обратно на "thinking"."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     fake = _BlockingFake(
         records=[_submit_solution_record()],
@@ -257,8 +257,8 @@ async def test_synthetic_submit_solution_output_does_not_reset_sentinel(tmp_path
     `"tool": "submit_solution"`. Без расширенного фильтра в trace_mapper
     он мапился как kind='result' и затирал sentinel — индикатор re-mount'ился."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     fake = _BlockingFake(
         records=[
@@ -297,8 +297,8 @@ async def test_policy_event_after_finalized_switches_back_to_thinking(tmp_path):
     индикатор обратно в "thinking": _last_event_kind переходит в 'system',
     _poll_active меняет state с validating на thinking."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     fake = _BlockingFake(
         records=[
@@ -331,7 +331,7 @@ async def test_new_user_send_clears_finalized(tmp_path):
 
     Проверяем напрямую через _reset_thinking_timer (вызывается в трёх send-путях)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     fake = _BlockingFake(
         records=[_submit_solution_record()],
@@ -357,7 +357,7 @@ async def test_new_user_send_clears_finalized(tmp_path):
 async def test_reset_render_state_clears_finalized(tmp_path):
     """_reset_render_state (новая задача / stream_reset) сбрасывает sentinel."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     fake = _BlockingFake(
         records=[_submit_solution_record()],
@@ -384,8 +384,8 @@ async def test_ask_human_active_hides_thinking_indicator(tmp_path):
     обманывает — он не работает, банер ask_human уже говорит «нужен ответ».
     Индикатор должен быть скрыт пока ask_human_state не сброшен."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     fake = _BlockingFake(
         records=[_ask_human_record(question="Выбери: A или B?")],
@@ -419,8 +419,8 @@ async def test_runner_not_running_shows_terminal_state_after_finalized(tmp_path)
 
     Sentinel не должен мешать (path-coverage / defensive)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     fake = _BlockingFake(
         records=[_submit_solution_record()],

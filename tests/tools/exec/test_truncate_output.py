@@ -4,7 +4,7 @@
 Бюджет max_chars — на голову+хвост; маркер omitted между ними в бюджет не вжимается.
 """
 
-from tools.exec.truncate_output import MARKER_TEMPLATE, truncate_head_tail
+from gc_core.tools.exec.truncate_output import MARKER_TEMPLATE, truncate_head_tail
 
 
 def test_no_truncation_when_within_budget():

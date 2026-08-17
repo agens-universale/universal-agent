@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from tui.services.agent_runner import AgentRunner
+from gc_tui.services.agent_runner import AgentRunner
 
 
 class _FakeExecutor:
@@ -72,7 +72,7 @@ def test_runner_double_start_rejected():
 
 def test_submit_ask_human_reply_terminates_real_read_loop():
     """Fake executor running ask_human's actual read-loop must complete with the answer."""
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
 
     captured = {}
 
@@ -98,7 +98,7 @@ def test_submit_ask_human_reply_terminates_real_read_loop():
 
 def test_cancel_ask_human_yields_empty_response():
     """cancel → пустая строка → read-loop ломается сразу → пустой ответ."""
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
 
     captured = {}
 
@@ -143,7 +143,7 @@ def test_start_passes_message_id_as_message_ids():
 @pytest.mark.asyncio
 async def test_runner_start_passes_discard_writes_after_stop_kwarg():
     """AgentRunner.start вызывает executor.run с discard_writes_after_stop=True."""
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
 
     calls = []
     class _StubExec:
@@ -275,7 +275,7 @@ def test_stop_during_factory_build_skips_run():
 
 
 def test_ensure_executor_build_once():
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
     calls = {"n": 0}
 
     class _Ex:
@@ -293,7 +293,7 @@ def test_ensure_executor_build_once():
 
 def test_warm_builds_executor_in_background():
     import time
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
     calls = {"n": 0}
 
     class _Ex:
@@ -311,7 +311,7 @@ def test_warm_builds_executor_in_background():
 
 def test_warm_idempotent():
     import time
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
     calls = {"n": 0}
 
     class _Ex:

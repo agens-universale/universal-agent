@@ -11,11 +11,11 @@ from uuid import UUID
 
 import pytest
 
-from config_modules.stored_outputs import DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS
-from tools.exec.execute_command import ExecuteCommand
-from tools.exec.run_python_code import RunPythonCode
-from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
-from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from gc_core.config_modules.stored_outputs import DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS
+from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
+from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 
 from tests.helpers.tool_ctx import with_local_ctx
 
@@ -139,7 +139,7 @@ class TestExecuteCommandPreview:
         original_exec = tool._backend.exec
 
         def fake_exec(command, *, cwd=None, timeout=None, env=None):
-            from backends.protocol import ExecResult
+            from gc_core.backends.protocol import ExecResult
             return ExecResult(
                 stdout="short",
                 stderr="",
@@ -365,7 +365,7 @@ class TestExecEnvelopeUnifiedWrap:
         state = _make_state()
         config = {"tool_output_inline_max_chars": 50}
         tool_res = json.dumps({"type": "stored_tool_output", "content": "x" * 200})
-        from constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME
+        from gc_core.constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME
         result = maybe_store_and_wrap_tool_output(
             tool_res, call_id="c5", tool_name=READ_STORED_TOOL_OUTPUT_NAME,
             state=state, config=config,

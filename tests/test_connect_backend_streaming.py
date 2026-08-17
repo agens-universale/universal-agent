@@ -2,7 +2,7 @@ import json
 import types
 import pytest
 import requests
-from utils import connect_backend
+from gc_core.utils import connect_backend
 
 
 class _FakeStreamResponse:

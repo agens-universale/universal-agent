@@ -4,9 +4,9 @@ import sys
 # arg_parser.py парсит sys.argv на import — подменяем argv до импорта cli.
 sys.argv = ["gc-cli", "--check-update"]
 
-import cli  # noqa: E402
-from updater.check import CheckResult  # noqa: E402
-from updater.source import UpdateSource  # noqa: E402
+from gc_cli import cli
+from gc_core.updater.check import CheckResult
+from gc_core.updater.source import UpdateSource
 
 
 def _fake_run_args(config=None):

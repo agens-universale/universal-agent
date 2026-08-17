@@ -1,7 +1,7 @@
 """trace_mapper: session_todo → kind=todo (чек-лист), output глушится."""
 import json
 
-from tui.services.trace_mapper import map_message
+from gc_tui.services.trace_mapper import map_message
 
 ARGS = {"todos": [
     {"content": "Изучить код", "status": "completed"},
@@ -80,7 +80,7 @@ def test_render_content_first_line_combines_title_and_summary():
 def test_garbage_arguments_do_not_map_to_todo_kind():
     """Битые аргументы -> обычное call-событие (механика покажет статус),
     а не чек-лист с враньём «очищен»."""
-    from tui.services.trace_mapper import map_message
+    from gc_tui.services.trace_mapper import map_message
     ev = map_message(
         {"type": "function_call", "name": "session_todo", "call_id": "c1",
          "arguments": "оборванный json{{{"},
@@ -92,7 +92,7 @@ def test_garbage_arguments_do_not_map_to_todo_kind():
 def test_failed_output_is_not_suppressed():
     """ok:false-результат session_todo НЕ глушится: ошибка вызова видна."""
     import json as _json
-    from tui.services.trace_mapper import map_message
+    from gc_tui.services.trace_mapper import map_message
     out = _json.dumps({"tool": "session_todo", "ok": False,
                        "error": {"type": "invalid_todos", "message": "bad"},
                        "message": "Checklist NOT changed."})
@@ -105,7 +105,7 @@ def test_failed_output_is_not_suppressed():
 
 def test_ok_output_still_suppressed():
     import json as _json
-    from tui.services.trace_mapper import map_message
+    from gc_tui.services.trace_mapper import map_message
     out = _json.dumps({"tool": "session_todo", "ok": True, "count": 2,
                        "message": "Checklist replaced: 2 items."})
     ev = map_message(

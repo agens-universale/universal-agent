@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from mcp_runtime.env import augment_process_env, resolve_mcp_command
+from gc_core.mcp_runtime.env import augment_process_env, resolve_mcp_command
 from recommended_mcp.manifest import RunSpec
 
 
@@ -19,7 +19,7 @@ class SupervisorError(RuntimeError):
 
 
 def default_pids_dir() -> Path:
-    from mcp_runtime.paths import recommended_mcp_data_dir
+    from gc_core.mcp_runtime.paths import recommended_mcp_data_dir
 
     path = recommended_mcp_data_dir() / "pids"
     path.mkdir(parents=True, exist_ok=True)

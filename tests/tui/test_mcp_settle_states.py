@@ -1,4 +1,4 @@
-from tui.services.mcp_progress import format_mcp_settle
+from gc_tui.services.mcp_progress import format_mcp_settle
 
 
 def _srv(ok):

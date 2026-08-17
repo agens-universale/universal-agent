@@ -5,7 +5,7 @@ import json, pytest
 @pytest.mark.asyncio
 async def test_event_ts_populated_from_record_ts(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "tts"
     rec = {"type": "message", "seq": 1, "ts": "2026-06-04T10:00:00Z",
            "payload": {"id": "u1", "role": "user", "content": "hi"}}

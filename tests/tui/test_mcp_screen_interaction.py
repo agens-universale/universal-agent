@@ -10,8 +10,8 @@ SNAP = {
 
 
 async def _open(tmp_path):
-    from tui.app import TuiApp
-    from tui.screens.mcp import McpScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.mcp import McpScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
     scr = McpScreen(config={}, tools_snapshot=dict(SNAP))
     return app, scr
@@ -103,8 +103,8 @@ async def test_arrows_move_focus_when_content_overflows(tmp_path):
 async def test_keys_on_empty_screen_do_not_crash(tmp_path):
     # Нет карточек (пустой снапшот) — клавиши не должны ронять экран.
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.mcp import McpScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.mcp import McpScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
     scr = McpScreen(config={}, tools_snapshot={})
     async with app.run_test() as pilot:

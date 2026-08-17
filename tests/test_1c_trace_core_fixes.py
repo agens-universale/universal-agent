@@ -2,11 +2,11 @@
 import hashlib
 import json
 
-from states import State
-from tools.fs.append_to_file import AppendToFile
-from tools.fs.apply_file_edits import ApplyFileEdits
-from tools.fs.search_and_replace import SearchAndReplace
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.states import State
+from gc_core.tools.fs.append_to_file import AppendToFile
+from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
+from gc_core.tools.fs.search_and_replace import SearchAndReplace
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 from tests.helpers.tool_ctx import with_local_ctx
 
 
@@ -20,9 +20,7 @@ def _fresh_state():
     state.shared = None
     state.user_intent_log = []
     state.current_user_intent = []
-    from tools.session.stored_outputs.tool_call_outputs_store import (
-        ToolCallOutputsStore,
-    )
+    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
     state.tool_call_outputs_store = ToolCallOutputsStore(max_entries=10)
     return state
 
@@ -30,7 +28,7 @@ def _fresh_state():
 # ---------- D-2 ----------
 
 def test_compaction_emits_dropped_messages_via_callback():
-    from summarize.compaction import apply_summary_state_patch
+    from gc_core.summarize.compaction import apply_summary_state_patch
 
     state = _fresh_state()
     archived: list = []
@@ -74,7 +72,7 @@ def test_compaction_emits_dropped_messages_via_callback():
 
 
 def test_compaction_without_callback_does_not_retain_dropped():
-    from summarize.compaction import apply_summary_state_patch
+    from gc_core.summarize.compaction import apply_summary_state_patch
 
     state = _fresh_state()
     system = {"role": "system", "content": "sys"}
@@ -99,7 +97,7 @@ def test_compaction_without_callback_does_not_retain_dropped():
 
 
 def test_compaction_callback_errors_do_not_fail_patch():
-    from summarize.compaction import apply_summary_state_patch
+    from gc_core.summarize.compaction import apply_summary_state_patch
 
     state = _fresh_state()
 

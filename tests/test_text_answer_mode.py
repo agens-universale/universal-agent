@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from intent_guard.text_answer_judge import should_return_text_answer
+from gc_core.intent_guard.text_answer_judge import should_return_text_answer
 
 
 def _ctx(mode):

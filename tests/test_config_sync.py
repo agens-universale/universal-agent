@@ -1,8 +1,8 @@
 """config_sync: ре-материализация user config.yml из свежего шаблона."""
 import pytest
 
-import config_sync
-import config_modules.compat as compat
+from gc_core import config_sync
+from gc_core.config_modules import compat as compat
 
 TEMPLATE = (
     "backend:\n"
@@ -109,7 +109,7 @@ def test_needs_sync_false_when_nothing_to_update():
 def test_sync_real_template_over_its_own_copy(tmp_path):
     """Sync копии реального шаблона на сам шаблон: без unknown, файл валиден."""
     from pathlib import Path as P
-    from config import _default_config_path
+    from gc_core.config import _default_config_path
     real = P(_default_config_path()).read_text(encoding="utf-8")
     cfg = tmp_path / "config.yml"
     cfg.write_text(real, encoding="utf-8")

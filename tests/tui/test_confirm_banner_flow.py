@@ -29,8 +29,8 @@ async def test_confirm_banner_y_answers_once(tmp_path):
     """«y» при активном баннере: submit_confirm_reply("once"), баннер снят."""
     pytest.importorskip("textual")
     from textual.containers import Horizontal
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -62,8 +62,8 @@ async def test_confirm_banner_y_answers_once(tmp_path):
 async def test_confirm_banner_s_answers_session(tmp_path):
     """«s» при активном баннере: submit_confirm_reply("session")."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -87,8 +87,8 @@ async def test_confirm_banner_s_answers_session(tmp_path):
 async def test_confirm_banner_n_answers_deny(tmp_path):
     """«n» при активном баннере: submit_confirm_reply("deny")."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -113,8 +113,8 @@ async def test_confirm_banner_escape_answers_deny(tmp_path):
     """Esc при активном баннере: submit_confirm_reply("deny"), не проваливается
     в глобальную Esc-лестницу (нет exit-модалки)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -140,8 +140,8 @@ async def test_confirm_banner_escape_answers_deny(tmp_path):
 async def test_confirm_banner_enter_default_answers_once(tmp_path):
     """Enter без навигации (selected==0): submit_confirm_reply("once")."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -165,8 +165,8 @@ async def test_confirm_banner_enter_default_answers_once(tmp_path):
 async def test_confirm_banner_down_then_enter_answers_session(tmp_path):
     """↓ + Enter (selected==1): submit_confirm_reply("session")."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -196,8 +196,8 @@ async def test_ctrl_c_during_init_style_confirm_cancels_and_hides_banner(tmp_pat
     Ctrl+C → cancel_confirm вызван, баннер снят, run НЕ остановлен (не было живого)."""
     pytest.importorskip("textual")
     from textual.containers import Horizontal
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner(running=False)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -232,8 +232,8 @@ async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(tmp_path):
     Ctrl+C → cancel_confirm вызван, баннер снят, раннер остановлен."""
     pytest.importorskip("textual")
     from textual.containers import Horizontal
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner(running=True)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -267,8 +267,8 @@ async def test_reset_render_state_clears_confirm_banner(tmp_path):
     """Backstop: _reset_render_state при _confirm_active=True → баннер снят, cancel вызван."""
     pytest.importorskip("textual")
     from textual.containers import Horizontal
-    from tui.app import TuiApp
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner(running=False)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",

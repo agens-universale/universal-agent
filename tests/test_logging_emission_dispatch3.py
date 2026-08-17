@@ -22,7 +22,7 @@ from unittest.mock import patch
 # runs deterministically under any pytest invocation.
 sys.argv = ["gc-cli", "-q", "x"]
 
-from utils.logging_module import create_run_logger
+from gc_core.utils.logging_module import create_run_logger
 
 
 def _make_logger(tmp_path, level="info"):
@@ -55,8 +55,8 @@ def _records(path):
 
 
 def test_build_run_usage_dict_shape():
-    from usage.account import UsageAccount
-    from usage.report import build_run_usage_dict
+    from gc_core.usage.account import UsageAccount
+    from gc_core.usage.report import build_run_usage_dict
 
     account = UsageAccount()
     account.add("main", input_tokens=100, output_tokens=50, cached_tokens=10)
@@ -74,8 +74,8 @@ def test_build_run_usage_dict_shape():
 
 
 def test_build_run_usage_dict_empty_account_returns_none():
-    from usage.account import UsageAccount
-    from usage.report import build_run_usage_dict
+    from gc_core.usage.account import UsageAccount
+    from gc_core.usage.report import build_run_usage_dict
 
     assert build_run_usage_dict(UsageAccount(), pricing=None, model_name="CodeChat") is None
 
@@ -121,7 +121,7 @@ def _base_ctx(logger, logging_path, thread_dir):
 
 
 def test_run_usage_event_emitted_at_end_of_run(tmp_path):
-    import agent_executor as agent_executor_module
+    from gc_core import agent_executor as agent_executor_module
 
     logger, logging_path = _make_logger(tmp_path)
 
@@ -159,7 +159,7 @@ def test_run_usage_event_emitted_at_end_of_run(tmp_path):
 
 
 def test_run_usage_event_not_emitted_when_no_usage(tmp_path):
-    import agent_executor as agent_executor_module
+    from gc_core import agent_executor as agent_executor_module
 
     logger, logging_path = _make_logger(tmp_path)
 
@@ -185,7 +185,7 @@ def test_run_usage_event_not_emitted_when_no_usage(tmp_path):
 
 
 def test_final_answer_event_is_top_level_event_field(tmp_path):
-    import cli as cli_module
+    from gc_cli import cli as cli_module
 
     logger, logging_path = _make_logger(tmp_path)
     ctx = SimpleNamespace(logger=logger)

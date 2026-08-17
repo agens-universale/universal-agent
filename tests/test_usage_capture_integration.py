@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-import utils.connect_backend as cb
-from usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
-from usage.context import usage_scope
+from gc_core.utils import connect_backend as cb
+from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
+from gc_core.usage.context import usage_scope
 
 
 class _FakeResponse:

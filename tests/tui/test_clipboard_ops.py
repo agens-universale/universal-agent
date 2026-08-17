@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tui.services import clipboard_ops
+from gc_tui.services import clipboard_ops
 
 
 def _app(*, notify=None):

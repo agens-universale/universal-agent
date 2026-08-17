@@ -7,7 +7,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_startup_block_collapsed_shows_max_three(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     # agent_md_path задан + agentsmd_override → notice agentsmd_override_ignored в TUI
     cfg = {"model": "M", "backend_api_mode": "chat_completions",
            "stop_tools": ["bogus1", "bogus2"], "agentsmd_override": True,
@@ -26,7 +26,7 @@ async def test_notices_summary_in_card_not_trace(tmp_path):
     НЕТ блока-заголовка «Уведомления» — детали только на экране /notices."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     cfg = {"model": "M", "stop_tools": ["bogus1"],
            "deprecated_keys_used": ["backend.stream"]}
     async with TuiApp(threads_dir=str(tmp_path / "t"), config=cfg).run_test() as pilot:
@@ -47,7 +47,7 @@ async def test_notices_summary_in_card_not_trace(tmp_path):
 async def test_notices_line_format_b_glyph_and_breakdown(tmp_path):
     """Формат B: ведущий severity-глиф, разбивка по уровням, без слова «уведомления»."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     # stop_tools_unknown + agentsmd_override_ignored — оба warning, без info: чистый warn-only случай.
     cfg = {"model": "M", "stop_tools": ["bogus1"], "agentsmd_override": True,
            "agent_md_path": "/some/agent.md"}
@@ -58,7 +58,7 @@ async def test_notices_line_format_b_glyph_and_breakdown(tmp_path):
         assert "уведомления:" not in card                       # слово убрано
         assert "⚠ 2 · F4/notices" in card                    # 2 warning'а, формат B
         # строка уведомлений — базовым цветом карточки, без амбер-подсветки глифа
-        from tui.palette import WARN
+        from gc_tui.palette import WARN
         t = scr._compose_card_lines(None)
         assert not any(sp.style == WARN for sp in t.spans)
 
@@ -66,7 +66,7 @@ async def test_notices_line_format_b_glyph_and_breakdown(tmp_path):
 def test_compose_card_lines_return_annotation_matches_actual_type():
     """M2: _compose_card_lines собирает и возвращает rich.text.Text (не str) —
     аннотация врала `-> str`."""
-    from tui.screens.main import TraceScreen
+    from gc_tui.screens.main import TraceScreen
     assert TraceScreen._compose_card_lines.__annotations__["return"] == "Text"
 
 
@@ -74,7 +74,7 @@ def test_compose_card_lines_return_annotation_matches_actual_type():
 async def test_no_notices_line_when_clean_config(tmp_path):
     """Без уведомлений — строки «уведомления:» в карточке нет, готовность простая."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     cfg = {"model": "M"}
     async with TuiApp(threads_dir=str(tmp_path / "t"), config=cfg).run_test() as pilot:
         scr = pilot.app.screen
@@ -89,8 +89,8 @@ async def test_update_available_line_in_card_teal(tmp_path):
     """При найденном обновлении (async авто-чек) в карточке — постоянная строка
     «↑ доступна новая версия · Настройки → Обновление» accent-цветом; refresh дорисовывает."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.palette import ACCENT
+    from gc_tui.app import TuiApp
+    from gc_tui.palette import ACCENT
     cfg = {"model": "M"}
     async with TuiApp(threads_dir=str(tmp_path / "t"), config=cfg).run_test() as pilot:
         scr = pilot.app.screen
@@ -111,8 +111,8 @@ async def test_notices_screen_includes_update_available(tmp_path):
     M1: текст уведомления — БЕЗ ведущего ↑ (NoticesScreen._notice_text сам подставляет
     глиф уровня — иначе рендерится «ℹ ↑ доступна…», двойной глиф)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.notices import NoticesScreen, _notice_text
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.notices import NoticesScreen, _notice_text
     cfg = {"model": "M"}
     async with TuiApp(threads_dir=str(tmp_path / "t"), config=cfg).run_test() as pilot:
         await pilot.pause()
@@ -135,12 +135,12 @@ async def test_auto_check_updates_main_card_when_other_screen_on_top(tmp_path, m
     всю сессию."""
     pytest.importorskip("textual")
     import time as time_mod
-    import updater.source as source_mod
-    import updater.check as check_mod
-    from updater.check import CheckResult
-    from updater.source import UpdateSource
-    from tui.app import TuiApp
-    from tui.screens.settings import SettingsScreen
+    from gc_core.updater import source as source_mod
+    from gc_core.updater import check as check_mod
+    from gc_core.updater.check import CheckResult
+    from gc_core.updater.source import UpdateSource
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.settings import SettingsScreen
 
     def _slow_resolved(*a, **k):
         return UpdateSource(url="https://x/y", ref="master", commit="old")
@@ -174,8 +174,8 @@ async def test_warning_toasts_fire_on_change_then_silent(tmp_path, monkeypatch):
     """Warning-уведомления всплывают тостом на 1-м старте (severity=warning), а на 2-м
     с ТЕМ ЖЕ набором — молчат (on-change; постоянная видимость держит карточка/notices)."""
     pytest.importorskip("textual")
-    import upgrade_gate
-    from tui.app import TuiApp
+    from gc_core import upgrade_gate
+    from gc_tui.app import TuiApp
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
     cfg = {"model": "M", "stop_tools": ["bogus1"], "deprecated_keys_used": ["backend.stream"]}
@@ -201,7 +201,7 @@ async def test_card_readiness_always_plain(tmp_path):
     """Строка готовности в карточке всегда простая «✓ готов к работе» (счётчики —
     на отдельной строке «уведомления:», не на готовности)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     cfg = {"model": "M", "stop_tools": ["bogus1"],
            "deprecated_keys_used": ["backend.stream"]}
     async with TuiApp(threads_dir=str(tmp_path / "t"), config=cfg).run_test() as pilot:

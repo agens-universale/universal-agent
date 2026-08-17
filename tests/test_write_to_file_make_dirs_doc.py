@@ -1,7 +1,7 @@
 """C2: описание make_dirs в fs_write_file — универсальное (создание родительских
 папок), без привязки к конкретному кейсу. Цель — чтобы агент знал про параметр и
 понимал, когда его звать (родительской папки нет)."""
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 
 def test_tool_description_documents_make_dirs():

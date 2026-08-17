@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from utils.logging_module import build_run_log_paths, create_run_logger
+from gc_core.utils.logging_module import build_run_log_paths, create_run_logger
 
 
 def test_build_run_log_paths_uses_logs_dump_dir(tmp_path):

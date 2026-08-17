@@ -1,4 +1,4 @@
-import request_backend_policy as policy
+from gc_core import request_backend_policy as policy
 
 
 def test_policy_forwards_on_delta(monkeypatch):

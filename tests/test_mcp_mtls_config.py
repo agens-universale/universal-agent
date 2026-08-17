@@ -1,7 +1,7 @@
 """mTLS-поля MCP-сервера (verify-ssl / client-cert / client-key) проходят схему
 и доходят до рантайма ssl_config — раньше extra=forbid резал их на загрузке."""
-from config_modules.mcp import McpServerConfig
-from utils.ssl_config import get_client_cert, get_verify_ssl
+from gc_core.config_modules.mcp import McpServerConfig
+from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
 
 
 def test_mcp_server_config_accepts_mtls_fields():

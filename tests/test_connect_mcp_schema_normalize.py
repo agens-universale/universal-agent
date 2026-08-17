@@ -8,10 +8,7 @@ to match.
 """
 from __future__ import annotations
 
-from tools.connect_mcp.agent_tools import (
-    _normalize_schema_recursive,
-    normalize_tool_spec_for_agent,
-)
+from gc_core.tools.connect_mcp.agent_tools import _normalize_schema_recursive, normalize_tool_spec_for_agent
 
 
 def test_normalize_preserves_anyof_without_forcing_type() -> None:

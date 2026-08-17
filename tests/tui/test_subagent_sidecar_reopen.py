@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from thread_store import append_subagent_trace_record
-from tui.services.subagent_sidecar_mapper import CHILD_SUMMARY_LABEL
-from tui.widgets.tool_call_row import ToolCallRow
-from tui.widgets.trace_row import TraceRow
+from gc_core.thread_store import append_subagent_trace_record
+from gc_tui.services.subagent_sidecar_mapper import CHILD_SUMMARY_LABEL
+from gc_tui.widgets.tool_call_row import ToolCallRow
+from gc_tui.widgets.trace_row import TraceRow
 
 
 def _write_parent_thread(tmp_path: Path, tid: str) -> None:
@@ -231,7 +231,7 @@ def _write_archived_subagent_thread(tmp_path: Path, tid: str) -> None:
 async def test_reopen_merges_nested_under_archived_subagent(tmp_path):
     """Приёмка #4: nested стыкуется к archived subagent_* в __pre_summary__."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "reopen_arch"
     _write_archived_subagent_thread(tmp_path, tid)
@@ -252,7 +252,7 @@ async def test_reopen_merges_nested_under_archived_subagent(tmp_path):
 @pytest.mark.asyncio
 async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "reopen_sub"
     _write_parent_thread(tmp_path, tid)

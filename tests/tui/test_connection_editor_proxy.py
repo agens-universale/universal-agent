@@ -7,7 +7,7 @@ pytest.importorskip("textual")
 from textual.app import App, ComposeResult
 from textual.widgets import Input
 
-from tui.editors.connection import ConnectionEditor
+from gc_tui.editors.connection import ConnectionEditor
 
 
 def _harness(editor):

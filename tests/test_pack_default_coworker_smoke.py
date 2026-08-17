@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+from tests.paths import ASSETS
 
 
-PACK_DIR = Path(__file__).resolve().parents[1] / "skills" / "default-coworker"
+PACK_DIR = ASSETS / "skills" / "default-coworker"
 
 EXPECTED_SKILL_IDS = {
     "using-default-coworker",
@@ -79,7 +80,7 @@ def test_inner_skills_do_not_reference_sibling_inners(skill_id):
 
 
 def test_registry_default_list_returns_only_bootstrap(tmp_path):
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent
     reg = SkillsRegistry(
@@ -97,7 +98,7 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
 
 
 def test_registry_pack_param_returns_all_internals(tmp_path):
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent
     reg = SkillsRegistry(

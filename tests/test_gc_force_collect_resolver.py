@@ -5,7 +5,7 @@ C3 (collect после батча тулов) — управляется эти�
 См. docs_md/actual/2026-07-29-gc-collect-placement-spec.md.
 """
 
-from config_modules.gc import gc_force_collect_enabled
+from gc_core.config_modules.gc import gc_force_collect_enabled
 
 
 class TestExplicitFlagOverrides:

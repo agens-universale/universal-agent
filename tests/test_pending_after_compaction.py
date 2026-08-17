@@ -5,10 +5,10 @@ import json
 import logging
 from types import SimpleNamespace
 
-import intent_guard.guard as intent_guard_guard
-import processing_responses as pr
-from intent_guard.validation_result import ValidationResult
-from states import State
+from gc_core.intent_guard import guard as intent_guard_guard
+from gc_core import processing_responses as pr
+from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.states import State
 
 
 def _make_state(*, max_steps: int = 5) -> State:

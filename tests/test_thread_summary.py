@@ -3,19 +3,10 @@ import os
 import tempfile
 import unittest
 
-from message_format.serialization import (
-    calc_history_chars_for_trigger,
-    calc_messages_chars_total,
-    message_text_for_summary,
-)
+from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total, message_text_for_summary
 from intent_fixtures import intent_user_ask_texts
-from intent_log import deserialize_list
-from thread_store import (
-    ThreadSession,
-    append_new_thread_messages,
-    load_thread_meta,
-    save_thread_meta,
-)
+from gc_core.intent_log import deserialize_list
+from gc_core.thread_store import ThreadSession, append_new_thread_messages, load_thread_meta, save_thread_meta
 
 
 class ThreadSummaryTest(unittest.TestCase):

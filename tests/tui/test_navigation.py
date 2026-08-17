@@ -5,125 +5,125 @@ import pytest
 @pytest.mark.asyncio
 async def test_ctrl_s_opens_sessions(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
         await pilot.press("ctrl+s")
         await pilot.pause()
-        from tui.screens.sessions import SessionsScreen
+        from gc_tui.screens.sessions import SessionsScreen
         assert isinstance(pilot.app.screen, SessionsScreen)
 
 
 @pytest.mark.asyncio
 async def test_esc_pops_screen(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
         await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
-        from tui.screens.main import TraceScreen
+        from gc_tui.screens.main import TraceScreen
         assert isinstance(pilot.app.screen, TraceScreen)
 
 
 @pytest.mark.asyncio
 async def test_f1_opens_help():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         await pilot.press("f1")
         await pilot.pause()
-        from tui.screens.help import HelpScreen
+        from gc_tui.screens.help import HelpScreen
         assert isinstance(pilot.app.screen, HelpScreen)
 
 
 @pytest.mark.asyncio
 async def test_f2_opens_sessions(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
         await pilot.press("f2")
         await pilot.pause()
-        from tui.screens.sessions import SessionsScreen
+        from gc_tui.screens.sessions import SessionsScreen
         assert isinstance(pilot.app.screen, SessionsScreen)
 
 
 @pytest.mark.asyncio
 async def test_ctrl_n_opens_new(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
         await pilot.press("ctrl+n")
         await pilot.pause()
-        from tui.screens.main import TraceScreen
+        from gc_tui.screens.main import TraceScreen
         assert isinstance(pilot.app.screen, TraceScreen)
 
 
 @pytest.mark.asyncio
 async def test_f5_opens_config():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         await pilot.press("f5")
         await pilot.pause()
-        from tui.screens.config import ConfigScreen
+        from gc_tui.screens.config import ConfigScreen
         assert isinstance(pilot.app.screen, ConfigScreen)
 
 
 @pytest.mark.asyncio
 async def test_ctrl_g_opens_config():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         await pilot.press("ctrl+g")
         await pilot.pause()
-        from tui.screens.config import ConfigScreen
+        from gc_tui.screens.config import ConfigScreen
         assert isinstance(pilot.app.screen, ConfigScreen)
 
 
 @pytest.mark.asyncio
 async def test_ctrl_d_opens_diff(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(config={"launch_root": str(tmp_path)}).run_test() as pilot:
         await pilot.press("ctrl+d")
         await pilot.pause()
-        from tui.screens.diff import DiffScreen
+        from gc_tui.screens.diff import DiffScreen
         assert isinstance(pilot.app.screen, DiffScreen)
 
 
 @pytest.mark.asyncio
 async def test_ctrl_o_opens_notices(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
         await pilot.press("ctrl+o")
         await pilot.pause()
-        from tui.screens.notices import NoticesScreen
+        from gc_tui.screens.notices import NoticesScreen
         assert isinstance(pilot.app.screen, NoticesScreen)
 
 
 @pytest.mark.asyncio
 async def test_ctrl_slash_opens_help():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         await pilot.press("ctrl+slash")
         await pilot.pause()
-        from tui.screens.help import HelpScreen
+        from gc_tui.screens.help import HelpScreen
         assert isinstance(pilot.app.screen, HelpScreen)
 
 
 @pytest.mark.asyncio
 async def test_f3_opens_diff(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp(config={"launch_root": str(tmp_path)}).run_test() as pilot:
         await pilot.press("f3")
         await pilot.pause()
-        from tui.screens.diff import DiffScreen
+        from gc_tui.screens.diff import DiffScreen
         assert isinstance(pilot.app.screen, DiffScreen)
 
 
@@ -136,10 +136,10 @@ async def test_tab_visits_each_event_once(tmp_path):
     from pathlib import Path
 
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.tool_call_row import ToolCallRow
-    from tui.widgets.trace_row import TraceRow
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     tid = "tab1"
     # Сценарий: user-reply (ev1) → agent prose из 2 prose-блоков (ev2)
@@ -161,7 +161,7 @@ async def test_tab_visits_each_event_once(tmp_path):
         await pilot.pause(0.2)
 
         # Импитируем рендер событий, как делает _render_records.
-        from tui.models import TraceEvent
+        from gc_tui.models import TraceEvent
         scr._render_event(TraceEvent(
             no=2, event_ts_utc_iso="...", kind="agent", title=None,
             summary="первая prose-строка\n\nвторая prose-строка",
@@ -208,9 +208,9 @@ async def test_tab_skips_agent_continuation_rows(tmp_path):
     from pathlib import Path
 
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.models import TraceEvent
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.trace_row import TraceRow
 
     tid = "tab2"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(

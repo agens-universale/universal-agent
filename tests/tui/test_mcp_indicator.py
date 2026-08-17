@@ -15,8 +15,8 @@ def _stub_factory(app) -> None:
 @pytest.mark.asyncio
 async def test_indicator_failed_settles_to_persistent_line(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.mcp_progress import McpProgress
+    from gc_tui.app import TuiApp
+    from gc_tui.services.mcp_progress import McpProgress
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     _stub_factory(app)
     async with app.run_test() as pilot:
@@ -53,8 +53,8 @@ async def test_indicator_warning_survives_trace_rebuild(tmp_path):
     """Предупреждение о недоступных MCP — часть стартовой шапки (как бренд):
     переживает пересборку #trace (первое сообщение / new / resume / stream_reset)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.mcp_progress import McpProgress
+    from gc_tui.app import TuiApp
+    from gc_tui.services.mcp_progress import McpProgress
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     _stub_factory(app)
     async with app.run_test() as pilot:
@@ -83,8 +83,8 @@ async def test_indicator_warning_survives_trace_rebuild(tmp_path):
 @pytest.mark.asyncio
 async def test_indicator_all_ok_settles_to_ready(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.mcp_progress import McpProgress
+    from gc_tui.app import TuiApp
+    from gc_tui.services.mcp_progress import McpProgress
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     _stub_factory(app)
     async with app.run_test() as pilot:
@@ -116,8 +116,8 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
     учтён упавший MCP) + одну «готов»; трейс чистый (нет блока «Уведомления»)."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.services.mcp_progress import McpProgress
+    from gc_tui.app import TuiApp
+    from gc_tui.services.mcp_progress import McpProgress
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "M", "mcp-servers": {"office": {}}})
     _stub_factory(app)

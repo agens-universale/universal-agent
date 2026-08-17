@@ -1,4 +1,4 @@
-from tools.fs.edit_suggestions import build_edit_miss_suggestions
+from gc_core.tools.fs.edit_suggestions import build_edit_miss_suggestions
 
 
 def test_extra_spaces_and_case_match_single_line():

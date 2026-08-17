@@ -1,6 +1,6 @@
 import json
 
-from tools.fs.search_files import SearchFiles
+from gc_core.tools.fs.search_files import SearchFiles
 
 
 from tests.helpers.tool_ctx import with_local_ctx

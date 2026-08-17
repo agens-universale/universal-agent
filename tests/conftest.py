@@ -18,8 +18,11 @@ from pathlib import Path
 
 import pytest
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
-_TOOLS_DIR = _SRC / "tools"
+# Исходники разъехались по пакетам — раскладку знает tests/paths.py.
+from tests.paths import module_dir, package_dir     # noqa: E402
+
+_CORE_SRC = package_dir("gc_core")
+_TOOLS_DIR = module_dir("tools")
 _MINIMAL_PRELOADED = False
 
 
@@ -34,7 +37,7 @@ def _mcp_runtime_available() -> bool:
 def _load_file_module(name: str, rel: str) -> types.ModuleType:
     if name in sys.modules:
         return sys.modules[name]
-    path = _SRC / rel
+    path = _CORE_SRC / rel
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {name} from {path}")
@@ -73,55 +76,56 @@ def preload_minimal_tools_package() -> None:
 
     _stub_optional_web_parsers()
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             del sys.modules[name]
 
-    tools_pkg = types.ModuleType("tools")
+    tools_pkg = types.ModuleType("gc_core.tools")
     tools_pkg.__path__ = [str(_TOOLS_DIR)]
-    sys.modules["tools"] = tools_pkg
+    sys.modules["gc_core.tools"] = tools_pkg
 
-    session_pkg = types.ModuleType("tools.session")
+    session_pkg = types.ModuleType("gc_core.tools.session")
     session_pkg.__path__ = [str(_TOOLS_DIR / "session")]
-    sys.modules["tools.session"] = session_pkg
+    sys.modules["gc_core.tools.session"] = session_pkg
     setattr(tools_pkg, "session", session_pkg)
 
-    stored_pkg = types.ModuleType("tools.session.stored_outputs")
+    stored_pkg = types.ModuleType("gc_core.tools.session.stored_outputs")
     stored_pkg.__path__ = [str(_TOOLS_DIR / "session" / "stored_outputs")]
-    sys.modules["tools.session.stored_outputs"] = stored_pkg
+    sys.modules["gc_core.tools.session.stored_outputs"] = stored_pkg
     setattr(session_pkg, "stored_outputs", stored_pkg)
     _load_file_module(
-        "tools.session.stored_outputs.tool_call_outputs_store",
+        "gc_core.tools.session.stored_outputs.tool_call_outputs_store",
         "tools/session/stored_outputs/tool_call_outputs_store.py",
     )
-    wrapping_mod = types.ModuleType("tools.session.stored_outputs.wrapping")
+    wrapping_mod = types.ModuleType("gc_core.tools.session.stored_outputs.wrapping")
     wrapping_mod.maybe_store_and_wrap_tool_output = lambda tool_res, **_kw: tool_res
-    sys.modules["tools.session.stored_outputs.wrapping"] = wrapping_mod
+    sys.modules["gc_core.tools.session.stored_outputs.wrapping"] = wrapping_mod
 
-    skills_pkg = types.ModuleType("tools.skills")
+    skills_pkg = types.ModuleType("gc_core.tools.skills")
     skills_pkg.__path__ = [str(_TOOLS_DIR / "skills")]
-    sys.modules["tools.skills"] = skills_pkg
+    sys.modules["gc_core.tools.skills"] = skills_pkg
 
-    _load_file_module("tools.simple_tool_base", "tools/simple_tool_base.py")
     _load_file_module(
-        "tools.turn.submit_solution",
+        "gc_core.tools.simple_tool_base", "tools/simple_tool_base.py")
+    _load_file_module(
+        "gc_core.tools.turn.submit_solution",
         "tools/turn/submit_solution.py",
     )
 
-    connect_mcp_pkg = types.ModuleType("tools.connect_mcp")
+    connect_mcp_pkg = types.ModuleType("gc_core.tools.connect_mcp")
     connect_mcp_pkg.__path__ = [str(_TOOLS_DIR / "connect_mcp")]
-    sys.modules["tools.connect_mcp"] = connect_mcp_pkg
+    sys.modules["gc_core.tools.connect_mcp"] = connect_mcp_pkg
 
 
 def _real_tools_loaded() -> bool:
-    tools = sys.modules.get("tools")
+    tools = sys.modules.get("gc_core.tools")
     if tools is None:
         return False
     return (
         callable(getattr(tools, "build_tools_data", None))
-        and "tools.connect_mcp" in sys.modules
-        and "tools.skills" in sys.modules
-        and isinstance(getattr(sys.modules.get("tools.skills"), "__path__", None), list)
-        and len(sys.modules["tools.skills"].__path__) > 0
+        and "gc_core.tools.connect_mcp" in sys.modules
+        and "gc_core.tools.skills" in sys.modules
+        and isinstance(getattr(sys.modules.get("gc_core.tools.skills"), "__path__", None), list)
+        and len(sys.modules["gc_core.tools.skills"].__path__) > 0
     )
 
 
@@ -130,9 +134,9 @@ def ensure_real_tools_package() -> None:
     if _real_tools_loaded():
         return
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             del sys.modules[name]
-    importlib.import_module("tools")
+    importlib.import_module("gc_core.tools")
 
 
 if not _mcp_runtime_available():
@@ -148,7 +152,7 @@ def _restore_real_tools_package_after_test():
 
 @pytest.fixture(autouse=True)
 def _clear_runtime_notices_between_tests():
-    from runtime_notices import clear_runtime_notices
+    from gc_core.runtime_notices import clear_runtime_notices
 
     clear_runtime_notices(listeners=True)
     yield
@@ -158,7 +162,7 @@ def _clear_runtime_notices_between_tests():
 @pytest.fixture(autouse=True)
 def _reset_message_projection_tags():
     """Спека 08: каждый тест стартует с default for_model = только think."""
-    from message_projection import configure_for_model_tags
+    from gc_core.message_projection import configure_for_model_tags
 
     configure_for_model_tags([])
     yield

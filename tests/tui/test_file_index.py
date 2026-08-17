@@ -1,5 +1,5 @@
 """Юнит-тесты file_index: парс @-сегмента, listing, fuzzy, резолв, футер."""
-from tui.services.file_index import parse_at_segment
+from gc_tui.services.file_index import parse_at_segment
 
 
 def test_at_at_start():
@@ -26,7 +26,7 @@ def test_trailing_slash_kept():
     assert parse_at_segment("@agents/", 8) == (0, "agents/")
 
 
-from tui.services.file_index import list_dir
+from gc_tui.services.file_index import list_dir
 
 
 def test_list_dir_dirs_before_files_with_slash(tmp_path):
@@ -51,7 +51,7 @@ def test_list_dir_hides_git(tmp_path):
 
 import subprocess
 
-from tui.services.file_index import fuzzy_search, rank
+from gc_tui.services.file_index import fuzzy_search, rank
 
 
 def test_rank_prefix_of_basename_first():
@@ -200,9 +200,7 @@ def test_fuzzy_git_respects_gitignore(tmp_path):
 
 import os
 
-from tui.services.file_index import (
-    extract_at_mentions, resolve_attachment, build_attachment_footer,
-)
+from gc_tui.services.file_index import extract_at_mentions, resolve_attachment, build_attachment_footer
 
 
 def test_extract_mentions():

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_runtime.venv import pip_install_target
+from gc_core.mcp_runtime.venv import pip_install_target
 from recommended_mcp import install as install_mod
 from recommended_mcp.manifest import InstallSpec, MCPEntry
 

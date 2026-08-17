@@ -6,7 +6,7 @@
 экран «залипает»). Контекст-менеджер возвращает режим после subprocess.
 Кросс-платформенный no-op вне Windows / без консоли.
 """
-import utils.win_console as wc
+from gc_core.utils import win_console as wc
 
 
 def test_restores_saved_mode(monkeypatch):

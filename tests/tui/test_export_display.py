@@ -1,5 +1,5 @@
 """TXT-экспорт использует display_content; JSON остаётся wire-faithful."""
-from tui.services.export import export_thread
+from gc_tui.services.export import export_thread
 
 
 def _seg(payloads):

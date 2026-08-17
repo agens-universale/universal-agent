@@ -30,8 +30,8 @@ async def test_copy_buffer_screen_chrome(tmp_path):
     (не дефолтная Textual — она рисуется box-глифами, которые на Windows
     консоли превращаются в мусорные квадратики по периметру, см. дефект)."""
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -47,7 +47,7 @@ async def test_copy_buffer_screen_chrome(tmp_path):
 
 @pytest.mark.asyncio
 async def test_copy_buffer_screen_marker(tmp_path):
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     screen = CopyBufferScreen(store=_MockStore(), task_id="T1")
     assert screen._is_copy_buffer_screen is True
@@ -55,8 +55,8 @@ async def test_copy_buffer_screen_marker(tmp_path):
 
 @pytest.mark.asyncio
 async def test_copy_buffer_screen_loads_existing(tmp_path):
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -69,8 +69,8 @@ async def test_copy_buffer_screen_loads_existing(tmp_path):
 
 @pytest.mark.asyncio
 async def test_copy_buffer_screen_no_store_opens_empty(tmp_path):
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -82,8 +82,8 @@ async def test_copy_buffer_screen_no_store_opens_empty(tmp_path):
 
 @pytest.mark.asyncio
 async def test_esc_no_change_no_write(tmp_path):
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -97,8 +97,8 @@ async def test_esc_no_change_no_write(tmp_path):
 
 @pytest.mark.asyncio
 async def test_esc_with_change_saves(tmp_path):
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -115,8 +115,8 @@ async def test_esc_with_change_saves(tmp_path):
 @pytest.mark.asyncio
 async def test_esc_empty_clears_buffer(tmp_path):
     """B7: пустой текст = очистили буфер → пишем пустую строку."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -132,9 +132,9 @@ async def test_esc_empty_clears_buffer(tmp_path):
 
 @pytest.mark.asyncio
 async def test_save_clamps_to_max(tmp_path):
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
-    from tui.services.copy_buffer import COPY_BUFFER_MAX
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.services.copy_buffer import COPY_BUFFER_MAX
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -153,12 +153,12 @@ async def test_save_clamps_to_max(tmp_path):
 @pytest.mark.asyncio
 async def test_paste_os_first(tmp_path, monkeypatch):
     """B8: paste сначала из буфера ОС, пусто — внутренний буфер TUI."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
-        monkeypatch.setattr("tui.services.os_ops.read_clipboard", lambda: "из-ОС")
+        monkeypatch.setattr("gc_tui.services.os_ops.read_clipboard", lambda: "из-ОС")
         store = _MockStore(existing_buffer="")
         await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T7"))
         await pilot.pause()
@@ -170,12 +170,12 @@ async def test_paste_os_first(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_ctrl_shift_v_binding_pastes(tmp_path, monkeypatch):
     """B8: ctrl+shift+v привязан к paste (не только ctrl+v / bracketed paste терминала)."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
-        monkeypatch.setattr("tui.services.os_ops.read_clipboard", lambda: "shift-v")
+        monkeypatch.setattr("gc_tui.services.os_ops.read_clipboard", lambda: "shift-v")
         store = _MockStore(existing_buffer="")
         await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T7b"))
         await pilot.pause()
@@ -190,12 +190,12 @@ async def test_ctrl_shift_v_binding_pastes(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_paste_falls_back_to_internal(tmp_path, monkeypatch):
     """B8: OS-буфер пуст → откат к внутреннему app.clipboard."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
-        monkeypatch.setattr("tui.services.os_ops.read_clipboard", lambda: "")
+        monkeypatch.setattr("gc_tui.services.os_ops.read_clipboard", lambda: "")
         # app.clipboard — read-only property, читает self._clipboard
         pilot.app._clipboard = "из-TUI"
         store = _MockStore(existing_buffer="")

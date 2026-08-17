@@ -1,5 +1,5 @@
-from agent_executor import _append_trace_id_to_meta
-from thread_store import load_thread_meta, save_thread_meta
+from gc_core.agent_executor import _append_trace_id_to_meta
+from gc_core.thread_store import load_thread_meta, save_thread_meta
 
 
 class _SessionStub:

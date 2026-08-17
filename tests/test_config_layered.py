@@ -8,12 +8,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from config_modules import env_vars
-from config_modules.env_vars import EnvVars
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.env_vars import EnvVars
 
 
 def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monkeypatch):
-    from config import _project_local_config_path
+    from gc_core.config import _project_local_config_path
 
     gc_dir = tmp_path / ".gc"
     gc_dir.mkdir()
@@ -27,7 +27,7 @@ def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monke
 
 
 def test_project_local_config_path_returns_none_when_missing(tmp_path, monkeypatch):
-    from config import _project_local_config_path
+    from gc_core.config import _project_local_config_path
 
     monkeypatch.chdir(tmp_path)
     # Никакого .gc/config.yml в tmp_path нет.
@@ -35,7 +35,7 @@ def test_project_local_config_path_returns_none_when_missing(tmp_path, monkeypat
 
 
 def test_project_local_config_path_returns_none_when_gc_dir_is_file(tmp_path, monkeypatch):
-    from config import _project_local_config_path
+    from gc_core.config import _project_local_config_path
 
     # Краевой случай: <cwd>/.gc — это файл, а не директория. Нет config.yml внутри.
     (tmp_path / ".gc").write_text("not a dir", encoding="utf-8")
@@ -98,7 +98,7 @@ def _write_project_config(project_dir: Path, content: str) -> Path:
 
 
 def test_global_only_when_no_project_config(global_config_file, isolated_cwd):
-    from config import load_config
+    from gc_core.config import load_config
 
     cfg = load_config(str(global_config_file))
     assert cfg["max_steps"] == 50
@@ -106,7 +106,7 @@ def test_global_only_when_no_project_config(global_config_file, isolated_cwd):
 
 
 def test_project_overrides_scalar(global_config_file, isolated_cwd):
-    from config import load_config
+    from gc_core.config import load_config
 
     _write_project_config(isolated_cwd, "agent:\n  max_steps: 999\n")
     cfg = load_config(str(global_config_file))
@@ -116,7 +116,7 @@ def test_project_overrides_scalar(global_config_file, isolated_cwd):
 
 
 def test_project_extends_list_with_dedup(global_config_file, isolated_cwd):
-    from config import load_config
+    from gc_core.config import load_config
 
     # project добавляет новый stop_tool, плюс дублирует существующий.
     _write_project_config(
@@ -131,7 +131,7 @@ def test_project_extends_list_with_dedup(global_config_file, isolated_cwd):
 
 def test_project_extends_dict_mcp_servers(global_config_file, isolated_cwd, tmp_path):
     """Project добавляет новый MCP-сервер, не трогая существующие из global."""
-    from config import load_config
+    from gc_core.config import load_config
 
     # Перезаписываем global с MCP-серверами.
     extended_global = """
@@ -170,7 +170,7 @@ mcp:
 
 def test_project_overrides_nested_scalar(global_config_file, isolated_cwd, tmp_path):
     """Project переопределяет конкретное scalar-поле внутри dict в global."""
-    from config import load_config
+    from gc_core.config import load_config
 
     extended_global = """
 backend:
@@ -218,7 +218,7 @@ def test_explicit_config_pointing_to_project_local_no_recursion(
     """
     import builtins
 
-    from config import load_config
+    from gc_core.config import load_config
 
     project_cfg = _write_project_config(
         isolated_cwd,
@@ -265,7 +265,7 @@ agent:
 
 def test_cli_extra_overrides_win_over_layered(global_config_file, isolated_cwd):
     """CLI args (через apply_cli_overrides extra_overrides) побеждают layered config."""
-    from config import apply_cli_overrides, load_config
+    from gc_core.config import apply_cli_overrides, load_config
 
     _write_project_config(isolated_cwd, "agent:\n  max_steps: 999\n")
     cfg = load_config(str(global_config_file))
@@ -279,7 +279,7 @@ def test_cli_extra_overrides_win_over_layered(global_config_file, isolated_cwd):
 
 def test_invalid_yaml_in_project_loud_error(global_config_file, isolated_cwd):
     """Невалидный YAML в project config → yaml.YAMLError, не silent fallback."""
-    from config import load_config
+    from gc_core.config import load_config
 
     _write_project_config(
         isolated_cwd,
@@ -300,7 +300,7 @@ def test_invalid_schema_in_project_loud_error(global_config_file, isolated_cwd):
     coerce'ит "123" → 123 без ошибки, и тест становится хрупким. Extra-forbid —
     чёткий тест.)
     """
-    from config import load_config
+    from gc_core.config import load_config
 
     _write_project_config(
         isolated_cwd,
@@ -312,7 +312,7 @@ def test_invalid_schema_in_project_loud_error(global_config_file, isolated_cwd):
 
 def test_empty_project_config_falls_back_to_global(global_config_file, isolated_cwd):
     """Пустой project config = пустой dict; deep_merge с global = global. Это нормальное поведение."""
-    from config import load_config
+    from gc_core.config import load_config
 
     _write_project_config(isolated_cwd, "")  # абсолютно пустой файл
     cfg = load_config(str(global_config_file))
@@ -322,7 +322,7 @@ def test_empty_project_config_falls_back_to_global(global_config_file, isolated_
 
 def test_apply_cli_overrides_sets_agentsmd_override():
     """apply_cli_overrides(agentsmd_override=True) sets config_dict key to True."""
-    from config import apply_cli_overrides
+    from gc_core.config import apply_cli_overrides
 
     cfg: dict = {"agentsmd_override": False}
     apply_cli_overrides(cfg, agentsmd_override=True)
@@ -331,7 +331,7 @@ def test_apply_cli_overrides_sets_agentsmd_override():
 
 def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
     """apply_cli_overrides() without flag does NOT override agentsmd_override."""
-    from config import apply_cli_overrides
+    from gc_core.config import apply_cli_overrides
 
     cfg: dict = {"agentsmd_override": False}
     apply_cli_overrides(cfg)

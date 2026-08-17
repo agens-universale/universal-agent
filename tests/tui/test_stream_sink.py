@@ -1,4 +1,4 @@
-from tui.services.stream_sink import StreamSink, format_stream_block
+from gc_tui.services.stream_sink import StreamSink, format_stream_block
 
 
 def test_sink_accumulates_and_resets():
@@ -85,30 +85,30 @@ def test_reset_clears_progress_and_reasoning():
 
 
 def test_reasoning_line_short_unchanged():
-    from tui.services.stream_sink import format_reasoning_line
+    from gc_tui.services.stream_sink import format_reasoning_line
     assert format_reasoning_line(think="смотрю agents/") == "⠇ смотрю agents/"
 
 
 def test_reasoning_line_collapses_newlines():
-    from tui.services.stream_sink import format_reasoning_line
+    from gc_tui.services.stream_sink import format_reasoning_line
     assert format_reasoning_line(think="строю план\nчитаю README") == "⠇ строю план читаю README"
 
 
 def test_reasoning_line_truncates_with_ellipsis():
-    from tui.services.stream_sink import format_reasoning_line
+    from gc_tui.services.stream_sink import format_reasoning_line
     # single long word (no spaces) → can't word-trim, keep last N chars
     out = format_reasoning_line(think="a" * 100, tail_len=10)
     assert out == "⠇ …" + "a" * 10
 
 
 def test_reasoning_line_truncates_on_word_boundary():
-    from tui.services.stream_sink import format_reasoning_line
+    from gc_tui.services.stream_sink import format_reasoning_line
     # last 12 chars of "alpha beta gamma delta" = " gamma delta"; drop leading
     # partial word → start at the word boundary → "gamma delta"
     assert format_reasoning_line(think="alpha beta gamma delta", tail_len=12) == "⠇ …gamma delta"
 
 
 def test_reasoning_line_empty():
-    from tui.services.stream_sink import format_reasoning_line
+    from gc_tui.services.stream_sink import format_reasoning_line
     assert format_reasoning_line(think="") == ""
     assert format_reasoning_line(think="   ") == ""

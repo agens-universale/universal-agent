@@ -1,8 +1,8 @@
 import os
 import tempfile
 
-from config import load_config
-from config_modules.backend import BackendConfig
+from gc_core.config import load_config
+from gc_core.config_modules.backend import BackendConfig
 
 
 def test_backend_stream_defaults_true():

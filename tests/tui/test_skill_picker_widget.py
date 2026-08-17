@@ -13,7 +13,7 @@ _SKILLS = [
 
 def test_empty_filter_returns_all():
     pytest.importorskip("textual")
-    from tui.widgets.skill_picker import SkillPicker
+    from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_SKILLS, initial_filter="")
     assert [s["id"] for s in p._visible_rows()] == [s["id"] for s in _SKILLS]
@@ -21,7 +21,7 @@ def test_empty_filter_returns_all():
 
 def test_substring_filter_matches_id():
     pytest.importorskip("textual")
-    from tui.widgets.skill_picker import SkillPicker
+    from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_SKILLS, initial_filter="super")
     ids = [s["id"] for s in p._visible_rows()]
@@ -30,7 +30,7 @@ def test_substring_filter_matches_id():
 
 def test_filter_case_insensitive():
     pytest.importorskip("textual")
-    from tui.widgets.skill_picker import SkillPicker
+    from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_SKILLS, initial_filter="CODE")
     ids = [s["id"] for s in p._visible_rows()]
@@ -40,7 +40,7 @@ def test_filter_case_insensitive():
 
 def test_filter_no_match_returns_empty():
     pytest.importorskip("textual")
-    from tui.widgets.skill_picker import SkillPicker
+    from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_SKILLS, initial_filter="zzz")
     assert p._visible_rows() == []
@@ -49,7 +49,7 @@ def test_filter_no_match_returns_empty():
 
 def test_move_selection_wraps_around():
     pytest.importorskip("textual")
-    from tui.widgets.skill_picker import SkillPicker
+    from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_SKILLS, initial_filter="")
     assert p.selected_skill()["id"] == "supercoder:planner"
@@ -62,7 +62,7 @@ def test_move_selection_wraps_around():
 
 def test_set_filter_resets_selection_to_zero():
     pytest.importorskip("textual")
-    from tui.widgets.skill_picker import SkillPicker
+    from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_SKILLS, initial_filter="")
     p.move_selection(2)

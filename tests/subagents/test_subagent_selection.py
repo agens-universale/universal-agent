@@ -8,11 +8,7 @@ import logging
 
 import pytest
 
-from tools.subagents.selection import (
-    subagents_allowlist,
-    subagents_allowlist_ordered,
-    subagents_enabled,
-)
+from gc_core.tools.subagents.selection import subagents_allowlist, subagents_allowlist_ordered, subagents_enabled
 
 BUILTIN = {
     "subagent_worker", "subagent_code_generator", "subagent_code_planner",
@@ -98,7 +94,7 @@ class TestIntegration:
         return str(d)
 
     def _split(self, cfg):
-        from tools import build_tools_data
+        from gc_core.tools import build_tools_data
 
         data, _spec, _descr, _mcp = build_tools_data(cfg)
         names = {n for n in data if n.startswith("subagent_")}
@@ -161,7 +157,7 @@ class TestLimitFollowsListOrder:
         return str(d)
 
     def _custom(self, tmp_path, value, limit):
-        from tools import build_tools_data
+        from gc_core.tools import build_tools_data
 
         agents = self._agents(tmp_path, ("alpha", "beta", "gamma"))
         data, _s, _d, _m = build_tools_data({
@@ -184,7 +180,7 @@ class TestLimitFollowsListOrder:
         assert self._custom(tmp_path, True, 2) == ["subagent_alpha", "subagent_beta"]
 
     def test_builtins_are_not_counted_against_limit(self, tmp_path):
-        from tools import build_tools_data
+        from gc_core.tools import build_tools_data
 
         agents = self._agents(tmp_path, ("alpha",))
         data, _s, _d, _m = build_tools_data({

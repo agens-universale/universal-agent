@@ -3,9 +3,9 @@ import pytest
 
 pytest.importorskip("textual")
 
-import config  # noqa: E402
-import tui  # noqa: E402
-from config_modules import env_vars  # noqa: E402
+from gc_core import config
+import gc_tui as tui
+from gc_core.config_modules import env_vars
 
 
 def test_tui_creates_project_gc_dir(tmp_path, monkeypatch):

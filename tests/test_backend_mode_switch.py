@@ -8,22 +8,23 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from tests.paths import module_dir
 
 
 def _restore_tools_and_dependents() -> None:
     for name in list(sys.modules):
         if name in ("agent_executor", "run_summary_coordinator"):
             sys.modules.pop(name, None)
-        elif name == "tools" or name.startswith("tools."):
+        elif name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    real_tools = importlib.import_module("tools")
-    proc = sys.modules.get("processing_responses")
+    real_tools = importlib.import_module("gc_core.tools")
+    proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.apply_tool = real_tools.apply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
-    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
         cycle_stop_mod.apply_tool = real_tools.apply_tool
 
@@ -32,10 +33,10 @@ def _stub_tools_modules() -> None:
     # Верхнеуровневый `tools` конфликтует с другими окружениями — минимальный stub
     # только на время этого теста (см. _restore_tools_and_dependents).
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
 
-    tools_pkg = types.ModuleType("tools")
+    tools_pkg = types.ModuleType("gc_core.tools")
 
     class _WrongFunctionArgumentsException(Exception):
         def to_llm_feedback(self):
@@ -52,22 +53,22 @@ def _stub_tools_modules() -> None:
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_pkg.is_unknown_tool_output = lambda *_a, **_kw: False
     root = Path(__file__).resolve().parents[1]
-    tools_dir = root / "src" / "tools"
+    tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
-    sys.modules["tools"] = tools_pkg
+    sys.modules["gc_core.tools"] = tools_pkg
 
-    skills_pkg = types.ModuleType("tools.skills")
+    skills_pkg = types.ModuleType("gc_core.tools.skills")
     # Point at the real skills dir so genuine submodules (skills_policy) resolve;
     # tools.skills.registry is still stubbed below via sys.modules.
     skills_pkg.__path__ = [str(tools_dir / "skills")]
-    sys.modules["tools.skills"] = skills_pkg
+    sys.modules["gc_core.tools.skills"] = skills_pkg
 
-    registry_mod = types.ModuleType("tools.skills.registry")
+    registry_mod = types.ModuleType("gc_core.tools.skills.registry")
 
     registry_mod.get_skills_registry = lambda _config_dict, **_kw: _SkillsRegistryStub()
     registry_mod.SkillsRegistry = _SkillsRegistryStub
 
-    sys.modules["tools.skills.registry"] = registry_mod
+    sys.modules["gc_core.tools.skills.registry"] = registry_mod
 
 
 class _SkillsRegistryStub:
@@ -79,9 +80,9 @@ class BackendModeSwitchTest(unittest.TestCase):
     def test_switch_responses_completions_responses_same_thread(self):
         _stub_tools_modules()
         try:
-            import agent_executor as agent_executor_module
-            import processing_responses as processing_module
-            from thread_store import load_thread_meta, resolve_threads_dir
+            from gc_core import agent_executor as agent_executor_module
+            from gc_core import processing_responses as processing_module
+            from gc_core.thread_store import load_thread_meta, resolve_threads_dir
         except Exception:
             _restore_tools_and_dependents()
             raise

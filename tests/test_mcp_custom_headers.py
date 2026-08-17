@@ -2,7 +2,7 @@ import pytest
 
 
 def test_mcp_server_config_accepts_headers():
-    from config_modules.mcp import McpServerConfig
+    from gc_core.config_modules.mcp import McpServerConfig
 
     cfg = McpServerConfig.model_validate(
         {
@@ -22,8 +22,8 @@ def test_discovery_http_transport_passes_custom_headers(monkeypatch):
     - кастомные X-* header'ы доходят до transport слоя
     """
 
-    import tools.connect_mcp.registry as reg
-    import tools.connect_mcp.transport as transport_mod
+    from gc_core.tools.connect_mcp import registry as reg
+    from gc_core.tools.connect_mcp import transport as transport_mod
 
     captured: list[tuple[str, dict[str, str]]] = []
 
@@ -80,7 +80,7 @@ def test_discovery_http_transport_passes_custom_headers(monkeypatch):
 
 
 def test_stream_http_client_merges_custom_headers(monkeypatch):
-    import tools.connect_mcp.stream_client as stream_client
+    from gc_core.tools.connect_mcp import stream_client as stream_client
 
     captured: dict[str, dict | None] = {"headers": None}
 

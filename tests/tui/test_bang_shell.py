@@ -6,16 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tui.services.bang_shell import (
-    BangShellController,
-    BangShellSettings,
-    ClearMeta,
-    normalize_output,
-    parse_body,
-    parse_clear_meta,
-    preflight,
-    truncate_output,
-)
+from gc_tui.services.bang_shell import BangShellController, BangShellSettings, ClearMeta, normalize_output, parse_body, parse_clear_meta, preflight, truncate_output
 
 
 def test_parse_body_strips_bang_and_optional_space():
@@ -189,7 +180,7 @@ def test_controller_rejects_concurrent():
 
 def test_controller_preflight_no_spawn():
     ctl = BangShellController()
-    with patch("tui.services.bang_shell.subprocess.Popen") as popen:
+    with patch("gc_tui.services.bang_shell.subprocess.Popen") as popen:
         result = ctl.run("vim x", cwd=".", settings=BangShellSettings())
     popen.assert_not_called()
     assert result.rejected is not None
@@ -205,8 +196,8 @@ def test_controller_run_success_mocked():
     proc.poll.return_value = 0
     proc.pid = 1234
 
-    with patch("tui.services.bang_shell.subprocess.Popen", return_value=proc) as popen:
-        with patch("tui.services.bang_shell.preserve_console_mode"):
+    with patch("gc_tui.services.bang_shell.subprocess.Popen", return_value=proc) as popen:
+        with patch("gc_tui.services.bang_shell.preserve_console_mode"):
             result = ctl.run("echo hello", cwd="/tmp", settings=BangShellSettings())
 
     popen.assert_called_once()
@@ -229,8 +220,8 @@ def test_controller_normalizes_crlf_in_output():
     proc.poll.return_value = 0
     proc.pid = 1
 
-    with patch("tui.services.bang_shell.subprocess.Popen", return_value=proc):
-        with patch("tui.services.bang_shell.preserve_console_mode"):
+    with patch("gc_tui.services.bang_shell.subprocess.Popen", return_value=proc):
+        with patch("gc_tui.services.bang_shell.preserve_console_mode"):
             result = ctl.run("echo", cwd=".", settings=BangShellSettings())
 
     assert result.output == "a\nb\n"
@@ -250,9 +241,9 @@ def test_controller_cancel_sets_flag():
     proc.poll.return_value = None
     proc.pid = 42
 
-    with patch("tui.services.bang_shell.subprocess.Popen", return_value=proc):
-        with patch("tui.services.bang_shell.preserve_console_mode"):
-            with patch("tui.services.bang_shell._kill_process"):
+    with patch("gc_tui.services.bang_shell.subprocess.Popen", return_value=proc):
+        with patch("gc_tui.services.bang_shell.preserve_console_mode"):
+            with patch("gc_tui.services.bang_shell._kill_process"):
                 result = ctl.run("sleep 99", cwd=".", settings=BangShellSettings())
 
     assert result.cancelled

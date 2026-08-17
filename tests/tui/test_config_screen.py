@@ -4,14 +4,14 @@ import pytest
 @pytest.mark.asyncio
 async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     cfg = {"model": "M", "chat_completions_auth_token": "sk-REAL",
            "agent_md_path": "/p/agent.md", "threads_data_path": "/p/threads",
            "logs_dump_dir": "/p/logs", "mcp-servers": {}}
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
-        from tui.screens.config import ConfigScreen
+        from gc_tui.screens.config import ConfigScreen
         scr = ConfigScreen(config=app._config, config_path=app._config_path)
         await app.push_screen(scr)
         await pilot.pause()
@@ -26,8 +26,8 @@ async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
 @pytest.mark.asyncio
 async def test_command_config_opens_screen(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.config import ConfigScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -40,9 +40,9 @@ async def test_command_config_opens_screen(tmp_path):
 async def test_config_screen_esc_returns_to_main(tmp_path):
     # Esc должен возвращать на главный экран, а не выходить из TUI.
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.config import ConfigScreen
-    from tui.screens.main import TraceScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
+    from gc_tui.screens.main import TraceScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -58,8 +58,8 @@ async def test_config_screen_esc_returns_to_main(tmp_path):
 async def test_config_screen_has_header_and_footer(tmp_path):
     # Консистентность с прочими экранами: есть #header и #footer.
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.config import ConfigScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -73,7 +73,7 @@ async def test_config_screen_has_header_and_footer(tmp_path):
 
 def test_paths_block_is_rich_text_without_pseudo_comment():
     from rich.text import Text
-    from tui.screens.config import _paths_block
+    from gc_tui.screens.config import _paths_block
     t = _paths_block({"agent_md_path": "/p/agent.md"}, "/p/config.yml", None)
     assert isinstance(t, Text)
     plain = t.plain
@@ -86,7 +86,7 @@ def test_paths_block_is_rich_text_without_pseudo_comment():
 
 
 def test_paths_block_project_local_line():
-    from tui.screens.config import _paths_block
+    from gc_tui.screens.config import _paths_block
     plain = _paths_block({}, "/p/config.yml", "/p/.gc/config.yml").plain
     assert "+ project-local:" in plain and "/p/.gc/config.yml" in plain
 
@@ -94,8 +94,8 @@ def test_paths_block_project_local_line():
 @pytest.mark.asyncio
 async def test_config_screen_fieldset_panels(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.config import ConfigScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -113,8 +113,8 @@ async def test_config_screen_fieldset_panels(tmp_path):
 async def test_config_screen_snapshot_hint_caption(tmp_path):
     # Подсказка-снимок: первая строка трейса и начало rendered_text().
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.config import ConfigScreen, _SNAPSHOT_HINT
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen, _SNAPSHOT_HINT
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -132,8 +132,8 @@ async def test_config_trace_quiet_focus_keeps_keyboard_scroll(tmp_path):
     # outline глушится классом quiet-focus, но контейнер ОСТАЁТСЯ фокусируемым —
     # иначе на экране без фокусируемых детей умрёт клавиатурная прокрутка.
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.config import ConfigScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -147,7 +147,7 @@ async def test_config_trace_quiet_focus_keeps_keyboard_scroll(tmp_path):
 def test_quiet_focus_and_panel_rules_in_tcss():
     # Sync-тест на CSS (прецедент: BRAND_RULE): правила существуют в styles.tcss.
     from pathlib import Path
-    import tui
+    import gc_tui as tui
     tcss = (Path(tui.__file__).parent / "styles.tcss").read_text(encoding="utf-8")
     assert "#trace.quiet-focus:focus" in tcss
     assert "outline: none" in tcss
@@ -157,30 +157,30 @@ def test_quiet_focus_and_panel_rules_in_tcss():
 # ---- фильтр по ключам конфига (2026-06-26) ----
 
 def test_filter_config_by_key_matches_key_keeps_subtree():
-    from tui.screens.config import _filter_config_by_key
+    from gc_tui.screens.config import _filter_config_by_key
     cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
     assert _filter_config_by_key(cfg, "mcp") == {
         "mcp-servers": {"srv": {"transport": "http"}}}
 
 
 def test_filter_config_by_key_nested_keeps_path():
-    from tui.screens.config import _filter_config_by_key
+    from gc_tui.screens.config import _filter_config_by_key
     cfg = {"a": {"chat_token": 1, "b": 2}, "x": 9}
     assert _filter_config_by_key(cfg, "token") == {"a": {"chat_token": 1}}
 
 
 def test_filter_config_by_key_no_match_empty():
-    from tui.screens.config import _filter_config_by_key
+    from gc_tui.screens.config import _filter_config_by_key
     assert _filter_config_by_key({"model": "M"}, "zzz") == {}
 
 
 def test_filter_config_by_key_case_insensitive():
-    from tui.screens.config import _filter_config_by_key
+    from gc_tui.screens.config import _filter_config_by_key
     assert _filter_config_by_key({"Model": "M"}, "model") == {"Model": "M"}
 
 
 def test_filtered_yaml_text_filters_full_and_no_match():
-    from tui.screens.config import ConfigScreen
+    from gc_tui.screens.config import ConfigScreen
     scr = ConfigScreen(config={"model": "M", "mcp-servers": {"s": {}}})
     scr._filter = "mcp"
     txt = scr._filtered_yaml_text()
@@ -195,8 +195,8 @@ def test_filtered_yaml_text_filters_full_and_no_match():
 async def test_config_filter_input_focused_and_filters(tmp_path):
     pytest.importorskip("textual")
     from textual.widgets import Input
-    from tui.app import TuiApp
-    from tui.screens.config import ConfigScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
     cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
     app._config_path = "/p/config.yml"

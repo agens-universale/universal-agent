@@ -7,8 +7,8 @@ async def test_preview_multiparagraph_prose_single_row(tmp_path):
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
-    from tui.services.trace_render import render_thread_readonly
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.services.trace_render import render_thread_readonly
+    from gc_tui.widgets.trace_row import TraceRow
 
     rec = {"payload": {"id": "a1", "role": "assistant",
                        "content": "абзац1\n\nабзац2"}, "ts": ""}

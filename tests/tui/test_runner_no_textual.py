@@ -18,10 +18,10 @@ def test_main_without_textual_returns_1_and_prints_to_stderr(monkeypatch, capsys
 
     # Remove cached tui.app
     for mod in list(sys.modules):
-        if mod.startswith("tui.app") or mod == "tui.app":
+        if mod.startswith("gc_tui.app") or mod == "tui.app":
             sys.modules.pop(mod, None)
 
-    from tui import main
+    from gc_tui import main
     rc = main(argv=[])
 
     err = capsys.readouterr().err

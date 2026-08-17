@@ -1,7 +1,7 @@
 import requests
 
-from utils.backend_errors import is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
-from utils.chat_completions_stream import BackendStreamError
+from gc_core.utils.backend_errors import is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
+from gc_core.utils.chat_completions_stream import BackendStreamError
 
 
 def _resp(*, content="", tool_calls=None, finish_reason=None, error=None, top_error=None):

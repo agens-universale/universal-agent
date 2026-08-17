@@ -4,7 +4,7 @@ Human-wait (ask/confirm) скрывает индикатор даже при err
 last_runner_error от заменённого runner рисует ✗ Ошибка поверх баннера.
 Краш текущего раннера (err) приоритетнее running → терминальный ✗ Ошибка сразу,
 не дожидаясь reaping воркера / falling-edge."""
-from tui.screens.main import select_indicator_mode as M
+from gc_tui.screens.main import select_indicator_mode as M
 
 
 def test_human_wait_hides_even_with_err():

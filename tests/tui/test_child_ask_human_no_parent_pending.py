@@ -21,11 +21,11 @@ class _FakeRunner:
 @pytest.mark.asyncio
 async def test_child_ask_human_answer_no_parent_pending(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.stores.file_store import FileTaskStore
-    from tui.widgets.command_input import CommandTextArea
-    from tui.widgets.tool_call_row import ToolCallRow
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stores.file_store import FileTaskStore
+    from gc_tui.widgets.command_input import CommandTextArea
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     threads = tmp_path / "threads"
     threads.mkdir()
@@ -77,7 +77,7 @@ async def test_child_ask_human_answer_no_parent_pending(tmp_path):
         assert pending == []
 
         # Nested user row under subagent is ok (display only).
-        from tui.widgets.trace_row import TraceRow
+        from gc_tui.widgets.trace_row import TraceRow
 
         nested_user = [
             r
@@ -92,11 +92,11 @@ async def test_child_ask_human_answer_no_parent_pending(tmp_path):
 async def test_parent_ask_human_answer_still_tracks_pending(tmp_path):
     """Регрессия: parent ask_human по-прежнему монтирует pending user-reply."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.models import TraceEvent
-    from tui.services.stores.file_store import FileTaskStore
-    from tui.widgets.command_input import CommandTextArea
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.services.stores.file_store import FileTaskStore
+    from gc_tui.widgets.command_input import CommandTextArea
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     threads = tmp_path / "threads"
     threads.mkdir()

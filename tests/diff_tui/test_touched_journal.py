@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from diff_tui.touched import TouchedJournal
-from thread_store import touched_journal_path
+from gc_tui.diff_tui.touched import TouchedJournal
+from gc_core.thread_store import touched_journal_path
 
 
 def test_path_helper_matches_data_meta_suffix(tmp_path):
@@ -53,7 +53,7 @@ def test_write_failure_is_soft(tmp_path, monkeypatch):
     def boom(*_a, **_k):
         raise OSError("disk full")
 
-    monkeypatch.setattr("diff_tui.touched.atomic_replace", boom)
+    monkeypatch.setattr("gc_tui.diff_tui.touched.atomic_replace", boom)
     j.add("fail.py")  # must not raise
     assert "ok.py" in j.paths()
 

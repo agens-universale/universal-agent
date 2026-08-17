@@ -1,5 +1,5 @@
-import request_backend_policy as policy
-from utils.chat_completions_stream import BackendStreamError
+from gc_core import request_backend_policy as policy
+from gc_core.utils.chat_completions_stream import BackendStreamError
 
 
 def test_on_delta_reset_between_retried_attempts(monkeypatch):

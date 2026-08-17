@@ -1,5 +1,5 @@
 """tool_identity: wire-имя тула → канонический id (старое голое имя)."""
-from tui.services.tool_identity import tool_id
+from gc_tui.services.tool_identity import tool_id
 
 
 def test_control_tools_new_to_legacy():

@@ -9,8 +9,8 @@ import threading
 import pytest
 
 from tests.harbor_support.fakes import bind_os_backend
-from backends.harbor import HarborBackend
-from tools.exec.execute_command import ExecuteCommand
+from gc_core.backends.harbor import HarborBackend
+from gc_core.tools.exec.execute_command import ExecuteCommand
 
 
 class RaisingEnv:

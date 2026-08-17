@@ -4,13 +4,13 @@ import pytest
 @pytest.mark.asyncio
 async def test_new_resets_terminal_title(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    import tui.services.terminal_title as tt
-    from tui.app import TuiApp
+    from gc_tui.services import terminal_title as tt
+    from gc_tui.app import TuiApp
 
     calls = []
     monkeypatch.setattr(tt, "set_terminal_title", lambda text, **k: calls.append(text))
     # main.py импортирует символы из модуля внутри функций — патчим там же:
-    import tui.screens.main as main_mod
+    from gc_tui.screens import main as main_mod
     monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
@@ -28,8 +28,8 @@ async def test_resume_title_uses_session_last_prompt(tmp_path, monkeypatch):
     """При возобновлении сессии (в этом запуске не слали) заголовок берёт последний
     промпт сессии из стора + её статус, а не пустоту."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tui.screens.main as main_mod
+    from gc_tui.app import TuiApp
+    from gc_tui.screens import main as main_mod
 
     calls = []
     monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
@@ -49,8 +49,8 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
     """Статус в заголовке обновляется в прогоне ([completed]→[running]); повторный
     вызов с тем же заголовком НЕ пишет OSC (дедуп — поллер зовёт каждый тик)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tui.screens.main as main_mod
+    from gc_tui.app import TuiApp
+    from gc_tui.screens import main as main_mod
 
     calls = []
     monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
@@ -79,8 +79,8 @@ async def test_title_single_source_no_cross_session_leak(tmp_path, monkeypatch):
     сессии). attach(is_resume) перезаписывает его из стора → промпт прошлой сессии
     не прилипает к табу новой."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tui.screens.main as main_mod
+    from gc_tui.app import TuiApp
+    from gc_tui.screens import main as main_mod
 
     calls = []
     monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
@@ -104,7 +104,7 @@ async def test_attach_resume_overwrites_prompt_from_store(tmp_path, monkeypatch)
     чтобы промпт прошлой сессии не оставался; auto-create (is_resume=False) НЕ затирает
     свежий _resumed_prompt, если стор ещё пуст."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen

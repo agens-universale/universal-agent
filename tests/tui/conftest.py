@@ -36,7 +36,7 @@ def _isolate_agent_state(tmp_path, monkeypatch):
     без редиректа тесты гадят в реальный `~/.gc/agent_state.json`. Редиректим на tmp_path
     для всех TUI-тестов; локальный monkeypatch внутри теста (если есть) просто
     переопределяет этот же путь позже — конфликта нет."""
-    import upgrade_gate
+    from gc_core import upgrade_gate
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
 
@@ -61,7 +61,7 @@ def settings_section_index(name: str) -> int:
     """Индекс секции SettingsScreen по отображаемому имени (SECTIONS), а не
     хардкод-номером: вставка новой секции в SECTIONS сдвигает номера соседей,
     но не имена — тест, прибитый к номеру, тихо открывает не ту секцию."""
-    from tui.screens.settings import SECTIONS
+    from gc_tui.screens.settings import SECTIONS
     return SECTIONS.index(name)
 
 

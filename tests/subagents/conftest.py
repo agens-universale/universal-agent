@@ -20,13 +20,13 @@ def _restore_real_tools_package() -> None:
     # already-collected test modules hold direct references to, creating a
     # second, distinct module/class object under the same dotted name and
     # breaking isinstance()/identity checks against the earlier reference.
-    current = sys.modules.get("tools")
+    current = sys.modules.get("gc_core.tools")
     if current is not None and getattr(current, "__file__", None):
         return
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    importlib.import_module("tools")
+    importlib.import_module("gc_core.tools")
 
 
 _restore_real_tools_package()

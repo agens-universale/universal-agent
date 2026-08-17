@@ -41,8 +41,8 @@ def _write(threads_dir, thread_id, payload, with_compaction=False):
 @pytest.mark.asyncio
 async def test_switch_session_clears_previous_trace(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import SummaryMarker, TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import SummaryMarker, TraceRow
     threads_dir = tmp_path / "threads"
     tid_a = "sessionAAAA00000000000000000000a"
     tid_b = "sessionBBBB00000000000000000000b"

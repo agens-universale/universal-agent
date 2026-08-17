@@ -1,4 +1,4 @@
-from tui.services.path_display import truncate_path
+from gc_tui.services.path_display import truncate_path
 
 
 def test_full_path_when_fits():

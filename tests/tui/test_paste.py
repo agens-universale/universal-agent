@@ -5,8 +5,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_action_paste_inserts_from_os_clipboard(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tui.services.os_ops as os_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.services import os_ops as os_ops
 
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "из буфера")
 
@@ -24,8 +24,8 @@ async def test_action_paste_inserts_from_os_clipboard(tmp_path, monkeypatch):
 async def test_right_click_pastes_from_os_clipboard(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from textual import events
-    from tui.app import TuiApp
-    import tui.services.os_ops as os_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.services import os_ops as os_ops
 
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "правый клик")
 

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import manual_compaction
+from gc_core import manual_compaction
 
 
 def test_compact_thread_noop_in_responses_mode():

@@ -1,7 +1,7 @@
 import json
 
-from utils.file_text import sha256_hex_of_bytes
-from tools.fs.search_and_replace import SearchAndReplace
+from gc_core.utils.file_text import sha256_hex_of_bytes
+from gc_core.tools.fs.search_and_replace import SearchAndReplace
 
 
 from tests.helpers.tool_ctx import with_local_ctx
@@ -353,7 +353,7 @@ def test_expected_file_sha256_allows_match(tmp_path):
 
 
 def test_crlf_file_info_hash_allows_edit_without_false_stale(tmp_path):
-    from tools.fs.file_info import FileInfo
+    from gc_core.tools.fs.file_info import FileInfo
 
     data = b"version one\r\n"
     p = tmp_path / "crlf.txt"

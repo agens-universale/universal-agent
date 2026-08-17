@@ -10,8 +10,8 @@ async def test_view_command_opens_file(tmp_path):
     f = tmp_path / "sample.txt"
     f.write_text("\n".join(f"line-{i}" for i in range(1, 41)) + "\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -32,8 +32,8 @@ async def test_view_python_uses_syntax_highlight(tmp_path):
     f = tmp_path / "mod.py"
     f.write_text("def hello():\n    return 1\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -53,8 +53,8 @@ async def test_view_python_uses_syntax_highlight(tmp_path):
 @pytest.mark.asyncio
 async def test_view_missing_file_error_on_screen(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -68,8 +68,8 @@ async def test_view_missing_file_error_on_screen(tmp_path):
 @pytest.mark.asyncio
 async def test_view_usage_without_path(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -86,8 +86,8 @@ async def test_view_remembers_page_across_reopen(tmp_path):
     f = tmp_path / "long.txt"
     f.write_text("\n".join(f"L{i}" for i in range(1, 201)) + "\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -123,8 +123,8 @@ async def test_view_arrow_hold_coalesces_moves(tmp_path):
     f = tmp_path / "thr.txt"
     f.write_text("\n".join(f"T{i}" for i in range(1, 201)) + "\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -155,9 +155,9 @@ async def test_view_pagedown_changes_window(tmp_path):
     f = tmp_path / "p.txt"
     f.write_text("\n".join(f"R{i}" for i in range(1, 101)) + "\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
-    from tui.services.file_view import FileViewSettings
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
+    from gc_tui.services.file_view import FileViewSettings
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -186,8 +186,8 @@ async def test_view_get_selected_text_returns_window_lines(tmp_path):
     f = tmp_path / "lines.txt"
     f.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -205,8 +205,8 @@ async def test_view_get_selected_text_uses_mouse_selection(tmp_path, monkeypatch
     f = tmp_path / "sel.txt"
     f.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -230,9 +230,9 @@ async def test_view_get_selected_text_empty_when_no_window(tmp_path):
     """get_selected_text: ошибка файла без _window → "" (текст ошибки не копируем)."""
     pytest.importorskip("textual")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
-    from tui.services.file_view import ViewPositionStore
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
+    from gc_tui.services.file_view import ViewPositionStore
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -254,8 +254,8 @@ async def test_view_get_selected_text_after_pagedown(tmp_path):
     f = tmp_path / "pages.txt"
     f.write_text("\n".join(f"LINE{i:03d}" for i in range(1, 101)) + "\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -284,8 +284,8 @@ async def test_view_soft_wrap_enabled(tmp_path):
     f = tmp_path / "wrap.txt"
     f.write_text("x" * 400 + "\n", encoding="utf-8")
 
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:

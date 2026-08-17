@@ -25,7 +25,7 @@ def test_present_confirm_calls_call_from_thread_and_show_banner(monkeypatch):
     """_present_confirm на агент-потоке вызывает call_from_thread;
     тот при синхронном вызове немедленно зовёт show_confirm_banner на TraceScreen."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp()
     calls: list[tuple] = []
@@ -60,9 +60,9 @@ async def test_confirm_full_chain_via_run_test():
     → call_from_thread → show_confirm_banner → клавиша y → submit_confirm_reply
     → confirm() возвращает True."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.agent_runner import AgentRunner
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.services.agent_runner import AgentRunner
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     app = TuiApp(config={"model": "M"})
     # Фабрика не нужна — executor не строим.
@@ -123,9 +123,9 @@ async def test_confirm_reentrant_decline_then_approve():
     """Два последовательных confirm в одном AgentRunner: первый отклонён (n),
     второй принят (y). Проверяет отсутствие stale-_confirm_event-бага."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.agent_runner import AgentRunner
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.services.agent_runner import AgentRunner
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     app = TuiApp(config={"model": "M"})
     app._executor_factory = lambda: None
@@ -198,9 +198,9 @@ async def test_confirm_reentrant_decline_then_approve():
 async def test_confirm_arrow_down_then_enter_selects_session():
     """↓ сдвигает выделение с Y ([Y]) на [S] (session); Enter выбирает выделенный → "session"."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.agent_runner import AgentRunner
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.services.agent_runner import AgentRunner
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     app = TuiApp(config={"model": "M"})
     app._executor_factory = lambda: None
@@ -246,9 +246,9 @@ async def test_confirm_arrow_down_then_enter_selects_session():
 async def test_confirm_enter_default_selects_y():
     """Enter без навигации → выделен Y (selected=0) → True."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.agent_runner import AgentRunner
-    from tui.widgets.confirm_banner import ConfirmBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.services.agent_runner import AgentRunner
+    from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     app = TuiApp(config={"model": "M"})
     app._executor_factory = lambda: None

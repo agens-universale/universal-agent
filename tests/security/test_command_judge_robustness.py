@@ -5,8 +5,8 @@ Security НЕ ослабляется: синонимы в 'safe' не маппи
 отвергается (→ декоратор → fail-closed)."""
 import pytest
 
-import security.command_moderation as cm
-from security.command_moderation import validate_judge_result
+from gc_core.security import command_moderation as cm
+from gc_core.security.command_moderation import validate_judge_result
 
 
 def test_validate_normalizes_verdict_separators_and_case():

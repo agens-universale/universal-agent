@@ -33,7 +33,7 @@ def test_source_mcp_versions_match_pyproject():
 
 def test_available_update_for_source_uses_manifest_version():
     """source-MCP: установлена 0.2.0, в манифесте (новый релиз) 0.3.0 → есть обновление."""
-    from mcp_runtime.cli import _available_update
+    from gc_core.mcp_runtime.cli import _available_update
     from recommended_mcp.manifest import InstallSpec, MCPEntry
     entry = MCPEntry(name="office", description="", path=Path("./office"),
                      install=InstallSpec(type="source", source=Path("../external/office-mcp"),
@@ -45,7 +45,7 @@ def test_available_update_for_source_uses_manifest_version():
 
 def test_available_update_none_without_manifest_version():
     """Рецепт без version (напр. npx) — признака нет, а не ложное «обновление»."""
-    from mcp_runtime.cli import _available_update
+    from gc_core.mcp_runtime.cli import _available_update
     from recommended_mcp.manifest import InstallSpec, MCPEntry
     entry = MCPEntry(name="browser_playwright", description="", path=Path("./b"),
                      install=InstallSpec(type="npx", npm_package="@playwright/mcp"))

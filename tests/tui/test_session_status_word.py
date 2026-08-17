@@ -4,7 +4,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_status_word_has_no_brackets(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -18,7 +18,7 @@ async def test_status_word_has_no_brackets(tmp_path):
 async def test_status_word_reads_real_terminal_status(tmp_path):
     """Записанный исход возвращается как слово (со скобками в бейдже)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _Store:
         def get_task_meta(self, tid):

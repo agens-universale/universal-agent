@@ -1,7 +1,7 @@
 import json
 
-from tools.fs.file_info import FileInfo
-from utils.file_text import BINARY_SAMPLE_BYTES, sha256_hex_of_bytes, sha256_hex_of_file_bytes
+from gc_core.tools.fs.file_info import FileInfo
+from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, sha256_hex_of_bytes, sha256_hex_of_file_bytes
 
 
 from tests.helpers.tool_ctx import with_local_ctx

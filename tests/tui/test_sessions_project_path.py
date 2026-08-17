@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from thread_store import append_new_thread_messages
-from tui.services.stores.file_store import FileTaskStore
+from gc_core.thread_store import append_new_thread_messages
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def _seed(threads_dir, tid, prompt, *, project_path=None,
@@ -38,8 +38,8 @@ async def test_card_shows_project_path(tmp_path):
     pytest.importorskip("textual")
     ppath = str(tmp_path)
     _seed(tmp_path, "pp000001", "вопрос", project_path=ppath)
-    from tui.screens.sessions import SessionsScreen
-    from tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         await pilot.app.push_screen(
@@ -49,7 +49,7 @@ async def test_card_shows_project_path(tmp_path):
         assert "pp000001" in text  # short id
         # Путь может быть обрезан слева (truncate_path_left при > _PATH_MAXLEN),
         # поэтому проверяем хвост, а не полный путь.
-        from tui.screens.sessions import _PATH_MAXLEN
+        from gc_tui.screens.sessions import _PATH_MAXLEN
         if len(ppath) > _PATH_MAXLEN:
             assert ppath[-(_PATH_MAXLEN - 1):] in text
             assert "…" in text
@@ -62,8 +62,8 @@ async def test_card_without_project_path_no_crash(tmp_path):
     """Старая сессия без project_path в meta → пути нет, карточка не падает."""
     pytest.importorskip("textual")
     _seed(tmp_path, "old00001", "старый вопрос", project_path=None)
-    from tui.screens.sessions import SessionsScreen
-    from tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         await pilot.app.push_screen(
@@ -78,12 +78,12 @@ async def test_card_without_project_path_no_crash(tmp_path):
 async def test_long_project_path_truncated_left(tmp_path):
     """Длинный путь (> _PATH_MAXLEN) обрезан слева через truncate_path_left."""
     pytest.importorskip("textual")
-    from tui.screens.sessions import _PATH_MAXLEN
+    from gc_tui.screens.sessions import _PATH_MAXLEN
     long_path = "/home/alex/sber_gigacode/mini-cli-pub/very/deep/nested/dir/structure"
     assert len(long_path) > _PATH_MAXLEN
     _seed(tmp_path, "long0001", "длинный путь", project_path=long_path)
-    from tui.screens.sessions import SessionsScreen
-    from tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         await pilot.app.push_screen(
@@ -101,9 +101,9 @@ async def test_project_path_captured_on_new_session(tmp_path, monkeypatch):
     """При создании новой сессии project_path пишется в meta.tui (как branch)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    import tui.screens.main as main_mod
+    from gc_tui.screens import main as main_mod
     monkeypatch.setattr(main_mod, "current_branch", lambda cwd: "")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     app._executor_factory = lambda: _NoopExecutor()
     async with app.run_test() as pilot:

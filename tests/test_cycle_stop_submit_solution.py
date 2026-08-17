@@ -3,9 +3,9 @@
 import json
 from types import SimpleNamespace
 
-from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
-from states import State
-from tools.turn.submit_solution import SubmitSolution
+from gc_core.message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
+from gc_core.states import State
+from gc_core.tools.turn.submit_solution import SubmitSolution
 
 
 def _make_state() -> State:
@@ -94,7 +94,7 @@ def test_invalid_arguments_fall_back_to_cycle_stop_error_without_apply_tool(monk
         raise AssertionError("apply_tool must not run when arguments are not JSON")
 
     monkeypatch.setattr(
-        "message_policy.cycle_stop.apply_tool",
+        "gc_core.message_policy.cycle_stop.apply_tool",
         _apply_tool_should_not_run,
     )
 

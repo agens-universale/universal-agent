@@ -5,12 +5,7 @@ import os
 
 import pytest
 
-from diff_tui.paths import (
-    canonical_path_key,
-    in_tracking_perimeter,
-    is_trackable_path,
-    orig_key,
-)
+from gc_tui.diff_tui.paths import canonical_path_key, in_tracking_perimeter, is_trackable_path, orig_key
 
 
 @pytest.fixture
@@ -74,7 +69,7 @@ def test_orig_key_casefold_on_windows(monkeypatch):
 
 
 def test_operational_gc_not_trackable(launch_root, monkeypatch):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", launch_root.parent / "gc_home")
     gc_file = launch_root / ".gc" / "threads.json"
@@ -85,7 +80,7 @@ def test_operational_gc_not_trackable(launch_root, monkeypatch):
 
 
 def test_regular_file_is_trackable(launch_root, monkeypatch):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", launch_root.parent / "gc_home")
     path = str(launch_root / "src" / "foo.py")

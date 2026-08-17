@@ -1,5 +1,5 @@
-from updater.source import UpdateSource
-from updater.check import _git_ls_remote, check_for_update
+from gc_core.updater.source import UpdateSource
+from gc_core.updater.check import _git_ls_remote, check_for_update
 
 def _src(commit="old", ref="master"):
     return UpdateSource(url="https://x/y", ref=ref, commit=commit)
@@ -34,8 +34,8 @@ def test_git_ls_remote_preserves_console_mode(monkeypatch):
     родительской консоли (см. utils/win_console.py) — без обёртки Ctrl+C после
     проверки обновлений превращается в системный break-сигнал вместо Key-события
     (см. tools/backends/local.py, где exec()/run_python() уже так обёрнуты)."""
-    import updater.check as check_mod
-    import utils.win_console as wc
+    from gc_core.updater import check as check_mod
+    from gc_core.utils import win_console as wc
 
     calls = []
 
@@ -64,7 +64,7 @@ def test_git_ls_remote_preserves_console_mode(monkeypatch):
 
 
 def test_update_available_from_state():
-    from updater.check import update_available_from_state
+    from gc_core.updater.check import update_available_from_state
     st = {"last_update_remote_commit": "new", "last_update_checked_installed": "old"}
     assert update_available_from_state(st, "old") is True             # проверяли на old, remote new → доступно
     assert update_available_from_state(st, "new") is False            # обновился до new (== remote) → нет
@@ -75,7 +75,7 @@ def test_update_available_from_state():
 
 def test_record_check_result_persists_and_preserves_on_none(tmp_path):
     import json
-    from updater.check import record_check_result
+    from gc_core.updater.check import record_check_result
     p = tmp_path / "state.json"
     record_check_result(1000.0, "abc", "inst", p)
     d = json.loads(p.read_text(encoding="utf-8"))

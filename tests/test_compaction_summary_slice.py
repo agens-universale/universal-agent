@@ -4,9 +4,9 @@ import types
 import unittest
 from unittest.mock import patch
 
-from summarize.compaction import run_summary_compaction
-from summarize.summary_spec import agent_summary_slice_mode, hint_section_tags, slice_summary
-from summarize.working_memory_gateway import WorkingMemoryDeltas
+from gc_core.summarize.compaction import run_summary_compaction
+from gc_core.summarize.summary_spec import agent_summary_slice_mode, hint_section_tags, slice_summary
+from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 
@@ -22,10 +22,10 @@ class CompactionSummarySliceTest(unittest.TestCase):
             agent_summary_slice_mode(num_batches=2, patch_executed=False), "full"
         )
 
-    @patch("summarize.compaction.log_compaction_completed")
-    @patch("summarize.compaction.log_summary_message_body")
-    @patch("summarize.compaction.log_summary_raw_text")
-    @patch("summarize.compaction.log_compaction_started")
+    @patch("gc_core.summarize.compaction.log_compaction_completed")
+    @patch("gc_core.summarize.compaction.log_summary_message_body")
+    @patch("gc_core.summarize.compaction.log_summary_raw_text")
+    @patch("gc_core.summarize.compaction.log_compaction_started")
     def test_single_batch_patch_short_slice_in_dialog_and_trace(
         self,
         _start,
@@ -72,10 +72,10 @@ class CompactionSummarySliceTest(unittest.TestCase):
         ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
 
         with patch(
-            "summarize.compaction.summarize_dialog_via_chat_completions",
+            "gc_core.summarize.compaction.summarize_dialog_via_chat_completions",
             fake_summarize,
         ), patch(
-            "summarize.compaction.apply_summary_state_patch",
+            "gc_core.summarize.compaction.apply_summary_state_patch",
             fake_apply,
         ):
             run_summary_compaction(
@@ -93,10 +93,10 @@ class CompactionSummarySliceTest(unittest.TestCase):
         self.assertEqual(trace["final_output"]["raw_summary"], full_xml)
         self.assertIn(short, trace["final_output"]["agent_summary_text"])
 
-    @patch("summarize.compaction.log_compaction_completed")
-    @patch("summarize.compaction.log_summary_message_body")
-    @patch("summarize.compaction.log_summary_raw_text")
-    @patch("summarize.compaction.log_compaction_started")
+    @patch("gc_core.summarize.compaction.log_compaction_completed")
+    @patch("gc_core.summarize.compaction.log_summary_message_body")
+    @patch("gc_core.summarize.compaction.log_summary_raw_text")
+    @patch("gc_core.summarize.compaction.log_compaction_started")
     def test_multi_batch_patch_skipped_full_slice_in_dialog_and_trace(
         self,
         _start,
@@ -149,10 +149,10 @@ class CompactionSummarySliceTest(unittest.TestCase):
         ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
 
         with patch(
-            "summarize.compaction.summarize_dialog_via_chat_completions",
+            "gc_core.summarize.compaction.summarize_dialog_via_chat_completions",
             fake_summarize,
         ), patch(
-            "summarize.compaction.apply_summary_state_patch",
+            "gc_core.summarize.compaction.apply_summary_state_patch",
             fake_apply,
         ):
             run_summary_compaction(

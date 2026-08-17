@@ -1,5 +1,5 @@
-import config
-from config_modules import env_vars
+from gc_core import config
+from gc_core.config_modules import env_vars
 
 
 def test_bootstrap_creates_user_config(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 """TaskStore Protocol — структурный контракт (без реализации)."""
 from typing import get_type_hints
 
-from tui.services.stores.base import TaskStore
+from gc_tui.services.stores.base import TaskStore
 
 
 def test_protocol_exposes_four_methods():

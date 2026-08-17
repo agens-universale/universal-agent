@@ -4,8 +4,8 @@ import stat
 
 import pytest
 
-from backends.local import _sanitize_env
-from tools.exec.run_python_code import RunPythonCode
+from gc_core.backends.local import _sanitize_env
+from gc_core.tools.exec.run_python_code import RunPythonCode
 
 
 from tests.helpers.tool_ctx import with_local_ctx

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from tui.services.stores.file_store import FileTaskStore
-from tui.models import TaskCursor
+from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.models import TaskCursor
 
 
 def _append_record(data_path: Path, seq: int, role: str, text: str) -> None:

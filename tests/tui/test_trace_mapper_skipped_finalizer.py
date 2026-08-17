@@ -6,7 +6,7 @@ turn_finish рисует фантомную прозу-«ответ», а вто
 """
 import json
 
-from tui.services.trace_mapper import collect_skipped_call_ids, map_message
+from gc_tui.services.trace_mapper import collect_skipped_call_ids, map_message
 
 
 # Точная форма synthetic skip-output из processing_responses.py:409-418.

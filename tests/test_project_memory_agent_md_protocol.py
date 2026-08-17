@@ -1,9 +1,10 @@
 """Guard current concise protocol in demo_cli_agent.md."""
 from pathlib import Path
+from tests.paths import ASSETS
 
 
 _PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "demo_cli_agent.md"
+    ASSETS / "prompts" / "demo_cli_agent.md"
 )
 
 

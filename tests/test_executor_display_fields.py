@@ -1,4 +1,4 @@
-from agent_executor import AgentExecutor
+from gc_core.agent_executor import AgentExecutor
 
 
 def test_display_content_set_when_differs():

@@ -1,4 +1,4 @@
-from tools.skills.registry import Skill
+from gc_core.tools.skills.registry import Skill
 
 
 def test_skill_has_source_field():
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.skills.registry import SkillsRegistry
+from gc_core.tools.skills.registry import SkillsRegistry
 
 
 def _write_skill(root: Path, skill_id: str, description: str) -> None:

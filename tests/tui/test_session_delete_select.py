@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from tui.models import TaskSummary
-from tui.services.session_delete_select import select_for_deletion
+from gc_tui.models import TaskSummary
+from gc_tui.services.session_delete_select import select_for_deletion
 
 
 def _task(tid: str, updated_at: str) -> TaskSummary:

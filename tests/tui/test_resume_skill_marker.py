@@ -44,7 +44,7 @@ def _count_skill_markers(scr) -> int:
 
 def _count_user_replies(scr) -> int:
     """Считает UserReplyContainer в #trace."""
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.widgets.user_reply import UserReplyContainer
     return len(list(scr.query("#trace UserReplyContainer")))
 
 
@@ -52,7 +52,7 @@ def _count_user_replies(scr) -> int:
 async def test_resume_path_mounts_exactly_one_marker(tmp_path):
     """На rebuild (live=False) _render_record монтирует [skill]-маркер."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -69,7 +69,7 @@ async def test_live_path_mounts_no_marker(tmp_path):
     """На live-пути (live=True) _render_record НЕ монтирует [skill]-маркер
     (delivery-флоу уже смонтировал его сам)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -86,7 +86,7 @@ async def test_midrun_delivery_resume_marker_only(tmp_path):
     """Mid-run доставка (display_content="", live=False):
     на resume — ровно один [skill]-маркер и ни одной UserReplyContainer."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -106,7 +106,7 @@ async def test_midrun_delivery_live_no_marker(tmp_path):
     """Mid-run доставка (display_content="", live=True):
     на live-пути _render_record НЕ монтирует [skill]-маркер."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

@@ -7,7 +7,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_new_session_clears_error_indicator(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -34,7 +34,7 @@ async def test_new_session_clears_error_indicator(tmp_path):
 @pytest.mark.asyncio
 async def test_poll_paints_no_indicator_without_active_task(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen

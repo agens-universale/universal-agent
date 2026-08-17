@@ -4,7 +4,7 @@ Polled-контент приходит из map_message уже .strip()'нуты
 иметь хвостовой/ведущий whitespace (многострочный промпт /init из файла-шаблона
 кончается на \\n). Матч должен это терпеть — иначе оптимистичный маркер не
 схлопывается и полный промпт течёт в трейс отдельным user-сообщением."""
-from tui.screens.main import TraceScreen
+from gc_tui.screens.main import TraceScreen
 
 
 def test_wire_match_exact():

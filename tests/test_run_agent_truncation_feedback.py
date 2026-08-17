@@ -1,6 +1,6 @@
 """C3: run_agent при WrongFunctionArgumentsException добавляет truncation-hint,
 если finish_reason последнего backend-ответа == "length", и не добавляет иначе."""
-import processing_responses as pr
+from gc_core import processing_responses as pr
 
 
 def _state():

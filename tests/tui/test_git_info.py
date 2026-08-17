@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from tui.services.git_info import current_branch
+from gc_tui.services.git_info import current_branch
 
 
 def _git(cwd, *args):

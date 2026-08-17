@@ -1,7 +1,7 @@
 """subagent_* args summary: preview reason/task text, not <N chars>."""
 import json
 
-from tui.services.trace_mapper import map_message
+from gc_tui.services.trace_mapper import map_message
 
 
 def _fc(name, args, call_id="c1"):

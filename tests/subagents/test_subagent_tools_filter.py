@@ -3,11 +3,7 @@ import logging
 
 import pytest
 
-from tools import (
-    SUBAGENT_TOOLS_ALLOW_KEY,
-    SUBAGENT_TOOLS_STOP_KEY,
-    apply_subagent_tools_filter,
-)
+from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, apply_subagent_tools_filter
 
 REQUIRED = (
     "turn_finish",
@@ -126,7 +122,7 @@ class TestWarnings:
 class TestReachesSpec:
     def test_filtered_set_reaches_tools_spec(self, tmp_path):
         """Модель не должна видеть в схеме тул, который не сможет вызвать."""
-        from tools import build_tools_data
+        from gc_core.tools import build_tools_data
 
         cfg = {
             "launch_root": str(tmp_path),

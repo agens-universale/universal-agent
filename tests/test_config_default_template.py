@@ -11,8 +11,8 @@ from pathlib import Path
 
 import yaml
 
-from config import _default_config_path
-from config_modules.root import AppConfig
+from gc_core.config import _default_config_path
+from gc_core.config_modules.root import AppConfig
 
 # dotted-пути, где шаблон НАМЕРЕННО отличается от кодового дефолта:
 # сентинелы онбординга и preset-значения шаблона. Пополнять только осознанно.

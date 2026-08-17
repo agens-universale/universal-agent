@@ -1,7 +1,7 @@
 import json
 import sys
 
-from tools.exec.execute_command import ExecuteCommand
+from gc_core.tools.exec.execute_command import ExecuteCommand
 
 
 from tests.helpers.tool_ctx import with_local_ctx

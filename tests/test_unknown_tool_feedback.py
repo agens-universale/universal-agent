@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from states import State
-from tools import apply_tool, is_unknown_tool_output
+from gc_core.states import State
+from gc_core.tools import apply_tool, is_unknown_tool_output
 
 
 def _make_state(**overrides):
@@ -80,7 +80,7 @@ def test_is_unknown_tool_output_legacy_substring():
 
 
 def test_process_tool_calls_updates_unknown_streak(monkeypatch):
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     monkeypatch.setattr(
         pr,
@@ -121,7 +121,7 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
 
 
 def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     def fake_apply(**kw):
         if kw["tool_name"] == "phase1":
@@ -162,7 +162,7 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
 
 
 def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     unknown_payload = json.dumps(
         {
@@ -226,7 +226,7 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
 
 def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
     """С высоким K unknown копит tool_error_cnt и упирается в no_tool_call_max_count."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     unknown_payload = json.dumps(
         {
@@ -289,6 +289,6 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
 
 
 def test_agent_config_has_max_unknown_tool_repeats_default():
-    from config_modules.agent import AgentConfig
+    from gc_core.config_modules.agent import AgentConfig
 
     assert AgentConfig().max_unknown_tool_repeats == 5

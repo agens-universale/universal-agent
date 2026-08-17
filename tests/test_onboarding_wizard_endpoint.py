@@ -1,7 +1,7 @@
 """Структурная валидация endpoint в плоском визарде.
 Проверка: схема http(s) + непустой хост. Путь/достижимость НЕ проверяем (осознанно)."""
-import onboarding
-import onboarding_wizard as wz
+from gc_core import onboarding
+from gc_cli import onboarding_wizard as wz
 
 
 def _io(reads):
@@ -50,7 +50,7 @@ def test_invalid_endpoint_then_enter_skips():
 
 def test_review_all_hides_current_for_placeholder_endpoint(monkeypatch):
     # дефолтный плейсхолдер (== URL_SENTINEL) НЕ показываем как «текущее»: он = «не задано»
-    import model_picker
+    from gc_core import model_picker
     monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **k: None)
     cfg = {"completions_url": onboarding.URL_SENTINEL,
            "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
@@ -72,7 +72,7 @@ def test_endpoint_prompt_uses_flat_indent_ascii_marker():
 
 def test_review_all_shows_current_for_real_endpoint(monkeypatch):
     # реально настроенный адрес — показываем «текущее»
-    import model_picker
+    from gc_core import model_picker
     monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **k: None)
     cfg = {"completions_url": "https://real/v1/chat/completions",
            "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}

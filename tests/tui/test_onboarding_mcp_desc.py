@@ -10,7 +10,7 @@ class _FakeMcp:
 
 
 def _screen():
-    from tui.screens.onboarding import OnboardingScreen
+    from gc_tui.screens.onboarding import OnboardingScreen
     cfg = {"completions_url": "http://your-backend:PORT/v1/chat/completions",
            "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
            "model": "<ВПИШИТЕ_МОДЕЛЬ>"}
@@ -23,7 +23,7 @@ def _screen():
 async def test_onboarding_mcp_row_shows_description(tmp_path):
     # строка MCP на онбординге показывает приглушённое описание (тот же источник, что /settings)
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()

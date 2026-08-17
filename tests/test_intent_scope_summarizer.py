@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from intent_scope import summarizer
-from summarize.llm import auxiliary_llm_completion_kwargs
+from gc_core.intent_scope import summarizer
+from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
 
 
 def test_auxiliary_llm_completion_kwargs_from_chat_completions_llm():
@@ -35,8 +35,8 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
         summarizer, "request_summary_text", _fake_request_summary_text
     )
 
-    from config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
-    from intent_log import append_user_ask
+    from gc_core.config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
+    from gc_core.intent_log import append_user_ask
 
     ctx = SimpleNamespace(
         intent_scope=IntentScopeConfig(
@@ -82,7 +82,7 @@ def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
-    from config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
+    from gc_core.config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
 
     ctx = SimpleNamespace(
         intent_scope=IntentScopeConfig(

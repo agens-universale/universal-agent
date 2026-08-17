@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from states import State, SharedStateData
-from tools import apply_tool, WrongFunctionArgumentsException
+from gc_core.states import State, SharedStateData
+from gc_core.tools import apply_tool, WrongFunctionArgumentsException
 
 
 def _make_state():
@@ -51,7 +51,7 @@ def _make_ctx(tools_data, use_local=True):
 
 def _subagent_tools_data():
     """Minimal tools_data entry for a subagent."""
-    from tools.subagents.registry import get_subagents_tools_data
+    from gc_core.tools.subagents.registry import get_subagents_tools_data
     return get_subagents_tools_data()
 
 
@@ -63,7 +63,7 @@ class TestSubagentDispatch:
         state = _make_state()
         run_agent_func = MagicMock(return_value="subagent result")
 
-        with patch("tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
             instance.run.return_value = "subagent result"
 
@@ -91,7 +91,7 @@ class TestSubagentDispatch:
         state = _make_state()
         run_agent_func = MagicMock()
 
-        with patch("tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
             instance.run.return_value = "ok"
 
@@ -239,7 +239,7 @@ class TestSubagentDispatch:
         run_agent_func = MagicMock()
 
         # Для subagent_worker обязательны reason и task.
-        with patch("tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             with pytest.raises(WrongFunctionArgumentsException):
                 apply_tool(
                     tool_name="subagent_worker",

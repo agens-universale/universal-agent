@@ -44,7 +44,7 @@ def _chat_cfg():
 @pytest.mark.asyncio
 async def test_compact_runs_when_grown_since_last_compact(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "cmp00000000000000000000000000001a"
     _write_task(tmp_path, tid, n_messages=3, last_compact=1)   # 3 > 1 → выросло
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
@@ -60,7 +60,7 @@ async def test_compact_runs_when_grown_since_last_compact(tmp_path):
 @pytest.mark.asyncio
 async def test_compact_blocked_when_nothing_new_since_compact(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "cmp00000000000000000000000000002a"
     _write_task(tmp_path, tid, n_messages=3, last_compact=3)   # 3 <= 3 → нет нового
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
@@ -76,7 +76,7 @@ async def test_compact_blocked_when_nothing_new_since_compact(tmp_path):
 @pytest.mark.asyncio
 async def test_compact_runs_when_never_compacted(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "cmp00000000000000000000000000005a"
     _write_task(tmp_path, tid, n_messages=2, last_compact=None)  # baseline нет → можно
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
@@ -95,7 +95,7 @@ async def test_compact_resets_thinking_timer(tmp_path):
     прошлого хода (баг: показывало (40с) вместо (0с))."""
     pytest.importorskip("textual")
     import time
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "cmp00000000000000000000000000006a"
     _write_task(tmp_path, tid, n_messages=3, last_compact=1)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
@@ -113,7 +113,7 @@ async def test_compact_resets_thinking_timer(tmp_path):
 @pytest.mark.asyncio
 async def test_compact_blocked_when_running(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "cmp00000000000000000000000000003a"
     _write_task(tmp_path, tid, n_messages=3)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
@@ -129,7 +129,7 @@ async def test_compact_blocked_when_running(tmp_path):
 @pytest.mark.asyncio
 async def test_compact_blocked_in_responses(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "cmp00000000000000000000000000004a"
     _write_task(tmp_path, tid, n_messages=3)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",

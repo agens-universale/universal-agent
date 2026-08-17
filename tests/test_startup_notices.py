@@ -1,4 +1,4 @@
-from startup_notices import Notice, collect_startup_notices, render_notices_for_cli
+from gc_core.startup_notices import Notice, collect_startup_notices, render_notices_for_cli
 
 _BUILTIN = {"fs_write_file", "fs_read_file", "execute_command", "turn_ask_human"}
 

@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from config import load_config
-from config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC, BackendConfig
-from utils import connect_backend
+from gc_core.config import load_config
+from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC, BackendConfig
+from gc_core.utils import connect_backend
 
 
 def test_backend_config_timeout_default():
@@ -81,7 +81,7 @@ def test_chat_completions_default_timeout():
 
 
 def test_policy_forwards_timeout(monkeypatch):
-    import request_backend_policy as policy
+    from gc_core import request_backend_policy as policy
 
     seen = {}
 

@@ -1,6 +1,6 @@
 import json
 
-from tools.turn.submit_solution import SubmitSolution
+from gc_core.tools.turn.submit_solution import SubmitSolution
 
 VALID_TYPES = (
     "full_solution",

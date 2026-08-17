@@ -1,9 +1,9 @@
 """Чистая проза: контент стрим-ряда и финал-ряда идентичны (оба render_prose)."""
 from textual.widgets import Static
 
-from tui.services.markdown_render import render_prose, segment_answer
-from tui.services.trace_render import build_agent_widgets
-from tui.widgets.trace_row import TraceRow
+from gc_tui.services.markdown_render import render_prose, segment_answer
+from gc_tui.services.trace_render import build_agent_widgets
+from gc_tui.widgets.trace_row import TraceRow
 
 
 def test_pure_prose_stream_equals_final_content():

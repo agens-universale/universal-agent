@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
-    import server
+    from gc_server import server
 
     captured = {}
 

@@ -2,18 +2,7 @@ import hashlib
 
 import pytest
 
-from utils.file_text import (
-    BINARY_SAMPLE_BYTES,
-    check_expected_file_sha256,
-    classify_file_content,
-    decode_text_bytes,
-    encode_text_bytes,
-    encode_text_for_append,
-    read_text_for_edit,
-    sha256_hex_of_bytes,
-    sha256_hex_of_file_bytes,
-    try_encode_text_bytes_for_append,
-)
+from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, check_expected_file_sha256, classify_file_content, decode_text_bytes, encode_text_bytes, encode_text_for_append, read_text_for_edit, sha256_hex_of_bytes, sha256_hex_of_file_bytes, try_encode_text_bytes_for_append
 
 
 def test_classify_utf8_sample_boundary_cyrillic(tmp_path):
@@ -170,7 +159,7 @@ def test_decode_text_bytes_nul_and_legacy():
 
 
 def test_decode_text_best_effort_utf8_and_cp1251():
-    from utils.file_text import decode_text_best_effort
+    from gc_core.utils.file_text import decode_text_best_effort
 
     assert decode_text_best_effort("hi\n".encode("utf-8")) == "hi\n"
     legacy = (
@@ -192,7 +181,7 @@ def test_decode_explicit_cp1251_and_unsupported():
 
 
 def test_try_encode_failed_and_round_trip():
-    from utils.file_text import try_encode_text_bytes
+    from gc_core.utils.file_text import try_encode_text_bytes
 
     data, err = try_encode_text_bytes("Привет", "cp1251")
     assert err is None and data == "Привет".encode("cp1251")
@@ -201,7 +190,7 @@ def test_try_encode_failed_and_round_trip():
 
 
 def test_check_encoding_on_file_head_truncation():
-    from utils.file_text import check_encoding_on_file_head
+    from gc_core.utils.file_text import check_encoding_on_file_head
 
     # Incomplete trailing UTF-8 sequence at cut — should still pass when truncated.
     sample = b"hello " + b"\xd0"  # start of a 2-byte Cyrillic char

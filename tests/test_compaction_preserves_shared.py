@@ -13,8 +13,8 @@ import types
 import unittest
 from unittest.mock import patch
 
-from summarize.compaction import run_summary_compaction
-from summarize.working_memory_gateway import WorkingMemoryDeltas
+from gc_core.summarize.compaction import run_summary_compaction
+from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
 
 def _state_with_full_shared():
@@ -49,19 +49,19 @@ def _fake_summarize(**_kwargs):
 
 
 class CompactionPreservesSharedTest(unittest.TestCase):
-    @patch("summarize.compaction.log_compaction_completed")
-    @patch("summarize.compaction.log_summary_message_body")
-    @patch("summarize.compaction.log_summary_raw_text")
-    @patch("summarize.compaction.log_compaction_started")
+    @patch("gc_core.summarize.compaction.log_compaction_completed")
+    @patch("gc_core.summarize.compaction.log_summary_message_body")
+    @patch("gc_core.summarize.compaction.log_summary_raw_text")
+    @patch("gc_core.summarize.compaction.log_compaction_started")
     def test_summary_payload_carries_whole_shared_block(self, *_logs) -> None:
         state = _state_with_full_shared()
         ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
         captured: dict = {}
 
         with patch(
-            "summarize.compaction.summarize_dialog_via_chat_completions", _fake_summarize
+            "gc_core.summarize.compaction.summarize_dialog_via_chat_completions", _fake_summarize
         ), patch(
-            "summarize.compaction.apply_summary_state_patch",
+            "gc_core.summarize.compaction.apply_summary_state_patch",
             lambda **_kw: "dialog-body",
         ):
             run_summary_compaction(

@@ -1,5 +1,5 @@
 # tests/tui/test_thinking_indicator_tail.py
-from tui.widgets.thinking_indicator import ThinkingIndicator
+from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
 
 class _FakeSink:
@@ -45,7 +45,7 @@ def test_processing_state_label():
 def test_processing_breathes_dot_brightness():
     """«сверяюсь…»: одна точка • статична по форме, а её ЦВЕТ дышит по кадрам
     (тёмно-серая рампа) — плавно, без морф-спиннера «думаю…» и без смены формы."""
-    from tui.widgets.thinking_indicator import _PROCESSING_SHADES
+    from gc_tui.widgets.thinking_indicator import _PROCESSING_SHADES
     ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)
     glyphs, colors = set(), set()
     for f in range(40):
@@ -61,7 +61,7 @@ def test_processing_breathes_dot_brightness():
 
 def test_processing_word_is_dim_not_accent():
     """Слово «сверяюсь…» — серым (dim), чтобы отличаться от accent-«думаю…»."""
-    from tui.widgets.thinking_indicator import _DIM, _ACCENT
+    from gc_tui.widgets.thinking_indicator import _DIM, _ACCENT
     t = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)._render_text()
     word_at = t.plain.index("сверяюсь")
     styles = [s.style for s in t.spans if s.start <= word_at < s.end]

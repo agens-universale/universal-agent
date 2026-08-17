@@ -1,6 +1,6 @@
 # tests/tui/test_falling_edge_outcome.py
 # Проверяем чистую функцию выбора outcome (вынесем её из спадающего фронта).
-from tui.screens.main import resolve_terminal_outcome
+from gc_tui.screens.main import resolve_terminal_outcome
 
 def test_step_limit_maps_to_stopped_steps():
     assert resolve_terminal_outcome(

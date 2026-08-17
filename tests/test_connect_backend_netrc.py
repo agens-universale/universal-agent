@@ -2,7 +2,7 @@ import requests
 
 
 def test_no_netrc_session_keeps_explicit_auth(monkeypatch):
-    from utils.connect_backend import _NO_NETRC_SESSION
+    from gc_core.utils.connect_backend import _NO_NETRC_SESSION
     # имитируем, что netrc отдаёт Basic-креды для любого хоста
     monkeypatch.setattr(
         requests.sessions, "get_netrc_auth",

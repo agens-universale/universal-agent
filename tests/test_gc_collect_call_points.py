@@ -25,7 +25,7 @@ def _coord(monkeypatch, calls, gc_calls, backend="chat_completions",
     ``gc_calls`` — список-счётчик вызовов gc.collect.
     ``threshold_exceeded`` управляет mock'ом history_exceeds_summary_trigger.
     """
-    rsc = importlib.import_module("run_summary_coordinator")
+    rsc = importlib.import_module("gc_core.run_summary_coordinator")
     state = types.SimpleNamespace(
         backend_api_mode=backend,
         messages=[{"role": "user", "content": "x" * 20_000}],
@@ -148,8 +148,8 @@ class TestC2AgentExecutorFinally:
         Честный end-to-end: реальный AgentExecutor.run доходит до finally
         (run_agent замокан на немедленный выход), gc.collect перехвачен.
         """
-        from run_context import create_run_context
-        ae = importlib.import_module("agent_executor")
+        from gc_core.run_context import create_run_context
+        ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(ae, "gc",
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
@@ -163,8 +163,8 @@ class TestC2AgentExecutorFinally:
 
     def test_collect_called_even_on_exception_in_run(self, monkeypatch, tmp_path):
         """finally срабатывает даже при исключении в теле run → gc.collect вызывается."""
-        from run_context import create_run_context
-        ae = importlib.import_module("agent_executor")
+        from gc_core.run_context import create_run_context
+        ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(ae, "gc",
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
@@ -191,7 +191,7 @@ class TestC3ProcessingResponses:
                                is_cli_mode=False):
         """Вызывает process_tool_calls с замоканным бэкендом и собирает
         флаг был ли вызван gc.collect."""
-        pr = importlib.import_module("processing_responses")
+        pr = importlib.import_module("gc_core.processing_responses")
         gc_calls = []
         monkeypatch.setattr(pr, "gc",
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))

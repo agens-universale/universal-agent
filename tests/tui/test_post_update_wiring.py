@@ -18,11 +18,11 @@ import pytest
 
 pytest.importorskip("textual")
 
-import app_version
-import config_sync
-import mcp_runtime.cli as mcp_cli_mod
-import upgrade_gate
-from tui.screens.post_update import PostUpdateScreen
+from gc_core import app_version
+from gc_core import config_sync
+from gc_core.mcp_runtime import cli as mcp_cli_mod
+from gc_core import upgrade_gate
+from gc_tui.screens.post_update import PostUpdateScreen
 
 
 def _stub_post_update_deps(monkeypatch):
@@ -39,8 +39,8 @@ def _stub_post_update_deps(monkeypatch):
 @pytest.mark.asyncio
 async def test_upgrade_info_set_pushes_post_update_screen(tmp_path, monkeypatch):
     _stub_post_update_deps(monkeypatch)
-    from tui.app import TuiApp
-    from tui.screens.main import TraceScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
 
     cfg = {"completions_url": "https://h/v1/chat/completions",
            "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
@@ -65,7 +65,7 @@ async def test_upgrade_info_set_pushes_post_update_screen(tmp_path, monkeypatch)
 @pytest.mark.asyncio
 async def test_no_upgrade_info_no_post_update_screen(tmp_path, monkeypatch):
     _stub_post_update_deps(monkeypatch)
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     cfg = {"completions_url": "https://h/v1/chat/completions",
            "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
@@ -86,11 +86,11 @@ async def test_no_upgrade_info_no_post_update_screen(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
     _stub_post_update_deps(monkeypatch)
-    from tui.app import TuiApp
-    from tui.screens.main import TraceScreen
-    from tui.screens.onboarding import OnboardingScreen
-    import config as cfg_mod
-    import thread_store as ts_mod
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
+    from gc_tui.screens.onboarding import OnboardingScreen
+    from gc_core import config as cfg_mod
+    from gc_core import thread_store as ts_mod
 
     configured = {"completions_url": "https://h/v1/chat/completions",
                   "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
@@ -128,7 +128,7 @@ async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_show_post_update_is_idempotent(tmp_path, monkeypatch):
     _stub_post_update_deps(monkeypatch)
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     cfg = {"completions_url": "https://h/v1/chat/completions",
            "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
@@ -151,28 +151,28 @@ async def test_show_post_update_is_idempotent(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict):
-    import config_modules.env_vars as env_mod
+    from gc_core.config_modules import env_vars as env_mod
     monkeypatch.setattr(env_mod, "ensure_project_gc_dir", lambda: None)
 
-    import config as cfg_mod
+    from gc_core import config as cfg_mod
     monkeypatch.setattr(cfg_mod, "load_config", lambda path=None: dict(config_dict))
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
     monkeypatch.setattr(cfg_mod, "user_config_path", lambda: tmp_path / "config.yml")
     monkeypatch.setattr(cfg_mod, "_bootstrap_user_config", lambda: True)
 
-    import onboarding as ob_mod
+    from gc_core import onboarding as ob_mod
     monkeypatch.setattr(ob_mod, "is_unconfigured", lambda cfg: False)
 
-    import thread_store as ts_mod
+    from gc_core import thread_store as ts_mod
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
 
-    import mcp_daemon_autostart as mcp_da_mod
+    from gc_core import mcp_daemon_autostart as mcp_da_mod
     monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 
 
 def test_main_does_not_stamp_when_upgrade_detected(monkeypatch, tmp_path):
-    import tui as tui_mod
+    import gc_tui as tui_mod
 
     configured = {"completions_url": "https://h/v1/chat/completions",
                   "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
@@ -183,7 +183,7 @@ def test_main_does_not_stamp_when_upgrade_detected(monkeypatch, tmp_path):
     mark_calls = []
     monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: mark_calls.append(1))
 
-    import tui.app as app_mod
+    from gc_tui import app as app_mod
     OrigTuiApp = app_mod.TuiApp
     captured = {}
 
@@ -196,7 +196,7 @@ def test_main_does_not_stamp_when_upgrade_detected(monkeypatch, tmp_path):
             captured["ran"] = True
 
     monkeypatch.setattr(app_mod, "TuiApp", FakeTuiApp)
-    monkeypatch.setitem(sys.modules, "tui.app", app_mod)
+    monkeypatch.setitem(sys.modules, "gc_tui.app", app_mod)
 
     result = tui_mod.main([])
 
@@ -209,7 +209,7 @@ def test_main_does_not_stamp_when_upgrade_detected(monkeypatch, tmp_path):
 def test_main_stamps_when_no_upgrade(monkeypatch, tmp_path):
     """No upgrade this run — startup stamp still happens (baseline for future
     detect_upgrade calls; PostUpdateScreen is never mounted in this case)."""
-    import tui as tui_mod
+    import gc_tui as tui_mod
 
     configured = {"completions_url": "https://h/v1/chat/completions",
                   "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
@@ -219,7 +219,7 @@ def test_main_stamps_when_no_upgrade(monkeypatch, tmp_path):
     mark_calls = []
     monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: mark_calls.append(1))
 
-    import tui.app as app_mod
+    from gc_tui import app as app_mod
     OrigTuiApp = app_mod.TuiApp
     captured = {}
 
@@ -232,7 +232,7 @@ def test_main_stamps_when_no_upgrade(monkeypatch, tmp_path):
             captured["ran"] = True
 
     monkeypatch.setattr(app_mod, "TuiApp", FakeTuiApp)
-    monkeypatch.setitem(sys.modules, "tui.app", app_mod)
+    monkeypatch.setitem(sys.modules, "gc_tui.app", app_mod)
 
     result = tui_mod.main([])
 

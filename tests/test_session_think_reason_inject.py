@@ -6,16 +6,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools import apply_tool, build_tools_data
+from gc_core.tools import apply_tool, build_tools_data
 
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    stale = [name for name in sys.modules if name == "tools" or name.startswith("tools.")]
+    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
     for name in stale:
         sys.modules.pop(name, None)
     yield
-    stale = [name for name in sys.modules if name == "tools" or name.startswith("tools.")]
+    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
     for name in stale:
         sys.modules.pop(name, None)
 

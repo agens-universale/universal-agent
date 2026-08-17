@@ -1,5 +1,5 @@
-from config_modules.tui import TuiConfig
-from config_modules.paths import PathsConfig
+from gc_core.config_modules.tui import TuiConfig
+from gc_core.config_modules.paths import PathsConfig
 
 
 def test_agentsmd_override_lives_in_tui_default_false():
@@ -12,9 +12,9 @@ def test_instructions_overwrite_removed_from_paths():
 
 def test_agentsmd_override_e2e_config_to_state(tmp_path, monkeypatch):
     """tui.agentsmd_override: true в конфиге → config_dict → State.agentsmd_override is True."""
-    import config as cfgmod
-    import mcp_runtime.paths as mpaths
-    from states import State
+    from gc_core import config as cfgmod
+    from gc_core.mcp_runtime import paths as mpaths
+    from gc_core.states import State
 
     monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
     monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")

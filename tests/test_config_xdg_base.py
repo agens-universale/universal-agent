@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from config_modules.env_vars import EnvVars
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.env_vars import EnvVars
 
 _XDG_CFG = """
 backend:
@@ -50,7 +50,7 @@ def env_with_config_dir(monkeypatch, tmp_path):
 @pytest.fixture
 def fake_pkg_default(monkeypatch, tmp_path):
     """Monkeypatch _default_config_path() to a controlled tmp 'package' config."""
-    import config
+    from gc_core import config
 
     pkg = tmp_path / "pkg_config.yml"
     pkg.write_text(_PKG_CFG, encoding="utf-8")
@@ -68,7 +68,7 @@ def isolated_cwd(tmp_path, monkeypatch):
 
 
 def test_xdg_config_path_returns_path_when_file_exists(env_with_config_dir):
-    from config import _xdg_config_path
+    from gc_core.config import _xdg_config_path
 
     cfg = env_with_config_dir / "config.yml"
     cfg.write_text(_XDG_CFG, encoding="utf-8")
@@ -78,7 +78,7 @@ def test_xdg_config_path_returns_path_when_file_exists(env_with_config_dir):
 
 
 def test_xdg_config_path_none_when_missing(env_with_config_dir):
-    from config import _xdg_config_path
+    from gc_core.config import _xdg_config_path
 
     # No config.yml in the xdg config dir.
     assert _xdg_config_path() is None
@@ -87,7 +87,7 @@ def test_xdg_config_path_none_when_missing(env_with_config_dir):
 def test_xdg_base_used_when_no_explicit_config(
     env_with_config_dir, fake_pkg_default, isolated_cwd
 ):
-    from config import load_config
+    from gc_core.config import load_config
 
     (env_with_config_dir / "config.yml").write_text(_XDG_CFG, encoding="utf-8")
     cfg = load_config()  # no --config
@@ -98,7 +98,7 @@ def test_xdg_base_used_when_no_explicit_config(
 def test_explicit_config_wins_over_xdg(
     env_with_config_dir, fake_pkg_default, isolated_cwd, tmp_path
 ):
-    from config import load_config
+    from gc_core.config import load_config
 
     (env_with_config_dir / "config.yml").write_text(_XDG_CFG, encoding="utf-8")
     explicit = tmp_path / "explicit.yml"
@@ -111,7 +111,7 @@ def test_explicit_config_wins_over_xdg(
 def test_falls_back_to_package_when_no_xdg_file(
     env_with_config_dir, fake_pkg_default, isolated_cwd
 ):
-    from config import load_config
+    from gc_core.config import load_config
 
     # gc_config_dir is set but no config.yml inside -> tier 2 skipped.
     cfg = load_config()
@@ -135,7 +135,7 @@ def test_no_env_override_uses_package_default(
         monkeypatch.delenv(_k, raising=False)
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(env_vars, "env", EnvVars(gc_config_dir=tmp_path))
-    from config import load_config
+    from gc_core.config import load_config
 
     cfg = load_config()
     assert cfg["model"] == "PkgModel"
@@ -144,7 +144,7 @@ def test_no_env_override_uses_package_default(
 def test_project_local_merges_over_xdg_base(
     env_with_config_dir, fake_pkg_default, isolated_cwd
 ):
-    from config import load_config
+    from gc_core.config import load_config
 
     (env_with_config_dir / "config.yml").write_text(_XDG_CFG, encoding="utf-8")
     gc_dir = isolated_cwd / ".gc"
@@ -159,7 +159,7 @@ def test_project_local_merges_over_xdg_base(
 def test_relative_paths_resolve_from_xdg_dir(
     env_with_config_dir, fake_pkg_default, isolated_cwd
 ):
-    from config import load_config
+    from gc_core.config import load_config
 
     (env_with_config_dir / "config.yml").write_text(
         _XDG_CFG + "paths:\n  agent_md_path: foo.md\n", encoding="utf-8"

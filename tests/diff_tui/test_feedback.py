@@ -3,20 +3,13 @@ from __future__ import annotations
 
 import pytest
 
-from config_modules import env_vars
-from diff_tui.feedback import (
-    build_undo_feedback_body,
-    build_undo_feedback_message,
-    files_word,
-    format_approve_ack,
-    format_pending_cta,
-    format_undo_ack,
-)
-from diff_tui.service import DiffService
-from diff_tui.store import DiffStore
-from message_policy.user_message_policy import is_technical_user_message_text
-from runtime_notices import clear_runtime_notices
-from thread_store import load_thread_messages
+from gc_core.config_modules import env_vars
+from gc_tui.diff_tui.feedback import build_undo_feedback_body, build_undo_feedback_message, files_word, format_approve_ack, format_pending_cta, format_undo_ack
+from gc_tui.diff_tui.service import DiffService
+from gc_tui.diff_tui.store import DiffStore
+from gc_core.message_policy.user_message_policy import is_technical_user_message_text
+from gc_core.runtime_notices import clear_runtime_notices
+from gc_core.thread_store import load_thread_messages
 
 
 @pytest.fixture
@@ -63,7 +56,7 @@ def test_format_approve_ack_and_cta():
 
 
 def test_format_bulk_dual_layer_acks():
-    from diff_tui.feedback import format_bulk_approve_ack, format_bulk_undo_ack
+    from gc_tui.diff_tui.feedback import format_bulk_approve_ack, format_bulk_undo_ack
 
     assert format_bulk_approve_ack(2, 1) == "Принято: git: 2; cache: 1"
     assert format_bulk_approve_ack(3, 0) == "Принято: git: 3"
@@ -74,7 +67,7 @@ def test_format_bulk_dual_layer_acks():
 
 
 def test_format_undo_noop_ack():
-    from diff_tui.feedback import format_undo_noop_ack
+    from gc_tui.diff_tui.feedback import format_undo_noop_ack
 
     assert format_undo_noop_ack("x", "other") is None
     assert format_undo_noop_ack("", "created_no_approve") is None
@@ -157,10 +150,10 @@ def test_service_undo_created_returns_deleted_keys(cache_proj):
 @pytest.mark.asyncio
 async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.diff import DiffScreen
-    from thread_store import append_new_thread_messages
-    from diff_tui.touched import TouchedJournal
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.diff import DiffScreen
+    from gc_core.thread_store import append_new_thread_messages
+    from gc_tui.diff_tui.touched import TouchedJournal
 
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()

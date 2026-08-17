@@ -25,7 +25,7 @@ def _content_text(widget) -> str:
 
 def test_dict_returns_widget_with_json_content():
     pytest.importorskip("textual")
-    from tui.services.json_payload import render_payload
+    from gc_tui.services.json_payload import render_payload
 
     w = render_payload({"ok": True, "count": 5})
     rendered = _content_text(w)
@@ -35,7 +35,7 @@ def test_dict_returns_widget_with_json_content():
 
 def test_list_returns_widget_with_json_content():
     pytest.importorskip("textual")
-    from tui.services.json_payload import render_payload
+    from gc_tui.services.json_payload import render_payload
 
     w = render_payload([1, 2, 3])
     rendered = _content_text(w)
@@ -46,7 +46,7 @@ def test_list_returns_widget_with_json_content():
 
 def test_string_valid_json_pretty_prints():
     pytest.importorskip("textual")
-    from tui.services.json_payload import render_payload
+    from gc_tui.services.json_payload import render_payload
 
     raw = json.dumps({"a": 1, "b": [10, 20]})
     w = render_payload(raw)
@@ -57,7 +57,7 @@ def test_string_valid_json_pretty_prints():
 
 def test_string_plain_text_falls_back():
     pytest.importorskip("textual")
-    from tui.services.json_payload import render_payload
+    from gc_tui.services.json_payload import render_payload
 
     raw = "this is not json at all"
     w = render_payload(raw)
@@ -67,7 +67,7 @@ def test_string_plain_text_falls_back():
 
 def test_string_empty_returns_widget():
     pytest.importorskip("textual")
-    from tui.services.json_payload import render_payload
+    from gc_tui.services.json_payload import render_payload
 
     w = render_payload("")
     # Должен вернуть валидный widget, без exception. Контент может быть пустым.

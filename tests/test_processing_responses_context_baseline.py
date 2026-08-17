@@ -6,16 +6,17 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
-import intent_guard.guard as intent_guard_guard
+from gc_core.intent_guard import guard as intent_guard_guard
 import pytest
 import requests
 
-from intent_guard.validation_result import ValidationResult
+from gc_core.intent_guard.validation_result import ValidationResult
 from intent_fixtures import (
     intent_user_ask_texts,
     intent_user_ask_texts_from_jsonl,
     seed_state_intent,
 )
+from tests.paths import module_dir
 
 
 def teardown_module(_module) -> None:
@@ -23,16 +24,16 @@ def teardown_module(_module) -> None:
     # `from processing_responses import f` держат f с устаревшим __globals__;
     # monkeypatch затем меняет другой экземпляр модуля.
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    real_tools = importlib.import_module("tools")
-    proc = sys.modules.get("processing_responses")
+    real_tools = importlib.import_module("gc_core.tools")
+    proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.apply_tool = real_tools.apply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
-    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
         cycle_stop_mod.apply_tool = real_tools.apply_tool
 
@@ -46,24 +47,24 @@ State = None
 def setup_module(module) -> None:
     global processing_module, request_policy, run_agent, State
     _stub_tools_modules()
-    import processing_responses as pm
-    import request_backend_policy as rq
-    from processing_responses import run_agent as ra
-    from states import State as St
+    from gc_core import processing_responses as pm
+    from gc_core import request_backend_policy as rq
+    from gc_core.processing_responses import run_agent as ra
+    from gc_core.states import State as St
 
     processing_module = pm
     request_policy = rq
     run_agent = ra
     State = St
-    pm.apply_tool = sys.modules["tools"].apply_tool
+    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
 
 
 def _stub_tools_modules() -> None:
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
 
-    tools_pkg = types.ModuleType("tools")
+    tools_pkg = types.ModuleType("gc_core.tools")
 
     class _WrongFunctionArgumentsException(Exception):
         def to_llm_feedback(self):
@@ -98,11 +99,11 @@ def _stub_tools_modules() -> None:
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     root = Path(__file__).resolve().parents[1]
-    tools_dir = root / "src" / "tools"
+    tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
-    sys.modules["tools"] = tools_pkg
+    sys.modules["gc_core.tools"] = tools_pkg
 
-    import message_policy.cycle_stop as _cycle_stop_mod
+    from gc_core.message_policy import cycle_stop as _cycle_stop_mod
 
     _cycle_stop_mod.apply_tool = tools_pkg.apply_tool
 
@@ -493,7 +494,7 @@ def test_turn_finish_validation_receives_context_and_current_scope(monkeypatch):
 def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
     from unittest.mock import patch
 
-    from intent_guard.trace_digest import FinishGateTraceDigest
+    from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 
     state = _make_state()
     state.messages = [
@@ -516,11 +517,11 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
     )
 
     with patch(
-        "intent_guard.final_report_consistency.build_finish_gate_trace_digest",
+        "gc_core.intent_guard.final_report_consistency.build_finish_gate_trace_digest",
         return_value=digest,
     ) as mock_build:
         with patch(
-            "summarize.llm.request_chat_completion_text",
+            "gc_core.summarize.llm.request_chat_completion_text",
             return_value=validator_json,
         ):
             run_agent(

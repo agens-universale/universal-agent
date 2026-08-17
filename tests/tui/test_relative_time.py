@@ -2,7 +2,7 @@
 Времена — середина суток, чтобы сдвиг локали не флипал календарную дату."""
 from datetime import datetime, timedelta, timezone
 
-from tui.services.relative_time import format_relative_local
+from gc_tui.services.relative_time import format_relative_local
 
 
 NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc).astimezone()

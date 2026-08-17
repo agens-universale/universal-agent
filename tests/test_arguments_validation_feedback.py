@@ -1,4 +1,4 @@
-from tools.arguments_validation import WrongFunctionArgumentsException
+from gc_core.tools.arguments_validation import WrongFunctionArgumentsException
 
 
 def test_anyof_object_shown_as_object_not_any():

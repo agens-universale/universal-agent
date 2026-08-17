@@ -6,7 +6,7 @@
 """
 import pytest
 
-from usage.account import CATEGORY_MAIN, UsageAccount
+from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
 _PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
             "per_tokens": 1_000_000}
@@ -29,7 +29,7 @@ def _meta(inp, out):
 @pytest.mark.asyncio
 async def test_footer_shows_request_and_session(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
@@ -48,7 +48,7 @@ async def test_request_reflects_live_snapshot(tmp_path):
     """Футер показывает «запрос» как есть из снапшота (исполнитель сам считает
     live-дельту хода) — без TUI-заморозки прошлого хода."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
@@ -72,7 +72,7 @@ async def test_request_hidden_until_first_tokens(tmp_path):
     """Новый вопрос только начался (дельта ещё пустая) — «запрос» скрыт,
     видна только «сессия» (кумулятив прошлых ходов)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
@@ -89,7 +89,7 @@ async def test_request_hidden_until_first_tokens(tmp_path):
 async def test_no_usage_segment_when_runner_lacks_method(tmp_path):
     """Раннер без usage_snapshot (старый/тестовый) не должен ронять футер."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _Bare:
         pass
@@ -107,7 +107,7 @@ async def test_no_usage_segment_when_runner_lacks_method(tmp_path):
 @pytest.mark.asyncio
 async def test_no_usage_segment_without_runner(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
@@ -124,7 +124,7 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
     """Узкий экран: «сессия» уезжает на 2-ю строку под «запрос» (команды слева
     не вытесняются). Широкий: одна строка."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test(size=(40, 24)) as pilot:
@@ -142,7 +142,7 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
 @pytest.mark.asyncio
 async def test_footer_single_line_on_wide_width(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test(size=(200, 24)) as pilot:

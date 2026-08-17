@@ -5,9 +5,9 @@
 - тариф выключен → только токены, без цены;
 - итога запроса ещё нет → только сегмент сессии.
 """
-from usage.account import CATEGORY_MAIN, UsageAccount
+from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
-from tui.services.usage_meter import format_nonzero_cost, render_usage_meter
+from gc_tui.services.usage_meter import format_nonzero_cost, render_usage_meter
 
 _PRICING_ON = {
     "enabled": True,

@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from tui.services.trace_mapper import map_message
+from gc_tui.services.trace_mapper import map_message
 
 
 # ---------- Unit-тесты Фикса A: mapper для ask_human function_call_output ----------
@@ -187,9 +187,9 @@ def test_ask_human_output_chat_completions_format_ok_false():
 
 from pathlib import Path
 
-from tui.app import TuiApp
-from tui.models import TraceEvent
-from tui.services.stores.file_store import FileTaskStore
+from gc_tui.app import TuiApp
+from gc_tui.models import TraceEvent
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 class _FakeRunner:
@@ -260,7 +260,7 @@ async def test_replay_renders_ask_human_dialog(tmp_path):
         # Banner снят (output-meta его убрал в replay).
         assert screen._ask_human_banner is None
         # В трассе есть user-реплика с текстом ответа.
-        from tui.widgets.user_reply import UserReplyContainer
+        from gc_tui.widgets.user_reply import UserReplyContainer
         replies = list(screen.query(UserReplyContainer))
         texts = [r._text for r in replies]
         assert "да, продолжаем" in texts
@@ -289,10 +289,10 @@ async def test_replay_empty_response_shows_meta_and_unmounts_banner(tmp_path):
         screen.attach_active_task(thread_id)
         await pilot.pause()
         assert screen._ask_human_banner is None
-        from tui.widgets.user_reply import UserReplyContainer
+        from gc_tui.widgets.user_reply import UserReplyContainer
         assert not list(screen.query(UserReplyContainer))
         # Meta-строка отрендерилась как обычный TraceRow с меткой.
-        from tui.widgets.trace_row import TraceRow
+        from gc_tui.widgets.trace_row import TraceRow
         trace_text = " ".join(
             f"{w._prefix}{w._content}" for w in screen.query(TraceRow)
         )
@@ -327,7 +327,7 @@ async def test_live_submit_mounts_pending_user_reply(tmp_path):
         await pilot.pause()
         assert screen._ask_human_banner is not None
         # Симулируем submit Enter-ом: вписываем текст и дёргаем on_command_text_area_submitted.
-        from tui.widgets.command_input import CommandTextArea
+        from gc_tui.widgets.command_input import CommandTextArea
         inp = screen.query_one("#cmdinput", CommandTextArea)
         inp.text = "да, поехали"
         # Имитируем submit event Textual'а напрямую — в Pilot Enter в TextArea
@@ -341,12 +341,12 @@ async def test_live_submit_mounts_pending_user_reply(tmp_path):
         assert screen._ask_human_banner is None
         assert app.tui_state.ask_human_state is None
         # В трассе есть pending user-реплика.
-        from tui.widgets.user_reply import UserReplyContainer
+        from gc_tui.widgets.user_reply import UserReplyContainer
         replies = list(screen.query(UserReplyContainer))
         assert replies, "user-reply виджет должен быть смонтирован"
         assert replies[-1]._state == "pending"
         # Филлер «думаю…» уже виден — агент снова работает, ответа юзера не ждём.
-        from tui.widgets.thinking_indicator import ThinkingIndicator
+        from gc_tui.widgets.thinking_indicator import ThinkingIndicator
         indicators = list(screen.query(ThinkingIndicator))
         assert indicators, "thinking-индикатор должен появиться сразу после ответа"
         assert not indicators[0].has_class("hidden")
@@ -378,7 +378,7 @@ async def test_live_function_call_output_confirms_pending(tmp_path):
         # live=True: плашка из live-поллинга → владелец = active_runner (как в проде).
         screen._on_ask_human_event(ev_call, live=True)
         await pilot.pause()
-        from tui.widgets.command_input import CommandTextArea
+        from gc_tui.widgets.command_input import CommandTextArea
         inp = screen.query_one("#cmdinput", CommandTextArea)
         inp.text = "go"
         screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="go"))
@@ -394,7 +394,7 @@ async def test_live_function_call_output_confirms_pending(tmp_path):
         # Banner снят.
         assert screen._ask_human_banner is None
         # User-реплика одна и в state=normal.
-        from tui.widgets.user_reply import UserReplyContainer
+        from gc_tui.widgets.user_reply import UserReplyContainer
         replies = list(screen.query(UserReplyContainer))
         assert len(replies) == 1, f"должна быть ровно 1 user-реплика, получили {len(replies)}"
         assert replies[0]._state == "normal"

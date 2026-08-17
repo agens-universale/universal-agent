@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.config import build_swarm_config, _abs_or_empty  # noqa: E402
+from gc_server.swarm.config import build_swarm_config, _abs_or_empty
 
 
 # ---------------------------------------------------------------------------

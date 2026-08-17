@@ -13,25 +13,25 @@ from __future__ import annotations
 
 
 def cli() -> int:
-    from cli import main
+    from gc_cli.cli import main
     return main()
 
 
 def tui() -> int:
-    from tui_entry import main
+    from gc_core.tui_entry import main
     return main()
 
 
 def serve() -> int:
-    from serve_entry import main
+    from gc_core.serve_entry import main
     return main()
 
 
 def mcp() -> int:
-    from mcp_runtime.cli import main
+    from gc_core.mcp_runtime.cli import main
     return main()
 
 
 def mcp_install() -> int:
-    from mcp_runtime.install_cli import main
+    from gc_core.mcp_runtime.install_cli import main
     return main()

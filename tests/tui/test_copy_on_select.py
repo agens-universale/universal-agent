@@ -8,8 +8,8 @@ pytest.importorskip("textual")
 
 @pytest.mark.asyncio
 async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
-    from tui.app import TuiApp
-    from tui.services import clipboard_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
 
     copied: list = []
     stop_called = {"flag": False}
@@ -58,8 +58,8 @@ async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
     from textual import events
-    from tui.app import TuiApp
-    from tui.services import clipboard_ops
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
 
     seen: list = []
 
@@ -72,7 +72,7 @@ async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
         monkeypatch.setattr(clipboard_ops, "copy_out", fake_copy_out)
         # patch на экземпляре через модуль, которым пользуется app — переопределим метод
         monkeypatch.setattr(
-            "tui.app.copy_out",
+            "gc_tui.app.copy_out",
             fake_copy_out,
         )
         monkeypatch.setattr(pilot.app, "_current_selection", lambda: "выделено")
@@ -85,7 +85,7 @@ async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_text_selected_debounce_keeps_last(tmp_path, monkeypatch):
     from textual import events
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     seen: list = []
 
@@ -95,7 +95,7 @@ async def test_text_selected_debounce_keeps_last(tmp_path, monkeypatch):
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
-        monkeypatch.setattr("tui.app.copy_out", fake_copy_out)
+        monkeypatch.setattr("gc_tui.app.copy_out", fake_copy_out)
         seq = {"n": 0}
         texts = ["один", "два"]
 
@@ -114,7 +114,7 @@ async def test_text_selected_debounce_keeps_last(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_text_selected_empty_noop(tmp_path, monkeypatch):
     from textual import events
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     seen: list = []
 
@@ -124,7 +124,7 @@ async def test_text_selected_empty_noop(tmp_path, monkeypatch):
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
-        monkeypatch.setattr("tui.app.copy_out", fake_copy_out)
+        monkeypatch.setattr("gc_tui.app.copy_out", fake_copy_out)
         monkeypatch.setattr(pilot.app, "_current_selection", lambda: "")
         pilot.app.post_message(events.TextSelected())
         await pilot.pause(0.25)
@@ -134,8 +134,8 @@ async def test_text_selected_empty_noop(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_clipboard_payload_appends_diff_cite(tmp_path, monkeypatch):
     """С DiffViewerScreen в буфер уходит суффикс [diff: path]."""
-    from tui.app import TuiApp
-    from tui.screens.diff import DiffViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.diff import DiffViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

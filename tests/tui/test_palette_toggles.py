@@ -6,7 +6,7 @@ import pytest
 
 def test_cycle_value_wraps_around():
     """Чистая функция цикла: ±1 по кортежу values, по кругу, без записи."""
-    from tui.toggles import cycle_value
+    from gc_tui.toggles import cycle_value
 
     assert cycle_value("gate", "on", 1) == "off"     # (idx2+1)%3 -> off
     assert cycle_value("gate", "off", 1) == "smart"  # было "on" -> теперь "smart"
@@ -23,9 +23,9 @@ def test_palette_renders_toggle_state(monkeypatch):
     pytest.importorskip("textual")
     from dataclasses import replace
 
-    from tui.commands import Command, CommandRegistry
-    from tui.toggles import TOGGLES
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.toggles import TOGGLES
+    from gc_tui.widgets.command_palette import CommandPalette
 
     # Механика рендера, не видимость (Task 4 §4.1) — gate виден в пустом фильтре.
     monkeypatch.setitem(TOGGLES, "gate", replace(TOGGLES["gate"], palette_default=True))
@@ -47,8 +47,8 @@ def test_hint_for_no_longer_special_cases_toggle():
     (см. tests ниже) — `_hint_for` больше не отличает toggle-команды, `_HINT_TOGGLE`
     удалена как осиротевшая."""
     pytest.importorskip("textual")
-    from tui.commands import Command
-    from tui.widgets.command_palette import _HINT_NO_ARGS, _hint_for
+    from gc_tui.commands import Command
+    from gc_tui.widgets.command_palette import _HINT_NO_ARGS, _hint_for
 
     toggle_cmd = Command("gate", (), "", "финиш-гейт", is_toggle=True)
     plain_cmd = Command("help", (), "", "справка")
@@ -61,9 +61,9 @@ async def test_palette_footer_hidden_when_no_toggle_commands(tmp_path):
     """Реестр без тогглов — разделителя и toggle-строк нет (подвал сам присутствует
     всегда — в нём живёт hint, см. §порядок ниже)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = CommandRegistry()
     reg.register(Command("help", (), "", "справка"))
@@ -81,9 +81,9 @@ async def test_palette_footer_hidden_when_no_toggle_commands(tmp_path):
 async def test_palette_footer_shows_docked_toggle_row(tmp_path):
     """Смонтированная палитра с toggle-командой — подвал + разделитель + строка с ●."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = CommandRegistry()
     reg.register(Command("help", (), "", "справка"))
@@ -111,9 +111,9 @@ async def test_palette_footer_vertical_order(tmp_path):
     (баг: hint жил СНАРУЖИ докнутого подвала и рендерился выше него — dock: bottom
     вырывает из потока только сам контейнер, не соседей по yield-порядку)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = CommandRegistry()
     reg.register(Command("help", (), "", "справка"))
@@ -142,9 +142,9 @@ async def test_palette_toggle_row_visible_when_filter_empties_top_zone(tmp_path)
     auto-высоте контейнера .palette — без резервации места контейнер схлопывается
     до одной рамки, и toggle-строка рендерится за пределами региона палитры."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = CommandRegistry()
     reg.register(Command("help", (), "", "справка"))
@@ -174,9 +174,9 @@ async def test_palette_footer_not_hanging_below_border_with_full_list(tmp_path):
     рисуется поверх последних строк списка команд вместо того, чтобы идти
     строго ниже них."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.commands import build_default_registry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
 
@@ -204,8 +204,8 @@ def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
     сохраняет в метаданные треда и зовёт invalidate_runner (не reload_config;
     спека 2026-07-20-session-scoped-settings §2)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.toggles import apply_toggle
+    from gc_tui.app import TuiApp
+    from gc_tui.toggles import apply_toggle
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
@@ -230,7 +230,7 @@ def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
     assert calls["n"] == 1
     assert cfg_file.read_text(encoding="utf-8") == 'tui:\n  finish_gate_mode: "on"\n'
 
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.services.stores.file_store import FileTaskStore
     store = FileTaskStore(threads_dir=app._threads_dir, system=app._system)
     saved = (store.get_task_meta("t1").get("tui") or {}).get("session_settings")
     assert saved == {"tui.finish_gate_mode": "off"}
@@ -241,8 +241,8 @@ def test_apply_toggle_writes_explicit_value_not_recomputed_direction(tmp_path):
     cycle_value(current, +1) от текущего состояния. current='allow' + draft='deny'
     (юзер крутил ←) — apply_toggle обязан выставить 'deny', а не пересчитанный 'judge'."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.toggles import apply_toggle, toggle_state
+    from gc_tui.app import TuiApp
+    from gc_tui.toggles import apply_toggle, toggle_state
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  text_answer_mode: "allow"\n', encoding="utf-8")
@@ -260,8 +260,8 @@ def test_apply_toggle_writes_explicit_value_not_recomputed_direction(tmp_path):
 def test_apply_toggle_rejects_value_outside_spec(tmp_path):
     """Мусорное/рассинхронизированное value — ValueError, ничего не пишется на диск."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.toggles import apply_toggle
+    from gc_tui.app import TuiApp
+    from gc_tui.toggles import apply_toggle
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
@@ -278,8 +278,8 @@ def test_apply_toggle_rejects_value_outside_spec(tmp_path):
 def test_apply_toggle_answers_three_values(tmp_path):
     """Каждое из трёх значений /answers реально применяется — в сессии, файл не трогается."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.toggles import apply_toggle, toggle_state
+    from gc_tui.app import TuiApp
+    from gc_tui.toggles import apply_toggle, toggle_state
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  text_answer_mode: "judge"\n', encoding="utf-8")
@@ -296,7 +296,7 @@ def test_apply_toggle_answers_three_values(tmp_path):
 
 def test_gate_state_shows_effective_not_raw():
     """Глобальный strict=false явный + tui дефолт → провайдер отдаёт 'off' (эффективный)."""
-    from tui.toggles import toggle_state
+    from gc_tui.toggles import toggle_state
 
     class _App:
         _config = {
@@ -313,7 +313,7 @@ def test_gate_state_shows_effective_not_raw():
 
 def _app_with_config(tmp_path, yaml_text):
     """TuiApp с реальным config.yml на диске (тот же паттерн, что apply_toggle-тесты)."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(yaml_text, encoding="utf-8")
@@ -547,8 +547,8 @@ def _reg_with_gate_answers(monkeypatch):
     pytest.importorskip("textual")
     from dataclasses import replace
 
-    from tui.commands import Command, CommandRegistry
-    from tui.toggles import TOGGLES
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.toggles import TOGGLES
 
     monkeypatch.setitem(TOGGLES, "gate", replace(TOGGLES["gate"], palette_default=True))
     monkeypatch.setitem(TOGGLES, "answers", replace(TOGGLES["answers"], palette_default=True))
@@ -562,7 +562,7 @@ def _reg_with_gate_answers(monkeypatch):
 
 
 def _mk_palette(reg, state_map):
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.widgets.command_palette import CommandPalette
 
     return CommandPalette(reg, initial_filter="", toggle_state=lambda n: state_map[n])
 
@@ -587,9 +587,9 @@ def test_regular_and_toggle_rows_share_name_column(monkeypatch):
     pytest.importorskip("textual")
     from dataclasses import replace
 
-    from tui.commands import Command, CommandRegistry
-    from tui.toggles import TOGGLES
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.toggles import TOGGLES
+    from gc_tui.widgets.command_palette import CommandPalette
 
     # Механика колонок, не видимость (Task 4 §4.1) — gate виден в пустом фильтре.
     monkeypatch.setitem(TOGGLES, "gate", replace(TOGGLES["gate"], palette_default=True))
@@ -631,10 +631,10 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     ОДНОЙ колонке (`col`), custom-резерв — правее троек, паддинг у детей
     достраивается СПРАВА."""
     pytest.importorskip("textual")
-    from tui import palette as p
-    from tui.commands import build_default_registry
-    from tui.toggles import TOGGLES
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui import palette as p
+    from gc_tui.commands import build_default_registry
+    from gc_tui.toggles import TOGGLES
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
     state = {"rigor": "high", "gate": "on", "answers": "deny"}
@@ -705,10 +705,10 @@ def test_filtered_dedups_child_matching_filter(monkeypatch):
     ребёнок), а не дважды (один раз сам по фильтру, второй раз родительской
     вставкой)."""
     pytest.importorskip("textual")
-    from tui import palette as p
-    from tui import toggles as tg
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui import palette as p
+    from gc_tui import toggles as tg
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     child = tg.ToggleSpec(
         dotted="tui.zz_child",
@@ -756,10 +756,10 @@ def test_filtered_dedups_child_matching_filter_registered_before_parent(monkeypa
     но ревизия 7 явно рассчитана на будущие независимые группы — состав
     подвала обязан быть дедуплицирован НЕЗАВИСИМО от порядка регистрации."""
     pytest.importorskip("textual")
-    from tui import palette as p
-    from tui import toggles as tg
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui import palette as p
+    from gc_tui import toggles as tg
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     child = tg.ToggleSpec(
         dotted="tui.zz_child",
@@ -796,7 +796,7 @@ def test_filtered_dedups_child_matching_filter_registered_before_parent(monkeypa
 
 def test_slider_colors_semantic(monkeypatch):
     """Цвет ползунка/индикатора = цвет значения (spans rich.Text), не позиция."""
-    from tui import palette as p
+    from gc_tui import palette as p
 
     reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "off", "answers": "judge"})
@@ -823,7 +823,7 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(tmp_path, m
     Реальный mount (`app.run_test`) обязателен: у не-смонтированной палитры
     `size.width == 0`, ветка усечения вообще не исполняется."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     reg = _reg_with_gate_answers(monkeypatch)
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
@@ -899,8 +899,8 @@ def test_fit_hint_priority_truncation():
     ' · '; 2) клавиши теряют область — «переключить в текущей сессии» →
     «переключить», область уходит ЦЕЛЫМ куском, не обрывком; 3) клавиши
     сжимаются до ←/→/Enter; 4) многоточие на смысле. Механика видима всегда."""
-    from tui.widgets.command_palette import _HINT_KEYS_TOGGLE, _fit_hint
-    from tui.toggles import _HINT_KEYS_TOGGLE_MEDIUM, _HINT_KEYS_TOGGLE_SHORT
+    from gc_tui.widgets.command_palette import _HINT_KEYS_TOGGLE, _fit_hint
+    from gc_tui.toggles import _HINT_KEYS_TOGGLE_MEDIUM, _HINT_KEYS_TOGGLE_SHORT
 
     value, keys = "on", _HINT_KEYS_TOGGLE
     hint = ("самопроверка не даст закончить, пока запрос не закрыт · "
@@ -968,8 +968,8 @@ async def test_toggle_hint_scope_visible_wide_and_gracefully_truncated_narrow(tm
 def test_non_toggle_hint_unchanged():
     """Обычная (не toggle) строка — прежние _HINT_NO_ARGS/_HINT_WITH_ARGS, без
     изменений (toggle-хинт со значением её не задевает)."""
-    from tui.commands import Command
-    from tui.widgets.command_palette import _HINT_NO_ARGS, _HINT_WITH_ARGS, _hint_for
+    from gc_tui.commands import Command
+    from gc_tui.widgets.command_palette import _HINT_NO_ARGS, _HINT_WITH_ARGS, _hint_for
 
     plain_cmd = Command("help", (), "", "справка")
     with_args_cmd = Command("view", (), "<path>", "просмотр файла")
@@ -986,10 +986,10 @@ def test_five_value_toggle_works_generically(monkeypatch):
     без правок кода рендера/палитры (TOGGLES — единственный владелец состава,
     реестр команд конфига не знает)."""
     pytest.importorskip("textual")
-    from tui import palette as p
-    from tui import toggles as tg
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui import palette as p
+    from gc_tui import toggles as tg
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     five = tg.ToggleSpec(
         dotted="tui.fake_mode",
@@ -1016,7 +1016,7 @@ def test_fit_hint_truncates_only_last_dot_segment_with_multiple_dots():
     """Carry ревью T3: подсказка с НЕСКОЛЬКИМИ ' · ' внутри — усечение хвоста
     режет только ПОСЛЕДНИЙ сегмент (rsplit-семантика §6), а не всё после
     первого разделителя."""
-    from tui.widgets.command_palette import _fit_hint
+    from gc_tui.widgets.command_palette import _fit_hint
 
     value, keys = "v2", "Enter — применить · Esc — закрыть"
     hint = "шаг один · шаг два · режим N"
@@ -1035,7 +1035,7 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
     интеграция роутинга ←/→/Enter, не файловой записи. Оба маршрута (←/Enter) —
     один и тот же try/except в screens/main.py."""
     pytest.importorskip("textual")
-    import tui.screens.main as main_screen
+    from gc_tui.screens import main as main_screen
 
     app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
 
@@ -1076,7 +1076,7 @@ async def test_palette_navigation_does_not_change_footer_row_count(tmp_path):
     появляются/прячутся по группе» (ревизия 5). Реальные `pilot.press` —
     так двигается пользователь."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:
@@ -1113,11 +1113,11 @@ async def test_group_separator_between_two_preset_groups(tmp_path, monkeypatch):
     Синтетический реестр с двумя preset-тогглами — сегодня в TOGGLES ровно
     одна preset-группа (`/rigor`), механизм рассчитан на будущее."""
     pytest.importorskip("textual")
-    from tui import palette as p
-    from tui import toggles as tg
-    from tui.app import TuiApp
-    from tui.commands import Command, CommandRegistry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui import palette as p
+    from gc_tui import toggles as tg
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     group_a = tg.ToggleSpec(
         values=(tg.ToggleValue("x", "hint x", p.INK), tg.ToggleValue("y", "hint y", p.ACCENT)),
@@ -1157,9 +1157,9 @@ async def test_group_separator_between_two_preset_groups(tmp_path, monkeypatch):
 async def test_palette_filter_reveals_hidden_gate(tmp_path):
     """Набор «ga» → появляется /gate (существующий фильтр по startswith)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.commands import build_default_registry
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
@@ -1176,9 +1176,9 @@ async def test_regular_row_hint_unaffected_by_visible_toggles(tmp_path):
     выделена ОБЫЧНАЯ строка при видимых toggle-строках в подвале → hint прежний
     (_HINT_NO_ARGS/_HINT_WITH_ARGS), не тоггловый."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.commands import build_default_registry
-    from tui.widgets.command_palette import _HINT_NO_ARGS, CommandPalette
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import _HINT_NO_ARGS, CommandPalette
 
     reg = build_default_registry()
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})

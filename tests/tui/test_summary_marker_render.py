@@ -1,14 +1,14 @@
 """kind=summary рендерит маркер-разделитель + блок с очищенной сводкой."""
 import pytest
 
-from tui.models import TraceEvent
+from gc_tui.models import TraceEvent
 
 
 @pytest.mark.asyncio
 async def test_summary_marker_renders(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -31,9 +31,9 @@ async def test_summary_marker_renders(tmp_path):
 @pytest.mark.asyncio
 async def test_summary_body_toggles_on_request(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
-    from tui.messages import SummaryToggleRequest
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.messages import SummaryToggleRequest
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -60,9 +60,9 @@ async def test_summary_body_toggles_on_request(tmp_path):
 async def test_summary_marker_arrow_flips_on_toggle(tmp_path):
     """Стрелка маркера: ▸ когда свёрнут, ▾ когда раскрыт."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
-    from tui.messages import SummaryToggleRequest
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.messages import SummaryToggleRequest
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -88,8 +88,8 @@ async def test_open_summary_event_shows_synthesis_not_empty(tmp_path):
     """Провал в событие summary (segments-путь, full_payload={}) показывает
     синтез сводки, а не пустой {}."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.viewer import ViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -110,9 +110,9 @@ async def test_open_summary_event_shows_synthesis_not_empty(tmp_path):
 async def test_summary_expand_scrolls_body_into_view(tmp_path):
     """Раскрытие тела сводки подводит его в зону видимости; сворачивание — нет."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
-    from tui.messages import SummaryToggleRequest
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.messages import SummaryToggleRequest
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         screen = pilot.app.screen

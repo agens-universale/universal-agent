@@ -1,4 +1,4 @@
-from security.permission_store import PermissionStore
+from gc_core.security.permission_store import PermissionStore
 
 
 def test_unknown_key_returns_none():

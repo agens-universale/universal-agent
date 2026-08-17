@@ -3,10 +3,10 @@ import sys
 
 import pytest
 
-from backends.local import LocalFsBackend
-from backends.protocol import ExecResult, FsBackend
-from tools.skills.registry import SkillsRegistry
-from tools.skills.skills_tools import RunSkillScriptTool
+from gc_core.backends.local import LocalFsBackend
+from gc_core.backends.protocol import ExecResult, FsBackend
+from gc_core.tools.skills.registry import SkillsRegistry
+from gc_core.tools.skills.skills_tools import RunSkillScriptTool
 from tests.helpers.tool_ctx import local_ctx
 
 
@@ -126,7 +126,7 @@ def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_path):
     previously had no exec_argv method, so ``backend.exec_argv(...)``
     raised AttributeError. argv must pass through verbatim (shell-less).
     """
-    from diff_tui.tracking import TrackingFsBackend
+    from gc_tui.diff_tui.tracking import TrackingFsBackend
 
     script = tmp_path / "echo_argv.py"
     script.write_text(

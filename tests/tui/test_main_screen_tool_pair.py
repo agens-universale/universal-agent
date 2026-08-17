@@ -8,8 +8,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_call_then_output_mutates_in_place(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     tid = "t1"
     data = tmp_path / f"data_cli_{tid}.jsonl"
@@ -70,7 +70,7 @@ async def test_call_then_output_mutates_in_place(tmp_path):
 async def test_active_calls_cleared_on_task_switch(tmp_path):
     """Switching tasks via attach_active_task must clear _active_calls dict."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     # Setup task A with one pending function_call (no output)
     (tmp_path / "meta_cli_A.json").write_text(
@@ -120,8 +120,8 @@ class _StubLiveRunner:
 async def test_ask_human_placeholder_shows_question(tmp_path):
     """ask_human event mounts a banner (Phase 5) carrying the question."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.ask_human_banner import AskHumanBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner
 
     (tmp_path / "meta_cli_t.json").write_text(
         json.dumps({"thread_id": "t", "updated_at": "2026-05-21T12:00:00+00:00",
@@ -146,7 +146,7 @@ async def test_ask_human_placeholder_shows_question(tmp_path):
         await pilot.pause()
         banner = pilot.app.query(AskHumanBanner)
         assert len(banner) == 1
-        from tui.widgets.trace_row import TraceRow
+        from gc_tui.widgets.trace_row import TraceRow
         rows = list(banner[0].query(TraceRow))
         assert rows, "баннер должен смонтировать блок-виджеты"
         joined = " ".join(
@@ -166,8 +166,8 @@ async def test_resume_orphan_call_finalized_as_interrupted(tmp_path):
     """Resume треда с function_call без output и без живого run:
     строка финализируется «прервано», секунды не тикают."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     tid = "orphan"
     (tmp_path / f"meta_cli_{tid}.json").write_text(
@@ -204,8 +204,8 @@ async def test_local_stop_finalizes_running_rows(tmp_path):
     открытые tool-строки финализируются «прервано»."""
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _ToggleRunner:
         def __init__(self): self.live = True

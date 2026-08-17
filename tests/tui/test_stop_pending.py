@@ -3,7 +3,7 @@
 первого persist. Закрывает окно off-thread сборки executor'а."""
 import types
 
-from agent_executor import AgentExecutor
+from gc_core.agent_executor import AgentExecutor
 
 
 def test_stop_run_remembers_pending_when_no_state():

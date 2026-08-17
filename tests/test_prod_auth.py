@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from config_modules.auth import build_auth_connector
-from utils.prod_auth import AuthConnector
+from gc_core.config_modules.auth import build_auth_connector
+from gc_core.utils.prod_auth import AuthConnector
 
 
 def _make_connector(**kwargs):
@@ -73,7 +73,7 @@ def test_get_auth_url_uses_resolved_proxies(monkeypatch):
     fake = MagicMock()
     fake.status_code = 401
     fake.headers = {"X-Authorization-Url": "https://auth.example/token"}
-    with patch("utils.prod_auth._NO_NETRC_SESSION.get", return_value=fake) as get:
+    with patch("gc_core.utils.prod_auth._NO_NETRC_SESSION.get", return_value=fake) as get:
         url = AuthConnector.get_auth_url(
             "https://gigacode.example/api/v2/config",
             verify=True,
@@ -94,7 +94,7 @@ def test_create_token_uses_resolved_proxies(monkeypatch):
 
     fake = MagicMock()
     fake.json.return_value = {"access_token": "t", "expires_in": 60}
-    with patch("utils.prod_auth._NO_NETRC_SESSION.post", return_value=fake) as post:
+    with patch("gc_core.utils.prod_auth._NO_NETRC_SESSION.post", return_value=fake) as post:
         AuthConnector.create_token(
             "https://auth.example/token",
             "e", "1", "p", "1", "hex", "l", True,
@@ -120,7 +120,7 @@ def test_get_auth_url_direct_when_no_proxy(monkeypatch):
     fake = MagicMock()
     fake.status_code = 401
     fake.headers = {"X-Authorization-Url": "https://auth.example/token"}
-    with patch("utils.prod_auth._NO_NETRC_SESSION.get", return_value=fake) as get:
+    with patch("gc_core.utils.prod_auth._NO_NETRC_SESSION.get", return_value=fake) as get:
         AuthConnector.get_auth_url("https://gigacode.example/api", verify=True)
     assert get.call_args.kwargs["proxies"] is None
 

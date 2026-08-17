@@ -1,10 +1,10 @@
 import json
 import logging
 
-from states import SharedStateData
-from states import State
+from gc_core.states import SharedStateData
+from gc_core.states import State
 from tests.helpers.tool_ctx import local_ctx
-from tools.subagents.runner import SubagentRunner
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state():

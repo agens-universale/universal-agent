@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import pytest
 
-from runtime_notices import clear_runtime_notices, push_runtime_notice
-from startup_notices import Notice
+from gc_core.runtime_notices import clear_runtime_notices, push_runtime_notice
+from gc_core.startup_notices import Notice
 
 
 @pytest.mark.asyncio
 async def test_runtime_notice_appears_in_card(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     clear_runtime_notices()
     cfg = {"model": "M"}
@@ -38,9 +38,9 @@ async def test_runtime_notice_appears_in_card(tmp_path):
 @pytest.mark.asyncio
 async def test_runtime_notice_footer_on_sessions_disappears_after_view(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.notices import NoticesScreen
-    from tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.notices import NoticesScreen
+    from gc_tui.screens.sessions import SessionsScreen
 
     clear_runtime_notices()
     async with TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"}).run_test() as pilot:

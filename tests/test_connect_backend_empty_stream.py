@@ -1,7 +1,7 @@
 import pytest
 
-import utils.connect_backend as cb
-from utils.chat_completions_stream import BackendStreamError
+from gc_core.utils import connect_backend as cb
+from gc_core.utils.chat_completions_stream import BackendStreamError
 
 
 class _Resp:

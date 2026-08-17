@@ -1,5 +1,5 @@
 import pytest
-import run_context as rc
+from gc_core import run_context as rc
 
 
 @pytest.fixture

@@ -164,10 +164,10 @@ def _stub_core(monkeypatch, captured: dict):
             return SimpleNamespace(messages=[])
 
     monkeypatch.setattr(
-        "run_context.create_run_context",
+        "gc_core.run_context.create_run_context",
         lambda cfg, **kw: SimpleNamespace(config_dict=cfg, os_backend=None),
     )
-    monkeypatch.setattr("agent_executor.AgentExecutor", StubExecutor)
+    monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", StubExecutor)
 
 
 def test_run_merges_profile_skills_and_points_config_at_container_root(tmp_path, monkeypatch):
@@ -219,7 +219,7 @@ def test_skills_debug_artifact_records_loaded_ids_and_sources(tmp_path, monkeypa
         gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
     )
     monkeypatch.setattr(
-        "tools.skills.registry.get_skills_registry",
+        "gc_core.tools.skills.registry.get_skills_registry",
         lambda cfg, backend=None: SimpleNamespace(
             list_skills=lambda: [{"id": "threat-model"}, {"id": "mesh-analysis"}]
         ),
@@ -247,7 +247,7 @@ def test_skills_debug_artifact_marks_collision_source_as_task(tmp_path, monkeypa
         gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
     )
     monkeypatch.setattr(
-        "tools.skills.registry.get_skills_registry",
+        "gc_core.tools.skills.registry.get_skills_registry",
         lambda cfg, backend=None: SimpleNamespace(
             list_skills=lambda: [{"id": "threat-model"}]
         ),
@@ -277,7 +277,7 @@ def test_skills_debug_artifact_failure_does_not_raise(tmp_path, monkeypatch):
     def _boom(cfg, backend=None):
         raise RuntimeError("registry exploded")
 
-    monkeypatch.setattr("tools.skills.registry.get_skills_registry", _boom)
+    monkeypatch.setattr("gc_core.tools.skills.registry.get_skills_registry", _boom)
 
     agent._write_skills_debug(SimpleNamespace(config_dict={}, os_backend=None), {})
 

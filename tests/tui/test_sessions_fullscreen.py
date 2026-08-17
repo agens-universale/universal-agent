@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from thread_store import append_new_thread_messages
+from gc_core.thread_store import append_new_thread_messages
 
 
 def _seed(threads_dir, tid, prompt):
@@ -21,8 +21,8 @@ async def test_sessions_list_fills_height(tmp_path):
     pytest.importorskip("textual")
     for i in range(3):
         _seed(tmp_path, f"fs{i:04d}", f"промпт {i}")
-    from tui.screens.sessions import SessionsScreen
-    from tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test(size=(100, 40)) as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()

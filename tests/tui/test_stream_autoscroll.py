@@ -26,7 +26,7 @@ class _FakeRunner:
 async def test_stream_autoscrolls_on_growth_when_at_bottom(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "scroll1"
     _write_task(tmp_path, tid)
@@ -54,7 +54,7 @@ async def test_stream_autoscrolls_on_growth_when_at_bottom(tmp_path, monkeypatch
 async def test_stream_no_autoscroll_when_scrolled_up(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "scroll2"
     _write_task(tmp_path, tid)

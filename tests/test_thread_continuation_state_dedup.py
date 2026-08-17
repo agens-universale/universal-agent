@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from run_summary_coordinator import filter_messages_not_in_state
-from summarize.compaction import history_exceeds_summary_trigger
+from gc_core.run_summary_coordinator import filter_messages_not_in_state
+from gc_core.summarize.compaction import history_exceeds_summary_trigger
 
 
 def _history_message(i: int, *, chars: int) -> dict:

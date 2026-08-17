@@ -5,8 +5,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_confirm_title_in_border_and_content():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(ConfirmScreen(
             title="Новая задача",
@@ -26,8 +26,8 @@ async def test_confirm_title_in_border_and_content():
 @pytest.mark.asyncio
 async def test_confirm_without_title_has_no_border_title():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(ConfirmScreen(message="Удалить?"))
         await pilot.pause()
@@ -38,8 +38,8 @@ async def test_confirm_without_title_has_no_border_title():
 @pytest.mark.asyncio
 async def test_confirm_y_returns_true_n_returns_false():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
     async with TuiApp().run_test() as pilot:
         results = []
         pilot.app.push_screen(ConfirmScreen(message="ok?"), lambda v: results.append(v))
@@ -53,8 +53,8 @@ async def test_confirm_y_returns_true_n_returns_false():
 async def test_confirm_default_selection_left_and_enter_confirms():
     """Левый вариант выбран по умолчанию; Enter → True."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
     async with TuiApp().run_test() as pilot:
         results = []
         scr = ConfirmScreen(message="ok?", hint="[Y] да  [N] нет")
@@ -70,8 +70,8 @@ async def test_confirm_default_selection_left_and_enter_confirms():
 async def test_confirm_right_arrow_then_enter_returns_false():
     """→ выбирает правый вариант; Enter → False."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
     async with TuiApp().run_test() as pilot:
         results = []
         scr = ConfirmScreen(message="ok?", hint="[Y] да  [N] нет")
@@ -89,8 +89,8 @@ async def test_confirm_right_arrow_then_enter_returns_false():
 async def test_confirm_left_arrow_clamps_at_zero():
     """← на левом варианте не уходит за границу."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
     async with TuiApp().run_test() as pilot:
         scr = ConfirmScreen(message="ok?", hint="[Y] да  [N] нет")
         pilot.app.push_screen(scr, lambda v: None)

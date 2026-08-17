@@ -9,5 +9,5 @@ def test_autouse_state_path_redirects_to_tmp(tmp_path):
     upgrade_gate._state_path на tmp_path для ЛЮБОГО TUI-теста — без неё
     upgrade_gate писал бы в реальный конфиг-каталог пользователя
     (env_vars.effective_config_dir()), что и происходило до фикса."""
-    import upgrade_gate
+    from gc_core import upgrade_gate
     assert upgrade_gate._state_path().parent == tmp_path

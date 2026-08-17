@@ -1,6 +1,6 @@
 import logging
 
-from message_policy.notice_policy_log import log_notice_policy_step
+from gc_core.message_policy.notice_policy_log import log_notice_policy_step
 
 
 def test_log_notice_policy_step_writes_counters(caplog):

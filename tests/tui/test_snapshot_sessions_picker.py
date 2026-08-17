@@ -52,9 +52,9 @@ def _write_task(tmp_path, tid, *, status, hours_ago, msgs_count,
 
 
 def test_sessions_picker_full_snapshot(snap_compare, tmp_path, monkeypatch):
-    from tui.app import TuiApp
-    from tui.screens import sessions as sessions_mod
-    from tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens import sessions as sessions_mod
+    from gc_tui.screens.sessions import SessionsScreen
 
     # Детерминируем относительное время (иначе зависит от часов/локали машины).
     monkeypatch.setattr(sessions_mod, "format_relative_local", _fixed_rel)

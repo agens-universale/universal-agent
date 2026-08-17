@@ -1,16 +1,12 @@
 """Тесты разметки тела сообщения после суммаризации."""
 
-from intent_log import IntentRecord, read_page, serialize, tail_preview
-from intent_log.operations import utc_now_ts
-from intent_log.record import ACTION_USER_ASK
-from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+from gc_core.intent_log import IntentRecord, read_page, serialize, tail_preview
+from gc_core.intent_log.operations import utc_now_ts
+from gc_core.intent_log.record import ACTION_USER_ASK
+from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
 
-from summarize.summary_message_body import (
-    build_dialog_summary_content,
-    build_intent_blocks_prefix,
-    format_summary_block,
-)
-from summarize.summary_spec import hint_section_tags
+from gc_core.summarize.summary_message_body import build_dialog_summary_content, build_intent_blocks_prefix, format_summary_block
+from gc_core.summarize.summary_spec import hint_section_tags
 from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 

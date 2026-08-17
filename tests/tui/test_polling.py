@@ -25,7 +25,7 @@ def _write_message(threads_dir, system, tid, seq, role, content,
 async def test_polling_appends_new_lines(tmp_path):
     pytest.importorskip("textual")
     _write_message(tmp_path, "cli", "t1", 1, "user", "первое")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -46,7 +46,7 @@ async def test_polling_appends_new_lines(tmp_path):
 async def test_polling_stream_reset_reloads_full(tmp_path):
     pytest.importorskip("textual")
     _write_message(tmp_path, "cli", "t2", 1, "user", "пред-суммаризация")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -80,7 +80,7 @@ async def test_polling_stream_reset_keeps_brand_header(tmp_path):
     """После stream_reset (компакция) бренд-шапка остаётся первым ребёнком #trace."""
     pytest.importorskip("textual")
     _write_message(tmp_path, "cli", "t3", 1, "user", "пред-суммаризация")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         scr = pilot.app.screen

@@ -1,8 +1,8 @@
 """compact_thread: грузит тред + форс-сжатие через координатор."""
 import types
 
-import agent_executor as ae
-import manual_compaction as mc
+from gc_core import agent_executor as ae
+from gc_core import manual_compaction as mc
 
 
 def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
@@ -92,7 +92,7 @@ def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, s
 class _UsageState:
     """State-заглушка с .usage (реальный конструктор State тяжёл/WMI-хэнг)."""
     def __init__(self, **kw):
-        from usage.account import UsageAccount
+        from gc_core.usage.account import UsageAccount
         self.messages = []
         self.backend_api_mode = "responses"
         self.shared = kw.get("shared")
@@ -108,7 +108,7 @@ class _UsageState:
 def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
     """Ручной /compact: summary-токены должны попасть в персистентный token_usage
     поверх гидрированного кумулятива (регресс: терялись целиком)."""
-    from usage.account import UsageAccount
+    from gc_core.usage.account import UsageAccount
     baseline = UsageAccount(); baseline.add("main", 600000, 6000)
     captured = {}
 
@@ -128,7 +128,7 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
 
     # Читаем РЕАЛЬНО сохранённую meta и проверяем TOP-LEVEL token_usage — именно
     # его гидрирует run() (регресс: писали в meta["tui"], run() его не видит).
-    from thread_store import load_thread_meta
+    from gc_core.thread_store import load_thread_meta
     saved = load_thread_meta(str(tmp_path), "cli", "t1") or {}
     persisted = UsageAccount.from_meta(saved.get("token_usage"))
     assert persisted.by_category["main"]["input"] == 600000     # кумулятив сохранён
@@ -138,7 +138,7 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
 
 def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
     """После /compact live-state (что читает футер) должен отражать summary."""
-    from usage.account import UsageAccount
+    from gc_core.usage.account import UsageAccount
 
     class _Coord:
         def __init__(self, **kw): self.state = kw["state"]

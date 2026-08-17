@@ -4,7 +4,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from config import load_config  # noqa: E402
+from gc_core.config import load_config
 
 
 class ChatCompletionsPromptConfigTest(unittest.TestCase):
@@ -118,7 +118,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 ].endswith("prompts/chat_completions_memory_patch_replace.md")
             )
             self.assertNotIn("llm", cfg["summary_params"])
-            from config_modules.chat_completions import ChatCompletionsLlmConfig
+            from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig
 
             self.assertIsInstance(cfg["chat_completions_llm"], ChatCompletionsLlmConfig)
             self.assertEqual(cfg["chat_completions_llm"].max_tokens, 8192)

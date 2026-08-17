@@ -6,15 +6,10 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from states import SharedStateData, State
-from tools import apply_tool
-from tools.subagents.progress import (
-    NOOP_SUBAGENT_PROGRESS_SINK,
-    QueueSubagentProgressSink,
-    SubagentProgressEvent,
-    resolve_progress_sink,
-)
-from tools.subagents.runner import SubagentRunner
+from gc_core.states import SharedStateData, State
+from gc_core.tools import apply_tool
+from gc_core.tools.subagents.progress import NOOP_SUBAGENT_PROGRESS_SINK, QueueSubagentProgressSink, SubagentProgressEvent, resolve_progress_sink
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_event(**overrides) -> SubagentProgressEvent:
@@ -148,14 +143,14 @@ def _make_ctx(tools_data, *, sink=None):
 
 class TestApplyToolPassesCallId:
     def test_call_id_forwarded_as_parent_call_id(self):
-        from tools.subagents.registry import get_subagents_tools_data
+        from gc_core.tools.subagents.registry import get_subagents_tools_data
 
         sub_data = get_subagents_tools_data()
         ctx = _make_ctx(sub_data)
         state = _make_state()
         run_agent_func = MagicMock(return_value="ok")
 
-        with patch("tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
             instance.run.return_value = "ok"
             apply_tool(
@@ -175,14 +170,14 @@ class TestApplyToolPassesCallId:
         )
 
     def test_missing_call_id_forwards_none(self):
-        from tools.subagents.registry import get_subagents_tools_data
+        from gc_core.tools.subagents.registry import get_subagents_tools_data
 
         sub_data = get_subagents_tools_data()
         ctx = _make_ctx(sub_data)
         state = _make_state()
         run_agent_func = MagicMock(return_value="ok")
 
-        with patch("tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
             instance.run.return_value = "ok"
             apply_tool(
@@ -217,7 +212,7 @@ def _make_runner_config(tmp_path):
 
 class TestProcessToolCallsForwardsCallId:
     def test_apply_tool_receives_call_id(self, monkeypatch):
-        from processing_responses import process_tool_calls
+        from gc_core.processing_responses import process_tool_calls
 
         state = _make_state()
         ctx = SimpleNamespace(config_dict={})
@@ -227,7 +222,7 @@ class TestProcessToolCallsForwardsCallId:
             seen.update(kwargs)
             return '{"ok": true}'
 
-        monkeypatch.setattr("processing_responses.apply_tool", _fake_apply_tool)
+        monkeypatch.setattr("gc_core.processing_responses.apply_tool", _fake_apply_tool)
         process_tool_calls(
             messages=[
                 {

@@ -1,4 +1,4 @@
-from tui.services.trace_mapper import map_message
+from gc_tui.services.trace_mapper import map_message
 
 
 def test_error_msg_carries_call_id():

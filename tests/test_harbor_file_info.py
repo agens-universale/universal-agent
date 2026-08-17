@@ -18,8 +18,8 @@ from types import SimpleNamespace
 import pytest
 
 from tests.harbor_support.fakes import FakeBackend, bind_os_backend
-from backends.local import LocalFsBackend
-from tools.fs.file_info import FileInfo
+from gc_core.backends.local import LocalFsBackend
+from gc_core.tools.fs.file_info import FileInfo
 
 # ---------------------------------------------------------------------------
 # helpers

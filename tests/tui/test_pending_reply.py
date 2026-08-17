@@ -17,7 +17,7 @@ def _read_pending(tmp_path, tid):
 @pytest.mark.asyncio
 async def test_send_records_pending_in_meta(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _Fake:
         def run(self, messages, *, thread_id, **kw):
@@ -50,8 +50,8 @@ async def test_send_records_pending_in_meta(tmp_path):
 @pytest.mark.asyncio
 async def test_pending_widget_mounted_with_pending_state(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     class _Fake:
         def run(self, messages, *, thread_id, **kw):
@@ -81,8 +81,8 @@ async def test_pending_widget_mounted_with_pending_state(tmp_path):
 async def test_polling_user_event_promotes_pending(tmp_path):
     """Polling видит свою же реплику в .jsonl → промоут pending → normal, запись удалена."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     class _Fake:
         """Stub-executor, который реально пишет user-сообщение в .jsonl."""
@@ -144,7 +144,7 @@ async def test_pending_cap_drops_oldest(tmp_path):
     ожидания наблюдаемых условий (meta записана; запись msg-i появилась).
     """
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _Fake:
         def run(self, messages, *, thread_id, **kw):
@@ -202,8 +202,8 @@ async def test_pending_cap_drops_oldest(tmp_path):
 @pytest.mark.asyncio
 async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     class _Fake:
         def run(self, messages, *, thread_id, **kw):
@@ -237,7 +237,7 @@ async def test_error_shown_resets_between_runs(tmp_path):
     """Две ошибки подряд → две error-line в trace (флаг сбрасывается)."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     call = {"n": 0}
 
@@ -274,8 +274,8 @@ async def test_restart_renders_failed_from_meta(tmp_path):
     """На attach_active_task pending-записи из meta монтируются как failed-виджеты,
     pending → failed нормализация в meta."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     tid = "restored"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
@@ -313,7 +313,7 @@ async def test_restart_renders_failed_from_meta(tmp_path):
 async def test_restart_with_only_failed_pendings_no_normalize_write(tmp_path):
     """Если все pending уже failed — повторной записи в meta не делаем (избежать noise-update)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "restored2"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
@@ -345,8 +345,8 @@ async def test_mount_failed_skips_delivered_via_attach(tmp_path):
     """Pending запись в meta + соответствующий kind=user в .jsonl → запись
     считается доставленной, виджет НЕ монтируется, запись удаляется из meta."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
     thread_id = "delivered000000000000000000000a"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -391,8 +391,8 @@ async def test_mount_failed_renders_truly_orphaned(tmp_path):
     """Pending запись в meta без соответствующего user-event в .jsonl →
     truly orphan, монтируется как failed-widget (current behaviour preserved)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
     thread_id = "orphan000000000000000000000000a"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -433,8 +433,8 @@ async def test_mount_failed_skips_delivered_via_user_messages_log(tmp_path):
     (до summarization) → в live .jsonl его уже нет, но user_messages_log
     в meta его помнит → cross-check корректно считает доставленным."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
     thread_id = "delivered-via-log0000000000000000"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -495,8 +495,8 @@ async def test_mount_failed_skips_delivered_via_user_intent_log(tmp_path):
     """Как legacy-вариант, но доставка распознаётся через intent-модель master
     meta.user_intent_log (user_ask записи) — без user_messages_log в meta."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
     thread_id = "delivered-via-intent000000000000"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -550,8 +550,8 @@ async def test_mount_failed_drops_superseded_by_later_delivered(tmp_path):
     user_ask с ts ПОЗЖЕ него), устарело → НЕ монтируется и вычищено из meta.
     Репро реального кейса: 'опиши проект' (failed) → 'опиши этот проект' (доставлено)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
     thread_id = "superseded000000000000000000000a"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -596,8 +596,8 @@ async def test_mount_failed_keeps_latest_failed_after_delivered(tmp_path):
     """Failed pending НОВЕЕ последнего доставленного (последнее действие юзера
     упало) → остаётся показанным для retry, не дропается (страж от передроба)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
     thread_id = "latestfailed00000000000000000000"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()

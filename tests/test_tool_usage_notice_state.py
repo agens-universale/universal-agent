@@ -1,19 +1,9 @@
 import json
 
-from message_policy.tool_usage_notice.state import (
-    META_PROJECT_MEMORY_CHECK_CNT,
-    META_PROJECT_MEMORY_CONTENT_HASH,
-    META_MEMORY_NOTICE_CNT,
-    META_TOOL_USAGE_NOTICE_CNT,
-    get_project_memory_check_cnt,
-    hydrate_tool_usage_notice_state,
-    merge_tool_usage_notice_meta_to_base,
-    persist_tool_usage_notice_state,
-    set_project_memory_check_cnt,
-)
-from intent_log.user_turn import init_subagent_open_turn
-from states import State
-from thread_store import ThreadSession
+from gc_core.message_policy.tool_usage_notice.state import META_PROJECT_MEMORY_CHECK_CNT, META_PROJECT_MEMORY_CONTENT_HASH, META_MEMORY_NOTICE_CNT, META_TOOL_USAGE_NOTICE_CNT, get_project_memory_check_cnt, hydrate_tool_usage_notice_state, merge_tool_usage_notice_meta_to_base, persist_tool_usage_notice_state, set_project_memory_check_cnt
+from gc_core.intent_log.user_turn import init_subagent_open_turn
+from gc_core.states import State
+from gc_core.thread_store import ThreadSession
 
 
 def _make_state() -> State:
@@ -126,7 +116,7 @@ def test_state_to_dict_roundtrip_restores_memory_fields():
     state = _make_state()
     state.project_memory_content_hash = "hash_x"
     state.tool_usage_notice_cnt = {"session_memory": 8}
-    from persistence.state_serializer import StateSerializer
+    from gc_core.persistence.state_serializer import StateSerializer
 
     payload = StateSerializer.serialize(state)
     restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
@@ -144,7 +134,7 @@ def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
     monkeypatch.setattr(
-        "thread_store.resolve_threads_dir",
+        "gc_core.thread_store.resolve_threads_dir",
         lambda _cfg: str(threads_dir),
     )
 
@@ -167,7 +157,7 @@ def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
     persist_tool_usage_notice_state(state, session.meta)
     session.persist_batch([], previous_response_id=None)
 
-    from thread_store import load_thread_meta
+    from gc_core.thread_store import load_thread_meta
 
     saved = load_thread_meta(str(threads_dir), "cli", "t_mem")
     assert saved[META_PROJECT_MEMORY_CONTENT_HASH] == "disk_hash"

@@ -6,7 +6,7 @@ import pytest
 async def test_show_esc_hint_clear_swaps_footer_left():
     """_show_esc_hint('clear') пишет в footer-left текст подсказки."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -20,7 +20,7 @@ async def test_show_esc_hint_clear_swaps_footer_left():
 @pytest.mark.asyncio
 async def test_show_esc_hint_stop_swaps_footer_left():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -34,7 +34,7 @@ async def test_show_esc_hint_stop_swaps_footer_left():
 async def test_clear_footer_hint_restores_footer_left():
     """_clear_footer_hint возвращает команды в footer-left и обнуляет state."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -51,7 +51,7 @@ async def test_clear_footer_hint_restores_footer_left():
 async def test_show_esc_hint_schedules_timer():
     """_show_esc_hint планирует timer (auto-reset через 2s)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -66,7 +66,7 @@ async def test_show_esc_hint_schedules_timer():
 async def test_esc_with_text_shows_clear_hint_first():
     """1-й Esc при тексте в input → подсказка 'очистить', input НЕ очищен."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "какой-то текст"
@@ -81,7 +81,7 @@ async def test_esc_with_text_shows_clear_hint_first():
 async def test_second_esc_in_window_clears_input():
     """2-й Esc до 2s → очищает input + сбрасывает hint."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "текст"
@@ -97,7 +97,7 @@ async def test_second_esc_in_window_clears_input():
 async def test_any_key_after_esc_resets_hint():
     """Любая клавиша (не Esc) после 1-го Esc → сброс подсказки, действие НЕ выполняется."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "x"
@@ -115,8 +115,8 @@ async def test_any_key_after_esc_resets_hint():
 async def test_esc_empty_input_no_run_opens_exit_modal():
     """1-й Esc при пустом input и без run → модалка выхода (не hint)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.confirm import ConfirmScreen
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -133,7 +133,7 @@ async def test_esc_empty_input_no_run_opens_exit_modal():
 @pytest.mark.asyncio
 async def test_exit_modal_yes_calls_app_exit(monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         called = {"flag": False}
@@ -152,7 +152,7 @@ async def test_exit_modal_yes_calls_app_exit(monkeypatch):
 async def test_esc_during_active_run_with_events_shows_stop_hint():
     """1-й Esc при active run И ≥1 событии от агента → подсказка 'остановить'."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -174,7 +174,7 @@ async def test_esc_during_run_with_text_shows_clear_hint_not_stop():
     1-й Esc при active run И тексте → подсказка 'очистить' (не 'остановить');
     2-й Esc чистит текст, run живёт. Безусловный стоп — /stop или Ctrl+C."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     stopped = {"n": 0}
 
@@ -204,7 +204,7 @@ async def test_esc_during_run_with_text_shows_clear_hint_not_stop():
 async def test_esc_during_run_zero_events_with_text_clears_first():
     """Текст в инпуте отключает и мгновенный cancel-with-undo: сначала очистка."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -226,7 +226,7 @@ async def test_esc_during_run_zero_events_with_text_clears_first():
 async def test_esc_during_active_run_zero_events_cancels_immediately():
     """1-й Esc при active run И 0 событий → cancel-with-undo сразу, без hint."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     class _FakeRunner:
         def is_running(self) -> bool: return True

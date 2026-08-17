@@ -13,12 +13,12 @@ class _FakeReg:
 @pytest.mark.asyncio
 async def test_skills_command_lists_from_registry(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    import tools.skills.registry as reg_mod
+    from gc_core.tools.skills import registry as reg_mod
     monkeypatch.setattr(reg_mod, "get_skills_registry", lambda cfg=None: _FakeReg())
 
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.screens.skills import SkillsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.skills import SkillsScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

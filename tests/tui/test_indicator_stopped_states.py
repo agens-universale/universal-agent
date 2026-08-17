@@ -1,4 +1,4 @@
-from tui.widgets.thinking_indicator import ThinkingIndicator
+from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
 def _text(state):
     ind = ThinkingIndicator(state=state, clock=lambda: 0.0)

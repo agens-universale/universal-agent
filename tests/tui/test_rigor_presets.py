@@ -3,7 +3,7 @@ import pytest
 
 
 def test_presets_match_spec_table():
-    from tui.toggles import PRESETS
+    from gc_tui.toggles import PRESETS
     assert PRESETS["low"] == {"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"}
     assert PRESETS["medium"] == {"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"}
     assert PRESETS["high"] == {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"}
@@ -11,13 +11,13 @@ def test_presets_match_spec_table():
 
 def test_presets_do_not_intersect():
     """Гвоздь §8: ни одна пара не совпадает с другой (иначе резолвер неоднозначен)."""
-    from tui.toggles import PRESETS
+    from gc_tui.toggles import PRESETS
     pairs = [tuple(sorted(p.items())) for p in PRESETS.values()]
     assert len(set(pairs)) == len(pairs)
 
 
 def test_resolve_preset_names_and_custom():
-    from tui.toggles import resolve_preset, PRESET_CUSTOM
+    from gc_tui.toggles import resolve_preset, PRESET_CUSTOM
     assert resolve_preset({"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"}) == "low"
     assert resolve_preset({"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"}) == "medium"
     assert resolve_preset({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"}) == "high"
@@ -26,7 +26,7 @@ def test_resolve_preset_names_and_custom():
 
 
 def test_resolve_rigor_state_reads_effective_pair():
-    from tui.toggles import resolve_rigor_state, PRESET_CUSTOM
+    from gc_tui.toggles import resolve_rigor_state, PRESET_CUSTOM
     # medium: explicit smart + judge
     cfg = {
         "tui_finish_gate_mode": "smart", "tui_finish_gate_mode_explicit": True,

@@ -4,7 +4,7 @@ pytest.importorskip("textual")
 
 
 def _app(tmp_path):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     return TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
@@ -32,8 +32,8 @@ def test_overrides_survive_config_reload(tmp_path, monkeypatch):
 
     fresh = {"model": "M", "tui_finish_gate_mode": "on", "tui_text_answer_mode": "judge",
              "threads_data_path": str(tmp_path / "threads")}
-    monkeypatch.setattr("config.load_config", lambda *_a, **_k: dict(fresh))
-    monkeypatch.setattr("config.apply_cli_overrides", lambda *_a, **_k: None)
+    monkeypatch.setattr("gc_core.config.load_config", lambda *_a, **_k: dict(fresh))
+    monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda *_a, **_k: None)
     app.reload_config()
 
     assert app.effective_config()["tui_text_answer_mode"] == "allow"
@@ -44,7 +44,7 @@ def test_overrides_survive_reload_if_changed(tmp_path):
     (reload_config_if_changed), не только прямой reload_config: она
     делегирует в него же, но контракт («слой сессии остаётся сверху свежей
     базы») фиксируем тестом отдельно от механизма перечитывания."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={})
@@ -80,7 +80,7 @@ def test_load_session_overrides_replaces_whole_set(tmp_path):
 
 def test_apply_toggle_writes_session_not_config_file(tmp_path):
     """Переключение меняет сессию и метаданные треда, но НЕ config.yml."""
-    from tui.toggles import apply_toggle, toggle_state
+    from gc_tui.toggles import apply_toggle, toggle_state
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
 
@@ -92,7 +92,7 @@ def test_apply_toggle_writes_session_not_config_file(tmp_path):
     assert toggle_state(app, "gate") == "off"
     assert cfg_file.read_text(encoding="utf-8") == 'tui:\n  finish_gate_mode: "on"\n'
 
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.services.stores.file_store import FileTaskStore
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
     saved = (store.get_task_meta("t1").get("tui") or {}).get("session_settings")
     assert saved == {"tui.finish_gate_mode": "off"}
@@ -108,8 +108,8 @@ def test_apply_toggle_rolls_back_when_meta_write_fails(tmp_path, monkeypatch):
 
     Отказ мокаем на РЕАЛЬНОЙ записи метаданных, а не на apply_toggle: мок самого
     apply_toggle этот дефект и пропустил."""
-    from tui.services.stores.file_store import FileTaskStore
-    from tui.toggles import apply_toggle, toggle_state
+    from gc_tui.services.stores.file_store import FileTaskStore
+    from gc_tui.toggles import apply_toggle, toggle_state
     app = _app(tmp_path)
     app.tui_state.active_task_id = "t1"
     app.set_session_override("tui.text_answer_mode", "allow")   # уже применённое до сбоя
@@ -129,7 +129,7 @@ def test_apply_toggle_rolls_back_when_meta_write_fails(tmp_path, monkeypatch):
 
 def test_apply_toggle_without_active_thread_keeps_session(tmp_path):
     """Тред ещё не создан — переключение живёт в памяти и не падает."""
-    from tui.toggles import apply_toggle, toggle_state
+    from gc_tui.toggles import apply_toggle, toggle_state
     app = _app(tmp_path)
     app.tui_state.active_task_id = None
     assert apply_toggle(app, "answers", "allow") == "allow"
@@ -147,8 +147,8 @@ def test_effective_gate_matrix_global_x_override(tmp_path, global_val, override,
     2026-07-21 §2, гейт §9): без оверрайда действует глобал; с оверрайдом —
     оверрайд. Ключ присутствует в файле → tui_finish_gate_mode_explicit=True
     (config.py: model_fields_set), поэтому глобальный «off» реально действует."""
-    from tui.app import TuiApp
-    from tui.toggles import toggle_state
+    from gc_tui.app import TuiApp
+    from gc_tui.toggles import toggle_state
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(f'tui:\n  finish_gate_mode: "{global_val}"\n', encoding="utf-8")
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={})
@@ -160,8 +160,8 @@ def test_effective_gate_matrix_global_x_override(tmp_path, global_val, override,
 
 
 def test_apply_session_overrides_applies_pair(tmp_path):
-    from tui.session_settings import read_from_meta
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.session_settings import read_from_meta
+    from gc_tui.services.stores.file_store import FileTaskStore
     app = _app(tmp_path)
     app.tui_state.active_task_id = "t1"
     app.apply_session_overrides({
@@ -187,7 +187,7 @@ def test_clear_session_overrides_removes_pair(tmp_path):
 
 
 def test_apply_session_overrides_rolls_back_on_meta_failure(tmp_path, monkeypatch):
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.services.stores.file_store import FileTaskStore
     app = _app(tmp_path)
     app.tui_state.active_task_id = "t1"
     app.set_session_override("tui.text_answer_mode", "deny")   # уже применённое до сбоя
@@ -205,7 +205,7 @@ def test_apply_session_overrides_rolls_back_on_meta_failure(tmp_path, monkeypatc
 
 
 def test_clear_session_overrides_noop_when_nothing_to_clear(tmp_path, monkeypatch):
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.services.stores.file_store import FileTaskStore
     app = _app(tmp_path)
     app.tui_state.active_task_id = "t1"
     calls = {"n": 0}

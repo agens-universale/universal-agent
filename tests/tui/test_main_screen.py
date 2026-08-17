@@ -4,7 +4,7 @@ pytest.importorskip("textual")
 
 @pytest.mark.asyncio
 async def test_ctrl_c_idle_requests_exit_not_stop(tmp_path, monkeypatch):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test() as pilot:
         scr = app.screen

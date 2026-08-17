@@ -4,9 +4,9 @@ import pytest
 @pytest.mark.asyncio
 async def test_consume_pending_prefix_injects_delivery(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tools.skills.skill_delivery as sd
-    import tools.skills.registry as sreg
+    from gc_tui.app import TuiApp
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: f"DELIVERY[{skill_id}]")
@@ -24,7 +24,7 @@ async def test_consume_pending_prefix_injects_delivery(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_consume_pending_prefix_passthrough_without_skill(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -39,9 +39,9 @@ async def test_consume_pending_prefix_passthrough_without_skill(tmp_path):
 async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
     """Во время run'а: /skill <id> шлёт add_message с инжектнутой доставкой."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    import tools.skills.skill_delivery as sd
-    import tools.skills.registry as sreg
+    from gc_tui.app import TuiApp
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: f"DELIVERY[{skill_id}]")
@@ -81,10 +81,10 @@ async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
 async def test_inline_skill_display_stays_clean(tmp_path, monkeypatch):
     """inline /skill <id> <prompt>: wire содержит DELIVERY, дисплей — чистый промпт."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
-    import tools.skills.skill_delivery as sd
-    import tools.skills.registry as sreg
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "DELIVERY")

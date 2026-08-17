@@ -4,7 +4,7 @@ After iter-3 the description is intentionally minimal (~250 chars):
 no workflow, no negation, no mention of other tools. Workflow lives in
 the system prompt (`prompts/<agent_md>`::## Long memory protocol).
 """
-from tools.project.project_memory import ProjectMemory
+from gc_core.tools.project.project_memory import ProjectMemory
 
 
 def test_tool_description_is_short():

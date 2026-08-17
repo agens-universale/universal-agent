@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import model_picker as mp
+from gc_core import model_picker as mp
 
 
 def test_requests_get_ex_passes_resolved_proxies(monkeypatch):
@@ -20,7 +20,7 @@ def test_requests_get_ex_passes_resolved_proxies(monkeypatch):
     fake = MagicMock()
     fake.status_code = 200
     fake.json.return_value = {"data": [{"id": "m1"}]}
-    with patch("utils.http_session.NO_NETRC_SESSION.get", return_value=fake) as get:
+    with patch("gc_core.utils.http_session.NO_NETRC_SESSION.get", return_value=fake) as get:
         reply = mp._requests_get_ex(
             "https://openrouter.ai/api/v1/models",
             {},
@@ -60,7 +60,7 @@ def test_probe_fetch_default_uses_config_proxy(monkeypatch):
 
 
 def test_settings_probe_forwards_config_proxy(monkeypatch):
-    from tui.services import settings_probe as sp
+    from gc_tui.services import settings_probe as sp
 
     seen = {}
 

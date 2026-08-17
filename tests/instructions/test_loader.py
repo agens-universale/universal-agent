@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from instructions.loader import build_instructions, AGENTSMD_OVERRIDE_IGNORED_WARNING
+from gc_core.instructions.loader import build_instructions, AGENTSMD_OVERRIDE_IGNORED_WARNING
 
 
 def _write(p: Path, text: str):
@@ -28,7 +28,7 @@ def test_cli_without_agent_md_is_empty(tmp_path):
 
 
 def test_tui_assembles_layers(tmp_path, monkeypatch):
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "no_global")  # L1 absent
     _write(tmp_path / ".gc" / "AGENTS.md", "GC RULES")   # L2
     _write(tmp_path / "AGENTS.md", "ROOT RULES")          # L3

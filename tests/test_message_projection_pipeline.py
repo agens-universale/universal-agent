@@ -1,13 +1,7 @@
 """TDD: MessageProjectionPipeline; default = effective strip tags; configure."""
 
-from message_projection import (
-    MessageProjectionPipeline,
-    configure_for_model_tags,
-    default_for_model_pipeline,
-    project_assistant_text,
-    project_text_for_model,
-)
-from message_projection.projectors.strip_tagged_blocks import strip_think_blocks
+from gc_core.message_projection import MessageProjectionPipeline, configure_for_model_tags, default_for_model_pipeline, project_assistant_text, project_text_for_model
+from gc_core.message_projection.projectors.strip_tagged_blocks import strip_think_blocks
 
 
 def test_default_pipeline_strips_think_only_without_configure():

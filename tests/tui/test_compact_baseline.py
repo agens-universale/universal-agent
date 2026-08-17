@@ -26,7 +26,7 @@ def _write_task(tmp_path, tid, n_messages):
 @pytest.mark.asyncio
 async def test_summarizing_falling_edge_records_baseline(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "base0000000000000000000000000001a"
     _write_task(tmp_path, tid, n_messages=2)   # после сжатия в live 2 сообщения
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -44,7 +44,7 @@ async def test_summarizing_falling_edge_records_baseline(tmp_path):
 @pytest.mark.asyncio
 async def test_no_record_without_falling_edge(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "base0000000000000000000000000002a"
     _write_task(tmp_path, tid, n_messages=2)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})

@@ -1,7 +1,7 @@
 import os
 
-from execution_workspace import ExecutionWorkspace
-from utils.tool_report_paths import tool_report_abspath
+from gc_core.execution_workspace import ExecutionWorkspace
+from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
 class FakeSandbox:

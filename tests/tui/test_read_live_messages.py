@@ -1,7 +1,7 @@
 """read_live_messages: payloads только из live data-файла (без архивов)."""
 import json
 
-from tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.stores.file_store import FileTaskStore
 
 _TID = "live0000000000000000000000000000a"
 

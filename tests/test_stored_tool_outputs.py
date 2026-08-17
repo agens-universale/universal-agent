@@ -26,15 +26,12 @@ def _stub_optional_web_parsers() -> None:
 
 _stub_optional_web_parsers()
 
-from processing_responses import process_tool_calls
-from persistence.state_repository import StateRepository
-from states import State
-from tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
-from tools.session.stored_outputs.tool_call_outputs_store import (
-    ToolCallOutputRecord,
-    ToolCallOutputsStore,
-)
-from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from gc_core.processing_responses import process_tool_calls
+from gc_core.persistence.state_repository import StateRepository
+from gc_core.states import State
+from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
+from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord, ToolCallOutputsStore
+from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 
 
 def _assert_pagination_metadata(payload: dict, *, expect_truncated: bool) -> None:
@@ -312,7 +309,7 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
     def _fake_apply_tool(**kwargs):
         return "abcdefghij"
 
-    monkeypatch.setattr("processing_responses.apply_tool", _fake_apply_tool)
+    monkeypatch.setattr("gc_core.processing_responses.apply_tool", _fake_apply_tool)
     out = process_tool_calls(
         messages=[
             {

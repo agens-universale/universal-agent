@@ -4,8 +4,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_indicator_persists_done_after_completed(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen

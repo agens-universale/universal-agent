@@ -1,16 +1,9 @@
 import json
 from types import SimpleNamespace
 
-from states import SharedStateData
-from tools.registry import get_builtin_tools_data
-from tools.session.working_memory import (
-    DEFAULT_TOTAL_BUDGET_CHARS,
-    REGISTER_CONSTRAINTS,
-    REGISTER_GOAL,
-    REGISTER_KNOWLEDGE,
-    REGISTER_STATE,
-    WorkingMemory,
-)
+from gc_core.states import SharedStateData
+from gc_core.tools.registry import get_builtin_tools_data
+from gc_core.tools.session.working_memory import DEFAULT_TOTAL_BUDGET_CHARS, REGISTER_CONSTRAINTS, REGISTER_GOAL, REGISTER_KNOWLEDGE, REGISTER_STATE, WorkingMemory
 
 
 def _make_state(working_memory=None):

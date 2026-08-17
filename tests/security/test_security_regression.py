@@ -1,9 +1,9 @@
 import json
 import sys
 
-import security.command_moderation as command_moderation
-from tools.exec.execute_command import ExecuteCommand
-from tools.exec.run_python_code import RunPythonCode
+from gc_core.security import command_moderation as command_moderation
+from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_core.tools.exec.run_python_code import RunPythonCode
 
 
 from tests.helpers.tool_ctx import with_local_ctx

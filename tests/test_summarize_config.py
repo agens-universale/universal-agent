@@ -1,11 +1,8 @@
 import os
 import tempfile
 
-from config import load_config
-from summarize.config import (
-    parse_summary_turn_end_trigger_chars,
-    parse_summary_trigger_chars,
-)
+from gc_core.config import load_config
+from gc_core.summarize.config import parse_summary_turn_end_trigger_chars, parse_summary_trigger_chars
 
 
 def test_parse_turn_end_reads_normalized_value_only():

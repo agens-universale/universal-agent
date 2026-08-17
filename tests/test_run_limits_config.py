@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from config_modules.agent import AgentConfig
+from gc_core.config_modules.agent import AgentConfig
 
 
 def test_limits_default_none():
@@ -24,8 +24,8 @@ def test_limits_reject_invalid(field, bad):
 
 
 def test_limits_reach_flat_config_dict():
-    from config import flatten_app_config
-    from config_modules.root import AppConfig
+    from gc_core.config import flatten_app_config
+    from gc_core.config_modules.root import AppConfig
 
     app_cfg = AppConfig(agent={"session_token_limit": 12345, "max_tool_calls": 7})
     flat = flatten_app_config(app_cfg)
@@ -34,8 +34,8 @@ def test_limits_reach_flat_config_dict():
 
 
 def test_limits_flat_default_none():
-    from config import flatten_app_config
-    from config_modules.root import AppConfig
+    from gc_core.config import flatten_app_config
+    from gc_core.config_modules.root import AppConfig
 
     flat = flatten_app_config(AppConfig())
     assert flat["session_token_limit"] is None

@@ -1,8 +1,5 @@
 """UI-модели (без textual)."""
-from tui.models import (
-    TaskCursor,
-    TailResult,
-)
+from gc_tui.models import TaskCursor, TailResult
 
 
 def test_tail_result_default_reset_false():

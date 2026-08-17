@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from thread_store import load_thread_messages, reset_thread_files
+from gc_core.thread_store import load_thread_messages, reset_thread_files
 
 
 def test_reset_thread_files_deletes_only_target_thread_files(tmp_path: Path) -> None:

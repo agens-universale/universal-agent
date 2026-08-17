@@ -9,11 +9,7 @@ Covers:
 - D5: level markers + one final hint only on truncation
 - D7: get_listing and get_listing_from_backend agree
 """
-from utils.project_data import (
-    cut_second,
-    get_listing,
-    get_listing_from_backend,
-)
+from gc_core.utils.project_data import cut_second, get_listing, get_listing_from_backend
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +155,7 @@ def test_truncation_ignores_stop_folders_in_counter(tmp_path, monkeypatch):
     With cut_first=2 and 3 stop folders + 4 visible files, shown/total must be
     2/4 (visible only), not a premature empty/near-empty cut.
     """
-    from utils import project_data
+    from gc_core.utils import project_data
 
     for stop in (".git", "node_modules", "__pycache__"):
         (tmp_path / stop).mkdir()
@@ -178,7 +174,7 @@ def test_truncation_ignores_stop_folders_in_counter(tmp_path, monkeypatch):
 
 def test_truncation_uses_shown_count_not_raw_index(tmp_path, monkeypatch):
     """Marker reflects filtered total, not raw listdir length."""
-    from utils import project_data
+    from gc_core.utils import project_data
 
     (tmp_path / ".git").mkdir()
     (tmp_path / "node_modules").mkdir()
@@ -199,7 +195,7 @@ def test_truncation_uses_shown_count_not_raw_index(tmp_path, monkeypatch):
 
 def test_no_truncation_marker_when_under_limit(tmp_path, monkeypatch):
     """When no truncation occurs, no level markers and no final hint."""
-    from utils import project_data
+    from gc_core.utils import project_data
 
     for name in ["a.txt", "b.py", "c_dir"]:
         p = tmp_path / name
@@ -217,7 +213,7 @@ def test_no_truncation_marker_when_under_limit(tmp_path, monkeypatch):
 
 def test_level_truncation_marker_shown_total(tmp_path, monkeypatch):
     """Truncated level shows ``...(truncated N/total)``, not bare ``...``."""
-    from utils import project_data
+    from gc_core.utils import project_data
 
     for name in ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt", "g.txt"]:
         (tmp_path / name).touch()
@@ -232,7 +228,7 @@ def test_level_truncation_marker_shown_total(tmp_path, monkeypatch):
 
 def test_final_hint_appears_only_when_truncation_occurred(tmp_path, monkeypatch):
     """Final hint only when at least one level was truncated; then last line."""
-    from utils import project_data
+    from gc_core.utils import project_data
 
     monkeypatch.setattr(project_data, "cut_first", 1000)
     listing_ok = get_listing(str(tmp_path))
@@ -250,7 +246,7 @@ def test_final_hint_appears_only_when_truncation_occurred(tmp_path, monkeypatch)
 
 def test_final_hint_once_even_with_multiple_truncations(tmp_path, monkeypatch):
     """Root + child truncation → still exactly one final hint."""
-    from utils import project_data
+    from gc_core.utils import project_data
 
     for name in ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"]:
         (tmp_path / name).touch()
@@ -270,7 +266,7 @@ def test_final_hint_once_even_with_multiple_truncations(tmp_path, monkeypatch):
 
 def test_backend_and_fs_agree_on_truncation_markers(tmp_path, monkeypatch):
     """D7: both entrypoints emit the same markers when truncating."""
-    from utils import project_data
+    from gc_core.utils import project_data
 
     entries = [f"file{i}.txt" for i in range(10)]
     for name in entries:
@@ -296,7 +292,7 @@ def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
     Names are created in intentionally bad order; sort + raised limit must keep
     both packages visible. With legacy cut_second=30, ``tui/`` would be truncated.
     """
-    from utils import project_data
+    from gc_core.utils import project_data
 
     # Intentionally bad creation order: tui/diff_tui last, modules reverse.
     # 50 modules + core + tui + diff_tui = 53 (matches typical src/).

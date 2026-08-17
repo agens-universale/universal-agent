@@ -1,6 +1,6 @@
 import json
 
-from tools.turn.intermediate_reply import IntermediateReply
+from gc_core.tools.turn.intermediate_reply import IntermediateReply
 
 
 def test_intermediate_reply_success(capsys):

@@ -5,10 +5,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from tui import palette
+from gc_tui import palette
+from tests.paths import TUI_PKG
 
 
-_STYLES_TCSS = Path(__file__).resolve().parents[2] / "src" / "tui" / "styles.tcss"
+_STYLES_TCSS = TUI_PKG / "styles.tcss"
 
 
 def _tcss_to_py_name(tcss_name: str) -> str:

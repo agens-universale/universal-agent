@@ -10,8 +10,8 @@ Covers four cases (spec section 7, step 7):
 
 import pytest
 
-from config_modules.merge import deep_merge
-from tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.config_modules.merge import deep_merge
+from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 
 
 def test_disable_skills_empty_list_keeps_all_skills() -> None:

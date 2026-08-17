@@ -1,11 +1,11 @@
-from tools.skills.skill_arg_resolver import resolve_skill_arg, Resolved
+from gc_core.tools.skills.skill_arg_resolver import resolve_skill_arg, Resolved
 
 
 def test_skill_catalog_shape_on_real_pack():
     # Import inside the test: test_skill_creator.py pops and reloads tools.*
     # modules; a module-level SkillCatalog would be a stale class object.
-    from tools.skills.skill_arg_resolver import SkillCatalog
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.skill_arg_resolver import SkillCatalog
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     cat = SkillsRegistry().skill_catalog()
     assert isinstance(cat, SkillCatalog)
@@ -35,7 +35,7 @@ def test_skill_catalog_shape_on_real_pack():
 
 
 def test_resolver_outputs_are_loadable_against_real_registry():
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     reg = SkillsRegistry()
     cat = reg.skill_catalog()

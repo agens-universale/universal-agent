@@ -1,5 +1,5 @@
 """run_agent при переполнении контекста: force-компакция + повтор, не краш."""
-import processing_responses as pr
+from gc_core import processing_responses as pr
 
 
 def _state():

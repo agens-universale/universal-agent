@@ -9,9 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import intent_guard.guard as intent_guard_guard
-from intent_guard.validation_result import ValidationResult
-from states import State
+from gc_core.intent_guard import guard as intent_guard_guard
+from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.states import State
 
 
 def _make_state() -> State:
@@ -87,7 +87,7 @@ def test_flag_raised_during_judge_call_and_cleared_after_accept(monkeypatch):
         intent_guard_guard, "validate_final_report_vs_user_intent", _accept
     )
 
-    from processing_responses import run_agent
+    from gc_core.processing_responses import run_agent
 
     result = run_agent(
         [_submit_solution_call()],
@@ -114,7 +114,7 @@ def test_flag_not_raised_on_smart_skip(monkeypatch):
         intent_guard_guard, "validate_final_report_vs_user_intent", _should_not_run
     )
 
-    from processing_responses import run_agent
+    from gc_core.processing_responses import run_agent
 
     state = _make_state()
     state.turn_tool_calls = 0
@@ -144,7 +144,7 @@ def test_flag_cleared_in_finally_even_if_guard_raises(monkeypatch):
         def evaluate_turn_finish(self, **_kwargs):
             raise RuntimeError("judge boom")
 
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     monkeypatch.setattr(pr, "FinishGateGuard", _BoomGuard)
 
@@ -163,12 +163,12 @@ def test_flag_absent_when_callback_not_wired():
     """CLI/server без TUI: callback не передан → run_agent работает как раньше,
     без AttributeError/TypeError (mark_finish_gate_checking=None по умолчанию)."""
     monkeypatch_calls: list[bool] = []
-    import intent_guard.guard as guard_mod
+    from gc_core.intent_guard import guard as guard_mod
 
     orig = guard_mod.validate_final_report_vs_user_intent
     guard_mod.validate_final_report_vs_user_intent = lambda **_kwargs: _accept_validation()
     try:
-        from processing_responses import run_agent
+        from gc_core.processing_responses import run_agent
 
         result = run_agent([_submit_solution_call()], _make_state(), _make_ctx())
     finally:

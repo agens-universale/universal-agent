@@ -6,7 +6,7 @@ import pytest
 
 def _trace_text(screen) -> str:
     from textual.widgets import Static
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import TraceRow
 
     parts: list[str] = []
     for row in screen.query(TraceRow):
@@ -16,7 +16,7 @@ def _trace_text(screen) -> str:
 
 
 def _trace_kinds(screen) -> list[str]:
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import TraceRow
 
     kinds: list[str] = []
     for row in screen.query(TraceRow):
@@ -29,8 +29,8 @@ def _trace_kinds(screen) -> list[str]:
 @pytest.mark.asyncio
 async def test_bang_echo_mounts_trace_not_agent(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     started = []
 
@@ -71,8 +71,8 @@ async def test_bang_echo_mounts_trace_not_agent(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_bang_empty_no_spawn(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -85,8 +85,8 @@ async def test_bang_empty_no_spawn(tmp_path):
 @pytest.mark.asyncio
 async def test_bang_preflight_vim(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -125,8 +125,8 @@ async def _await_bang_gone(pilot, scr, *needles: str, rounds: int = 50) -> None:
 @pytest.mark.asyncio
 async def test_bang_clear_all(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     class _FakeRunner:
         def is_running(self):
@@ -160,8 +160,8 @@ async def test_bang_clear_all(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_bang_clear_last_n(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     class _FakeRunner:
         def is_running(self):

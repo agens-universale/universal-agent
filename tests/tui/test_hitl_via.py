@@ -1,6 +1,6 @@
 """HITL via-label on ask/confirm banners + consumer ask actions."""
-from tools.subagents.progress import SubagentProgressEvent
-from tui.services.subagent_progress import plan_progress_actions
+from gc_core.tools.subagents.progress import SubagentProgressEvent
+from gc_tui.services.subagent_progress import plan_progress_actions
 
 
 def _ev(**kw):
@@ -31,7 +31,7 @@ def test_plan_ask_human_actions():
 
 
 def test_ask_human_banner_via_label():
-    from tui.widgets.ask_human_banner import AskHumanBanner, format_ask_label
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner, format_ask_label
 
     b = AskHumanBanner(question="Q?", via="subagent_worker")
     assert b._via == "subagent_worker"
@@ -40,7 +40,7 @@ def test_ask_human_banner_via_label():
 
 
 def test_confirm_banner_via_in_label():
-    from tui.widgets.confirm_banner import build_guard_label
+    from gc_tui.widgets.confirm_banner import build_guard_label
 
     plain = build_guard_label("Запись файла", via="subagent_critic").plain
     assert "Запись файла" in plain

@@ -1,5 +1,5 @@
 import os
-from tui.services.prompt_assets import tui_special_instructions_path
+from gc_tui.services.prompt_assets import tui_special_instructions_path
 
 
 def test_path_points_to_existing_tui_instructions_file():

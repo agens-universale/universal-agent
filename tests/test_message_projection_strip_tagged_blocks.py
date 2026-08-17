@@ -1,9 +1,6 @@
 """TDD: strip_tagged_blocks / strip_think_blocks — non-greedy closed + unclosed tail."""
 
-from message_projection.projectors.strip_tagged_blocks import (
-    strip_tagged_blocks,
-    strip_think_blocks,
-)
+from gc_core.message_projection.projectors.strip_tagged_blocks import strip_tagged_blocks, strip_think_blocks
 
 
 def test_strip_closed_think_keeps_remainder():

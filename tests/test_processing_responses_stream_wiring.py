@@ -5,7 +5,7 @@ request_chat_completions_with_policy, gated by cfg["stream"].
 import logging
 from types import SimpleNamespace
 
-import processing_responses as pr
+from gc_core import processing_responses as pr
 
 
 def _patch_policy(monkeypatch):

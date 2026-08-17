@@ -5,11 +5,11 @@ import pytest
 @pytest.mark.asyncio
 async def test_brand_block_visible_when_no_task():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         logos = pilot.app.query(".brand-logo")
         assert len(logos) > 0
-        from tui import branding
+        from gc_tui import branding
         assert str(logos[0].render()) == branding.LOGO
 
 
@@ -17,7 +17,7 @@ async def test_brand_block_visible_when_no_task():
 async def test_brand_block_persists_after_first_event():
     """Claude-style: бренд не исчезает на первом событии — остаётся шапкой трейса."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         scr._mount_trace_row(prefix="> ", content="привет",
@@ -38,7 +38,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
     pytest.importorskip("textual")
     import json
     from pathlib import Path
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "t1"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
@@ -97,7 +97,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
 async def test_brand_block_survives_switch_to_empty_state():
     """/new: пересборка трейса щадит бренд (remove_children асинхронный — ремоунт с тем же id невозможен)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         scr._mount_trace_row(prefix="> ", content="привет",
@@ -119,7 +119,7 @@ async def test_brand_block_shown_on_attach_existing_session(tmp_path):
     pytest.importorskip("textual")
     import json
     from pathlib import Path
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "t-resume"
     data = Path(tmp_path) / f"data_cli_{tid}.jsonl"

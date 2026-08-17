@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from tools.subagents.custom.file_definitions import discover_subagent_definitions
+from gc_core.tools.subagents.custom.file_definitions import discover_subagent_definitions
 
 BUILTIN = {"subagent_worker", "subagent_coder"}
 

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import importlib
 
-import intent_guard.guard as intent_guard_guard
+from gc_core.intent_guard import guard as intent_guard_guard
 import pytest
 
 from intent_fixtures import (
@@ -18,10 +18,11 @@ from intent_fixtures import (
     intent_user_ask_texts_from_jsonl,
     seed_state_intent,
 )
-from intent_log import append_tool_aggregated
-from intent_guard.feedback import build_finish_gate_feedback
-from intent_guard.guard import FinishGateGuard
-from intent_guard.validation_result import ValidationResult
+from gc_core.intent_log import append_tool_aggregated
+from gc_core.intent_guard.feedback import build_finish_gate_feedback
+from gc_core.intent_guard.guard import FinishGateGuard
+from gc_core.intent_guard.validation_result import ValidationResult
+from tests.paths import module_dir
 
 _trace_digest_tests = importlib.import_module("test_intent_guard_trace_digest")
 _ask_human_scenario_messages = _trace_digest_tests._ask_human_scenario_messages
@@ -34,10 +35,10 @@ State = None
 
 def _stub_tools_modules() -> None:
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
 
-    tools_pkg = types.ModuleType("tools")
+    tools_pkg = types.ModuleType("gc_core.tools")
 
     class _WrongFunctionArgumentsException(Exception):
         def to_llm_feedback(self):
@@ -69,11 +70,11 @@ def _stub_tools_modules() -> None:
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     root = Path(__file__).resolve().parents[1]
-    tools_dir = root / "src" / "tools"
+    tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
-    sys.modules["tools"] = tools_pkg
+    sys.modules["gc_core.tools"] = tools_pkg
 
-    import message_policy.cycle_stop as cycle_stop_mod
+    from gc_core.message_policy import cycle_stop as cycle_stop_mod
 
     cycle_stop_mod.apply_tool = tools_pkg.apply_tool
 
@@ -82,17 +83,17 @@ def _stub_tools_modules() -> None:
 def _load_processing_responses():
     global processing_module, run_agent, State
     _stub_tools_modules()
-    import processing_responses as pm
-    from processing_responses import run_agent as ra
-    from states import State as St
+    from gc_core import processing_responses as pm
+    from gc_core.processing_responses import run_agent as ra
+    from gc_core.states import State as St
 
     processing_module = pm
     run_agent = ra
     State = St
-    pm.apply_tool = sys.modules["tools"].apply_tool
+    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
     yield
     for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
 
 

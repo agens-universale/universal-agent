@@ -2,10 +2,7 @@
 # ensure_real_tools_package перегружает tools.* между сбором и прогоном, поэтому
 # импорт исключения внутри теста дал бы ДРУГОЙ класс → pytest.raises не ловил бы
 # исключение, поднятое parse_and_validate (старый класс). Один импорт — одна личность.
-from tools.arguments_validation import (
-    WrongFunctionArgumentsException,
-    parse_and_validate_tool_arguments,
-)
+from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 
 _SPEC = {
     "parameters": {

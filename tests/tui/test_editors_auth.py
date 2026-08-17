@@ -20,8 +20,8 @@ def _rows(ed):
 
 
 def test_active_option_index_maps_current_header():
-    from tui.editors.auth import active_option_index
-    import onboarding
+    from gc_tui.editors.auth import active_option_index
+    from gc_core import onboarding
     assert active_option_index(None) is None
     assert active_option_index(onboarding.TOKEN_SENTINEL) is None
     assert active_option_index("") == 1
@@ -29,7 +29,7 @@ def test_active_option_index_maps_current_header():
 
 
 async def test_auth_editor_bearer_active_marked_and_mask_shown():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header="Bearer secret123")
     app = _harness(ed)
     async with app.run_test():
@@ -41,7 +41,7 @@ async def test_auth_editor_bearer_active_marked_and_mask_shown():
 
 
 async def test_auth_editor_no_auth_active_initial_cursor_on_it():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header="")
     app = _harness(ed)
     async with app.run_test():
@@ -52,7 +52,7 @@ async def test_auth_editor_no_auth_active_initial_cursor_on_it():
 
 
 async def test_auth_editor_no_current_header_no_marker_cursor_at_zero():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None)
     app = _harness(ed)
     async with app.run_test():
@@ -63,7 +63,7 @@ async def test_auth_editor_no_current_header_no_marker_cursor_at_zero():
 
 
 async def test_auth_editor_mask_disappears_after_typing():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header="Bearer secret123")
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -74,8 +74,8 @@ async def test_auth_editor_mask_disappears_after_typing():
 
 
 async def test_auth_editor_children_order_option_input_option():
-    from tui.editors.auth import AuthEditor
-    from tui.widgets.paste_input import PasteInput
+    from gc_tui.editors.auth import AuthEditor
+    from gc_tui.widgets.paste_input import PasteInput
     ed = AuthEditor(current_header=None)
     app = _harness(ed)
     async with app.run_test():
@@ -87,7 +87,7 @@ async def test_auth_editor_children_order_option_input_option():
 
 
 async def test_auth_editor_allow_skip_false_has_two_options():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None, allow_skip=False)
     app = _harness(ed)
     async with app.run_test():
@@ -95,7 +95,7 @@ async def test_auth_editor_allow_skip_false_has_two_options():
 
 
 async def test_auth_editor_allow_skip_true_has_three_options():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None, allow_skip=True)
     app = _harness(ed)
     async with app.run_test():
@@ -105,7 +105,7 @@ async def test_auth_editor_allow_skip_true_has_three_options():
 
 
 async def test_auth_editor_submit_bearer_with_input_returns_header_and_raw():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None)
     app = _harness(ed)
     async with app.run_test():
@@ -115,7 +115,7 @@ async def test_auth_editor_submit_bearer_with_input_returns_header_and_raw():
 
 
 async def test_auth_editor_submit_bearer_empty_returns_none():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header="Bearer old-token")
     app = _harness(ed)
     async with app.run_test():
@@ -124,7 +124,7 @@ async def test_auth_editor_submit_bearer_empty_returns_none():
 
 
 async def test_auth_editor_bearer_empty_no_active_asks_for_token():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None)          # действующего токена нет
     app = _harness(ed)
     async with app.run_test():
@@ -134,7 +134,7 @@ async def test_auth_editor_bearer_empty_no_active_asks_for_token():
 
 
 async def test_auth_editor_submit_no_auth_returns_empty_header():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None)
     app = _harness(ed)
     async with app.run_test():
@@ -145,7 +145,7 @@ async def test_auth_editor_submit_no_auth_returns_empty_header():
 
 
 async def test_auth_editor_submit_skip_returns_none():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None, allow_skip=True)
     app = _harness(ed)
     async with app.run_test():
@@ -155,7 +155,7 @@ async def test_auth_editor_submit_skip_returns_none():
 
 
 async def test_auth_editor_move_wraps_within_available_options():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None, allow_skip=True)
     app = _harness(ed)
     async with app.run_test():
@@ -168,7 +168,7 @@ async def test_auth_editor_move_wraps_within_available_options():
 
 
 async def test_auth_editor_peek_no_side_effects():
-    from tui.editors.auth import AuthEditor
+    from gc_tui.editors.auth import AuthEditor
     ed = AuthEditor(current_header=None)
     app = _harness(ed)
     async with app.run_test():

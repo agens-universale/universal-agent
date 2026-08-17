@@ -2,8 +2,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from config_modules import env_vars
-from config_modules.env_vars import EnvVars
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.env_vars import EnvVars
 
 
 def _make_mock_resp(lines):
@@ -15,7 +15,7 @@ def _make_mock_resp(lines):
 def test_mcp_debug_off_does_not_print(monkeypatch, capsys):
     monkeypatch.setattr(env_vars, "env", EnvVars(mcp_debug=False))
 
-    from tools.connect_mcp.transport import _read_sse_first_json
+    from gc_core.tools.connect_mcp.transport import _read_sse_first_json
 
     resp = _make_mock_resp([
         "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}",
@@ -30,7 +30,7 @@ def test_mcp_debug_off_does_not_print(monkeypatch, capsys):
 def test_mcp_debug_on_prints_lines(monkeypatch, capsys):
     monkeypatch.setattr(env_vars, "env", EnvVars(mcp_debug=True))
 
-    from tools.connect_mcp.transport import _read_sse_first_json
+    from gc_core.tools.connect_mcp.transport import _read_sse_first_json
 
     resp = _make_mock_resp([
         "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}",

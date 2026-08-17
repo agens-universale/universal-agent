@@ -1,6 +1,6 @@
 import json
 
-from tools.session.think import Think
+from gc_core.tools.session.think import Think
 
 
 def test_think_success_single_field():

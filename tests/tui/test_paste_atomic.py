@@ -6,14 +6,14 @@ LABEL5 = "[Вставка #1 · 5 строк]"
 
 
 async def _input(pilot):
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.widgets.command_input import CommandTextArea
     return pilot.app.screen.query_one("#cmdinput", CommandTextArea)
 
 
 @pytest.mark.asyncio
 async def test_backspace_deletes_whole_chip():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)          # курсор встаёт после плашки
@@ -27,7 +27,7 @@ async def test_backspace_deletes_whole_chip():
 @pytest.mark.asyncio
 async def test_delete_right_before_chip_removes_it():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)
@@ -42,7 +42,7 @@ async def test_delete_right_before_chip_removes_it():
 @pytest.mark.asyncio
 async def test_chip_surrounded_by_text_atomic_delete():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp.text = "AB"
@@ -59,7 +59,7 @@ async def test_chip_surrounded_by_text_atomic_delete():
 @pytest.mark.asyncio
 async def test_cursor_left_jumps_over_chip():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)          # курсор после плашки: (0, len(label))
@@ -72,7 +72,7 @@ async def test_cursor_left_jumps_over_chip():
 @pytest.mark.asyncio
 async def test_cursor_right_jumps_over_chip():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste(BIG5)
@@ -87,8 +87,8 @@ async def test_cursor_right_jumps_over_chip():
 async def test_numbering_stable_after_middle_chip_delete():
     """Удаление средней плашки не перенумеровывает соседей: #1 и #3 остаются."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.paste_chips import token_spans
+    from gc_tui.app import TuiApp
+    from gc_tui.services.paste_chips import token_spans
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp._handle_paste("a\n" * 4 + "a")          # плашка #1

@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from config_modules.env_vars import EnvVars, project_slug
-from config_modules.root import AppConfig, resolve_paths
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.env_vars import EnvVars, project_slug
+from gc_core.config_modules.root import AppConfig, resolve_paths
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def isolated_env(monkeypatch, tmp_path):
 
 def test_default_config_path_is_normalized():
     """Дефолтный bundled-конфиг без '..' — путь показывается пользователю в /config."""
-    from config import _default_config_path
+    from gc_core.config import _default_config_path
     p = _default_config_path()
     assert ".." not in p
     assert p.endswith("config.default.yml")

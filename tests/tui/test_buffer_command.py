@@ -27,7 +27,7 @@ class _MockStore:
 
 def test_buffer_command_registered():
     """B5: /buffer в реестре команд с hotkey F7."""
-    from tui.commands import build_default_registry
+    from gc_tui.commands import build_default_registry
 
     reg = build_default_registry()
     cmd = reg.lookup("buffer")
@@ -38,7 +38,7 @@ def test_buffer_command_registered():
 
 def test_f7_binding_priority():
     """B5: F7 в BINDINGS с priority=True (иначе TextArea select_all перебивает)."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     f7 = [b for b in TuiApp.BINDINGS if b.key == "f7"]
     assert len(f7) == 1
@@ -49,8 +49,8 @@ def test_f7_binding_priority():
 @pytest.mark.asyncio
 async def test_action_buffer_opens_screen(tmp_path):
     """B5: есть сессия → открывается CopyBufferScreen."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -65,8 +65,8 @@ async def test_action_buffer_opens_screen(tmp_path):
 @pytest.mark.asyncio
 async def test_action_buffer_noop_if_already_open(tmp_path):
     """B5: повторный F7 на открытом буфере — no-op (второй push не нужен)."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -85,8 +85,8 @@ async def test_action_buffer_noop_if_already_open(tmp_path):
 @pytest.mark.asyncio
 async def test_action_buffer_no_session_notify(tmp_path):
     """B5: нет активной сессии → короткое сообщение, экран не открываем."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -99,8 +99,8 @@ async def test_action_buffer_no_session_notify(tmp_path):
 @pytest.mark.asyncio
 async def test_dispatch_command_buffer(tmp_path):
     """B5: /buffer через _dispatch_command открывает экран."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -122,8 +122,8 @@ async def test_push_session_buffer_from_diff_screen(tmp_path):
     Store/task_id берутся из базового TraceScreen (как action_buffer),
     а не из self.screen — у diff/view экранов их нет.
     """
-    from tui.app import TuiApp
-    from tui.screens.diff import DiffViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.diff import DiffViewerScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -160,8 +160,8 @@ async def test_buffer_ctrl_a_selects_all(tmp_path):
     который перехватывается app-уровнем (action_buffer priority=True).
     Нужен явный ctrl+a → select_all в BufferTextArea.
     """
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -189,8 +189,8 @@ async def test_save_strips_whitespace_only_to_empty(tmp_path):
     Если в поле остались только переносы строк и пробелы — сохраняем пустую
     строку (= очистили буфер), не пишем висячий whitespace.
     """
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -213,8 +213,8 @@ async def test_save_strips_whitespace_only_to_empty(tmp_path):
 @pytest.mark.asyncio
 async def test_save_preserves_real_text_with_strip_edges(tmp_path):
     """B11: реальный текст сохраняется, краевые пустые строки/хвосты пробелов стрипаются."""
-    from tui.app import TuiApp
-    from tui.screens.copy_buffer import CopyBufferScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

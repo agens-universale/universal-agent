@@ -26,16 +26,23 @@ import argparse
 import ast
 import importlib.util
 import json
+import re
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SCAN_DIRS = ["src", "tests", "harbor", "scripts", "recommended_mcp"]
+SCAN_DIRS = ["packages", "src", "tests", "harbor", "scripts", "recommended_mcp", "meta"]
 SCAN_FILES = ["conftest.py"]
 
 # Функции, чей строковый аргумент — путь к модулю или атрибуту модуля.
+# Имена логгеров — тоже ссылка на модуль: логгер обычно зовётся __name__, и
+# при переезде его полное имя меняется вместе с пакетом. Тест, который ждёт
+# старое имя, падает громко, но найти причину без этой проверки долго.
 DOTTED_TARGET_CALLS = {
+    "assertLogs": 0,
+    "assertNoLogs": 0,
+    "getLogger": 0,
     "import_module": 0,
     "setattr": 0,      # monkeypatch.setattr("mod.attr", ...) — только строковая форма
     "patch": 0,        # mock.patch("mod.attr")
@@ -57,23 +64,43 @@ class Ref:
 
 
 def _top_level_names() -> set[str]:
-    """Имена модулей верхнего уровня, существующие в дереве исходников."""
+    """Имена, с которых может начинаться ССЫЛКА на наш модуль.
+
+    Только верхний уровень: сами пакеты (`gc_core`, `gc_tui`, …) плюс —
+    во время миграции — дореформенные имена из module_map.json. Брать сюда
+    вложенные подпакеты нельзя: `fs`, `exec`, `session` дают ложные
+    срабатывания на обычных строках (`f"fs{i:04d}"` — идентификатор сессии).
+    """
     names: set[str] = set()
-    for root in (REPO / "src", REPO / "packages"):
-        if not root.exists():
-            continue
-        for p in root.rglob("*"):
-            if p.name == "__pycache__":
+    for pkg_src in (REPO / "packages").glob("*/src"):
+        for child in pkg_src.iterdir():
+            if child.is_dir() and (child / "__init__.py").exists():
+                names.add(child.name)
+    legacy = REPO / "tools_dev" / "module_map.json"
+    if legacy.is_file():
+        names |= set(json.loads(legacy.read_text(encoding="utf-8")))
+    src = REPO / "src"
+    if src.exists():
+        for p in src.iterdir():
+            if p.name.startswith(("__", ".")):
                 continue
-            if p.is_dir() and (p / "__init__.py").exists():
-                names.add(p.name)
-            elif p.suffix == ".py" and p.parent.name in ("src", root.name):
-                names.add(p.stem)
+            names.add(p.stem if p.suffix == ".py" else p.name)
     return names
 
 
-def _looks_like_our_module(lit: str, ours: set[str]) -> bool:
-    return lit.split(".")[0] in ours
+_DOTTED = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*\.?$")
+
+
+def _looks_like_our_module(lit: str, ours: set[str], *, strict: bool = False) -> bool:
+    """strict=True — литерал обязан выглядеть как модульный путь целиком.
+
+    Нужно для f-строк: `f"config.yml не перечитан…"` начинается с имени
+    модуля `config`, но модулем не является. У обычных строк такой проверки
+    нет намеренно — там встречаются пути вида `tools/session/x.py`.
+    """
+    if lit.split(".")[0] not in ours:
+        return False
+    return bool(_DOTTED.match(lit)) if strict else True
 
 
 def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
@@ -141,6 +168,16 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
                             and _looks_like_our_module(a.value.split(":")[0], ours)):
                         refs.append(Ref(rel, node.lineno, "asgi_target", a.value))
 
+            # 4b) f-строки: f"tools.{sub}" — кодмод их НЕ видит (это JoinedStr,
+            # а не Constant). Именно на них разъехались регистрация и чтение в
+            # tests/{tools,security}/conftest.py: пакет ставился под
+            # `tools.session`, а искался под `gc_core.tools.session`.
+            if isinstance(node, ast.JoinedStr) and node.values:
+                first = node.values[0]
+                if (isinstance(first, ast.Constant) and isinstance(first.value, str)
+                        and _looks_like_our_module(first.value, ours, strict=True)):
+                    refs.append(Ref(rel, node.lineno, "fstring", first.value))
+
             # 5) "literal" in sys.modules
             if isinstance(node, ast.Compare) and isinstance(node.left, ast.Constant):
                 if isinstance(node.left.value, str) and _looks_like_our_module(node.left.value, ours):
@@ -167,7 +204,10 @@ def verify(ref: Ref) -> str | None:
                 mod = cand
                 rest = parts[i:]
                 break
-        except (ImportError, ValueError, ModuleNotFoundError):
+        except Exception:
+            # find_spec бросает, а не возвращает None, когда РОДИТЕЛЬСКИЙ пакет
+            # не импортируется (ModuleNotFoundError), а импорт родителя может
+            # уронить что угодно ещё. Для нашей задачи это просто «не нашли».
             continue
     else:
         return f"модуль не найден: {lit}"

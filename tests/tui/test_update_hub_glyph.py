@@ -9,12 +9,12 @@ import pytest
 
 pytest.importorskip("textual")
 
-from updater.check import CheckResult
+from gc_core.updater.check import CheckResult
 from tests.tui.conftest import open_settings_section, settings_section_index
 
 
 def _screen(tmp_path):
-    from tui.screens.settings import SettingsScreen
+    from gc_tui.screens.settings import SettingsScreen
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
     return SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
@@ -24,7 +24,7 @@ def _screen(tmp_path):
 @pytest.mark.asyncio
 async def test_hub_glyph_current_from_startup_check(tmp_path):
     """Стартовый чек сказал «актуально» → в хабе сразу ✓, без захода в секцию."""
-    import tui.app as app_mod
+    from gc_tui import app as app_mod
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         app._update_check_result = CheckResult("current", "abc", "установлена последняя версия")
@@ -33,13 +33,13 @@ async def test_hub_glyph_current_from_startup_check(tmp_path):
         app.push_screen(scr)
         await pilot.pause()
         assert scr._menu_glyph(settings_section_index("Обновление")) == (
-            "✓", __import__("tui.palette", fromlist=["OK"]).OK)
+            "✓", __import__("gc_tui.palette", fromlist=["OK"]).OK)
 
 
 @pytest.mark.asyncio
 async def test_hub_glyph_wave_while_startup_check_in_flight(tmp_path):
     """Пока стартовый чек в полёте — «…», а не «—» (вердикта ещё нет, но он будет)."""
-    import tui.app as app_mod
+    from gc_tui import app as app_mod
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         app._update_check_result = None
@@ -54,8 +54,8 @@ async def test_hub_glyph_wave_while_startup_check_in_flight(tmp_path):
 @pytest.mark.asyncio
 async def test_section_reuses_startup_verdict_without_network(tmp_path, monkeypatch):
     """Вход в секцию при готовом стартовом вердикте не делает второй сетевой запрос."""
-    import tui.app as app_mod
-    import updater.check as check_mod
+    from gc_tui import app as app_mod
+    from gc_core.updater import check as check_mod
     calls = []
     monkeypatch.setattr(check_mod, "check_for_update",
                         lambda source, **k: calls.append(source) or CheckResult("current", "abc", "ок"))
@@ -74,7 +74,7 @@ async def test_section_reuses_startup_verdict_without_network(tmp_path, monkeypa
 @pytest.mark.asyncio
 async def test_manual_check_publishes_verdict_to_app(tmp_path):
     """Ручная проверка в секции кладёт вердикт на app — общий источник для хаба и карточки."""
-    import tui.app as app_mod
+    from gc_tui import app as app_mod
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         scr = _screen(tmp_path)

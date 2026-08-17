@@ -11,10 +11,10 @@ import json
 
 import pytest
 
-import run_context as rc
-from tools.turn.ask_human import AskHuman
-from tools.turn.intermediate_reply import IntermediateReply
-from utils.logging_module import create_run_logger
+from gc_core import run_context as rc
+from gc_core.tools.turn.ask_human import AskHuman
+from gc_core.tools.turn.intermediate_reply import IntermediateReply
+from gc_core.utils.logging_module import create_run_logger
 
 
 def _jsonl_cfg(tmp_path, **extra):

@@ -1,5 +1,5 @@
 """compat-слой: rename/remove устаревших ключей ДО pydantic-валидации."""
-import config_modules.compat as compat
+from gc_core.config_modules import compat as compat
 
 
 def test_rename_moves_value(monkeypatch):
@@ -51,7 +51,7 @@ def test_untouched_config_yields_no_facts():
 
 def test_load_config_survives_renamed_key(monkeypatch, tmp_path):
     monkeypatch.setattr(compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"})
-    from config import load_config
+    from gc_core.config import load_config
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
         "backend:\n  legacy_url: \"http://x/v1/chat/completions\"\n",

@@ -3,8 +3,8 @@ pytest.importorskip("textual")
 
 
 async def test_update_action_rows_have_air(tmp_path, monkeypatch):
-    import app_version, updater.check as check_mod, tui.app as app_mod
-    from tui.screens.settings import SettingsScreen
+    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     from tests.tui.conftest import open_settings_section
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))

@@ -1,4 +1,4 @@
-from tools.connect_mcp.agent_tools import _servers_cfg_with_trace
+from gc_core.tools.connect_mcp.agent_tools import _servers_cfg_with_trace
 
 
 def _servers():

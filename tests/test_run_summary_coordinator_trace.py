@@ -8,9 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import run_summary_coordinator as rsc
-import summarize.summary_logging as summary_logging
-from run_summary_coordinator import RunSummaryCoordinator
+from gc_core import run_summary_coordinator as rsc
+from gc_core.summarize import summary_logging as summary_logging
+from gc_core.run_summary_coordinator import RunSummaryCoordinator
 
 
 @pytest.fixture()

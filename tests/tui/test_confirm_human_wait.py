@@ -11,7 +11,7 @@ import pytest
 def test_present_confirm_targets_trace_screen_and_returns_ack(monkeypatch):
     """_present_confirm ищет TraceScreen в стеке и возвращает mounted ack."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp()
     calls: list[tuple] = []
@@ -31,7 +31,7 @@ def test_present_confirm_targets_trace_screen_and_returns_ack(monkeypatch):
 
 def test_present_confirm_returns_false_without_trace_screen(monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp()
     monkeypatch.setattr(app, "_main_screen", lambda: None, raising=False)
@@ -41,7 +41,7 @@ def test_present_confirm_returns_false_without_trace_screen(monkeypatch):
 
 def test_tui_confirm_denies_without_wait_when_present_fails():
     """Present fail → wait не вызывается, сразу deny."""
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
 
     runner = AgentRunner(
         executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
@@ -60,7 +60,7 @@ def test_tui_confirm_denies_without_wait_when_present_fails():
 
 
 def test_tui_confirm_waits_only_after_mounted_ack():
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
 
     runner = AgentRunner(
         executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
@@ -85,7 +85,7 @@ def test_tui_confirm_waits_only_after_mounted_ack():
 
 def test_tui_confirm_timeout_auto_deny():
     """O11: нет ответа за timeout → deny, поток не висит вечно."""
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
 
     runner = AgentRunner(
         executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
@@ -105,7 +105,7 @@ def test_tui_confirm_timeout_auto_deny():
 
 def test_tui_confirm_stop_requested_denies_without_full_wait():
     """stop_requested во время wait → deny быстрее полного timeout."""
-    from tui.services.agent_runner import AgentRunner
+    from gc_tui.services.agent_runner import AgentRunner
 
     runner = AgentRunner(
         executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
@@ -129,7 +129,7 @@ def test_tui_confirm_stop_requested_denies_without_full_wait():
 async def test_cancel_confirm_always_on_reset_even_without_banner():
     """stream_reset / reset: cancel_confirm всегда, даже если баннер не монтировался."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     cancelled = {"n": 0}
     runner = types.SimpleNamespace(
@@ -146,7 +146,7 @@ async def test_cancel_confirm_always_on_reset_even_without_banner():
 
 def test_tui_without_tui_confirm_denies_not_cli_input(monkeypatch):
     """is_tui без рабочего present → deny, не CLI input() за Textual."""
-    from security import confirm_port as cp
+    from gc_core.security import confirm_port as cp
 
     prompted = {"n": 0}
 
@@ -162,7 +162,7 @@ def test_tui_without_tui_confirm_denies_not_cli_input(monkeypatch):
 
 def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
     """Батч: call1 ok + call2 confirm-block → до wait в jsonl есть output call1."""
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     persisted: list = []
     order: list[str] = []

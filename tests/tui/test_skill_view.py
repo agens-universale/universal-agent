@@ -1,7 +1,5 @@
 """skill_view — RU-метки типа, title/body вьювера."""
-from tui.services.skill_view import (
-    build_skill_viewer, source_label, truncate_path_left,
-)
+from gc_tui.services.skill_view import build_skill_viewer, source_label, truncate_path_left
 
 
 def test_source_label_ru():

@@ -1,6 +1,6 @@
 import pytest
 
-from config import apply_cli_overrides
+from gc_core.config import apply_cli_overrides
 
 
 class TestApplyCliOverridesTraceId:

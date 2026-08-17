@@ -1,13 +1,10 @@
 import json
 
-from intent_guard.guard import FinishGateDecision
-from intent_guard.turn_finish_emit import (
-    apply_finish_gate_to_turn_finish_output_in_state,
-    patch_function_call_output,
-)
-from intent_guard.validation_result import ValidationResult
-from states import State
-from tools.turn.submit_solution import SubmitSolution
+from gc_core.intent_guard.guard import FinishGateDecision
+from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, patch_function_call_output
+from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.states import State
+from gc_core.tools.turn.submit_solution import SubmitSolution
 
 
 def _make_state() -> State:

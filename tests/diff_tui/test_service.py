@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from diff_tui.paths import orig_key
-from diff_tui.service import DiffService
-from diff_tui.store import DiffStore
-from diff_tui.touched import TouchedJournal
-from runtime_notices import clear_runtime_notices
+from gc_core.config_modules import env_vars
+from gc_tui.diff_tui.paths import orig_key
+from gc_tui.diff_tui.service import DiffService
+from gc_tui.diff_tui.store import DiffStore
+from gc_tui.diff_tui.touched import TouchedJournal
+from gc_core.runtime_notices import clear_runtime_notices
 
 
 def _has_git() -> bool:
@@ -324,7 +324,7 @@ def test_t13_cache_to_git_keeps_ignored_cache(tmp_path, monkeypatch):
 
 
 def test_git_show_index_returns_staged_content(git_repo):
-    from diff_tui import git_ops
+    from gc_tui.diff_tui import git_ops
 
     root, _threads = git_repo
     # a.txt staged with "base\n"
@@ -334,7 +334,7 @@ def test_git_show_index_returns_staged_content(git_repo):
 
 
 def test_git_show_index_untracked_fails(git_repo):
-    from diff_tui import git_ops
+    from gc_tui.diff_tui import git_ops
 
     root, _threads = git_repo
     (root / "fresh.py").write_text("x\n", encoding="utf-8")

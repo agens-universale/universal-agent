@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tui.models import TaskSummary
+from gc_tui.models import TaskSummary
 
 
 def _task(tid: str, updated_at: str) -> TaskSummary:
@@ -15,7 +15,7 @@ async def test_mass_delete_keep_last_count_and_submit():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.widgets import Input, Static
-    from tui.screens.mass_delete import MassDeleteScreen
+    from gc_tui.screens.mass_delete import MassDeleteScreen
     now = datetime(2026, 6, 6, tzinfo=timezone.utc)
     tasks = [_task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00") for i in range(5)]
     result = {}
@@ -40,7 +40,7 @@ async def test_mass_delete_mode_toggle_to_older_than():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.widgets import Input
-    from tui.screens.mass_delete import MassDeleteScreen
+    from gc_tui.screens.mass_delete import MassDeleteScreen
     now = datetime(2026, 6, 6, tzinfo=timezone.utc)
     # старше 1 дня от 06-06 → 06-01 точно под удаление (count > 0, чтобы submit сработал)
     tasks = [_task("t0", "2026-06-01T00:00:00+00:00")]
@@ -65,7 +65,7 @@ async def test_mass_delete_mode_toggle_to_older_than():
 async def test_mass_delete_escape_returns_none():
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.screens.mass_delete import MassDeleteScreen
+    from gc_tui.screens.mass_delete import MassDeleteScreen
     now = datetime(2026, 6, 6, tzinfo=timezone.utc)
     result = {"v": "unset"}
 

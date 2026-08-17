@@ -1,5 +1,5 @@
-from execution_workspace import ExecutionWorkspace
-from states import State
+from gc_core.execution_workspace import ExecutionWorkspace
+from gc_core.states import State
 from tests.test_project_data_backend import FakeSandboxBackend
 
 
@@ -49,7 +49,7 @@ def test_state_with_workspace_is_json_serializable():
     """Live I/O handle must not leak into the persisted snapshot."""
     import json
 
-    from persistence.state_repository import StateRepository
+    from gc_core.persistence.state_repository import StateRepository
 
     backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": []}, git=False)
     state = _state(workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True))

@@ -1,7 +1,7 @@
 """read_segments: тред (архивы + live) → сегменты с синтезом сжатий."""
 import json
 
-from tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.stores.file_store import FileTaskStore
 
 _TID = "seg00000000000000000000000000000a"
 

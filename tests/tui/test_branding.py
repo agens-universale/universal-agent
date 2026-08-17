@@ -1,5 +1,5 @@
 """branding — единый источник бренд-контента TUI GIGACODE."""
-from tui import branding
+from gc_tui import branding
 
 
 def test_logo_shape():

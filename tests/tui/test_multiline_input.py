@@ -5,8 +5,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_ctrl_j_inserts_newline(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -26,8 +26,8 @@ async def test_ctrl_j_inserts_newline(tmp_path):
 async def test_modified_enter_inserts_newline(tmp_path, key):
     """Shift/Ctrl+Enter (Kitty) и shift/ctrl+\\r (modifyOtherKeys) — перенос, не submit."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -46,8 +46,8 @@ async def test_alt_backspace_deletes_word_left(tmp_path):
     """alt+backspace = удалить слово слева. Прицельно для macOS (option+backspace
     в режиме Option-as-Meta); на Windows/Linux закрепляет прежнее поведение контрактом."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -63,8 +63,8 @@ async def test_alt_backspace_deletes_word_left(tmp_path):
 @pytest.mark.asyncio
 async def test_enter_submits_multiline(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     captured = {"run": None}
 

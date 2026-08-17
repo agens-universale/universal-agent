@@ -10,10 +10,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from tui.services.markdown_render import (
-    segment_answer,
-    table_block_to_markdown,
-)
+from gc_tui.services.markdown_render import segment_answer, table_block_to_markdown
 
 
 # ---- table_block_to_markdown ----
@@ -82,7 +79,7 @@ def test_table_block_to_markdown_empty():
 def test_get_selection_with_copy_text_returns_markdown():
     """С copy_text → (md, "\\n") при любом Selection, игнорируя координаты."""
     from rich.text import Text
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     w = AgentReplyLine(Text("table"), event_no=1, copy_text="| A |\n| --- |")
     # selection не используется override'ом — передаём dummy
@@ -104,7 +101,7 @@ async def test_get_selection_without_copy_text_delegates_to_super():
     from textual.geometry import Offset
     from textual.selection import Selection
     from rich.text import Text
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -136,7 +133,7 @@ async def test_selection_updated_sets_copy_selected_class():
     """selection is not None → класс ``-copy-selected`` на виджете."""
     from textual.app import App, ComposeResult
     from rich.text import Text
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -155,7 +152,7 @@ async def test_selection_updated_clears_copy_selected_class():
     """selection=None → класс ``-copy-selected`` снят."""
     from textual.app import App, ComposeResult
     from rich.text import Text
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -176,7 +173,7 @@ async def test_selection_updated_no_class_without_copy_text():
     """Без copy_text класс ``-copy-selected`` не ставится (Text-ветка — native)."""
     from textual.app import App, ComposeResult
     from rich.text import Text
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -198,8 +195,8 @@ async def test_selection_updated_swaps_syntax_background():
     """
     from textual.app import App, ComposeResult
     from rich.syntax import Syntax
-    from tui.palette import BAND_BG, FOCUS_BG
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.palette import BAND_BG, FOCUS_BG
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     syntax = Syntax(
         "print(1)", lexer="python", theme="monokai",
@@ -230,7 +227,7 @@ async def test_selection_updated_swaps_syntax_background():
 
 def test_render_code_block_with_lang_has_copy_text():
     """render_code_block с известным lang → fenced copy_text на виджете."""
-    from tui.services.trace_render import render_code_block
+    from gc_tui.services.trace_render import render_code_block
 
     w = render_code_block("print(1)", "python", event_no=1)
     assert w._copy_text is not None
@@ -240,7 +237,7 @@ def test_render_code_block_with_lang_has_copy_text():
 def test_render_code_block_unknown_lang_no_copy_text():
     """render_code_block с неизвестным lang → fallback на Text, copy_text=None
     (нативный partial select, не RichVisual)."""
-    from tui.services.trace_render import render_code_block
+    from gc_tui.services.trace_render import render_code_block
 
     w = render_code_block("x", "zzz_bogus", event_no=1)
     assert w._copy_text is None
@@ -249,8 +246,8 @@ def test_render_code_block_unknown_lang_no_copy_text():
 @pytest.mark.asyncio
 async def test_build_block_widgets_table_has_copy_text():
     """Таблица в build_block_widgets → AgentReplyLine с copy_text=markdown."""
-    from tui.services.trace_render import build_block_widgets
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.services.trace_render import build_block_widgets
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
 
     text = "| A | B |\n|---|---|\n| 1 | 2 |"
     widgets = build_block_widgets(text, prose_bullet=True, event_no=1)

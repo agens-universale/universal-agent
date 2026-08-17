@@ -2,7 +2,7 @@
 чтобы модель само-исправилась, а не гадала имена дальше."""
 import pytest
 
-from tools.skills.registry import SkillsRegistry
+from gc_core.tools.skills.registry import SkillsRegistry
 
 
 def _reg_with_refs(tmp_path):

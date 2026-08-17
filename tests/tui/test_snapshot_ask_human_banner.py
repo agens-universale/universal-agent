@@ -16,8 +16,8 @@ class _StubLiveRunner:
 
 
 def test_ask_human_banner_snapshot(snap_compare, tmp_path, monkeypatch):
-    from tui.app import TuiApp
-    from tui.screens.main import TraceScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
 
     # cwd-чип в футере фиксируем — иначе снапшот стал бы машинно-зависимым
     # (футер теперь показывает путь проекта, а не отладочный плейсхолдер).

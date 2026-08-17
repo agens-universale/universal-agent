@@ -16,7 +16,7 @@ import json
 import pytest
 import requests
 
-from utils.logging_module import create_run_logger
+from gc_core.utils.logging_module import create_run_logger
 
 
 def _make_logger(tmp_path, level="info"):
@@ -49,11 +49,7 @@ def _flush(logger):
 
 
 def test_summary_started_and_precheck_events(tmp_path):
-    from summarize.summary_logging import (
-        SummaryCompactionLog,
-        log_compaction_started,
-        log_compaction_precheck,
-    )
+    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_started, log_compaction_precheck
 
     logger, path = _make_logger(tmp_path)
     ctx = SummaryCompactionLog(trigger_reason="turn_end", thread_id="t1", trigger_volume=10)
@@ -79,11 +75,7 @@ def test_summary_started_and_precheck_events(tmp_path):
 
 
 def test_summary_raw_text_and_message_body_events(tmp_path):
-    from summarize.summary_logging import (
-        SummaryCompactionLog,
-        log_summary_raw_text,
-        log_summary_message_body,
-    )
+    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_summary_raw_text, log_summary_message_body
 
     logger, path = _make_logger(tmp_path)
     ctx = SummaryCompactionLog(trigger_reason="pre_run", thread_id="t2", trigger_volume=1)
@@ -100,11 +92,7 @@ def test_summary_raw_text_and_message_body_events(tmp_path):
 
 
 def test_summary_completed_and_failed_events(tmp_path):
-    from summarize.summary_logging import (
-        SummaryCompactionLog,
-        log_compaction_completed,
-        log_compaction_failed,
-    )
+    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_completed, log_compaction_failed
 
     logger, path = _make_logger(tmp_path)
     ctx = SummaryCompactionLog(trigger_reason="pre_backend", thread_id="t3", trigger_volume=5)
@@ -136,7 +124,7 @@ def test_summary_completed_and_failed_events(tmp_path):
 
 
 def test_backend_request_and_response_events_chat_completions(tmp_path, monkeypatch):
-    from utils import connect_backend
+    from gc_core.utils import connect_backend
 
     logger, path = _make_logger(tmp_path, level="debug")
 
@@ -163,7 +151,7 @@ def test_backend_request_and_response_events_chat_completions(tmp_path, monkeypa
 
 
 def test_backend_responses_json_error_event(tmp_path, monkeypatch):
-    from utils import connect_backend
+    from gc_core.utils import connect_backend
 
     logger, path = _make_logger(tmp_path, level="debug")
 
@@ -203,8 +191,8 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
 
 def test_agent_md_read_failed_event(tmp_path, monkeypatch):
     """Event fires when verbose=True, logger is present, and L0 read fails."""
-    from config_modules import env_vars
-    from instructions.loader import build_instructions
+    from gc_core.config_modules import env_vars
+    from gc_core.instructions.loader import build_instructions
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     logger, path = _make_logger(tmp_path)
@@ -227,8 +215,8 @@ def test_agent_md_read_failed_event(tmp_path, monkeypatch):
 def test_agent_md_read_failed_event_not_emitted_when_not_verbose(tmp_path, monkeypatch):
     """Same L0 read-failure + logger present, but verbose=False (the default)
     must suppress the event — matching the fork's ``if self.verbose:`` gate."""
-    from config_modules import env_vars
-    from instructions.loader import build_instructions
+    from gc_core.config_modules import env_vars
+    from gc_core.instructions.loader import build_instructions
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     logger, path = _make_logger(tmp_path)
@@ -253,8 +241,8 @@ def test_state_threads_logger_into_agent_md_read_failed(tmp_path, monkeypatch):
     forwards both to build_instructions(), so a missing agent_md_path surfaces
     the event through the per-run logger the caller passed to State — but only
     when verbose is True."""
-    from config_modules import env_vars
-    from states import State
+    from gc_core.config_modules import env_vars
+    from gc_core.states import State
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     logger, path = _make_logger(tmp_path)
@@ -280,8 +268,8 @@ def test_state_threads_logger_into_agent_md_read_failed(tmp_path, monkeypatch):
 
 def test_state_does_not_emit_agent_md_read_failed_when_not_verbose(tmp_path, monkeypatch):
     """Same setup as above but verbose=False: State must not emit the event."""
-    from config_modules import env_vars
-    from states import State
+    from gc_core.config_modules import env_vars
+    from gc_core.states import State
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     logger, path = _make_logger(tmp_path)
@@ -336,7 +324,7 @@ def test_system_prompt_read_failed_event(tmp_path):
 
 
 def test_dialog_message_event_emitted_for_each_message(tmp_path):
-    from utils.format_messages import format_message_responses
+    from gc_core.utils.format_messages import format_message_responses
 
     logger, path = _make_logger(tmp_path)
     console_trace = False

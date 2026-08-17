@@ -2,17 +2,17 @@
 Enter (выполняет export), Esc, mutex с командной палитрой."""
 import pytest
 
-from thread_store import append_new_thread_messages
-from tui.services.stores.file_store import FileTaskStore
+from gc_core.thread_store import append_new_thread_messages
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def _mk_app(tmp_path):
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     return TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
 
 
 def test_export_command_has_arg_options():
-    from tui.commands import build_default_registry
+    from gc_tui.commands import build_default_registry
     export = build_default_registry().lookup("export")
     assert export.arg_options == (
         ("txt", "Вся сессия в читаемом виде"),
@@ -25,7 +25,7 @@ def test_export_command_has_arg_options():
 @pytest.mark.asyncio
 async def test_picker_opens_on_export_space(tmp_path):
     pytest.importorskip("textual")
-    from tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.arg_picker import ArgPicker
     async with _mk_app(tmp_path).run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "/export "
         await pilot.pause(0.1)
@@ -39,7 +39,7 @@ async def test_picker_opens_on_export_space(tmp_path):
 @pytest.mark.asyncio
 async def test_picker_filters_by_prefix(tmp_path):
     pytest.importorskip("textual")
-    from tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.arg_picker import ArgPicker
     async with _mk_app(tmp_path).run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "/export j"
         await pilot.pause(0.1)
@@ -53,7 +53,7 @@ async def test_picker_filters_by_prefix(tmp_path):
 @pytest.mark.asyncio
 async def test_tab_completes_value_and_closes(tmp_path):
     pytest.importorskip("textual")
-    from tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.arg_picker import ArgPicker
     async with _mk_app(tmp_path).run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/export j"
@@ -70,7 +70,7 @@ async def test_enter_runs_export_with_selected_value(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     append_new_thread_messages(str(tmp_path), "cli", "tidX",
                                [{"role": "user", "content": "q", "id": "m1"}], set())
-    from tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.arg_picker import ArgPicker
     async with _mk_app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "tidX"
@@ -88,7 +88,7 @@ async def test_enter_runs_export_with_selected_value(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_esc_closes_keeps_input(tmp_path):
     pytest.importorskip("textual")
-    from tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.arg_picker import ArgPicker
     async with _mk_app(tmp_path).run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/export j"
@@ -102,8 +102,8 @@ async def test_esc_closes_keeps_input(tmp_path):
 @pytest.mark.asyncio
 async def test_mutex_with_command_palette(tmp_path):
     pytest.importorskip("textual")
-    from tui.widgets.arg_picker import ArgPicker
-    from tui.widgets.command_palette import CommandPalette
+    from gc_tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.command_palette import CommandPalette
     async with _mk_app(tmp_path).run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/exp"
@@ -129,7 +129,7 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
     (иначе main.py недосчитывал бы высоту и нижняя рамка уезжала за экран —
     класс бага palette desired_height)."""
     pytest.importorskip("textual")
-    from tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.arg_picker import ArgPicker
     async with _mk_app(tmp_path).run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/export "
@@ -150,7 +150,7 @@ async def test_hint_visible_on_open_with_small_screen_no_scroll(tmp_path):
     picker.region до 4 строк — 2 border + 2 контента) — hint видна СРАЗУ при
     открытии, без скролла (докнутый .palette-footer, а не последний FLOW-ребёнок)."""
     pytest.importorskip("textual")
-    from tui.widgets.arg_picker import ArgPicker
+    from gc_tui.widgets.arg_picker import ArgPicker
     async with _mk_app(tmp_path).run_test(size=(80, 16)) as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/export "

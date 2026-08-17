@@ -9,12 +9,12 @@ import pytest
 _ORIG_ARGV = sys.argv
 sys.argv = ["pytest-cli-import", "-q", "dummy"]
 try:
-    from cli import _ensure_user_skills_dir
+    from gc_cli.cli import _ensure_user_skills_dir
 finally:
     sys.argv = _ORIG_ARGV
 
-from config_modules import env_vars
-from config_modules.env_vars import EnvVars
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.env_vars import EnvVars
 
 
 @pytest.fixture

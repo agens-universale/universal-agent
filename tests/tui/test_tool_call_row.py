@@ -1,7 +1,7 @@
 """ToolCallRow — один виджет, который мутирует от running к ok/err."""
 import pytest
 
-from tui.palette import TOOL_NAME
+from gc_tui.palette import TOOL_NAME
 
 
 _TOOL_NAME_HEX = TOOL_NAME[1:].lower()  # '#XXXXXX' → 'xxxxxx' для substring-проверок в span.style
@@ -11,7 +11,7 @@ _TOOL_NAME_HEX = TOOL_NAME[1:].lower()  # '#XXXXXX' → 'xxxxxx' для substrin
 async def test_tool_call_row_initial_state():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -32,7 +32,7 @@ async def test_tool_call_row_initial_state():
 async def test_tool_call_row_mutate_to_ok():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -54,7 +54,7 @@ async def test_tool_call_row_mutate_to_ok():
 async def test_tool_call_row_mutate_to_error():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -76,8 +76,8 @@ async def test_tool_call_row_mutate_to_error():
 async def test_tool_call_row_error_text_is_dim():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
-    from tui.palette import DIM, ERR
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.palette import DIM, ERR
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -104,7 +104,7 @@ async def test_tool_call_row_brackets_in_args_not_interpreted_as_markup():
     """Args containing [brackets] must render literally (Content not str)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -124,7 +124,7 @@ async def test_tool_call_row_brackets_in_args_not_interpreted_as_markup():
 
 def test_tool_call_row_exposes_call_id():
     """call_id must be a public attribute (Task 2.3 looks up widgets by it)."""
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="abc-123", tool_name="t", args_summary="")
     assert row.call_id == "abc-123"
@@ -134,7 +134,7 @@ def test_tool_call_row_exposes_call_id():
 async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -158,7 +158,7 @@ async def test_tool_call_row_ok_state_uses_styled_text():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from rich.text import Text
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -184,7 +184,7 @@ async def test_tool_call_row_tool_name_uses_tool_name_color():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from rich.text import Text
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -212,7 +212,7 @@ async def test_tool_call_row_tool_name_uses_tool_name_color():
 async def test_tool_call_row_set_result_twice_overwrites():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -237,8 +237,8 @@ async def test_tool_call_row_set_result_twice_overwrites():
 async def test_ctrl_click_posts_open_tool_call_detail_request():
     pytest.importorskip("textual")
     from textual import events
-    from tui.widgets.tool_call_row import ToolCallRow
-    from tui.messages import OpenToolCallDetailRequest
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.messages import OpenToolCallDetailRequest
 
     captured: list = []
 
@@ -273,7 +273,7 @@ async def test_focus_does_not_render_event_number_prefix():
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from textual.widgets import Static
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         AUTO_FOCUS = None
@@ -304,7 +304,7 @@ async def test_focus_handler_has_focus_after_super():
     """
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     captured = {"has_focus_after_super": None}
 
@@ -327,7 +327,7 @@ async def test_focus_handler_has_focus_after_super():
 
 def test_running_row_shows_elapsed_seconds():
     import time
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="subagent_planner", args_summary="task=x")
     row._start_monotonic = time.monotonic() - 47.0
     r = str(row._render_content())
@@ -337,7 +337,7 @@ def test_running_row_shows_elapsed_seconds():
 
 def test_running_row_elapsed_same_for_any_tool():
     import time
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c2", tool_name="read_file", args_summary="path=a")
     row._start_monotonic = time.monotonic() - 3.0
     assert "· 3с" in str(row._render_content())
@@ -345,7 +345,7 @@ def test_running_row_elapsed_same_for_any_tool():
 
 def test_running_row_elapsed_minutes_format():
     import time
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
     row._start_monotonic = time.monotonic() - 125  # 2м 5с
     assert "· 2м 5с" in str(row._render_content())
@@ -353,8 +353,8 @@ def test_running_row_elapsed_minutes_format():
 
 def test_elapsed_excludes_paused_interval(monkeypatch):
     """confirm/ask_human: время ожидания решения юзера не входит в elapsed тула."""
-    import tui.widgets.tool_call_row as tcr
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets import tool_call_row as tcr
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     clock = {"t": 100.0}
     monkeypatch.setattr(tcr.time, "monotonic", lambda: clock["t"])
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")  # _start=100
@@ -369,8 +369,8 @@ def test_elapsed_excludes_paused_interval(monkeypatch):
 
 
 def test_pause_resume_idempotent(monkeypatch):
-    import tui.widgets.tool_call_row as tcr
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets import tool_call_row as tcr
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     clock = {"t": 100.0}
     monkeypatch.setattr(tcr.time, "monotonic", lambda: clock["t"])
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
@@ -386,7 +386,7 @@ def test_pause_resume_idempotent(monkeypatch):
 
 def test_running_glyph_pulses_color():
     """▸ статичен по форме, но цвет глифа в prefix меняется между кадрами пульса."""
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
     row._pulse_frame = 0
     p0 = row._render_prefix()
@@ -399,7 +399,7 @@ def test_running_glyph_pulses_color():
 def test_pulse_cycle_length_is_ten():
     """Цикл пульса ▸ = 10 кадров на 0.1с-тике (плавное дыхание ≈1.0с, 10fps):
     frame10 возвращается к frame0, frame5 (пик) внутри цикла отличается."""
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
 
     def glyph_color(frame: int) -> str:
@@ -414,7 +414,7 @@ def test_pulse_cycle_length_is_ten():
 
 def test_pulse_tick_advances_pulse_while_running():
     """Пульс ▸ двигается на собственном 0.1с-тике (_pulse_tick), пока running."""
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
     f0 = row._pulse_frame
     row._pulse_tick()
@@ -423,7 +423,7 @@ def test_pulse_tick_advances_pulse_while_running():
 
 def test_pulse_tick_noop_after_completion():
     """После завершения строки _pulse_tick не двигает кадр (тик гасится)."""
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
     row.set_result(summary="ok", error=False)
     f = row._pulse_frame
@@ -433,7 +433,7 @@ def test_pulse_tick_noop_after_completion():
 
 def test_refresh_running_elapsed_does_not_advance_pulse():
     """Секундный поллер больше НЕ двигает пульс (он на собственном тике)."""
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
     f0 = row._pulse_frame
     row.refresh_running_elapsed()
@@ -441,7 +441,7 @@ def test_refresh_running_elapsed_does_not_advance_pulse():
 
 
 def test_completed_ok_row_has_no_elapsed():
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c3", tool_name="subagent_planner", args_summary="x")
     row.set_result(summary="ok", error=False)
     assert "✓" in str(row._render_prefix())
@@ -449,7 +449,7 @@ def test_completed_ok_row_has_no_elapsed():
 
 
 def test_completed_error_row_has_no_elapsed():
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c4", tool_name="subagent_planner", args_summary="x")
     row.set_result(summary="boom", error=True)
     assert "✗" in str(row._render_prefix())
@@ -457,7 +457,7 @@ def test_completed_error_row_has_no_elapsed():
 
 
 def test_refresh_running_elapsed_noop_after_completion():
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c5", tool_name="subagent_planner", args_summary="x")
     row.set_result(summary="ok", error=False)
     row.refresh_running_elapsed()  # не возвращает в running
@@ -469,8 +469,8 @@ async def test_poll_active_ticks_running_rows():
     pytest.importorskip("textual")
     import time
     from textual.containers import VerticalScroll
-    from tui.app import TuiApp
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     class _LiveRunner:  # без живого run инвариант поллинга финализирует строку
         def is_running(self) -> bool:
             return True
@@ -492,7 +492,7 @@ async def test_poll_active_ticks_running_rows():
 # ---- mark_interrupted: терминальное состояние «прервано» (spec 2026-06-10) ----
 
 def test_mark_interrupted_renders_dim_terminal_state():
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c6", tool_name="subagent_critic", args_summary="t")
     row.mark_interrupted()
     assert "·" in str(row._render_prefix())
@@ -502,7 +502,7 @@ def test_mark_interrupted_renders_dim_terminal_state():
 
 
 def test_mark_interrupted_noop_after_result_and_idempotent():
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c7", tool_name="read_file", args_summary="p")
     row.set_result(summary="312 строк", error=False)
     row.mark_interrupted()                      # после результата — no-op
@@ -514,7 +514,7 @@ def test_mark_interrupted_noop_after_result_and_idempotent():
 
 
 def test_refresh_running_elapsed_noop_after_interrupted():
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c9", tool_name="exec", args_summary="")
     row.mark_interrupted()
     row.refresh_running_elapsed()               # не возвращает в running

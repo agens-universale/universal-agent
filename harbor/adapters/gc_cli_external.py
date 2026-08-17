@@ -59,10 +59,14 @@ DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 _ADAPTER_DIR = Path(__file__).resolve().parent          # .../adapters
 _PROMPTS_DIR = _ADAPTER_DIR.parent / "prompts"          # image: /opt/gc-harbor-adapters/prompts
 _SKILLS_DIR = _ADAPTER_DIR.parent / "skills"
-if not _PROMPTS_DIR.is_dir():                            # editable/local: fall back to repo root
+if not _PROMPTS_DIR.is_dir():                            # editable/local: fall back to repo
     _repo_root = _ADAPTER_DIR.parent.parent
-    _PROMPTS_DIR = _repo_root / "prompts"
-    _SKILLS_DIR = _repo_root / "skills"
+    # После разбиения на модули ассеты принадлежат дистрибутиву gc-core и лежат
+    # рядом с его исходниками; в корне репозитория их больше нет.
+    _assets = _repo_root / "packages" / "core" / "assets"
+    _base = _assets if (_assets / "prompts").is_dir() else _repo_root
+    _PROMPTS_DIR = _base / "prompts"
+    _SKILLS_DIR = _base / "skills"
 
 
 def _stringify_content(content: Any) -> str:
@@ -325,7 +329,7 @@ class GcCliExternal(BaseAgent):
         a debug artifact must never fail a run.
         """
         try:
-            from tools.skills.registry import get_skills_registry
+            from gc_core.tools.skills.registry import get_skills_registry
 
             config_dict = getattr(ctx, "config_dict", {}) or {}
             root = config_dict.get("skills_data_path")
@@ -415,8 +419,8 @@ class GcCliExternal(BaseAgent):
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        from run_context import create_run_context
-        from agent_executor import AgentExecutor
+        from gc_core.run_context import create_run_context
+        from gc_core.agent_executor import AgentExecutor
 
         loop = asyncio.get_running_loop()
         config_dict = self._build_config()

@@ -13,7 +13,7 @@ pytest.importorskip("textual")
 @pytest.mark.asyncio
 async def test_trace_screen_has_freeze_field(tmp_path):
     """F1: TraceScreen имеет _select_freeze_since (None по умолчанию)."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -24,7 +24,7 @@ async def test_trace_screen_has_freeze_field(tmp_path):
 @pytest.mark.asyncio
 async def test_ui_frozen_for_select_predicate(tmp_path):
     """F1: _ui_frozen_for_select() отражает Screen._selecting."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -38,7 +38,7 @@ async def test_ui_frozen_for_select_predicate(tmp_path):
 @pytest.mark.asyncio
 async def test_poll_freeze_skips_stick(tmp_path, monkeypatch):
     """F2: при _selecting — _update_stick_state и _scroll_trace_end не вызываются."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -67,7 +67,7 @@ async def test_poll_freeze_skips_stick(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_poll_freeze_sets_since(tmp_path):
     """F1: при первом тике freeze ставит _select_freeze_since; при снятии — None."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -85,7 +85,7 @@ async def test_poll_freeze_timeout_clears(tmp_path, monkeypatch):
     """F5: freeze > 5с → clear_selection() вызывается, since сбрасывается."""
     import time as _time
 
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -109,8 +109,8 @@ async def test_poll_freeze_timeout_clears(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_thinking_indicator_tick_gated_by_selecting(tmp_path, monkeypatch):
     """F4: ThinkingIndicator._tick early-return при screen._selecting."""
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -131,8 +131,8 @@ async def test_thinking_indicator_tick_gated_by_selecting(tmp_path, monkeypatch)
 @pytest.mark.asyncio
 async def test_tool_call_row_pulse_gated_by_selecting(tmp_path, monkeypatch):
     """F4: ToolCallRow._pulse_tick early-return при screen._selecting."""
-    from tui.app import TuiApp
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -160,7 +160,7 @@ async def test_refresh_stream_content_gated_by_selecting(tmp_path, monkeypatch):
     событийный путь _stream_signal → call_from_thread (set_content/scroll_end
     не зовутся). Это главная дыра: poll-гейт бесполезен, если стрим красит
     экран в обход poll."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -200,7 +200,7 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
     """F6: freeze глушит только stick/scroll/stream/wipe, но НЕ весь poll.
     Footer/title/orphan/MCP-indicator продолжают обновляться — UI не тупеет
     целиком на 5с timeout. Это регрессия на прежний полный `return`."""
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

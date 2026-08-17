@@ -1,8 +1,8 @@
 import json
 import logging
 
-from utils.logging_module import create_run_logger
-from security.log_redaction import MASK
+from gc_core.utils.logging_module import create_run_logger
+from gc_core.security.log_redaction import MASK
 
 
 def _base(tmp_path, **over):

@@ -1,6 +1,6 @@
 """reset_stale_summarizing_flag: протухший runtime.summarizing снимается на старте run'а."""
-from thread_store import save_thread_meta, load_thread_meta
-from run_summary_coordinator import reset_stale_summarizing_flag
+from gc_core.thread_store import save_thread_meta, load_thread_meta
+from gc_core.run_summary_coordinator import reset_stale_summarizing_flag
 
 
 class _StubSession:

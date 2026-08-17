@@ -1,5 +1,5 @@
 """app_version: версия пакета + источник установки из direct_url.json (PEP 610)."""
-import app_version
+from gc_core import app_version
 
 GIT_PINNED = '{"url": "https://github.com/pypa/sampleproject", "vcs_info": {"vcs": "git", "commit_id": "621e497", "requested_revision": "main"}}'
 GIT_DEFAULT = '{"url": "https://gitverse.ru/gigacode-ai/universal-agent", "vcs_info": {"vcs": "git", "commit_id": "a1b2c3d"}}'

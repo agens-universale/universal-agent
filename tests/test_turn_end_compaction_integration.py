@@ -8,15 +8,15 @@ from types import SimpleNamespace
 
 import pytest
 
-import intent_guard.guard as intent_guard_guard
-import processing_responses as pr
-import run_summary_coordinator as rsc
+from gc_core.intent_guard import guard as intent_guard_guard
+from gc_core import processing_responses as pr
+from gc_core import run_summary_coordinator as rsc
 from intent_fixtures import intent_user_ask_texts, seed_state_intent
-from intent_guard.validation_result import ValidationResult
-from message_policy.user_message_policy import is_dialog_summary_user_message_text
-from run_summary_coordinator import RunSummaryCoordinator
-from states import State
-from summarize.compaction import apply_summary_state_patch
+from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text
+from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_core.states import State
+from gc_core.summarize.compaction import apply_summary_state_patch
 from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 
@@ -351,7 +351,7 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
     _seed_long_history(state, user_chars=80)
     seed_state_intent(state, current=["вопрос"])
     if not hasattr(state, "shared") or state.shared is None:
-        from states import SharedStateData
+        from gc_core.states import SharedStateData
 
         state.shared = SharedStateData()
 
@@ -412,7 +412,7 @@ def _agent_executor_config_dict() -> dict:
 
 def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
     """Полный wiring: AgentExecutor → run_agent → fail_open → turn-end hook."""
-    import agent_executor as ae
+    from gc_core import agent_executor as ae
 
     class _SkillsRegistryStub:
         def list_skills(self):
@@ -434,11 +434,11 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
     # Строковые пути: после reload в test_summary_triggers импорт ``rsc`` в этом файле
     # может указывать на старый модуль, а AgentExecutor — на актуальный.
     monkeypatch.setattr(
-        "run_summary_coordinator.history_exceeds_summary_trigger",
+        "gc_core.run_summary_coordinator.history_exceeds_summary_trigger",
         lambda **_k: True,
     )
     monkeypatch.setattr(
-        "run_summary_coordinator.run_summary_compaction",
+        "gc_core.run_summary_coordinator.run_summary_compaction",
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
 

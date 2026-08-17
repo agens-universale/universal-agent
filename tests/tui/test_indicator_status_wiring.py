@@ -4,8 +4,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
@@ -33,7 +33,7 @@ async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_falling_edge_persists_last_indicator(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen

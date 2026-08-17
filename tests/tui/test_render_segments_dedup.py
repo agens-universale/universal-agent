@@ -36,8 +36,8 @@ def _seg_live():
 @pytest.mark.asyncio
 async def test_main_render_segments_dedupes_preserved_reply(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -65,8 +65,8 @@ async def test_render_segments_renders_all_not_just_last_two(tmp_path):
     """B-фикс: после 2+ компакций самый старый сегмент НЕ схлопывается в маркер —
     весь трейс рендерится сырьём (а не только последние 2 сегмента)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -89,8 +89,8 @@ async def test_readonly_render_segments_dedupes_preserved_reply():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
-    from tui.services.trace_render import render_segments_readonly
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.services.trace_render import render_segments_readonly
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     class _A(App):
         def compose(self):

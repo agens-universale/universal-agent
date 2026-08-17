@@ -1,6 +1,6 @@
 import yaml
 
-from config import load_config, apply_cli_overrides
+from gc_core.config import load_config, apply_cli_overrides
 
 
 def _write_cfg(tmp_path, body: dict) -> str:
@@ -52,7 +52,7 @@ def test_validate_config_text_resolves_env_like_load_config(monkeypatch):
     онбординга и --sync-config падают «конфиг не проходит схему» — юзер заблокирован в UI
     без внятной причины.
     """
-    import config as config_mod
+    from gc_core import config as config_mod
 
     monkeypatch.setenv("GC_BACKEND_TIMEOUT", "42")
     text = (

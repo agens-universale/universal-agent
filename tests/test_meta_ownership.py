@@ -1,10 +1,5 @@
 """meta.runtime helpers (ownership constants + merge)."""
-from persistence.meta_ownership import (
-    RUNTIME_FLAG_NAMES,
-    merge_runtime_into_meta,
-    resolve_runtime_flag_name,
-    runtime_section,
-)
+from gc_core.persistence.meta_ownership import RUNTIME_FLAG_NAMES, merge_runtime_into_meta, resolve_runtime_flag_name, runtime_section
 
 
 def test_resolve_runtime_flag_name():

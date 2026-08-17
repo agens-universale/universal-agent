@@ -19,9 +19,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from config import flatten_app_config
-from config_modules.merge import deep_merge
-from config_modules.root import AppConfig, resolve_paths
+from gc_core.config import flatten_app_config
+from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.root import AppConfig, resolve_paths
 
 
 def schema_defaults(config_dir: str) -> Dict[str, Any]:

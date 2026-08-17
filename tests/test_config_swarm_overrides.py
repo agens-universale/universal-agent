@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from config_modules.common import apply_swarm_env_overrides
-from config_modules.env_vars import EnvVars
+from gc_core.config_modules import env_vars
+from gc_core.config_modules.common import apply_swarm_env_overrides
+from gc_core.config_modules.env_vars import EnvVars
 
 
 def test_swarm_threads_dir_overrides_threads_data_path(monkeypatch, tmp_path):

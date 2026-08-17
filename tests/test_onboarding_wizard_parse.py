@@ -1,5 +1,5 @@
 import pytest
-import onboarding_wizard as wz
+from gc_cli import onboarding_wizard as wz
 
 
 def test_parse_single_ok_and_normalizes():

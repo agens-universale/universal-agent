@@ -7,10 +7,10 @@
 """
 from types import SimpleNamespace
 
-from message_policy.todo_reminder import apply_todo_reminder
-from message_policy.tool_availability import available_tool_names, tool_is_available
-from message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
-from states import SharedStateData, State
+from gc_core.message_policy.todo_reminder import apply_todo_reminder
+from gc_core.message_policy.tool_availability import available_tool_names, tool_is_available
+from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
+from gc_core.states import SharedStateData, State
 
 
 def _state(tools_spec=None) -> State:
@@ -109,7 +109,7 @@ class TestToolUsageNoticeGate:
 
 class TestProjectMemoryGate:
     def test_hint_suppressed_when_tool_absent(self, monkeypatch):
-        import project_memory
+        from gc_core import project_memory
 
         monkeypatch.setattr(project_memory, "get_hash", lambda _ctx: "hash-1")
         cfg = {

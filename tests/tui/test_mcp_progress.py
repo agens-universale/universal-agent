@@ -1,4 +1,4 @@
-from tui.services.mcp_progress import McpProgress, format_mcp_progress, format_mcp_settle
+from gc_tui.services.mcp_progress import McpProgress, format_mcp_progress, format_mcp_settle
 
 
 def test_sink_begin_update_snapshot():

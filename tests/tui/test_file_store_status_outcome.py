@@ -4,7 +4,7 @@
 import json
 from pathlib import Path
 
-from tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def _write_meta(d: Path, system: str, tid: str, meta: dict) -> None:

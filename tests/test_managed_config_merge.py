@@ -1,5 +1,5 @@
-import config
-from config_modules import env_vars
+from gc_core import config
+from gc_core.config_modules import env_vars
 
 
 def test_managed_local_config_merges_mcp_servers(tmp_path, monkeypatch):

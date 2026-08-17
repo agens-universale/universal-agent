@@ -1,8 +1,8 @@
 """render_context_meter: Rich-Text «контекст <bar> NN%»; заполнено/пусто — цветом."""
 import pytest
 
-from tui.services.context_meter import render_context_meter, _TRACK
-from tui.palette import OK, RUN_COLOR, WARN
+from gc_tui.services.context_meter import render_context_meter, _TRACK
+from gc_tui.palette import OK, RUN_COLOR, WARN
 
 
 def test_hidden_when_threshold_zero():

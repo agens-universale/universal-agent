@@ -4,13 +4,13 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import intent_guard.guard as intent_guard_guard
+from gc_core.intent_guard import guard as intent_guard_guard
 
-from intent_guard.guard import FinishGateGuard
-from intent_guard.validation_result import ValidationResult
-from intent_log.user_turn import init_subagent_open_turn
-from states import SharedStateData, State
-from tools.subagents.runner import SubagentRunner
+from gc_core.intent_guard.guard import FinishGateGuard
+from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.intent_log.user_turn import init_subagent_open_turn
+from gc_core.states import SharedStateData, State
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state():
@@ -119,7 +119,7 @@ def test_subagent_seed_keeps_orchestrator_cli_scope_unchanged():
     runner._build_initial_messages(child, "worker", user_message)
     init_subagent_open_turn(child, task_text)
 
-    from intent_log import ACTION_USER_ASK
+    from gc_core.intent_log import ACTION_USER_ASK
 
     assert len(child.current_user_intent) == 1
     assert child.current_user_intent[0].action == ACTION_USER_ASK

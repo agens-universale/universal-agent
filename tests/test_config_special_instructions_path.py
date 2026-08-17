@@ -1,4 +1,4 @@
-from config_modules.paths import PathsConfig
+from gc_core.config_modules.paths import PathsConfig
 
 
 def test_paths_has_special_instructions_field_default_none():

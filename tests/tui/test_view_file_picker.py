@@ -10,7 +10,7 @@ def _mk(tmp_path):
 @pytest.mark.asyncio
 async def test_view_space_opens_file_picker(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -27,7 +27,7 @@ async def test_view_space_opens_file_picker(tmp_path):
 @pytest.mark.asyncio
 async def test_command_without_arg_file_does_not_open_picker(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -46,7 +46,7 @@ async def test_at_inside_view_line_stays_file_arg_picker(tmp_path):
     состояние 3b стоит раньше @-детекта. Пикер остаётся (file-arg),
     фильтр '@...' сужает список до пустого."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -65,7 +65,7 @@ async def test_at_inside_view_line_stays_file_arg_picker(tmp_path):
 @pytest.mark.asyncio
 async def test_view_complete_dir_drills_in_file_closes(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -88,7 +88,7 @@ async def test_view_complete_dir_drills_in_file_closes(tmp_path):
 @pytest.mark.asyncio
 async def test_view_escape_closes_picker_keeps_line(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -111,7 +111,7 @@ async def test_view_at_prefixed_filename_completes_file_arg_not_at_branch(tmp_pa
     on_text_area_changed), а не через старую @-ветку (та задвоила бы
     префикс '@')."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     (tmp_path / "@agents.py").write_text("x", encoding="utf-8")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -135,8 +135,8 @@ async def test_view_enter_no_matches_submits_command(tmp_path):
     Enter исполняет /view как обычный сабмит (спека: «абсолютные/внешние
     пути по-прежнему набираются руками»), а не молча съедается."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.file_view import FileViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -157,7 +157,7 @@ async def test_view_tab_cursor_left_of_arg_is_noop(tmp_path):
     """Курсор внутри имени команды (левее зоны аргумента) — Tab не должен
     достраивать/искажать строку; пикер остаётся открытым как есть."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -181,7 +181,7 @@ async def test_backspace_to_bare_command_closes_file_picker(tmp_path):
     в состояние 1 (командная палитра) — FilePicker, открытый состоянием 3b,
     должен закрыться (симметрично state 1b для '.')."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -203,7 +203,7 @@ async def test_empty_matches_hide_picker_and_it_returns(tmp_path):
     """Совпадений нет → пикер скрыт (никакого ящика «нет совпадений»);
     появились совпадения → пикер сам возвращается."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -225,7 +225,7 @@ async def test_empty_matches_hide_picker_and_it_returns(tmp_path):
 async def test_at_segment_empty_matches_hide_picker(tmp_path):
     """То же для @-аттача: '@zzz' — пикер скрыт, а не пустой ящик."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -244,7 +244,7 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
     desired_height включает строку margin (шов main.py::_sync_trace_max_height:
     недосчёт = рамка за экраном)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     _mk(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -269,7 +269,7 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path):
     при открытии, без скролла (докнутый .palette-footer, а не последний FLOW-ребёнок,
     которого упирает max-height и хоронит за скроллом)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     (tmp_path / "agents").mkdir()
     for i in range(45):
         (tmp_path / "agents" / f"agent{i:03d}.py").write_text("x", encoding="utf-8")

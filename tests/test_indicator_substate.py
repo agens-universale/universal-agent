@@ -1,6 +1,6 @@
 """select_active_substate — под-состояние TUI-индикатора в режиме active."""
 
-from tui.screens.main import select_active_substate
+from gc_tui.screens.main import select_active_substate
 
 _SOFT = {"agent", "system"}
 

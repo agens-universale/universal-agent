@@ -1,4 +1,4 @@
-from utils.local_render_system_prompt import render_system_prompt
+from gc_core.utils.local_render_system_prompt import render_system_prompt
 
 
 def _load_special(path):

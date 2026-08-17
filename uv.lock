@@ -19,6 +19,7 @@ resolution-markers = [
 [manifest]
 members = [
     "gc-cli",
+    "gc-core",
     "gc-server",
     "gc-tui",
     "gc-ua",
@@ -822,8 +823,19 @@ wheels = [
 
 [[package]]
 name = "gc-cli"
-version = "0.4.0"
-source = { editable = "packaging/cli" }
+version = "0.5.0"
+source = { editable = "packages/cli" }
+dependencies = [
+    { name = "gc-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "gc-core", editable = "packages/core" }]
+
+[[package]]
+name = "gc-core"
+version = "0.5.0"
+source = { editable = "packages/core" }
 dependencies = [
     { name = "chardet" },
     { name = "httpx", extra = ["socks"] },
@@ -855,11 +867,11 @@ requires-dist = [
 
 [[package]]
 name = "gc-server"
-version = "0.4.0"
-source = { editable = "packaging/server" }
+version = "0.5.0"
+source = { editable = "packages/server" }
 dependencies = [
     { name = "fastapi" },
-    { name = "gc-cli" },
+    { name = "gc-core" },
     { name = "psutil" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -867,17 +879,17 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "gc-cli", editable = "packaging/cli" },
+    { name = "gc-core", editable = "packages/core" },
     { name = "psutil", specifier = ">=5.9,<7" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
 
 [[package]]
 name = "gc-tui"
-version = "0.4.0"
-source = { editable = "packaging/tui" }
+version = "0.5.0"
+source = { editable = "packages/tui" }
 dependencies = [
-    { name = "gc-cli" },
+    { name = "gc-core" },
     { name = "pygments" },
     { name = "rich" },
     { name = "textual" },
@@ -885,7 +897,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gc-cli", editable = "packaging/cli" },
+    { name = "gc-core", editable = "packages/core" },
     { name = "pygments", specifier = ">=2.13" },
     { name = "rich", specifier = ">=13" },
     { name = "textual", specifier = ">=0.55" },
@@ -893,10 +905,11 @@ requires-dist = [
 
 [[package]]
 name = "gc-ua"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "gc-cli" },
+    { name = "gc-core" },
     { name = "gc-server" },
     { name = "gc-tui" },
 ]
@@ -931,9 +944,10 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gc-cli", editable = "packaging/cli" },
-    { name = "gc-server", editable = "packaging/server" },
-    { name = "gc-tui", editable = "packaging/tui" },
+    { name = "gc-cli", editable = "packages/cli" },
+    { name = "gc-core", editable = "packages/core" },
+    { name = "gc-server", editable = "packages/server" },
+    { name = "gc-tui", editable = "packages/tui" },
 ]
 provides-extras = ["all"]
 

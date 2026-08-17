@@ -18,7 +18,7 @@ class _RecRunner:
 async def test_cmd_init_busy_guard(tmp_path):
     """runner.is_running() → сообщение, start НЕ зовётся."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     rec = _RecRunner(running=True)
     app.active_runner = rec
@@ -35,7 +35,7 @@ async def test_cmd_init_busy_guard(tmp_path):
 async def test_cmd_init_starts_run_with_init_prompt(tmp_path):
     """Не running → runner.start с init-промптом как query (wire), маркер /init в трейсе."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     rec = _RecRunner(running=False)
     # get_runner() должен вернуть наш стаб

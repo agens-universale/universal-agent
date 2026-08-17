@@ -9,7 +9,7 @@ class _Upg:  # UpgradeInfo-подобный
 
 def _states(monkeypatch, updates: dict):
     """installed_state-заглушка: {имя: версия-обновления|None}."""
-    import mcp_runtime.cli as cli
+    from gc_core.mcp_runtime import cli as cli
     monkeypatch.setattr(cli, "load_manifest_entries", lambda config=None: ([], None))
     monkeypatch.setattr(cli, "installed_state",
                         lambda name, config=None, manifest=None:
@@ -17,8 +17,8 @@ def _states(monkeypatch, updates: dict):
 
 
 async def test_post_update_lists_checkboxes(monkeypatch):
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     _states(monkeypatch, {"office": "0.3.1", "ddg": "0.2.0"})
@@ -36,8 +36,8 @@ async def test_post_update_lists_checkboxes(monkeypatch):
 async def test_post_update_hides_mcp_when_nothing_to_update(monkeypatch):
     """MCP подключены, но их версии совпадают с манифестом новой версии агента →
     пункт не предлагаем (как с config.yml: нечего делать — нечего показывать)."""
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     _states(monkeypatch, {})                       # ни у кого нет обновления
@@ -52,8 +52,8 @@ async def test_post_update_hides_mcp_when_nothing_to_update(monkeypatch):
 
 async def test_post_update_mcp_row_lists_only_outdated(monkeypatch):
     """В строке — только серверы, которым правда есть что обновить."""
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _states(monkeypatch, {"office": "0.3.1"})      # обновление только у office
@@ -67,8 +67,8 @@ async def test_post_update_mcp_row_lists_only_outdated(monkeypatch):
 
 
 async def test_post_update_hides_config_when_nothing_to_sync(monkeypatch):
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     app = app_mod.TuiApp(config={})
@@ -80,8 +80,8 @@ async def test_post_update_hides_config_when_nothing_to_sync(monkeypatch):
 
 
 async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):
-    import mcp_runtime.cli as cli, config_sync, upgrade_gate, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_core import upgrade_gate; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _states(monkeypatch, {"office": "0.3.1"})
@@ -105,8 +105,8 @@ async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):
 
 
 async def test_post_update_enter_installs_marked_and_stamps_once(monkeypatch):
-    import mcp_runtime.cli as cli, config_sync, upgrade_gate, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_core import upgrade_gate; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     _states(monkeypatch, {"office": "0.3.1", "ddg": "0.2.0"})
@@ -136,8 +136,8 @@ async def test_post_update_enter_installs_marked_and_stamps_once(monkeypatch):
 
 
 async def test_post_update_esc_stamps_without_executing(monkeypatch):
-    import mcp_runtime.cli as cli, config_sync, upgrade_gate, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_core import upgrade_gate; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     installed = []
@@ -159,8 +159,8 @@ async def test_post_update_esc_stamps_without_executing(monkeypatch):
 async def test_post_update_nothing_to_do_shows_only_title(monkeypatch):
     """Обновлять нечего → блок «Осталось обновить» не показываем вовсе (ни подзаголовка,
     ни «всё уже актуально»), футер честный: отмечать нечего."""
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _states(monkeypatch, {})                       # у MCP тоже нечего обновлять
@@ -178,8 +178,8 @@ async def test_post_update_nothing_to_do_shows_only_title(monkeypatch):
 
 async def test_post_update_hint_and_footer_when_there_is_work(monkeypatch):
     """Есть что обновить → подзаголовок «Осталось обновить:» и полный футер."""
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     app = app_mod.TuiApp(config={})
@@ -194,8 +194,8 @@ async def test_post_update_hint_and_footer_when_there_is_work(monkeypatch):
 
 async def test_post_update_equal_version_title_is_plain(monkeypatch):
     """Номер версии не изменился → просто «Агент обновлён», без «до актуальной версии»."""
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
 
     class _SameVer:
         old_version = "0.0.1"; new_version = "0.0.1"
@@ -213,8 +213,8 @@ async def test_post_update_equal_version_title_is_plain(monkeypatch):
 
 async def test_post_update_title_always_carries_version(monkeypatch):
     """Версия видна всегда: сдвига не было → «Агент обновлён · v0.0.1»."""
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
 
     class _SameVer:
         old_version = "0.0.1"; new_version = "0.0.1"
@@ -232,8 +232,8 @@ async def test_post_update_title_always_carries_version(monkeypatch):
 
 async def test_post_update_title_divider_only_when_there_is_work(monkeypatch):
     """Линия под заголовком отделяет заголовок ОТ блока — без блока она не висит."""
-    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
-    from tui.screens.post_update import PostUpdateScreen
+    from gc_core.mcp_runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     app = app_mod.TuiApp(config={})

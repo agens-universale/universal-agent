@@ -1,5 +1,5 @@
 """Per-field детект pending_field_keys для визарда."""
-import onboarding
+from gc_core import onboarding
 
 
 def test_stock_defaults_pending_endpoint_and_token_not_model():

@@ -2,8 +2,8 @@
 
 import pytest
 
-from tools import build_tools_data
-from tools.arguments_validation import parse_and_validate_tool_arguments
+from gc_core.tools import build_tools_data
+from gc_core.tools.arguments_validation import parse_and_validate_tool_arguments
 
 CONFIG = {
     "inject_tool_fields": {

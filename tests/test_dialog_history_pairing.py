@@ -1,5 +1,5 @@
 """Фундамент: техническое user-сообщение не отрывается от своего реального хода."""
-from message_format.dialog_history import group_into_turns, split_turns_into_char_batches
+from gc_core.message_format.dialog_history import group_into_turns, split_turns_into_char_batches
 
 
 def _user(text):
@@ -61,7 +61,7 @@ def test_current_context_technical_also_binds():
     assert turns[0] == [real, ctx, asst]
 
 
-from run_summary_coordinator import build_preserved_batch
+from gc_core.run_summary_coordinator import build_preserved_batch
 
 
 def test_preserved_batch_keeps_both_real_and_technical():

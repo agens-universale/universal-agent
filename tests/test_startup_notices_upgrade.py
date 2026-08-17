@@ -1,6 +1,6 @@
 """Notice «агент обновлён» в канале startup_notices."""
-from startup_notices import collect_startup_notices
-from upgrade_gate import UpgradeInfo
+from gc_core.startup_notices import collect_startup_notices
+from gc_core.upgrade_gate import UpgradeInfo
 
 
 def _collect(upgrade_info):

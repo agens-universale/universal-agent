@@ -8,18 +8,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from message_policy.user_message_policy import wrap_technical_user_content
-from states import SharedStateData, State
-from tools.subagents.active_scope import (
-    activate_child_input,
-    active_parent_call_id,
-    is_child_input_active,
-    reset_active_scope_for_tests,
-    try_enqueue_user_message,
-)
-from tools.subagents.progress import QueueSubagentProgressSink
-from tools.subagents.runner import SubagentRunner
-from thread_store import read_subagent_trace
+from gc_core.message_policy.user_message_policy import wrap_technical_user_content
+from gc_core.states import SharedStateData, State
+from gc_core.tools.subagents.active_scope import activate_child_input, active_parent_call_id, is_child_input_active, reset_active_scope_for_tests, try_enqueue_user_message
+from gc_core.tools.subagents.progress import QueueSubagentProgressSink
+from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.thread_store import read_subagent_trace
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +100,7 @@ class TestActiveScopeRegistry:
 
 class TestAgentExecutorRoutesToChild:
     def test_add_message_goes_to_child_when_active(self):
-        from agent_executor import AgentExecutor
+        from gc_core.agent_executor import AgentExecutor
 
         ctx = MagicMock()
         ex = AgentExecutor(ctx)
@@ -117,7 +111,7 @@ class TestAgentExecutorRoutesToChild:
                 assert ex._pending_messages == []
 
     def test_add_message_goes_to_parent_when_no_child(self):
-        from agent_executor import AgentExecutor
+        from gc_core.agent_executor import AgentExecutor
 
         ctx = MagicMock()
         ex = AgentExecutor(ctx)
@@ -243,7 +237,7 @@ class TestRunnerWiresPending:
 class TestParentPendingUnchangedWithoutChild:
     def test_technical_only_parent_path(self):
         """Regression: no active child → parent pending as before."""
-        from agent_executor import AgentExecutor
+        from gc_core.agent_executor import AgentExecutor
 
         ex = AgentExecutor(MagicMock())
         msg = {"role": "user", "content": "hello"}

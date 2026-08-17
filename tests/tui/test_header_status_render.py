@@ -14,7 +14,7 @@ def _write_task(tmp_path, tid, status_tui=None, extra_data=""):
 @pytest.mark.asyncio
 async def test_badge_completed_from_meta_tui(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "hdr00000000000000000000000000001a"
     _write_task(tmp_path, tid, status_tui="completed")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -29,7 +29,7 @@ async def test_badge_completed_from_meta_tui(tmp_path):
 async def test_header_left_is_str_with_session_id(tmp_path):
     """После Task 6: хедер-лево — str «Сессия: <id>», без модели и бейджа."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "hdr00000000000000000000000000002a"
     _write_task(tmp_path, tid, status_tui="completed")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -49,7 +49,7 @@ async def test_header_left_is_str_with_session_id(tmp_path):
 async def test_meter_hidden_in_header_responses_mode(tmp_path):
     """Контекст-индикатор в хедере не показывается — он в мете."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "hdr00000000000000000000000000003a"
     _write_task(tmp_path, tid, status_tui="completed")
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -69,7 +69,7 @@ async def test_badge_failed_read_via_task_status_badge(tmp_path):
     Раскраска бейджа (status_badge_color) и мета-полоса удалены вместе с
     переездом «модель·контекст» в футер — здесь проверяем только чтение статуса."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "hdr00000000000000000000000000004a"
     _write_task(tmp_path, tid, status_tui="failed")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -83,7 +83,7 @@ async def test_badge_failed_read_via_task_status_badge(tmp_path):
 async def test_meter_in_header_not_shown_chat_mode(tmp_path):
     """Контекст-индикатор не в хедере (переехал в мету или вовсе убран из хрома)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "hdr00000000000000000000000000005a"
     rec = {"type": "message", "thread_id": tid, "system": "cli", "seq": 1,
            "ts": "t", "payload": {"role": "user", "content": "привет " * 50}}

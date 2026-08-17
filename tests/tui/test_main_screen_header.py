@@ -7,7 +7,7 @@ async def test_header_shows_session_id_and_meta_shows_model(tmp_path):
     """После реструктуризации хрома: хедер = Сессия:id + cwd; мета = модель + статус."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli",
@@ -40,7 +40,7 @@ async def test_header_shows_session_id_and_meta_shows_model(tmp_path):
 async def test_attach_active_task_mirrors_into_tui_state(tmp_path):
     """attach_active_task должен синхронизировать tui_state.active_task_id."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "M"})

@@ -1,11 +1,8 @@
 """Tests for subagent progress TUI consumer (drain → nested rows / heartbeat)."""
 from __future__ import annotations
 
-from tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
-from tui.services.subagent_progress import (
-    SubagentProgressConsumer,
-    plan_progress_actions,
-)
+from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
+from gc_tui.services.subagent_progress import SubagentProgressConsumer, plan_progress_actions
 
 
 def _ev(**kwargs) -> SubagentProgressEvent:

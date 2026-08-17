@@ -3,7 +3,7 @@ import queue
 import sys
 import threading
 
-from tui.services.stdin_bridge import QueueStdin, redirect_stdin
+from gc_tui.services.stdin_bridge import QueueStdin, redirect_stdin
 
 
 def test_queue_stdin_readline_blocks_until_item():
@@ -30,7 +30,7 @@ def test_redirect_stdin_replaces_during_block():
     assert result == ["answer"]
     # sys.stdin теперь потоко-aware прокси (установлен один раз, обратно не свапаем);
     # у текущего (main) потока источник не назначен.
-    from tui.services.stdin_bridge import _ThreadAwareStdin, _tls
+    from gc_tui.services.stdin_bridge import _ThreadAwareStdin, _tls
     assert isinstance(sys.stdin, _ThreadAwareStdin)
     assert getattr(_tls, "stdin", None) is None
 

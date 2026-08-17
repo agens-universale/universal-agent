@@ -9,8 +9,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_confirm_y_answers_when_input_was_focused(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     answered = []
 
@@ -51,8 +51,8 @@ async def test_confirm_disables_input_synchronously(tmp_path):
     Иначе под нагрузкой (агент пишет, медленная модель) первый y успевает уйти
     в ещё-сфокусированный инпут до применения blur — «плавающий» баг."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
 

@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from utils.json_text import extract_json_candidate, format_json_for_display, parse_json_from_text
+from gc_core.utils.json_text import extract_json_candidate, format_json_for_display, parse_json_from_text
 
 
 class ExtractJsonCandidateTest(unittest.TestCase):

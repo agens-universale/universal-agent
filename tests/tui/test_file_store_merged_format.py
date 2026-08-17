@@ -9,13 +9,8 @@ import json
 
 import pytest
 
-from thread_store import (
-    ThreadSession,
-    append_new_thread_messages,
-    save_thread_meta,
-    load_thread_meta,
-)
-from tui.services.stores.file_store import FileTaskStore
+from gc_core.thread_store import ThreadSession, append_new_thread_messages, save_thread_meta, load_thread_meta
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 _SYSTEM = "cli"

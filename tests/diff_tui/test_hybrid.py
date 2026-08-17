@@ -7,22 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from config_modules import env_vars
-from diff_tui.feedback import (
-    format_approve_ack,
-    format_bulk_approve_ack,
-    format_bulk_undo_ack,
-)
-from diff_tui.mode import evict_stale_cache
-from diff_tui.paths import orig_key
-from diff_tui.service import DiffService
-from diff_tui.store import DiffStore
-from diff_tui.touched import TouchedJournal
-from diff_tui.tracking import wrap_local_for_tui
-from execution_workspace import build_execution_workspace
-from runtime_notices import clear_runtime_notices
+from gc_core.config_modules import env_vars
+from gc_tui.diff_tui.feedback import format_approve_ack, format_bulk_approve_ack, format_bulk_undo_ack
+from gc_tui.diff_tui.mode import evict_stale_cache
+from gc_tui.diff_tui.paths import orig_key
+from gc_tui.diff_tui.service import DiffService
+from gc_tui.diff_tui.store import DiffStore
+from gc_tui.diff_tui.touched import TouchedJournal
+from gc_tui.diff_tui.tracking import wrap_local_for_tui
+from gc_core.execution_workspace import build_execution_workspace
+from gc_core.runtime_notices import clear_runtime_notices
 from tests.helpers.tool_ctx import local_ctx
-from tools.fs.write_to_file_tool import WriteToFile
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 
 def _has_git() -> bool:
@@ -192,7 +188,7 @@ def test_h3_approve_ignored_updates_orig_not_staged(git_proj):
     assert result.backend == "cache"
     store = DiffStore(str(root))
     assert _orig(store, "local.md").read_text(encoding="utf-8") == "v2\n"
-    from diff_tui import git_ops
+    from gc_tui.diff_tui import git_ops
 
     assert all(e.path != "local.md" for e in git_ops.git_status(root))
     ack = format_approve_ack(1, "local.md")
@@ -362,7 +358,7 @@ def test_h10_git_mode_entry_keeps_ignored_orig(tmp_path, monkeypatch):
 
 
 def test_h11_check_ignore_fail_no_blind_cache(git_proj, monkeypatch):
-    from diff_tui import git_ops
+    from gc_tui.diff_tui import git_ops
 
     root, _threads = git_proj
     monkeypatch.setattr(git_ops, "check_ignore", lambda *_a, **_k: None)

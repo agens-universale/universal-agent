@@ -3,12 +3,9 @@ import json
 
 import pytest
 
-from tools.arguments_validation import (
-    WrongFunctionArgumentsException,
-    parse_and_validate_tool_arguments,
-)
-from tools.fs.append_to_file import AppendToFile
-from tools.schema_optional import apply_openai_strict_parameters
+from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.fs.append_to_file import AppendToFile
+from gc_core.tools.schema_optional import apply_openai_strict_parameters
 
 
 from tests.helpers.tool_ctx import with_local_ctx
@@ -174,7 +171,7 @@ def test_append_rejects_nul_binary(tmp_path):
 
 def test_append_large_file_without_full_read(tmp_path):
     """Append must not require loading the whole file (head-check + end write)."""
-    from utils.file_text import APPEND_HEAD_SAMPLE_BYTES
+    from gc_core.utils.file_text import APPEND_HEAD_SAMPLE_BYTES
 
     p = tmp_path / "big.log"
     # Larger than former mutate cap and larger than head sample.
@@ -194,7 +191,7 @@ def test_append_large_file_without_full_read(tmp_path):
 
 def test_append_head_truncated_utf8_still_ok(tmp_path):
     """Multi-byte char spanning the head cut must not false-fail encoding check."""
-    from utils.file_text import APPEND_HEAD_SAMPLE_BYTES
+    from gc_core.utils.file_text import APPEND_HEAD_SAMPLE_BYTES
 
     # Fill so that a 2-byte Cyrillic char sits across the sample boundary.
     prefix = b"a" * (APPEND_HEAD_SAMPLE_BYTES - 1)
@@ -219,8 +216,8 @@ def test_append_utf16_no_mid_bom(tmp_path, encoding):
     BOM in the middle of an existing utf-16 file, corrupting it with
     ZERO WIDTH NO-BREAK SPACE (U+FEFF) between the existing tail and the new chunk.
     """
-    from utils.file_text import decode_text_bytes
-    from tools.fs.write_to_file_tool import WriteToFile
+    from gc_core.utils.file_text import decode_text_bytes
+    from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
     p = tmp_path / "u16.txt"
     wres = json.loads(
@@ -264,7 +261,7 @@ def test_append_utf16_no_mid_bom(tmp_path, encoding):
 @pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-16-be"])
 def test_append_utf16_create_missing_has_bom(tmp_path, encoding):
     """create_if_missing path must still write a BOM for a brand-new utf-16 file."""
-    from utils.file_text import decode_text_bytes
+    from gc_core.utils.file_text import decode_text_bytes
 
     p = tmp_path / "created.txt"
     res = json.loads(
@@ -292,8 +289,8 @@ def test_append_utf8_sig_no_mid_bom(tmp_path):
     ``text.encode(\"utf-8-sig\")`` always prepends EF BB BF, so the append path must
     encode as plain utf-8 (BOM lives only at file offset 0).
     """
-    from utils.file_text import decode_text_bytes
-    from tools.fs.write_to_file_tool import WriteToFile
+    from gc_core.utils.file_text import decode_text_bytes
+    from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
     p = tmp_path / "sig.txt"
     wres = json.loads(
@@ -325,7 +322,7 @@ def test_append_utf8_sig_no_mid_bom(tmp_path):
 
 def test_append_utf8_sig_create_missing_has_bom(tmp_path):
     """create_if_missing for utf-8-sig must write the EF BB BF BOM at offset 0."""
-    from utils.file_text import decode_text_bytes
+    from gc_core.utils.file_text import decode_text_bytes
 
     p = tmp_path / "created_sig.txt"
     res = json.loads(
@@ -349,7 +346,7 @@ def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
     BOM-less file that later decodes incorrectly. size==0 → create-path (write_bytes
     with BOM) rather than append-path (no BOM).
     """
-    from utils.file_text import decode_text_bytes
+    from gc_core.utils.file_text import decode_text_bytes
 
     p = tmp_path / "empty.dat"
     p.write_bytes(b"")  # exists but size == 0

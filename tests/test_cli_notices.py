@@ -1,5 +1,5 @@
-from startup_notices import collect_startup_notices, render_notices_for_cli
-from tools.registry import all_builtin_tool_names
+from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli
+from gc_core.tools.registry import all_builtin_tool_names
 
 
 def test_cli_pipeline_flags_stop_tools_typo():

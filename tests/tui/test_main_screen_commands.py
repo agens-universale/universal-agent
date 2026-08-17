@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_unknown_command_shows_closest_match():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -23,8 +23,8 @@ async def test_unknown_command_shows_closest_match():
 async def test_notices_command_opens_screen():
     # Набранная /notices должна открыть NoticesScreen (диспатч-ветка, не только реестр).
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.notices import NoticesScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.notices import NoticesScreen
 
     async with TuiApp().run_test() as pilot:
         pilot.app.screen._handle_command("notices")
@@ -35,7 +35,7 @@ async def test_notices_command_opens_screen():
 @pytest.mark.asyncio
 async def test_unknown_command_no_close_match():
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

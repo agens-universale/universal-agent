@@ -25,8 +25,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-import tui.services.json_payload as json_payload_module
-from tui.services.json_payload import render_payload, unfold_payload
+from gc_tui.services import json_payload as json_payload_module
+from gc_tui.services.json_payload import render_payload, unfold_payload
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 STORED_TRUNCATED = (_FIXTURES / "stored_tool_output_truncated.json").read_text(encoding="utf-8")

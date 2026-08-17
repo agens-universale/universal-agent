@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from tui.services.agent_runner import AgentRunner
+from gc_tui.services.agent_runner import AgentRunner
 
 
 class _FakeExecutor:
@@ -69,7 +69,7 @@ async def test_warm_builds_executor_off_ui_thread(tmp_path):
     # on_mount запускает warm() — сборка executor (incl. MCP-дискавери) идёт в
     # worker-потоке, НЕ на UI/main (иначе фриз event-loop Textual).
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     built = []
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._executor_factory = lambda: (

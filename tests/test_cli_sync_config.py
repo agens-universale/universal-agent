@@ -4,8 +4,8 @@ import sys
 # arg_parser.py парсит sys.argv на import — подменяем argv до импорта cli.
 sys.argv = ["gc-cli", "--sync-config"]
 
-import config_sync  # noqa: E402
-import cli  # noqa: E402
+from gc_core import config_sync
+from gc_cli import cli
 
 
 def _fake_run_args(config=None):
@@ -14,7 +14,7 @@ def _fake_run_args(config=None):
 
 def test_run_sync_config_refuses_bundled_template(monkeypatch, capsys):
     """M9a: bundled-шаблон → отдельное сообщение (не «не найден»)."""
-    from config import _default_config_path
+    from gc_core.config import _default_config_path
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args())
     monkeypatch.setattr(cli, "user_config_path", lambda: __import__("pathlib").Path(_default_config_path()))
     assert cli._run_sync_config() == 1
@@ -41,7 +41,7 @@ def test_run_sync_config_refuses_project_local(monkeypatch, tmp_path, capsys):
     local_cfg.write_text("backend:\n  completions_url: \"http://x\"\n", encoding="utf-8")
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(local_cfg)))
     # _project_local_config_path должна вернуть путь к этому файлу
-    import config as config_mod
+    from gc_core import config as config_mod
     monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: str(local_cfg))
     assert cli._run_sync_config() == 1
     err = capsys.readouterr().err

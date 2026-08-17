@@ -1,5 +1,5 @@
-import tools.connect_mcp.registry as reg
-import tools as tools_pkg
+from gc_core.tools.connect_mcp import registry as reg
+from gc_core import tools as tools_pkg
 
 
 def test_get_mcp_tools_data_returns_status(monkeypatch):
@@ -7,7 +7,7 @@ def test_get_mcp_tools_data_returns_status(monkeypatch):
         return ({}, {"office": {"status": "failed", "reason": "команда 'office-mcp' не найдена",
                                 "tool_count": 0, "elapsed_ms": 3}})
     monkeypatch.setattr(reg, "_build_tools_registry", fake_build)
-    from tools.connect_mcp.agent_tools import get_mcp_tools_data_for_config
+    from gc_core.tools.connect_mcp.agent_tools import get_mcp_tools_data_for_config
     tools_data, status = get_mcp_tools_data_for_config(
         {"mcp-servers": {"office": {"transport": "stdio", "command": "office-mcp"}}}
     )

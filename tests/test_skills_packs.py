@@ -53,7 +53,7 @@ def _write_pack(
 
 def _registry(tmp_path, *, with_layers=("system",)):
     """Build a SkillsRegistry pointing at <tmp_path>/<layer>/ for chosen layers, empty for others."""
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     paths = {
         "system": tmp_path / "system" if "system" in with_layers else tmp_path / "system_empty",
@@ -328,7 +328,7 @@ def test_override_inner_skill_project_layer(tmp_path):
 
 def test_single_source_escape_disables_pack_walk(tmp_path):
     """skills_data_path в config → single-source режим, паки игнорируются."""
-    from tools.skills.registry import get_skills_registry
+    from gc_core.tools.skills.registry import get_skills_registry
 
     custom = tmp_path / "custom"
     custom.mkdir()
@@ -359,7 +359,7 @@ def test_bootstrap_resolved_by_folder_name_when_frontmatter_id_differs(tmp_path)
     Без этого fallback'а пакет с такой конфигурацией silently invisible.
     """
     import yaml
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     layer = tmp_path / "system"
     layer.mkdir()
@@ -399,7 +399,7 @@ def test_bootstrap_direct_canonical_wins_over_folder_name_match(tmp_path):
     matches skill с frontmatter id 'bar', не skill в папке 'bar/'.
     """
     import yaml
-    from tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.registry import SkillsRegistry
 
     layer = tmp_path / "system"
     layer.mkdir()

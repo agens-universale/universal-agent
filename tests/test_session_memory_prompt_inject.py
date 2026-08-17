@@ -2,17 +2,9 @@
 
 from pathlib import Path
 
-from summarize.prompt_loading import (
-    default_prompt_path,
-    load_memory_patch_replace_prompt,
-    load_prompt_template,
-)
-from summarize.working_memory_gateway import (
-    MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER,
-    SESSION_MEMORY_REGISTER_NAMES_PLACEHOLDER,
-    REGISTER_ORDER,
-    REGISTER_PATCH_RULES,
-)
+from gc_core.summarize.prompt_loading import default_prompt_path, load_memory_patch_replace_prompt, load_prompt_template
+from gc_core.summarize.working_memory_gateway import MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER, SESSION_MEMORY_REGISTER_NAMES_PLACEHOLDER, REGISTER_ORDER, REGISTER_PATCH_RULES
+from tests.paths import ASSETS
 
 
 def _root() -> Path:
@@ -32,7 +24,7 @@ def test_summary_prompt_injects_register_names():
 
 
 def test_replace_prompt_still_uses_all_registers_from_canon():
-    path = str(_root() / "prompts" / "chat_completions_memory_patch_replace.md")
+    path = str(ASSETS / "prompts" / "chat_completions_memory_patch_replace.md")
     loaded = load_memory_patch_replace_prompt(path)
     assert MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER not in loaded
     for name in REGISTER_ORDER:

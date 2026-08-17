@@ -4,7 +4,7 @@ import pytest
 
 def test_normal_state_no_failed_marker():
     pytest.importorskip("textual")
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     w = UserReplyContainer("привет", state="normal")
     rendered = str(w.render())
@@ -15,7 +15,7 @@ def test_normal_state_no_failed_marker():
 
 def test_pending_state_has_pending_class_no_marker():
     pytest.importorskip("textual")
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     w = UserReplyContainer("привет", state="pending")
     rendered = str(w.render())
@@ -26,7 +26,7 @@ def test_pending_state_has_pending_class_no_marker():
 
 def test_failed_state_has_failed_class_and_inline_marker():
     pytest.importorskip("textual")
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     w = UserReplyContainer("упало", state="failed")
     rendered = str(w.render())
@@ -37,7 +37,7 @@ def test_failed_state_has_failed_class_and_inline_marker():
 
 def test_set_state_transitions_pending_to_failed():
     pytest.importorskip("textual")
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     w = UserReplyContainer("x", state="pending")
     assert "user-reply-pending" in w.classes
@@ -49,7 +49,7 @@ def test_set_state_transitions_pending_to_failed():
 
 def test_set_state_transitions_pending_to_normal():
     pytest.importorskip("textual")
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     w = UserReplyContainer("x", state="pending")
     w.set_state("normal")

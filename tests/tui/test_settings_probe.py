@@ -3,8 +3,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-import model_picker as mp
-from tui.services.settings_probe import ProbeResult, interpret_auth, probe
+from gc_core import model_picker as mp
+from gc_tui.services.settings_probe import ProbeResult, interpret_auth, probe
 
 
 def _fetch(models=None, status=None, net="", latency=7):

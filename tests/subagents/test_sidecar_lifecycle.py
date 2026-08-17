@@ -6,9 +6,9 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from states import SharedStateData, State
-from thread_store import read_subagent_trace
-from tools.subagents.sidecar import persist_subagent_trace
+from gc_core.states import SharedStateData, State
+from gc_core.thread_store import read_subagent_trace
+from gc_core.tools.subagents.sidecar import persist_subagent_trace
 
 
 def _state():
@@ -46,7 +46,7 @@ def _fc(name: str, call_id: str, arguments: str = "{}"):
 
 
 def _patch_process(monkeypatch, *, apply_return):
-    import processing_responses as pr
+    from gc_core import processing_responses as pr
 
     monkeypatch.setattr(pr, "apply_tool", lambda **kw: apply_return)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
@@ -123,8 +123,8 @@ class TestSidecarIntermediateReply:
 class TestSidecarFinished:
     def test_finished_on_success(self, tmp_path):
         from tests.helpers.tool_ctx import local_ctx
-        from tools.subagents.runner import SubagentRunner
-        from tools.subagents.sidecar import bind_thread_identity
+        from gc_core.tools.subagents.runner import SubagentRunner
+        from gc_core.tools.subagents.sidecar import bind_thread_identity
 
         cfg = _runner_cfg(tmp_path)
         parent = local_ctx(cfg)
@@ -167,8 +167,8 @@ class TestSidecarFinished:
 
     def test_finished_on_user_stop(self, tmp_path):
         from tests.helpers.tool_ctx import local_ctx
-        from tools.subagents.runner import SubagentRunner
-        from tools.subagents.sidecar import bind_thread_identity
+        from gc_core.tools.subagents.runner import SubagentRunner
+        from gc_core.tools.subagents.sidecar import bind_thread_identity
 
         cfg = _runner_cfg(tmp_path)
         parent = local_ctx(cfg)
@@ -208,9 +208,9 @@ class TestSidecarFinished:
 class TestSidecarChildSummary:
     def test_child_summary_on_compaction_applied(self, tmp_path):
         from tests.helpers.tool_ctx import local_ctx
-        from tools.subagents.runner import SubagentRunner
-        from tools.subagents.sidecar import bind_thread_identity
-        import run_summary_coordinator as rsc
+        from gc_core.tools.subagents.runner import SubagentRunner
+        from gc_core.tools.subagents.sidecar import bind_thread_identity
+        from gc_core import run_summary_coordinator as rsc
 
         cfg = _runner_cfg(tmp_path, trigger=10)
         parent = local_ctx(cfg)

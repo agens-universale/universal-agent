@@ -31,7 +31,7 @@ def _cfg(trigger, turn_end):
 async def test_meter_uses_hard_threshold_not_turn_end(tmp_path):
     """Бар нормируется от summary_trigger (10M), а не turn-end (1) → ~0%, не 100%."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "ctxm0000000000000000000000000001a"
     _write_task(tmp_path, tid, "hello")
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -48,7 +48,7 @@ async def test_meter_uses_hard_threshold_not_turn_end(tmp_path):
 async def test_meter_falls_back_to_turn_end_when_no_hard_threshold(tmp_path):
     """summary_trigger=0 (форс-сжатие выкл) → fallback на turn-end, бар виден."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     tid = "ctxm0000000000000000000000000002a"
     _write_task(tmp_path, tid, "hello")
     app = TuiApp(threads_dir=str(tmp_path), system="cli",

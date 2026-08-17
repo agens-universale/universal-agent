@@ -14,7 +14,7 @@ def _harness(editor):
 
 async def test_url_prefilled_token_empty():
     """Адрес предзаполнен сырым значением; поле токена пустое (секрет не заезжает)."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="http://old/v1/chat/completions",
                           auth_header="Bearer sk-SECRET")
     app = _harness(ed)
@@ -30,7 +30,7 @@ async def test_url_prefilled_token_empty():
 
 async def test_submit_empty_url_returns_error():
     """Пустой адрес → error «введите адрес» (пункт C), не «ничего не изменено»."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="http://old/v1", auth_header="")
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -41,7 +41,7 @@ async def test_submit_empty_url_returns_error():
 
 
 async def test_submit_malformed_url_returns_error():
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="http://old/v1", auth_header="")
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -53,7 +53,7 @@ async def test_submit_malformed_url_returns_error():
 
 async def test_submit_valid_pair():
     """Валидный адрес + токен → (url, header, None)."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="http://old/v1/chat/completions", auth_header="")
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -71,7 +71,7 @@ async def test_submit_valid_pair():
 async def test_bearer_selected_without_token_asks_for_token():
     """Выбрали Bearer (курсор на нём), токен не введён, действующего токена нет →
     submit просит «введите токен», а не молчит «ничего не изменено»."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="http://h/v1", auth_header="")  # действует «без авторизации»
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -86,7 +86,7 @@ async def test_bearer_selected_without_token_asks_for_token():
 async def test_bearer_active_empty_field_is_noop():
     """Действует Bearer с токеном; зашли курсором на Bearer, поле пусто → submit ничего не
     меняет (не ошибка): действующий токен остаётся, «ничего не изменено» здесь корректно."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="http://h/v1", auth_header="Bearer sk-OLD")
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -99,7 +99,7 @@ async def test_bearer_active_empty_field_is_noop():
 
 async def test_is_dirty_false_on_entry():
     """Вход без правок — не dirty (адрес предзаполнен, токен пуст = «не менять»)."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="http://old/v1", auth_header="Bearer x")
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -110,7 +110,7 @@ async def test_is_dirty_false_on_entry():
 async def test_move_does_not_move_active_mark_before_enter():
     """Навигация курсором НЕ двигает метку ● (действующий вариант из конфига) — как на
     «Модели»: едут только курсор ▸ и подсветка, выбор фиксирует submit/peek по позиции."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Static
     ed = ConnectionEditor(url_current="http://old/v1", auth_header="")  # действует «без авторизации»
     app = _harness(ed)
@@ -129,7 +129,7 @@ async def test_move_does_not_move_active_mark_before_enter():
 async def test_navigation_only_does_not_change_selection():
     """Проход курсором по вариантам и обратно (без Enter/ввода токена) не делает секцию
     «изменено» и не двигает действующий выбор — установка только по submit (жалоба со скрина)."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Static
     ed = ConnectionEditor(url_current="http://old/v1", auth_header="Bearer x")  # действует Bearer
     app = _harness(ed)
@@ -145,7 +145,7 @@ async def test_navigation_only_does_not_change_selection():
 async def test_focus_first_returns_to_address():
     """focus_first после навигации возвращает фокус на адрес; на опциях не остаётся
     призрака курсора ▸ и подсветки (адрес — через фокус поля, опции — через ▸/selected)."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Static, Input
     ed = ConnectionEditor(url_current="http://old/v1", auth_header="")
     app = _harness(ed)
@@ -165,7 +165,7 @@ async def test_focus_first_returns_to_address():
 async def test_token_field_placeholder_shows_masked_current():
     """Действующий токен виден МАСКОЙ в placeholder поля (поле не выглядит пустым),
     но НЕ заезжает в значение — секретная безопасность сохранена."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
     ed = ConnectionEditor(url_current="http://h/v1", auth_header="Bearer sk-SECRETVALUE")
     app = _harness(ed)
@@ -179,7 +179,7 @@ async def test_token_field_placeholder_shows_masked_current():
 
 async def test_selected_class_highlights_active_option():
     """Строка выбранного варианта авторизации получает класс selected (фон-подсветка)."""
-    from tui.editors.connection import ConnectionEditor
+    from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Static
     ed = ConnectionEditor(url_current="http://h/v1", auth_header="")
     app = _harness(ed)

@@ -20,7 +20,7 @@ class _FakeRunner:
 async def test_refresh_updates_mounted_answer_row(tmp_path):
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "ref1"
     _write_task(tmp_path, tid)
@@ -43,7 +43,7 @@ async def test_refresh_updates_mounted_answer_row(tmp_path):
 @pytest.mark.asyncio
 async def test_refresh_noop_when_nothing_mounted(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     tid = "ref2"
     _write_task(tmp_path, tid)

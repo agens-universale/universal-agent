@@ -3,7 +3,7 @@ import os as _os
 
 import pytest
 
-from config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 
 
 def test_replaces_marker(monkeypatch):

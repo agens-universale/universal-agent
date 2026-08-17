@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def _write_thread(threads_dir: Path, system: str, tid: str, *, msgs: int, updated: str,

@@ -32,9 +32,9 @@ class _StubLiveRunner:
 @pytest.mark.asyncio
 async def test_ask_human_banner_appears_and_disappears(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.ask_human_banner import AskHumanBanner
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner
+    from gc_tui.widgets.trace_row import TraceRow
 
     tid = "ah_t1"
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
@@ -108,8 +108,8 @@ async def test_replay_unanswered_question_does_not_swallow_later_ones(tmp_path):
     переформулировала, не дождавшись ответа): баннер не должен застревать и
     глотать последующие вопросы — каждый оседает своей dim-строкой."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     tid = "ahchain0000000000000000000000001"
     recs = [
@@ -161,8 +161,8 @@ async def test_replay_answered_question_keeps_question_row(tmp_path):
     """История с отвеченным ask_human: вопрос виден серой рамкой с «? …» (без ask_human:),
     баннера нет — диалог читается целиком (вопрос + ответ), live и replay одинаковы."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     tid = "ahq00000000000000000000000000001"
     recs = [
@@ -210,8 +210,8 @@ async def test_ask_human_esc_clean_stops(tmp_path):
     - tui_state.ask_human_state сброшен в None.
     - app.active_runner = None (clean-restart pattern)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.ask_human_banner import AskHumanBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner
     from tests.tui.fixtures.stub_executor import StubExecutor
 
     tid = "ah_esc"
@@ -250,8 +250,8 @@ async def test_ask_human_esc_closes_open_overlay_first(tmp_path):
     Контракт: первый Esc закрывает палитру команд и НЕ трогает вопрос агента
     (runner.stop не вызван, banner жив); второй Esc — штатный clean stop."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.ask_human_banner import AskHumanBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner
 
     tid = "ah_overlay"
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
@@ -296,8 +296,8 @@ async def test_ask_human_esc_with_text_clears_input_first(tmp_path):
     Esc при тексте → clear-hint, вопрос жив; Esc-Esc чистит текст;
     Esc при пустом поле — только тогда clean stop вопроса."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.ask_human_banner import AskHumanBanner
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner
 
     tid = "ah_text"
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
@@ -343,8 +343,8 @@ async def test_ask_human_body_renders_markdown():
     """Баннер монтирует блок-виджеты: markdown отрисован, без маркера-реплики `●`."""
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.widgets.ask_human_banner import AskHumanBanner
-    from tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner
+    from gc_tui.widgets.trace_row import TraceRow
 
     class _A(App):
         def compose(self):
@@ -367,8 +367,8 @@ async def test_ask_human_table_renders():
     """Таблица в вопросе ask_human → виджет .table-block."""
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.widgets.agent_reply_line import AgentReplyLine
-    from tui.widgets.ask_human_banner import AskHumanBanner
+    from gc_tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner
 
     q = "Сравни:\n\n| A | B |\n|---|---|\n| 1 | 2 |"
 

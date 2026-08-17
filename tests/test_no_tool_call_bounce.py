@@ -1,8 +1,4 @@
-from message_policy.no_tool_call_bounce import (
-    NO_TOOL_CALL_BOUNCE_MESSAGE,
-    extract_last_assistant_text,
-    format_no_tool_call_bounce,
-)
+from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text, format_no_tool_call_bounce
 
 
 # --- extract_last_assistant_text ---

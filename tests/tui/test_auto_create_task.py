@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_first_message_creates_task(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     captured = {"run": None}
 
@@ -48,7 +48,7 @@ async def test_first_message_creates_task(tmp_path):
 async def test_message_while_running_calls_add_message(tmp_path):
     """Свободный текст при is_running() → executor.add_message, не новый run."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     captured = {"runs": 0, "added": []}
 
@@ -90,7 +90,7 @@ async def test_message_while_running_calls_add_message(tmp_path):
 async def test_message_after_stopped_restarts_same_thread(tmp_path):
     """Свободный текст когда runner закончился → новый run, но тот же thread_id."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     captured = {"thread_ids": []}
 
@@ -137,8 +137,8 @@ async def test_message_after_stopped_restarts_same_thread(tmp_path):
 async def test_no_duplicate_user_reply(tmp_path):
     """После ввода — реплика появляется ровно один раз (через polling), не дважды."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     class _Fake:
         def run(self, messages, *, thread_id, **kw):

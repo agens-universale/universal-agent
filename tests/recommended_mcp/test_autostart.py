@@ -5,7 +5,7 @@ from pathlib import Path
 from textwrap import dedent
 from unittest.mock import patch
 
-from mcp_runtime.manifest_resolve import resolve_agent_manifest_path
+from gc_core.mcp_runtime.manifest_resolve import resolve_agent_manifest_path
 from recommended_mcp.autostart import ensure_daemons_for_agent, wait_daemon_url_ready
 
 
@@ -21,7 +21,7 @@ def test_resolve_manifest_from_gc_config(tmp_path: Path, monkeypatch) -> None:
     manifest = gc_config / "recommended_mcp" / "config.local.yml"
     manifest.parent.mkdir(parents=True)
     manifest.write_text("mcps: []\n", encoding="utf-8")
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_config_dir=gc_config))
     path = resolve_agent_manifest_path({})
@@ -52,7 +52,7 @@ def test_ensure_starts_only_configured_http_mcp(tmp_path: Path) -> None:
         },
     }
     with patch(
-        "mcp_runtime.manifest_resolve.resolve_agent_manifest_path",
+        "gc_core.mcp_runtime.manifest_resolve.resolve_agent_manifest_path",
         return_value=manifest,
     ):
         with patch("recommended_mcp.autostart.run_entry", return_value=True) as run_entry:
@@ -83,7 +83,7 @@ def test_ensure_skips_ready_wait_when_daemon_already_running(tmp_path: Path) -> 
         },
     }
     with patch(
-        "mcp_runtime.manifest_resolve.resolve_agent_manifest_path",
+        "gc_core.mcp_runtime.manifest_resolve.resolve_agent_manifest_path",
         return_value=manifest,
     ):
         with patch("recommended_mcp.autostart.run_entry", return_value=False):

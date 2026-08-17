@@ -1,10 +1,4 @@
-from config_modules.pricing import (
-    DEFAULT_CURRENCY,
-    DEFAULT_PER_TOKENS,
-    PricingConfig,
-    pricing_from_config_dict,
-    resolve_model_tariff,
-)
+from gc_core.config_modules.pricing import DEFAULT_CURRENCY, DEFAULT_PER_TOKENS, PricingConfig, pricing_from_config_dict, resolve_model_tariff
 
 
 def _pricing(**kw) -> dict:

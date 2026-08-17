@@ -7,7 +7,7 @@ async def test_enter_returns_trimmed_value(tmp_path):
     pytest.importorskip("textual")
     from textual.app import App
     from textual.widgets import Input
-    from tui.screens.rename import RenameScreen
+    from gc_tui.screens.rename import RenameScreen
 
     result = {}
 
@@ -28,7 +28,7 @@ async def test_enter_returns_trimmed_value(tmp_path):
 async def test_escape_returns_none(tmp_path):
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.screens.rename import RenameScreen
+    from gc_tui.screens.rename import RenameScreen
 
     result = {}
 

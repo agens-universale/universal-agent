@@ -5,7 +5,7 @@ import types
 import pytest
 import requests
 
-import processing_responses as pr
+from gc_core import processing_responses as pr
 
 
 class _FakeAuth:

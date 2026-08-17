@@ -1,8 +1,8 @@
 import base64
 import json
 
-from tools.fs.save_base64_file import SaveBase64File
-from utils.file_text import sha256_hex_of_bytes
+from gc_core.tools.fs.save_base64_file import SaveBase64File
+from gc_core.utils.file_text import sha256_hex_of_bytes
 
 
 from tests.helpers.tool_ctx import with_local_ctx

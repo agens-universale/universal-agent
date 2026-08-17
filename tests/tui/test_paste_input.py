@@ -5,7 +5,7 @@ import pytest
 
 def _app_with_input():
     from textual.app import App, ComposeResult
-    from tui.widgets.paste_input import PasteInput
+    from gc_tui.widgets.paste_input import PasteInput
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -17,9 +17,9 @@ def _app_with_input():
 @pytest.mark.asyncio
 async def test_ctrl_v_pastes_from_os_clipboard(monkeypatch):
     pytest.importorskip("textual")
-    import tui.services.os_ops as os_ops
+    from gc_tui.services import os_ops as os_ops
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "https://pasted/v1/chat/completions")
-    from tui.widgets.paste_input import PasteInput
+    from gc_tui.widgets.paste_input import PasteInput
 
     app = _app_with_input()
     async with app.run_test() as pilot:
@@ -33,9 +33,9 @@ async def test_ctrl_v_pastes_from_os_clipboard(monkeypatch):
 @pytest.mark.asyncio
 async def test_os_clipboard_helper_inserts_and_strips_newlines(monkeypatch):
     pytest.importorskip("textual")
-    import tui.services.os_ops as os_ops
+    from gc_tui.services import os_ops as os_ops
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "tok-\r\n123")   # многострочный → в одну строку
-    from tui.widgets.paste_input import PasteInput
+    from gc_tui.widgets.paste_input import PasteInput
 
     app = _app_with_input()
     async with app.run_test() as pilot:
@@ -50,9 +50,9 @@ async def test_os_clipboard_helper_inserts_and_strips_newlines(monkeypatch):
 @pytest.mark.asyncio
 async def test_empty_os_clipboard_no_crash(monkeypatch):
     pytest.importorskip("textual")
-    import tui.services.os_ops as os_ops
+    from gc_tui.services import os_ops as os_ops
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "")
-    from tui.widgets.paste_input import PasteInput
+    from gc_tui.widgets.paste_input import PasteInput
 
     app = _app_with_input()
     async with app.run_test() as pilot:
@@ -67,10 +67,10 @@ async def test_empty_os_clipboard_no_crash(monkeypatch):
 async def test_paste_replaces_full_selection(monkeypatch):
     """Вставка поверх полного выделения ЗАМЕНЯЕТ значение, а не дописывает к нему."""
     pytest.importorskip("textual")
-    import tui.services.os_ops as os_ops
+    from gc_tui.services import os_ops as os_ops
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "http://new/v1/chat/completions")
     from textual.widgets import Input
-    from tui.widgets.paste_input import PasteInput
+    from gc_tui.widgets.paste_input import PasteInput
 
     from textual.app import App, ComposeResult
 
@@ -95,9 +95,9 @@ async def test_paste_replaces_full_selection(monkeypatch):
 async def test_paste_without_selection_inserts_at_cursor(monkeypatch):
     """Регресс: без выделения вставка идёт в позицию курсора, как раньше."""
     pytest.importorskip("textual")
-    import tui.services.os_ops as os_ops
+    from gc_tui.services import os_ops as os_ops
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "X")
-    from tui.widgets.paste_input import PasteInput
+    from gc_tui.widgets.paste_input import PasteInput
     from textual.app import App, ComposeResult
 
     class _App(App):

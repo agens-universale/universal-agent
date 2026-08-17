@@ -1,6 +1,6 @@
 import pytest
 
-from tools.deprecated.update_plan import UpdatePlan
+from gc_core.tools.deprecated.update_plan import UpdatePlan
 
 
 def test_update_plan_success():

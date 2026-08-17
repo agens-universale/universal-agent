@@ -3,7 +3,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-import tui.app as app_mod
+from gc_tui import app as app_mod
 
 
 class _FakeRunner:
@@ -67,7 +67,7 @@ def test_reload_config_idle_clears_stale_flag(tmp_path):
     fake_runner = _FakeRunner(running=False)
     app._executor_factory = lambda: None
     # перехватываем AgentRunner: подменяем класс в tui.services.agent_runner
-    import tui.services.agent_runner as runner_mod
+    from gc_tui.services import agent_runner as runner_mod
     orig = runner_mod.AgentRunner
     runner_mod.AgentRunner = lambda **_kw: fake_runner
     try:
@@ -88,9 +88,9 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
       - периметр path_policy съезжал со снапшота на живой os.getcwd(), хотя агент мог
         сделать cd внутри сессии.
     """
-    from tui.app import TuiApp
-    import config as cfg_mod
-    import thread_store as ts_mod
+    from gc_tui.app import TuiApp
+    from gc_core import config as cfg_mod
+    from gc_core import thread_store as ts_mod
 
     on_disk = {"completions_url": "https://h/v1/chat/completions",
                "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
@@ -136,7 +136,7 @@ def test_reload_config_if_changed_first_check_after_startup_is_noop(tmp_path, mo
     app.active_runner = _FakeRunner(running=False)
 
     calls = {"load": 0, "invalidate": 0}
-    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+    monkeypatch.setattr("gc_core.config.load_config", lambda *_a, **_k: (
         calls.__setitem__("load", calls["load"] + 1) or {}
     ))
     orig_invalidate = app.invalidate_runner
@@ -160,7 +160,7 @@ def test_reload_config_if_changed_skips_when_file_untouched(tmp_path, monkeypatc
     app.reload_config()   # устанавливает базовый снимок mtime
 
     calls = {"load": 0, "invalidate": 0}
-    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+    monkeypatch.setattr("gc_core.config.load_config", lambda *_a, **_k: (
         calls.__setitem__("load", calls["load"] + 1) or {}
     ))
     orig_invalidate = app.invalidate_runner
@@ -199,7 +199,7 @@ def test_reload_config_if_changed_keeps_old_base_on_broken_file(tmp_path):
     кидает, окно не падает и продолжает работать на прежней базе. Молчать при
     этом нельзя: причина уходит в runtime-уведомления (/notices), иначе
     регрессия загрузки конфига незаметна."""
-    from runtime_notices import collect_runtime_notices
+    from gc_core.runtime_notices import collect_runtime_notices
 
     app = _mk_app(tmp_path)
     app.reload_config()
@@ -224,7 +224,7 @@ def test_reload_config_if_changed_own_write_does_not_retrigger(tmp_path, monkeyp
     app.reload_config()   # «сохранение» — сам конфиг тоже перечитан этим вызовом
 
     calls = {"load": 0}
-    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+    monkeypatch.setattr("gc_core.config.load_config", lambda *_a, **_k: (
         calls.__setitem__("load", calls["load"] + 1) or {}
     ))
 
@@ -261,9 +261,9 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
         seen_cfg.update(cfg)
         return _Ctx()
 
-    monkeypatch.setattr("config.build_auth_connector", lambda cfg: None)
-    monkeypatch.setattr("run_context.create_run_context", _fake_create_run_context)
-    monkeypatch.setattr("agent_executor.AgentExecutor", _Ex)
+    monkeypatch.setattr("gc_core.config.build_auth_connector", lambda cfg: None)
+    monkeypatch.setattr("gc_core.run_context.create_run_context", _fake_create_run_context)
+    monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", _Ex)
 
     app._build_real_executor()
 
@@ -299,7 +299,7 @@ def test_screen_config_noop_when_file_untouched(tmp_path, monkeypatch):
     app.reload_config()
 
     calls = {"load": 0, "invalidate": 0}
-    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+    monkeypatch.setattr("gc_core.config.load_config", lambda *_a, **_k: (
         calls.__setitem__("load", calls["load"] + 1) or {}
     ))
     orig_invalidate = app.invalidate_runner

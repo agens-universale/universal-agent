@@ -57,7 +57,7 @@ def _trace_text(screen) -> str:
 @pytest.mark.asyncio
 async def test_task_flow_renders_agent_output(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     fake = _FakeExecutor(threads_dir=str(tmp_path), system="cli")
     app = TuiApp(threads_dir=str(tmp_path), system="cli")

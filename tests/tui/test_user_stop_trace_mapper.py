@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from tui.services.trace_mapper import _looks_like_error, _summarize_output
+from gc_tui.services.trace_mapper import _looks_like_error, _summarize_output
 
 
 def test_cancelled_by_user_looks_like_error():

@@ -6,8 +6,8 @@ pytest.importorskip("pytest_textual_snapshot")
 
 
 def test_confirm_banner_snapshot(snap_compare, tmp_path, monkeypatch):
-    from tui.app import TuiApp
-    from tui.screens.main import TraceScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
 
     # cwd-чип в футере фиксируем — иначе снапшот стал бы машинно-зависимым.
     monkeypatch.setattr(TraceScreen, "_current_cwd", lambda self: "/work/demo-project")

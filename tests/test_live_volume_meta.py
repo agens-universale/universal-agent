@@ -1,11 +1,6 @@
 """meta.tui.live_history_chars / live_msg_count — агрегаты объёма live (persist)."""
-from message_format import calc_history_chars_for_trigger
-from thread_store import (
-    ThreadSession,
-    discard_message_by_id,
-    load_thread_messages,
-    load_thread_meta,
-)
+from gc_core.message_format import calc_history_chars_for_trigger
+from gc_core.thread_store import ThreadSession, discard_message_by_id, load_thread_messages, load_thread_meta
 
 
 def _session(tmp_path, tid="t1"):
@@ -102,7 +97,7 @@ def test_discard_keeps_live_volume_consistent(tmp_path):
 
 def test_persist_batch_preserves_tui_owned_keys(tmp_path):
     """live_* пишет persist в runtime; last_compact_msg_count (TUI) не затирается."""
-    from thread_store import load_thread_meta, update_tui_meta
+    from gc_core.thread_store import load_thread_meta, update_tui_meta
 
     ts = _session(tmp_path)
     ts.persist_batch(
@@ -121,7 +116,7 @@ def test_persist_batch_preserves_tui_owned_keys(tmp_path):
 
 
 def test_compact_preserves_tui_owned_keys(tmp_path):
-    from thread_store import load_thread_meta, update_tui_meta
+    from gc_core.thread_store import load_thread_meta, update_tui_meta
 
     ts = _session(tmp_path)
     ts.persist_batch(

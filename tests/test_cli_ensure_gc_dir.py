@@ -9,7 +9,7 @@ import pytest
 _ORIG_ARGV = sys.argv
 sys.argv = ["pytest-cli-import", "-q", "dummy"]
 try:
-    from cli import _ensure_project_gc_dir
+    from gc_cli.cli import _ensure_project_gc_dir
 finally:
     sys.argv = _ORIG_ARGV
 

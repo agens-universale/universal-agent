@@ -1,7 +1,7 @@
 """_installed_status: трёхзначный статус INSTALLED для gc-mcp list."""
 from pathlib import Path
 
-from mcp_runtime import cli
+from gc_core.mcp_runtime import cli
 from recommended_mcp.manifest import MCPEntry, InstallSpec
 
 
@@ -12,13 +12,13 @@ def _src(dist=None):
 
 def test_status_source_installed(monkeypatch):
     monkeypatch.setattr("recommended_mcp.install._dist_name", lambda e, r: "office-mcp")
-    monkeypatch.setattr("mcp_runtime.venv.query_installed_version", lambda n: "1.0")
+    monkeypatch.setattr("gc_core.mcp_runtime.venv.query_installed_version", lambda n: "1.0")
     assert cli._installed_status(_src("office-mcp"), Path("."), Path(".")) == "yes"
 
 
 def test_status_source_not_installed(monkeypatch):
     monkeypatch.setattr("recommended_mcp.install._dist_name", lambda e, r: "office-mcp")
-    monkeypatch.setattr("mcp_runtime.venv.query_installed_version", lambda n: None)
+    monkeypatch.setattr("gc_core.mcp_runtime.venv.query_installed_version", lambda n: None)
     assert cli._installed_status(_src("office-mcp"), Path("."), Path(".")) == "—"
 
 
@@ -49,7 +49,7 @@ def test_status_npx_not_installed(monkeypatch):
 
 
 def test_install_all_skips_optional(monkeypatch):
-    import mcp_runtime.cli as cli_mod
+    from gc_core.mcp_runtime import cli as cli_mod
     from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
 

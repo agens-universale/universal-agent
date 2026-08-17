@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from security.confirm_port import _ask_human_enabled
+from gc_core.security.confirm_port import _ask_human_enabled
 
 
 def test_ask_human_disabled_when_turn_ask_human_in_stop_tools():

@@ -2,9 +2,9 @@
 
 from types import SimpleNamespace
 
-from states import State, SharedStateData
-from tools.subagents.registry import SUBAGENT_CLASSES, is_subagent_tool
-from tools.subagents.runner import SubagentRunner
+from gc_core.states import State, SharedStateData
+from gc_core.tools.subagents.registry import SUBAGENT_CLASSES, is_subagent_tool
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state(**overrides):

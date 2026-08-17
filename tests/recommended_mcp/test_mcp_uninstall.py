@@ -34,7 +34,7 @@ def test_uninstall_entry_npx_calls_npm(monkeypatch):
     calls = []
     monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr(inst, "_node_install_paths", lambda dep: {"npm": "NPM"})
-    monkeypatch.setattr("config_modules.env_vars.gc_paths",
+    monkeypatch.setattr("gc_core.config_modules.env_vars.gc_paths",
                         lambda: {"data": Path("."), "config": Path("."),
                                  "cache": Path("."), "state": Path(".")})
     e = MCPEntry(name="pw", path=Path("."),

@@ -1,4 +1,4 @@
-from config_modules.mcp import McpMetaConfig
+from gc_core.config_modules.mcp import McpMetaConfig
 
 
 def test_discovery_timeout_default_is_30():

@@ -1,5 +1,5 @@
 """segment_answer: сегментация ответа на прозовые прогоны + code/table-блоки."""
-from tui.services.markdown_render import Block, segment_answer, build_markdown_table
+from gc_tui.services.markdown_render import Block, segment_answer, build_markdown_table
 
 
 def test_pure_prose_is_one_run():

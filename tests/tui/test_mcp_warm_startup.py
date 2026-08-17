@@ -4,7 +4,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_on_mount_triggers_warm(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     calls = {"n": 0}
 
@@ -20,8 +20,8 @@ async def test_on_mount_triggers_warm(tmp_path):
 @pytest.mark.asyncio
 async def test_poll_renders_indicator_without_active_task(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.services.mcp_progress import McpProgress
+    from gc_tui.app import TuiApp
+    from gc_tui.services.mcp_progress import McpProgress
 
     class _Ex:
         def stop_run(self): pass

@@ -7,7 +7,7 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
-from mcp_runtime.manifest_resolve import recipe_root, resolve_agent_manifest_path
+from gc_core.mcp_runtime.manifest_resolve import recipe_root, resolve_agent_manifest_path
 from recommended_mcp.manifest import load_manifest
 from recommended_mcp.process_supervisor import RunSupervisor
 from recommended_mcp.run import run_entry

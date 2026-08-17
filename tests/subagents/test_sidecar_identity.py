@@ -4,12 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from tools.subagents.progress import QueueSubagentProgressSink, child_progress_enabled
-from tools.subagents.sidecar import (
-    bind_thread_identity,
-    clear_thread_identity,
-    resolve_sidecar_identity,
-)
+from gc_core.tools.subagents.progress import QueueSubagentProgressSink, child_progress_enabled
+from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity, resolve_sidecar_identity
 
 
 class TestResolveSidecarIdentityGate:
@@ -112,9 +108,9 @@ class TestBindClearThreadIdentity:
 
 class TestChildCtxCopiesThreadIdentity:
     def test_build_child_ctx_copies_identity_without_sink(self, tmp_path):
-        from states import SharedStateData, State
+        from gc_core.states import SharedStateData, State
         from tests.helpers.tool_ctx import local_ctx
-        from tools.subagents.runner import SubagentRunner
+        from gc_core.tools.subagents.runner import SubagentRunner
 
         state = State(
             verbose=False,

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from tests.harbor_support.fakes import FakeBackend, bind_os_backend, strip_path_fields
-from backends.local import LocalFsBackend
-from tools.fs.search_and_replace import SearchAndReplace
+from gc_core.backends.local import LocalFsBackend
+from gc_core.tools.fs.search_and_replace import SearchAndReplace
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
 SHA = hashlib.sha256(CONTENT.encode()).hexdigest()

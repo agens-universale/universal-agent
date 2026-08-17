@@ -1,8 +1,8 @@
 import json
 from types import SimpleNamespace
 
-from states import SharedStateData
-from tools.deprecated.thread_notes import ThreadNotes
+from gc_core.states import SharedStateData
+from gc_core.tools.deprecated.thread_notes import ThreadNotes
 
 
 def test_thread_notes_no_state():

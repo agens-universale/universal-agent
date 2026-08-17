@@ -2,9 +2,9 @@
 
 import json
 
-from persistence.schema import STATE_SCHEMA_VERSION
-from persistence.state_serializer import StateSerializer
-from states import State
+from gc_core.persistence.schema import STATE_SCHEMA_VERSION
+from gc_core.persistence.state_serializer import StateSerializer
+from gc_core.states import State
 
 
 def _minimal_snapshot(session_todo: list) -> dict:

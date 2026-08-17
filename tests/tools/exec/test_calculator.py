@@ -1,6 +1,6 @@
 import json
 
-from tools.exec.calculator import Calculator
+from gc_core.tools.exec.calculator import Calculator
 
 
 from tests.helpers.tool_ctx import with_local_ctx

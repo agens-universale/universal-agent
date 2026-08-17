@@ -5,7 +5,7 @@ import pytest
 
 def test_load_missing_file_size_zero(tmp_path):
     """Если файла нет — size=0, no errors."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h = InputHistory(tmp_path)
     h.load()
@@ -14,7 +14,7 @@ def test_load_missing_file_size_zero(tmp_path):
 
 def test_append_writes_file(tmp_path):
     """append добавляет запись в файл и в memory."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h = InputHistory(tmp_path)
     h.load()
@@ -33,7 +33,7 @@ def test_append_writes_file(tmp_path):
 
 def test_append_dedup_adjacent(tmp_path):
     """Adjacent duplicates не сохраняются."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h = InputHistory(tmp_path)
     h.load()
@@ -47,7 +47,7 @@ def test_append_dedup_adjacent(tmp_path):
 
 def test_load_persists_across_instances(tmp_path):
     """Новый instance видит то что было append'нуто старым."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h1 = InputHistory(tmp_path)
     h1.load()
@@ -61,7 +61,7 @@ def test_load_persists_across_instances(tmp_path):
 
 def test_load_skips_corrupted_lines(tmp_path):
     """Битая JSON-строка не валит load."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     history_file = tmp_path / "input_history.jsonl"
     history_file.write_text(
@@ -77,7 +77,7 @@ def test_load_skips_corrupted_lines(tmp_path):
 
 def test_append_caps_at_max_entries(tmp_path, monkeypatch):
     """Превышение MAX_ENTRIES → файл переписывается с tail-N."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     monkeypatch.setattr(InputHistory, "MAX_ENTRIES", 5)
     monkeypatch.setattr(InputHistory, "REWRITE_EVERY", 2)
@@ -96,7 +96,7 @@ def test_append_caps_at_max_entries(tmp_path, monkeypatch):
 
 def test_prev_from_none_returns_last(tmp_path):
     """prev(None) → (size-1, last_text)."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h = InputHistory(tmp_path)
     h.load()
@@ -110,7 +110,7 @@ def test_prev_from_none_returns_last(tmp_path):
 
 def test_prev_walks_backwards(tmp_path):
     """prev(idx) → (idx-1, entries[idx-1])."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h = InputHistory(tmp_path)
     h.load()
@@ -125,7 +125,7 @@ def test_prev_walks_backwards(tmp_path):
 
 def test_prev_from_virtual_position(tmp_path):
     """prev(size) (virtual end) → (size-1, last)."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h = InputHistory(tmp_path)
     h.load()
@@ -137,7 +137,7 @@ def test_prev_from_virtual_position(tmp_path):
 
 def test_next_walks_forward(tmp_path):
     """next(idx) → (idx+1, entries[idx+1]) или None если за размером."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h = InputHistory(tmp_path)
     h.load()
@@ -152,7 +152,7 @@ def test_next_walks_forward(tmp_path):
 
 def test_prev_on_empty_history_returns_none(tmp_path):
     """prev(None) на пустой истории → None."""
-    from tui.services.input_history import InputHistory
+    from gc_tui.services.input_history import InputHistory
 
     h = InputHistory(tmp_path)
     h.load()

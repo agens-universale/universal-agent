@@ -6,11 +6,7 @@ import asyncio
 
 import pytest
 
-from tools.connect_mcp.stream_client import (
-    _is_loopback_url,
-    _make_stream_http_client,
-    _trust_env_for_url,
-)
+from gc_core.tools.connect_mcp.stream_client import _is_loopback_url, _make_stream_http_client, _trust_env_for_url
 
 
 @pytest.mark.parametrize(

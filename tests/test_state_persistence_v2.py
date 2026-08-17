@@ -4,21 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from intent_log import ACTION_USER_ASK, deserialize_list, serialize_for_meta
-from persistence.schema import (
-    STATE_SCHEMA_VERSION,
-    StateSchemaError,
-    meta_has_persisted_agent_state,
-    validate_thread_meta_for_load,
-)
-from persistence.state_repository import StateRepository
-from persistence.state_serializer import StateSerializer
-from persistence.thread_meta_mapper import ThreadMetaMapper
-from states import SharedStateData, State
-from tools.session.stored_outputs.tool_call_outputs_store import (
-    ToolCallOutputRecord,
-    ToolCallOutputsStore,
-)
+from gc_core.intent_log import ACTION_USER_ASK, deserialize_list, serialize_for_meta
+from gc_core.persistence.schema import STATE_SCHEMA_VERSION, StateSchemaError, meta_has_persisted_agent_state, validate_thread_meta_for_load
+from gc_core.persistence.state_repository import StateRepository
+from gc_core.persistence.state_serializer import StateSerializer
+from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.states import SharedStateData, State
+from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord, ToolCallOutputsStore
 
 
 def _make_state() -> State:
@@ -235,9 +227,7 @@ def test_state_serializer_roundtrip_from_state_factory():
 
 
 def test_get_thread_memory_registers_only_working_memory():
-    from message_policy.tool_usage_notice.policy import (
-        get_thread_memory_registers_from_shared,
-    )
+    from gc_core.message_policy.tool_usage_notice.policy import get_thread_memory_registers_from_shared
 
     shared = SimpleNamespace(
         working_memory={"state": "ok"},

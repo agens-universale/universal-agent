@@ -8,8 +8,8 @@ import pytest
 async def test_paste_collapse_shows_footer_hint():
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
     async with TuiApp().run_test() as pilot:
         inp = pilot.app.screen.query_one("#cmdinput", CommandTextArea)
         inp._handle_paste("a\n" * 4 + "a")          # 5 строк → сворачивается
@@ -22,8 +22,8 @@ async def test_paste_collapse_shows_footer_hint():
 async def test_paste_hint_lasts_5_seconds():
     """Подсказка повторной вставки держится 5с (а не 2с, как раньше)."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.widgets.command_input import CommandTextArea
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.command_input import CommandTextArea
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         with patch.object(scr, "set_timer", wraps=scr.set_timer) as spy:

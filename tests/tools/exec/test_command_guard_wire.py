@@ -13,10 +13,10 @@ import types
 
 import pytest
 
-import security.command_guard as cg
+from gc_core.security import command_guard as cg
 from tests.helpers.tool_ctx import with_local_ctx
-from tools.exec.execute_command import ExecuteCommand
-from tools.exec.run_python_code import RunPythonCode
+from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_core.tools.exec.run_python_code import RunPythonCode
 
 
 def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
@@ -44,7 +44,7 @@ def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
 
 def test_execute_command_rm_rf_gc_denied(tmp_path, monkeypatch):
     """rm -rf .gc must be blocked deterministically, regardless of judge."""
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     executed = []
@@ -65,7 +65,7 @@ def test_execute_command_rm_rf_gc_denied(tmp_path, monkeypatch):
 
 def test_execute_command_rm_rf_gc_relative_denied(tmp_path, monkeypatch):
     """rm -rf .gc (relative) must be blocked when cwd=tmp_path."""
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     executed = []
@@ -86,7 +86,7 @@ def test_execute_command_rm_rf_gc_relative_denied(tmp_path, monkeypatch):
 def test_execute_command_skills_path_allowed(tmp_path, monkeypatch):
     """Commands on .gc/skills/... are allowed by the tripwire."""
     import sys
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     skills_dir = tmp_path / ".gc" / "skills" / "foo"
@@ -108,7 +108,7 @@ def test_execute_command_skills_path_allowed(tmp_path, monkeypatch):
 def test_execute_command_plain_command_allowed(tmp_path, monkeypatch):
     """Plain mkdir / echo commands must not be blocked by the tripwire."""
     import sys
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     tool = with_local_ctx(ExecuteCommand)
@@ -125,7 +125,7 @@ def test_execute_command_plain_command_allowed(tmp_path, monkeypatch):
 def test_execute_command_protection_disabled_skips_tripwire(tmp_path, monkeypatch):
     """When protection_enabled=False the tripwire must not block anything."""
     import sys
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     tool = with_local_ctx(ExecuteCommand)
@@ -147,12 +147,12 @@ def test_execute_command_protection_disabled_skips_tripwire(tmp_path, monkeypatc
 def test_execute_command_ask_path_confirmed_executes(tmp_path, monkeypatch):
     """ask-level path + user confirms → command executes."""
     import sys
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     # Patch scan to return "ask" for any command.
     monkeypatch.setattr(cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask")
-    monkeypatch.setattr("security.confirm_port.request_confirm", lambda **k: True)
+    monkeypatch.setattr("gc_core.security.confirm_port.request_confirm", lambda **k: True)
 
     tool = with_local_ctx(ExecuteCommand)
     result = json.loads(
@@ -163,11 +163,11 @@ def test_execute_command_ask_path_confirmed_executes(tmp_path, monkeypatch):
 
 def test_execute_command_ask_path_not_confirmed_blocks(tmp_path, monkeypatch):
     """ask-level path + user declines → command blocked."""
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     monkeypatch.setattr(cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask")
-    monkeypatch.setattr("security.confirm_port.request_confirm", lambda **k: False)
+    monkeypatch.setattr("gc_core.security.confirm_port.request_confirm", lambda **k: False)
 
     tool = with_local_ctx(ExecuteCommand)
     result = json.loads(
@@ -188,7 +188,7 @@ def test_run_python_code_gc_deny_blocks_before_subprocess(tmp_path, monkeypatch)
     detecting .gc inside Python string literals is heuristic and path-format
     dependent (the scanner is designed for shell command tokens, not Python AST).
     """
-    from config_modules import env_vars
+    from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     # Force scanner to deny

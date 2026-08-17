@@ -1,8 +1,8 @@
 """tui summarizing → meta.runtime.summarizing; снимается (в т.ч. при ошибке)."""
 import pytest
 
-import run_summary_coordinator as rsc
-import thread_store
+from gc_core import run_summary_coordinator as rsc
+from gc_core import thread_store
 
 
 class _FakeTS:

@@ -1,8 +1,8 @@
 # tests/tui/test_main_error_msg_finalizes.py
 # Юнит на ветку рендера: подменяем _active_calls фейковой строкой и проверяем,
 # что error_msg с известным call_id финализирует её, а отдельная [!]-строка не плодится.
-from tui.models import TraceEvent
-from tui.screens.main import TraceScreen
+from gc_tui.models import TraceEvent
+from gc_tui.screens.main import TraceScreen
 
 class _FakeRow:
     def __init__(self): self.finalized = None

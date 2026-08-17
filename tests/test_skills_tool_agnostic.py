@@ -11,8 +11,9 @@ import re
 from pathlib import Path
 
 import pytest
+from tests.paths import ASSETS
 
-SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
+SKILLS_DIR = ASSETS / "skills"
 SUPERCODER_DIR = SKILLS_DIR / "supercoder"
 
 # Legacy as-is and to-be agent-visible builtin names (not skills_*).

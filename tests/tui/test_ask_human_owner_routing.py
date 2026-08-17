@@ -4,7 +4,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_owner_reset_on_unmount(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -16,7 +16,7 @@ async def test_owner_reset_on_unmount(tmp_path):
 @pytest.mark.asyncio
 async def test_owner_reset_on_reset_render_state(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -38,7 +38,7 @@ def _ask_human_rec():
 @pytest.mark.asyncio
 async def test_owner_set_on_live_render(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
 
     class _Runner:
@@ -56,7 +56,7 @@ async def test_owner_set_on_live_render(tmp_path):
 @pytest.mark.asyncio
 async def test_owner_not_set_on_replay_render(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
 
     class _Runner:
@@ -78,7 +78,7 @@ class _R:
 @pytest.mark.asyncio
 async def test_target_is_owner_when_live_and_active(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -91,7 +91,7 @@ async def test_target_is_owner_when_live_and_active(tmp_path):
 @pytest.mark.asyncio
 async def test_target_none_when_owner_differs(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -103,7 +103,7 @@ async def test_target_none_when_owner_differs(tmp_path):
 @pytest.mark.asyncio
 async def test_target_none_when_owner_none(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -115,7 +115,7 @@ async def test_target_none_when_owner_none(tmp_path):
 @pytest.mark.asyncio
 async def test_target_none_when_not_running(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -142,14 +142,14 @@ class _FakeRunner:
 
 
 def _set_ask_human_state(app):
-    from tui.state import AskHumanState
+    from gc_tui.state import AskHumanState
     app.tui_state.ask_human_state = AskHumanState(call_id="c1", question="Q?")
 
 
 @pytest.mark.asyncio
 async def test_live_owner_answer_goes_to_stdin(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -167,8 +167,8 @@ async def test_live_owner_answer_goes_to_stdin(tmp_path):
 async def test_replay_banner_answer_starts_new_turn(tmp_path):
     pytest.importorskip("textual")
     import uuid
-    from tui.app import TuiApp
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stores.file_store import FileTaskStore
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -191,8 +191,8 @@ async def test_replay_banner_answer_starts_new_turn(tmp_path):
 async def test_nonowner_running_is_stopped_then_new_turn(tmp_path):
     pytest.importorskip("textual")
     import uuid
-    from tui.app import TuiApp
-    from tui.services.stores.file_store import FileTaskStore
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stores.file_store import FileTaskStore
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -202,7 +202,7 @@ async def test_nonowner_running_is_stopped_then_new_turn(tmp_path):
         fresh = _FakeRunner(running=False)
         # get_runner после _stop_and_replace_runner (active_runner=None) создаст
         # новый раннер из фабрики — подменим конструктор AgentRunner на возврат fresh.
-        from tui.services import agent_runner as _ar
+        from gc_tui.services import agent_runner as _ar
         orig = _ar.AgentRunner
         _ar.AgentRunner = lambda *a, **k: fresh
         try:

@@ -4,28 +4,23 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-ua"
-# Релизная дисциплина: бампать при нарезке release/vX.Y.Z — стамп агента сверяет
-# версию+коммит. Версии ВСЕХ четырёх манифестов обязаны совпадать: профили
-# пинят друг друга точно, иначе можно собрать установку из разных коммитов.
-# 0.3.0 — профили через extras (гейт зависимостей).
-# 0.4.0 — профили стали отдельными дистрибутивами (гейт ФАЙЛОВ).
-version = "0.4.0"
-description = "GigaCode Universal Agent — полный агент (ядро + TUI + server)"
+# Версии ВСЕХ манифестов обязаны совпадать: профили пинят друг друга точно.
+# 0.5.0 — разбиение на настоящие пакеты gc_core / gc_cli / gc_tui / gc_server.
+version = "0.5.0"
+description = "GigaCode Universal Agent — полный агент (ядро + CLI + TUI + server)"
 readme = "readme.md"
 requires-python = ">=3.11"
-# Мета не содержит кода агента: только лаунчер команд. Ставит все три профиля,
-# поэтому короткая команда `uv tool install "gc-ua @ git+URL"` даёт полный агент.
 dependencies = [
-    "gc-cli==0.4.0",
-    "gc-tui==0.4.0",
-    "gc-server==0.4.0",
+    "gc-core==0.5.0",
+    "gc-cli==0.5.0",
+    "gc-tui==0.5.0",
+    "gc-server==0.5.0",
 ]
 
 [project.optional-dependencies]
-# Синоним полной установки: `gc-ua` и `gc-ua[all]` дают одно и то же. Extras
-# умеют только ДОБАВЛЯТЬ, а база здесь уже полная — поэтому профилей «поменьше»
-# через extras не существует, их роль выполняют отдельные дистрибутивы
-# gc-cli / gc-tui / gc-server (см. docs/packaging.md).
+# Синоним полной установки. Extras умеют только добавлять, а база здесь уже
+# полная — профилей «поменьше» через extras не существует, их роль выполняют
+# отдельные дистрибутивы (см. docs/packaging.md).
 all = []
 
 [project.scripts]
@@ -68,13 +63,12 @@ test = [
 default-groups = ["dev"]
 
 [tool.uv.workspace]
-members = ["packaging/*"]
+members = ["packages/*"]
 
 [tool.uv.sources]
 # uv читает эти sources и у git-зависимости, поэтому профили приезжают из ТОГО
-# ЖЕ коммита и по ТОМУ ЖЕ URL, который набрал пользователь — токены приватного
-# репозитория и форки продолжают работать. PEP 508 direct reference вшил бы URL
-# в METADATA и это сломал бы.
+# ЖЕ коммита и по ТОМУ ЖЕ URL, который набрал пользователь.
+gc-core = { workspace = true }
 gc-cli = { workspace = true }
 gc-tui = { workspace = true }
 gc-server = { workspace = true }

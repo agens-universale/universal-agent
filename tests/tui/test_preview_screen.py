@@ -16,8 +16,8 @@ async def test_preview_renders_trace_widgets_and_header():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.widgets import Static
-    from tui.screens.preview import PreviewScreen
-    from tui.widgets.user_reply import UserReplyContainer
+    from gc_tui.screens.preview import PreviewScreen
+    from gc_tui.widgets.user_reply import UserReplyContainer
     result = {}
     records = [_rec({"role": "user", "content": "вопрос-превью", "id": "m1"})]
 
@@ -52,8 +52,8 @@ async def test_preview_summary_marker_collapsed_then_toggles():
     """Маркер сжатия в превью свёрнут по умолчанию; клик раскрывает тело."""
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.screens.preview import PreviewScreen
-    from tui.widgets.trace_row import SummaryMarker
+    from gc_tui.screens.preview import PreviewScreen
+    from gc_tui.widgets.trace_row import SummaryMarker
     # seg0 [вопрос] сжат → СИНТЕЗ; seg1 (live) [ответ]
     segments = [
         {"index": 0, "messages": [_rec({"role": "user", "content": "вопрос", "id": "m0"})],
@@ -95,7 +95,7 @@ async def test_preview_enter_resumes_even_with_summary():
     маркер не focusable, Enter не перехватывается toggle'ом."""
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.screens.preview import PreviewScreen
+    from gc_tui.screens.preview import PreviewScreen
     result = {}
     segments = [
         {"index": 0, "messages": [_rec({"role": "user", "content": "q", "id": "m0"})],
@@ -121,8 +121,8 @@ async def test_preview_enter_resumes_when_row_focused():
     приоритетный binding экрана срабатывает раньше on_key строки."""
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.screens.preview import PreviewScreen
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.screens.preview import PreviewScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     result = {}
     segments = [{"index": 0, "compacted_by": None, "messages": [
         _rec({"type": "function_call", "id": "fc1", "call_id": "c1",
@@ -151,8 +151,8 @@ async def test_preview_mounts_nested_subagent_rows():
     и развёрнутый чек-лист (spec 2026-07-31 §4, канал превью)."""
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.screens.preview import PreviewScreen
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.screens.preview import PreviewScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     segments = [{"index": 0, "compacted_by": None, "messages": [
         _rec({"type": "function_call", "id": "fc1", "call_id": "parent1",
               "name": "subagent_worker", "arguments": '{"task": "x"}'}),
@@ -186,8 +186,8 @@ async def test_preview_without_records_unchanged():
     """Без records превью рендерится как раньше (ни одного nested-виджета)."""
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.screens.preview import PreviewScreen
-    from tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.screens.preview import PreviewScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     segments = [{"index": 0, "compacted_by": None, "messages": [
         _rec({"type": "function_call", "id": "fc1", "call_id": "parent1",
               "name": "subagent_worker", "arguments": '{"task": "x"}'}),
@@ -208,7 +208,7 @@ async def test_preview_without_records_unchanged():
 async def test_preview_escape_false():
     pytest.importorskip("textual")
     from textual.app import App
-    from tui.screens.preview import PreviewScreen
+    from gc_tui.screens.preview import PreviewScreen
     result = {}
 
     class _A(App):

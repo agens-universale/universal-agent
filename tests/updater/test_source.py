@@ -1,5 +1,5 @@
-from app_version import InstallSource
-from updater.source import resolved_source
+from gc_core.app_version import InstallSource
+from gc_core.updater.source import resolved_source
 
 
 def test_resolved_source_from_install():

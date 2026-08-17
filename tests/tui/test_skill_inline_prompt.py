@@ -11,7 +11,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     captured = {}
 
@@ -48,7 +48,7 @@ async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
 async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
     """Во время run'а: одно add_message с префиксом, без technical-довеска."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     added = []
 
@@ -83,7 +83,7 @@ async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
 @pytest.mark.asyncio
 async def test_skill_without_prompt_stays_pending(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -98,7 +98,7 @@ async def test_unknown_skill_first_token_not_inline(tmp_path):
     """/skill <неизвестный> <текст>: первый токен не валидный id → НЕ inline-пара,
     весь arg трактуется как id (pending), inline-доставка не срабатывает."""
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -113,7 +113,7 @@ async def test_unknown_skill_first_token_not_inline(tmp_path):
 @pytest.mark.asyncio
 async def test_picker_closes_when_id_plus_prompt(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

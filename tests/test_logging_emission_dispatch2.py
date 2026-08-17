@@ -14,7 +14,7 @@ import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from utils.logging_module import create_run_logger
+from gc_core.utils.logging_module import create_run_logger
 
 
 def _make_logger(tmp_path, level="debug"):
@@ -60,7 +60,7 @@ def _embedded_events(recs, event_name):
 
 
 def test_command_moderation_judge_regex_fallback_event(tmp_path):
-    from security.command_moderation import _log_command_judge_regex_fallback
+    from gc_core.security.command_moderation import _log_command_judge_regex_fallback
 
     logger, path = _make_logger(tmp_path)
     _log_command_judge_regex_fallback(logger, tool_name="exec_command", verdict="safe")
@@ -74,8 +74,8 @@ def test_command_moderation_judge_regex_fallback_event(tmp_path):
 
 
 def test_command_moderation_judge_failed_event(tmp_path):
-    from security.command_moderation import _log_command_judge_failure
-    from security.path_policy import ToolSecurityContext
+    from gc_core.security.command_moderation import _log_command_judge_failure
+    from gc_core.security.path_policy import ToolSecurityContext
 
     logger, path = _make_logger(tmp_path)
     context = ToolSecurityContext(launch_root="/tmp/launch", logger=logger)
@@ -96,7 +96,7 @@ def test_command_moderation_judge_failed_event(tmp_path):
 
 
 def test_security_policy_decision_event(tmp_path):
-    from security.path_policy import ToolSecurityContext, audit_policy_decision
+    from gc_core.security.path_policy import ToolSecurityContext, audit_policy_decision
 
     logger, path = _make_logger(tmp_path)
     context = ToolSecurityContext(launch_root="/tmp/launch", logger=logger)
@@ -129,7 +129,7 @@ def test_security_policy_decision_event(tmp_path):
 
 
 def test_log_path_event_emitted_at_end_of_run(tmp_path):
-    import agent_executor as agent_executor_module
+    from gc_core import agent_executor as agent_executor_module
 
     logger, logging_path = _make_logger(tmp_path)
 

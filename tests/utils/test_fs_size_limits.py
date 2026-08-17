@@ -1,11 +1,4 @@
-from utils.fs_size_limits import (
-    DEFAULT_FS_MUTATE_MAX_BYTES,
-    DEFAULT_FS_READ_MAX_BYTES,
-    check_file_size,
-    file_too_large_error,
-    fs_mutate_max_bytes,
-    fs_read_max_bytes,
-)
+from gc_core.utils.fs_size_limits import DEFAULT_FS_MUTATE_MAX_BYTES, DEFAULT_FS_READ_MAX_BYTES, check_file_size, file_too_large_error, fs_mutate_max_bytes, fs_read_max_bytes
 
 
 def test_defaults_and_config_keys():

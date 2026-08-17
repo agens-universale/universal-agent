@@ -6,12 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from thread_store import append_new_thread_messages
-from tui.services.session_lock import (
-    BUSY_MESSAGE,
-    lock_path,
-    try_acquire,
-)
+from gc_core.thread_store import append_new_thread_messages
+from gc_tui.services.session_lock import BUSY_MESSAGE, lock_path, try_acquire
 
 
 def _seed(threads_dir, tid, prompt="hello"):
@@ -44,7 +40,7 @@ async def test_attach_denies_when_held_by_other(tmp_path):
     _seed(tmp_path, tid)
     assert try_acquire(str(tmp_path), "cli", tid, "foreign") is True
 
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     notifications = []
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
@@ -63,7 +59,7 @@ async def test_attach_allows_own_tui_id(tmp_path):
     tid = "bbbbbbbb"
     _seed(tmp_path, tid)
 
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         assert try_acquire(str(tmp_path), "cli", tid, pilot.app.tui_id) is True
@@ -78,7 +74,7 @@ async def test_new_releases_lock(tmp_path):
     tid = "cccccccc"
     _seed(tmp_path, tid)
 
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         scr = pilot.app.screen
@@ -92,7 +88,7 @@ async def test_new_releases_lock(tmp_path):
 @pytest.mark.asyncio
 async def test_empty_state_does_not_create_lock(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
+    from gc_tui.app import TuiApp
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.pause()
@@ -108,8 +104,8 @@ async def test_sessions_shows_busy_badge(tmp_path):
     _seed(tmp_path, tid, "занятая сессия")
     assert try_acquire(str(tmp_path), "cli", tid, "foreign") is True
 
-    from tui.app import TuiApp
-    from tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(
@@ -129,8 +125,8 @@ async def test_sessions_resume_denies_busy(tmp_path):
     _seed(tmp_path, tid_b, "чужая")
     assert try_acquire(str(tmp_path), "cli", tid_b, "foreign") is True
 
-    from tui.app import TuiApp
-    from tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
 
     notifications = []
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
@@ -164,8 +160,8 @@ async def test_sessions_switch_releases_previous(tmp_path):
     _seed(tmp_path, tid_a, "A")
     _seed(tmp_path, tid_b, "B")
 
-    from tui.app import TuiApp
-    from tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         scr = pilot.app.screen
