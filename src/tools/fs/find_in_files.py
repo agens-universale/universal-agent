@@ -102,22 +102,24 @@ class FindInFiles(AbstractSimpleTool):
                 "type": "string",
                 "description": (
                     "What to search for. "
-                    "query_mode=text: exact substring. "
-                    "query_mode=python-re / python-re-dotall: Python regular expression."
+                    "Default query_mode=python-re: Python regular expression. "
+                    "query_mode=text: exact substring (metacharacters literal). "
+                    "query_mode=python-re-dotall: regex where '.' also matches newline."
                 ),
             },
             "query_mode": {
                 "type": "string",
                 "enum": ["text", "python-re", "python-re-dotall"],
+                "default": "python-re",
                 "description": (
-                    "Required. How to read pattern. "
-                    "text: exact substring (use for normal searches). "
+                    "How to interpret pattern. Default python-re. "
                     "python-re: Python regular expression "
                     "('.' does not match newline; ^/$ are line edges). "
-                    "python-re-dotall: same, but '.' also matches newline "
-                    "(use only when a match must span lines). "
-                    "Prefer text; use python-re when you need regex features; "
-                    "use python-re-dotall only for cross-line matches."
+                    "text: exact substring only — metacharacters like "
+                    "| ( ) . * are literal; use when you need a fixed string "
+                    "that would be special in regex. "
+                    "python-re-dotall: same as python-re, but '.' also matches "
+                    "newline (only when a match must span lines)."
                 ),
             },
             "limit": {
@@ -159,7 +161,7 @@ class FindInFiles(AbstractSimpleTool):
                 "default": False,
             },
         },
-        "required": ["path", "pattern", "query_mode"],
+        "required": ["path", "pattern"],
         "additionalProperties": False,
     }
 
@@ -171,8 +173,11 @@ class FindInFiles(AbstractSimpleTool):
             "name": "fs_find_in_files",
             "description": (
                 "Search file contents under an absolute file or directory "
-                "(not file names). Required: path, pattern, query_mode — prefer text; "
-                "regex only if needed (see query_mode). "
+                "(not file names). Required: path, pattern. "
+                "pattern is a Python regex by default (query_mode defaults to "
+                "python-re). Optional query_mode: python-re (default), text "
+                "(exact substring; metacharacters literal), python-re-dotall "
+                "(cross-line '.'). "
                 "At most limit matches (default 100, max 300); no pagination. "
                 "Skips binary/large files; no .gitignore. "
                 f"Does not enter nested `.gc`, dirs named {skip}, or nested dot-dirs "
@@ -191,8 +196,11 @@ class FindInFiles(AbstractSimpleTool):
         return (
             "Tool name: fs_find_in_files\n"
             "Search file contents under an absolute file or directory (not file names).\n"
-            "Required: path, pattern, query_mode (prefer text; regex only if needed).\n"
-            "Optional: limit (default 100, max 300; no pagination), case_insensitive, "
+            "Required: path, pattern. pattern is Python regex by default "
+            "(query_mode defaults to python-re).\n"
+            "Optional: query_mode (python-re default; text=exact substring; "
+            "python-re-dotall=cross-line '.'), "
+            "limit (default 100, max 300; no pagination), case_insensitive, "
             "file_pattern (directory only; basename-only like '*.py' matches any depth), "
             "exclude_dirs, "
             "show_excluded_dirs (default false; full skipped-dirs list when needed).\n"
@@ -207,7 +215,7 @@ class FindInFiles(AbstractSimpleTool):
         self,
         path: str,
         pattern: str,
-        query_mode: str,
+        query_mode: Optional[str] = QUERY_MODE_RE,
         limit: int = 100,
         case_insensitive: bool = False,
         file_pattern: Optional[str] = None,
@@ -254,7 +262,7 @@ class FindInFiles(AbstractSimpleTool):
         self,
         path: str,
         pattern: str,
-        query_mode: str,
+        query_mode: Optional[str],
         limit: int,
         case_insensitive: bool,
         file_pattern: Optional[str],
@@ -271,6 +279,9 @@ class FindInFiles(AbstractSimpleTool):
             )
         if not isinstance(pattern, str):
             return self._error("invalid_argument", "pattern")
+        # Optional arg: omit / None → python-re (schema default).
+        if query_mode is None:
+            query_mode = self.QUERY_MODE_RE
         if not isinstance(query_mode, str) or query_mode not in self._QUERY_MODES:
             return self._error(
                 "invalid_argument",

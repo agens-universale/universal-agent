@@ -160,7 +160,7 @@ fs_tools:
     max_open_files_affix_or: 50000    # full-re opens budget (affix_or only)
     content_workers_threshold: 20000  # N >= → 2 workers; else 1
     max_exclude_dirs: 32
-    top_level_dirs_cap: 20
+    top_level_dirs_cap: 5
     default_limit: 100                # limit if caller omits it
     max_total_matches: 300            # hard ceiling: limit_eff = min(requested, 300)
     exclude_dot_dirs: true            # nested '.' dirs (hard floor always on)

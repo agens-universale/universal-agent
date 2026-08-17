@@ -22,9 +22,9 @@ from tests.helpers.tool_ctx import with_local_ctx
 def _call(tool, **kw):
     """Call FindInFiles and parse JSON response.
 
-    Default query_mode=python-re when omitted (older tests).
+    Omitting query_mode exercises the tool default (python-re).
+    Pass query_mode=... explicitly when a test needs text / dotall / invalid.
     """
-    kw.setdefault("query_mode", "python-re")
     return json.loads(tool(**kw))
 
 
@@ -1361,6 +1361,41 @@ class TestQueryMode:
         assert data["error"]["type"] == "invalid_argument"
         assert data["error"]["field"] == "pattern"
 
+    def test_query_mode_omitted_defaults_to_python_re(self, tmp_path):
+        """Omit query_mode → python-re (regex | / groups work)."""
+        f = tmp_path / "harbor.py"
+        f.write_text(
+            "def is_hidden(path):\n"
+            "    return False\n"
+            "def iter_walk(root):\n"
+            "    yield root\n",
+            encoding="utf-8",
+        )
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(f),
+            pattern=r"def (is_hidden|iter_walk|iter_files)",
+        )
+        assert data["ok"] is True
+        assert data["query_mode"] == "python-re"
+        assert data["count"] == 2
+        lines = {m["line_content"] for m in data["matches"]}
+        assert "def is_hidden(path):" in lines
+        assert "def iter_walk(root):" in lines
+
+    def test_query_mode_none_defaults_to_python_re(self, tmp_path):
+        f = tmp_path / "t.txt"
+        f.write_text("foo\nbar\n", encoding="utf-8")
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(f),
+            pattern=r"foo|bar",
+            query_mode=None,
+        )
+        assert data["ok"] is True
+        assert data["query_mode"] == "python-re"
+        assert data["count"] == 2
+
     def test_invalid_query_mode(self, tmp_path):
         f = tmp_path / "t.txt"
         f.write_text("x\n", encoding="utf-8")
@@ -1373,14 +1408,17 @@ class TestQueryMode:
         assert data["ok"] is False
         assert data["error"]["field"] == "query_mode"
 
-    def test_schema_requires_query_mode(self):
+    def test_schema_query_mode_optional_default_python_re(self):
         schema = FindInFiles._PARAM_SCHEMA
-        assert "query_mode" in schema["required"]
-        assert schema["properties"]["query_mode"]["enum"] == [
+        assert schema["required"] == ["path", "pattern"]
+        assert "query_mode" not in schema["required"]
+        qm = schema["properties"]["query_mode"]
+        assert qm["enum"] == [
             "text",
             "python-re",
             "python-re-dotall",
         ]
+        assert qm["default"] == "python-re"
         assert "exclude_dirs" in schema["properties"]
         assert "show_excluded_dirs" in schema["properties"]
         assert schema["properties"]["show_excluded_dirs"]["default"] is False
