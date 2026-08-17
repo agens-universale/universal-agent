@@ -38,7 +38,11 @@ def _label_ru(request_label: Optional[str]) -> str:
         return "LLM"
     if label in _REQUEST_LABEL_RU:
         return _REQUEST_LABEL_RU[label]
-    if label.startswith("gc_core.intent_scope:"):
+    # Это ЯРЛЫК ЗАПРОСА, а не имя модуля: его выдаёт intent_scope/summarizer.py
+    # как f"intent_scope:{tool_name}". При разбиении на пакеты кодмод дописал
+    # сюда префикс gc_core., приняв литерал за модуль, — ветка стала мёртвой, и
+    # пользователь вместо «intent scope» видел сырой ярлык.
+    if label.startswith("intent_scope:"):
         return "intent scope"
     if label.startswith("summary"):
         return "суммаризация"

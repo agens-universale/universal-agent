@@ -2,7 +2,7 @@ import os
 from typing import Any, Dict
 
 from gc_core.config_modules import env_vars
-from gc_core.bundled_assets import bundled_root
+from gc_core.bundled_assets import bundled_root, repo_root
 
 # Корень bundled-ассетов. Раньше брался из rest_api.server_config — это была
 # единственная зависимость swarm → server, причём там PROJECT_ROOT объявлен как
@@ -10,22 +10,33 @@ from gc_core.bundled_assets import bundled_root
 # зависел только от core.
 PROJECT_ROOT = str(bundled_root())
 
+# Корень рабочей копии. Нужен отдельно от ассетов: обёртка песочницы живёт в
+# `scripts/`, то есть в репозитории, а не среди промптов. До разбиения на пакеты
+# оба корня совпадали, и дефолт `scripts/run-cli-in-sandbox.sh` резолвился верно;
+# после переезда ассетов он стал указывать в `packages/core/assets/scripts/`,
+# которого не существует. Popen такой путь не проверяет — падало бы уже в бою.
+_REPO_ROOT = repo_root()
 
-def _resolve_path(maybe_path: Any, default_rel: str) -> str:
+
+def _resolve_path(maybe_path: Any, default_rel: str, *, base: str | None = None) -> str:
     """
     Преобразовать конфиг-путь в абсолютный.
 
-    - Если значение пустое или не строка — использовать PROJECT_ROOT/default_rel.
+    - Если значение пустое или не строка — использовать ``base``/``default_rel``.
     - Если путь абсолютный — вернуть как есть.
-    - Если путь относительный — резолвится от PROJECT_ROOT.
+    - Если путь относительный — резолвится от ``base``.
+
+    ``base`` по умолчанию — корень ассетов. Для файлов репозитория (обёртка
+    песочницы) вызывающий передаёт корень рабочей копии явно.
     """
+    root = base or PROJECT_ROOT
     if not isinstance(maybe_path, str) or not maybe_path.strip():
-        return os.path.join(PROJECT_ROOT, default_rel)
+        return os.path.join(root, default_rel)
 
     path = maybe_path.strip()
     if os.path.isabs(path):
         return path
-    return os.path.join(PROJECT_ROOT, path)
+    return os.path.join(root, path)
 
 
 def _resolve_optional(maybe_path: Any) -> str:
@@ -89,8 +100,13 @@ def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     cli_command = str(raw_swarm.get("cli_command", "gc-cli"))
+    # Обёртка песочницы — файл репозитория, а не ассет: резолвим от корня
+    # рабочей копии. В установленном колесе рабочей копии нет, и дефолта тоже
+    # быть не может — там wrapper_path обязан быть задан в конфиге явно.
     wrapper_path = _resolve_path(
-        raw_swarm.get("wrapper_path"), "scripts/run-cli-in-sandbox.sh"
+        raw_swarm.get("wrapper_path"),
+        "scripts/run-cli-in-sandbox.sh",
+        base=str(_REPO_ROOT) if _REPO_ROOT is not None else None,
     )
     sandbox_tool = str(raw_swarm.get("sandbox_tool", "bubblewrap"))
     agentmd_path = _resolve_path(raw_swarm.get("agentmd_path"), "prompts/server_agent.md")
