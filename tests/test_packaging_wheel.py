@@ -121,19 +121,52 @@ def test_cli_wheel_contents(wheels):
     assert "gc_cli/cli.py" in names
 
 
-def test_every_profile_declares_all_commands():
-    """`uv tool install` экспортирует в PATH скрипты ТОЛЬКО запрошенного
-    дистрибутива. Поэтому команды объявляет каждый профиль — иначе установка
-    листа дала бы окружение вообще без команд (проверено живьём)."""
-    expected = {"gc-cli", "gc-ua", "gc-serve", "gc-mcp", "gc-mcp-install"}
+#: Своя команда каждого профиля. `uv tool install` экспортирует в PATH скрипты
+#: ТОЛЬКО запрошенного дистрибутива, поэтому свою команду профиль обязан
+#: объявить сам.
+OWN_COMMAND = {"gc_cli": "gc-cli", "gc_tui": "gc-ua", "gc_server": "gc-serve"}
+
+#: Общие для всех профилей: это чистое ядро (gc_core.mcp_runtime.*), работает в
+#: любом профиле. Пересечение симлинка тут безвредно — какой профиль ни выиграл
+#: бы, команда отработает одинаково.
+SHARED_COMMANDS = {"gc-mcp", "gc-mcp-install"}
+
+
+def test_profile_declares_own_command_only():
+    """Профиль не должен объявлять чужие команды.
+
+    Раньше все четыре объявляли одинаковый набор из пяти имён, и два
+    установленных профиля дрались за одни симлинки: второй перезаписывал первый,
+    а `uv tool uninstall` одного сносил команды другого (обе ловушки наблюдались
+    живьём 18.08.2026). Теперь имена разведены — пересекаются только gc-mcp*.
+    """
     for name, sub in MANIFESTS.items():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         got = set(man["project"].get("scripts", {}))
+
         if name == "gc_core":
             # gc-core — БИБЛИОТЕКА: команды в PATH не кладёт.
             assert not got, "gc-core не должен объявлять точки входа"
+        elif name == "gc_ua":
+            # Мета тянет все профили, поэтому объявляет весь набор.
+            assert got == set(OWN_COMMAND.values()) | SHARED_COMMANDS, sub
         else:
-            assert got == expected, sub
+            assert got == {OWN_COMMAND[name]} | SHARED_COMMANDS, sub
+
+
+def test_foreign_commands_are_not_declared():
+    """Явно: в манифесте листа нет команд соседей.
+
+    Отдельным тестом, потому что это и есть суть правки — предыдущий проверяет
+    равенство множеств и при ошибке скажет «не совпало», а этот назовёт лишнее.
+    """
+    for name, sub in MANIFESTS.items():
+        if name in ("gc_core", "gc_ua"):
+            continue
+        man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+        got = set(man["project"].get("scripts", {}))
+        foreign = {c for k, c in OWN_COMMAND.items() if k != name} & got
+        assert not foreign, f"{sub} объявляет чужие команды: {sorted(foreign)}"
 
 
 def test_meta_pulls_every_profile():
