@@ -21,10 +21,10 @@ REPO = Path(__file__).resolve().parents[1]
 # __file__, то есть от каталога ядра. Промпт TUI тоже здесь — иначе фронтенд,
 # находясь в другом дистрибутиве, его бы не нашёл.
 CORE_REQUIRED = [
-    "prompts/chat_completions_system_prompt.md",
-    "prompts/chat_completions_tui_special_instructions.md",
+    "gc_core/assets/prompts/chat_completions_system_prompt.md",
+    "gc_core/assets/prompts/chat_completions_tui_special_instructions.md",
     "recommended_mcp/config.yml",
-    "config.default.yml",
+    "gc_core/assets/config.default.yml",
     "gc_core/config.py",
     "gc_core/tui_entry.py",     # шим точки входа gc-ua обязан быть в ядре
     "gc_core/serve_entry.py",
@@ -74,10 +74,29 @@ def test_core_wheel_bundles_assets(wheels):
     names = wheels["gc_core"]
     for needed in CORE_REQUIRED:
         assert needed in names, f"{needed} нет в колесе ядра; образец {sorted(names)[:10]}"
-    assert any(n.startswith("skills/") for n in names), "skills/ отсутствует"
+    assert any(n.startswith("gc_core/assets/skills/") for n in names), "skills/ отсутствует"
     assert any(n.startswith("recommended_mcp/") and n.endswith(".py") for n in names)
     assert "external/ddgs-mcp/pyproject.toml" in names, "external/ddgs-mcp не поставляется"
     assert "external/ddgs-mcp/src/ddgs_mcp/server.py" in names
+
+
+def test_core_wheel_does_not_squat_generic_names(wheels):
+    """Дистрибутив не должен занимать родовые имена верхнего уровня.
+
+    В Python 3 любой каталог на sys.path — namespace-пакет. Пока ассеты лежали
+    рядом с пакетом, `import prompts` у встраивающего приложения молча
+    резолвился в НАШИ промпты (проверено в чистом venv). Теперь они внутри
+    gc_core/assets.
+
+    recommended_mcp и external пока остаются: первый — настоящий импортируемый
+    пакет (mcp_daemon_autostart тянет recommended_mcp.autostart), второй обязан
+    быть его соседом. Их выносит отдельная задача.
+    """
+    squatted = {"prompts", "skills", "config.default.yml", "assets", "tests", "src"}
+    for dist, names in wheels.items():
+        tops = {n.split("/")[0] for n in names}
+        hit = tops & squatted
+        assert not hit, f"{dist} занимает родовые имена верхнего уровня: {sorted(hit)}"
 
 
 def test_testkit_never_ships(wheels):

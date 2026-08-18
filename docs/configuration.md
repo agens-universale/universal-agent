@@ -8,7 +8,7 @@
 - **Где ищется базовый `config.yml`** (первый найденный источник побеждает):
   1. путь из `--config` (если задан);
   2. иначе `config.yml` в каталоге «Config» из таблицы [«Где gc-cli хранит runtime-данные»](#где-gc-cli-хранит-runtime-данные) — `~/.config/gc/config.yml` на Linux/macOS, `%USERPROFILE%\.gc\config.yml` на Windows (учитывает `GC_CONFIG_DIR` / `XDG_CONFIG_HOME` / `GC_HOME`). Это **полная база** (кладите полный конфиг — частичный файл здесь потеряет пакетные дефолты);
-  3. иначе `config.default.yml` из ассетов дистрибутива `gc-core` (в рабочей копии — `packages/core/assets/`, в установленном колесе — рядом с пакетом `gc_core`).
+  3. иначе `config.default.yml` из ассетов дистрибутива `gc-core` (в рабочей копии — `packages/core/assets/`, в установленном колесе — `gc_core/assets/`).
 
   Поверх выбранной базы дополнительно deep-merge'ится project-local `<cwd>/.gc/config.yml` (см. [«Project local config (опционально)»](#project-local-config-опционально)). Чтобы указать свой путь явно:
   ```commandline

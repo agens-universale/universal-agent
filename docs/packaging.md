@@ -75,15 +75,30 @@ packages = ["src/gc_tui"]
 У ядра там было 48 записей — «весь `src/` минус лишнее» выразить нечем,
 `force-include` умеет только включать. Переезд это убрал.
 
-Ассеты ядра остались через `force-include`, потому что кладутся не внутрь
-пакета, а рядом с ним:
+Ассеты ядра идут через `force-include`, потому что в репозитории лежат рядом с
+`src/`, а в колесо кладутся внутрь пакета:
 
 ```toml
 [tool.hatch.build.targets.wheel.force-include]
-"assets/prompts" = "prompts"
-"assets/skills" = "skills"
-"assets/config.default.yml" = "config.default.yml"
+"assets/prompts" = "gc_core/assets/prompts"
+"assets/skills" = "gc_core/assets/skills"
+"assets/config.default.yml" = "gc_core/assets/config.default.yml"
 ```
+
+Внутрь пакета они переехали 18.08.2026. До этого попадали **рядом** с ним, прямо
+в `site-packages`, и дистрибутив занимал там четыре родовых имени верхнего
+уровня: `prompts`, `skills`, `external`, `recommended_mcp`. В Python 3 любой
+каталог на `sys.path` — namespace-пакет, поэтому у встраивающего приложения
+`import prompts` молча резолвился в наши промпты — проверено в чистом venv.
+Ровно та болезнь, ради лечения которой ядро и делали SDK: было 45 родовых имён,
+после разбиения осталось четыре, теперь два.
+
+`recommended_mcp` и `external` пока остаются наверху: первый — настоящий
+импортируемый пакет (`mcp_daemon_autostart` тянет `recommended_mcp.autostart`),
+второй обязан быть его соседом, потому что манифест MCP ссылается на
+`../external/<name>-mcp`. Их выносит отдельная задача.
+
+Закреплено тестом `test_core_wheel_does_not_squat_generic_names`.
 
 Проверить состав:
 
