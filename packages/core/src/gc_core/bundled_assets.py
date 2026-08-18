@@ -19,13 +19,24 @@ def bundled_root() -> Path:
 
     Две раскладки, обе поддерживаются:
 
-    - wheel: ``site-packages/gc_core/bundled_assets.py`` → ассеты разложены
-      рядом с пакетом, то есть в ``site-packages`` (``here.parent``);
+    - wheel: ``site-packages/gc_core/bundled_assets.py`` → ассеты лежат ВНУТРИ
+      пакета, в ``gc_core/assets``;
     - репозиторий: ``packages/core/src/gc_core/bundled_assets.py`` → ассеты
       лежат в ``packages/core/assets`` — поднимаемся до каталога, у которого
       есть ``assets/prompts``.
+
+    Внутрь пакета ассеты переехали 18.08.2026. До этого в колесе они лежали
+    РЯДОМ с ним, прямо в ``site-packages``, и дистрибутив занимал там четыре
+    родовых имени верхнего уровня. В Python 3 любой каталог на ``sys.path`` —
+    namespace-пакет, поэтому у встраивающего приложения ``import prompts``
+    молча резолвился в наши промпты (проверено в чистом venv).
     """
     here = Path(__file__).resolve().parent
+    # Внутри пакета — основной случай и в колесе, и в рабочей копии после
+    # переезда ассетов.
+    if (here / "assets" / _MARKER).is_dir():
+        return here / "assets"
+    # Совместимость: старые колёса, где ассеты лежали рядом с пакетом.
     for cand in (here, here.parent):
         if (cand / _MARKER).is_dir():
             return cand
@@ -34,9 +45,9 @@ def bundled_root() -> Path:
         if (cand / _MARKER).is_dir():
             return cand
     raise FileNotFoundError(
-        f"bundled assets not found: {_MARKER}/ не найден ни рядом с {here}, "
-        f"ни в assets/ выше по дереву (ожидается wheel site-packages "
-        f"или packages/core/assets в репозитории)"
+        f"bundled assets not found: {_MARKER}/ не найден ни в {here / 'assets'}, "
+        f"ни рядом с {here}, ни в assets/ выше по дереву (ожидается "
+        f"gc_core/assets в колесе или packages/core/assets в репозитории)"
     )
 
 
