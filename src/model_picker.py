@@ -132,7 +132,10 @@ def _requests_get_ex(
         except ValueError:
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
-    except requests.exceptions.RequestException as exc:
+    # UnicodeEncodeError — не сеть: заголовки кодируются в latin-1, и токен с
+    # кириллицей рвёт запрос в клиенте. Это ValueError, мимо RequestException, —
+    # без перехвата исключение уходит наверх и там читается как «сервер недоступен».
+    except (requests.exceptions.RequestException, UnicodeEncodeError) as exc:
         return HttpReply(
             status=None,
             payload=None,
@@ -163,7 +166,8 @@ def _requests_post_ex(
         except ValueError:
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
-    except requests.exceptions.RequestException as exc:
+    # см. комментарий в _requests_get_ex: кириллица в токене — ValueError, не сеть
+    except (requests.exceptions.RequestException, UnicodeEncodeError) as exc:
         return HttpReply(
             status=None,
             payload=None,

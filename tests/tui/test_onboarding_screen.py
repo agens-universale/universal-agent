@@ -742,8 +742,12 @@ async def test_connection_auto_probe_runs_on_leaving_token_field(tmp_path):
         ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
         await pilot.press("down")             # уход с адреса на токен — триггер пробы
         await pilot.pause()
-        await wait_until(pilot, lambda: "доступен" in str(scr.query_one(".onb-conn-probe").render()),
-                          "проба завершилась")
+        # Фейк отвечает и на контрольный запрос без токена → честный вердикт
+        # «авторизация не требуется», а не «доступен».
+        await wait_until(pilot,
+                         lambda: "не требует" in str(scr.query_one(".onb-conn-probe").render())
+                         or "не требуется" in str(scr.query_one(".onb-conn-probe").render()),
+                         "проба завершилась")
 
 
 @pytest.mark.asyncio
@@ -769,8 +773,13 @@ async def test_connection_preset_pick_triggers_auto_probe(tmp_path):
         await pilot.press("enter")              # подставляет первый пресет
         await pilot.pause()
         assert not ed.presets_open
-        await wait_until(pilot, lambda: "доступен" in str(scr.query_one(".onb-conn-probe").render()),
-                          "проба завершилась")
+        # Фейк отвечает и на контрольный запрос без токена → честный вердикт
+        # «авторизация не требуется», а не «доступен»: токен здесь ни на что
+        # не влияет, и писать про него что-либо было бы неправдой.
+        await wait_until(pilot,
+                         lambda: "не требует" in str(scr.query_one(".onb-conn-probe").render())
+                         or "не требуется" in str(scr.query_one(".onb-conn-probe").render()),
+                         "проба завершилась")
 
 
 @pytest.mark.asyncio
@@ -1462,10 +1471,14 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
     cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
                                auth="Bearer sk-REALSECRET123")
     cfg = _resolved_conn_cfg(cfg_path)
-    seen = {}
+    seen = []
 
+    # Сервер, ТРЕБУЮЩИЙ авторизацию: иначе токену просто некуда доехать —
+    # проба, получив ok на контрольный запрос, второй раз не пойдёт.
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
-        seen["auth"] = auth
+        seen.append(auth)
+        if auth is None:
+            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -1474,8 +1487,8 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._auto_probe()
-        await wait_until(pilot, lambda: "auth" in seen, "проба ушла")
-        assert seen["auth"] == "Bearer sk-REALSECRET123"
+        await wait_until(pilot, lambda: len(seen) >= 2, "проба ушла с токеном")
+        assert seen == [None, "Bearer sk-REALSECRET123"]
 
 
 @pytest.mark.asyncio
@@ -1493,10 +1506,14 @@ async def test_auto_probe_resolves_env_ref_token_when_field_untouched(tmp_path, 
     cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
                                auth="Bearer ${ENV:GC_TOKEN}")
     cfg = _resolved_conn_cfg(cfg_path)
-    seen = {}
+    seen = []
 
+    # Сервер, ТРЕБУЮЩИЙ авторизацию (см. соседний тест): без 401 на контрольный
+    # запрос проба до токена не дойдёт и проверять было бы нечего.
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
-        seen["auth"] = auth
+        seen.append(auth)
+        if auth is None:
+            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -1505,8 +1522,8 @@ async def test_auto_probe_resolves_env_ref_token_when_field_untouched(tmp_path, 
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._auto_probe()
-        await wait_until(pilot, lambda: "auth" in seen, "проба ушла")
-        assert seen["auth"] == "Bearer sk-REALSECRET123"
+        await wait_until(pilot, lambda: len(seen) >= 2, "проба ушла с токеном")
+        assert seen == [None, "Bearer sk-REALSECRET123"]
 
 
 # --- гейт «пустой адрес» на ссылке ${ENV:...}, у которой нет переменной ---
@@ -1757,3 +1774,23 @@ async def test_alt_down_on_the_model_step_goes_past_the_session_cache(tmp_path):
         await pilot.press("alt+down")
         await wait_until(pilot, lambda: any("deepseek" in r for r in rows()),
                          "перечитывание должно идти мимо сессионного кэша")
+
+
+def test_wizard_checks_token_on_the_real_route():
+    """Мастер не должен писать «доступен» по публичной models-цепочке: у
+    OpenRouter она отвечает без токена, а chat/completions его требует. Считаем
+    вызовы — контроль без токена и повтор с ним, а не один запрос."""
+    from tui.services.settings_probe import ProbeResult
+    seen = []
+
+    def fake_auth(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        seen.append(auth)
+        if auth is None:
+            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+        return ProbeResult("ok", 200, None, 5, "доступен")
+
+    screen = _screen(probe=fake_auth)
+    result = screen._run_connection_probe("http://x/v1/chat/completions",
+                                          "Bearer good", True, None)
+    assert seen == [None, "Bearer good"]
+    assert result.auth_state == "accepted" and "токен принят" in result.detail

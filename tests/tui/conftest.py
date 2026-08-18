@@ -195,6 +195,9 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
             scr = _mk_screen(config_path=str(cfg_file))
             if probe is not None:
                 scr._probe_fn = probe      # иначе остаётся ok-проба из _mk_screen
+                # Вердикт «Подключения» идёт через отдельный слот: не подменив его,
+                # тест с фейком полез бы в сеть настоящей probe_auth.
+                scr._auth_probe_fn = probe
             await pilot.app.push_screen(scr)
             await pilot.pause()
             open_settings_section(scr, "Подключение")

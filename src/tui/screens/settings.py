@@ -103,7 +103,8 @@ def fit_mode_pairs(pairs: list[str], width: int) -> str:
 
 
 class SettingsScreen(Screen):
-    def __init__(self, *, config, config_path, on_apply, probe_fn=None) -> None:
+    def __init__(self, *, config, config_path, on_apply, probe_fn=None,
+                 auth_probe_fn=None) -> None:
         super().__init__()
         self._config = config or {}
         self._config_path = config_path
@@ -115,7 +116,15 @@ class SettingsScreen(Screen):
         self._menu_idx = 0
         self._modes_idx = 0             # курсор строки подэкрана «Режимы работы»
         from tui.services.settings_probe import probe as _default_probe
+        from tui.services.settings_probe import probe_auth as _default_auth_probe
         self._probe_fn = probe_fn or _default_probe
+        # Отдельно от _probe_fn: тому нужна models-цепочка (глифы хаба показывают
+        # модели сервера), а вердикт об авторизации обязан идти строго по
+        # chat/completions — у публичного /models он получился бы ложным.
+        #
+        # Подменили probe_fn — значит забрали сеть целиком, и вторым каналом наружу
+        # экран не ходит: иначе частично застабленный экран молча стучится в интернет.
+        self._auth_probe_fn = auth_probe_fn or probe_fn or _default_auth_probe
         self._probe_config = None       # ProbeResult сохранённых значений → глифы хаба
         self._config_gen = 0            # generation config-probe: устаревшие результаты отбрасываются
         self._draft_gen = 0             # generation draft-probe: независим от config-probe
@@ -651,7 +660,10 @@ class SettingsScreen(Screen):
                 t = Text("✓ сервер доступен · ", style=OK)
                 t.append("✗ токен отклонён (401)", style=WARN)
                 return t
-            if r.verdict == "unknown" and not r.http_status:
+            if r.offline:
+                # Винить сервер можно только когда до него не дошли. Раньше сюда
+                # попадал любой unknown без статуса — в том числе наш внутренний
+                # сбой, и причина терялась вместе с detail.
                 return Text("✗ сервер недоступен", style=WARN)
             return Text(f"? не удалось проверить: {r.detail}", style=WARN)
         if r.verdict == "ok":
@@ -683,7 +695,6 @@ class SettingsScreen(Screen):
             token = authorization_header(token_raw)  # введённый токен
         else:
             token = auth_cfg                         # поле пусто → действующий токен
-        has_token = bool(token)
         # draft proxy: поле → иначе config; пустое поле = «не задано» → env через резолвер
         proxy = proxy_draft if proxy_draft else proxy_cfg
         # Снимок ПОЛЕЙ (не резолва) — по нему автопроба ухода с поля отличает
@@ -695,17 +706,11 @@ class SettingsScreen(Screen):
         self._set_probe_line(Text("проверяю…", style=DEEP_DIM))
 
         def _work() -> None:
-            from tui.services.settings_probe import ProbeResult, interpret_auth
+            from tui.services.settings_probe import ProbeResult, probe_connection
             try:
-                control = self._probe_fn(
-                    endpoint, None, verify, model, config_proxy=proxy,
-                )
-                with_token = None
-                if control.verdict == "rejected" and control.http_status == 401 and has_token:
-                    with_token = self._probe_fn(
-                        endpoint, token, verify, model, config_proxy=proxy,
-                    )
-                result = interpret_auth(control, with_token, has_token)
+                result = probe_connection(endpoint, token, verify, model,
+                                          config_proxy=proxy,
+                                          probe_fn=self._auth_probe_fn)
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
             self.app.call_from_thread(self._on_draft_probe, result, gen=gen,

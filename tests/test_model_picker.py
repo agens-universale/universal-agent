@@ -1,4 +1,40 @@
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import pytest
+
 import model_picker as mp
+
+
+@pytest.fixture
+def local_http_server():
+    """Настоящий доступный HTTP-сервер на свободном порту → базовый URL.
+
+    Нужен там, где проверяется поведение транспорта ДО ответа сервера (кодирование
+    заголовков): на закрытом порту соединение отваливается раньше, и тест зеленеет
+    по неверной причине."""
+    class _H(BaseHTTPRequestHandler):
+        def _reply(self):
+            body = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = do_POST = _reply
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_port}"
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_parse_config_models():
@@ -153,3 +189,20 @@ def test_the_user_agent_carries_the_live_version(monkeypatch):
         assert seen == ["gc-ua/9.9.9"]
     finally:
         mp._user_agent.cache_clear()
+
+
+def test_transport_survives_non_latin1_header(local_http_server):
+    """Кириллица в токене — ошибка ДАННЫХ, а не сбой процесса: заголовки HTTP
+    кодируются в latin-1, и http.client бросает UnicodeEncodeError. Это ValueError,
+    а не RequestException, поэтому мимо перехвата он рвёт вызывающий код и доезжает
+    до юзера как «сервер недоступен» — при том, что сервера никто не спрашивал.
+
+    Сервер здесь настоящий и доступный: на закрытом порту соединение отвалилось бы
+    РАНЬШЕ кодирования заголовка, и тест был бы зелёным даже без фикса."""
+    url = f"{local_http_server}/v1/chat/completions"
+    ok = mp._requests_post_ex(url, mp._headers("Bearer sk-latin"), {"model": "m"}, True)
+    assert ok.status == 200          # контроль: до сервера доезжаем
+
+    reply = mp._requests_post_ex(url, mp._headers("Bearer уквxxx"), {"model": "m"}, True)
+    assert reply.status is None
+    assert reply.network_error

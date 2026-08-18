@@ -70,7 +70,10 @@ class OnboardingScreen(Screen):
             self._mcp = mcp_mod
         else:
             self._mcp = mcp
-        from tui.services.settings_probe import probe as _default_probe
+        # Вердикт шага «Подключение» — только по chat/completions: models-цепочка
+        # у публичного /models (OpenRouter) отвечает без токена и сказала бы
+        # «доступен» про маршрут, который токен как раз требует.
+        from tui.services.settings_probe import probe_auth as _default_probe
         self._probe_fn = probe or _default_probe
         self._step = 0
         self._values: dict = {}
@@ -565,12 +568,21 @@ class OnboardingScreen(Screen):
             probe_proxy = resolve_env_placeholders(proxy) if proxy else proxy
             config_proxy = probe_proxy or None
             try:
-                result = self._probe_fn(probe_url, probe_auth, verify, "", config_proxy=config_proxy)
+                result = self._run_connection_probe(probe_url, probe_auth, verify,
+                                                    config_proxy)
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
             self.app.call_from_thread(self._on_auto_probe_done, result, gen)
 
         self.run_worker(_work, thread=True, exclusive=True, name="onboarding-conn-probe")
+
+    def _run_connection_probe(self, url: str, auth, verify: bool, config_proxy):
+        """Вердикт шага «Подключение» — той же differential-пробой, что в /settings:
+        иначе мастер и настройки скажут про один сервер разное. Вынесен из воркера
+        отдельным методом, чтобы проверяться без потока."""
+        from tui.services.settings_probe import probe_connection
+        return probe_connection(url, auth, verify, "", config_proxy=config_proxy,
+                                probe_fn=self._probe_fn)
 
     def _on_auto_probe_done(self, result, gen: int) -> None:
         if gen != self._probe_gen or not self.is_mounted:

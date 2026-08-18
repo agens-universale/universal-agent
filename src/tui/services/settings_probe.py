@@ -22,6 +22,26 @@ import model_picker
 # гарантированно не знает — ответ (401 vs 400/404/5xx) судит только токен.
 _DUMMY_MODEL = "gc-connection-probe"
 
+# Заведомо негодный, но синтаксически корректный токен. Если сервер отвечает на
+# него тем же, что на пользовательский, — он их не различает, и «принят» заявлять
+# нельзя (LiteLLM отдаёт 400 «No connected db.» на любой неизвестный ключ).
+_CANARY_TOKEN = "Bearer gc-probe-invalid-token"
+
+
+def _non_latin1_reason(auth: Optional[str]) -> str:
+    """Причина, по которой заголовок нельзя отправить, — или пустая строка.
+
+    Заголовки HTTP кодируются в latin-1: токен с кириллицей рвёт запрос в клиенте,
+    до сервера он не доходит вовсе. Молчать об этом нельзя — иначе вердикт
+    сваливается в «сервер недоступен», хотя сервер ни при чём."""
+    if not auth:
+        return ""
+    try:
+        auth.encode("latin-1")
+    except UnicodeEncodeError:
+        return "в токене недопустимые символы — нужны только латиница и цифры"
+    return ""
+
 
 @dataclass(frozen=True)
 class ProbeResult:
@@ -36,6 +56,10 @@ class ProbeResult:
     # авторизацию, токена не было; "rejected" — токен отклонён (401).
     # detail — только текст для человека, вердикт по нему не восстанавливать.
     auth_state: Optional[str] = None
+    # True только когда до сервера не дошли (сетевой отказ). Отличает «сервер
+    # лежит» от «не смогли проверить по своей причине» — рендер печатает разное,
+    # и без флага клиентская ошибка читается как недоступный сервер.
+    offline: bool = False
 
     @property
     def reachable(self) -> bool:
@@ -58,7 +82,7 @@ def probe(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
         return ProbeResult("ok", out.status, out.models, out.latency_ms, "доступен")
     if out.status is None:
         return ProbeResult("unknown", None, None, out.latency_ms,
-                           f"нет соединения ({out.network_error})")
+                           f"нет соединения ({out.network_error})", offline=True)
     # Сервер жив, но models-цепочка не про него → ступень 2 (вердикт по реальному
     # маршруту). 401 цепочки — НЕ приговор токену: у gigacode /config собственная
     # plugin-авторизация (x-authorization-url, код 14011) → 401 при валидном Bearer,
@@ -73,8 +97,15 @@ def probe(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
         )
     else:
         status, net_err, lat, json_body = post_ex(endpoint, auth, probe_model, verify=verify)
+    return _verdict_from_post(status, net_err, lat, json_body, dummy)
+
+
+def _verdict_from_post(status, net_err, lat, json_body, dummy: bool) -> ProbeResult:
+    """Ответ chat/completions в вердикт. Общая для probe() и probe_auth(): правила
+    чтения одного и того же маршрута не должны разъезжаться между вызывающими."""
     if status is None:
-        return ProbeResult("unknown", None, None, lat, f"нет соединения ({net_err})")
+        return ProbeResult("unknown", None, None, lat,
+                           f"нет соединения ({net_err})", offline=True)
     if 200 <= status < 300:
         return ProbeResult("ok", status, None, lat, "доступен")
     if status == 401:
@@ -99,8 +130,29 @@ def probe(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
     return ProbeResult("unknown", status, None, lat, f"сервер ответил {status}")
 
 
+def probe_auth(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
+               config_proxy: Optional[str] = None, post_ex=None) -> ProbeResult:
+    """Вердикт об авторизации СТРОГО по chat/completions.
+
+    models-цепочка сюда не входит намеренно: у OpenRouter `/api/v1/models` публичен
+    и отвечает без токена — судя по нему, проба писала бы «авторизация не требуется»
+    ровно про тот маршрут, который токен как раз требует."""
+    reason = _non_latin1_reason(auth)
+    if reason:
+        return ProbeResult("rejected", None, None, 0, reason, auth_state="rejected")
+    dummy = not model
+    probe_model = model or _DUMMY_MODEL
+    if post_ex is None:
+        status, net_err, lat, json_body = model_picker.probe_post(
+            endpoint, auth, probe_model, verify=verify, config_proxy=config_proxy,
+        )
+    else:
+        status, net_err, lat, json_body = post_ex(endpoint, auth, probe_model, verify=verify)
+    return _verdict_from_post(status, net_err, lat, json_body, dummy)
+
+
 def interpret_auth(control: ProbeResult, with_token: Optional[ProbeResult],
-                   has_token: bool) -> ProbeResult:
+                   has_token: bool, canary: Optional[ProbeResult] = None) -> ProbeResult:
     """Смысл авторизации из differential-probe. control — запрос БЕЗ токена;
     with_token — повтор С токеном (или None, если не слали, т.к. незачем).
     ok → авторизация не требуется ЛИБО токен реально принят; rejected → сервер
@@ -122,14 +174,25 @@ def interpret_auth(control: ProbeResult, with_token: Optional[ProbeResult],
                                "сервер требует авторизацию (401)", auth_state="required")
         if with_token is None:
             return control
+        # Канарейка старше всех правил ниже. Оба они выводят принятие из того, что
+        # отказ «переехал» дальше авторизации: ступень 2 — на модели-заглушке
+        # (400/5xx = «до валидации тела не дойти, не пройдя auth»), сдвиг 401→не-401 —
+        # на смене кода. Посылка одна, и ломается она одинаково: LiteLLM отвечает 400
+        # на ЛЮБОЙ негодный ключ. Совпал ответ с заведомо мусорным — сервер токены не
+        # различает, и утверждать нечего, чем бы ступень 2 вердикт ни назвала.
+        if canary is not None and canary.http_status == with_token.http_status:
+            return ProbeResult(
+                "unknown", with_token.http_status, None, with_token.latency_ms,
+                f"не удалось подтвердить токен: на заведомо неверный сервер "
+                f"отвечает так же ({with_token.http_status})")
         if with_token.verdict == "ok":
             return ProbeResult("ok", with_token.http_status, with_token.models,
                                with_token.latency_ms, "токен принят",
                                auth_state="accepted")
         if with_token.http_status not in (None, 401):
             # Отказ «переехал» дальше авторизации (401 без токена → 404/5xx с токеном
-            # на ТОМ ЖЕ маршруте) → путь существует, токен принят; остаток отказа —
-            # про модель/сервер, это забота других секций (живой кейс gigacode ST:
+            # на ТОМ ЖЕ маршруте) → путь существует и токен принят; остаток отказа —
+            # про модель/сервер, забота других секций (живой кейс gigacode ST:
             # несуществующая модель даёт 404-не-JSON, неотличимый от кривого пути).
             return ProbeResult("ok", with_token.http_status, with_token.models,
                                with_token.latency_ms, "токен принят",
@@ -139,3 +202,27 @@ def interpret_auth(control: ProbeResult, with_token: Optional[ProbeResult],
                            with_token.models, with_token.latency_ms,
                            with_token.detail, auth_state=auth_state)
     return control
+
+
+def probe_connection(endpoint: str, token: Optional[str], verify: bool, model: str, *,
+                     config_proxy: Optional[str] = None, probe_fn=None) -> ProbeResult:
+    """Полный вердикт «сервер + токен» для строки «Подключение».
+
+    Контроль БЕЗ токена отвечает на вопрос «нужна ли тут авторизация вообще»;
+    повтор С токеном — «принимают ли именно этот». Канарейка добирается только в
+    спорную ветку: сервер отказал не 401-м, и без неё пришлось бы гадать, отказ
+    это про токен или уже про модель.
+
+    Живёт здесь, а не в экранах: пробу зовут и /settings, и мастер, а скопированный
+    differential-танец разъехался бы при первой правке одной из копий."""
+    run = probe_fn or probe_auth
+    has_token = bool(token)
+    control = run(endpoint, None, verify, model, config_proxy=config_proxy)
+    with_token = canary = None
+    if control.verdict == "rejected" and control.http_status == 401 and has_token:
+        with_token = run(endpoint, token, verify, model, config_proxy=config_proxy)
+        st = with_token.http_status
+        ambiguous = st is not None and st != 401 and not (200 <= st < 300)
+        if ambiguous:
+            canary = run(endpoint, _CANARY_TOKEN, verify, model, config_proxy=config_proxy)
+    return interpret_auth(control, with_token, has_token, canary=canary)

@@ -1644,6 +1644,48 @@ async def test_auth_draft_probe_server_ignores_token(tmp_path):
         assert "токен принят" not in probe_line
 
 
+async def test_connection_line_separates_bad_data_from_dead_server(tmp_path):
+    """Три разных «плохо» не должны схлопываться в «сервер недоступен»: кривой
+    токен (запрос вообще не ушёл), неподтверждённый токен (сервер ответил) и
+    настоящий обрыв связи. Раньше первые два печатались как лежачий сервер."""
+    from tui.screens.settings import SettingsScreen, _CONNECTION
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+
+        bad_token = ProbeResult("rejected", None, None, 0,
+                                "в токене недопустимые символы — нужны только латиница и цифры",
+                                auth_state="rejected")
+        line = str(scr._probe_line_text(bad_token, _CONNECTION))
+        assert "недопустимые символы" in line and "сервер недоступен" not in line
+
+        unconfirmed = ProbeResult("unknown", 400, None, 9,
+                                  "не удалось подтвердить токен: на заведомо неверный "
+                                  "сервер отвечает так же (400)")
+        line = str(scr._probe_line_text(unconfirmed, _CONNECTION))
+        assert "подтвердить токен" in line and "сервер недоступен" not in line
+
+        # Настоящий обрыв — единственный случай, когда сервер можно винить.
+        offline = ProbeResult("unknown", None, None, 9,
+                              "нет соединения (timeout)", offline=True)
+        assert "сервер недоступен" in str(scr._probe_line_text(offline, _CONNECTION))
+
+        # А это — наш собственный сбой (так его заворачивает _work). Статуса нет,
+        # как и при обрыве, но сервер здесь ни при чём: раньше вердикт сваливался
+        # в «сервер недоступен», и причина терялась вместе с detail.
+        internal = ProbeResult("unknown", None, None, 0,
+                               "внутренняя ошибка проверки: boom")
+        line = str(scr._probe_line_text(internal, _CONNECTION))
+        assert "внутренняя ошибка" in line and "сервер недоступен" not in line
+
+
 async def test_connection_probe_line_combined_verdicts(tmp_path):
     """Строка probe «Подключения» — совокупный вердикт по таблице A4."""
     from tui.screens.settings import SettingsScreen, _CONNECTION
@@ -1669,7 +1711,10 @@ async def test_connection_probe_line_combined_verdicts(tmp_path):
         # не «включает» (раньше паттерн-матч по тексту делал именно это).
         text_only = ProbeResult("ok", 200, [], 10, "токен принят")
         assert "токен принят" not in str(scr._probe_line_text(text_only, _CONNECTION))
-        unk = ProbeResult("unknown", 0, None, 10, "нет связи")
+        # «Недоступен» теперь включает флаг offline, а не пустой http_status:
+        # без статуса остаются и наши внутренние сбои, а они про сервер не говорят.
+        unk = ProbeResult("unknown", None, None, 10, "нет соединения (timeout)",
+                          offline=True)
         assert "недоступен" in str(scr._probe_line_text(unk, _CONNECTION)).lower()
         inconclusive = ProbeResult("unknown", 500, None, 10, "сервер ответил 500")
         assert "не удалось проверить" in str(scr._probe_line_text(inconclusive, _CONNECTION))
