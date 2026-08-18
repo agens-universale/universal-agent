@@ -40,8 +40,7 @@ persistence  summarize  updater  usage  onboarding  model_picker  app_version
 
 ```
 universal-agent/
-  pyproject.toml                 # мета gc-ua + корень uv-workspace
-  meta/gc_ua_launcher.py
+  pyproject.toml                 # мета gc-ua (чисто метаданные) + корень uv-workspace
   packages/core/
     pyproject.toml               # дистрибутив gc-core — БЕЗ [project.scripts]
     src/gc_core/                 # 277 модулей SDK
