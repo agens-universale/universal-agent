@@ -41,10 +41,13 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 | `gc-server` | ядро + FastAPI-режим и swarm |
 
 ```bash
+# полный агент — все пять команд сразу
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"
-uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
-uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
+
+# узкий профиль: своя команда + менеджер MCP одной строкой
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"       --with-executables-from gc-mcp
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"       --with-executables-from gc-mcp
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 
 gc-mcp install duckduckgo_search   # один MCP + авто-подключение в ~/.gc/config.local.yml
 # gc-mcp install                   # все MCP из манифеста
@@ -55,10 +58,10 @@ gc-mcp install duckduckgo_search   # один MCP + авто-подключен�
 [docs/packaging.md](docs/packaging.md).
 
 > Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
-> `gc-tui` → `gc-ua`, `gc-server` → `gc-serve`; полный `gc-ua` — все пять.
-> Менеджер MCP ставится отдельно и один раз на машину:
-> `uv tool install "gc-mcp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/mcp"`.
-> Смена профиля — переустановка, нужен `--force`.
+> `gc-tui` → `gc-ua`, `gc-server` → `gc-serve`, `gc-mcp` → `gc-mcp`; полный
+> `gc-ua` — все пять. `uv tool` не экспортирует команды зависимостей, поэтому у
+> узкого профиля стоит `--with-executables-from gc-mcp` — менеджер MCP при этом
+> приезжает из того же коммита. Смена профиля — переустановка, нужен `--force`.
 
 После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся сам (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`).
 

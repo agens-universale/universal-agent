@@ -34,9 +34,9 @@ uv tool install -e .                 # полный агент
 
 ```bash
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"
-uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
-uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" --with-executables-from gc-mcp
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui" --with-executables-from gc-mcp
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 ```
 
 Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
@@ -49,14 +49,23 @@ uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent
 
 Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
 `gc-tui` → `gc-ua`, `gc-server` → `gc-serve`, полный `gc-ua` — все пять.
-Менеджер MCP — отдельный дистрибутив и ставится отдельно, один раз на машину:
+Менеджер MCP — отдельный дистрибутив. `uv tool` не экспортирует команды
+зависимостей, поэтому у узкого профиля стоит штатный флаг:
 
 ```bash
-uv tool install "gc-mcp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/mcp"
+uv tool install "gc-cli @ ...#subdirectory=packages/cli" --with-executables-from gc-mcp
 ```
 
-Почему не проще: `uv tool install` не экспортирует скрипты зависимостей, а
-объявить одно имя в двух дистрибутивах нельзя — uv откажется ставить второй.
+Флаг резолвит `gc-mcp` из того же коммита (через `[tool.uv.sources]`), пишется в
+`uv-receipt.toml` и переживает `uv tool upgrade` — набирать его нужно один раз.
+
+Если профилей на машине несколько, флаг не годится: второй профиль столкнётся с
+первым на именах `gc-mcp*`. Тогда ставьте менеджер отдельным инструментом:
+
+```bash
+uv tool install "gc-mcp @ ...#subdirectory=packages/mcp"
+```
+
 Подробности в [упаковке](packaging.md#команды-каждый-дистрибутив-объявляет-только-свои).
 
 Проверка после установки: `uv sync` и `uv run pytest` — см. [Тесты](testing.md).
