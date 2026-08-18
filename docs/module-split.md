@@ -159,7 +159,8 @@ f-строки  f"mod.{x}"                      4
 uvicorn.run("mod:app")                    1
 ```
 
-Цифры — фактические, из `tools_dev/check_module_literals.py` после переезда.
+Цифры — фактические, из `gc_testkit.module_literals` после переезда
+(гоняется тестом `tests/test_module_literals.py`).
 
 По целям: `tools` 112, `summarize` 86, `tui` 24, `config` 19,
 `processing_responses` 13, `utils` 12.
