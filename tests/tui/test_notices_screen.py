@@ -28,10 +28,10 @@ def test_header_text_counts_in_header():
     from tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH
     # Значки берём из общего источника: в них вариационный селектор, и литерал в тесте
     # разъезжался бы с кодом по невидимому символу.
-    assert scr._header_text(notices) == f"уведомления · {WARN_GLYPH}2 {INFO_GLYPH}1"
+    assert scr._header_text(notices) == f"уведомления · {WARN_GLYPH} 2  {INFO_GLYPH} 1"
     assert NoticesScreen(notices=[Notice("warning", "a", "x")])._header_text(
         [Notice("warning", "a", "x")]
-    ) == f"уведомления · {WARN_GLYPH}1"
+    ) == f"уведомления · {WARN_GLYPH} 1"
     assert NoticesScreen(notices=[])._header_text([]) == "уведомления"
 
 
