@@ -46,9 +46,14 @@ _DIST_OF = {"gc_core": "core", "gc_cli": "cli", "gc_tui": "tui", "gc_server": "s
 _FLATTENED = {"tui": "gc_tui"}
 
 
+#: Карта «дореформенное плоское имя модуля → пакет». Лежит РЯДОМ с этим файлом,
+#: а не в корне репозитория: единственный потребитель — тест-кит, и находить её
+#: через вычисление корня значило бы повторять ошибку bundled_root().
+_MAP_PATH = Path(__file__).resolve().parent / "module_map.json"
+
+
 def _load_map() -> dict[str, str]:
-    p = REPO / "tools_dev" / "module_map.json"
-    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    return json.loads(_MAP_PATH.read_text(encoding="utf-8")) if _MAP_PATH.is_file() else {}
 
 
 _MAP = _load_map()
@@ -72,6 +77,6 @@ def module_dir(old_top_level_name: str) -> Path:
     if pkg is None:
         raise KeyError(
             f"неизвестный модуль {old_top_level_name!r}; "
-            f"проверьте tools_dev/module_map.json"
+            f"проверьте {_MAP_PATH}"
         )
     return package_dir(pkg) / old_top_level_name

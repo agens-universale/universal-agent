@@ -12,10 +12,10 @@
 существует ли модуль, существует ли атрибут.
 
 Использование:
-    python tools_dev/check_module_literals.py            # отчёт
-    python tools_dev/check_module_literals.py --json     # машинный вывод
-    python tools_dev/check_module_literals.py --inventory  # снять снимок «до»
-    python tools_dev/check_module_literals.py --compare inventory.json
+    uv run python -m gc_testkit.module_literals            # отчёт
+    uv run python -m gc_testkit.module_literals --json     # машинный вывод
+    uv run python -m gc_testkit.module_literals --inventory  # снимок «до»
+    uv run python -m gc_testkit.module_literals --compare inventory.json
         сравнить с снимком: любое ИСЧЕЗНОВЕНИЕ живого литерала — регрессия
 
 Код возврата: 0 — всё сходится, 1 — есть битые ссылки.
@@ -31,9 +31,28 @@ import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
-SCAN_DIRS = ["packages", "src", "tests", "harbor", "scripts", "recommended_mcp", "meta"]
-SCAN_FILES = ["conftest.py"]
+from gc_testkit.paths import REPO, _MAP_PATH
+
+#: Каталоги корня, которые сканировать НЕ надо. Раньше здесь был обратный
+#: список — перечень сканируемых каталогов, и он протух молча: в нём остался
+#: `src`, которого нет с разбиения на пакеты, а появившиеся каталоги в него не
+#: попадали вовсе. Список-исключение переживает переезды: новый каталог с кодом
+#: подхватывается сам, а мусор перечислен явно и заметен.
+SKIP_DIRS = {
+    ".git", ".venv", ".idea", ".vscode", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "__pycache__", "dist", "build", "node_modules", "docs",
+}
+#: Отдельные файлы вне каталогов. Корневой conftest.py удалён 18.08.2026 —
+#: бутстрап sys.path делает плагин тест-кита. Список оставлен как механизм.
+SCAN_FILES: list[str] = []
+
+
+def scan_dirs() -> list[Path]:
+    """Каталоги верхнего уровня с кодом — вычисляются, а не перечисляются."""
+    return sorted(
+        d for d in REPO.iterdir()
+        if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
+    )
 
 # Функции, чей строковый аргумент — путь к модулю или атрибуту модуля.
 # Имена логгеров — тоже ссылка на модуль: логгер обычно зовётся __name__, и
@@ -76,9 +95,8 @@ def _top_level_names() -> set[str]:
         for child in pkg_src.iterdir():
             if child.is_dir() and (child / "__init__.py").exists():
                 names.add(child.name)
-    legacy = REPO / "tools_dev" / "module_map.json"
-    if legacy.is_file():
-        names |= set(json.loads(legacy.read_text(encoding="utf-8")))
+    if _MAP_PATH.is_file():
+        names |= set(json.loads(_MAP_PATH.read_text(encoding="utf-8")))
     src = REPO / "src"
     if src.exists():
         for p in src.iterdir():
@@ -221,6 +239,25 @@ def verify(ref: Ref) -> str | None:
     return None
 
 
+def scan() -> tuple[list[Ref], list[tuple[Ref, str]]]:
+    """Собрать все ссылки и отобрать битые. Общая точка для CLI и теста.
+
+    Раньше эта логика жила внутри main(), и тест её переиспользовать не мог —
+    поэтому сетка гонялась только руками и дважды пропустила регрессию.
+    """
+    for pkg in (REPO / "packages").glob("*/src"):
+        entry = str(pkg)
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+
+    ours = _top_level_names()
+    paths = [p for d in scan_dirs() for p in d.rglob("*.py") if "__pycache__" not in p.parts]
+    paths += [REPO / f for f in SCAN_FILES if (REPO / f).exists()]
+
+    refs = collect(paths, ours)
+    return refs, [(r, msg) for r in refs if (msg := verify(r))]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true")
@@ -228,17 +265,7 @@ def main() -> int:
     ap.add_argument("--compare", metavar="FILE", help="сравнить с ранее снятым снимком")
     args = ap.parse_args()
 
-    sys.path.insert(0, str(REPO / "src"))
-    for pkg in (REPO / "packages").glob("*/src"):
-        sys.path.insert(0, str(pkg))
-
-    ours = _top_level_names()
-    paths = [p for d in SCAN_DIRS for p in (REPO / d).rglob("*.py")
-             if (REPO / d).exists() and "__pycache__" not in p.parts]
-    paths += [REPO / f for f in SCAN_FILES if (REPO / f).exists()]
-
-    refs = collect(paths, ours)
-    problems = [(r, msg) for r in refs if (msg := verify(r))]
+    refs, problems = scan()
 
     if args.inventory:
         print(json.dumps([asdict(r) for r in refs], ensure_ascii=False, indent=1))

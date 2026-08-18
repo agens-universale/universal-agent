@@ -115,7 +115,7 @@ python -c "import zipfile;print(sorted(zipfile.ZipFile('dist/gc_core-0.5.0-py3-n
 
 ```toml
 [project.scripts]
-gc-cli = "gc_cli.cli:main"
+gc-cli = "gc_core.cli_entry:main"
 gc-ua = "gc_core.tui_entry:main"
 gc-serve = "gc_core.serve_entry:main"
 gc-mcp = "gc_core.mcp_runtime.cli:main"
@@ -253,6 +253,6 @@ uv run pytest
 пустеет, заглушки протекают между тестами, набор зелёный. Проверка:
 
 ```bash
-uv run python tools_dev/check_module_literals.py
+uv run python -m gc_testkit.module_literals
 uv run pytest tests/test_packaging_wheel.py
 ```
