@@ -408,7 +408,7 @@ def test_install_dist_defaults_none(tmp_path):
 def test_every_source_entry_declares_dist():
     """Каждая source-запись бандл-манифеста обязана нести install.dist."""
     from recommended_mcp.manifest import default_manifest_path, load_manifest
-    from gc_core.mcp_runtime.paths import recipe_root
+    from recommended_mcp.runtime.manifest_resolve import recipe_root
     entries = load_manifest(default_manifest_path(recipe_root()))
     for e in entries:
         if e.install.type == "source":
@@ -440,7 +440,7 @@ def test_manifest_dist_matches_pyproject_when_source_present():
     import dataclasses
     from recommended_mcp import install as inst
     from recommended_mcp.manifest import default_manifest_path, load_manifest
-    from gc_core.mcp_runtime.paths import recipe_root
+    from recommended_mcp.runtime.manifest_resolve import recipe_root
     root = recipe_root()
     for e in load_manifest(default_manifest_path(root)):
         if e.install.type == "source" and e.install.dist and e.install.source:

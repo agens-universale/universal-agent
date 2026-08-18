@@ -26,12 +26,14 @@ dependencies = [
 # те же пять имён, и оба установленных профиля дрались за одни симлинки в
 # ~/.local/bin: второй перезаписывал первый, а `uv tool uninstall` одного
 # сносил команды другого.
-# gc-mcp/gc-mcp-install — исключение: точка входа в ядре (шим), а сам
-# менеджер приезжает дистрибутивом gc-mcp, от которого зависят все профили.
-# Поэтому пересечение симлинка безвредно — команда отработает одинаково.
+# gc-mcp/gc-mcp-install ведут ПРЯМО в дистрибутив gc-mcp, от которого профиль
+# зависит жёстко. Объявлять их всё равно приходится здесь: uv tool кладёт в
+# PATH скрипты только ЗАПРОШЕННОГО дистрибутива, поэтому объявление в
+# манифесте gc-mcp команду бы не дало (проверено установкой).
+# Пересечение симлинка безвредно — цель у всех профилей одна и та же.
 gc-ua = "gc_core.tui_entry:main"
-gc-mcp = "gc_core.mcp_entry:main"
-gc-mcp-install = "gc_core.mcp_entry:install"
+gc-mcp = "recommended_mcp.runtime.cli:main"
+gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_tui"]
