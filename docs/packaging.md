@@ -204,17 +204,24 @@ except ImportError as exc:
 
 | Где | Что | Почему |
 |---|---|---|
-| `gc_core.mcp_runtime` | `env`, `state`, `paths`, `repo_path`, `recipes` | нужны САМОМУ агенту: `connect_mcp` спавнит ими stdio-серверы |
+| `gc_core.mcp_runtime` | `env`, `state`, `paths`, `repo_path` | нужны САМОМУ агенту: `connect_mcp` спавнит ими stdio-серверы |
 | `recommended_mcp.runtime` | `cli`, `install_cli`, `manifest_resolve`, `venv`, `wiring` | это менеджер: установка, venv, запись в `config.local.yml` |
 
 `repo_path` остаётся в ядре намеренно: это бутстрап, благодаря которому
 `import recommended_mcp` вообще находит пакет в рабочей копии. Унеси его в тот
 же пакет — и получится курица с яйцом.
 
-Ядро тянет рецепты **лениво** и работает без них: `mcp_daemon_autostart` ловит
-их отсутствие и пишет строку в лог, а команды `gc-mcp` / `gc-mcp-install` идут
-через шим `gc_core/mcp_entry.py` — тот же приём, что у `cli_entry` /
-`tui_entry` / `serve_entry`.
+Команды `gc-mcp` / `gc-mcp-install` ведут **прямо** в
+`recommended_mcp.runtime` — шима в ядре у них нет и не нужно: все профили
+зависят от `gc-mcp` жёстко. Объявлять их всё равно приходится в манифесте
+каждого профиля: `uv tool install gc-cli` кладёт в PATH скрипты только
+ЗАПРОШЕННОГО дистрибутива, поэтому объявление в манифесте `gc-mcp` команду бы
+не дало — проверено установкой (`Installed 1 executable: gc-cli`).
+
+Единственное место, где ядро тянется к рецептам, — мост автозапуска daemon'ов
+`mcp_daemon_autostart`. Ядро от `gc-mcp` НЕ зависит, поэтому у встраивающего
+SDK рецептов может не быть: мост ловит именно их отсутствие и пишет строку в
+лог, а чужую ошибку импорта пробрасывает.
 
 Исходники самих MCP-серверов лежат в `external/vendor/` и едут в колесе
 `gc-mcp` соседями с рецептами: `install.py` ищет их по ИМЕНИ каталога

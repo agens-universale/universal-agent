@@ -5,18 +5,28 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from gc_core.mcp_runtime.paths import recipe_root
-from gc_core.mcp_runtime.recipes import import_recipes
 
 
 def _manifest_errors():
-    ManifestError = import_recipes("manifest").ManifestError
+    from recommended_mcp.manifest import ManifestError
 
     return ManifestError
 
 
+def recipe_root() -> Path:
+    """Каталог рецептов — он же каталог пакета.
+
+    Жила в ``gc_core.mcp_runtime.paths`` и ходила туда через охранник импорта:
+    ядро аккуратно спрашивало, установлен ли пакет рецептов. Теперь функция
+    внутри самого пакета, и вопрос отпал — считаем от ``__file__``.
+    """
+    import recommended_mcp
+
+    return Path(recommended_mcp.__file__).resolve().parent
+
+
 def _default_manifest_path(root: Path) -> Path:
-    default_manifest_path = import_recipes("manifest").default_manifest_path
+    from recommended_mcp.manifest import default_manifest_path
 
     return default_manifest_path(root)
 

@@ -51,14 +51,3 @@ def managed_config_path() -> Path:
     from gc_core.config_modules.env_vars import managed_config_path as _impl
 
     return _impl()
-
-
-def recipe_root() -> Path:
-    """Каталог рецептов recommended_mcp (сниппеты, external-пути в манифесте)."""
-    from gc_core.mcp_runtime.recipes import recipes_package
-
-    # Через охранник: без рецептов получим RecipesUnavailable, а не сырой
-    # ModuleNotFoundError. Именно recipes_package(), а не import_recipes():
-    # второй ходит через importlib.import_module, который тесты подменяют
-    # глобально, и тогда сюда прилетает MagicMock без __file__.
-    return Path(recipes_package().__file__).resolve().parent
