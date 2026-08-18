@@ -226,6 +226,13 @@ def test_package_skill_auto_detects_source_layer(tmp_path, base, skill_subpath, 
     root = PROJECT_ROOT if base == "repo" else ASSETS
     skill_dir = root / skill_subpath
     cleanup_needed = not skill_dir.exists()
+    # Самый верхний каталог, которого ещё нет: mkdir(parents=True) создаёт всю
+    # цепочку, а убирать её надо целиком. Иначе после каждого прогона в рабочей
+    # копии оседает пустой `<корень>/.gc/skills/` — тест мусорит в дереве
+    # проекта (наблюдалось: packages/core/.gc и <repo>/.gc).
+    created_root = skill_dir
+    while created_root.parent != root and not created_root.parent.exists():
+        created_root = created_root.parent
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_md = skill_dir / "SKILL.md"
     skill_md.write_text(
@@ -258,7 +265,7 @@ def test_package_skill_auto_detects_source_layer(tmp_path, base, skill_subpath, 
     finally:
         if cleanup_needed:
             import shutil
-            shutil.rmtree(skill_dir, ignore_errors=True)
+            shutil.rmtree(created_root, ignore_errors=True)
 
 
 def test_package_skill_unknown_source_layer(tmp_path):
