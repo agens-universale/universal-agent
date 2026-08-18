@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Fleet harbor runner image + gc-cli External agent. Two additions vs the original:
 #   1) gc-cli installed into harbor's tool venv (uv tool install --with);
-#   2) the adapter (harbor/adapters/) baked in and put on PYTHONPATH.
+#   2) the adapter (integrations/harbor/adapters/) baked in and put on PYTHONPATH.
 #
 # Build (needs an ssh-agent key with gitverse access, same as helpctl).
 # ALWAYS pass GC_REF=<commit-sha> — it is what actually goes into the image (the code is
@@ -71,14 +71,14 @@ RUN --mount=type=ssh \
       --with "gc-ua @ git+ssh://git@gitverse.ru/gigacode-ai/universal-agent@${GC_REF}"
 
 # Адаптер запекаем в образ: клонируем и чекаутим тот же GC_REF (ветка ИЛИ SHA),
-# кладём harbor/adapters на PYTHONPATH. PYTHONPATH наследуется и venv-питоном harbor →
+# кладём integrations/harbor/adapters на PYTHONPATH. PYTHONPATH наследуется и venv-питоном harbor →
 # harbor видит --agent-import-path adapters.gc_cli_external:GcCliExternal
 RUN --mount=type=ssh \
     git clone --filter=blob:none \
       ssh://git@gitverse.ru/gigacode-ai/universal-agent.git /opt/gc-cli-src \
     && git -C /opt/gc-cli-src checkout "${GC_REF}" \
     && mkdir -p /opt/gc-harbor-adapters \
-    && cp -r /opt/gc-cli-src/harbor/adapters /opt/gc-harbor-adapters/adapters \
+    && cp -r /opt/gc-cli-src/integrations/harbor/adapters /opt/gc-harbor-adapters/adapters \
     # Ассеты переехали в packages/core/assets при разбиении на пакеты;
     # в корне репозитория их больше нет, и прежний cp обрывал сборку.
     && cp -r /opt/gc-cli-src/packages/core/assets/prompts /opt/gc-harbor-adapters/prompts \

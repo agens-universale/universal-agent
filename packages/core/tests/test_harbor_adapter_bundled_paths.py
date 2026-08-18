@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from gc_testkit.paths import REPO
+from gc_testkit.paths import HARBOR, REPO
 
 _TEST_URL = "http://test-backend/v1/chat/completions"
 
@@ -29,9 +29,9 @@ def _load_adapter():
             del sys.modules[key]
     # Import as harbor does at runtime (`adapters.gc_cli_external:GcCliExternal`), so the
     # adapter's own `from adapters.gc_cli_config import ...` resolves.
-    sys.path.insert(0, str(REPO / "harbor"))
+    sys.path.insert(0, str(HARBOR))
     spec = importlib.util.spec_from_file_location(
-        "adapters.gc_cli_external", REPO / "harbor" / "adapters" / "gc_cli_external.py"
+        "adapters.gc_cli_external", HARBOR / "adapters" / "gc_cli_external.py"
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

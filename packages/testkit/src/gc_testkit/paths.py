@@ -36,6 +36,10 @@ ASSETS = REPO / "packages" / "core" / "assets"
 #: Каталоги исходников всех пакетов — то, что кладётся на ``sys.path``.
 PACKAGE_SRC_DIRS = tuple(sorted(p for p in REPO.glob("packages/*/src") if p.is_dir()))
 
+#: Стенды бенчмарков: адаптеры Harbor и конфиги 2x2. В колёса не попадают.
+INTEGRATIONS = REPO / "integrations"
+HARBOR = INTEGRATIONS / "harbor"
+
 #: Каталог курируемых рецептов MCP: дистрибутив gc-mcp.
 RECIPES = REPO / "packages" / "mcp" / "src" / "recommended_mcp"
 

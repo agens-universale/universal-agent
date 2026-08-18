@@ -14,8 +14,8 @@ from pathlib import Path
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig, resolve_paths
 
-from gc_testkit.paths import REPO
-_HARBOR_DIR = REPO / "harbor"
+from gc_testkit.paths import HARBOR, REPO
+_HARBOR_DIR = HARBOR
 if str(_HARBOR_DIR) not in sys.path:
     sys.path.insert(0, str(_HARBOR_DIR))
 

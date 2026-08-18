@@ -23,8 +23,8 @@ for _key in list(sys.modules.keys()):
     if _key == "harbor" or _key.startswith("harbor."):
         del sys.modules[_key]
 
-from gc_testkit.paths import REPO
-_HARBOR = REPO / "harbor"
+from gc_testkit.paths import HARBOR, REPO
+_HARBOR = HARBOR
 sys.path.insert(0, str(_HARBOR))
 
 from adapters.gc_cli_external import GcCliExternal  # noqa: E402

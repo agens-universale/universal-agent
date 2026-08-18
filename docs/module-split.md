@@ -59,6 +59,7 @@ universal-agent/
     pyproject.toml               # gc-testkit — только dev, в колёса не попадает
     src/gc_testkit/              # раскладка, фикстуры, pytest-плагин
   external/                      # сторонние батарейки: vendor/ (MCP), litellm/
+  integrations/                  # стенды бенчмарков: harbor/, bench_configs/
   tests/                         # только общерепозиторное: колёса, MCP
 ```
 
