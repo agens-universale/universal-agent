@@ -36,6 +36,7 @@ from harbor.models.trajectories import (
 from harbor.utils.trajectory_utils import format_trajectory_json
 
 from adapters.gc_cli_config import build_gc_cli_config
+from adapters.step_timings import StepTimings
 
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-ua`), so it imports directly — no source-dir / PYTHONPATH.
@@ -435,6 +436,8 @@ class GcCliExternal(BaseAgent):
 
         executor = None
         self._evicted_messages: list = []
+        # Wall-clock split per step: LLM wait vs tool exec.
+        timings = StepTimings(self.logs_dir / "timings.jsonl")
 
         def _on_messages_evicted(dropped: list) -> None:
             # Host-side archive for ATIF dump; core State does not retain these.
@@ -442,6 +445,7 @@ class GcCliExternal(BaseAgent):
 
         def _run_loop():
             nonlocal executor
+            timings.attach()  # sink routing is per thread — bind inside the worker
             ctx = create_run_context(
                 config_dict,
                 environment=environment,
@@ -468,6 +472,11 @@ class GcCliExternal(BaseAgent):
             if state is None and executor is not None:
                 state = executor.get_state()
             n_steps = self._write_trajectory(state)
+            # On a timeout the worker is abandoned mid-call: these are the totals
+            # reached so far, and timings.jsonl names the call still running.
+            timing_summary = timings.summary()
+            timings.close()
+            self.logger.info("timings: %s", timing_summary)
 
             # Populate AgentContext so the run isn't a black box. gc-cli does not track
             # token usage in `state`, so token/cost counters stay None (would need core
@@ -477,4 +486,5 @@ class GcCliExternal(BaseAgent):
                     "agent": self.name(),
                     "session_id": self._session_id,
                     "total_steps": n_steps,
+                    "timings": timing_summary,
                 }
