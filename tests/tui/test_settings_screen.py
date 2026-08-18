@@ -3327,3 +3327,65 @@ async def test_connection_footer_names_the_clear_key_on_the_token_field(tmp_path
         ed.clear_token()                               # стёрли — стирать больше нечего
         await pilot.pause()
         assert "Ctrl+U" not in scr._footer_text()
+
+
+async def test_ctrl_u_over_env_ref_warns_about_deletion_not_a_leak(tmp_path, monkeypatch):
+    """Ctrl+U поверх ссылки `${ENV:VAR}`: страж перезаписи обязан сработать (ссылка
+    не гибнет молча), но сказать ПРАВДУ — сохранение её удалит, а не «запишет
+    введённое значение открытым текстом». Утечки на этом пути нет: поле пустое.
+
+    Единый текст на оба случая пугал утечкой ровно там, где идёт стирание."""
+    monkeypatch.setenv("GC_API_KEY", "sk-REALSECRET123")
+    cfg_file = _write_cfg(tmp_path, auth='"${ENV:GC_API_KEY}"')
+    import tui.app as app_mod
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr._connection_editor()
+        ed.move(1)                                   # → поле токена
+        await pilot.pause()
+        assert ed.clear_token() is True              # маска была — есть что стирать
+        await pilot.pause()
+
+        await pilot.press("enter")                   # сохранение → страж
+        await pilot.pause(); await pilot.pause()
+        banner = " ".join(str(w.render()) for w in scr.query("#set-envconfirm"))
+        assert "GC_API_KEY" in banner                        # страж сработал
+        assert "удалит ссылку из файла" in banner
+        assert "открытым текстом" not in banner
+
+
+async def test_literal_over_env_ref_still_warns_about_the_leak(tmp_path, monkeypatch):
+    """Обратный случай не должен пострадать от правки выше: вписанный поверх ссылки
+    литерал по-прежнему предупреждает именно об утечке в файл."""
+    monkeypatch.setenv("GC_API_KEY", "sk-REALSECRET123")
+    cfg_file = _write_cfg(tmp_path, auth='"${ENV:GC_API_KEY}"')
+    import tui.app as app_mod
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        from textual.widgets import Input as _Input
+        scr._connection_editor().query_one("#conn-token", _Input).value = "sk-typed-by-hand"
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.pause(); await pilot.pause()
+        banner = " ".join(str(w.render()) for w in scr.query("#set-envconfirm"))
+        assert "GC_API_KEY" in banner
+        assert "открытым текстом" in banner
+        assert "удалит ссылку" not in banner
+
+
+def test_env_confirm_text_names_both_fates_when_they_differ():
+    """Адрес перезаписали литералом, токен стёрли — обе ссылки затрагиваются, но
+    по-разному. Умолчать об одной значило бы выбрать, о чём соврать."""
+    scr = _mk_screen()
+    text = scr._env_confirm_text(["GC_URL"], ["GC_API_KEY"])
+    assert "GC_URL — сохранение запишет введённое значение в файл открытым текстом" in text
+    assert "GC_API_KEY — сохранение удалит ссылку из файла" in text

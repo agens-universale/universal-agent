@@ -1468,21 +1468,38 @@ class SettingsScreen(Screen):
         cls = "set-dyn set-flash-ok" if outcome == "ok" else "set-dyn set-flash-warn"
         self._singleton("set-flash", glyph + text, cls)
 
-    def _env_refs_overwritten(self, values: dict) -> list[str]:
-        """Переменные окружения, чьи ссылки в файле затрёт вводимый литерал
-        (пусто — затирать нечего либо новое значение само ссылка)."""
+    def _env_refs_overwritten(self, values: dict) -> tuple[list[str], list[str]]:
+        """Переменные окружения, чьи ссылки в файле затрёт сохранение, разложенные
+        по тому, ЧТО с ними произойдёт: (перезапись литералом, удаление пустым
+        значением). Оба списка пусты — затирать нечего либо новое значение само ссылка.
+
+        Раскладка нужна предупреждению: у литерала последствие — утечка секрета в
+        файл, у пустого поля — исчезновение ссылки. Одним словом их не назвать."""
         import config_raw
-        out: list[str] = []
+        written: list[str] = []
+        erased: list[str] = []
         for key, value in values.items():
             if config_raw.env_refs(value):
                 continue
-            out.extend(config_raw.env_refs(self._raw.get(key)))
-        return out
+            refs = config_raw.env_refs(self._raw.get(key))
+            (written if str(value or "").strip() else erased).extend(refs)
+        return written, erased
 
-    def _env_confirm_text(self, refs: list[str]) -> str:
-        return (f"В файле — ссылка на переменную окружения ({', '.join(refs)}); "
-                "сохранение запишет введённое значение в файл открытым текстом.  "
-                "Enter — сохранить  ·  Esc — отмена")
+    def _env_confirm_text(self, written: list[str], erased: list[str]) -> str:
+        """Предупреждение называет ПОСЛЕДСТВИЕ, а не сам факт затирания.
+
+        Единый текст «запишет введённое значение открытым текстом» пугал утечкой и
+        на пути `Ctrl+U`, где поле пустое и ничего не пишется — ссылка удаляется.
+        Оба списка разом реальны: в «Подключении» ссылками могут быть и адрес, и
+        токен, и судьба у них может разойтись."""
+        parts = []
+        if written:
+            parts.append(f"{', '.join(written)} — сохранение запишет введённое "
+                         "значение в файл открытым текстом")
+        if erased:
+            parts.append(f"{', '.join(erased)} — сохранение удалит ссылку из файла")
+        return ("В файле — ссылка на переменную окружения: " + ";  ".join(parts)
+                + ".  Enter — сохранить  ·  Esc — отмена")
 
     def _cancel_env_confirm(self) -> None:
         """Снять confirm перезаписи ссылки. Секцию НЕ перерисовываем: ре-рендер поднял бы
@@ -1499,10 +1516,11 @@ class SettingsScreen(Screen):
         if not confirmed:
             # Единственная точка записи → ссылка на переменную не может стать литералом
             # молча, каким бы путём (probe, force, секция 1) сюда ни пришли.
-            refs = self._env_refs_overwritten(values)
-            if refs:
+            written, erased = self._env_refs_overwritten(values)
+            if written or erased:
                 self._pending_env_save = (section, values, warn_detail)
-                self._singleton("set-envconfirm", Text(self._env_confirm_text(refs), style=WARN),
+                self._singleton("set-envconfirm",
+                                Text(self._env_confirm_text(written, erased), style=WARN),
                                 "set-confirm set-dyn")
                 return
         dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in values.items()}
