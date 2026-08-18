@@ -54,9 +54,11 @@ gc-mcp install duckduckgo_search   # один MCP + авто-подключен�
 корневой `pyproject.toml`, а в корне лежит полный профиль. Подробно — в
 [docs/packaging.md](docs/packaging.md).
 
-> Профиль кладёт в PATH свою команду (`gc-cli`, `gc-ua` или `gc-serve`) плюс
-> общие `gc-mcp` и `gc-mcp-install`; полный `gc-ua` — все пять. Смена профиля —
-> переустановка, нужен `--force`.
+> Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
+> `gc-tui` → `gc-ua`, `gc-server` → `gc-serve`; полный `gc-ua` — все пять.
+> Менеджер MCP ставится отдельно и один раз на машину:
+> `uv tool install "gc-mcp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/mcp"`.
+> Смена профиля — переустановка, нужен `--force`.
 
 После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся сам (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`).
 

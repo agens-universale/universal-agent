@@ -12,6 +12,26 @@ from typing import Any, Callable, Dict, List, NamedTuple
 from urllib.parse import urlparse
 
 from gc_core import config_raw
+from gc_core.app_version import REPO_GIT_URL
+
+
+def _mcp_hint() -> str:
+    """Подсказка про MCP: команда управления или как её доставить.
+
+    Команды `gc-mcp` объявляет дистрибутив gc-mcp, а `uv tool install` кладёт в
+    PATH скрипты только запрошенного дистрибутива. Поэтому в узком профиле
+    (`gc-cli` / `gc-tui` / `gc-server`) менеджер установлен как зависимость, но
+    в PATH его нет — советовать `gc-mcp install` там значит советовать
+    command not found.
+    """
+    import shutil
+
+    if shutil.which("gc-mcp"):
+        return "gc-mcp install — поставить, gc-mcp help — все команды"
+    return (
+        "менеджер ставится отдельно: "
+        'uv tool install "gc-mcp @ git+' + REPO_GIT_URL + '#subdirectory=packages/mcp"'
+    )
 
 
 def authorization_header(raw: str) -> str:
@@ -194,5 +214,5 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
         f"    • Помощник настройки (рекомендуется):\n"
         f"        {program} --init-config\n"
         f"    • Либо впишите поля вручную и запустите снова.\n\n"
-        f"  MCP-серверы (веб-поиск, документы и др.): gc-mcp install — поставить, gc-mcp help — все команды\n"
+        f"  MCP-серверы (веб-поиск, документы и др.): {_mcp_hint()}\n"
     )

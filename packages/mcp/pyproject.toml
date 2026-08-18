@@ -14,8 +14,13 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
-# Команд НЕ объявляет: gc-mcp остаётся шимом в ядре, чтобы работать в любом
-# профиле и давать подсказку, когда рецепты не установлены (см. docs/packaging.md).
+# Команды объявляет тот дистрибутив, которому принадлежит код. Профили их НЕ
+# дублируют: uv владеет симлинком эксклюзивно, поэтому два профиля с одним
+# именем команды не ставятся рядом — второй падает с «Executables already
+# exist». Проверено установкой.
+[project.scripts]
+gc-mcp = "recommended_mcp.runtime.cli:main"
+gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/recommended_mcp"]
