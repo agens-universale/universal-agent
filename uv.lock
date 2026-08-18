@@ -20,6 +20,7 @@ resolution-markers = [
 members = [
     "gc-cli",
     "gc-core",
+    "gc-mcp",
     "gc-server",
     "gc-testkit",
     "gc-tui",
@@ -828,10 +829,14 @@ version = "0.5.0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "gc-core" },
+    { name = "gc-mcp" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "gc-core", editable = "packages/core" }]
+requires-dist = [
+    { name = "gc-core", editable = "packages/core" },
+    { name = "gc-mcp", editable = "packages/mcp" },
+]
 
 [[package]]
 name = "gc-core"
@@ -867,12 +872,28 @@ requires-dist = [
 ]
 
 [[package]]
+name = "gc-mcp"
+version = "0.5.0"
+source = { editable = "packages/mcp" }
+dependencies = [
+    { name = "gc-core" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gc-core", editable = "packages/core" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+]
+
+[[package]]
 name = "gc-server"
 version = "0.5.0"
 source = { editable = "packages/server" }
 dependencies = [
     { name = "fastapi" },
     { name = "gc-core" },
+    { name = "gc-mcp" },
     { name = "psutil" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -881,6 +902,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "gc-core", editable = "packages/core" },
+    { name = "gc-mcp", editable = "packages/mcp" },
     { name = "psutil", specifier = ">=5.9,<7" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
@@ -902,6 +924,7 @@ version = "0.5.0"
 source = { editable = "packages/tui" }
 dependencies = [
     { name = "gc-core" },
+    { name = "gc-mcp" },
     { name = "pygments" },
     { name = "rich" },
     { name = "textual" },
@@ -910,6 +933,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "gc-core", editable = "packages/core" },
+    { name = "gc-mcp", editable = "packages/mcp" },
     { name = "pygments", specifier = ">=2.13" },
     { name = "rich", specifier = ">=13" },
     { name = "textual", specifier = ">=0.55" },
@@ -922,6 +946,7 @@ source = { editable = "." }
 dependencies = [
     { name = "gc-cli" },
     { name = "gc-core" },
+    { name = "gc-mcp" },
     { name = "gc-server" },
     { name = "gc-tui" },
 ]
@@ -960,6 +985,7 @@ test = [
 requires-dist = [
     { name = "gc-cli", editable = "packages/cli" },
     { name = "gc-core", editable = "packages/core" },
+    { name = "gc-mcp", editable = "packages/mcp" },
     { name = "gc-server", editable = "packages/server" },
     { name = "gc-tui", editable = "packages/tui" },
 ]

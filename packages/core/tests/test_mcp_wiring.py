@@ -56,8 +56,8 @@ def test_wire_playwright_resolves_real_paths(tmp_path, monkeypatch):
     from gc_core.mcp_runtime import wiring
     # Путь от корня репозитория, а не от cwd: набор ядра гоняется и из
     # packages/core, где относительный путь никуда не ведёт.
-    from gc_testkit.paths import REPO
-    recipe = REPO / "recommended_mcp" / "browser_playwright"
+    from gc_testkit.paths import RECIPES
+    recipe = RECIPES / "browser_playwright"
     leftover = wiring.wire_snippet("browser_playwright", recipe, npx="/N/npx", cache="/C")
     srv = wiring.wired_servers()["browser_playwright"]
     assert srv["command"] == "/N/npx"

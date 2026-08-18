@@ -16,7 +16,7 @@ mcps:
     path: ./computer
     install:
       type: source
-      source: ../external/vendor/computer-mcp
+      source: computer-mcp
       dist: computer-mcp
       version: "0.1.0"      # синк с external/*/pyproject.toml (стережёт тест)
       platforms: [win32]
@@ -27,7 +27,7 @@ mcps:
     path: ./office
     install:
       type: source
-      source: ../external/vendor/office-mcp
+      source: office-mcp
       dist: office-mcp
       version: "0.3.1"      # синк с external/*/pyproject.toml (стережёт тест)
 
@@ -36,7 +36,7 @@ mcps:
     path: ./science
     install:
       type: source
-      source: ../external/vendor/science-mcp
+      source: science-mcp
       dist: science-mcp
       version: "0.1.0"      # синк с external/*/pyproject.toml (стережёт тест)
     run:
@@ -49,7 +49,7 @@ mcps:
     path: ./duckduckgo_search
     install:
       type: source
-      source: ../external/vendor/ddgs-mcp
+      source: ddgs-mcp
       dist: ddgs-mcp
       version: "0.2.0"      # синк с external/*/pyproject.toml (стережёт тест)
     # run-блок отсутствует: агент спавнит ddgs-mcp по stdio.

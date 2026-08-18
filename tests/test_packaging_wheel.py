@@ -23,7 +23,6 @@ REPO = Path(__file__).resolve().parents[1]
 CORE_REQUIRED = [
     "gc_core/assets/prompts/chat_completions_system_prompt.md",
     "gc_core/assets/prompts/chat_completions_tui_special_instructions.md",
-    "recommended_mcp/config.yml",
     "gc_core/assets/config.default.yml",
     "gc_core/config.py",
     "gc_core/tui_entry.py",     # шим точки входа gc-ua обязан быть в ядре
@@ -34,7 +33,8 @@ CORE_REQUIRED = [
 CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/"]
 
 MANIFESTS = {"gc_ua": ".", "gc_core": "packages/core", "gc_cli": "packages/cli",
-             "gc_tui": "packages/tui", "gc_server": "packages/server"}
+             "gc_tui": "packages/tui", "gc_server": "packages/server",
+             "gc_mcp": "packages/mcp"}
 
 
 def _build_all(out: Path) -> dict:
@@ -75,9 +75,24 @@ def test_core_wheel_bundles_assets(wheels):
     for needed in CORE_REQUIRED:
         assert needed in names, f"{needed} нет в колесе ядра; образец {sorted(names)[:10]}"
     assert any(n.startswith("gc_core/assets/skills/") for n in names), "skills/ отсутствует"
+
+
+def test_mcp_wheel_bundles_recipes_and_sources(wheels):
+    """Рецепты и исходники MCP едут в СВОЁМ дистрибутиве, а не в ядре.
+
+    Соседство обязательно: install.py ищет исходники относительно каталога
+    рецептов, поэтому в колесе они должны лежать так же, как в репозитории.
+    """
+    names = wheels["gc_mcp"]
+    assert "recommended_mcp/config.yml" in names
     assert any(n.startswith("recommended_mcp/") and n.endswith(".py") for n in names)
     assert "external/vendor/ddgs-mcp/pyproject.toml" in names, "ddgs-mcp не поставляется"
     assert "external/vendor/ddgs-mcp/src/ddgs_mcp/server.py" in names
+
+    core = wheels["gc_core"]
+    assert not any(n.startswith("recommended_mcp/") for n in core), (
+        "ядро больше не должно тащить рецепты"
+    )
 
 
 def test_core_wheel_does_not_squat_generic_names(wheels):
@@ -163,9 +178,9 @@ def test_profile_declares_own_command_only():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         got = set(man["project"].get("scripts", {}))
 
-        if name == "gc_core":
+        if name in ("gc_core", "gc_mcp"):
             # gc-core — БИБЛИОТЕКА: команды в PATH не кладёт.
-            assert not got, "gc-core не должен объявлять точки входа"
+            assert not got, f"{sub} — библиотека, точек входа быть не должно"
         elif name == "gc_ua":
             # Мета тянет все профили, поэтому объявляет весь набор.
             assert got == set(OWN_COMMAND.values()) | SHARED_COMMANDS, sub
@@ -180,7 +195,7 @@ def test_foreign_commands_are_not_declared():
     равенство множеств и при ошибке скажет «не совпало», а этот назовёт лишнее.
     """
     for name, sub in MANIFESTS.items():
-        if name in ("gc_core", "gc_ua"):
+        if name in ("gc_core", "gc_ua", "gc_mcp"):
             continue
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         got = set(man["project"].get("scripts", {}))
@@ -196,6 +211,7 @@ def test_meta_pulls_every_profile():
     assert root["project"]["name"] == "gc-ua"
     assert set(root["project"]["dependencies"]) == {
         f"gc-core=={ver}", f"gc-cli=={ver}", f"gc-tui=={ver}", f"gc-server=={ver}",
+        f"gc-mcp=={ver}",
     }
 
 

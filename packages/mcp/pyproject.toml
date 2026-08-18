@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gc-mcp"
+# Версии ВСЕХ манифестов обязаны совпадать: профили пинят друг друга точно.
+version = "0.5.0"
+description = "GigaCode Universal Agent — менеджер MCP-серверов и курируемые рецепты"
+readme = "readme.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gc-core==0.5.0",
+    "pyyaml>=6.0.3",
+]
+
+# Команд НЕ объявляет: gc-mcp остаётся шимом в ядре, чтобы работать в любом
+# профиле и давать подсказку, когда рецепты не установлены (см. docs/packaging.md).
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/recommended_mcp"]
+
+# Исходники MCP-серверов лежат рядом с рецептами и в репозитории, и в колесе:
+# install.py резолвит install.source относительно каталога рецептов
+# (`../external/vendor/<name>-mcp`), поэтому цель обязана повторять путь из
+# манифеста. Иначе локальная установка тихо съедет в git-метод.
+[tool.hatch.build.targets.wheel.force-include]
+"../../external/vendor/ddgs-mcp" = "external/vendor/ddgs-mcp"
+
+[tool.pytest.ini_options]
+# Набор пакета самодостаточен: `cd packages/mcp && pytest` — доказательство,
+# что дистрибутив не тянет соседей.
+testpaths = ["tests"]
+asyncio_mode = "auto"

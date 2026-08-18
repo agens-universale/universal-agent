@@ -1,8 +1,9 @@
 """Путь к корню репозитория в editable-установке.
 
-`recommended_mcp/` — отдельный импортируемый пакет и лежит в корне репозитория,
-а не внутри `packages/*/src`. Чтобы `import recommended_mcp` работал из
-dev-окружения, корень нужно найти и положить на `sys.path`.
+Рецепты (`recommended_mcp`) — отдельный дистрибутив, и в рабочей копии их
+исходники лежат в `packages/mcp/src/`. Чтобы `import recommended_mcp` работал
+из dev-окружения, корень репозитория нужно найти и положить на `sys.path`
+вместе с каталогами исходников всех пакетов.
 """
 
 from __future__ import annotations
@@ -14,18 +15,23 @@ from pathlib import Path
 
 @lru_cache(maxsize=1)
 def repo_root() -> Path | None:
-    """Корень репозитория: каталог, где лежат `packages/` и `recommended_mcp/`.
+    """Корень репозитория, или None если код запущен не из рабочей копии.
 
-    Маркер — пара «каталог пакетов + recommended_mcp». До разбиения на модули
-    искали `src/mcp_runtime`; такого пути больше нет, поэтому проверка идёт по
-    раскладке репозитория, а не по конкретному модулю. Ветка с `src/`
-    оставлена для дореформенных рабочих копий.
+    Маркер — пара «каталог packages/ + pyproject.toml». Раньше маркером был
+    `recommended_mcp/` в корне, но рецепты уехали в packages/mcp, и та проверка
+    молча перестала бы находить корень: repo_root() вернул бы None, а вместе с
+    ним отвалились бы recipe_root(), автозапуск daemon'ов и бутстрап тестов.
+    Признак «есть packages/ рядом с pyproject.toml» переживает такие переезды.
+
+    Тот же маркер использует gc_core.bundled_assets.repo_root(); здесь
+    отдельная функция, потому что она кэширована и умеет legacy-раскладку.
     """
     here = Path(__file__).resolve()
     for parent in here.parents:
-        if not (parent / "recommended_mcp").is_dir():
-            continue
-        if (parent / "packages").is_dir() or (parent / "src" / "mcp_runtime").is_dir():
+        if (parent / "packages").is_dir() and (parent / "pyproject.toml").is_file():
+            return parent
+        # Дореформенные рабочие копии: до разбиения на пакеты был единый src/.
+        if (parent / "src" / "mcp_runtime").is_dir():
             return parent
     return None
 

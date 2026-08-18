@@ -236,17 +236,54 @@ def _install_docker(name: str, pkg_path: Path) -> None:
     )
 
 
-def _repo_subdir(source: Path, root: Path) -> str:
-    """Путь source внутри репо для git `#subdirectory`. source относителен
-    recipe_root (recommended_mcp/), напр.
-    ../external/vendor/office-mcp → external/vendor/office-mcp.
-    Ведёт за пределы репо (ведущий ..) или абсолютный → ошибка."""
-    rel = os.path.normpath(os.path.join(root.name, str(source))).replace(os.sep, "/")
-    if rel.startswith("../") or rel == ".." or os.path.isabs(rel):
+#: Где лежат исходники наших MCP относительно корня репозитория.
+#: Одно место на весь модуль: и для поиска локальных исходников, и для
+#: вычисления #subdirectory при git-установке.
+VENDOR_REL = "external/vendor"
+
+
+def _vendor_candidates(name: str, root: Path) -> list[Path]:
+    """Где искать исходники MCP по имени каталога.
+
+    Раньше в манифесте лежал ОТНОСИТЕЛЬНЫЙ путь (`../external/vendor/office-mcp`),
+    и он резолвился от каталога рецептов. Это работало, пока рецепты и исходники
+    были соседями в обеих раскладках. После переезда рецептов в packages/mcp/src
+    глубины разошлись: в колесе соседство сохраняется force-include'ом, а в
+    рабочей копии путь стал вести в никуда — и локальная установка молча
+    съезжала в git-метод, что для офлайн-контура означает отказ.
+
+    Поэтому в манифесте теперь ИМЯ каталога, а искать его умеет вот этот
+    список. Арифметики путей нет — переживёт следующий переезд.
+    """
+    candidates = [
+        # Колесо: site-packages/recommended_mcp/ и site-packages/external/vendor/
+        (root.parent / VENDOR_REL / name),
+    ]
+    repo = _repo_root(root)
+    if repo is not None:
+        candidates.append(repo / VENDOR_REL / name)
+    return [c.resolve() for c in candidates]
+
+
+def _repo_root(root: Path) -> Path | None:
+    """Корень рабочей копии по маркеру «packages/ рядом с pyproject.toml»."""
+    for parent in root.resolve().parents:
+        if (parent / "packages").is_dir() and (parent / "pyproject.toml").is_file():
+            return parent
+    return None
+
+
+def _repo_subdir(source: str, root: Path) -> str:
+    """Путь внутри репозитория для git `#subdirectory`.
+
+    source — имя каталога MCP (`office-mcp`), а не путь: см. _vendor_candidates.
+    """
+    name = str(source).strip().strip("/")
+    if "/" in name or name.startswith(".."):
         raise InstallError(
-            f"install.source {source!r} ведёт за пределы репо — git-установка невозможна"
+            f"install.source {source!r} должен быть ИМЕНЕМ каталога, а не путём"
         )
-    return rel
+    return f"{VENDOR_REL}/{name}"
 
 
 def _install_source(
@@ -260,7 +297,8 @@ def _install_source(
 ) -> None:
     if source is None:
         raise InstallError(f"mcp {name!r}: install.type=source requires install.source")
-    src_path = (root / source).resolve()
+    tried = _vendor_candidates(str(source), root)
+    src_path = next((c for c in tried if (c / "pyproject.toml").exists()), tried[0])
     if (src_path / "pyproject.toml").exists():
         # method-1: локальные исходники из клона
         cmd = [str(active_pip_python()), "-m", "pip", "install"]
@@ -280,7 +318,8 @@ def _install_source(
         subprocess.run(pip_argv("install", spec), check=True)
         return
     raise InstallError(
-        f"mcp {name!r}: pyproject.toml не найден в {src_path} и repo_url не задан "
+        f"mcp {name!r}: pyproject.toml не найден (просмотрено: "
+        f"{', '.join(str(c) for c in tried)}) и repo_url не задан "
         f"(нужен клон репо или repo_url в манифесте для git-установки)"
     )
 
