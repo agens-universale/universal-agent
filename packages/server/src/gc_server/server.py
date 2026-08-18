@@ -71,7 +71,6 @@ register_cleanup_threads_on_startup(
     app,
     server_config=SERVER_CONFIG,
     base_agent_config=BASE_AGENT_CONFIG,
-    project_root=PROJECT_ROOT,
     logger=logger,
 )
 
@@ -79,7 +78,6 @@ register_cleanup_threads_on_startup(
 register_swarm_cleanup_on_startup(
     app,
     swarm_config=SWARM_CONFIG,
-    project_root=PROJECT_ROOT,
     logger=logger,
 )
 

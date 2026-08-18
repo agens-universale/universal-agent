@@ -1,84 +1,47 @@
 import logging
 import os
-import subprocess
-import sys
 import threading
 import time
 from typing import Any, Dict
 
 from fastapi import FastAPI
 
-from gc_core.bundled_assets import repo_root
 from gc_core.thread_store import resolve_threads_dir
 
 _cleanup_thread_started = False
 _swarm_cleanup_thread_started = False
 
 
-def _cleanup_script(name: str, project_root: str, logger: logging.Logger) -> str | None:
-    """Путь к скрипту чистки, или ``None`` если его нет.
-
-    Скрипты живут в ``scripts/`` репозитория — это не ассеты. Раньше их искали
-    от ``bundled_root()``, который до разбиения на пакеты и был корнем
-    репозитория; после переезда ассетов путь стал вести в
-    ``packages/core/assets/scripts/``. Поток при этом исправно поднимался и раз
-    в интервал звал несуществующий файл: ``subprocess.run`` шёл с
-    ``check=False``, код возврата не проверялся, исключения не было — чистка
-    тредов просто не работала, молча.
-
-    Поэтому здесь две вещи: ищем в корне рабочей копии и **не поднимаем поток**,
-    если скрипта нет.
-    """
-    root = repo_root()
-    candidates = [os.path.join(str(root), "scripts", name)] if root is not None else []
-    candidates.append(os.path.join(project_root, "scripts", name))
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-    logger.error(
-        "скрипт чистки %s не найден (просмотрено: %s) — фоновая чистка не запущена",
-        name,
-        ", ".join(candidates) or "нет кандидатов",
-    )
-    return None
+# Чистки — обычные функции пакета, а не внешние скрипты. Раньше их искали
+# файлом в scripts/ репозитория: путь считался от bundled_root(), который до
+# разбиения на пакеты и был корнем репо, а после переезда ассетов стал вести в
+# packages/core/assets/scripts/. Поток при этом исправно поднимался и раз в
+# интервал звал несуществующий файл — subprocess.run шёл с check=False, код
+# возврата никто не смотрел, исключения не было. Чистка тредов не работала
+# вообще, молча. Вдобавок scripts/ не попадал НИ В ОДНО колесо, поэтому в
+# установленном профиле её и не могло быть.
 
 
 def _cleanup_threads_loop(
     *,
     interval_seconds: int,
     ttl_days: int,
-    script_path: str,
     threads_dir: str,
     logger: logging.Logger,
 ) -> None:
-    """
-    Фоновая периодическая чистка устаревших тредов.
+    """Фоновая периодическая чистка устаревших тредов.
 
     Поток в рамках текущего процесса, чтобы не блокировать async event loop.
     """
+    from gc_server.cleanup_threads import cleanup_threads
+
     while True:
         try:
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    script_path,
-                    "--threads-dir",
-                    threads_dir,
-                    "--ttl-days",
-                    str(ttl_days),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            # Раньше код возврата не смотрели вовсе: чистка могла падать каждый
-            # цикл, и в логе не появлялось ни строки.
-            if result.returncode != 0:
-                logger.error(
-                    "чистка тредов вернула код %s: %s",
-                    result.returncode,
-                    (result.stderr or "").strip()[:500],
-                )
+            stats = cleanup_threads(threads_dir, ttl_days)
+            if stats.get("missing_dir"):
+                logger.warning("каталог тредов не найден: %s", threads_dir)
+            elif stats["errors"]:
+                logger.error("чистка тредов: %s ошибок, %s", stats["errors"], stats)
         except Exception as e:  # noqa: BLE001
             logger.warning("threads cleanup failed: %r", e)
 
@@ -90,7 +53,6 @@ def register_cleanup_threads_on_startup(
     *,
     server_config: Dict[str, Any],
     base_agent_config: Dict[str, Any],
-    project_root: str,
     logger: logging.Logger,
 ) -> None:
     """
@@ -128,9 +90,6 @@ def register_cleanup_threads_on_startup(
             return
         interval_seconds, ttl_days = cfg
 
-        script_path = _cleanup_script("cleanup_threads_by_updated_at.py", project_root, logger)
-        if script_path is None:
-            return
         threads_dir = resolve_threads_dir(base_agent_config)
 
         threading.Thread(
@@ -138,7 +97,6 @@ def register_cleanup_threads_on_startup(
             kwargs={
                 "interval_seconds": interval_seconds,
                 "ttl_days": ttl_days,
-                "script_path": script_path,
                 "threads_dir": threads_dir,
                 "logger": logger,
             },
@@ -150,32 +108,16 @@ def _swarm_cleanup_loop(
     *,
     interval_seconds: int,
     ttl_hours: float,
-    script_path: str,
     swarm_threads_dir: str,
     sandbox_root_dir: str,
     logger: logging.Logger,
 ) -> None:
     """Фоновая чистка swarm_threads/ + .swarm_sandboxes/ (M6, шаг 3.2)."""
+    from gc_server.swarm.cleanup import cleanup_threads as cleanup_swarm
+
     while True:
         try:
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    script_path,
-                    "--threads-dir", swarm_threads_dir,
-                    "--sandbox-root-dir", sandbox_root_dir,
-                    "--ttl-hours", str(ttl_hours),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                logger.error(
-                    "чистка swarm-тредов вернула код %s: %s",
-                    result.returncode,
-                    (result.stderr or "").strip()[:500],
-                )
+            cleanup_swarm(swarm_threads_dir, sandbox_root_dir, ttl_hours)
         except Exception as e:  # noqa: BLE001
             logger.warning("swarm cleanup failed: %r", e)
         time.sleep(interval_seconds)
@@ -185,7 +127,6 @@ def register_swarm_cleanup_on_startup(
     app: FastAPI,
     *,
     swarm_config: Dict[str, Any],
-    project_root: str,
     logger: logging.Logger,
 ) -> None:
     """Подключает шуруджи для TTL-очистки swarm-каталогов (шаг 3.2)."""
@@ -214,9 +155,6 @@ def register_swarm_cleanup_on_startup(
             return
         _swarm_cleanup_thread_started = True
 
-        script_path = _cleanup_script("cleanup_swarm_threads.py", project_root, logger)
-        if script_path is None:
-            return
         swarm_threads_dir = str(swarm_config["threads_dir"])
         sandbox_root_dir = str(swarm_config["sandbox_root_dir"])
 
@@ -225,7 +163,6 @@ def register_swarm_cleanup_on_startup(
             kwargs={
                 "interval_seconds": interval_seconds,
                 "ttl_hours": ttl_hours,
-                "script_path": script_path,
                 "swarm_threads_dir": swarm_threads_dir,
                 "sandbox_root_dir": sandbox_root_dir,
                 "logger": logger,

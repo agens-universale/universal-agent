@@ -115,8 +115,8 @@ swarm:
   # Какой sandbox-tool. На данный момент поддерживается только bubblewrap.
   sandbox_tool: "bubblewrap"
 
-  # Путь к wrapper-скрипту (по умолчанию scripts/run-cli-in-sandbox.sh в репо).
-  wrapper_path: "/opt/gc-cli/scripts/run-cli-in-sandbox.sh"
+  # Путь к wrapper-скрипту (по умолчанию gc_server/swarm/run-cli-in-sandbox.sh в репо).
+  wrapper_path: "/opt/gc-cli/gc_server/swarm/run-cli-in-sandbox.sh"
 
   # Venv c gc-cli и зависимостями. Биндится --ro-bind внутрь песочницы.
   # ПРИНИМАЕТСЯ ТОЛЬКО АБСОЛЮТНЫЙ путь; пустое или относительное игнорируется.

@@ -4,7 +4,6 @@
 sandboxes; --dry-run; обработку отсутствующих/невалидных meta.
 """
 
-import importlib.util
 import json
 import os
 import sys
@@ -12,13 +11,12 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from gc_testkit.paths import REPO
 
-# Импортируем напрямую из scripts/ — не пакет.
-SCRIPT_PATH = str(REPO / "scripts" / "cleanup_swarm_threads.py")
-_spec = importlib.util.spec_from_file_location("cleanup_swarm_threads", SCRIPT_PATH)
-cleanup_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(cleanup_mod)
+# Обычный импорт: чистка стала модулем пакета. Раньше файл лежал в scripts/ и
+# грузился через spec_from_file_location по пути от корня репозитория — а
+# scripts/ не попадал ни в одно колесо, поэтому в установленном профиле такой
+# чистки не существовало вовсе.
+from gc_server.swarm import cleanup as cleanup_mod
 
 
 def _make_meta(updated_at: datetime) -> dict:
