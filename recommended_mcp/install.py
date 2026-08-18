@@ -238,7 +238,8 @@ def _install_docker(name: str, pkg_path: Path) -> None:
 
 def _repo_subdir(source: Path, root: Path) -> str:
     """Путь source внутри репо для git `#subdirectory`. source относителен
-    recipe_root (recommended_mcp/), напр. ../external/office-mcp → external/office-mcp.
+    recipe_root (recommended_mcp/), напр.
+    ../external/vendor/office-mcp → external/vendor/office-mcp.
     Ведёт за пределы репо (ведущий ..) или абсолютный → ошибка."""
     rel = os.path.normpath(os.path.join(root.name, str(source))).replace(os.sep, "/")
     if rel.startswith("../") or rel == ".." or os.path.isabs(rel):

@@ -1,7 +1,7 @@
 # duckduckgo_search — ddgs-mcp
 
 Тонкая MCP-обёртка над библиотекой [DDGS](https://github.com/deedy5/ddgs) —
-исходник в `external/ddgs-mcp/` репозитория.
+исходник в `external/vendor/ddgs-mcp/` репозитория.
 Устанавливается из исходника через `recommended_mcp/install.py` (рецепт `source`).
 
 > Ранее использовался пакет `ddgs-mcp==0.1.0` с PyPI, который требовал Python <3.14.
@@ -24,7 +24,7 @@ python recommended_mcp/install.py
 Или вручную (из корня репозитория):
 
 ```bash
-pip install external/ddgs-mcp
+pip install external/vendor/ddgs-mcp
 ```
 
 После установки в PATH активного venv появится команда `ddgs-mcp`.
@@ -90,5 +90,5 @@ env:
 
 ## Обновление
 
-Обнови зависимость `ddgs` в `external/ddgs-mcp/pyproject.toml` и снова
+Обнови зависимость `ddgs` в `external/vendor/ddgs-mcp/pyproject.toml` и снова
 запусти `python recommended_mcp/install.py`.

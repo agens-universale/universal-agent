@@ -76,8 +76,8 @@ def test_core_wheel_bundles_assets(wheels):
         assert needed in names, f"{needed} нет в колесе ядра; образец {sorted(names)[:10]}"
     assert any(n.startswith("gc_core/assets/skills/") for n in names), "skills/ отсутствует"
     assert any(n.startswith("recommended_mcp/") and n.endswith(".py") for n in names)
-    assert "external/ddgs-mcp/pyproject.toml" in names, "external/ddgs-mcp не поставляется"
-    assert "external/ddgs-mcp/src/ddgs_mcp/server.py" in names
+    assert "external/vendor/ddgs-mcp/pyproject.toml" in names, "ddgs-mcp не поставляется"
+    assert "external/vendor/ddgs-mcp/src/ddgs_mcp/server.py" in names
 
 
 def test_core_wheel_does_not_squat_generic_names(wheels):

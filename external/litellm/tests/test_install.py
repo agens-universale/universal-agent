@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Make litellm/install.py importable as a module (no package dunder for litellm/).
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "litellm"))
+# Тесты лежат внутри самой батарейки, поэтому её каталог — родитель.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import install as install_mod  # type: ignore[import-not-found]
 

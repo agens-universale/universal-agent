@@ -41,7 +41,10 @@ packages = ["src/gc_core"]
 # с ним соседом, потому что манифест ссылается на ../external/<name>-mcp.
 # Их судьба решается отдельно, в задаче про вынос MCP в свой дистрибутив.
 "../../recommended_mcp" = "recommended_mcp"
-"../../external/ddgs-mcp" = "external/ddgs-mcp"
+# Цель повторяет путь из манифеста (source: ../external/vendor/ddgs-mcp),
+# иначе раскладки репозитория и колеса разъедутся: install.py резолвит
+# source относительно каталога рецептов, а он в обеих раскладках рядом.
+"../../external/vendor/ddgs-mcp" = "external/vendor/ddgs-mcp"
 
 [tool.pytest.ini_options]
 # Набор пакета самодостаточен: `cd packages/core && pytest` — доказательство,
