@@ -19,14 +19,27 @@ from gc_core.security.protected_paths import classify_path, protected_paths, pro
 _TOKEN_RE = re.compile(r"[\s=;&|()<>]+")
 
 
+#: Разделители команд в shell. Резать по ним НАДО до токенизации: shlex их
+#: разделителями не считает, и `rm -rf .gc; echo x` даёт токен `.gc;` — с
+#: точкой с запятой внутри. Проверка пути такой токен не узнаёт, и tripwire
+#: пропускал команду, которую с `&&` блокировал (найдено 18.08.2026: агент
+#: удалил .gc, приписав `; echo "exit=$?"`).
+_SHELL_SEPARATORS = re.compile(r"[;&|\n\r]+")
+
+
 def _tokens(command: str) -> list[str]:
     # posix=True on POSIX (backslash as escape char); posix=False on Windows
     # (backslash is path separator, not escape — shlex would strip it otherwise).
     posix = os.name != "nt"
-    try:
-        return shlex.split(command, posix=posix)
-    except ValueError:
-        return [t for t in _TOKEN_RE.split(command) if t]
+    out: list[str] = []
+    for segment in _SHELL_SEPARATORS.split(command):
+        if not segment.strip():
+            continue
+        try:
+            out.extend(shlex.split(segment, posix=posix))
+        except ValueError:
+            out.extend(t for t in _TOKEN_RE.split(segment) if t)
+    return out
 
 
 def scan_command_for_protected(command: str, *, cwd: str, extra=None) -> str:
