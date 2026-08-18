@@ -54,6 +54,28 @@ def test_build_report_empty_returns_none():
     assert build_run_usage_report(UsageAccount(), _PRICING, "m") is None
 
 
+def test_build_report_fact_currency_follows_endpoint():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 250_000, 40_000, 0, cost=12.5, billed=True)
+    ru = build_run_usage_report(acc, _PRICING, "m",
+                                "https://routerai.ru/api/v1/chat/completions")
+    assert "₽" in ru and "$" not in ru
+    usd = build_run_usage_report(acc, _PRICING, "m",
+                                 "https://openrouter.ai/api/v1/chat/completions")
+    assert "$" in usd
+
+
+def test_build_dict_fact_currency_follows_endpoint():
+    from usage.report import build_run_usage_dict
+
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 250_000, 40_000, 0, cost=12.5, billed=True)
+    d = build_run_usage_dict(acc, _PRICING, "m",
+                             "https://routerai.ru/api/v1/chat/completions")
+    assert d["categories"][CATEGORY_MAIN]["cost_parts"][0]["currency"] == "₽"
+    assert "₽" in d["cost"]["by_currency"]
+
+
 def test_state_exposes_usage_and_last_run_in_memory():
     # На свежем State: usage пустой, last_run_usage = None (прогон не завершался).
     from states import State

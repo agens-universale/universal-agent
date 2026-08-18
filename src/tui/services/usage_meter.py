@@ -15,7 +15,7 @@ from typing import Any, Optional
 from rich.text import Text
 
 from usage.account import UsageAccount
-from usage.cost import PROVIDER_CURRENCY, CostReport, compute_cost
+from usage.cost import CostReport, compute_cost
 from usage.report import format_money, format_tokens
 
 from tui.palette import DIM, INK
@@ -27,93 +27,70 @@ _VALUE = INK
 _SEP = " · "
 
 
-def _dominant_currency(report: CostReport) -> str:
-    """Валюта с наибольшей долей токенов (суммы в разных валютах несравнимы,
-    токены — всегда). При равенстве долей — валюта факта (детерминированность)."""
-    tokens = report.tokens_by_currency
-    if not tokens:
-        return next(iter(report.by_currency))
-    max_tokens = max(tokens.values())
-    candidates = [c for c, t in tokens.items() if t == max_tokens]
-    if PROVIDER_CURRENCY in candidates:
-        return PROVIDER_CURRENCY
-    return candidates[0]
+def _cost_display(report: CostReport, *, compact: bool) -> Optional[str]:
+    """Строка стоимости («2.00$+200.0₽~?») или None, если денег в отчёте нет.
 
+    Показываются ВСЕ валюты, ни одна не сворачивается: доля токенов не
+    пропорциональна деньгам, поэтому свести картину к одной цифре значит скрыть
+    неизвестно какую часть суммы — основная могла оказаться как раз в спрятанной
+    валюте. Порядок валют задаёт отчёт (см. ``CostReport.by_currency``).
 
-def _headline_amount(report: CostReport, currency: str | None = None) -> Optional[tuple[float, str, str]]:
-    """(сумма, валюта, маркеры) для компактного показа стоимости или None.
+    Знаки: «+» соединяет части суммы; «~» — часть суммы посчитана по тарифу, а не
+    измерена (ставится, только когда в отчёте есть ОБЕ стороны — иначе не сообщает
+    ничего); «?» — есть трата, стоимость которой узнать неоткуда.
 
-    ``currency`` — навязанная извне валюта (для парного показа «запрос»/«сессия»
-    в одной валюте, см. ``usage_segments``); если её нет в отчёте — None (только
-    токены у вызывающего, валюту НЕ переключаем). Без навязанной валюты — валюта
-    блока выбирается по ``_dominant_currency`` (доля токенов, не сумм — суммы в
-    разных валютах несравнимы). Маркеры: «~» — в отчёте есть ОБЕ стороны (и факт,
-    и тариф) — часть суммы посчитана по тарифу, а не измерена (если сторона всего
-    одна — тильда ничего не сообщает и не ставится); «+» — в показанную цифру
-    вошло не всё (либо есть вызовы без цены вовсе, либо часть денег осталась в
-    другой валюте — ``multi_currency`` — и в headline-сумму не попала).
+    ``compact`` — формат футера, без пробела перед валютой («0.5₽», не «0.5 ₽»).
     """
     if not report.has_cost:
         return None
-    if currency is None:
-        currency = _dominant_currency(report)
-    elif currency not in report.by_currency:
-        return None
     has_provider = any(p.source == "provider" for c in report.categories for p in c.parts)
     has_tariff = any(p.source == "tariff" for c in report.categories for p in c.parts)
-    amount = report.by_currency[currency]
     marks = ""
     if has_provider and has_tariff:
         marks += "~"
-    if report.has_unpriced or report.multi_currency:
-        marks += "+"
-    return (amount, currency, marks)
+    if report.has_unpriced:
+        marks += "?"
+    chunks = []
+    for currency, amount in report.by_currency.items():
+        money = format_money(amount, currency)
+        chunks.append(money.replace(" ", "") if compact else money)
+    return "+".join(chunks) + marks
 
 
-def format_nonzero_cost(meta: Any, pricing: Any, model: str | None) -> Optional[str]:
+def format_nonzero_cost(meta: Any, pricing: Any, model: str | None,
+                        endpoint_url: str | None = None) -> Optional[str]:
     """Стоимость сессии («35.1 ₽», «10.5 $~») или None, если считать нечего / 0.
 
     Для списка /sessions: показываем даже крошечную ненулевую сумму (как
     «<0.01 $», а не молча прячем). Источник — персистентный ``meta.token_usage``.
+
+    ``endpoint_url`` — текущий адрес бэкенда: нужен для сумм из старых сессий,
+    записанных до того, как валюта стала фиксироваться на вызове.
     """
     account = UsageAccount.from_meta(meta)
     if account.is_empty():
         return None
-    report: CostReport = compute_cost(account, pricing, model)
-    headline = _headline_amount(report)
-    if headline is None:
+    report: CostReport = compute_cost(account, pricing, model, endpoint_url)
+    if not any(amount > 0 for amount in report.by_currency.values()):
         return None
-    amount, currency, marks = headline
-    if amount <= 0:
-        return None
-    return f"{format_money(amount, currency)}{marks}"
+    return _cost_display(report, compact=False)
 
 
-def _segment_from_report(label: str, report: CostReport, currency: str | None = None) -> tuple[str, str]:
+def _segment_from_report(label: str, report: CostReport) -> tuple[str, str]:
     """(label, «<tok>» либо «<tok>/<cost>») по уже готовому отчёту."""
     tokens = format_tokens(report.total_input + report.total_output)
-    headline = _headline_amount(report, currency)
-    if headline is not None:
-        amount, headline_currency, marks = headline
-        # Компактно для футера: без пробела перед валютой («0.5₽», не «0.5 ₽»).
-        value = f"{tokens}/{format_money(amount, headline_currency).replace(' ', '')}{marks}"
-    else:
-        value = tokens
-    return (label, value)
+    cost = _cost_display(report, compact=True)
+    return (label, f"{tokens}/{cost}" if cost else tokens)
 
 
 def _segment(label: str, meta: Any, pricing: Any, model: str | None,
-             currency: str | None = None) -> Optional[tuple[str, str]]:
-    """(label, «<tok>» либо «<tok>/<cost>») или None, если в meta нет вызовов.
-
-    ``currency`` — навязанная валюта (парный показ с другим сегментом), см.
-    ``_headline_amount``.
-    """
+             endpoint_url: str | None = None) -> Optional[tuple[str, str]]:
+    """(label, «<tok>» либо «<tok>/<cost>») или None, если в meta нет вызовов."""
     account = UsageAccount.from_meta(meta)
     if account.is_empty():
         return None
-    report: CostReport = compute_cost(account, pricing, model)
-    return _segment_from_report(label, report, currency)
+    report: CostReport = compute_cost(account, pricing, model, endpoint_url)
+    return _segment_from_report(label, report)
 
 
 def _to_text(seg: tuple[str, str] | None) -> Text | None:
@@ -128,9 +105,9 @@ def _to_text(seg: tuple[str, str] | None) -> Text | None:
 
 
 def _segment_text(label: str, meta: Any, pricing: Any, model: str | None,
-                   currency: str | None = None) -> Text | None:
+                   endpoint_url: str | None = None) -> Text | None:
     """Rich-Text одного сегмента «<label> <tok>[/<cost>]» или None."""
-    return _to_text(_segment(label, meta, pricing, model, currency))
+    return _to_text(_segment(label, meta, pricing, model, endpoint_url))
 
 
 def _join(parts: list[Text], sep: str = _SEP) -> Text:
@@ -147,24 +124,21 @@ def usage_segments(
     request_meta: Any,
     pricing: Any,
     model: str | None,
+    endpoint_url: str | None = None,
 ) -> tuple[Text | None, Text | None]:
     """Раздельные сегменты ``(request_text, session_text)`` для адаптивной вёрстки.
 
     Сессия пуста (провайдер не вернул токенов) → ``(None, None)`` (весь блок скрыт).
     Иначе session_text всегда есть; request_text может быть None (запроса ещё нет).
 
-    Валюта решается один раз — по отчёту сессии (сессия — надмножество запроса) —
-    и применяется к обоим сегментам: иначе «запрос» и «сессия» могли бы оказаться
-    в разных валютах в одной строке без пояснения. Если в запросе денег в этой
-    валюте нет — он остаётся с одними токенами, на другую валюту не переключается."""
+    Каждый сегмент показывает свои валюты: у запроса их обычно меньше, чем у
+    сессии, и подгонять их друг под друга нельзя — это скрыло бы часть суммы."""
     session_account = UsageAccount.from_meta(session_meta)
     if session_account.is_empty():
         return (None, None)
-    session_report: CostReport = compute_cost(session_account, pricing, model)
-    session_headline = _headline_amount(session_report)
-    currency = session_headline[1] if session_headline is not None else None
-    session = _to_text(_segment_from_report("сессия", session_report, currency))
-    request = _segment_text("запрос", request_meta, pricing, model, currency)
+    session_report: CostReport = compute_cost(session_account, pricing, model, endpoint_url)
+    session = _to_text(_segment_from_report("сессия", session_report))
+    request = _segment_text("запрос", request_meta, pricing, model, endpoint_url)
     return (request, session)
 
 
@@ -197,9 +171,11 @@ def render_usage_meter(
     last_run_meta: Any,
     pricing: Any,
     model: str | None,
+    endpoint_url: str | None = None,
 ) -> Text | None:
     """Rich-Text «запрос …/… · сессия …/…» одной строкой или None (совместимость)."""
-    request, session = usage_segments(session_meta, last_run_meta, pricing, model)
+    request, session = usage_segments(session_meta, last_run_meta, pricing, model,
+                                      endpoint_url)
     if session is None:
         return None
     return _join([s for s in (request, session) if s is not None])
