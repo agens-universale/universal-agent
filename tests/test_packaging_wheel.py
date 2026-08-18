@@ -155,52 +155,59 @@ def test_cli_wheel_contents(wheels):
     assert "gc_cli/cli.py" in names
 
 
-#: Своя команда каждого профиля. `uv tool install` экспортирует в PATH скрипты
-#: ТОЛЬКО запрошенного дистрибутива, поэтому свою команду профиль обязан
-#: объявить сам.
-OWN_COMMAND = {"gc_cli": "gc-cli", "gc_tui": "gc-ua", "gc_server": "gc-serve"}
+#: Команды каждого дистрибутива. `uv tool install` экспортирует в PATH скрипты
+#: ТОЛЬКО запрошенного дистрибутива, поэтому свою команду объявляет он сам.
+OWN_COMMANDS = {
+    "gc_cli": {"gc-cli"},
+    "gc_tui": {"gc-ua"},
+    "gc_server": {"gc-serve"},
+    "gc_mcp": {"gc-mcp", "gc-mcp-install"},
+}
 
-#: Общие для всех профилей: это чистое ядро (gc_core.mcp_runtime.*), работает в
-#: любом профиле. Пересечение симлинка тут безвредно — какой профиль ни выиграл
-#: бы, команда отработает одинаково.
-SHARED_COMMANDS = {"gc-mcp", "gc-mcp-install"}
 
+def test_each_distribution_declares_only_its_own_commands():
+    """Ни одно имя команды не объявлено двумя дистрибутивами.
 
-def test_profile_declares_own_command_only():
-    """Профиль не должен объявлять чужие команды.
+    Это не гигиена, а работоспособность: uv владеет симлинком ЭКСКЛЮЗИВНО.
+    Пока gc-mcp/gc-mcp-install объявляли все три профиля, установка второго
+    профиля падала с `error: Executables already exist`, а `uv tool uninstall`
+    одного профиля уносил gc-mcp у другого. Проверено установкой 18.08.2026 —
+    прежний комментарий «пересечение симлинка безвредно» был неверен.
 
-    Раньше все четыре объявляли одинаковый набор из пяти имён, и два
-    установленных профиля дрались за одни симлинки: второй перезаписывал первый,
-    а `uv tool uninstall` одного сносил команды другого (обе ловушки наблюдались
-    живьём 18.08.2026). Теперь имена разведены — пересекаются только gc-mcp*.
+    Мета gc-ua — исключение по построению: она тянет все профили и объявляет
+    весь набор через собственный лаунчер. Ставить её вместе с отдельными
+    профилями и не предполагается.
     """
     for name, sub in MANIFESTS.items():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         got = set(man["project"].get("scripts", {}))
 
-        if name in ("gc_core", "gc_mcp"):
+        if name == "gc_core":
             # gc-core — БИБЛИОТЕКА: команды в PATH не кладёт.
             assert not got, f"{sub} — библиотека, точек входа быть не должно"
         elif name == "gc_ua":
-            # Мета тянет все профили, поэтому объявляет весь набор.
-            assert got == set(OWN_COMMAND.values()) | SHARED_COMMANDS, sub
+            expected = set().union(*OWN_COMMANDS.values())
+            assert got == expected, sub
         else:
-            assert got == {OWN_COMMAND[name]} | SHARED_COMMANDS, sub
+            assert got == OWN_COMMANDS[name], sub
 
 
-def test_foreign_commands_are_not_declared():
-    """Явно: в манифесте листа нет команд соседей.
-
-    Отдельным тестом, потому что это и есть суть правки — предыдущий проверяет
-    равенство множеств и при ошибке скажет «не совпало», а этот назовёт лишнее.
-    """
+def test_command_names_do_not_collide_between_leaf_distributions():
+    """Явно: два листовых дистрибутива не претендуют на одно имя в PATH."""
+    seen: dict[str, str] = {}
     for name, sub in MANIFESTS.items():
-        if name in ("gc_core", "gc_ua", "gc_mcp"):
+        if name in ("gc_core", "gc_ua"):
             continue
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
-        got = set(man["project"].get("scripts", {}))
-        foreign = {c for k, c in OWN_COMMAND.items() if k != name} & got
-        assert not foreign, f"{sub} объявляет чужие команды: {sorted(foreign)}"
+        for cmd in man["project"].get("scripts", {}):
+            assert cmd not in seen, (
+                f"команду {cmd!r} объявляют и {seen[cmd]}, и {sub} — "
+                f"uv откажется ставить второй дистрибутив"
+            )
+            seen[cmd] = sub
+
+
+
 
 
 def test_meta_pulls_every_profile():
