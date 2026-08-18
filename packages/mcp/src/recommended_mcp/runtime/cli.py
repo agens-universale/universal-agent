@@ -11,7 +11,7 @@ from gc_core.mcp_runtime.recipes import RecipesUnavailable, import_recipes
 
 def _load_manifest_entries(config: str | None = None):
     """(entries, recipe_root). Резолвит манифест (config=None → дефолтная цепочка)."""
-    from gc_core.mcp_runtime.manifest_resolve import resolve_install_manifest_path, recipe_root
+    from recommended_mcp.runtime.manifest_resolve import resolve_install_manifest_path, recipe_root
     load_manifest = import_recipes("manifest").load_manifest
     path = resolve_install_manifest_path(config)
     return load_manifest(path), recipe_root()
@@ -25,7 +25,7 @@ def _agent_dep_dir():
 def _load_repo_url(config: Optional[str] = None):
     from gc_core.mcp_runtime.repo_path import ensure_repo_on_sys_path
     ensure_repo_on_sys_path()
-    from gc_core.mcp_runtime.manifest_resolve import resolve_install_manifest_path
+    from recommended_mcp.runtime.manifest_resolve import resolve_install_manifest_path
     _r = import_recipes('manifest')
     load_repo_url = _r.load_repo_url
     return load_repo_url(resolve_install_manifest_path(config))
@@ -36,7 +36,7 @@ def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False,
     """Поставить один рецепт в MCP-venv. True если успех."""
     _r = import_recipes('install')
     run_install_entries = _r.run_install_entries
-    from gc_core.mcp_runtime.venv import ensure_mcp_venv, pip_install_target
+    from recommended_mcp.runtime.venv import ensure_mcp_venv, pip_install_target
     ensure_mcp_venv()
     with pip_install_target():
         results = run_install_entries([entry], root, agent_dep_dir, editable=editable,
@@ -45,7 +45,7 @@ def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False,
 
 
 def _wire_one(entry, root: Path, agent_dep_dir) -> None:
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     _r = import_recipes('install')
     _node_install_paths = _r._node_install_paths
     from gc_core.config_modules.env_vars import gc_paths
@@ -118,7 +118,7 @@ def descriptions(config: Optional[str] = None) -> dict:
 def wired_names(config: Optional[str] = None) -> list:
     """Имена MCP, уже подключённых в конфиге (быстро, без subprocess) — для онбординга:
     отметить как установленные и не предлагать заново."""
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     return list(wiring.wired_servers().keys())
 
 
@@ -142,7 +142,7 @@ def wire(name: str, config: Optional[str] = None) -> bool:
 
 def unwire(name: str) -> bool:
     """Отключить MCP (убрать из config.local.yml). True если был подключён."""
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     return wiring.unwire(name)
 
 
@@ -155,7 +155,7 @@ def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
     """yes = установлен; — = проверили, не установлен; ? = проверить не удалось."""
     _r = import_recipes('install')
     _dist_name, npm_global_has = _r._dist_name, _r.npm_global_has
-    from gc_core.mcp_runtime.venv import query_installed_version
+    from recommended_mcp.runtime.venv import query_installed_version
     itype = entry.install.type
     if itype in ("pypi", "source", "wheel"):
         name = _dist_name(entry, root)
@@ -173,7 +173,7 @@ def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
 
 def _cmd_list() -> int:
     entries, root = _load_manifest_entries()
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     dep = _agent_dep_dir()
     wired = wiring.wired_servers()
     print(f"{'NAME':22} {'TRANSPORT':14} {'INSTALLED':10} WIRED")
@@ -188,7 +188,7 @@ def _cmd_list() -> int:
 
 
 def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     _r = import_recipes('install')
     find_entry = _r.find_entry
     if wiring.unwire(name):
@@ -204,7 +204,7 @@ def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
 
 
 def _cmd_remove(name: Optional[str], keep_package: bool, remove_all: bool = False) -> int:
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     if remove_all:
         names = list(wiring.wired_servers().keys())
         for n in names:
@@ -327,7 +327,7 @@ def installed_state(name: str, config: Optional[str] = None, *, manifest=None) -
     entries, root = manifest if manifest is not None else _load_manifest_entries(config)
     _r = import_recipes('install')
     find_entry, _dist_name = _r.find_entry, _r._dist_name
-    from gc_core.mcp_runtime.venv import query_installed_version
+    from recommended_mcp.runtime.venv import query_installed_version
     entry = find_entry(entries, name)
     if entry is None:
         return {"installed": None, "version": None, "update": None}

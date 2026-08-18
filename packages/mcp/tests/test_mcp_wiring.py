@@ -10,7 +10,7 @@ def _gc(tmp_path):
 
 
 def test_resolve_placeholders():
-    from gc_core.mcp_runtime.wiring import resolve_placeholders
+    from recommended_mcp.runtime.wiring import resolve_placeholders
     block = {"command": "{npx}", "args": ["-y", "{cache}/x"], "transport": "stdio"}
     out = resolve_placeholders(block, npx="/n/npx", cache="/c")
     assert out == {"command": "/n/npx", "args": ["-y", "/c/x"], "transport": "stdio"}
@@ -25,7 +25,7 @@ def test_wire_and_unwire(tmp_path, monkeypatch):
         "office:\n  transport: stdio\n  command: office-mcp\n  server-name: office\n",
         encoding="utf-8",
     )
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     wiring.wire_snippet("office", recipe, npx="/n/npx", cache="/c")
 
     managed = yaml.safe_load((tmp_path / "cfg" / "config.local.yml").read_text(encoding="utf-8"))
@@ -43,7 +43,7 @@ def test_wire_snippet_rejects_multi_key(tmp_path, monkeypatch):
     recipe.mkdir(parents=True)
     (recipe / "agent_config.snippet.yml").write_text(
         "a:\n  transport: stdio\nb:\n  transport: stdio\n", encoding="utf-8")
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     import pytest
     with pytest.raises(ValueError):
         wiring.wire_snippet("bad", recipe, npx="/n", cache="/c")
@@ -53,7 +53,7 @@ def test_wire_playwright_resolves_real_paths(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars, "gc_paths", lambda: {"config": tmp_path / "cfg",
         "data": tmp_path / "d", "cache": tmp_path / "cache", "state": tmp_path / "s"})
-    from gc_core.mcp_runtime import wiring
+    from recommended_mcp.runtime import wiring
     # Путь от корня репозитория, а не от cwd: набор ядра гоняется и из
     # packages/core, где относительный путь никуда не ведёт.
     from gc_testkit.paths import RECIPES

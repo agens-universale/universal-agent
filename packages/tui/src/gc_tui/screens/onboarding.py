@@ -45,7 +45,7 @@ class OnboardingScreen(Screen):
         from gc_core.model_picker import fetch_models
         self._fetch = fetch or fetch_models
         if mcp is None:
-            from gc_core.mcp_runtime import cli as mcp_mod
+            from recommended_mcp.runtime import cli as mcp_mod
             self._mcp = mcp_mod
         else:
             self._mcp = mcp

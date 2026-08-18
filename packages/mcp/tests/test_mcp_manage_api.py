@@ -1,4 +1,4 @@
-from gc_core.mcp_runtime import cli as cli
+from recommended_mcp.runtime import cli as cli
 
 
 def test_wire_unknown_name_returns_false(monkeypatch):
@@ -18,7 +18,7 @@ def test_wire_known_name_calls_wire_one(monkeypatch):
 
 
 def test_unwire_delegates_to_wiring(monkeypatch):
-    from gc_core.mcp_runtime import wiring as wiring
+    from recommended_mcp.runtime import wiring as wiring
     monkeypatch.setattr(wiring, "unwire", lambda name: name == "office")
     assert cli.unwire("office") is True
     assert cli.unwire("ghost") is False
@@ -55,7 +55,7 @@ def test_installed_state_installed_with_version(monkeypatch):
     monkeypatch.setattr(cli, "_agent_dep_dir", lambda: "dep")
     monkeypatch.setattr(cli, "_installed_status", lambda e, r, d: "yes")
     import recommended_mcp.install as inst
-    from gc_core.mcp_runtime import venv as venv
+    from recommended_mcp.runtime import venv as venv
     monkeypatch.setattr(inst, "_dist_name", lambda e, root: "office-mcp")
     monkeypatch.setattr(venv, "query_installed_version", lambda d: "0.3.1")
     st = cli.installed_state("office")

@@ -20,7 +20,7 @@ pytest.importorskip("textual")
 
 from gc_core import app_version
 from gc_core import config_sync
-from gc_core.mcp_runtime import cli as mcp_cli_mod
+from recommended_mcp.runtime import cli as mcp_cli_mod
 from gc_core import upgrade_gate
 from gc_tui.screens.post_update import PostUpdateScreen
 

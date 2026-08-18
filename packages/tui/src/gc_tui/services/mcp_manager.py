@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from gc_core.mcp_runtime import cli as _cli
+from recommended_mcp.runtime import cli as _cli
 
 
 @dataclass(frozen=True)

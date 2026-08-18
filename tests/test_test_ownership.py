@@ -24,12 +24,14 @@ import pytest
 from gc_testkit.paths import REPO
 
 #: Что каждому набору разрешено импортировать помимо gc_testkit и сторонних.
+#: Профили приложения зависят от gc-mcp (менеджер MCP), поэтому рецепты им
+#: доступны. Ядру — нет: оно тянет их лениво и обязано работать без них.
 ALLOWED = {
     "core": {"gc_core"},
     "mcp": {"gc_core", "recommended_mcp"},
-    "cli": {"gc_core", "gc_cli"},
-    "server": {"gc_core", "gc_server"},
-    "tui": {"gc_core", "gc_tui"},
+    "cli": {"gc_core", "gc_cli", "recommended_mcp"},
+    "server": {"gc_core", "gc_server", "recommended_mcp"},
+    "tui": {"gc_core", "gc_tui", "recommended_mcp"},
 }
 
 OUR_PACKAGES = {"gc_core", "gc_cli", "gc_tui", "gc_server", "recommended_mcp"}

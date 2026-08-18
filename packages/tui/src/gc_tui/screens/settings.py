@@ -188,7 +188,7 @@ class SettingsScreen(Screen):
             v.append(display_value(model) if model else "—", style=DIM)
         elif i == _MCP:
             try:
-                from gc_core.mcp_runtime import cli as mcp_mod
+                from recommended_mcp.runtime import cli as mcp_mod
                 n = len(mcp_mod.wired_names())
             except Exception:
                 n = 0
@@ -321,7 +321,7 @@ class SettingsScreen(Screen):
             return ("✓", OK) if model in ids else ("—", DEEP_DIM)   # не в списке → —, не !
         if i == _MCP:
             try:
-                from gc_core.mcp_runtime import cli as mcp_mod
+                from recommended_mcp.runtime import cli as mcp_mod
                 return ("✓", OK) if mcp_mod.wired_names() else ("—", DEEP_DIM)
             except Exception:
                 return "—", DEEP_DIM

@@ -13,7 +13,7 @@ def fake_env(tmp_path, monkeypatch):
 
 
 def test_install_by_name_installs_and_wires(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli
+    from recommended_mcp.runtime import cli
     from recommended_mcp.manifest import MCPEntry, InstallSpec
 
     office = MCPEntry(name="office", path=Path("recommended_mcp/office"),
@@ -30,14 +30,14 @@ def test_install_by_name_installs_and_wires(fake_env, monkeypatch):
 
 
 def test_install_unknown_name_errors(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli
+    from recommended_mcp.runtime import cli
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([], Path(".")))
     rc = cli.main(["install", "nope"])
     assert rc != 0
 
 
 def test_install_all_wires_only_installed(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli
+    from recommended_mcp.runtime import cli
     from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
     good = MCPEntry(name="good", path=Path("."), install=InstallSpec(type="source"))
@@ -52,7 +52,7 @@ def test_install_all_wires_only_installed(fake_env, monkeypatch):
 
 
 def test_remove_unwires(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli, wiring
+    from recommended_mcp.runtime import cli, wiring
     from recommended_mcp.manifest import MCPEntry, InstallSpec
     office = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([office], Path(".")))
@@ -67,7 +67,7 @@ def test_remove_unwires(fake_env, monkeypatch):
 
 
 def test_wire_one_missing_snippet_does_not_raise(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli
+    from recommended_mcp.runtime import cli
     from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
     monkeypatch.setattr("recommended_mcp.install._node_install_paths", lambda dep: {"npx": "/n"})
@@ -78,7 +78,7 @@ def test_wire_one_missing_snippet_does_not_raise(fake_env, monkeypatch):
 
 
 def test_install_threads_config_and_editable(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli
+    from recommended_mcp.runtime import cli
     from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
     seen = {}
@@ -99,7 +99,7 @@ def test_install_threads_config_and_editable(fake_env, monkeypatch):
 
 
 def test_install_threads_repo_url(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli
+    from recommended_mcp.runtime import cli
     from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
     e = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
@@ -115,7 +115,7 @@ def test_install_threads_repo_url(fake_env, monkeypatch):
 
 
 def test_remove_all_wipes_our_dirs(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli, wiring
+    from recommended_mcp.runtime import cli, wiring
     cfg = fake_env / "cfg"; cfg.mkdir(parents=True, exist_ok=True)
     (cfg / "config.local.yml").write_text(
         "mcp:\n  servers:\n    office:\n      transport: stdio\n"
@@ -132,7 +132,7 @@ def test_remove_all_wipes_our_dirs(fake_env, monkeypatch):
 
 
 def test_remove_all_keep_package_keeps_dirs(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli, wiring
+    from recommended_mcp.runtime import cli, wiring
     cfg = fake_env / "cfg"; cfg.mkdir(parents=True, exist_ok=True)
     (cfg / "config.local.yml").write_text(
         "mcp:\n  servers:\n    office:\n      transport: stdio\n", encoding="utf-8")
@@ -146,7 +146,7 @@ def test_remove_all_keep_package_keeps_dirs(fake_env, monkeypatch):
 
 
 def test_remove_no_name_no_all_errors(fake_env, monkeypatch):
-    from gc_core.mcp_runtime import cli
+    from recommended_mcp.runtime import cli
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([], __import__("pathlib").Path(".")))
     rc = cli.main(["remove"])
     assert rc != 0

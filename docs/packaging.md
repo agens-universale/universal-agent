@@ -195,6 +195,32 @@ except ImportError as exc:
 `::test_foreign_commands_are_not_declared` и
 `packages/core/tests/test_missing_profile_guards.py`.
 
+## Где живёт MCP
+
+Менеджер MCP и курируемые рецепты — отдельный дистрибутив `gc-mcp` (пакет
+`recommended_mcp`). От него зависят все профили приложения; ядро — нет.
+
+Граница проходит по линии «рантайм против установщика»:
+
+| Где | Что | Почему |
+|---|---|---|
+| `gc_core.mcp_runtime` | `env`, `state`, `paths`, `repo_path`, `recipes` | нужны САМОМУ агенту: `connect_mcp` спавнит ими stdio-серверы |
+| `recommended_mcp.runtime` | `cli`, `install_cli`, `manifest_resolve`, `venv`, `wiring` | это менеджер: установка, venv, запись в `config.local.yml` |
+
+`repo_path` остаётся в ядре намеренно: это бутстрап, благодаря которому
+`import recommended_mcp` вообще находит пакет в рабочей копии. Унеси его в тот
+же пакет — и получится курица с яйцом.
+
+Ядро тянет рецепты **лениво** и работает без них: `mcp_daemon_autostart` ловит
+их отсутствие и пишет строку в лог, а команды `gc-mcp` / `gc-mcp-install` идут
+через шим `gc_core/mcp_entry.py` — тот же приём, что у `cli_entry` /
+`tui_entry` / `serve_entry`.
+
+Исходники самих MCP-серверов лежат в `external/vendor/` и едут в колесе
+`gc-mcp` соседями с рецептами: `install.py` ищет их по ИМЕНИ каталога
+(`install.source: office-mcp`), а не по относительному пути — арифметика путей
+уже один раз разъехалась между раскладками репозитория и колеса.
+
 ## Как агент понимает, какой профиль установлен
 
 `gc_core/app_version.py` перебирает `PROFILE_DISTS` в порядке убывания полноты и

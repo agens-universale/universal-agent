@@ -27,7 +27,7 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(_legacy_src))
     __package__ = "recommended_mcp"
 
-from gc_core.mcp_runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
+from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
 from recommended_mcp.manifest import MCPEntry, load_manifest
 from recommended_mcp.process_supervisor import RunSupervisor, stop_command_daemons
 

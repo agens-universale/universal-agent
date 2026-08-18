@@ -35,7 +35,7 @@ class PostUpdateScreen(Screen):
         self._config_path = config_path
 
         from gc_core import config_sync as _config_sync
-        from gc_core.mcp_runtime import cli as _mcp_cli
+        from recommended_mcp.runtime import cli as _mcp_cli
         self._mcp_cli = _mcp_cli
         self._config_sync = _config_sync
 
