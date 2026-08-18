@@ -107,7 +107,7 @@ class FieldListController:
         # can_open(value) -> bool — раскрывать ли список при таком значении поля.
         # on_pick(value) — что делает Enter после выбора (обычно подстановка в поле).
         # restore_on_close — возвращать ли по Esc значение, бывшее ДО фильтра.
-        # closed_hint — что показать под свёрнутым списком (`show_closed_hint`), чем его
+        # closed_hint — что показать под свёрнутым списком (ставит `_sync_hint`), чем его
         #   раскрыть. По умолчанию — канон локального источника («показать список»);
         #   список с сервера (модели endpoint'а) всегда идёт в сеть, раскрытый он или
         #   нет, — глагол тот же, что у него в открытом состоянии («перечитать список»),
@@ -148,6 +148,19 @@ class FieldListController:
         if self._matches is not None:
             return self._matches(self._items[i], q)
         return q in str(self._items[i]).lower()
+
+    def would_match(self, text: str) -> bool:
+        """Нашлось бы хоть что-то под таким фильтром — БЕЗ раскрытия и монтажа строк.
+
+        Нужна хозяину, чтобы решить, стоит ли вообще поднимать свёрнутый список на
+        печать: поднять и тут же свернуть значило бы монтировать и сносить строки на
+        каждую букву. `has_matches` на это не годится — он про уже раскрытый список."""
+        q = (text or "").strip().lower()
+        items = self._read_items()
+        if not q:
+            return bool(items)
+        return any(self._matches(it, q) if self._matches is not None
+                   else q in str(it).lower() for it in items)
 
     def _hint_text(self) -> str:
         return self._hint(self.has_selection)
@@ -272,6 +285,7 @@ class FieldListController:
             # поверх чужого значения значит увести туда ↑/↓ и дать Enter молча затереть
             # набранное. На явную клавишу (`forced`) это правило не распространяется —
             # человек попросил список сам (смок 2026-08-04).
+            self._sync_hint()   # отказ — тоже состояние: строка обязана назвать Alt+↓
             return
         self.is_open = True
         if not keep_baseline:
@@ -363,7 +377,7 @@ class FieldListController:
         row_cls = f"onb-option onb-dyn {self._row_class} {self._row_classes}".rstrip()
         scroll.mount(*[Static("", classes=row_cls) for _ in self._items])
 
-    def close(self, *, restore: bool = True) -> None:
+    def close(self, *, restore: bool = True, closed_hint: str | None = None) -> None:
         """Свернуть список. `restore` — вернуть в поле значение, которое было ДО фильтра:
         печать там, где она только фильтрует, не имеет права оставить в поле остаток
         набора («нем») — следующий Enter сохранил бы его (живой смок). Осознанный выбор
@@ -376,11 +390,9 @@ class FieldListController:
             return
         self.is_open = False
         self._on_close()
-        doomed = list(self._host.query(f".{self._scroll_class}"))
-        if self._hint is not None:
-            doomed += list(self._host.query(f".{self._hint_class}"))
-        for w in doomed:
+        for w in self._host.query(f".{self._scroll_class}"):
             w.remove()          # строки уходят вместе со своим контейнером
+        self._sync_hint(closed_hint)   # подсказка остаётся — меняется только её текст
         if restore and self._restore_on_close:
             try:
                 field = self._field()
@@ -388,28 +400,31 @@ class FieldListController:
                 return          # поля уже нет (редактор пересобирают) — восстанавливать некуда
             write_field(field, self._value0)
 
-    def show_closed_hint(self) -> None:
-        """Показать под свёрнутым списком, чем его раскрыть. Зовёт хозяин — он один
-        знает, что поле осталось активным (курсор ленты в /settings, фокус в мастере);
-        сам контроллер за этим не следит."""
-        if self.is_open or self._hint is None:
+    def _sync_hint(self, closed_override: str | None = None) -> None:
+        """Текст подсказки — функция состояния списка: раскрыт → хинт открытого (с
+        учётом наличия подсветки), свёрнут → `closed_hint`. Виджет не сносим.
+
+        Живёт здесь, а не у хозяина: строка принадлежит контроллеру — он её монтирует,
+        он же владеет `is_open`. Пока согласование было хозяйским делом, каждый путь
+        закрытия обязан был помнить о ремонте, и строка пропадала после Enter и после
+        фильтра, сузившего список до нуля."""
+        if self._hint is None:
+            return                       # своей строки у списка нет (см. параметр `hint`)
+        if not self.is_open and not self._read_items():
+            # Показывать нечего — и обещать нечего: `closed_hint` звал бы раскрыть
+            # список, которого не существует, а форсированное раскрытие дало бы
+            # пустую рамку (находка ревью 2026-08-18). Молчим.
             return
         try:
             field = self._field()
         except NoMatches:
-            return              # поля уже нет (редактор пересобирают)
+            return                       # поля уже нет (редактор пересобирают)
         self._mount_hint(field)          # строка одна: существующую переиспользует
-        hint = self._hint_widget()
-        if hint is not None:
-            hint.update(Text(self._closed_hint, style=DEEP_DIM))
-
-    def hide_closed_hint(self) -> None:
-        """Снять подсказку свёрнутого списка: поле перестало быть активным. `close` этого
-        не делает — он выходит сразу, если список и так свёрнут."""
-        if self.is_open or self._hint is None:
-            return
-        for w in self._host.query(f".{self._hint_class}"):
-            w.remove()
+        w = self._hint_widget()
+        if w is not None:
+            text = (self._hint_text() if self.is_open
+                    else (closed_override or self._closed_hint))
+            w.update(Text(text, style=DEEP_DIM))
 
     def move(self, delta: int) -> bool:
         """↑/↓ по списку. True — клавиша израсходована списком: хозяин на неё ленту не

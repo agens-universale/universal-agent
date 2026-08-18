@@ -314,10 +314,11 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     (спека 2026-08-06 §4.4) — общий хинт-механизм списков (`show_closed_hint`,
     дословно `LIST_CLOSED_HINT`). До правки `escape_presets` сворачивал список молча.
 
-    Фикс-раунд 1 (ревью): подсказка не переживает уход курсора с адреса — с чужого
-    поля `Alt+↓` список адреса уже не раскрывает (`reload_presets` гейтует именно
-    позицию курсора). Полный путь: Esc → хинт появился → стрелкой ушли на «Токен» →
-    хинта нет → стрелкой вернулись → список раскрылся заново, хинт снова канонный
+    Канон 2026-08-17: строка под адресом ПОСТОЯННА — уход курсора её не снимает.
+    Она ярлык способа, а не команда момента (как `Space — переключить` у галки,
+    работающая только со своей позиции); что нажимать сейчас, отвечает футер.
+    Полный путь: Esc → хинт появился → ушли на «Токен» → хинт НА МЕСТЕ (раньше он
+    исчезал) → вернулись на пустой адрес → список поднялся снова, хинт канонный
     (`_PRESET_HINT_EMPTY` — мастер на пустом адресе зовёт выбрать провайдера явно)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -336,7 +337,8 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
         assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT
         await pilot.press("down")                  # уйти с адреса на токен
         await pilot.pause()
-        assert not scr.query(".conn-url-preset-hint")   # подсказка ушла вместе с курсором
+        hints = scr.query(".conn-url-preset-hint")
+        assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT   # строка постоянна
         await pilot.press("up")                    # вернуться на адрес
         await pilot.pause()
         assert scr.query(".conn-preset-row")        # список раскрылся заново

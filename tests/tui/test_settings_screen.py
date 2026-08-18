@@ -662,11 +662,11 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     дословно `LIST_CLOSED_HINT`). До правки `escape_presets`
     сворачивал список молча — способа узнать про `Alt+↓` не было.
 
-    Фикс-раунд 1 (ревью): подсказка не переживает уход курсора с адреса — с чужого
-    поля `Alt+↓` список адреса уже не раскрывает (`reload_presets` гейтует именно
-    позицию курсора), и висящий текст врал бы про несуществующий путь. Полный путь:
-    Esc → хинт появился → стрелкой ушли на «Токен» → хинта нет → стрелкой вернулись →
-    список раскрылся заново, хинт снова канонный (`PRESET_HINT`)."""
+    Канон 2026-08-17: строка под адресом ПОСТОЯННА — уход курсора её не снимает и
+    текст не меняет. Она ярлык способа, а не команда момента (как `Space —
+    переключить` у галки, работающая только со своей позиции); что нажимать сейчас,
+    отвечает футер. Полный путь: Esc → хинт появился → ушли на «Токен» → хинт НА
+    МЕСТЕ (раньше он исчезал) → вернулись на пустой адрес → список поднялся снова."""
     from tui.editors.field_list import LIST_CLOSED_HINT
     from tui.editors.preset_list import PRESET_HINT
     cfg_file = _write_cfg(tmp_path, url='""')
@@ -685,10 +685,14 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
         assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT
         await pilot.press("down")                       # уйти с адреса на токен
         await pilot.pause()
-        assert not scr.query(".conn-url-preset-hint")   # подсказка ушла вместе с курсором
+        hints = scr.query(".conn-url-preset-hint")
+        assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT   # строка постоянна
         await pilot.press("up")                         # вернуться на адрес
         await pilot.pause()
-        assert scr.query(".conn-preset-row")            # список раскрылся заново
+        # Поле здесь ПУСТОЕ — на нём канон список поднимает, и хинт снова канонный.
+        # (С заполненным адресом список остался бы свёрнутым — см. таблицу состояний
+        # в test_editors_connection::test_canon_table_of_list_states.)
+        assert scr.query(".conn-preset-row")
         hints = scr.query(".conn-url-preset-hint")
         assert hints and str(hints[-1].render()) == PRESET_HINT
 
@@ -726,7 +730,11 @@ async def test_alt_down_over_own_address_opens_without_a_highlight(tmp_path):
 async def test_connection_footer_names_alt_down_only_on_the_url_field(tmp_path):
     """Находка D финального ревью 2026-08-06: Alt+↓ раскрывает список только с адреса
     (`ConnectionEditor.on_url_field` гейтит именно эту позицию, `reload_presets`) —
-    на «Токене»/«Прокси» клавиша молчит, и футер не должен её там обещать."""
+    на «Токене»/«Прокси» клавиша молчит, и футер не должен её там обещать.
+
+    Адрес пресетный, поэтому по канону 2026-08-17 список свёрнут с самого входа —
+    сворачивать его `Esc` больше не нужно (и нельзя: с заполненным адресом `Esc`
+    закрыл бы секцию, это названный побочный эффект канона)."""
     from config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     cfg_file = _write_cfg(tmp_path, url=f'"{DEFAULT_ENDPOINT_PRESETS[0].url}"')
     cfg = _loaded(cfg_file)
@@ -736,17 +744,13 @@ async def test_connection_footer_names_alt_down_only_on_the_url_field(tmp_path):
         scr = await _open_settings(app, pilot, cfg_file, cfg)
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        await pilot.press("escape")          # свернуть список, курсор остаётся на адресе
-        await pilot.pause()
         footer = str(scr.query_one("#set-footer", Static).render())
         assert "Alt+↓ — показать список" in footer
         await pilot.press("down")            # адрес → токен
         await pilot.pause()
         footer2 = str(scr.query_one("#set-footer", Static).render())
         assert "Alt+↓" not in footer2
-        await pilot.press("up")              # обратно на адрес — список раскрылся заново
-        await pilot.pause()
-        await pilot.press("escape")
+        await pilot.press("up")              # обратно на адрес
         await pilot.pause()
         footer3 = str(scr.query_one("#set-footer", Static).render())
         assert "Alt+↓ — показать список" in footer3

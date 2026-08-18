@@ -286,11 +286,11 @@ async def test_create_mode_empty_url_shows_variant_preset_hint():
 
 
 async def test_edit_mode_prefilled_url_shows_canon_preset_hint():
-    """Хинт пресет-листа при непустом адресе (settings/edit) остаётся канонным —
-    когда адрес совпадает с одним из пресетов (список раскрывается, подсвечивая
-    ЕГО; отклонение от источника, спека-отклонение №5: список не раскрывается
-    поверх СВОЕГО адреса, которого нет в пресетах — см. test_editors_connection
-    рядом и test_preset_list.py)."""
+    """Текст строки под адресом — функция состояния списка (канон 2026-08-17).
+
+    Непустой адрес — любой, хоть совпавший с пресетом — список не поднимает, и строка
+    называет способ вызвать его вручную. Раскрыли явно (`Alt+↓`) — строка становится
+    канонной подсказкой списка."""
     from tui.editors.connection import ConnectionEditor
     from config_modules.endpoint_presets import default_endpoint_presets
     ed = ConnectionEditor(url_current="https://openrouter.ai/api/v1/chat/completions",
@@ -298,15 +298,24 @@ async def test_edit_mode_prefilled_url_shows_canon_preset_hint():
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
+        assert "Alt+↓ — показать список" == str(ed.query_one(".conn-url-preset-hint").render())
+
+        ed.reload_presets()                    # Alt+↓
+        await pilot.pause()
         status = str(ed.query_one(".conn-url-preset-hint").render())
-        assert status == "пресеты · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
+        assert status == "провайдеры · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
 
 
-async def test_arrow_leaves_the_address_when_the_filter_matches_no_preset():
-    """Набран свой адрес — в пресет-листе не осталось ни строки: водить по нему
-    нечем, и забирать стрелку значит запереть курсор на адресе без всякой обратной
-    связи (контракт `FieldListController.move`, дословно). Стрелка возвращается
-    ленте формы, а список сворачивается — курсор ушёл с поля адреса."""
+async def test_no_match_collapses_the_list_and_says_so():
+    """Набран свой адрес — в каталоге такого нет: список СВОРАЧИВАЕТСЯ, а строка под
+    полем сообщает об этом и называет, чем список вернуть.
+
+    Раньше он оставался раскрытым пустым с хинтом «Enter — оставить свой адрес» —
+    выдуманное значение клавиши, которая везде сохраняет форму; заодно первое нажатие
+    уходило на сворачивание вместо перехода дальше. И вид зависел от предыстории: с
+    пустого поля список висел раскрытым, с заполненного — не поднимался вовсе. Канон
+    в редакции 2026-08-18: раскрыт, пока значение складывается И есть из чего
+    выбирать."""
     from config_modules.endpoint_presets import default_endpoint_presets
     from tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="", auth_header=None,
@@ -314,14 +323,21 @@ async def test_arrow_leaves_the_address_when_the_filter_matches_no_preset():
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert ed.presets_open
+        assert ed.presets_open                      # пустое поле — подходит всё
+
         ed.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
         await pilot.pause()
-        assert ed.presets_open and not ed.presets_have_selection
+
+        assert not ed.presets_open
+        assert _hint_under_address(ed) == "в списке такого нет · Alt+↓ — показать список"
+
+        # Стрелка — обычная навигация формы, список её не забирает.
         ed.move(1)
         await pilot.pause()
         assert ed.query_one("#conn-token", Input).has_focus
-        assert not ed.presets_open
+        # Набранное осталось: пресет-лист адреса печать не откатывает
+        # (`restore_on_close=False`) — она тут ввод своего значения, а не фильтр.
+        assert ed.query_one("#conn-url", Input).value == "https://my-own-host.internal/v1"
         # Набранное осталось в поле: пресет-лист адреса печать не откатывает
         # (`restore_on_close=False`) — она тут ввод своего значения, а не фильтр.
         assert ed.query_one("#conn-url", Input).value == "https://my-own-host.internal/v1"
@@ -358,14 +374,20 @@ async def test_create_mode_typed_token_becomes_bearer_header():
 
 
 async def test_preset_list_opens_whole_not_filtered_by_the_prefilled_address():
-    """Вход на поле адреса раскрывает ВЕСЬ список, курсор — на совпавшем пресете.
+    """Раскрытие поверх заполненного адреса даёт ВЕСЬ список, курсор — на совпавшем
+    пресете.
 
     Живой смок 2026-08-04: в «Подключении» список показывал одну строку, а стоило
     уйти с поля и вернуться — все три. Сужал его `Input.Changed`, который Textual
-    постит на поле, смонтированное СО значением: список к тому времени уже раскрыт
-    (канон §2.1), и хозяин честно принимает событие за печать. Задумано иначе —
-    докстринг `can_open`/`initial_index` прямо говорит «раскрываем и подсвечиваем
-    ИМЕННО его»."""
+    постит на поле, смонтированное СО значением, — хозяин честно принимал событие за
+    печать.
+
+    ПОСЛЕ канона 2026-08-17 эта ловушка структурно недостижима, и тест её больше НЕ
+    сторожит (проверено мутацией на ревью 2026-08-18: верни голое присваивание вместо
+    `write_field` — тест пройдёт). Причина: при заполненном адресе список свёрнут, и
+    прилетающий `Input.Changed` уходит в `apply_filter`, где это no-op; к моменту
+    `Alt+↓` список открывается с пустым фильтром. Тест остаётся проверкой того, что
+    форсированное раскрытие даёт ПОЛНЫЙ список с подсветкой совпавшего пресета."""
     from config_modules.endpoint_presets import default_endpoint_presets
     from tui.editors.connection import ConnectionEditor
     presets = default_endpoint_presets()
@@ -374,6 +396,8 @@ async def test_preset_list_opens_whole_not_filtered_by_the_prefilled_address():
     async with app.run_test() as pilot:
         await pilot.pause()
         assert ed.query_one("#conn-url", Input).value == presets[1].url
+        ed.reload_presets()                    # Alt+↓ — раскрыть поверх значения
+        await pilot.pause()
         visible = [w for w in ed.query(".conn-preset-row") if w.display]
         assert len(visible) == len(presets), (
             f"список раскрылся суженным: {[str(w.render()) for w in visible]}")
@@ -385,19 +409,24 @@ async def test_preset_list_opens_whole_not_filtered_by_the_prefilled_address():
 
 
 async def test_section_entry_shows_the_whole_preset_list(tmp_path):
-    """Живой смок 2026-08-04: вход в «Подключение» показывал ОДНУ строку — совпавший
-    пресет, — а стоило уйти с поля и вернуться, как появлялись все три. Задумано
-    иначе (докстринг `can_open`/`initial_index`: «раскрываем и подсвечиваем ИМЕННО
-    его»): список полный, курсор — на совпавшем.
+    """Живой смок 2026-08-04: список раскрывался суженным до одной строки — совпавшего
+    пресета, — а стоило уйти с поля и вернуться, как появлялись все. Сужал его
+    `Input.Changed` от поля, смонтированного СО значением.
 
-    Через настоящую секцию, а не через контроллер: сужал список `Input.Changed`,
-    который постит смонтированное со значением поле, — на минимальном хосте такого
-    события нет вовсе."""
+    Через настоящую секцию, а не через контроллер: на минимальном хосте такого события
+    нет вовсе. После канона 2026-08-17 вход в секцию список не раскрывает (адрес задан),
+    поэтому раскрываем явно.
+
+    Как и у соседа выше, саму ловушку тест больше не ловит — она стала недостижимой
+    (мутация на ревью 2026-08-18 проходит). Проверяется полнота списка на боевом пути
+    раскрытия секции."""
     from config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from tests.tui.conftest import settings_connection
     from tui.editors.connection import ConnectionEditor
-    async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[1].url) as (_pilot, scr):
+    async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[1].url) as (pilot, scr):
         ed = scr.query_one(ConnectionEditor)
+        ed.reload_presets()                    # Alt+↓
+        await pilot.pause()
         rows = list(ed.query(".conn-preset-row"))
         visible = [w for w in rows if w.display]
         assert len(visible) == len(DEFAULT_ENDPOINT_PRESETS), (
@@ -471,3 +500,197 @@ async def test_cleared_token_is_saved_as_empty_header():
         _url, header, err, _proxy = ed.submit()
         assert err is None
         assert header == ""
+
+
+def _hint_under_address(ed) -> str:
+    """Текст живой строки-подсказки под полем адреса («» — строки нет)."""
+    live = [w for w in ed.query(Static)
+            if "conn-url-preset-hint" in " ".join(w.classes) and not w._pruning]
+    return str(live[-1].render()) if live else ""
+
+
+async def test_hint_stays_when_cursor_leaves_the_address():
+    """Строка под адресом постоянна: уход курсора её не снимает и текст не меняет.
+
+    Иначе при ходьбе по форме менялись бы два места сразу — строка и футер, — и глаз
+    ловит мельтешение там, где ничего не произошло. `Alt+↓` под свёрнутым списком —
+    ярлык способа, а не команда момента, как `Space — переключить` у галки, которая
+    тоже работает только со своей позиции. Что нажимать сейчас, отвечает футер."""
+    from tui.editors.connection import ConnectionEditor
+    from config_modules.endpoint_presets import default_endpoint_presets
+    ed = ConnectionEditor(url_current="https://own-host/v1/chat/completions",
+                          auth_header="Bearer x", presets=default_endpoint_presets())
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        on_url = _hint_under_address(ed)
+        assert "показать список" in on_url
+
+        ed.move(1)                              # курсор ушёл на токен
+        await pilot.pause()
+        assert _hint_under_address(ed) == on_url
+
+
+async def test_canon_table_of_list_states():
+    """Таблица состояний канона 2026-08-17 целиком.
+
+    Врозь эти проверки дают ложное спокойствие: исходный дефект был ровно в том, что
+    два состояния из пяти выпадали, а каждое по отдельности выглядело правильным."""
+    from tui.editors.connection import ConnectionEditor
+    from config_modules.endpoint_presets import default_endpoint_presets
+    presets = default_endpoint_presets()
+
+    # 1. пусто → раскрыт, строка — подсказка списка
+    ed = ConnectionEditor(url_current="", auth_header="Bearer x", presets=presets)
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        assert ed._presets_ctrl.is_open
+        assert "показать список" not in _hint_under_address(ed)
+
+    # 2-4. пресетный и свой ведут себя ОДИНАКОВО — в этом и суть канона
+    for url in (presets[0].url, "https://own-host/v1/chat/completions"):
+        ed = ConnectionEditor(url_current=url, auth_header="Bearer x", presets=presets)
+        async with _harness(ed).run_test() as pilot:
+            await pilot.pause(); await pilot.pause()
+            assert not ed._presets_ctrl.is_open, url
+            assert "показать список" in _hint_under_address(ed), url
+            ed.move(1)
+            await pilot.pause()
+            assert ed._positions[ed._idx] == "conn-token", url   # ↓ уводит с адреса
+
+    # 6-7. Alt+↓ поверх значения: своё — без подсветки, пресетное — с подсветкой
+    for url, selected in (("https://own-host/v1/chat/completions", False),
+                          (presets[0].url, True)):
+        ed = ConnectionEditor(url_current=url, auth_header="Bearer x", presets=presets)
+        async with _harness(ed).run_test() as pilot:
+            await pilot.pause(); await pilot.pause()
+            ed.reload_presets()
+            await pilot.pause()
+            assert ed._presets_ctrl.is_open, url
+            assert ed._presets_ctrl.has_selection is selected, url
+
+    # 9. адрес-ссылка ${ENV:...} — непустое значение, ведёт себя как свой адрес
+    ed = ConnectionEditor(url_current="${ENV:GC_URL}", auth_header="Bearer x",
+                          presets=presets)
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        assert not ed._presets_ctrl.is_open
+        assert "показать список" in _hint_under_address(ed)
+
+    # 10. пустой каталог не раскрывается даже на пустом поле
+    ed = ConnectionEditor(url_current="", auth_header="Bearer x", presets=[])
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        assert not ed._presets_ctrl.is_open
+
+    # 11. Esc при заполненном адресе списку не адресован — хозяин обработает сам
+    ed = ConnectionEditor(url_current=presets[0].url, auth_header="Bearer x",
+                          presets=presets)
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        assert ed.escape_presets() is False
+
+
+async def test_hint_survives_pick_and_zero_filter():
+    """Два пути закрытия, на которых строка раньше пропадала: Enter (подстановка) и
+    ↓ с отфильтрованного в ноль списка. Оба обязаны оставить «Alt+↓ — показать список».
+
+    Именно эти два состояния выпадали из первой редакции правки — их нашло независимое
+    ревью, замерив таблицу вместо того, чтобы поверить описанию."""
+    from tui.editors.connection import ConnectionEditor
+    from config_modules.endpoint_presets import default_endpoint_presets
+    presets = default_endpoint_presets()
+
+    ed = ConnectionEditor(url_current="", auth_header="Bearer x", presets=presets)
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        assert ed._presets_ctrl.is_open              # предусловие: пустое поле раскрыто
+        ed.enter_presets()                           # Enter — подставить пресет
+        await pilot.pause()
+        assert not ed._presets_ctrl.is_open
+        assert "показать список" in _hint_under_address(ed)
+
+    ed = ConnectionEditor(url_current="", auth_header="Bearer x", presets=presets)
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        ed.query_one("#conn-url", Input).value = "https://nothing-matches-this/v1"
+        await pilot.pause()
+        ed.move(1)                                   # фильтр в ноль → ↓ сворачивает
+        await pilot.pause()
+        assert not ed._presets_ctrl.is_open
+        assert "показать список" in _hint_under_address(ed)
+
+
+async def test_clearing_the_address_reopens_the_list():
+    """Стёрли адрес целиком — список раскрывается сам.
+
+    Канон 2026-08-17 — инвариант над ЗНАЧЕНИЕМ поля: пусто ⟹ раскрыт. Первая
+    реализация решала это только на входе курсора в поле, и стирание оставляло
+    свёрнутый список до ухода-возврата или Alt+↓ (живой смок 2026-08-18). Юнит-тесты
+    этого не видели структурно: все конструировали редактор с готовым значением,
+    а не редактировали поле."""
+    from tui.editors.connection import ConnectionEditor
+    from config_modules.endpoint_presets import default_endpoint_presets
+    ed = ConnectionEditor(url_current="https://own-host/v1/chat/completions",
+                          auth_header="Bearer x", presets=default_endpoint_presets())
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        assert not ed._presets_ctrl.is_open          # предусловие: адрес задан
+
+        ed.query_one("#conn-url", Input).value = ""
+        await pilot.pause()
+
+        assert ed._presets_ctrl.is_open
+        rows = [w for w in ed.query(".conn-preset-row") if w.display]
+        assert len(rows) == len(default_endpoint_presets())   # весь список, не сужен
+
+
+async def test_editing_the_address_reopens_the_list_as_a_filter():
+    """Правка заполненного адреса раскрывает список фильтром.
+
+    Канон 2026-08-17 в первой редакции был сформулирован над ЗНАЧЕНИЕМ (пусто →
+    раскрыт), и печать поверх заданного адреса список не поднимала. Живой смок
+    2026-08-18 показал несогласованность того же рода, ради лечения которой канон и
+    затевался: с пустого поля печать фильтрует, с заполненного — нет. Одно действие,
+    два поведения, разница только в предыстории.
+
+    Правильная формулировка — над ПРОЦЕССОМ: список раскрыт, пока значение
+    складывается (пусто ИЛИ человек прямо сейчас правит поле), и свёрнут, когда оно
+    сложилось (вошли с готовым значением и не трогаем)."""
+    from tui.editors.connection import ConnectionEditor
+    from config_modules.endpoint_presets import default_endpoint_presets
+    presets = default_endpoint_presets()
+    ed = ConnectionEditor(url_current=presets[1].url, auth_header="Bearer x",
+                          presets=presets)
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        assert not ed._presets_ctrl.is_open           # предусловие: значение сложилось
+
+        # Стёрли последний символ — правка началась.
+        ed.query_one("#conn-url", Input).value = presets[1].url[:-1]
+        await pilot.pause()
+
+        assert ed._presets_ctrl.is_open
+        visible = [w for w in ed.query(".conn-preset-row") if w.display]
+        assert len(visible) == 1                      # ровно совпавший провайдер
+        assert presets[1].name in str(visible[0].render())
+
+
+async def test_typing_an_unmatched_address_returns_the_arrows_to_the_form():
+    """Набран свой адрес — совпадений нет, и раскрытый фильтром список не имеет права
+    запереть ↑/↓ на поле: ходить по нему нечем. Стрелка уводит курсор дальше по форме,
+    список сворачивается сам (контракт `FieldListController.move`)."""
+    from tui.editors.connection import ConnectionEditor
+    from config_modules.endpoint_presets import default_endpoint_presets
+    ed = ConnectionEditor(url_current="https://own-host/v1/chat/completions",
+                          auth_header="Bearer x", presets=default_endpoint_presets())
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        ed.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
+        await pilot.pause()
+        assert ed._presets_ctrl.has_matches is False
+
+        ed.move(1)
+        await pilot.pause()
+        assert ed._positions[ed._idx] == "conn-token"
+        assert not ed._presets_ctrl.is_open
