@@ -54,18 +54,6 @@ def test_create_run_context_sets_local_os_backend():
     assert getattr(ctx, "is_tui", False) is False
 
 
-def test_create_run_context_tui_wraps_tracking():
-    from gc_tui.diff_tui.tracking import TrackingFsBackend
-
-    ctx = create_run_context(
-        {"backend_api_mode": "chat_completions", "save_logs": False},
-        is_tui=True,
-    )
-    assert isinstance(ctx.os_backend, TrackingFsBackend)
-    assert isinstance(ctx.os_backend.inner, LocalFsBackend)
-    assert ctx.is_tui is True
-
-
 def test_create_run_context_explicit_override():
     sentinel = object()
     ctx = create_run_context(

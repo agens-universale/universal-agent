@@ -1,13 +1,14 @@
-"""Проводка онбординга в контроллеры: --init-config и стоп-гайд первого запуска."""
+"""Проводка онбординга в TUI: --init-config, режим review, стоп-гайд.
+
+Жил в корневом tests/test_onboarding_wiring.py вместе с проверками CLI. Файл
+выглядел кросс-пакетным по импортам, но взаимодействия cli ↔ tui в нём не было:
+каждый фронтенд общается с ядром независимо. Разнесён по пакетам 18.08.2026.
+"""
 import sys
 
-# `import cli` парсит sys.argv на импорте (нужен -q или --init) — пиннем валидный.
-sys.argv = ["gc-cli", "-q", "x"]
-
-from gc_cli import cli
 from gc_core import config
-import gc_tui as tui
 from gc_core.config_modules import env_vars
+import gc_tui as tui
 
 
 def _isolate(tmp_path, monkeypatch):
@@ -17,26 +18,6 @@ def _isolate(tmp_path, monkeypatch):
     })
     monkeypatch.setattr(env_vars, "project_slug", lambda: "p")
     monkeypatch.setattr(config, "_project_local_config_path", lambda: None)
-
-
-def test_cli_init_creates_config(tmp_path, monkeypatch, capsys):
-    _isolate(tmp_path, monkeypatch)
-    rc = cli._run_init()
-    assert rc == 0
-    assert (tmp_path / "gc" / "config.yml").is_file()
-    assert "config.yml" in capsys.readouterr().err
-
-
-def test_cli_init_does_not_clobber_existing(tmp_path, monkeypatch, capsys):
-    _isolate(tmp_path, monkeypatch)
-    cfgdir = tmp_path / "gc"
-    cfgdir.mkdir(parents=True)
-    (cfgdir / "config.yml").write_text("agent:\n  model: mine\n", encoding="utf-8")
-    rc = cli._run_init()
-    assert rc == 0
-    # Новое поведение: не-TTY → setup_guide (путь к конфигу выводится в stderr)
-    assert "config.yml" in capsys.readouterr().err
-    assert "mine" in (cfgdir / "config.yml").read_text(encoding="utf-8")
 
 
 def test_tui_init_config_creates_and_exits(tmp_path, monkeypatch, capsys):

@@ -107,20 +107,3 @@ def test_normal_complete_still_ok_true(monkeypatch):
     payload = json.loads(out)
     assert payload["ok"] is True
     assert payload["meta"]["finish_reason"] == "completed"
-
-
-def test_step_limit_trace_summary_not_success():
-    from gc_tui.services.trace_mapper import _looks_like_error, _summarize_output
-
-    out = json.dumps(
-        {
-            "tool": "subagent_worker",
-            "ok": False,
-            "status": "step_limit",
-            "message": "Subagent hit step limit.",
-            "error": {"code": "step_limit", "message": "Subagent hit step limit.", "retryable": True},
-            "meta": {"finish_reason": "step_limit", "steps": 50},
-        }
-    )
-    assert _looks_like_error(out) is True
-    assert _summarize_output(out, error=True) == "лимит шагов"
