@@ -4,16 +4,16 @@
 
 Здесь лежат «рецепты» сборки и подключения MCP — то, что нужно агенту, чтобы
 поднять интеграцию: snippet для `config.yml` и (опционально) сборочные
-артефакты. Сами исходники наших MCP живут в [`../external/`](../external/).
+артефакты. Сами исходники наших MCP живут в [`../external/vendor/`](../external/).
 
 ## Что доступно
 
 | MCP | Источник | Установка | Платформа |
 |---|---|---|---|
-| `computer` | `external/computer-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | **только Windows** (`platforms: [win32]`) |
-| `office` | `external/office-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | Linux, macOS, Windows |
-| `science` | `external/science-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) + HTTP-daemon | Linux, macOS, Windows |
-| `duckduckgo_search` | `external/ddgs-mcp/` (своя обёртка над `ddgs`, git-подкаталог monorepo + бандлится в wheel) | `pip install` из source (локально / из бандла в method-2) | Linux, macOS, Windows |
+| `computer` | `external/vendor/computer-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | **только Windows** (`platforms: [win32]`) |
+| `office` | `external/vendor/office-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | Linux, macOS, Windows |
+| `science` | `external/vendor/science-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) + HTTP-daemon | Linux, macOS, Windows |
+| `duckduckgo_search` | `external/vendor/ddgs-mcp/` (своя обёртка над `ddgs`, git-подкаталог monorepo + бандлится в wheel) | `pip install` из source (локально / из бандла в method-2) | Linux, macOS, Windows |
 | `browser_playwright` | [@playwright/mcp](https://www.npmjs.com/package/@playwright/mcp) | **Docker** (`docker compose build` + `run.py`) или npx (Node в `gc_data`) | Linux, macOS, Windows |
 
 По умолчанию в `config.yml` для `browser_playwright` включён **npx** (stdio, без Docker).

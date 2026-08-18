@@ -58,7 +58,8 @@ universal-agent/
   packages/testkit/
     pyproject.toml               # gc-testkit — только dev, в колёса не попадает
     src/gc_testkit/              # раскладка, фикстуры, pytest-плагин
-  tests/                         # только общерепозиторное: колёса, MCP, litellm
+  external/                      # сторонние батарейки: vendor/ (MCP), litellm/
+  tests/                         # только общерепозиторное: колёса, MCP
 ```
 
 Наборы тестов лежат в `packages/*/tests` — по одному на дистрибутив.

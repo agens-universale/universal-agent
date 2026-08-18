@@ -32,7 +32,8 @@ uv run --directory external/computer-mcp pytest -m "not windows"
 | `packages/tui/tests` | TUI | 2250 |
 | `packages/server/tests` | server и swarm | 170 |
 | `packages/cli/tests` | CLI | 91 |
-| `tests` | репозиторий целиком: раскладка колёс, `recommended_mcp`, `litellm` | 151 |
+| `tests` | репозиторий целиком: раскладка колёс, `recommended_mcp` | 151 |
+| `external/litellm/tests` | батарейка LiteLLM Proxy | 13 |
 
 Файл принадлежит самому «верхнему» пакету из тех, что импортирует: фронтенд
 важнее ядра, потому что зависит от него.
