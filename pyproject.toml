@@ -25,15 +25,19 @@ dependencies = [
 all = []
 
 [project.scripts]
-gc-cli = "gc_ua_launcher:cli"
-gc-ua = "gc_ua_launcher:tui"
-gc-serve = "gc_ua_launcher:serve"
-gc-mcp = "gc_ua_launcher:mcp"
-gc-mcp-install = "gc_ua_launcher:mcp_install"
+gc-cli = "gc_core.cli_entry:main"
+gc-ua = "gc_core.tui_entry:main"
+gc-serve = "gc_core.serve_entry:main"
+gc-mcp = "recommended_mcp.runtime.cli:main"
+gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 
+# Мета — чисто метаданные: ни одного файла, только зависимости и точки входа.
+# Раньше здесь жил meta/gc_ua_launcher.py, каждая функция которого делала
+# `from X import main; return main()`. Он появился, когда цели точек входа были
+# в разных местах и hatchling (без bypass-selection) не собирал пустое колесо;
+# после того как цели стали прямыми, посредник осиротел.
 [tool.hatch.build.targets.wheel]
-sources = ["meta"]
-only-include = ["meta"]
+bypass-selection = true
 
 [dependency-groups]
 dev = [
