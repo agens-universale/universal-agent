@@ -42,18 +42,23 @@ def runtime_state_path() -> Path:
 
 
 def managed_config_path() -> Path:
-    """Machine-managed overlay для mcp.servers (пишет gc-mcp install/remove).
-    Мёржится в конфиг агента; config.yml пользователя не трогается."""
-    from gc_core.config_modules.env_vars import effective_config_dir
+    """Реэкспорт из config_modules.env_vars — там теперь дом этой функции.
 
-    return effective_config_dir() / "config.local.yml"
+    Оставлен, чтобы не менять вызовы внутри MCP-подсистемы (wiring и др.).
+    Путь принадлежит конфигу, а не MCP: раньше config.py статически импортировал
+    его отсюда, и ядро конфига зависело от MCP-подсистемы.
+    """
+    from gc_core.config_modules.env_vars import managed_config_path as _impl
+
+    return _impl()
 
 
 def recipe_root() -> Path:
     """Каталог рецептов recommended_mcp (сниппеты, external-пути в манифесте)."""
-    from gc_core.mcp_runtime.repo_path import ensure_repo_on_sys_path
+    from gc_core.mcp_runtime.recipes import recipes_package
 
-    ensure_repo_on_sys_path()
-    import recommended_mcp
-
-    return Path(recommended_mcp.__file__).resolve().parent
+    # Через охранник: без рецептов получим RecipesUnavailable, а не сырой
+    # ModuleNotFoundError. Именно recipes_package(), а не import_recipes():
+    # второй ходит через importlib.import_module, который тесты подменяют
+    # глобально, и тогда сюда прилетает MagicMock без __file__.
+    return Path(recipes_package().__file__).resolve().parent

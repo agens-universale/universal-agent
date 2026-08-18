@@ -219,3 +219,17 @@ def ensure_project_gc_dir(cwd: str | None = None) -> None:
         os.makedirs(project_gc_dir(cwd), exist_ok=True)
     except (PermissionError, OSError):
         pass
+
+
+def managed_config_path() -> Path:
+    """Machine-managed overlay конфига: ``<gc_config>/config.local.yml``.
+
+    Пишется командой ``gc-mcp install/remove``, мёржится в конфиг агента;
+    ``config.yml`` пользователя не трогается.
+
+    Живёт здесь, а не в ``mcp_runtime.paths``, хотя пишет его именно MCP: это
+    путь КОНФИГА, и тянут его config.py и config_origin.py. Пока функция лежала
+    в mcp_runtime, ядро конфига статически зависело от MCP-подсистемы —
+    зависимость, которая мешает вынести MCP в отдельный дистрибутив.
+    """
+    return effective_config_dir() / "config.local.yml"

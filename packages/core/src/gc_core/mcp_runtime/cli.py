@@ -6,13 +6,13 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from gc_core.mcp_runtime.recipes import RecipesUnavailable, import_recipes
+
 
 def _load_manifest_entries(config: str | None = None):
     """(entries, recipe_root). Резолвит манифест (config=None → дефолтная цепочка)."""
-    from gc_core.mcp_runtime.repo_path import ensure_repo_on_sys_path
-    ensure_repo_on_sys_path()
     from gc_core.mcp_runtime.manifest_resolve import resolve_install_manifest_path, recipe_root
-    from recommended_mcp.manifest import load_manifest
+    load_manifest = import_recipes("manifest").load_manifest
     path = resolve_install_manifest_path(config)
     return load_manifest(path), recipe_root()
 
@@ -26,14 +26,16 @@ def _load_repo_url(config: Optional[str] = None):
     from gc_core.mcp_runtime.repo_path import ensure_repo_on_sys_path
     ensure_repo_on_sys_path()
     from gc_core.mcp_runtime.manifest_resolve import resolve_install_manifest_path
-    from recommended_mcp.manifest import load_repo_url
+    _r = import_recipes('manifest')
+    load_repo_url = _r.load_repo_url
     return load_repo_url(resolve_install_manifest_path(config))
 
 
 def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False,
                  repo_url=None, repo_ref=None) -> bool:
     """Поставить один рецепт в MCP-venv. True если успех."""
-    from recommended_mcp.install import run_install_entries
+    _r = import_recipes('install')
+    run_install_entries = _r.run_install_entries
     from gc_core.mcp_runtime.venv import ensure_mcp_venv, pip_install_target
     ensure_mcp_venv()
     with pip_install_target():
@@ -44,7 +46,8 @@ def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False,
 
 def _wire_one(entry, root: Path, agent_dep_dir) -> None:
     from gc_core.mcp_runtime import wiring
-    from recommended_mcp.install import _node_install_paths
+    _r = import_recipes('install')
+    _node_install_paths = _r._node_install_paths
     from gc_core.config_modules.env_vars import gc_paths
     npx = str(_node_install_paths(agent_dep_dir)["npx"])
     cache = str(gc_paths()["cache"])
@@ -60,7 +63,8 @@ def _wire_one(entry, root: Path, agent_dep_dir) -> None:
 
 
 def _uninstall_one(entry, root: Path) -> None:
-    from recommended_mcp.install import uninstall_entry
+    _r = import_recipes('install')
+    uninstall_entry = _r.uninstall_entry
     uninstall_entry(entry, root)
 
 
@@ -68,7 +72,8 @@ def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bo
     entries, root = _load_manifest_entries(config)
     dep = _agent_dep_dir()
     repo_url, repo_ref = _load_repo_url(config)
-    from recommended_mcp.install import find_entry
+    _r = import_recipes('install')
+    find_entry = _r.find_entry
     if name:
         entry = find_entry(entries, name)
         if entry is None:
@@ -126,7 +131,8 @@ def wire(name: str, config: Optional[str] = None) -> bool:
     """Подключить УЖЕ установленный MCP по имени (wire_snippet рецепта в
     config.local.yml). True — подключён; False — имени нет в манифесте."""
     entries, root = _load_manifest_entries(config)
-    from recommended_mcp.install import find_entry
+    _r = import_recipes('install')
+    find_entry = _r.find_entry
     entry = find_entry(entries, name)
     if entry is None:
         return False
@@ -147,7 +153,8 @@ def remove(name: str, config: Optional[str] = None, keep_package: bool = False) 
 
 def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
     """yes = установлен; — = проверили, не установлен; ? = проверить не удалось."""
-    from recommended_mcp.install import _dist_name, npm_global_has
+    _r = import_recipes('install')
+    _dist_name, npm_global_has = _r._dist_name, _r.npm_global_has
     from gc_core.mcp_runtime.venv import query_installed_version
     itype = entry.install.type
     if itype in ("pypi", "source", "wheel"):
@@ -182,7 +189,8 @@ def _cmd_list() -> int:
 
 def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
     from gc_core.mcp_runtime import wiring
-    from recommended_mcp.install import find_entry
+    _r = import_recipes('install')
+    find_entry = _r.find_entry
     if wiring.unwire(name):
         print(f"[unwired] {name}")
     else:
@@ -269,12 +277,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.cmd in (None, "help"):
         return _cmd_help()
-    if args.cmd == "install":
-        return _cmd_install(args.name, args.config, args.editable)
-    if args.cmd == "list":
-        return _cmd_list()
-    if args.cmd == "remove":
-        return _cmd_remove(args.name, args.keep_package, args.remove_all)
+
+    # Отказ «нет рецептов» превращаем в одну строку, а не в трейсбек — тот же
+    # приём, что у шимов профилей. Справка при этом работает всегда: она
+    # рецептов не требует.
+    try:
+        if args.cmd == "install":
+            return _cmd_install(args.name, args.config, args.editable)
+        if args.cmd == "list":
+            return _cmd_list()
+        if args.cmd == "remove":
+            return _cmd_remove(args.name, args.keep_package, args.remove_all)
+    except RecipesUnavailable as exc:
+        print(f"{exc}. Поставьте профиль с MCP.", file=sys.stderr)
+        return 1
     return 1
 
 
@@ -309,7 +325,8 @@ def installed_state(name: str, config: Optional[str] = None, *, manifest=None) -
     Медленно (subprocess-опрос venv). installed=None — проверить не удалось.
     manifest=(entries, root) — уже загруженный манифест (кэш вызывающего); иначе грузим."""
     entries, root = manifest if manifest is not None else _load_manifest_entries(config)
-    from recommended_mcp.install import find_entry, _dist_name
+    _r = import_recipes('install')
+    find_entry, _dist_name = _r.find_entry, _r._dist_name
     from gc_core.mcp_runtime.venv import query_installed_version
     entry = find_entry(entries, name)
     if entry is None:

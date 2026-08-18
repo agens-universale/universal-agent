@@ -23,9 +23,15 @@ def _no_managed_overlay_by_default(tmp_path, monkeypatch):
 
     Тестам, которым managed-оверлей нужен, ничего специально включать не надо —
     они сами переопределяют managed_config_path поверх этой заглушки.
+
+    Патчим ДОМ функции — ``config_modules.env_vars``. С 18.08.2026 она живёт
+    там, а не в ``mcp_runtime.paths``: путь принадлежит конфигу, и держать его в
+    MCP-подсистеме значило заставлять config.py статически от неё зависеть.
+    В mcp_runtime остался реэкспорт, поэтому патч по старому адресу молча
+    перестал бы действовать — тест бы позеленел, ничего не проверяя.
     """
     monkeypatch.setattr(
-        "gc_core.mcp_runtime.paths.managed_config_path",
+        "gc_core.config_modules.env_vars.managed_config_path",
         lambda: tmp_path / "no-managed-overlay-here.yml",
     )
 
@@ -48,7 +54,7 @@ def test_managed_overlay_overrides_base(tmp_path, monkeypatch):
     base = _write(tmp_path / "config.yml", "agent:\n  model: base-model\n")
     managed = tmp_path / "gc" / "config.local.yml"
     _write(managed, "agent:\n  model: managed-model\n")
-    monkeypatch.setattr("gc_core.mcp_runtime.paths.managed_config_path", lambda: managed)
+    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
     monkeypatch.chdir(tmp_path)      # нет .gc/ → проектного оверлея нет
 
     got = origins(base, ["agent.model"])["agent.model"]
@@ -63,7 +69,7 @@ def test_project_wins_over_managed(tmp_path, monkeypatch):
     base = _write(tmp_path / "config.yml", "agent:\n  model: base-model\n")
     managed = tmp_path / "gc" / "config.local.yml"
     _write(managed, "agent:\n  model: managed-model\n")
-    monkeypatch.setattr("gc_core.mcp_runtime.paths.managed_config_path", lambda: managed)
+    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
     proj_dir = tmp_path / "proj"
     _write(proj_dir / ".gc" / "config.yml", "agent:\n  model: proj-model\n")
     monkeypatch.chdir(proj_dir)
