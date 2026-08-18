@@ -160,21 +160,40 @@ error: Executables already exist: gc-mcp, gc-mcp-install (use `--force` to overw
 ### Следствие для узкого профиля
 
 `uv tool install "gc-cli @ ..."` даёт в PATH одну команду `gc-cli`. Менеджер
-MCP при этом **установлен** (жёсткая зависимость) и лежит в venv профиля, но
-без симлинка. Чтобы получить `gc-mcp` в PATH:
+MCP при этом **установлен** — он жёсткая зависимость и физически лежит в venv
+профиля (`tools/gc-cli/bin/gc-mcp` есть и запускается), но симлинка наружу нет.
 
-```bash
-uv tool install "gc-mcp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/mcp"
+Разница не наша, а модели `uv tool`. В обычном venv скрипты зависимостей
+ставятся сами:
+
+```
+$ uv pip install gc-cli        →  bin/: gc-cli, gc-mcp, gc-mcp-install
+$ uv tool install gc-cli       →  Installed 1 executable: gc-cli
 ```
 
-Ставится один раз на машину — как и положено отдельному менеджеру. Полный
-профиль `gc-ua` даёт все пять команд сразу, ему ничего доставлять не нужно.
+`uv tool` изолирует инструменты и намеренно экспортирует только скрипты
+запрошенного дистрибутива — так в доке uv: «Executables provided by dependencies
+of tool packages are not installed».
 
-Есть и штатный флаг uv — `--with-executables-from gc-mcp` — он экспортирует
-скрипты зависимости при установке профиля и переживает `uv tool upgrade`
-(пишется в `uv-receipt.toml`). Но каноном его делать нельзя: два профиля с этим
-флагом снова столкнутся на тех же именах. Годится как удобство, когда профиль
-на машине один.
+Штатный способ получить их всё же — флаг:
+
+```bash
+uv tool install "gc-cli @ ...#subdirectory=packages/cli" --with-executables-from gc-mcp
+```
+
+Он резолвит `gc-mcp` из ТОГО ЖЕ коммита (через `[tool.uv.sources] workspace`,
+в PyPI не идёт), пишется в `uv-receipt.toml` вместе с `from = "gc-mcp"` и
+переживает `uv tool upgrade`. Набирается один раз. Именно эта форма и стоит в
+командах установки в readme.
+
+Декларативной формы у флага нет: ни переменной окружения, ни ключа в
+`pyproject.toml` — только аргумент командной строки (в отличие от, скажем,
+`--constraints`, у которого есть `UV_CONSTRAINT`). Ближайший аналог в pipx —
+`--include-resources-from`; полного `--include-deps` у uv нет.
+
+Ограничение флага: если ставить с ним ДВА профиля, второй снова столкнётся на
+именах `gc-mcp*`. В таком случае менеджер ставится отдельным инструментом —
+`uv tool install "gc-mcp @ ...#subdirectory=packages/mcp"`.
 
 Закреплено тестами `test_each_distribution_declares_only_its_own_commands` и
 `test_command_names_do_not_collide_between_leaf_distributions`.
