@@ -28,10 +28,12 @@ def serve() -> int:
 
 
 def mcp() -> int:
-    from gc_core.mcp_runtime.cli import main
+    # Через шим ядра, а не напрямую: команда объявляется всеми профилями и
+    # должна давать строку, если дистрибутив gc-mcp почему-то не приехал.
+    from gc_core.mcp_entry import main
     return main()
 
 
 def mcp_install() -> int:
-    from gc_core.mcp_runtime.install_cli import main
+    from gc_core.mcp_entry import install as main
     return main()

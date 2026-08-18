@@ -523,7 +523,7 @@ async def test_mcp_section_mounts_editor(tmp_path, monkeypatch):
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_core.mcp_runtime import cli as cli
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(cli, "manual_server_names", lambda uc: [])
@@ -547,7 +547,7 @@ async def test_mcp_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_core.mcp_runtime import cli as cli
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "manual_server_names", lambda uc: [])
@@ -1567,7 +1567,7 @@ async def test_ctrl_d_in_mcp_section_reaches_screen(tmp_path, monkeypatch):
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_core.mcp_runtime import cli as cli
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "manual_server_names", lambda uc: [])

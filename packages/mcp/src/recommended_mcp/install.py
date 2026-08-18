@@ -31,9 +31,9 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(_legacy_src))
     __package__ = "recommended_mcp"
 
-from gc_core.mcp_runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
+from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
 from gc_core.mcp_runtime.state import save_runtime_state
-from gc_core.mcp_runtime.venv import active_pip_python, ensure_mcp_venv, pip_argv, pip_install_argv, pip_install_target, query_installed_version
+from recommended_mcp.runtime.venv import active_pip_python, ensure_mcp_venv, pip_argv, pip_install_argv, pip_install_target, query_installed_version
 from recommended_mcp.manifest import (
     MCPEntry,
     load_agent_dep_dir,

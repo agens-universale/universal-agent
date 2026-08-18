@@ -1,22 +1,22 @@
 """Отсутствие пакета рецептов даёт строку, а не трейсбек.
 
-Ядро тянет `recommended_mcp` ЛЕНИВО: без него агент работает, просто не
-поднимает HTTP/SSE-daemon'ы и не умеет `gc-mcp`. Но до 18.08.2026 отказ был
-двух разных сортов, и оба плохие:
+Менеджер MCP уехал в дистрибутив gc-mcp, а команды `gc-mcp` / `gc-mcp-install`
+объявляют ВСЕ профили приложения. Значит их могут набрать там, где этого
+дистрибутива нет, — и тогда нужна одна строка, как у соседних шимов
+(`cli_entry` / `tui_entry` / `serve_entry`), а не ModuleNotFoundError.
 
-- `gc-mcp` падал сырым ModuleNotFoundError с трейсбеком — единственная из пяти
-  команд без охранника, тогда как у профилей охранники есть;
-- `mcp_daemon_autostart` глотал ЛЮБУЮ ошибку импорта голым
-  `except ImportError: return`. Автозапуск включён по умолчанию в gc-ua,
-  поэтому опечатка внутри рецептов молча выключала MCP, а агент падал позже —
-  на мёртвом порту, в инструменте.
+Второй закрываемый случай — автозапуск daemon'ов. Раньше он глотал ЛЮБУЮ
+ошибку импорта голым `except ImportError: return`; в gc-ua автозапуск включён
+по умолчанию, поэтому опечатка внутри рецептов молча выключала MCP, а агент
+падал позже — на мёртвом порту, в инструменте.
 
-Сейчас ветка отказа недостижима (рецепты лежат в колесе ядра), но станет
-достижимой, когда они уедут в свой дистрибутив. Тест написан заранее, чтобы
-переезд не превратился в регрессию.
+Тест живёт в наборе ЯДРА, потому что проверяет код ядра: шим и мост автозапуска.
+Сам менеджер проверяется в packages/mcp/tests.
 """
 
 from __future__ import annotations
+
+import sys
 
 import pytest
 
@@ -24,12 +24,9 @@ import pytest
 class _Blocker:
     """meta_path-finder, отвечающий «не нашёл» для одного пакета.
 
-    Подмена ``builtins.__import__`` тут НЕ годится: ``importlib.import_module``
-    идёт мимо неё, прямо в машинерию импорта (проверено — импорт спокойно
-    проходил при активной подмене). Вариант ``sys.modules[name] = None`` тоже
-    неточен: он даёт ModuleNotFoundError с name = "recommended_mcp.manifest",
-    тогда как настоящее отсутствие пакета даёт name = "recommended_mcp", а
-    охранник различает именно это.
+    Подмена ``builtins.__import__`` не годится: ``importlib.import_module`` идёт
+    мимо неё. Вариант ``sys.modules[name] = None`` неточен — даёт исключение с
+    другим ``name``, а охранник различает именно его.
     """
 
     def __init__(self, name: str) -> None:
@@ -43,17 +40,16 @@ class _Blocker:
 
 @pytest.fixture
 def without_recipes(monkeypatch):
-    """Сделать вид, что пакета recommended_mcp в окружении нет."""
-    import sys
-
+    """Сделать вид, что дистрибутива gc-mcp в окружении нет."""
     for name in [n for n in sys.modules if n.startswith("recommended_mcp")]:
         monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setattr(sys, "meta_path", [_Blocker("recommended_mcp"), *sys.meta_path])
 
 
-@pytest.mark.parametrize("argv", [["list"], ["install", "office"], ["remove", "office"]])
+@pytest.mark.parametrize("argv", [["list"], ["install", "office"], ["help"]])
 def test_gc_mcp_without_recipes_prints_one_line(without_recipes, capsys, argv):
-    from gc_core.mcp_runtime.cli import main
+    """Шим обязан объяснить, чего не хватает, вместо трейсбека."""
+    from gc_core.mcp_entry import main
 
     rc = main(argv)
 
@@ -63,12 +59,11 @@ def test_gc_mcp_without_recipes_prints_one_line(without_recipes, capsys, argv):
     assert "recommended_mcp" in err
 
 
-def test_gc_mcp_help_works_without_recipes(without_recipes, capsys):
-    """Справка рецептов не требует и обязана работать всегда."""
-    from gc_core.mcp_runtime.cli import main
+def test_gc_mcp_install_alias_also_guarded(without_recipes, capsys):
+    from gc_core.mcp_entry import install
 
-    assert main(["help"]) == 0
-    assert "gc-mcp" in capsys.readouterr().out
+    assert install() == 1
+    assert "recommended_mcp" in capsys.readouterr().err
 
 
 def test_autostart_degrades_without_recipes(without_recipes, caplog):
@@ -84,22 +79,13 @@ def test_autostart_degrades_without_recipes(without_recipes, caplog):
 
 
 def test_real_import_error_is_not_masked(monkeypatch):
-    """Опечатка ВНУТРИ рецептов обязана лететь как есть, а не выдаваться за «не установлено».
-
-    Именно этот случай глотал прежний голый `except ImportError: return` в
-    автозапуске: отсутствие зависимости внутри рецептов было неотличимо от
-    отсутствия самих рецептов.
-    """
-    import sys
-
+    """Опечатка ВНУТРИ рецептов обязана лететь как есть, а не выдаваться за «не установлено»."""
     from gc_core.mcp_runtime import recipes
 
     for name in [n for n in sys.modules if n.startswith("recommended_mcp")]:
         monkeypatch.delitem(sys.modules, name, raising=False)
 
     class _BrokenDep:
-        """Пакет на месте, но внутри падает импорт зависимости."""
-
         def find_spec(self, fullname, path=None, target=None):
             if fullname.startswith("recommended_mcp"):
                 raise ModuleNotFoundError("No module named 'yaml'", name="yaml")

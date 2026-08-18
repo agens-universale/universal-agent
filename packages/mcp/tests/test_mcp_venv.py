@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-from gc_core.mcp_runtime import venv as venv_mod
+from recommended_mcp.runtime import venv as venv_mod
 
 
 # --- _python_runs: health-check интерпретатора ---

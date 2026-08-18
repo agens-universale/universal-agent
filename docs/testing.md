@@ -28,9 +28,9 @@ uv run --directory external/computer-mcp pytest -m "not windows"
 
 | Каталог | Что проверяет | Тестов |
 |---|---|---|
-| `packages/core/tests` | ядро/SDK | 3289 |
+| `packages/core/tests` | ядро/SDK | 3285 |
 | `packages/tui/tests` | TUI | 2250 |
-| `packages/mcp/tests` | рецепты и менеджер MCP | 133 |
+| `packages/mcp/tests` | рецепты и менеджер MCP | 137 |
 | `packages/server/tests` | server и swarm | 170 |
 | `packages/cli/tests` | CLI | 93 |
 | `tests` | репозиторий целиком: колёса, литералы модулей, принадлежность тестов | 21 |

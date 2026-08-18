@@ -1,5 +1,5 @@
 """Tests for public API wrappers in mcp_runtime.cli."""
-from gc_core.mcp_runtime import cli as mcp
+from recommended_mcp.runtime import cli as mcp
 
 
 def test_installable_names_from_bundled_manifest():
