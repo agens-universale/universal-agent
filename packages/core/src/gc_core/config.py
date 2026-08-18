@@ -19,7 +19,7 @@ from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from gc_core.config_modules import env_vars
 from gc_core.bundled_assets import bundled_root
-from gc_core.mcp_runtime.paths import managed_config_path
+from gc_core.config_modules.env_vars import managed_config_path
 from gc_core.message_projection import configure_for_model_tags
 from gc_core.trace_id import normalize_trace_id
 

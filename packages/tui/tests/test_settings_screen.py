@@ -1810,7 +1810,10 @@ def no_managed_overlay(tmp_path, monkeypatch):
     managed-оверлей задаёт agent.model, «перекрытие» появится из ниоткуда (или наоборот).
     Тем же приёмом, что и в tests/test_config_origin.py."""
     monkeypatch.setattr(
-        "gc_core.mcp_runtime.paths.managed_config_path",
+        # Дом функции — config_modules.env_vars (с 18.08.2026). В mcp_runtime
+        # остался реэкспорт, поэтому патч по старому адресу молча перестал бы
+        # действовать: тест бы зеленел, читая настоящий ~/.gc/config.local.yml.
+        "gc_core.config_modules.env_vars.managed_config_path",
         lambda: tmp_path / "no-managed-overlay-here.yml",
     )
 

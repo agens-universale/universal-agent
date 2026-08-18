@@ -6,16 +6,17 @@ from pathlib import Path
 from typing import Any
 
 from gc_core.mcp_runtime.paths import recipe_root
+from gc_core.mcp_runtime.recipes import import_recipes
 
 
 def _manifest_errors():
-    from recommended_mcp.manifest import ManifestError
+    ManifestError = import_recipes("manifest").ManifestError
 
     return ManifestError
 
 
 def _default_manifest_path(root: Path) -> Path:
-    from recommended_mcp.manifest import default_manifest_path
+    default_manifest_path = import_recipes("manifest").default_manifest_path
 
     return default_manifest_path(root)
 

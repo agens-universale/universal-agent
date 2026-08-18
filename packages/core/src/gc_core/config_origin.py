@@ -46,7 +46,7 @@ def _overlay_paths(base_path: str) -> list[tuple[str, str]]:
 
     Совпадающий с базовым файл пропускаем — ровно как load_config."""
     from gc_core.config import _project_local_config_path
-    from gc_core.mcp_runtime.paths import managed_config_path
+    from gc_core.config_modules.env_vars import managed_config_path
 
     base_abs = os.path.abspath(base_path)
     out: list[tuple[str, str]] = []
