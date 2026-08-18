@@ -313,6 +313,6 @@ awk '{print $5}' /proc/<bwrap_pid>/mountinfo | sort -u
 | `MCP tools/list ... 400 Bad Request` | Неправильный transport | Для публичных MCP-серверов (playwright и т.п.) → `transport: stream_sse` или `stream_http`, не legacy `sse`/`http` |
 | `messages.jsonl` пуст | CLI не успел финализировать поток (короткая задача) | Смотри `stdout.log` — там полный дамп |
 | `meta.status = unknown_failed`, `error_type = process_crash` | wrapper упал до записи `completion.json` | Смотри `stderr.log` — там traceback |
-| Накопилось много `threads/`, `sandboxes/` | TTL janitor не успевает или `ttl_seconds` большой | Снизь `ttl_seconds` или запусти `scripts/cleanup_swarm_threads.py` вручную |
+| Накопилось много `threads/`, `sandboxes/` | TTL janitor не успевает или `ttl_seconds` большой | Снизь `ttl_seconds` или запусти `python -m gc_server.swarm.cleanup` вручную |
 | Playwright MCP: `ENOENT mkdtemp /tmp/playwright-artifacts-*` | В песочнице нет writable `/tmp` | Уже решено: wrapper монтирует `--tmpfs /tmp`. Если своя сборка wrapper'а — добавь его |
 | Playwright MCP: `chrome-for-testing not installed` / `Executable doesn't exist` | Браузер не найден внутри песочницы | Установить Chromium (`npx playwright install --with-deps chromium`) + системные либы (`libatk-1.0.so.0`, `libasound2` …); забиндить кэш Chromium через `extra_mounts` или `agent_dep_dir`; запускать MCP с `--browser chromium`; убедиться, что `PLAYWRIGHT_BROWSERS_PATH` доходит до stdio-процесса MCP |

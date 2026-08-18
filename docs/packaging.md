@@ -279,7 +279,7 @@ uv run pytest
 | Функция | Что возвращает | Для чего |
 |---|---|---|
 | `bundled_assets.bundled_root()` | каталог ассетов: `packages/core/assets` в репо, `site-packages` в колесе | `prompts/`, `skills/`, `config.default.yml` |
-| `bundled_assets.repo_root()` | корень рабочей копии либо **`None`** | `scripts/`, `config_server.yml`, обёртка swarm |
+| `bundled_assets.repo_root()` | корень рабочей копии либо **`None`** | `config_server.yml`, `integrations/` |
 
 До разбиения на пакеты маркер `prompts/` лежал в корне репозитория, поэтому
 `bundled_root()` возвращал сам корень — и на нём держались вещи, к ассетам
