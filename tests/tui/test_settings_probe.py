@@ -13,9 +13,14 @@ def _fetch(models=None, status=None, net="", latency=7):
     return fetch_ex
 
 
-def _post(status=None, net="", json_body=True):
+def _post(status=None, net="", json_body=True, payload=None):
+    """Подменный chat/completions. Четвёртым элементом идёт ТЕЛО ответа (разобранный
+    JSON или None), а не флаг «тело было JSON»: по нему проба и вердикт выносит, и
+    канарейка сравнивает ответы. `json_body=False` — не-JSON (HTML гейтвея)."""
+    body = payload if payload is not None else ({"error": {"message": "x"}} if json_body else None)
+
     def post_ex(endpoint, auth, model, *, verify=True, http_post_ex=None):
-        return status, net, 11, json_body
+        return status, net, 11, body
     return post_ex
 
 
@@ -347,6 +352,30 @@ def test_auth_accepted_when_canary_gets_different_answer():
     canary = ProbeResult("rejected", 401, None, 25, "токен отклонён (401)")
     r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
     assert r.verdict == "ok" and r.auth_state == "accepted"
+
+
+def test_auth_accepted_when_only_the_body_differs():
+    """Живой LiteLLM: валидный токен и мусорный ОБА дают 400, но говорят разное —
+    валидный дошёл до проверки модели («Invalid model name»), мусорный застрял на
+    поиске ключа в базе («No connected db.»). Одного статуса мало: по нему сервер
+    выглядит неразличающим, и настоящий токен объявлялся неподтверждённым."""
+    wt = ProbeResult("ok", 400, None, 25, "доступен",
+                     body_signature='{"error":{"message":"Invalid model name"}}')
+    canary = ProbeResult("ok", 400, None, 25, "доступен",
+                         body_signature='{"error":{"message":"No connected db."}}')
+    r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
+    assert r.verdict == "ok" and r.auth_state == "accepted"
+
+
+def test_auth_not_claimed_when_body_matches_too():
+    """Два разных мусорных токена дают побайтово одинаковый ответ — вот это и есть
+    «сервер их не различает» (замерено на том же LiteLLM)."""
+    same = '{"error":{"message":"No connected db."}}'
+    wt = ProbeResult("ok", 400, None, 25, "доступен", body_signature=same)
+    canary = ProbeResult("ok", 400, None, 25, "доступен", body_signature=same)
+    r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
+    assert r.auth_state != "accepted"
+    assert "подтвердить" in r.detail
 
 
 def test_auth_falls_back_to_shift_rule_without_canary():

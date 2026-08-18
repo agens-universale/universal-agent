@@ -13,6 +13,7 @@ Express/гейтвея) — путь не найден, токен не вини
 Сервис чистый: сеть только через инъецируемые model_picker.probe_fetch/probe_post."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -60,6 +61,11 @@ class ProbeResult:
     # лежит» от «не смогли проверить по своей причине» — рендер печатает разное,
     # и без флага клиентская ошибка читается как недоступный сервер.
     offline: bool = False
+    # Слепок тела ответа — нужен ТОЛЬКО канарейке, чтобы понять, различает ли
+    # сервер наш токен и заведомо мусорный. Одного http_status мало: LiteLLM на
+    # оба отвечает 400, но валидному говорит «Invalid model name» (дошёл до
+    # проверки модели), а мусорному «No connected db.» (застрял на поиске ключа).
+    body_signature: str = ""
 
     @property
     def reachable(self) -> bool:
@@ -92,42 +98,64 @@ def probe(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
     dummy = not model
     probe_model = model or _DUMMY_MODEL
     if post_ex is None:
-        status, net_err, lat, json_body = model_picker.probe_post(
+        status, net_err, lat, payload = model_picker.probe_post(
             endpoint, auth, probe_model, verify=verify, config_proxy=config_proxy,
         )
     else:
-        status, net_err, lat, json_body = post_ex(endpoint, auth, probe_model, verify=verify)
-    return _verdict_from_post(status, net_err, lat, json_body, dummy)
+        status, net_err, lat, payload = post_ex(endpoint, auth, probe_model, verify=verify)
+    return _verdict_from_post(status, net_err, lat, payload, dummy)
 
 
-def _verdict_from_post(status, net_err, lat, json_body, dummy: bool) -> ProbeResult:
+def _body_signature(payload) -> str:
+    """Стабильный слепок тела ответа для сравнения канарейкой. Сортируем ключи,
+    чтобы порядок в JSON не выдавал различие там, где его нет; не-JSON и пустое
+    тело дают пустую строку — сравнение тогда сводится к одному статусу."""
+    if not isinstance(payload, dict):
+        return ""
+    try:
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)[:400]
+    except (TypeError, ValueError):
+        return ""
+
+
+def _verdict_from_post(status, net_err, lat, payload, dummy: bool) -> ProbeResult:
     """Ответ chat/completions в вердикт. Общая для probe() и probe_auth(): правила
-    чтения одного и того же маршрута не должны разъезжаться между вызывающими."""
+    чтения одного и того же маршрута не должны разъезжаться между вызывающими.
+
+    `payload` — разобранное JSON-тело или None. Тело нужно и для вердикта (404 с
+    JSON = ответило приложение), и для канарейки: она сравнивает слепок."""
+    json_body = payload is not None
+    sig = _body_signature(payload)
     if status is None:
         return ProbeResult("unknown", None, None, lat,
                            f"нет соединения ({net_err})", offline=True)
     if 200 <= status < 300:
-        return ProbeResult("ok", status, None, lat, "доступен")
+        return ProbeResult("ok", status, None, lat, "доступен", body_signature=sig)
     if status == 401:
-        return ProbeResult("rejected", 401, None, lat, "токен отклонён (401)")
+        return ProbeResult("rejected", 401, None, lat, "токен отклонён (401)",
+                           body_signature=sig)
     if status == 404:
         if not json_body:
             # 404 без JSON неоднозначен: HTML «Cannot POST» пути ИЛИ роутер, не знающий
             # модель (gigacode ST на несуществующую модель отвечает так же) — не гадаем.
             if dummy:       # модель-заглушка наша — совсем не вердикт о данных юзера
                 return ProbeResult("unknown", 404, None, lat,
-                                   "не удалось проверить (404: путь или модель)")
+                                   "не удалось проверить (404: путь или модель)",
+                                   body_signature=sig)
             return ProbeResult("rejected", 404, None, lat,
-                               "отклонено сервером (404): проверьте адрес и имя модели")
+                               "отклонено сервером (404): проверьте адрес и имя модели",
+                               body_signature=sig)
         if dummy:           # JSON-ошибка на заглушку — приложение ответило, auth пройден
-            return ProbeResult("ok", status, None, lat, "доступен")
+            return ProbeResult("ok", status, None, lat, "доступен", body_signature=sig)
         return ProbeResult("rejected", 404, None, lat,
-                           "отклонено сервером (404): проверьте имя модели")
+                           "отклонено сервером (404): проверьте имя модели",
+                           body_signature=sig)
     if dummy:
         # 400/422/5xx на заглушку: до «плохая модель/тело» нельзя дойти,
         # не пройдя авторизацию → сервер жив, токен принят.
-        return ProbeResult("ok", status, None, lat, "доступен")
-    return ProbeResult("unknown", status, None, lat, f"сервер ответил {status}")
+        return ProbeResult("ok", status, None, lat, "доступен", body_signature=sig)
+    return ProbeResult("unknown", status, None, lat, f"сервер ответил {status}",
+                       body_signature=sig)
 
 
 def probe_auth(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
@@ -143,12 +171,12 @@ def probe_auth(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
     dummy = not model
     probe_model = model or _DUMMY_MODEL
     if post_ex is None:
-        status, net_err, lat, json_body = model_picker.probe_post(
+        status, net_err, lat, payload = model_picker.probe_post(
             endpoint, auth, probe_model, verify=verify, config_proxy=config_proxy,
         )
     else:
-        status, net_err, lat, json_body = post_ex(endpoint, auth, probe_model, verify=verify)
-    return _verdict_from_post(status, net_err, lat, json_body, dummy)
+        status, net_err, lat, payload = post_ex(endpoint, auth, probe_model, verify=verify)
+    return _verdict_from_post(status, net_err, lat, payload, dummy)
 
 
 def interpret_auth(control: ProbeResult, with_token: Optional[ProbeResult],
@@ -178,9 +206,16 @@ def interpret_auth(control: ProbeResult, with_token: Optional[ProbeResult],
         # отказ «переехал» дальше авторизации: ступень 2 — на модели-заглушке
         # (400/5xx = «до валидации тела не дойти, не пройдя auth»), сдвиг 401→не-401 —
         # на смене кода. Посылка одна, и ломается она одинаково: LiteLLM отвечает 400
-        # на ЛЮБОЙ негодный ключ. Совпал ответ с заведомо мусорным — сервер токены не
-        # различает, и утверждать нечего, чем бы ступень 2 вердикт ни назвала.
-        if canary is not None and canary.http_status == with_token.http_status:
+        # на ЛЮБОЙ негодный ключ.
+        #
+        # Сравниваем статус И тело: на том же LiteLLM валидный токен и мусорный оба
+        # дают 400, но валидному сервер говорит «Invalid model name» (дошёл до
+        # проверки модели), а мусорному «No connected db.» (застрял на поиске ключа
+        # в базе). По одному статусу сервер выглядел бы неразличающим, и настоящий
+        # токен объявлялся бы неподтверждённым — живой смок 2026-08-17.
+        if (canary is not None
+                and canary.http_status == with_token.http_status
+                and canary.body_signature == with_token.body_signature):
             return ProbeResult(
                 "unknown", with_token.http_status, None, with_token.latency_ms,
                 f"не удалось подтвердить токен: на заведомо неверный сервер "

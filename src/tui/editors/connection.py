@@ -27,6 +27,8 @@ _URL_ERROR = "нужны http(s):// и хост"
 _URL_EMPTY = "введите адрес"
 _TOKEN_EMPTY = "введите токен"
 _TOKEN_PH_CREATE = "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"
+_TOKEN_PH_CLEARED = "токен очищен · будет удалён при сохранении"
+_TOKEN_CLEAR_HINT = "Ctrl+U — очистить токен"
 _PRESET_HINT_EMPTY = "выберите провайдера или впишите свой адрес · Enter — подставить"
 
 
@@ -70,15 +72,51 @@ class ConnectionEditor(Vertical):
         self._idx = 0
         self._initial_url = self._url_current
         self._initial_proxy = self._proxy_current
+        # Третье состояние поля токена. Пусто = «не менять», напечатано = «заменить»,
+        # помечено = «стереть сохранённый». Нужно потому, что значение токена, в
+        # отличие от прочих полей, физически не в Input: он секрет, поле держат
+        # пустым, и обычным Backspace стирать нечего.
+        self._token_cleared = False
         # Контроллер пресет-листа заводится в on_mount (ему нужны смонтированные поля),
         # но спросить о нём могут раньше: футер хоста считается сразу после mount(),
         # когда редактор в дереве уже есть, а своего on_mount ещё не прошёл.
         self._presets_ctrl = None
 
     # --- рендер ---
+    @property
+    def token_cleared(self) -> bool:
+        """Сохранённый токен помечен к удалению (Ctrl+U). Хозяева спрашивают, чтобы
+        проба ушла без токена ещё до сохранения."""
+        return self._token_cleared
+
     def _token_is_mask(self) -> bool:
         """placeholder токена сейчас — маска сохранённого значения, а не подсказка."""
+        if self._token_cleared:
+            return False        # маска сохранённого лгала бы: его уже стёрли
         return _auth_active(self._auth_header) == 0 and bool(self._auth_header)
+
+    def on_token_field_with_saved(self) -> bool:
+        """Курсор ленты стоит на токене, и есть что стирать. По этому признаку
+        футер секции обещает Ctrl+U — ровно как Alt+↓ обещается по `on_url_field`:
+        клавиша, названная там, где она молчит, — та же ложь, что умолчание о
+        работающей."""
+        return self._positions[self._idx] == "conn-token" and self._token_is_mask()
+
+    def clear_token(self) -> bool:
+        """Ctrl+U на поле токена: стереть СОХРАНЁННЫЙ токен. True — обработали.
+
+        Действует сразу: маска уходит, проба с этого момента идёт без токена, и
+        передумать можно, просто набрав новый (пометка снимется). В файл попадёт
+        при сохранении — как и всё остальное в форме."""
+        if self._no_auth or not self._token_is_mask():
+            return False        # стирать нечего — клавиша не наша
+        self._token_cleared = True
+        inp = self.query_one("#conn-token", Input)
+        inp.value = ""
+        inp.placeholder = self._token_placeholder()
+        inp.set_class(False, "has-saved")
+        self.query_one("#conn-token-label", Static).update(self._token_label())
+        return True
 
     def _token_placeholder(self) -> str:
         """placeholder ≠ значение: действующий токен — маской (и НИКАКОГО хинта —
@@ -87,7 +125,16 @@ class ConnectionEditor(Vertical):
         печать заменяет, пустое поле = «не менять»/«не задан»."""
         if self._token_is_mask():
             return onboarding.display_secret(self._auth_header)
+        if self._token_cleared:
+            return _TOKEN_PH_CLEARED
         return _TOKEN_PH_CREATE if self.create_mode else "введите токен"
+
+    def _token_label(self) -> str:
+        """Заголовок поля токена. Клавиша очистки называется здесь, а не в футере:
+        футер секции уже на пределе ширины (см. _FOOTER_BY_VIEW в settings), а
+        главное — подсказка нужна там, куда смотрят, как «Space — переключить»
+        у галки. Обещаем только когда есть что стирать."""
+        return "Токен   Ctrl+U — очистить" if self._token_is_mask() else "Токен"
 
     def _proxy_placeholder(self) -> str:
         """placeholder для поля прокси: действующее значение маской, пусто — подсказка."""
@@ -130,7 +177,8 @@ class ConnectionEditor(Vertical):
             # специфичности (#conn-url.set-framed — id+класс) и дал бы вторую
             # рамку внутри первой.
             yield self._url_input
-        yield Static("Токен", classes="onb-hint onb-dyn set-group-gap", id="conn-token-label")
+        yield Static(self._token_label(), classes="onb-hint onb-dyn set-group-gap",
+                     id="conn-token-label")
         # has-saved: placeholder говорит одно из двух (маска сохранённого /
         # подсказка-объяснение), и различать их надо не вчитываясь — маркер красит
         # маску цветом значения (спека §3.4).
@@ -271,6 +319,10 @@ class ConnectionEditor(Vertical):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "conn-url":
             self._presets_ctrl.apply_filter(event.input.value)   # no-op, если список свёрнут
+        elif event.input.id == "conn-token" and event.input.value:
+            # Очистил, а потом набрал новый — пометка снимается сама. Иначе
+            # commit пошёл бы по ветке «стереть» и набранное молча пропало бы.
+            self._token_cleared = False
 
     # focus_first() здесь больше нет: он повторял приземление `move()` (раскрыть список
     # на адресе, снять подсветку галки, сфокусировать поле), только грубее — всегда на
@@ -341,6 +393,8 @@ class ConnectionEditor(Vertical):
             return True
         if proxy != self._initial_proxy:
             return True
+        if self._token_cleared:
+            return True                      # Ctrl+U: сохранённый токен помечен к удалению
         active = _auth_active(self._auth_header)
         if self._no_auth != (active == 1):
             return True                      # галка отличается от действующего варианта
@@ -371,6 +425,8 @@ class ConnectionEditor(Vertical):
                 header = ""                  # снять действующую авторизацию
         elif token:
             header = onboarding.authorization_header(token)
+        elif self._token_cleared:
+            header = ""                      # Ctrl+U: стереть сохранённый токен
         elif active == 1 and not self.create_mode:
             # действовала «без авторизации», галку сняли (выбран Bearer), токена
             # нет ни в поле, ни действующего — честная ошибка (пользователь явно

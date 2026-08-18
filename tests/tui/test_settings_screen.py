@@ -3234,3 +3234,92 @@ async def test_ctrl_space_on_the_model_section_does_nothing(tmp_path, monkeypatc
         await pilot.pause()
         assert app.screen is scr                       # приложение живо
         assert [str(w.render()) for w in scr.query(".onb-option")] == rows_before
+
+
+async def test_connection_glyph_is_about_server_and_token_not_the_model(tmp_path):
+    """Живой кейс GigaCode: сервер доступен, токен принят, но имя модели неверное —
+    ступень 2 отвечает 404 «проверьте адрес и имя модели». Раньше «достижимым»
+    считался только ok или 401, поэтому такой ответ красил «Подключение» красным
+    «!» с пометкой «сервер недоступен СЕЙЧАС» — при живом сервере и рабочем токене.
+
+    Глиф «Подключения» отвечает за сервер и токен; про модель краснеет своя строка."""
+    from tui.screens.settings import SettingsScreen, _CONNECTION
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        scr._raw["Authorization"] = "Bearer sk-live"
+
+        scr._probe_config = ProbeResult(
+            "rejected", 404, None, 12,
+            "отклонено сервером (404): проверьте адрес и имя модели")
+        assert scr._menu_glyph(_CONNECTION)[0] == "✓"    # сервер ответил, токен не 401
+
+        # Настоящий обрыв — вот теперь «!» по делу.
+        scr._probe_config = ProbeResult("unknown", None, None, 12,
+                                        "нет соединения (timeout)", offline=True)
+        assert scr._menu_glyph(_CONNECTION)[0] == "!"
+
+        # Отклонённый токен — тоже «!», но по другой причине.
+        scr._probe_config = ProbeResult("rejected", 401, None, 12, "токен отклонён (401)")
+        assert scr._menu_glyph(_CONNECTION)[0] == "!"
+
+
+async def test_connection_glyph_not_green_when_server_demands_a_token(tmp_path):
+    """Токен снят (Ctrl+U / «без авторизации»), а сервер отвечает 401 — конфиг
+    нерабочий, агент на нём не поедет. Хаб обязан это показать: раньше правило
+    «токена нет → решает только достижимость» ставило зелёную галочку рядом с
+    секцией, которая честно писала «⚠ сервер требует авторизацию (401)»."""
+    from tui.screens.settings import SettingsScreen, _CONNECTION
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        scr._raw["Authorization"] = ""            # токена нет
+
+        scr._probe_config = ProbeResult("rejected", 401, None, 12, "токен отклонён (401)")
+        assert scr._menu_glyph(_CONNECTION)[0] == "!"
+
+        # А вот сервер, которому токен и не нужен, — зелёный по делу.
+        scr._probe_config = ProbeResult("ok", 200, None, 12, "доступен")
+        assert scr._menu_glyph(_CONNECTION)[0] == "✓"
+
+
+async def test_connection_footer_names_the_clear_key_on_the_token_field(tmp_path):
+    """Футер секции контекстный: «Alt+↓ — показать список» обещается только на
+    адресе. Симметрично и «Ctrl+U — очистить» — только на токене и только когда
+    есть что стирать. Клавиши на разных полях, в одной строке не встречаются,
+    так что бюджету ширины ничего не грозит."""
+    from tui.screens.settings import SettingsScreen, _CONNECTION
+    import tui.app as app_mod
+    cfg_file = _write_cfg(tmp_path)          # с сохранённым токеном — иначе стирать нечего
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr._connection_editor()
+
+        assert "Ctrl+U" not in scr._footer_text()      # курсор на адресе — молчим
+        ed.move(1)                                     # → токен
+        await pilot.pause()
+        assert "Ctrl+U — очистить" in scr._footer_text()
+
+        ed.clear_token()                               # стёрли — стирать больше нечего
+        await pilot.pause()
+        assert "Ctrl+U" not in scr._footer_text()

@@ -549,10 +549,14 @@ class OnboardingScreen(Screen):
             self._probe_gen += 1   # обесценить летящую пробу
             self._set_conn_probe_line(Text(f"⚠ {onboarding.display_value(url)}", style=WARN))
             return
-        auth = (onboarding.authorization_header(token_raw) if token_raw
-                else self._values.get("Authorization"))
-        if auth is None:
-            auth = (self._config.get("chat_completion_headers") or {}).get("Authorization")
+        if token_raw:
+            auth = onboarding.authorization_header(token_raw)
+        elif ed.token_cleared:
+            auth = None                  # Ctrl+U: сохранённый стёрт ещё до записи
+        else:
+            auth = self._values.get("Authorization")
+            if auth is None:
+                auth = (self._config.get("chat_completion_headers") or {}).get("Authorization")
         if auth == onboarding.TOKEN_SENTINEL:
             auth = None
         verify = bool((self._config or {}).get("use_ssl", True))
@@ -691,6 +695,20 @@ class OnboardingScreen(Screen):
             self._refresh_footer()
 
     def on_key(self, event: events.Key) -> None:
+        if event.key == "ctrl+u" and self._step == 0:
+            # Очистка сохранённого токена — та же клавиша, что в /settings.
+            # Перехватываем здесь: Input держит на ней delete_left_all, а поле
+            # токена пустое (секрет живёт в конфиге, в поле — маска).
+            from textual.css.query import NoMatches
+            try:
+                ed = self.query_one(ConnectionEditor)
+            except NoMatches:
+                ed = None
+            if ed is not None and ed.clear_token():
+                event.prevent_default()
+                event.stop()
+                self._refresh_footer()
+            return
         if event.key in ("alt+down", "ctrl+down"):
             # Развод клавиш (спека 2026-08-06 §2): раскрыть/перечитать список поля под
             # курсором. Списков в мастере два: пресеты адреса (шаг 0), модели агента

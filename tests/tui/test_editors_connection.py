@@ -403,3 +403,71 @@ async def test_section_entry_shows_the_whole_preset_list(tmp_path):
         assert len(visible) == len(DEFAULT_ENDPOINT_PRESETS), (
             f"список раскрылся суженным: {[str(w.render()) for w in visible]}")
         assert str(visible[1].render()).startswith("▸ "), "▸ не на совпавшем пресете"
+
+
+# --- Ctrl+U: очистка сохранённого токена ---------------------------------------
+#
+# Токен — единственное поле формы, чьё значение физически не в поле: он секрет,
+# поэтому Input держат пустым, а сохранённое показывают маской в placeholder.
+# Стереть его обычным Backspace не за что — отсюда отдельное действие.
+
+
+async def test_clear_token_marks_saved_for_removal():
+    """Очистка меняет состояние формы здесь и сейчас: маска уходит, поле
+    сообщает, что сохранённый токен будет удалён."""
+    from tui.editors.connection import ConnectionEditor
+    ed = ConnectionEditor(url_current="http://h/v1/chat/completions",
+                          auth_header="Bearer sk-old")
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        inp = ed.query_one("#conn-token", Input)
+        assert "***" in inp.placeholder            # до очистки — маска сохранённого
+
+        assert ed.clear_token() is True
+        await pilot.pause()
+
+        assert ed.token_cleared is True
+        assert "***" not in inp.placeholder
+        assert "удал" in inp.placeholder
+
+
+async def test_clear_token_is_a_noop_without_saved_token():
+    """Стирать нечего — клавиша не наша, пусть её обработает кто-то ещё."""
+    from tui.editors.connection import ConnectionEditor
+    ed = ConnectionEditor(url_current="http://h/v1/chat/completions", auth_header=None)
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert ed.clear_token() is False
+        assert ed.token_cleared is False
+
+
+async def test_typing_a_token_cancels_the_clear():
+    """Очистил, потом передумал и набрал новый — пометка снимается сама,
+    иначе набранное молча не сохранилось бы."""
+    from tui.editors.connection import ConnectionEditor
+    ed = ConnectionEditor(url_current="http://h/v1/chat/completions",
+                          auth_header="Bearer sk-old")
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        ed.clear_token()
+        ed.query_one("#conn-token", Input).value = "sk-new"
+        await pilot.pause()
+        assert ed.token_cleared is False
+
+
+async def test_cleared_token_is_saved_as_empty_header():
+    """Сохранение после очистки снимает авторизацию — тот же результат, что у
+    галки «без авторизации», но без переключения режима."""
+    from tui.editors.connection import ConnectionEditor
+    ed = ConnectionEditor(url_current="http://h/v1/chat/completions",
+                          auth_header="Bearer sk-old")
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        ed.clear_token()
+        _url, header, err, _proxy = ed.submit()
+        assert err is None
+        assert header == ""

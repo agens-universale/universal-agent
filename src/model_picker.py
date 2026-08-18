@@ -237,10 +237,13 @@ def probe_fetch(completions_url: str, auth_header: Optional[str], *,
 
 def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
                verify: bool = True, config_proxy: Optional[str] = None,
-               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int, bool]:
+               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int, Any]:
     """Минимальный POST в сам chat/completions (ступень 2 probe).
-    → (status, net_err, latency_ms, json_body); json_body — тело ответа было JSON
-    (ответило приложение), а не HTML/текст 404-страницы гейтвея/Express."""
+    → (status, net_err, latency_ms, payload); payload — разобранное JSON-тело или
+    None, если ответ не JSON (HTML/текст 404-страницы гейтвея/Express).
+
+    Отдаём тело, а не флаг «оно было JSON»: по нему проба отличает ответ на наш
+    токен от ответа на заведомо мусорный, когда статус у обоих одинаковый."""
     import time
     if http_post_ex is None:
         def post_ex(url, headers, body, verify):
@@ -253,7 +256,7 @@ def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
     t0 = time.monotonic()
     reply = post_ex(completions_url, headers, body, verify)
     return (reply.status, reply.network_error, int((time.monotonic() - t0) * 1000),
-            reply.payload is not None)
+            reply.payload)
 
 
 def fetch_models(completions_url: str, auth_header: Optional[str], *,

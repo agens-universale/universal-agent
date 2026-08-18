@@ -73,6 +73,11 @@ _FOOTER_PRESET_LIST_NO_MATCH = ("↑/↓  ·  Enter — оставить сво�
 # финального ревью 2026-08-06, D). Тот же текст без сегмента про Alt+↓.
 _FOOTER_CONNECTION_FIELD = ("Enter — сохранить  ·  "
                             "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню")
+# Курсор на токене и есть что стирать. Сегмент занимает место «Alt+↓ — показать
+# список» — тот обещается только на адресе, эти двое на разных полях и в одной
+# строке не встречаются, поэтому бюджету ширины ничего не грозит.
+_FOOTER_CONNECTION_TOKEN = ("Enter — сохранить  ·  Ctrl+U — очистить  ·  "
+                            "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню")
 # Бюджет ширины футера — `#set-footer` две строки БЕЗ скролла (тот же контракт у
 # `#onb-footer` мастера): что не влезло, то отрезано вместе с хвостом «Esc — меню».
 # Меряется он ПЕРЕНОСОМ на самом узком окне, а не числом символов: перенос идёт по
@@ -182,7 +187,10 @@ class SettingsScreen(Screen):
             # Список свёрнут: Alt+↓ обещаем, только пока курсор на адресе — на «Токене»/
             # «Прокси» клавиша молчит (`on_url_field` гейтит ровно эту позицию,
             # находка финального ревью 2026-08-06, D), и обещать её там значило бы врать.
-            return _FOOTERS[_CONNECTION] if self._connection_on_url() else _FOOTER_CONNECTION_FIELD
+            if self._connection_on_url():
+                return _FOOTERS[_CONNECTION]
+            return (_FOOTER_CONNECTION_TOKEN if self._connection_can_clear_token()
+                    else _FOOTER_CONNECTION_FIELD)
         return _FOOTERS.get(self._view, _FOOTER_READONLY)
 
     def _connection_editor(self):
@@ -219,6 +227,14 @@ class SettingsScreen(Screen):
             return self._connection_editor().on_url_field
         except NoMatches:
             return True
+
+    def _connection_can_clear_token(self) -> bool:
+        """Курсор на токене и есть что стирать — футер обещает Ctrl+U. Редактора
+        нет — обещать нечего (курсор стартует на адресе)."""
+        try:
+            return self._connection_editor().on_token_field_with_saved()
+        except NoMatches:
+            return False
 
     def on_connection_editor_ready(self, event) -> None:
         """Редактор адреса домонтировался: заполнил поле и решил, раскрывать ли
@@ -426,12 +442,20 @@ class SettingsScreen(Screen):
                     return "—", DEEP_DIM
                 if r is None:
                     return "—", DEEP_DIM
-                reachable = r.verdict == "ok" or (r.verdict == "rejected" and r.http_status == 401)
-                if not reachable:
+                # Достижим — значит ОТВЕТИЛ, каким бы ни был ответ. Раньше сюда
+                # пускали только ok и 401, и содержательный отказ про модель
+                # (живой GigaCode: 404 «проверьте адрес и имя модели») красил
+                # «Подключение» красным при живом сервере и принятом токене.
+                # Имя модели — забота своей строки, у неё свой глиф.
+                if r.offline or r.http_status is None:
                     return "!", ERR                  # сервер недоступен СЕЙЧАС
                 auth = self._raw.get("Authorization")
                 if not auth:
-                    return "✓", OK                   # без авторизации — решает только достижимость
+                    # Токена нет. Зелёный — только если сервер его и не требует:
+                    # 401 здесь означает нерабочий конфиг (агент не поедет), и
+                    # молчать об этом нельзя — секция пишет то же «⚠ сервер
+                    # требует авторизацию (401)», хаб обязан с ней совпадать.
+                    return ("!", ERR) if r.http_status == 401 else ("✓", OK)
                 if auth == TOKEN_SENTINEL:
                     return "—", DEEP_DIM             # токен не задан (шаблон) — нечем подтвердить
                 return ("✓", OK) if r.auth_ok else ("!", ERR)   # токен принят/отклонён (401)
@@ -693,6 +717,8 @@ class SettingsScreen(Screen):
             token = None                             # без авторизации
         elif token_raw:
             token = authorization_header(token_raw)  # введённый токен
+        elif self._connection_editor().token_cleared:
+            token = None                             # Ctrl+U: сохранённый стёрт ещё до записи
         else:
             token = auth_cfg                         # поле пусто → действующий токен
         # draft proxy: поле → иначе config; пустое поле = «не задано» → env через резолвер
@@ -1952,6 +1978,22 @@ class SettingsScreen(Screen):
                 if self._view == _CONNECTION:
                     self._autoprobe_on_leave(ed, leaving_id)
                 self._refresh_footer()   # вход на адрес раскрывает список, уход — сворачивает
+            return
+        if event.key == "ctrl+u" and self._view == _CONNECTION:
+            # Очистка сохранённого токена. Клавишу приходится перехватывать здесь:
+            # Input держит на ней delete_left_all, а поле токена пустое (секрет
+            # живёт в конфиге, в поле — маска), и штатное поведение там вхолостую.
+            # clear_token() сама решает, её ли это случай; не её — клавиша идёт
+            # дальше, к Input.
+            try:
+                ed = self._connection_editor()
+            except NoMatches:
+                ed = None
+            if ed is not None and ed.clear_token():
+                event.prevent_default()
+                event.stop()
+                self._update_dirty()
+                self._refresh_footer()
             return
         if event.key == "space" and self._view == _CONNECTION:
             # Галка «без авторизации» — Space переключает её, только если курсор
