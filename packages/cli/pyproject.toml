@@ -19,9 +19,14 @@ dependencies = [
 # присутствуют всегда и без своего профиля печатают однострочную подсказку —
 # охранники gc_core.tui_entry / gc_core.serve_entry.
 [project.scripts]
+# Профиль объявляет ТОЛЬКО свою команду. Раньше все четыре объявляли одни и
+# те же пять имён, и оба установленных профиля дрались за одни симлинки в
+# ~/.local/bin: второй перезаписывал первый, а `uv tool uninstall` одного
+# сносил команды другого.
+# gc-mcp/gc-mcp-install — исключение: это чистое ядро, работает в любом
+# профиле, поэтому пересечение симлинка безвредно — какой профиль ни выиграл
+# бы, команда отработает одинаково.
 gc-cli = "gc_core.cli_entry:main"
-gc-ua = "gc_core.tui_entry:main"
-gc-serve = "gc_core.serve_entry:main"
 gc-mcp = "gc_core.mcp_runtime.cli:main"
 gc-mcp-install = "gc_core.mcp_runtime.install_cli:main"
 

@@ -72,9 +72,9 @@ universal-agent/
 | Дистрибутив | Пакеты | Зависит от | Команды |
 |---|---|---|---|
 | `gc-core` | `gc_core` | — | **нет** |
-| `gc-cli` | `gc_cli` | `gc-core` | все пять |
-| `gc-tui` | `gc_tui` | `gc-core` | все пять |
-| `gc-server` | `gc_server` | `gc-core` | все пять |
+| `gc-cli` | `gc_cli` | `gc-core` | `gc-cli` + mcp |
+| `gc-tui` | `gc_tui` | `gc-core` | `gc-ua` + mcp |
+| `gc-server` | `gc_server` | `gc-core` | `gc-serve` + mcp |
 | `gc-ua` (мета) | — | все три | все пять |
 
 `gc-core` — библиотека, поэтому **не объявляет точек входа** и ставится иначе:
