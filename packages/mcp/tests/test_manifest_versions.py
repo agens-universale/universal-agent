@@ -9,6 +9,8 @@ import tomllib
 from pathlib import Path
 
 from recommended_mcp.manifest import load_manifest
+from gc_testkit.paths import RECIPES
+from recommended_mcp.install import _vendor_candidates
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,12 +21,17 @@ def _pyproject_version(source_dir: Path) -> str:
 
 
 def test_source_mcp_versions_match_pyproject():
-    manifest_path = _ROOT / "recommended_mcp" / "config.yml"
+    manifest_path = RECIPES / "config.yml"
     root = manifest_path.parent
     source_entries = [e for e in load_manifest(manifest_path) if e.install.type == "source"]
     assert source_entries, "в манифесте нет source-MCP — тест потерял смысл"
     for entry in source_entries:
-        src_dir = (root / entry.install.source).resolve()
+        # install.source — ИМЯ каталога, а не путь (с 18.08.2026): исходники
+        # ищет тот же резолвер, что и установщик.
+        src_dir = next(
+            c for c in _vendor_candidates(str(entry.install.source), root)
+            if (c / "pyproject.toml").exists()
+        )
         assert entry.install.version, f"{entry.name}: install.version не задан в манифесте"
         assert entry.install.version == _pyproject_version(src_dir), (
             f"{entry.name}: версия в манифесте разошлась с {src_dir}/pyproject.toml"

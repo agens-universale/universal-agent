@@ -36,15 +36,6 @@ packages = ["src/gc_core"]
 "assets/prompts" = "gc_core/assets/prompts"
 "assets/skills" = "gc_core/assets/skills"
 "assets/config.default.yml" = "gc_core/assets/config.default.yml"
-# recommended_mcp и external остаются верхним уровнем: первый — импортируемый
-# пакет (`import recommended_mcp` из mcp_daemon_autostart), второй обязан лежать
-# с ним соседом, потому что манифест ссылается на ../external/<name>-mcp.
-# Их судьба решается отдельно, в задаче про вынос MCP в свой дистрибутив.
-"../../recommended_mcp" = "recommended_mcp"
-# Цель повторяет путь из манифеста (source: ../external/vendor/ddgs-mcp),
-# иначе раскладки репозитория и колеса разъедутся: install.py резолвит
-# source относительно каталога рецептов, а он в обеих раскладках рядом.
-"../../external/vendor/ddgs-mcp" = "external/vendor/ddgs-mcp"
 
 [tool.pytest.ini_options]
 # Набор пакета самодостаточен: `cd packages/core && pytest` — доказательство,

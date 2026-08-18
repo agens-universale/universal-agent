@@ -9,7 +9,9 @@ from gc_core.mcp_runtime.repo_path import ensure_repo_on_sys_path, repo_root
 def test_repo_root_points_at_monorepo() -> None:
     root = repo_root()
     assert root is not None
-    assert (root / "recommended_mcp" / "install.py").is_file()
+    # Рецепты уехали в свой дистрибутив; маркером корня стала пара
+    # «packages/ + pyproject.toml» вместо «recommended_mcp/ в корне».
+    assert (root / "packages" / "mcp" / "src" / "recommended_mcp" / "install.py").is_file()
     # После разбиения на модули mcp_runtime живёт в пакете ядра.
     assert (root / "packages" / "core" / "src" / "gc_core" / "mcp_runtime").is_dir()
 

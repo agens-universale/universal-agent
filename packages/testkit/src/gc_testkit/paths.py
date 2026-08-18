@@ -36,6 +36,12 @@ ASSETS = REPO / "packages" / "core" / "assets"
 #: Каталоги исходников всех пакетов — то, что кладётся на ``sys.path``.
 PACKAGE_SRC_DIRS = tuple(sorted(p for p in REPO.glob("packages/*/src") if p.is_dir()))
 
+#: Каталог курируемых рецептов MCP: дистрибутив gc-mcp.
+RECIPES = REPO / "packages" / "mcp" / "src" / "recommended_mcp"
+
+#: Исходники MCP-серверов, которые ставит `gc-mcp install`.
+VENDOR = REPO / "external" / "vendor"
+
 #: Каталог пакета TUI — там же лежат его стили (styles.tcss).
 TUI_PKG = REPO / "packages" / "tui" / "src" / "gc_tui"
 

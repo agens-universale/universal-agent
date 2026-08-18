@@ -15,6 +15,7 @@ dependencies = [
     "gc-cli==0.5.0",
     "gc-tui==0.5.0",
     "gc-server==0.5.0",
+    "gc-mcp==0.5.0",
 ]
 
 [project.optional-dependencies]
@@ -75,6 +76,7 @@ gc-tui = { workspace = true }
 gc-server = { workspace = true }
 # Только для разработки: общая тестовая инфраструктура наборов. Ни в один
 # дистрибутив не входит и в колёса не попадает.
+gc-mcp = { workspace = true }
 gc-testkit = { workspace = true }
 office-mcp = { path = "external/vendor/office-mcp", editable = true }
 
@@ -84,6 +86,7 @@ office-mcp = { path = "external/vendor/office-mcp", editable = true }
 testpaths = [
     "tests",
     "external/litellm/tests",
+    "packages/mcp/tests",
     "packages/core/tests",
     "packages/cli/tests",
     "packages/server/tests",

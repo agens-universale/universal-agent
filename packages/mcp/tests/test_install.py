@@ -140,7 +140,7 @@ def test_pypi_missing_package_raises() -> None:
 
 def _source_entry(
     name: str = "x",
-    source: str = "../external/x",
+    source: str = "x-mcp",
     platforms: tuple[str, ...] = (),
 ) -> MCPEntry:
     return MCPEntry(
@@ -149,20 +149,23 @@ def _source_entry(
         install=InstallSpec(
             type="source",
             platforms=platforms,
-            source=Path(source),
+            source=source,   # имя каталога, не путь (см. test_mcp_git_install)
         ),
     )
 
 
 def test_source_calls_pip_install(tmp_path: Path) -> None:
-    src = tmp_path / "external" / "x"
+    # Раскладка колеса: каталог рецептов и external/vendor — соседи.
+    recipes = tmp_path / "recommended_mcp"
+    recipes.mkdir()
+    src = tmp_path / "external" / "vendor" / "x-mcp"
     src.mkdir(parents=True)
     (src / "pyproject.toml").write_text("[project]\nname = 'x'\n")
 
-    entry = _source_entry(source="external/x")
+    entry = _source_entry(source="x-mcp")
     with pip_install_target(_FAKE_MCP_PY):
         with patch("subprocess.run") as sub:
-            install_mod.install_entry(entry, root=tmp_path)
+            install_mod.install_entry(entry, root=recipes)
 
     cmd = sub.call_args.args[0]
     assert cmd[0] == str(_FAKE_MCP_PY)
@@ -172,14 +175,16 @@ def test_source_calls_pip_install(tmp_path: Path) -> None:
 
 
 def test_source_editable_appends_dash_e(tmp_path: Path) -> None:
-    src = tmp_path / "external" / "x"
+    recipes = tmp_path / "recommended_mcp"
+    recipes.mkdir()
+    src = tmp_path / "external" / "vendor" / "x-mcp"
     src.mkdir(parents=True)
     (src / "pyproject.toml").write_text("[project]\nname = 'x'\n")
 
-    entry = _source_entry(source="external/x")
+    entry = _source_entry(source="x-mcp")
     with pip_install_target(_FAKE_MCP_PY):
         with patch("subprocess.run") as sub:
-            install_mod.install_source_entry(entry, root=tmp_path, editable=True)
+            install_mod.install_source_entry(entry, root=recipes, editable=True)
 
     cmd = sub.call_args.args[0]
     assert "-e" in cmd
@@ -189,7 +194,7 @@ def test_source_editable_appends_dash_e(tmp_path: Path) -> None:
 def test_source_missing_pyproject_raises(tmp_path: Path) -> None:
     (tmp_path / "external" / "x").mkdir(parents=True)
     # pyproject.toml не создаём
-    entry = _source_entry(source="external/x")
+    entry = _source_entry(source="x-mcp")
     with pytest.raises(install_mod.InstallError, match="pyproject.toml не найден"):
         install_mod.install_entry(entry, root=tmp_path)
 
