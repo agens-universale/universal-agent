@@ -26,8 +26,8 @@ for _key in list(sys.modules.keys()):
 # The adapter is not part of src/; import it as harbor does at runtime
 # (`--agent-import-path adapters.gc_cli_external:GcCliExternal`), so its own
 # `from adapters.gc_cli_config import ...` resolves the same way here.
-from gc_testkit.paths import REPO
-_HARBOR = REPO / "harbor"
+from gc_testkit.paths import HARBOR, REPO
+_HARBOR = HARBOR
 sys.path.insert(0, str(_HARBOR))
 
 from adapters.gc_cli_external import (  # noqa: E402

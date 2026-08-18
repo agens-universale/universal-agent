@@ -3,8 +3,8 @@ import importlib.util, sys
 from pathlib import Path
 import yaml
 
-from gc_testkit.paths import REPO
-PROFILES = REPO / "harbor" / "profiles"
+from gc_testkit.paths import HARBOR, REPO
+PROFILES = HARBOR / "profiles"
 
 def _build(gc_cli_config):
     # tests/harbor/ (a test-fixture package) shadows the real harbor framework.
@@ -23,9 +23,9 @@ def _build(gc_cli_config):
             del sys.modules[key]
     # Адаптер тянет соседей как `from adapters.…`, поэтому на sys.path нужен
     # каталог harbor/, а не исходники: единого <repo>/src больше нет.
-    sys.path.insert(0, str(REPO / "harbor"))
+    sys.path.insert(0, str(HARBOR))
     spec = importlib.util.spec_from_file_location(
-        "adapters.gc_cli_external", REPO / "harbor" / "adapters" / "gc_cli_external.py")
+        "adapters.gc_cli_external", HARBOR / "adapters" / "gc_cli_external.py")
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
     from gc_core.summarize.config import parse_summary_trigger_chars
     # completions_url: the adapter has no hardcoded default (fail-fast) — supply one.

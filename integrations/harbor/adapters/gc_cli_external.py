@@ -60,9 +60,18 @@ _ADAPTER_DIR = Path(__file__).resolve().parent          # .../adapters
 _PROMPTS_DIR = _ADAPTER_DIR.parent / "prompts"          # image: /opt/gc-harbor-adapters/prompts
 _SKILLS_DIR = _ADAPTER_DIR.parent / "skills"
 if not _PROMPTS_DIR.is_dir():                            # editable/local: fall back to repo
-    _repo_root = _ADAPTER_DIR.parent.parent
-    # После разбиения на модули ассеты принадлежат дистрибутиву gc-core и лежат
-    # рядом с его исходниками; в корне репозитория их больше нет.
+    # Корень репозитория ищем ПО МАРКЕРУ, а не фиксированной глубиной: адаптер
+    # уже переезжал (harbor/ → integrations/harbor/), и счётчик .parent молча
+    # уводил на уровень выше нужного — промпты переставали находиться.
+    _repo_root = None
+    for _candidate in _ADAPTER_DIR.parents:
+        if (_candidate / "packages").is_dir() and (_candidate / "pyproject.toml").is_file():
+            _repo_root = _candidate
+            break
+    if _repo_root is None:                               # не рабочая копия — оставляем как есть
+        _repo_root = _ADAPTER_DIR.parent.parent
+    # Ассеты принадлежат дистрибутиву gc-core и лежат рядом с его исходниками;
+    # в корне репозитория их больше нет.
     _assets = _repo_root / "packages" / "core" / "assets"
     _base = _assets if (_assets / "prompts").is_dir() else _repo_root
     _PROMPTS_DIR = _base / "prompts"

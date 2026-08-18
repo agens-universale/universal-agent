@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-from gc_testkit.paths import REPO
+from gc_testkit.paths import HARBOR, REPO
 _REPO = REPO
 
 # Expose `adapters/` (inside ./harbor) and `src/` for the adapter import. Append, do
@@ -10,7 +10,7 @@ _REPO = REPO
 # on sys.path. These tests live under tests/harbor_support/ (not tests/harbor/) for the
 # same reason — a package named `harbor` would collide with the pip lib. In the real
 # bench PYTHONPATH=/opt/gc-harbor-adapters, so `adapters` is top-level with no collision.
-for p in (str(_REPO / "harbor"), str(_REPO / "src")):
+for p in (str(HARBOR), str(_REPO / "src")):
     if p not in sys.path:
         sys.path.append(p)
 
