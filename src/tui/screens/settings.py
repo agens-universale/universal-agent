@@ -5,6 +5,8 @@
 (только когда фокус не в текстовом поле). Push-экран поверх TraceScreen."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -135,7 +137,7 @@ class SettingsScreen(Screen):
         self._config_gen = 0            # generation config-probe: устаревшие результаты отбрасываются
         self._draft_gen = 0             # generation draft-probe: независим от config-probe
         self._autoprobe_timer = None    # таймер автопробы секции «Подключение» (см. _cancel_autoprobe)
-        self._last_probed_snapshot = None   # (url, token, proxy) последней пробы — дребезг автопробы
+        self._last_probed_snapshot = None   # ConnectionEditor.probe_snapshot() последней пробы
         self._probe_in_flight = False
         self._note_timer = None         # автогашение title-note «ничего не изменено»
         self._wave_timer = None         # таймер анимации загрузки (глифы хаба)
@@ -376,8 +378,8 @@ class SettingsScreen(Screen):
         ))
 
     def _menu_glyph_text(self, i: int) -> Text:
-        """Text глифа строки: анимированная волна в полёте probe (секции 0-2),
-        иначе одиночный глиф ✓/!/— из _menu_glyph."""
+        """Text глифа строки: анимированная волна в полёте probe (редакторные секции,
+        _EDITOR_SECTIONS), иначе одиночный глиф ✓/!/— из _menu_glyph."""
         if i in _EDITOR_SECTIONS and self._probe_in_flight:
             return self._wave_glyph()
         glyph, gstyle = self._menu_glyph(i)
@@ -443,23 +445,29 @@ class SettingsScreen(Screen):
                     return "—", DEEP_DIM
                 if r is None:
                     return "—", DEEP_DIM
-                # Достижим — значит ОТВЕТИЛ, каким бы ни был ответ. Раньше сюда
-                # пускали только ok и 401, и содержательный отказ про модель
-                # (живой GigaCode: 404 «проверьте адрес и имя модели») красил
-                # «Подключение» красным при живом сервере и принятом токене.
-                # Имя модели — забота своей строки, у неё свой глиф.
-                if r.offline or r.http_status is None:
+                # Красный — только про подключение. Содержательный отказ про модель
+                # (живой GigaCode: 404 «проверьте адрес и имя модели») сюда не
+                # попадает: имя модели — забота своей строки, у неё свой глиф.
+                if r.offline:
                     return "!", ERR                  # сервер недоступен СЕЙЧАС
+                if r.http_status is None:
+                    # Ответа нет, но и до сервера мы не доходили: сорвалась сама
+                    # проверка (фолбэк `_start_config_probe`). Утверждать за сервер
+                    # нечего — строка секции про этот же результат пишет «не удалось
+                    # проверить», и хаб не имеет права быть категоричнее её.
+                    return "—", DEEP_DIM
                 auth = self._raw.get("Authorization")
-                if not auth:
-                    # Токена нет. Зелёный — только если сервер его и не требует:
-                    # 401 здесь означает нерабочий конфиг (агент не поедет), и
-                    # молчать об этом нельзя — секция пишет то же «⚠ сервер
-                    # требует авторизацию (401)», хаб обязан с ней совпадать.
-                    return ("!", ERR) if r.http_status == 401 else ("✓", OK)
                 if auth == TOKEN_SENTINEL:
                     return "—", DEEP_DIM             # токен не задан (шаблон) — нечем подтвердить
-                return ("✓", OK) if r.auth_ok else ("!", ERR)   # токен принят/отклонён (401)
+                # Вердикт о токене читаем через общий словарь смыслов — тот же, что у
+                # строки секции и у реплики после сохранения: три собственных прочтения
+                # одного результата уже разъезжались (хаб верил публичному /models).
+                # Токен есть, а вердикта о нём нет — молчим («—»), а не гадаем.
+                from tui.services.probe_presentation import token_accepted
+                accepted = token_accepted(r, has_token=bool(auth))
+                if accepted is None:
+                    return "—", DEEP_DIM
+                return ("✓", OK) if accepted else ("!", ERR)
             model = c.get("model") or ""
             if not model or r is None:
                 return "—", DEEP_DIM
@@ -535,7 +543,8 @@ class SettingsScreen(Screen):
 
     # --- dirty-маркер заголовка (спека v2 §3.1, Task 7) ---
     def _update_dirty(self) -> None:
-        """Обновляет #set-title: имя секции (+ dirty-маркер « изменено» для редакторов 0–2)."""
+        """Обновляет #set-title: имя секции (+ dirty-маркер « изменено» для редакторных
+        секций, _EDITOR_SECTIONS)."""
         if self._view == "menu":
             return
         try:
@@ -615,13 +624,33 @@ class SettingsScreen(Screen):
         self._refresh_menu_rows()
 
         def _work() -> None:
-            from tui.services.settings_probe import ProbeResult
+            from tui.services.settings_probe import ProbeResult, probe_connection
             try:
                 result = self._probe_fn(
                     endpoint, auth, verify, model, config_proxy=proxy,
                 )
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
+            auth_result = None
+            if result.models is not None:
+                # Ответил справочник моделей — а он бывает публичным (OpenRouter отдаёт
+                # `/models` без токена), и об авторизации его «200» не говорит ничего:
+                # ни что токен приняли, ни что он вообще нужен. Только здесь вердикта
+                # и нет — 401 справочника уже приговор, а «ок» без моделей проба
+                # получила фолбэком по самому chat/completions, пройдя авторизацию.
+                # Догоняем ровно эту неизвестность — той же differential-пробой, что
+                # судит секция, иначе хаб и секция разойдутся вердиктом.
+                try:
+                    auth_result = probe_connection(endpoint, auth, verify, model,
+                                                   config_proxy=proxy,
+                                                   probe_fn=self._auth_probe_fn)
+                except Exception:
+                    auth_result = None      # не смогли — хаб про токен просто промолчит
+            if auth_result is not None and auth_result.auth_state is not None:
+                # Вливаем вердикт в ТОТ ЖЕ результат, а не держим вторым полем: два
+                # поля про одну пробу расходятся при первом же обновлении одного из
+                # них. Список моделей остаётся — по нему живёт глиф «Модель».
+                result = replace(result, auth_state=auth_result.auth_state)
             self.app.call_from_thread(self._on_config_probe, result, gen=gen)
 
         self.run_worker(_work, thread=True, name="settings-config-probe")
@@ -727,7 +756,9 @@ class SettingsScreen(Screen):
         # Снимок ПОЛЕЙ (не резолва) — по нему автопроба ухода с поля отличает
         # «значения изменились» от ходьбы по форме; пишем здесь, а не на местах
         # вызова, чтобы автопроба входа в секцию и ручные пробы тоже считались.
-        self._last_probed_snapshot = (url, token_raw, proxy_draft)
+        # Собирает его сам редактор: в снимок входит и то, чего нет в полях
+        # (Ctrl+U, галка «без авторизации»), — иначе он врёт про вход пробы.
+        self._last_probed_snapshot = self._connection_editor().probe_snapshot()
         self._draft_gen += 1
         gen = self._draft_gen
         self._set_probe_line(Text("проверяю…", style=DEEP_DIM))
@@ -782,18 +813,17 @@ class SettingsScreen(Screen):
 
     def _smart_enter_decide(self, section: int, values: dict, r) -> None:
         """Проверка ⊥ Сохранение: Enter всегда сохраняет (блок — только формальная
-        невалидность, её ловит _collect_values→submit). Вердикт сервера — информация."""
+        невалидность, её ловит _collect_values→submit). Вердикт сервера — информация.
+
+        Текст реплики — у `probe_presentation.save_warning`: разбирать `verdict`
+        здесь значило бы завести третье прочтение одного результата (после строки
+        секции и глифа хаба), и оно уже разъехалось — «rejected» объявлялось
+        отклонённым токеном даже когда сервер писал про имя модели."""
         if not values:
             self._title_note("ничего не изменено")
             return
-        if r is not None and r.verdict == "rejected":
-            self._do_save(section, values,
-                          warn_detail="сервер отклонил токен — проверьте")
-        elif r is not None and r.verdict == "unknown":
-            self._do_save(section, values,
-                          warn_detail="проверить не удалось — сервер недоступен")
-        else:
-            self._do_save(section, values)
+        from tui.services.probe_presentation import save_warning
+        self._do_save(section, values, warn_detail=save_warning(r))
 
     # --- guard записи ---
     def _writable(self) -> bool:
@@ -1692,8 +1722,8 @@ class SettingsScreen(Screen):
             return          # курсор шёл не с поля (галка «без авторизации») — уходить неоткуда
         if leaving_id == "conn-url" and ed.presets_open:
             return          # стрелка водила по пресет-листу, поле адреса не покидали
-        url, _auth_idx, token_raw, proxy = ed.peek()
-        if (url, token_raw, proxy) == self._last_probed_snapshot:
+        url = ed.peek()[0]
+        if ed.probe_snapshot() == self._last_probed_snapshot:
             return          # ровно те же значения уже проверены (или проверяются)
         if not url and not self._probe_args_from_config()[0]:
             # Адреса нет ни в поле, ни в конфиге: _start_draft_probe вышел бы до
@@ -1996,7 +2026,7 @@ class SettingsScreen(Screen):
                 self._update_dirty()
                 if self._view == _CONNECTION:
                     self._autoprobe_on_leave(ed, leaving_id)
-                self._refresh_footer()   # вход на адрес раскрывает список, уход — сворачивает
+                self._refresh_footer()   # состав клавиш зависит от того, раскрыт ли список
             return
         if event.key == "ctrl+u" and self._view == _CONNECTION:
             # Очистка сохранённого токена. Клавишу приходится перехватывать здесь:
@@ -2011,6 +2041,12 @@ class SettingsScreen(Screen):
             if ed is not None and ed.clear_token():
                 event.prevent_default()
                 event.stop()
+                # Очистка меняет и то, что уйдёт в запрос, и то, что уйдёт в файл:
+                # летящая проба, её вердикт, снимок дребезга и подтверждение перезаписи
+                # ссылки относятся к прежней форме. Печать в поле проходит этот же
+                # сброс через `on_input_changed` — но Ctrl+U стирает то, чего в поле
+                # нет (секрет живёт под маской), и события Changed не порождает.
+                self._reset_draft_state()
                 self._update_dirty()
                 self._refresh_footer()
             return
