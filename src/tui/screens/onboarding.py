@@ -83,7 +83,7 @@ class OnboardingScreen(Screen):
         self._mcp_selected: set = set()
         self._mcp_installed: set = set()   # уже подключённые (wired) — отмечаем, не предлагаем
         self._probe_gen = 0   # generation авто-пробы шага «Подключение»: протухший результат отбрасывается
-        self._last_probed_snapshot: tuple | None = None   # (url, token_raw, proxy) последней пробы — дребезг
+        self._last_probed_snapshot: tuple | None = None   # ConnectionEditor.probe_snapshot() последней пробы
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -517,6 +517,21 @@ class OnboardingScreen(Screen):
             proxy = (self._config or {}).get("proxy")
         return proxy
 
+    def _auto_probe_if_changed(self) -> None:
+        """Авто-проба, если с прошлой изменилось хоть что-то из уходящего в запрос.
+
+        Гейт против дребезга: ходьба по форме стрелками ничего не меняет, а без него
+        пролистанная вверх-вниз форма давала реальный запрос на каждое нажатие.
+        Живёт здесь, а не внутри `_auto_probe`: ручной `Ctrl+Space` обязан идти
+        мимо снимка (§5.2), иначе вердикт «сервер недоступен» залипал бы навсегда."""
+        ed = self._connection_editor()
+        if ed is None:
+            return
+        snapshot = ed.probe_snapshot()
+        if not snapshot[0] or snapshot == self._last_probed_snapshot:
+            return          # адреса нет либо ровно это уже проверено (или проверяется)
+        self._auto_probe()
+
     def _auto_probe(self) -> None:
         """Авто-проба шага «Подключение» (worker-поток): триггеры — подстановка
         пресета, уход с поля адреса/токена/прокси.
@@ -534,16 +549,13 @@ class OnboardingScreen(Screen):
         Токен-поле на нетронутом шаге принципиально пустое (секрет живёт только
         под маской placeholder, см. _mount_step_body) — фолбэк на действующий
         токен из self._config, тот же приём, что у соседнего шага «Модель»."""
-        from tui.editors.connection import ConnectionEditor
-        from textual.css.query import NoMatches
-        try:
-            ed = self.query_one(ConnectionEditor)
-        except NoMatches:
+        ed = self._connection_editor()
+        if ed is None:
             return
         url, _auth_idx, token_raw, proxy = ed.peek()
         if not url:
             return
-        self._last_probed_snapshot = (url, token_raw, proxy)
+        self._last_probed_snapshot = ed.probe_snapshot()
         if onboarding.env_ref_status(url) == onboarding.ENV_REF_MISSING:
             # Резолв даст "" — стрелять пробой в пустой адрес нечестно: под
             # визуально заполненным полем проба соврала бы «нет соединения»/
@@ -701,11 +713,7 @@ class OnboardingScreen(Screen):
             # Очистка сохранённого токена — та же клавиша, что в /settings.
             # Перехватываем здесь: Input держит на ней delete_left_all, а поле
             # токена пустое (секрет живёт в конфиге, в поле — маска).
-            from textual.css.query import NoMatches
-            try:
-                ed = self.query_one(ConnectionEditor)
-            except NoMatches:
-                ed = None
+            ed = self._connection_editor()
             if ed is not None and ed.clear_token():
                 event.prevent_default()
                 event.stop()
@@ -727,8 +735,7 @@ class OnboardingScreen(Screen):
             if self._step == 0:
                 # Список пресетов адреса: свёрнутый раскрываем и клавишу съедаем,
                 # раскрытый её не ест — перечитывать статику нечего (падает молча).
-                from tui.editors.connection import ConnectionEditor as _ConnEd
-                _ed = next(iter(self.query(_ConnEd)), None)
+                _ed = self._connection_editor()
                 if _ed is not None and _ed.reload_presets():
                     event.stop()
                     self._refresh_footer()   # клавиши теперь про список
@@ -744,16 +751,14 @@ class OnboardingScreen(Screen):
                 event.stop()
                 return
             # Конец цепочки — «перепроверить связь». Зовём _auto_probe НАПРЯМУЮ, мимо
-            # снимка `_last_probed_snapshot` (он живёт на местах вызова, а не внутри):
-            # снимок гасит повтор автопробы на неизменных полях, и без ручного пути
-            # вердикт «сервер недоступен» залипал бы навсегда (§5.2).
+            # гейта `_auto_probe_if_changed`: снимок гасит повтор автопробы на
+            # неизменных полях, и без ручного пути вердикт «сервер недоступен»
+            # залипал бы навсегда (§5.2).
             event.stop()
-            from textual.css.query import NoMatches
-            from tui.editors.connection import ConnectionEditor
-            try:
-                url = self.query_one(ConnectionEditor).peek()[0]
-            except NoMatches:
+            ed = self._connection_editor()
+            if ed is None:
                 return
+            url = ed.peek()[0]
             if not url:
                 # _auto_probe на пустом адресе выходит ДО записи любой строки, и
                 # клавиша осталась бы абсолютно немой. На чистой установке шаг
@@ -796,9 +801,8 @@ class OnboardingScreen(Screen):
         if event.key == "escape" and self._step == 0:
             # Esc при раскрытом пресет-листе сворачивает ТОЛЬКО его (канон /settings) —
             # общий Esc ниже (выход из мастера) в этом случае не должен стрелять.
-            from tui.editors.connection import ConnectionEditor
-            ed = self.query_one(ConnectionEditor)
-            if ed.escape_presets():
+            ed = self._connection_editor()
+            if ed is not None and ed.escape_presets():
                 event.stop()
                 self._refresh_footer()   # клавиши вернулись шагу — футер за ними
                 return
@@ -810,17 +814,15 @@ class OnboardingScreen(Screen):
             # Единая лента курсора формы (канон ConnectionEditor.move из /settings):
             # адрес → токен → прокси; уход с поля токена/прокси/адреса — триггер
             # авто-пробы (спека §5.5).
-            from tui.editors.connection import ConnectionEditor
             event.stop()
-            ed = self.query_one(ConnectionEditor)
+            ed = self._connection_editor()
+            if ed is None:
+                return
             leaving_id = getattr(self.focused, "id", None)
             ed.move(-1 if event.key == "up" else 1)
-            if leaving_id in ("conn-token", "conn-proxy"):
-                self._auto_probe()          # уход с поля токена/прокси — авто-проба
-            elif leaving_id == "conn-url" and not ed.presets_open:
-                url, _auth_idx, token_raw, proxy = ed.peek()
-                if url and (url, token_raw, proxy) != self._last_probed_snapshot:
-                    self._auto_probe()
+            if (leaving_id in ("conn-token", "conn-proxy")
+                    or (leaving_id == "conn-url" and not ed.presets_open)):
+                self._auto_probe_if_changed()   # уход с поля — авто-проба, если есть что проверять
             self._refresh_footer()   # состав клавиш зависит от того, раскрыт ли список
             return
         if event.key in ("up", "down") and self._step == 1:
@@ -842,14 +844,11 @@ class OnboardingScreen(Screen):
         if event.key == "enter":
             event.stop()
             if self._step == 0:
-                from tui.editors.connection import ConnectionEditor
-                ed = self.query_one(ConnectionEditor)
-                if ed.enter_presets():
+                ed = self._connection_editor()
+                if ed is not None and ed.enter_presets():
                     # пресет-лист открыт — подставил/свернул, не сабмит; подстановка
                     # пресета — тоже триггер авто-пробы (спека §5.5).
-                    url, _auth_idx, token_raw, proxy = ed.peek()
-                    if url and (url, token_raw, proxy) != self._last_probed_snapshot:
-                        self._auto_probe()
+                    self._auto_probe_if_changed()
                     self._refresh_footer()   # список свернулся — футер снова про шаг
                     return
                 self._submit_connection()
