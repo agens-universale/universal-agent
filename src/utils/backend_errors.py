@@ -29,13 +29,20 @@ class EmbeddedChoiceError(Exception):
 
     Поверхностно запрос «успешен», поэтому транспорт её не ретраит, а фаталит
     она позже — в конвертации ответа, уже за границей retry-политики.
-    Несём status_code (из error.code), чтобы is_retriable_backend_error
-    классифицировал её как обычную HTTP-ошибку бэкенда."""
+    Несём status_code (числовой из error.code), чтобы is_retriable_backend_error
+    классифицировал её как обычную HTTP-ошибку бэкенда.
 
-    def __init__(self, message, *, status_code=None, metadata=None):
+    raw_code — исходный error.code как есть (до попытки int()). Нужен, чтобы
+    отличить нечисловой код (insufficient_quota/invalid_api_key: ошибка не
+    HTTP-таймаута, повтором не чинится → НЕ ретраить) от отсутствия кода вовсе
+    (finish_reason='error' с пустым выбором: транзиентный сбой → ретраить).
+    Оба дают status_code=None, но раскладываются по-разному."""
+
+    def __init__(self, message, *, status_code=None, metadata=None, raw_code=None):
         super().__init__(message)
         self.status_code = status_code
         self.metadata = metadata
+        self.raw_code = raw_code
 
 
 def is_auth_error(exc: BaseException) -> bool:
@@ -46,6 +53,11 @@ def is_auth_error(exc: BaseException) -> bool:
     if isinstance(exc, requests.exceptions.HTTPError):
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
     elif isinstance(exc, BackendStreamError):
+        status_code = exc.status_code
+    elif isinstance(exc, EmbeddedChoiceError):
+        # Прокси завернул 401 в HTTP-200 (choices[0].error.code == 401):
+        # это тот же истёкший токен — путь перевыпуска токена + один повтор,
+        # а не адаптивный ретрай (401 в _HTTP_RETRY_SKIP_STATUSES).
         status_code = exc.status_code
     else:
         return False
@@ -63,6 +75,13 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
     elif isinstance(exc, EmbeddedChoiceError):
+        # Embedded с ПРИСУТСТВУЮЩИМ нечисловым error.code (insufficient_quota,
+        # invalid_api_key) — не HTTP-таймаут, повтором не чинится: 4 пере-отправки
+        # промпта со сном и двойным списанием токенов бессмысленны → не ретраим.
+        # Отсутствие кода вовсе (raw_code is None: finish_reason='error' с пустым
+        # выбором) — транзиентный сбой, ретрай оправдан → пропускаем на общий путь.
+        if exc.status_code is None and exc.raw_code is not None:
+            return False
         status_code = exc.status_code
     else:
         return False
