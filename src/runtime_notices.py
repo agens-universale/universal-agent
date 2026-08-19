@@ -12,6 +12,7 @@ from typing import Callable, List, Optional
 import requests
 
 from startup_notices import Notice
+from utils.backend_errors import EmbeddedChoiceError
 from utils.chat_completions_stream import BackendStreamError
 
 _MAX_NOTICES = 50
@@ -131,6 +132,9 @@ def _extract_http_detail(exc: BaseException) -> tuple[Optional[int], str]:
         except Exception:
             body = ""
     elif isinstance(exc, BackendStreamError):
+        status = exc.status_code
+        body = str(exc)
+    elif isinstance(exc, EmbeddedChoiceError):
         status = exc.status_code
         body = str(exc)
     else:
