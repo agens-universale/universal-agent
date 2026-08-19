@@ -135,9 +135,10 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
         await pilot.pause(1.2)   # лингер → settle
         card = _content(scr._mcp_status_row)
         # Точный формат карточки: три строки через пустую (MCP · уведомления · готовность).
+        from tui.services.notices_ui import WARN_GLYPH
         assert card == (
             "⚠ MCP: 0/1 — ни один не подключился · /mcp\n\n"
-            "⚠ 1 · F4/notices\n\n"
+            f"{WARN_GLYPH} 1 · F4/notices\n\n"
             "✓ готов к работе"
         ), f"Формат карточки разошёлся: {card!r}"
         # Ровно одна «готов» во всём трейсе (готовность только в карточке).

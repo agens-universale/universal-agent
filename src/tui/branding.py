@@ -85,6 +85,17 @@ _TAGLINE_LETTER_GAP = "  "   # 2 пробела — между буквами
 _TAGLINE_WORD_GAP = "    "    # 4 пробела — между словами (двойной от letter-gap)
 
 
+def version_under_logo() -> str:
+    """Версия отдельной строкой под тэглайном, центрированная по ширине лого — тем же
+    приёмом, что и сам тэглайн (ведущие пробелы, а не CSS: рамка карточки шире бренда,
+    и align центрировал бы по ней). Воздух над строкой даёт CSS (`.brand-version`).
+    Из исходников показывается «dev», см. app_version.display_version."""
+    import app_version
+    text = app_version.display_version(long=True)   # в карточке есть место на пояснение
+    logo_w = max((len(line) for line in LOGO.splitlines()), default=0)
+    return " " * max(0, (logo_w - len(text)) // 2) + text
+
+
 def tagline_under_logo() -> str:
     """Тэглайн под логотипом: разрядка букв (`_TAGLINE_LETTER_GAP`), межсловный
     зазор (`_TAGLINE_WORD_GAP`, двойной), центрирование по ширине лого (ведущие

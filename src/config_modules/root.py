@@ -36,6 +36,7 @@ from config_modules.project_memory import (
 from config_modules.chat_completions import ChatCompletionsConfig
 from config_modules.pricing import PricingConfig
 from config_modules.tui import TuiConfig
+from config_modules.endpoint_presets import EndpointPreset, default_endpoint_presets
 from config_modules.update import UpdateConfig
 from config_modules.diff_tui import DiffTuiConfig
 from config_modules.fs_tools import FsToolsConfig
@@ -79,6 +80,7 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
+    endpoint_presets: list[EndpointPreset] = Field(default_factory=default_endpoint_presets)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)

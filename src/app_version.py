@@ -27,6 +27,33 @@ def agent_version() -> str:
         return "dev"
 
 
+def is_dev_install() -> bool:
+    """Запуск из исходников (editable) либо без метаданных PEP 610.
+
+    В этом случае код может быть новее пакета, и номер версии соврёт — показывать
+    его нельзя. Признак один на все экраны: карточка главного и /settings."""
+    src = install_source()
+    return src is None or src.editable
+
+
+# Что показывать вместо номера при запуске из исходников. Один текст на все экраны:
+# карточка главного и /settings — иначе одно и то же состояние называлось бы
+# по-разному.
+DEV_LABEL = "dev · установка из исходников"
+
+
+def display_version(*, long: bool = False) -> str:
+    """Версия для показа человеку: «v0.0.1», а из исходников — «dev».
+
+    `long` — для мест, где есть куда развернуться (бренд-карточка, секция
+    «Обновление»): там вместо голого «dev» показываем DEV_LABEL. В тесных строках
+    (шапка /settings) остаётся короткая форма, но правило «editable → номер не
+    показываем» одно и то же: иначе шапка обещала бы версию, которой в коде нет."""
+    if is_dev_install():
+        return DEV_LABEL if long else "dev"
+    return f"v{agent_version()}"
+
+
 def _read_direct_url_text() -> Optional[str]:
     from importlib import metadata
     try:

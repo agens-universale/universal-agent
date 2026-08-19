@@ -13,10 +13,71 @@ def _fetch(models=None, status=None, net="", latency=7):
     return fetch_ex
 
 
-def _post(status=None, net="", json_body=True):
+def _post(status=None, net="", json_body=True, payload=None):
+    """Подменный chat/completions. Четвёртым элементом идёт ТЕЛО ответа (разобранный
+    JSON или None), а не флаг «тело было JSON»: по нему проба и вердикт выносит, и
+    канарейка сравнивает ответы. `json_body=False` — не-JSON (HTML гейтвея)."""
+    body = payload if payload is not None else ({"error": {"message": "x"}} if json_body else None)
+
     def post_ex(endpoint, auth, model, *, verify=True, http_post_ex=None):
-        return status, net, 11, json_body
+        return status, net, 11, body
     return post_ex
+
+
+def test_probe_auth_ignores_public_models_route():
+    """Живой кейс OpenRouter: /api/v1/models публичен (411 моделей без токена), а
+    chat/completions токен требует. Один и тот же сервер: probe() судит по
+    models-цепочке и говорит ok, probe_auth — по реальному маршруту и говорит 401.
+    Расхождение и есть суть фикса, поэтому проверяем обе функции разом."""
+    from tui.services.settings_probe import probe_auth
+    public_models = _fetch(models=[mp.ModelInfo(id="m1")], status=200)
+    completions_needs_token = _post(status=401)
+
+    old = probe("http://x/v1/chat/completions", None, True, "",
+                fetch_ex=public_models, post_ex=completions_needs_token)
+    assert old.verdict == "ok"             # прежнее поведение probe() не тронуто
+
+    r = probe_auth("http://x/v1/chat/completions", None, True, "",
+                   post_ex=completions_needs_token)
+    assert r.verdict == "rejected" and r.http_status == 401
+
+
+def test_probe_auth_rejects_non_latin1_without_network():
+    """Кривой токен — вердикт о данных: ни одного запроса."""
+    from tui.services.settings_probe import probe_auth
+    sent = {"n": 0}
+
+    def post_ex(endpoint, auth, model, *, verify=True, http_post_ex=None):
+        sent["n"] += 1
+        return 200, "", 1, True
+
+    r = probe_auth("http://x/v1/chat/completions", "Bearer уквxxx", True, "",
+                   post_ex=post_ex)
+    assert sent["n"] == 0
+    assert r.verdict == "rejected" and "недопустимые символы" in r.detail
+    assert r.auth_state == "rejected"
+
+
+def test_offline_flag_only_for_real_network_failure():
+    """«Сервер недоступен» можно писать только когда до сервера не дошли.
+    Прочие unknown (сервер ответил, но не вердиктно) обязаны нести свою причину —
+    иначе клиентская ошибка читается как лежачий сервер."""
+    net = probe("http://x/v1/chat/completions", None, True, "m1",
+                fetch_ex=_fetch(status=None, net="timeout"))
+    assert net.verdict == "unknown" and net.offline is True
+
+    server_5xx = probe("http://x/v1/chat/completions", "Bearer good", True, "m1",
+                       fetch_ex=_fetch(status=401), post_ex=_post(status=500))
+    assert server_5xx.verdict == "unknown" and server_5xx.offline is False
+
+
+def test_non_latin1_token_is_a_data_verdict():
+    """Кириллица в токене — вердикт о ДАННЫХ: заголовок в latin-1 не кодируется,
+    запрос не уйдёт, и спрашивать сеть незачем."""
+    from tui.services.settings_probe import _non_latin1_reason
+    assert _non_latin1_reason("Bearer sk-ok") == ""
+    assert _non_latin1_reason(None) == ""
+    assert "недопустимые символы" in _non_latin1_reason("Bearer уквxxx")
 
 
 def test_ok_from_stage1_models():
@@ -205,6 +266,123 @@ def test_auth_accepted_when_401_moves_to_5xx():
     """Тот же принцип для 5xx: с токеном сервер упал дальше авторизации."""
     wt = ProbeResult("unknown", 500, None, 25, "сервер ответил 500")
     r = interpret_auth(_r401(), wt, has_token=True)
+    assert r.verdict == "ok" and r.auth_state == "accepted"
+
+
+def test_probe_connection_runs_canary_only_when_ambiguous():
+    """Канарейка стоит запроса, поэтому стреляет только там, где без неё соврём:
+    ответ не 401 и не успех. Считаем вызовы — их должно быть ровно три."""
+    from tui.services.settings_probe import probe_connection
+    calls = []
+
+    def fake(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        calls.append(auth)
+        if auth is None:
+            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+        if auth == "Bearer user":
+            return ProbeResult("rejected", 404, None, 5, "отклонено сервером (404)")
+        return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+
+    r = probe_connection("http://x/v1/chat/completions", "Bearer user", True, "",
+                         probe_fn=fake)
+    assert len(calls) == 3                    # control + токен + канарейка
+    assert r.verdict == "ok" and r.auth_state == "accepted"
+
+
+def test_probe_connection_skips_canary_on_plain_401():
+    """Токен отклонён прямо — спрашивать мусорным незачем, лишний запрос не шлём."""
+    from tui.services.settings_probe import probe_connection
+    calls = []
+
+    def fake(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        calls.append(auth)
+        return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+
+    r = probe_connection("http://x/v1/chat/completions", "Bearer bad", True, "",
+                         probe_fn=fake)
+    assert len(calls) == 2                    # control + токен, канарейки нет
+    assert r.auth_state == "rejected"
+
+
+def test_probe_connection_skips_probing_when_server_needs_no_token():
+    """Контроль без токена прошёл — сервер отдаёт всем, проверять нечего."""
+    from tui.services.settings_probe import probe_connection
+    calls = []
+
+    def fake(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        calls.append(auth)
+        return ProbeResult("ok", 200, None, 5, "доступен")
+
+    r = probe_connection("http://x/v1/chat/completions", "Bearer any", True, "",
+                         probe_fn=fake)
+    assert calls == [None]
+    assert r.auth_state == "not_required"
+
+
+def test_auth_not_claimed_when_canary_gets_same_answer():
+    """Живой кейс LiteLLM: без токена 401, а на ЛЮБОЙ негодный ключ — 400
+    («No connected db.»): прокси идёт искать ключ в базе, базы нет. Раз заведомо
+    мусорный токен получает тот же ответ, что пользовательский, сервер их не
+    различает — «принят» было бы враньём (замерено на sk-fake-000)."""
+    wt = ProbeResult("unknown", 400, None, 25, "сервер ответил 400")
+    canary = ProbeResult("unknown", 400, None, 25, "сервер ответил 400")
+    r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
+    assert r.auth_state != "accepted"
+    assert "подтвердить" in r.detail
+
+
+def test_auth_not_claimed_when_canary_matches_a_dummy_model_ok():
+    """Ступень 2 на модель-заглушку считает 400/5xx успехом («до валидации тела
+    не дойти, не пройдя авторизацию») — та же посылка, что и правило сдвига, и
+    ломается она там же. Живой LiteLLM: и пользовательский, и мусорный токен
+    получают 400, но вердикт ступени 2 уже «ok» — канарейка обязана перебить его,
+    иначе выдуманный ключ снова объявляется принятым."""
+    wt = ProbeResult("ok", 400, None, 25, "доступен")
+    canary = ProbeResult("ok", 400, None, 25, "доступен")
+    r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
+    assert r.auth_state != "accepted"
+    assert "подтвердить" in r.detail
+
+
+def test_auth_accepted_when_canary_gets_different_answer():
+    """ST: без токена 401, с валидным токеном 404 (нет такой модели), мусорный
+    токен отбивается 401 — ответы разошлись, значит токен реально прошёл.
+    Замерено на gigacode.ru: control 401 / токен 404 / канарейка 401."""
+    wt = ProbeResult("rejected", 404, None, 25, "отклонено сервером (404)")
+    canary = ProbeResult("rejected", 401, None, 25, "токен отклонён (401)")
+    r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
+    assert r.verdict == "ok" and r.auth_state == "accepted"
+
+
+def test_auth_accepted_when_only_the_body_differs():
+    """Живой LiteLLM: валидный токен и мусорный ОБА дают 400, но говорят разное —
+    валидный дошёл до проверки модели («Invalid model name»), мусорный застрял на
+    поиске ключа в базе («No connected db.»). Одного статуса мало: по нему сервер
+    выглядит неразличающим, и настоящий токен объявлялся неподтверждённым."""
+    wt = ProbeResult("ok", 400, None, 25, "доступен",
+                     body_signature='{"error":{"message":"Invalid model name"}}')
+    canary = ProbeResult("ok", 400, None, 25, "доступен",
+                         body_signature='{"error":{"message":"No connected db."}}')
+    r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
+    assert r.verdict == "ok" and r.auth_state == "accepted"
+
+
+def test_auth_not_claimed_when_body_matches_too():
+    """Два разных мусорных токена дают побайтово одинаковый ответ — вот это и есть
+    «сервер их не различает» (замерено на том же LiteLLM)."""
+    same = '{"error":{"message":"No connected db."}}'
+    wt = ProbeResult("ok", 400, None, 25, "доступен", body_signature=same)
+    canary = ProbeResult("ok", 400, None, 25, "доступен", body_signature=same)
+    r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
+    assert r.auth_state != "accepted"
+    assert "подтвердить" in r.detail
+
+
+def test_auth_falls_back_to_shift_rule_without_canary():
+    """Канарейку не запускали (или она не долетела) → прежнее правило сдвига.
+    Хуже, чем было, не становится: ST-контракт держится и без неё."""
+    wt = ProbeResult("rejected", 404, None, 25, "отклонено сервером (404)")
+    r = interpret_auth(_r401(), wt, has_token=True, canary=None)
     assert r.verdict == "ok" and r.auth_state == "accepted"
 
 

@@ -11,6 +11,29 @@ from textual.widgets import Input
 
 
 class PasteInput(Input):
+    def _sync_group_disabled(self) -> None:
+        """Отключённое поле в группе гасит рамку ГРУППЫ (единый язык форм §3.3).
+
+        Своей рамки у поля внутри `.field-group` нет — класс `set-framed` оно
+        теряет, иначе рамок было бы две, — поэтому правило одинокого поля
+        (`#conn-token.set-framed:disabled`) сюда не достаёт. Селектора `:has`
+        в Textual 8.2.7 нет, так что признак ставим отсюда: это единственное
+        место, через которое проходит любое изменение `disabled` у поля формы.
+        Поле вне группы — no-op: у него своя рамка и своё правило."""
+        parent = self.parent
+        if parent is not None and parent.has_class("field-group"):
+            parent.set_class(self.disabled, "set-disabled")
+
+    def watch_disabled(self, disabled: bool) -> None:
+        super().watch_disabled(disabled)
+        self._sync_group_disabled()
+
+    def on_mount(self) -> None:
+        # Поле, отключённое ЕЩЁ ДО монтирования (`PasteInput(disabled=True)` в
+        # конструкторе хоста), watcher уже отработало вхолостую: родителя тогда
+        # не было. Догоняем на монтировании.
+        self._sync_group_disabled()
+
     def _paste_from_os_clipboard(self) -> bool:
         """Вставить текст системного буфера в позицию курсора. True — если что-то вставили."""
         from tui.services.os_ops import read_clipboard

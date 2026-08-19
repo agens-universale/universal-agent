@@ -13,10 +13,13 @@ from textual.widgets import Static
 from startup_notices import Notice
 from runtime_notices import mark_runtime_notices_seen
 from tui import palette
+from tui.services import notices_ui
 
 _FOOTER = "/config · /mcp  [Esc] назад"
-_WARN_GLYPH = "⚠"
-_INFO_GLYPH = "ℹ"
+# Значки — из общего источника (tui.services.notices_ui): язык этого экрана и бейджа
+# обязан совпадать, а свои копии уже разъезжались по вариационному селектору.
+_WARN_GLYPH = notices_ui.WARN_GLYPH
+_INFO_GLYPH = notices_ui.INFO_GLYPH
 # Стили из палитры (единый источник): имена — цвет инлайн-кода/пути в трейсе
 # ($code = palette.CODE) → единый стиль тех. имён по всему UI.
 _WARN_STYLE = palette.WARN
@@ -61,7 +64,10 @@ class NoticesScreen(Screen):
             parts.append(f"{_WARN_GLYPH} {warns}")
         if infos:
             parts.append(f"{_INFO_GLYPH} {infos}")
-        return "уведомления" + (" · " + " · ".join(parts) if parts else "")
+        # Счётчики — пара, между ними хватает пробела; точка отделяет их от названия
+        # экрана (тот же язык, что у бейджа: format_notices_badge). Внутри пары
+        # пробел, между парами двойной — язык обязан совпадать с бейджем дословно.
+        return "уведомления" + (" · " + "  ".join(parts) if parts else "")
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):

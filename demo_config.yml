@@ -607,6 +607,21 @@ pricing:
   #     input: 0.05
   #     output: 0.15
 
+# Пресеты выпадающего списка в полях «Адрес API-сервера» (можно дополнять своими).
+# Пресеты адресов провайдеров — выпадающий список под полем «Адрес API-сервера».
+# Закомментировано намеренно: пока ключа тут нет, работает список из кода, и он
+# обновляется вместе с версией агента. Раскомментируете — ваш список перекроет
+# кодовый и с обновлениями меняться уже не будет.
+# endpoint_presets:
+#   - name: OpenRouter
+#     url: https://openrouter.ai/api/v1/chat/completions
+#   - name: GigaCode
+#     url: https://litellm-proxy.sberai-rnd.ru/v1/chat/completions
+#   - name: Cloud.ru
+#     url: https://foundation-models.api.cloud.ru/v1/chat/completions
+#   - name: RouterAI
+#     url: https://routerai.ru/api/v1/chat/completions
+
 # Сборка мусора (gc.collect) — точки C1/C2/C3.
 # C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
 # C3 (один collect после батча тулов, перед LLM-шагом) — управляется этим флагом.

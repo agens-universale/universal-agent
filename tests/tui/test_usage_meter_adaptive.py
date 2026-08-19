@@ -41,13 +41,13 @@ def test_single_line_when_fits():
     assert "запрос" in out.plain and "сессия" in out.plain
 
 
-def test_stacks_session_under_request_when_tight():
+def test_stacks_both_usage_segments_when_tight():
     req = Text("запрос 1.0M/1.0₽"); sess = Text("сессия 2.0M/2.0₽")
     out = compose_adaptive_footer_right(_head(), req, sess, available_width=25)
     lines = out.plain.split("\n")
     assert len(lines) == 2
-    assert "запрос" in lines[0] and "сессия" not in lines[0]   # запрос на 1-й строке
-    assert lines[1].strip() == "сессия 2.0M/2.0₽"              # сессия — под ним
+    assert lines[0] == "model"                                    # head без usage
+    assert lines[1] == "запрос 1.0M/1.0₽ · сессия 2.0M/2.0₽"      # токен-блок целиком
 
 
 def test_no_stack_when_only_one_segment():
