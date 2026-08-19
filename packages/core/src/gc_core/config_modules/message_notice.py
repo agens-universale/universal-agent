@@ -5,8 +5,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from gc_core.config_modules.project_memory import ProjectMemoryConfig, ProjectMemoryConfig as ProjectMemoryNoticeConfig, normalize_project_memory_config, normalize_project_memory_config as normalize_project_memory_notice_config, project_memory_from_config_dict, project_memory_from_config_dict as project_memory_notice_from_config_dict, project_memory_notice_enabled
-
 _logger = logging.getLogger(__name__)
 
 DEFAULT_TOOL_USAGE_NOTICE_STEP_MESSAGES = 16

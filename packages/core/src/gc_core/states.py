@@ -50,7 +50,6 @@ class State:
         thread_id: Optional[str] = None,
         shared: Optional["SharedStateData"] = None,
         workspace_config: Optional[Dict[str, Any]] = None,
-        instructions_overwrite: bool = False,
         logger: Optional[Any] = None,
         is_tui: bool = False,
         agentsmd_override: bool = False,
@@ -205,25 +204,10 @@ class State:
     def add_message(self, message):
         self.messages.append(message)
 
-    def add_messages(self, messages):
-        self.messages += messages
 
     def set_previous_response_id(self, previous_response_id):
         self.previous_response_id =previous_response_id
 
-    def check_messages_in_state(self, messages) -> bool:
-        """
-        check messages by message['id']
-        if one message or more from messages is in state.messages - return True, otherwise False
-        :param messages:
-        :return:
-        """
-        state_messages_ids = set([m['id'] for m in self.messages])
-        for m in messages:
-            m_id = m['id']
-            if m_id in state_messages_ids:
-                return True
-        return False
 
     def init_user_intent_log(self, entries: Any) -> None:
         """Initialize closed user turns from persisted thread meta."""

@@ -1,5 +1,5 @@
 """Снимок MCP «сервер → статус+тулы» из реестра tools_data (технический слой)."""
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 
 def build_mcp_tools_snapshot(

@@ -479,28 +479,6 @@ class ToolsCache:
 
         return fresh_tools
 
-    def force_refresh(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
-        """
-        Принудительно перестроить реестр тулов и обновить кэш,
-        игнорируя TTL.
-        """
-        servers_cfg = self._config.get("mcp-servers") or {}
-        cache_key = self._make_cache_key(servers_cfg)
-
-        fresh_tools, status = _build_tools_registry(
-            servers_cfg,
-            discovery_timeout_sec=self._discovery_timeout(),
-            on_progress=on_progress,
-        )
-        self._status = status
-
-        if cache_key is not None:
-            self._data = fresh_tools
-            self._fetched_at = time.time()
-            self._cache_key = cache_key
-
-        return fresh_tools
-
 
 def get_all_tools(
     servers_cfg: Dict[str, Dict[str, Any]],

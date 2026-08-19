@@ -367,7 +367,7 @@ async def test_ask_human_table_renders():
     """Таблица в вопросе ask_human → виджет .table-block."""
     pytest.importorskip("textual")
     from textual.app import App
-    from gc_tui.widgets.agent_reply_line import AgentReplyLine
+    from gc_tui.widgets.block_panel import BlockPanel
     from gc_tui.widgets.ask_human_banner import AskHumanBanner
 
     q = "Сравни:\n\n| A | B |\n|---|---|\n| 1 | 2 |"
@@ -377,6 +377,6 @@ async def test_ask_human_table_renders():
             yield AskHumanBanner(question=q)
 
     async with _A().run_test() as pilot:
-        tables = [w for w in pilot.app.screen.query(AgentReplyLine)
+        tables = [w for w in pilot.app.screen.query(BlockPanel)
                   if w.has_class("table-block")]
         assert len(tables) == 1

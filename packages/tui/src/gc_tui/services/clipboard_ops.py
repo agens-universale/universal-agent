@@ -1,7 +1,8 @@
 """Единый write-path копирования во внешний буфер ОС.
 
-OSC 52 + внутренний app.clipboard всегда (на UI-потоке); native через
-os_ops.write_clipboard — синхронно (тесты) или в worker (TUI, O9).
+Путь доставки один, не два: нативная запись средствами ОС (os_ops.write_clipboard)
+— основной, OSC 52 через терминал — для SSH, для Linux и как запасной. Почему
+их развели — см. `_send_osc52`. Внутренний app.clipboard наполняется всегда.
 Возврат bool = успех native при blocking; при async — True если задача поставлена.
 """
 from __future__ import annotations
@@ -39,6 +40,33 @@ def with_source_cite(text: str, *, kind: str, path: str) -> str:
     return f"{text.rstrip()}\n[{kind}: {path}]"
 
 
+def _remember_internally(app: Any, text: str) -> None:
+    """Внутренний буфер приложения — из него читает Ctrl+V внутри TUI.
+
+    Публичного сеттера у Textual нет: `App.clipboard` только для чтения, а
+    `copy_to_clipboard` попутно отправляет OSC 52 — ровно то, чего мы здесь
+    избегаем. Поэтому пишем поле напрямую."""
+    try:
+        app._clipboard = text
+    except Exception:
+        pass   # чужая реализация app — внутренний буфер не наша забота
+
+
+def _send_osc52(app: Any, text: str) -> None:
+    """Попросить терминал положить текст в буфер (управляющая последовательность).
+
+    Дорогой путь на Windows: получив её, терминал сам захватывает системный
+    буфер обмена, а тот эксклюзивен. Замер 2026-08-04 в Windows Terminal —
+    захват занимал до 3-4 секунд, всё это время терминал не рисовал и не отдавал
+    события (интерфейс выглядел зависшим), а параллельная нативная запись
+    получала отказ. Поэтому на Windows и macOS шлём только как запасной путь;
+    на Linux и в SSH — всегда (там он безопасен и/или единственный)."""
+    send = getattr(app, "copy_to_clipboard", None)
+    if not callable(send):
+        return
+    send(text)
+
+
 def copy_out(
     app: Any,
     text: str,
@@ -46,26 +74,49 @@ def copy_out(
     toast: bool = False,
     blocking: bool = True,
 ) -> bool:
-    """Скопировать text: OSC+internal сразу, native sync или в worker.
+    """Скопировать text наружу, выбрав ОДИН путь доставки.
 
-    toast=True — хоткей: при native ok показать «Скопировано».
+    Путей два, и на Windows вместе они мешают друг другу (см. `_send_osc52`):
+    нативная запись средствами ОС — основной, OSC 52 через терминал — всегда
+    в SSH и на Linux, на прочих платформах только если нативная не удалась.
+
+    toast=True — хоткей: при успехе показать «Скопировано».
     toast=False — copy-on-select: тихий успех.
     blocking=True — ждать write_clipboard (тесты / простой API).
-    blocking=False — native в ``run_worker``; UI не ждёт subprocess (O9).
-    При native fail — warning раз за сессию (текст зависит от среды).
+    blocking=False — native в ``run_worker``; UI не ждёт запись (O9).
+    При окончательной неудаче — warning раз за сессию (текст зависит от среды).
     Пустой text — no-op, False.
     """
     if not text:
         return False
-    app.copy_to_clipboard(text)
+    _remember_internally(app, text)
+
+    # Два случая, когда OSC 52 нужен сразу, а не как запасной путь:
+    #
+    # SSH — нативная запись легла бы в буфер обмена СЕРВЕРА, до машины
+    # пользователя текст так не доедет; OSC 52 несёт его через сам протокол.
+    #
+    # Linux — страховка от одноразовости X11: `xclip -loops 1` отдаёт содержимое
+    # один раз и выходит, после первой вставки буфер пустеет (содержимое живёт в
+    # процессе-владельце, а не в системе). Копия у терминала это закрывает.
+    # Здесь OSC 52 безопасен: буфер X11/Wayland не эксклюзивный, пишущий никого
+    # не блокирует — в отличие от Windows, где ровно это и вешало терминал.
+    osc_sent = is_ssh_session() or sys.platform.startswith("linux")
+    if osc_sent:
+        _send_osc52(app, text)
+
     if blocking or not callable(getattr(app, "run_worker", None)):
         ok = write_clipboard(text)
+        if not ok and not osc_sent:
+            _send_osc52(app, text)
         _feedback(app, ok, toast=toast)
         return ok
 
     def _work() -> None:
         ok = write_clipboard(text)
         try:
+            if not ok and not osc_sent:
+                app.call_from_thread(_send_osc52, app, text)
             app.call_from_thread(_feedback, app, ok, toast=toast)
         except RuntimeError:
             # App уже останавливается — feedback не нужен.

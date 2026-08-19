@@ -190,7 +190,8 @@ class SessionsScreen(Screen):
         if not usage:
             return None
         cfg = getattr(self.app, "_config", None) or {}
-        return format_nonzero_cost(usage, cfg.get("pricing"), cfg.get("model"))
+        return format_nonzero_cost(usage, cfg.get("pricing"), cfg.get("model"),
+                                   cfg.get("completions_url"))
 
     def _session_is_busy(self, thread_id: str) -> bool:
         """Чужой свежий lock → сессия занята другим TUI."""

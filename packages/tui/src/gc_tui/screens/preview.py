@@ -11,6 +11,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
+from gc_tui.messages import CopyBlockRequest
+from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.skill_view import truncate_path_left
 
 _PATH_MAXLEN = 48
@@ -47,7 +49,8 @@ class PreviewScreen(Screen[bool]):
                 id="preview-footer", markup=False)
 
     def on_mount(self) -> None:
-        from gc_tui.services.trace_render import merge_nested_readonly, render_segments_readonly
+        from gc_tui.services.trace_render import (
+            merge_nested_readonly, render_segments_readonly)
         trace = self.query_one("#trace", VerticalScroll)
         calls = render_segments_readonly(trace, self._segments)
         if self._subagent_records:
@@ -82,3 +85,14 @@ class PreviewScreen(Screen[bool]):
             body.add_class("hidden")
             if marker is not None:
                 marker.set_prefix("▸ ")
+
+    def on_copy_block_request(self, event: CopyBlockRequest) -> None:
+        """Копия наружу без буфера сессии: превью показывает ЧУЖОЙ тред, а
+        _push_session_copy_buffer пишет в активную сессию главного экрана.
+
+        Двойной клик перед этим сам рождает TextSelected и ставит в очередь
+        отложенную автокопию видимого — отменяем, иначе она затрёт payload
+        позже (гонка copy-on-select)."""
+        if event.payload:
+            self.app.cancel_pending_select_copy()
+            copy_out(self.app, event.payload, toast=True, blocking=False)

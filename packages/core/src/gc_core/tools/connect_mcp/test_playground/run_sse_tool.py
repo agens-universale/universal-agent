@@ -72,7 +72,12 @@ def main():
     print(f"Timeout: {timeout}s\n")
 
     # Импорты после добавления path
-    from gc_core.tools.connect_mcp.client import _init_mcp_session, _send_initialized_notification, _tools_list_request, _call_mcp_tool, _get_or_init_session_id, _MCP_SESSIONS
+    from gc_core.tools.connect_mcp.client import (
+        _init_mcp_session,
+        _tools_list_request,
+        _call_mcp_tool,
+        _MCP_SESSIONS,
+    )
 
     # Очистить кэш сессии для чистого прогона
     _MCP_SESSIONS.pop(server_key, None)

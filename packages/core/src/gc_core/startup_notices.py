@@ -64,19 +64,18 @@ def _deprecated(deprecated_keys_used: Optional[List[str]]) -> List[Notice]:
     return out
 
 
-def _pricing_zero_rates(config_dict: Dict[str, Any]) -> List[Notice]:
+def _pricing_no_rates(config_dict: Dict[str, Any]) -> List[Notice]:
+    """Ставки не заданы: у провайдеров без фактической цены денег видно не будет."""
     pricing = config_dict.get("pricing")
     if not isinstance(pricing, dict) or not pricing.get("enabled"):
         return []
-    tariff = resolve_model_tariff(pricing, config_dict.get("model"))
-    if tariff is None:
-        return []
-    if tariff.input != 0 or tariff.output != 0:
+    if resolve_model_tariff(pricing, config_dict.get("model")) is not None:
         return []
     return [Notice(
-        "info", "pricing_zero_rates",
-        "pricing: тариф включён, но ставки input и output равны 0 — "
-        "стоимость в футере и отчётах будет 0.0. Задайте реальные цены в секции pricing в конфиге агента (см. /config).",
+        "info", "pricing_no_rates",
+        "pricing: ставки не заданы. Провайдеры, которые сообщают фактическую стоимость "
+        "(например, OpenRouter), всё равно будут показаны; для остальных стоимость "
+        "останется скрытой — задайте цены в секции pricing (см. /config).",
         highlights=("pricing", "input", "output"),
     )]
 
@@ -217,7 +216,7 @@ def collect_startup_notices(
         + _mcp_failed(mcp_status)
         + _agentsmd(config_dict, is_tui=is_tui)
         + _compat(compat_notices)
-        + _pricing_zero_rates(config_dict)
+        + _pricing_no_rates(config_dict)
         + _deprecated(deprecated_keys_used)
         + _upgrade(upgrade_info)
     ):

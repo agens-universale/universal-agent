@@ -6,9 +6,17 @@ from gc_cli import arg_parser
 from gc_core import config_sync
 from gc_core import onboarding
 from gc_core.agent_executor import AgentExecutor
-from gc_core.config import apply_cli_overrides, build_auth_connector, load_config, user_config_path, _bootstrap_user_config
-from gc_core.config_modules.env_vars import project_gc_dir
-from gc_core.message_policy.user_message_policy import wrap_skill_resolution_technical_instruction, wrap_technical_user_content
+from gc_core.config import (
+    apply_cli_overrides,
+    build_auth_connector,
+    load_config,
+    user_config_path,
+    _bootstrap_user_config,
+)
+from gc_core.message_policy.user_message_policy import (
+    wrap_skill_resolution_technical_instruction,
+    wrap_technical_user_content,
+)
 from gc_core.run_context import RunContext, create_run_context
 from gc_core.mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 from gc_core.updater import check as updater_check
@@ -76,7 +84,7 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     name = (skill_name or "").strip()
     if not name:
         return None
-    from gc_core.tools.skills.skill_arg_resolver import resolve_skill_arg, Resolved, Failed
+    from gc_core.tools.skills.skill_arg_resolver import resolve_skill_arg, Failed
     from gc_core.tools.skills.registry import get_skills_registry
 
     try:

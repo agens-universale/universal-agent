@@ -204,7 +204,6 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
             read_guard=None,
             no_read_guard=False,
             read_guard_mode=None,
-            instructions_overwrite=False,
             query="hi",
             wrap_technical=False,
             skill=None,

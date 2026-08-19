@@ -119,7 +119,8 @@ async def test_card_shows_nonzero_session_cost(tmp_path):
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
         text = _rows_text(pilot)
-        assert "2.0 ₽" in text
+        # Чисто тарифный отчёт (нет факта провайдера) — тильды нет.
+        assert "2.00 ₽" in text
         assert "1 сообщ." in text
 
 

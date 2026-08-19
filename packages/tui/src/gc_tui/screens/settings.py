@@ -629,12 +629,12 @@ class SettingsScreen(Screen):
     # --- guard записи ---
     def _writable(self) -> bool:
         from pathlib import Path
-        from gc_core.config import default_config_path
+        from gc_core.config import _default_config_path
         p = self._config_path
         if not p:
             return False
         try:
-            return Path(p).resolve() != Path(default_config_path()).resolve()
+            return Path(p).resolve() != Path(_default_config_path()).resolve()
         except OSError:
             return False
 
@@ -937,7 +937,7 @@ class SettingsScreen(Screen):
         шаблон не пишем. Ошибка — флеш, значение не меняется. Сессионные
         переопределения НЕ трогаем — их перекрытие показывает пометка §6.2."""
         from gc_core import onboarding_config_writer as w
-        from gc_core.config import default_config_path, validate_config_text
+        from gc_core.config import _default_config_path, validate_config_text
         from gc_tui.toggles import cycle_value, TOGGLES, toggle_state_base, PRESETS
         names = list(TOGGLES.keys())
         name = names[self._modes_idx]
@@ -952,7 +952,7 @@ class SettingsScreen(Screen):
         try:
             w.write_values(
                 self._config_path, values,
-                template_path=default_config_path(),
+                template_path=_default_config_path(),
                 validate=validate_config_text,
             )
         except (ValueError, OSError) as exc:
@@ -1180,10 +1180,10 @@ class SettingsScreen(Screen):
             self._notice("✗ пакетный шаблон не обновляется")
             return
         from pathlib import Path
-        from gc_core.config import default_config_path
+        from gc_core.config import _default_config_path
         try:
             user_text = Path(self._config_path).read_text(encoding="utf-8")
-            template_text = Path(default_config_path()).read_text(encoding="utf-8")
+            template_text = Path(_default_config_path()).read_text(encoding="utf-8")
             if not config_sync.needs_sync(user_text, template_text):
                 self._notice("config.yml уже актуален — обновлять нечего")
                 return
@@ -1307,7 +1307,7 @@ class SettingsScreen(Screen):
     def _do_save(self, section: int, values: dict, *, warn_detail: str = "",
                  confirmed: bool = False) -> None:
         from gc_core import onboarding_config_writer as w
-        from gc_core.config import default_config_path, validate_config_text
+        from gc_core.config import _default_config_path, validate_config_text
         from gc_core.onboarding import FIELD_ANCHOR_PATHS
         if not confirmed:
             # Единственная точка записи → ссылка на переменную не может стать литералом
@@ -1321,7 +1321,7 @@ class SettingsScreen(Screen):
         dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in values.items()}
         try:
             w.write_values(self._config_path, dotted,
-                           template_path=default_config_path(),
+                           template_path=_default_config_path(),
                            validate=validate_config_text)
         except (ValueError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}")

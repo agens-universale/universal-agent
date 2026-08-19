@@ -83,17 +83,21 @@ async def test_ctrl_c_with_selection_pushes_session_buffer(tmp_path, monkeypatch
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
-        monkeypatch.setattr(pilot.app, "copy_to_clipboard", lambda t: copied.append(t))
-        monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda t: True)
+        # Копирование ловим на транспорте: OSC 52 с 2026-08-04 шлётся только в
+        # SSH, на Linux и как запасной путь (см. services/clipboard_ops).
+        monkeypatch.setattr(clipboard_ops, "write_clipboard",
+                            lambda text: copied.append(text) or True)
         store = _MockStore(existing_buffer="")
         monkeypatch.setattr(pilot.app.screen, "_store", store, raising=False)
         monkeypatch.setattr(pilot.app.screen, "_active_task_id", "TID2", raising=False)
         monkeypatch.setattr(pilot.app, "_clipboard_payload", lambda: "фрагмент")
 
         await pilot.press("ctrl+c")
-        await pilot.pause(0.1)
+        # нативная запись уходит в фоновый поток — ждём наблюдаемый результат
+        from gc_testkit.tui_support import wait_until
 
-        assert copied == ["фрагмент"]
+        await wait_until(pilot, lambda: copied == ["фрагмент"],
+                         "текст ушёл в системный буфер")
         assert store.writes == [("TID2", {"copy_buffer": "фрагмент"})]
         assert stop_called["flag"] is False  # не стопаем
 

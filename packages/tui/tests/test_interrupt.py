@@ -28,16 +28,23 @@ async def test_ctrl_c_copies_when_input_has_selection(tmp_path, monkeypatch):
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
-        monkeypatch.setattr(pilot.app, "copy_to_clipboard", lambda t: copied.append(t))
+        # Копирование ловим на транспорте: OSC 52 с 2026-08-04 шлётся только в
+        # SSH, на Linux и как запасной путь (см. services/clipboard_ops).
+        from gc_tui.services import clipboard_ops
+
+        monkeypatch.setattr(clipboard_ops, "write_clipboard",
+                            lambda text: copied.append(text) or True)
         # запускаем run, затем выделяем текст в поле ввода
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "выделенный текст"
         inp.select_all()
         await pilot.pause(0.1)
         await pilot.press("ctrl+c")
-        await pilot.pause(0.1)
+        # нативная запись уходит в фоновый поток — ждём наблюдаемый результат
+        from gc_testkit.tui_support import wait_until
 
-        assert copied == ["выделенный текст"]
+        await wait_until(pilot, lambda: copied == ["выделенный текст"],
+                         "текст ушёл в системный буфер")
         assert stop_called["flag"] is False
 
 

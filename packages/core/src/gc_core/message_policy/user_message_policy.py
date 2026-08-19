@@ -159,20 +159,6 @@ def resolve_technical_user_content_type(content: str) -> str:
     return TECHNICAL_TYPE_TECHNICAL
 
 
-def normalize_user_log_entries(entries: Any) -> List[str]:
-    out: List[str] = []
-    if not isinstance(entries, list):
-        return out
-    for item in entries:
-        text = str(item).strip()
-        if not text:
-            continue
-        if is_technical_user_message_text(text):
-            continue
-        if text not in out:
-            out.append(text)
-    return out
-
 
 def append_user_log_entries(existing: List[str], step_messages: List[Dict[str, Any]]) -> List[str]:
     out = list(existing) if isinstance(existing, list) else []

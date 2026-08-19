@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, List
 
 from gc_core.intent_scope.agent_logging import log_intent_scope_summary_done, log_intent_scope_summary_start
 from gc_core.config_modules.intent_scope import IntentScopeConfig

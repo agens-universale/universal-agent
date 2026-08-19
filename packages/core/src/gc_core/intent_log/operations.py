@@ -5,8 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from gc_core.intent_log.record import ACTION_FINAL_ANSWER, ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK, IntentRecord, validate_record
-from gc_core.intent_log.serialize import deserialize_list, serialize
+from gc_core.intent_log.record import (
+    ACTION_FINAL_ANSWER,
+    ACTION_TOOL_AGGREGATED,
+    ACTION_TOOL_RAW,
+    ACTION_USER_ASK,
+    IntentRecord,
+    validate_record,
+)
+from gc_core.intent_log.serialize import serialize
 
 
 def utc_now_ts() -> str:
