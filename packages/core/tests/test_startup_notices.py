@@ -63,33 +63,34 @@ def test_warnings_before_infos():
     assert levels == sorted(levels, key=lambda l: 0 if l == "warning" else 1)
 
 
-def test_pricing_zero_rates_info_when_enabled():
-    cfg = {
-        "model": "gpt-5.5",
-        "pricing": {"enabled": True, "input": 0, "output": 0, "currency": "₽", "per_tokens": 1_000_000},
-    }
-    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
-    zero = [n for n in ns if n.code == "pricing_zero_rates"]
-    assert len(zero) == 1 and zero[0].level == "info"
-    assert "input" in zero[0].message and "output" in zero[0].message
+def test_pricing_no_rates_info_when_enabled():
+    notices = collect_startup_notices({
+        "pricing": {"enabled": True, "input": 0, "output": 0},
+        "model": "m",
+    }, _BUILTIN, None, is_tui=False)
+    codes = [n.code for n in notices]
+    assert "pricing_no_rates" in codes
+    message = next(n.message for n in notices if n.code == "pricing_no_rates")
+    assert "фактическую стоимость" in message
 
 
-def test_pricing_zero_rates_no_notice_when_disabled():
+def test_pricing_no_rates_no_notice_when_disabled():
     cfg = {"pricing": {"enabled": False, "input": 0, "output": 0}}
     ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
-    assert "pricing_zero_rates" not in _codes(ns)
+    assert "pricing_no_rates" not in _codes(ns)
 
 
-def test_pricing_zero_rates_no_notice_when_rates_set():
+def test_pricing_no_rates_no_notice_when_rates_set():
     cfg = {"pricing": {"enabled": True, "input": 1.0, "output": 2.0}}
     ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
-    assert "pricing_zero_rates" not in _codes(ns)
+    assert "pricing_no_rates" not in _codes(ns)
 
 
-def test_pricing_zero_rates_no_notice_without_tariff():
+def test_pricing_no_rates_info_without_model():
+    """Если нет модели в конфиге, resolve_model_tariff вернёт None → notice."""
     cfg = {"pricing": {"enabled": True}}
     ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
-    assert "pricing_zero_rates" not in _codes(ns)
+    assert "pricing_no_rates" in _codes(ns)
 
 
 def test_cli_render_lines():

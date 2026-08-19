@@ -2,14 +2,29 @@ from __future__ import annotations
 
 from typing import Any
 
-from gc_core.config_modules.message_notice import active_tool_usage_notice_rules, project_memory_notice_from_config_dict
-from gc_core.message_policy.project_memory_notice.policy import collect_project_memory_hints, on_persist_steps, project_memory_hints_enabled, wrap_project_memory_hint_user_message
+from gc_core.config_modules.message_notice import active_tool_usage_notice_rules
+from gc_core.config_modules.project_memory import project_memory_from_config_dict
+from gc_core.message_policy.project_memory_notice.policy import (
+    collect_project_memory_hints,
+    on_persist_steps,
+    project_memory_hints_enabled,
+    wrap_project_memory_hint_user_message,
+)
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.message_policy.notice_policy_log import log_notice_policy_step
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
 from gc_core.message_policy.tool_availability import available_tool_names, tool_is_available
-from gc_core.message_policy.tool_usage_notice.policy import batch_used_tool, collect_tool_usage_notices, get_thread_memory_registers_from_shared, update_tool_usage_notice_after_persist, wrap_tool_usage_notice_user_message
-from gc_core.message_policy.tool_usage_notice.state import get_project_memory_check_cnt, persist_tool_usage_notice_state
+from gc_core.message_policy.tool_usage_notice.policy import (
+    batch_used_tool,
+    collect_tool_usage_notices,
+    get_thread_memory_registers_from_shared,
+    update_tool_usage_notice_after_persist,
+    wrap_tool_usage_notice_user_message,
+)
+from gc_core.message_policy.tool_usage_notice.state import (
+    get_project_memory_check_cnt,
+    persist_tool_usage_notice_state,
+)
 
 
 def _tool_thresholds(rules: list[Any]) -> dict[str, int]:
@@ -77,7 +92,7 @@ def apply_tool_usage_notice_before_llm(
         available_tools, PROJECT_MEMORY_TOOL_NAME
     )
     project_interval = (
-        project_memory_notice_from_config_dict(cfg).check_interval_messages
+        project_memory_from_config_dict(cfg).check_interval_messages
         if project_hints_enabled
         else None
     )

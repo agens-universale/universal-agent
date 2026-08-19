@@ -94,21 +94,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_core.config_modules.env_vars import ensure_project_gc_dir
     ensure_project_gc_dir()
 
-    from gc_core.config import load_config, apply_cli_overrides, resolve_config_path, project_local_config_path, user_config_path, bootstrap_user_config
+    from gc_core.config import load_config, apply_cli_overrides, resolve_config_path, _project_local_config_path, user_config_path, _bootstrap_user_config
     from gc_core import onboarding
 
     onb_write_path = user_config_path()
     onboarding_mode = None
 
     if getattr(args, "init_config", False):
-        just_created = bootstrap_user_config()
+        just_created = _bootstrap_user_config()
         config_dict = load_config(None)
         if not _interactive():
             print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
             return 0
         onboarding_mode = "review"
     else:
-        just_created = bootstrap_user_config() if args.config is None else False
+        just_created = _bootstrap_user_config() if args.config is None else False
         config_dict = load_config(args.config)
         apply_cli_overrides(config_dict)
 
@@ -134,7 +134,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict)
     app.set_config_path(onb_write_path if onboarding_mode else resolve_config_path(args.config))
-    app._config_project_local = project_local_config_path()  # str | None
+    app._config_project_local = _project_local_config_path()  # str | None
     app._onboarding_mode = onboarding_mode
     app._onboarding_config_path = onb_write_path
     from gc_core import upgrade_gate

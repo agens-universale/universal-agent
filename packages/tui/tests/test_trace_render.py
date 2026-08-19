@@ -15,24 +15,24 @@ def test_compaction_label_legacy_no_chars():
     assert build_compaction_label(2, comp) == "контекст сжат #2 · 5→1"
 
 
-def test_render_code_block_with_lang():
+def test_block_panel_for_code_with_lang():
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_code_block
-    w = render_code_block("print(1)", "python", event_no=1)
+    from gc_tui.widgets.block_panel import BlockPanel
+    w = BlockPanel.for_code("print(1)", "python", event_no=1)
     assert w.has_class("code-block-panel")
 
 
-def test_render_code_block_unknown_lang_fallback():
+def test_block_panel_for_code_unknown_lang_fallback():
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_code_block
-    w = render_code_block("x = 1", "no-such-lang-xyz", event_no=2)
+    from gc_tui.widgets.block_panel import BlockPanel
+    w = BlockPanel.for_code("x = 1", "no-such-lang-xyz", event_no=2)
     assert w.has_class("code-block-panel")
 
 
-def test_render_code_block_no_lang_fallback():
+def test_block_panel_for_code_no_lang_fallback():
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_code_block
-    w = render_code_block("plain text", None, event_no=3)
+    from gc_tui.widgets.block_panel import BlockPanel
+    w = BlockPanel.for_code("plain text", None, event_no=3)
     assert w.has_class("code-block-panel")
 
 
@@ -54,8 +54,6 @@ def test_build_agent_widgets_code_and_prose_order_and_focus():
     assert len(ws) == 3
     assert ws[0].has_class("code-block-panel") is False  # первый proza
     assert ws[1].has_class("code-block-panel") is True    # code-block
-    # focusable только у первого (Tab-стоп события)
-    assert getattr(ws[0], "_focusable", None) in (True, None)  # см. AgentReplyLine/TraceRow API
 
 
 def _env(payload, ts="2026-05-30T10:00:00Z"):
@@ -261,6 +259,58 @@ async def test_readonly_submit_note_label():
         notes = [w for w in pilot.app.screen.query(TraceRow) if w.has_class("line-note")]
         assert len(notes) == 1
         assert notes[0]._content.plain == "заметка: проверь X"
+
+
+def test_code_block_builds_block_panel():
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_block_widgets
+    from gc_tui.widgets.block_panel import BlockPanel
+
+    widgets = build_block_widgets("текст\n\n```python\nx = 1\n```",
+                                  prose_bullet=True, event_no=5)
+    panels = [w for w in widgets if isinstance(w, BlockPanel)]
+    assert len(panels) == 1
+    assert panels[0].has_class("code-block-panel")
+    assert panels[0].has_class("code-indent")
+
+
+def test_table_builds_block_panel():
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_block_widgets
+    from gc_tui.widgets.block_panel import BlockPanel
+
+    text = "до\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
+    panels = [w for w in build_block_widgets(text, prose_bullet=True, event_no=6)
+              if isinstance(w, BlockPanel)]
+    assert len(panels) == 1
+    assert panels[0].has_class("table-block")
+
+
+def test_banner_blocks_have_no_indent():
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_block_widgets
+    from gc_tui.widgets.block_panel import BlockPanel
+
+    widgets = build_block_widgets("```python\nx = 1\n```",
+                                  prose_bullet=False, event_no=1)
+    panel = next(w for w in widgets if isinstance(w, BlockPanel))
+    assert not panel.has_class("code-indent")
+
+
+def test_first_widget_is_the_only_tab_stop():
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_block_widgets
+    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```\n\nещё проза",
+                                  prose_bullet=True, event_no=5)
+    assert [w.can_focus for w in widgets] == [True, False, False]
+
+
+def test_event_no_bound_to_every_widget():
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_block_widgets
+    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```",
+                                  prose_bullet=True, event_no=9)
+    assert all(w._event_no == 9 for w in widgets)
 
 
 @pytest.mark.asyncio

@@ -114,7 +114,6 @@ class WrongFunctionArgumentsException(Exception):
                 else:
                     optional_entries.append(entry)
             if required_entries or optional_entries:
-                all_field_entries = required_entries + optional_entries
                 all_field_lines = []
                 if required_entries:
                     all_field_lines.append("  // REQUIRED")

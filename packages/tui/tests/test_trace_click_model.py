@@ -29,8 +29,8 @@ def test_focus_on_click_not_disabled():
     строку уже на MouseDown, выделение видно в момент нажатия (в т.ч. при
     Ctrl+клике до открытия экрана события). Явный focus() в on_click — лишь
     идемпотентная страховка, а не носитель поведения."""
-    from gc_tui.widgets.agent_reply_line import AgentReplyLine
-    for cls in (TraceRow, ToolCallRow, UserReplyContainer, AgentReplyLine):
+    from gc_tui.widgets.block_panel import BlockPanel
+    for cls in (TraceRow, ToolCallRow, UserReplyContainer, BlockPanel):
         assert cls.FOCUS_ON_CLICK is True, cls.__name__
 
 

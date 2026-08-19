@@ -11,7 +11,6 @@ from typing import List, Dict, Optional, Tuple
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.message_policy.chat_completions import prepare_chat_completion_messages_for_api
 from gc_core.utils.schema_markers import schema_without_internal_markers
-from gc_core.utils.convertations import output_chat_completion_to_response
 from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
 from gc_core.utils.http_proxy import resolve_proxies
 from gc_core.utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION
@@ -19,7 +18,11 @@ from gc_core.utils.retry import retry_with_backoff
 from gc_core.usage.context import record_usage
 from gc_core.utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
 from gc_core.utils.backend_errors import is_empty_completion
-from gc_core.trace_id import trace_id_from_config, trace_header_name, model_trace_header_enabled
+from gc_core.trace_id import (
+    trace_id_from_config,
+    trace_header_name,
+    model_trace_header_enabled,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -161,7 +164,7 @@ def request_backend_responses(
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
-        record_usage(response_obj.get("usage"))
+        record_usage(response_obj.get("usage"), url)
     if logger is not None:
         logger.debug(
             "backend_response",
@@ -269,7 +272,7 @@ def request_backend_chat_completions(
                 )
                         # основного цикла терялся — фиксировался только non-stream aux-вызов).
             if isinstance(assembled, dict):
-                record_usage(assembled.get("usage"))
+                record_usage(assembled.get("usage"), url)
             if logger is not None:
                 logger.debug(
                     "backend_response",
@@ -364,7 +367,7 @@ def request_backend_chat_completions(
 
     data = r.json()
     if isinstance(data, dict):
-        record_usage(data.get("usage"))
+        record_usage(data.get("usage"), url)
     if logger is not None:
         logger.debug(
             "backend_response",

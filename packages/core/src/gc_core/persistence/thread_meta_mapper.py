@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
-from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
-from gc_core.persistence.schema import STATE_SCHEMA_VERSION, StateSchemaError, normalize_session_todo, normalize_working_memory, reject_legacy_memory_keys, serialize_shared_block, validate_thread_meta_for_load
+from gc_core.intent_log.serialize import serialize_for_meta
+from gc_core.persistence.schema import (
+    STATE_SCHEMA_VERSION,
+    normalize_session_todo,
+    normalize_working_memory,
+    reject_legacy_memory_keys,
+    serialize_shared_block,
+    validate_thread_meta_for_load,
+)
 from gc_core.states import SharedStateData, State
 
 

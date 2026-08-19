@@ -8,10 +8,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from gc_tui.widgets.ask_human_banner import AskHumanBanner
+from typing import Optional
 
 from textual import events
 from textual.app import ComposeResult
@@ -24,9 +21,8 @@ from textual.widgets import Static, TextArea
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
 from gc_core.runtime_notices import collect_unread_runtime_notices
-from gc_core.startup_notices import collect_startup_notices
-from gc_core.tools.registry import all_builtin_tool_names
 from gc_tui.commands import build_default_registry, closest_command
+from gc_tui.messages import CopyBlockRequest
 from gc_tui.models import TaskCursor
 from rich.text import Text
 from gc_tui.palette import ACCENT as _ACCENT
@@ -37,26 +33,58 @@ from gc_tui.palette import INK as _INK
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.notices_ui import format_notices_badge, format_notices_footer_suffix
 from gc_tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
+from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.export import export_thread
 from gc_tui.services.path_display import truncate_path
 from gc_tui.services.git_info import current_branch
 from gc_tui.services.session_lock import BUSY_MESSAGE, heartbeat, release, try_acquire
 from gc_tui.services.stores.file_store import FileTaskStore
-from gc_tui.services.subagent_progress import SubagentProgressConsumer, format_parent_live_status, reconcile_batch_phases
-from gc_tui.services.subagent_sidecar_mapper import CHILD_SUMMARY_LABEL, apply_sidecar_nested_actions, plan_sidecar_nested_actions, resolve_nested_tool_detail, trace_events_from_nested_detail
+from gc_tui.services.subagent_progress import (
+    SubagentProgressConsumer,
+    format_parent_live_status,
+    reconcile_batch_phases,
+)
+from gc_tui.services.subagent_sidecar_mapper import (
+    CHILD_SUMMARY_LABEL,
+    apply_sidecar_nested_actions,
+    plan_sidecar_nested_actions,
+    resolve_nested_tool_detail,
+    trace_events_from_nested_detail,
+)
 from gc_tui.services.trace_mapper import collect_skipped_call_ids, map_message
-from gc_tui.services.trace_render import LINE_INTERMEDIATE_CLASS, LINE_USER_CLASS, NESTED_PREFIX, NESTED_PROSE_PREFIX, NESTED_USER_PREFIX, build_compaction_label
+from gc_tui.services.trace_render import (
+    LINE_INTERMEDIATE_CLASS,
+    LINE_USER_CLASS,
+    NESTED_PREFIX,
+    NESTED_PROSE_PREFIX,
+    NESTED_USER_PREFIX,
+    build_compaction_label,
+)
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.session_settings import read_from_meta
-from gc_tui.toggles import apply_toggle, next_toggle_value, preset_custom_hint, preset_track_extra, toggle_state
+from gc_tui.toggles import (
+    apply_toggle,
+    next_toggle_value,
+    preset_custom_hint,
+    preset_track_extra,
+    toggle_state,
+)
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
-from gc_tui.widgets.thinking_indicator import TERMINAL_INDICATOR_STATES, ThinkingIndicator, is_terminal_indicator_state
+from gc_tui.widgets.thinking_indicator import (
+    TERMINAL_INDICATOR_STATES,
+    ThinkingIndicator,
+    is_terminal_indicator_state,
+)
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import TraceRow
 from gc_tui import branding
 from gc_tui.services.terminal_title import format_terminal_title, set_terminal_title
-from gc_tui.services.session_title import LAST_ACTUAL_MIN, display_name, normalize_prompt_title
+from gc_tui.services.session_title import (
+    LAST_ACTUAL_MIN,
+    display_name,
+    normalize_prompt_title,
+)
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 
 
@@ -450,7 +478,8 @@ class TraceScreen(Screen):
         session_meta, request_meta = snapshot
         cfg = getattr(self.app, "_config", None) or {}
         return usage_segments(
-            session_meta, request_meta, cfg.get("pricing"), cfg.get("model")
+            session_meta, request_meta, cfg.get("pricing"), cfg.get("model"),
+            cfg.get("completions_url"),
         )
 
     def _context_meter(self) -> "Text | None":
@@ -463,7 +492,10 @@ class TraceScreen(Screen):
         # только на границе хода (turn_finish), её показывает нижняя плашка «сжимаю…»,
         # а не 100% на баре. summary_trigger=0 (форс-сжатие выключено) → fallback на
         # turn-end как на единственный реальный порог.
-        from gc_core.summarize.config import parse_summary_trigger_chars, parse_summary_turn_end_trigger_chars
+        from gc_core.summarize.config import (
+            parse_summary_trigger_chars,
+            parse_summary_turn_end_trigger_chars,
+        )
         threshold = parse_summary_trigger_chars(cfg) or parse_summary_turn_end_trigger_chars(cfg)
         if threshold <= 0 or self._store is None or self._active_task_id is None:
             return None
@@ -2505,7 +2537,9 @@ class TraceScreen(Screen):
             # F3: при freeze не монтируем/не красим стрим-виджеты (mount/switch/
             # set_content дрожали бы экран под выделением). Контент догонит после MouseUp.
             if _thinking_phase and sink is not None and sink.has_content() and not _frozen:
-                from gc_tui.services.stream_sink import format_stream_block, format_reasoning_line, select_stream_render
+                from gc_tui.services.stream_sink import (
+                    format_stream_block, format_reasoning_line, select_stream_render,
+                )
                 from gc_tui.services.markdown_render import render_prose
                 from gc_tui.widgets.stream_block import StreamBlock
                 think, answer = sink.snapshot()
@@ -3584,7 +3618,9 @@ class TraceScreen(Screen):
     def _build_attachment_technical(self, text: str) -> Optional[str]:
         """Технический футер для @-вложений в тексте (резолв на сабмите).
         None — если в тексте нет существующих @-путей."""
-        from gc_tui.services.file_index import extract_at_mentions, resolve_attachment, build_attachment_footer
+        from gc_tui.services.file_index import (
+            extract_at_mentions, resolve_attachment, build_attachment_footer,
+        )
         from gc_core.message_policy.user_message_policy import wrap_technical_user_content
         root = self._project_root()
         resolved = []
@@ -3663,49 +3699,6 @@ class TraceScreen(Screen):
             )
         )
 
-    def action_diff_approve_all(self) -> None:
-        """Принять все pending (оставлен для явного вызова; хоткей Ctrl+A — на /diff)."""
-        from gc_tui.diff_tui.feedback import format_approve_ack, format_bulk_approve_ack
-
-        svc = self._diff_service_for_preview()
-        if svc is None:
-            self._mount_trace_row(
-                prefix="· ",
-                content="принять все: launch_root не задан",
-                kind_class="line-meta",
-            )
-            return
-        try:
-            pending = svc.list_entries(pending_only=True)
-        except Exception:
-            self._mount_trace_row(
-                prefix="· ",
-                content="принять все: не удалось прочитать pending",
-                kind_class="line-meta",
-            )
-            return
-        n = len(pending)
-        if n == 0:
-            self._mount_trace_row(
-                prefix="· ",
-                content="Нет изменений для принятия",
-                kind_class="line-meta",
-            )
-            return
-        try:
-            result = svc.approve_all()
-        except Exception:
-            self._mount_trace_row(
-                prefix="· ",
-                content="принять все: ошибка",
-                kind_class="line-meta",
-            )
-            return
-        if svc.mode == "git-mode" and (result.git_count or result.cache_count):
-            ack = format_bulk_approve_ack(result.git_count, result.cache_count)
-        else:
-            ack = format_approve_ack(n)
-        self._on_diff_ui_ack(ack or f"Принято {n}")
 
     def _on_diff_ui_ack(self, text: str) -> None:
         """TUI-only строка в трейсе после принять/откатить (не в thread модели)."""
@@ -3769,7 +3762,12 @@ class TraceScreen(Screen):
         system = getattr(self.app, "_system", "cli")
         if not threads_dir:
             return
-        from gc_core.thread_store import append_new_thread_messages, load_thread_messages, load_thread_meta, save_thread_meta
+        from gc_core.thread_store import (
+            append_new_thread_messages,
+            load_thread_messages,
+            load_thread_meta,
+            save_thread_meta,
+        )
 
         _msgs, keys, max_seq = load_thread_messages(threads_dir, system, tid)
         written = append_new_thread_messages(
@@ -4222,7 +4220,13 @@ class TraceScreen(Screen):
 
     def _handle_bang_shell(self, text: str) -> None:
         """`!command` → локальный shell в cwd TUI; результат только в трейсе."""
-        from gc_tui.services.bang_shell import BangShellController, BangShellSettings, parse_body, parse_clear_meta, preflight
+        from gc_tui.services.bang_shell import (
+            BangShellController,
+            BangShellSettings,
+            parse_body,
+            parse_clear_meta,
+            preflight,
+        )
 
         body = parse_body(text)
         if body is None:
@@ -4554,6 +4558,20 @@ class TraceScreen(Screen):
             body.add_class("hidden")
             if marker is not None:
                 marker.set_prefix("▸ ")
+
+    def on_copy_block_request(self, event: CopyBlockRequest) -> None:
+        """Кнопка ❐ или двойной клик по блоку: копия наружу + в буфер сессии.
+
+        Буфер сессии — как у Ctrl+C: это явный жест копирования, а не побочный
+        эффект выделения. Двойной клик перед этим сам рождает TextSelected
+        (выделение тела) и ставит в очередь отложенную автокопию видимого —
+        её нужно отменить, иначе она затрёт payload позже (гонка copy-on-select)."""
+        payload = event.payload
+        if not payload:
+            return
+        self.app.cancel_pending_select_copy()
+        copy_out(self.app, payload, toast=True, blocking=False)
+        self.app._push_session_copy_buffer(payload)
 
     def on_open_tool_call_detail_request(self, message) -> None:
         """Ctrl+click / Enter по row → детальный экран call + output.

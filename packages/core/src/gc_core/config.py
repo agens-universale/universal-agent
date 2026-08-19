@@ -9,17 +9,21 @@ import yaml
 
 from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_vars import project_gc_dir
-from gc_core.config_modules.backend import parse_chat_completions_max_tokens
-from gc_core.config_modules.common import apply_swarm_env_overrides
+from gc_core.config_modules.backend import parse_chat_completions_max_tokens  # noqa: F401  # re-export: processing_responses импортирует из config
+from gc_core.config_modules.common import (
+    apply_swarm_env_overrides,
+)
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.config_modules.root import AppConfig, resolve_paths
-from gc_core.config_modules.security import apply_cli_command_moderation_overrides
+from gc_core.config_modules.security import (
+    apply_cli_command_moderation_overrides,
+)
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from gc_core.config_modules import env_vars
 from gc_core.bundled_assets import bundled_root
-from gc_core.config_modules.env_vars import managed_config_path
+from gc_core.mcp_runtime.paths import managed_config_path
 from gc_core.message_projection import configure_for_model_tags
 from gc_core.trace_id import normalize_trace_id
 
@@ -122,30 +126,6 @@ def _bootstrap_user_config() -> bool:
     return True
 
 
-# --- Публичный контракт для необязательных модулей (extras) -------------------
-# tui/ и swarm/ живут за extras и обязаны зависеть только от ядра, причём через
-# публичные имена: тянуться в приватные `_foo` через границу дистрибутива —
-# значит ломаться от любого внутреннего рефакторинга config.py.
-#
-# Это ДЕЛЕГИРУЮЩИЕ обёртки, а не алиасы вида `foo = _foo`. Алиас захватывает
-# объект функции на импорте, и тогда monkeypatch приватного имени (так делают
-# существующие тесты — например tests/tui/test_settings_screen.py:2504) до
-# публичного имени не доходит. Обёртка резолвит приватное имя в момент вызова.
-def default_config_path() -> str:
-    """Публичное имя для `_default_config_path`."""
-    return _default_config_path()
-
-
-def project_local_config_path() -> Optional[str]:
-    """Публичное имя для `_project_local_config_path`."""
-    return _project_local_config_path()
-
-
-def bootstrap_user_config() -> bool:
-    """Публичное имя для `_bootstrap_user_config`."""
-    return _bootstrap_user_config()
-
-
 def resolve_base_config_path(config_path: Optional[str] = None) -> str:
     """Резолвить путь к base config.yml без загрузки YAML.
 
@@ -223,6 +203,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "chat_completion_kwargs": app_cfg.backend.chat_completion_kwargs,
         "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
+        "send_tool_strict": app_cfg.backend.send_tool_strict,
         "use_ssl": app_cfg.backend.use_ssl,
         "cert_path": app_cfg.backend.cert_path,
         "key_path": app_cfg.backend.key_path,

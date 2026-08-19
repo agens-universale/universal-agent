@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Input, Static
+from textual.widgets import Static
 from rich.text import Text
 
 from gc_core import onboarding
@@ -314,13 +314,13 @@ class OnboardingScreen(Screen):
 
     def _commit(self) -> None:
         from gc_core import onboarding_config_writer as w
-        from gc_core.config import default_config_path, validate_config_text
+        from gc_core.config import _default_config_path, validate_config_text
         from gc_core.onboarding import FIELD_ANCHOR_PATHS
         dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in self._values.items()}
         try:
             w.write_values(
                 self._config_path, dotted,
-                template_path=default_config_path(),
+                template_path=_default_config_path(),
                 validate=validate_config_text,
             )
         except ValueError as exc:

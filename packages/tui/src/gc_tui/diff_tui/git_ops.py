@@ -115,10 +115,6 @@ def git_restore_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     return _run_git(launch_root, ["restore", "--worktree", "--", path])
 
 
-def git_diff_worktree(launch_root: PathLike, path: str) -> GitRunResult:
-    """Unstaged / pending diff vs index для одного файла."""
-    return _run_git(launch_root, ["diff", "--", path])
-
 
 def git_show_index(launch_root: PathLike, path: str) -> GitRunResult:
     """``git show :<path>`` — содержимое файла из index (baseline для viewer).

@@ -125,5 +125,6 @@ async def test_unknown_lang_falls_back_to_code_block_color(tmp_path):
         # Panel смонтирован, контент рендерится без exception.
         code_panels = scr.query(".code-block-panel")
         assert len(code_panels) == 1
-        rendered = str(code_panels[0].render())
-        assert "some content here" in rendered
+        from textual.widgets import Static
+        body = code_panels[0].query_one(".block-body", Static)
+        assert "some content here" in body.visual.plain

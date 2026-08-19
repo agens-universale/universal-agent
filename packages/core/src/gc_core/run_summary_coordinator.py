@@ -11,8 +11,16 @@ import gc
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
-from gc_core.summarize.compaction import history_exceeds_summary_trigger, run_summary_compaction, without_system_messages
-from gc_core.summarize.summary_logging import SummaryCompactionLog, append_summary_trace_record, log_compaction_failed, log_pre_run_max_rounds
+from gc_core.summarize.compaction import (
+    history_exceeds_summary_trigger,
+    run_summary_compaction,
+)
+from gc_core.summarize.summary_logging import (
+    SummaryCompactionLog,
+    append_summary_trace_record,
+    log_compaction_failed,
+    log_pre_run_max_rounds,
+)
 from gc_core.message_policy.user_message_policy import extract_real_user_message_text
 from gc_core.thread_store import load_thread_meta, make_message_key, patch_runtime_flag
 

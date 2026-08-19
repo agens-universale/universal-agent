@@ -4,13 +4,18 @@ import json
 from typing import Any, Dict, List, Tuple
 
 from gc_core.security.path_policy import enforce_write_guard
-from gc_core.utils.file_text import check_expected_file_sha256, decode_text_bytes, is_valid_sha256_hex, sha256_hex_of_bytes, try_encode_text_bytes
+from gc_core.utils.file_text import (
+    check_expected_file_sha256,
+    decode_text_bytes,
+    is_valid_sha256_hex,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
+)
 from gc_core.utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
 from gc_core.tools.fs.edit_suggestions import build_edit_miss_suggestions
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.utils.atomic_io import atomic_replace
 
 class ApplyFileEdits(AbstractSimpleTool):
     default_diff_context_lines = 3
@@ -151,19 +156,6 @@ class ApplyFileEdits(AbstractSimpleTool):
             ensure_ascii=False,
         )
 
-    def _root_box_blocked_result(self, error: Dict[str, Any], path: str, edits: list, **kwargs) -> str:
-        return self._result(
-            path=path,
-            ok=False,
-            applied=False,
-            edits_would_apply=0,
-            total_would_replace=0,
-            edits_applied=0,
-            total_replaced=0,
-            edit_results=[],
-            message=error.get("message", "Path policy blocked."),
-            error=error,
-        )
 
     @staticmethod
     def _build_unified_diff(

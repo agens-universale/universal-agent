@@ -41,9 +41,6 @@ except (ModuleNotFoundError, ImportError) as e:
     swarm_storage = None  # type: ignore[assignment]
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
 # Настраиваем безопасный asyncio.run для работы внутри FastAPI/uvicorn.
 patch_asyncio_run_for_fastapi()
 

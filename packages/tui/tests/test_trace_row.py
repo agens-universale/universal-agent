@@ -48,7 +48,7 @@ async def test_trace_row_kind_class_lands_on_widget():
 
 @pytest.mark.asyncio
 async def test_trace_row_ctrl_click_emits_open_event_request():
-    """Ctrl+клик → OpenEventRequest (parity с AgentReplyLine)."""
+    """Ctrl+клик → OpenEventRequest (общая клик-модель, см. ClickModelMixin)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from textual import events
@@ -145,33 +145,3 @@ async def test_trace_row_focusable_false_opts_out():
         assert row.can_focus is False
 
 
-@pytest.mark.asyncio
-async def test_agent_reply_line_focusable_default_false():
-    """Дефолт AgentReplyLine.can_focus == False (Static-наследник, обычно continuation)."""
-    pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from gc_tui.widgets.agent_reply_line import AgentReplyLine
-
-    class _App(App):
-        def compose(self) -> ComposeResult:
-            yield AgentReplyLine("x", event_no=1)
-
-    async with _App().run_test() as pilot:
-        w = pilot.app.query_one(AgentReplyLine)
-        assert w.can_focus is False
-
-
-@pytest.mark.asyncio
-async def test_agent_reply_line_focusable_true_opt_in():
-    """focusable=True → can_focus == True (для edge-case `только code-block`-событий)."""
-    pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from gc_tui.widgets.agent_reply_line import AgentReplyLine
-
-    class _App(App):
-        def compose(self) -> ComposeResult:
-            yield AgentReplyLine("x", event_no=1, focusable=True)
-
-    async with _App().run_test() as pilot:
-        w = pilot.app.query_one(AgentReplyLine)
-        assert w.can_focus is True

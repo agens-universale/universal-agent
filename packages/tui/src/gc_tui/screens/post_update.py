@@ -80,13 +80,13 @@ class PostUpdateScreen(Screen):
     # --- расчёт состояния ---
 
     def _compute_needs_sync(self) -> bool:
-        from gc_core.config import default_config_path
+        from gc_core.config import _default_config_path
         try:
             user_text = Path(self._config_path).read_text(encoding="utf-8")
         except OSError:
             user_text = ""
         try:
-            template_text = Path(default_config_path()).read_text(encoding="utf-8")
+            template_text = Path(_default_config_path()).read_text(encoding="utf-8")
         except OSError:
             template_text = ""
         try:

@@ -1,7 +1,6 @@
 import difflib
 import json
 import traceback
-import sys
 import logging
 from typing import Any, Dict, Iterable, Tuple, Optional
 
@@ -214,6 +213,7 @@ def build_tools_data(
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
 
     openai_strict = bool(config_dict.get("openai_strict_tools_schema", False))
+    send_tool_strict = bool(config_dict.get("send_tool_strict", True))
     inject_tool_fields = resolve_inject_tool_fields(config_dict)
 
     # Бэкенд требует parameters.required — нормализуем все spec'и
@@ -228,6 +228,8 @@ def build_tools_data(
             if openai_strict:
                 _apply_openai_strict_tools_schema(spec)
             augment_optional_property_descriptions(spec, openai_strict=openai_strict)
+            if not send_tool_strict:
+                spec.pop("strict", None)
 
     tools_spec = [v["spec"] for v in tools_data.values()]
     tools_description = [v["description"] for v in tools_data.values()]

@@ -59,3 +59,38 @@ def _copy_raw_snapshots_to_svg():
         svg = raw.with_suffix(".svg")
         # Always overwrite — keeps .svg in sync with .raw
         shutil.copy2(raw, svg)
+
+
+@pytest.fixture
+def tui_app_factory():
+    """Мини-хост с реальными стилями приложения — для проверки CSS-контракта.
+
+    styles.tcss ссылается на кастомные переменные ($bg, $ink, ...), которые
+    в проде инжектит TuiApp.get_css_variables() из gc_tui.palette — без этого
+    переопределения обычный App падает на парсинге стилшита
+    (UnresolvedVariableError), поэтому мини-хост его тоже переопределяет.
+
+    Путь к стилям берётся из gc_testkit.paths.TUI_PKG, а не считается от
+    __file__: набор TUI лежит в packages/tui/tests, а стили — в
+    packages/tui/src/gc_tui, и арифметика уровней здесь уже ломалась.
+    """
+    from textual.app import App, ComposeResult
+
+    from gc_testkit.paths import TUI_PKG
+    from gc_tui import palette
+
+    def _factory(widget):
+        class _StyledHost(App):
+            CSS_PATH = str(TUI_PKG / "styles.tcss")
+
+            def get_css_variables(self) -> dict:
+                variables = super().get_css_variables()
+                variables.update(palette.css_variables())
+                return variables
+
+            def compose(self) -> ComposeResult:
+                yield widget
+
+        return _StyledHost()
+
+    return _factory
