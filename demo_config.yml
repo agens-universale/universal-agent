@@ -62,6 +62,12 @@ backend:
   # cert_path: "/path/client.crt"
   # key_path:  "/path/client.key"
   use_retry: true
+  # Прокси (OpenRouter и т.п.) иногда возвращают ошибку внутри HTTP-200:
+  # choices[0].error, top-level {"error": {...}} или finish_reason="error" с
+  # пустым выбором (напр. 504 "Upstream idle timeout exceeded"). true —
+  # политика ретраев ловит такую ошибку как обычную HTTP-ошибку; false —
+  # ответ уходит наверх как есть (фаталит позже в конвертации). Дефолт true.
+  retry_embedded_choice_errors: true
   # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
   # При стриме лимит — на connect и на паузу между чанками, не на весь ответ.
   request_timeout_sec: 600
