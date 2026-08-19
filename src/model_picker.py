@@ -10,7 +10,7 @@ import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 
 @dataclass(frozen=True)
