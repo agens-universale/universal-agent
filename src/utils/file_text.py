@@ -536,7 +536,3 @@ def classify_file_content(path: str, sample_size: int = BINARY_SAMPLE_BYTES) -> 
     with open(path, "rb") as f:
         chunk = f.read(sample_size)
     return classify_content_from_sample(path, chunk)
-
-
-def guess_is_binary(path: str, sample_size: int = BINARY_SAMPLE_BYTES) -> bool:
-    return classify_file_content(path, sample_size).is_binary

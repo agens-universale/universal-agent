@@ -1,6 +1,5 @@
 from tools.simple_tool_base import AbstractSimpleTool
 from typing import Any, Dict, Optional
-import os
 import json
 
 from utils.tool_report_paths import tool_report_abspath
@@ -8,7 +7,7 @@ from security.read_guard import enforce_read_guard
 from tools.schema_optional import coalesce_optional_string
 from utils.file_text import decode_text_bytes, sha256_hex_of_bytes
 from utils.fs_size_limits import (
-    DEFAULT_FS_READ_MAX_BYTES as DEFAULT_READ_FILE_MAX_BYTES,
+    DEFAULT_FS_READ_MAX_BYTES as DEFAULT_READ_FILE_MAX_BYTES,  # noqa: F401  # re-export для тестов
     check_file_size,
     fs_read_max_bytes,
 )

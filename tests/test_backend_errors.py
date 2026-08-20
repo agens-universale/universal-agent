@@ -1,6 +1,6 @@
 import requests
 
-from utils.backend_errors import is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
+from utils.backend_errors import EmbeddedChoiceError, is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
 from utils.chat_completions_stream import BackendStreamError
 
 
@@ -86,6 +86,26 @@ def test_retriable_unrelated_false():
     assert is_retriable_backend_error(ValueError("boom")) is False
 
 
+def test_retriable_embedded_504_true():
+    assert is_retriable_backend_error(EmbeddedChoiceError("x", status_code=504, raw_code=504)) is True
+
+def test_retriable_embedded_auth_false():
+    for code in (401, 403, 404):
+        assert is_retriable_backend_error(EmbeddedChoiceError("x", status_code=code, raw_code=code)) is False
+
+def test_retriable_embedded_nonnumeric_code_false():
+    # insufficient_quota/invalid_api_key: код ПРИСУТСТВУЕТ, но нечисловой →
+    # status_code=None, raw_code задан; повтором не чинится → не ретраим.
+    assert is_retriable_backend_error(
+        EmbeddedChoiceError("x", status_code=None, raw_code="insufficient_quota")
+    ) is False
+
+def test_retriable_embedded_no_code_true():
+    # finish_reason='error' с пустым выбором: кода нет вовсе (raw_code=None) —
+    # транзиентный сбой, ретрай оправдан.
+    assert is_retriable_backend_error(EmbeddedChoiceError("x")) is True
+
+
 def test_auth_error_http_401_true():
     resp = requests.Response(); resp.status_code = 401
     assert is_auth_error(requests.exceptions.HTTPError(response=resp)) is True
@@ -101,6 +121,13 @@ def test_auth_error_403_and_500_false():
 def test_auth_error_unrelated_false():
     assert is_auth_error(ValueError("boom")) is False
     assert is_auth_error(BackendStreamError("x")) is False
+
+def test_auth_error_embedded_401_true():
+    # Прокси завернул 401 в HTTP-200 — тот же истёкший токен, лечится рефрешем.
+    assert is_auth_error(EmbeddedChoiceError("x", status_code=401, raw_code=401)) is True
+
+def test_auth_error_embedded_504_false():
+    assert is_auth_error(EmbeddedChoiceError("x", status_code=504, raw_code=504)) is False
 
 
 def test_finish_known_accept():

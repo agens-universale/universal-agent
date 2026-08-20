@@ -148,12 +148,24 @@ def insert_missing(text: str, dotted_key: str, template_text: str) -> str:
     if deepest == 0:
         sep = "" if text.endswith("\n") else "\n"
         return text + sep + "\n" + block
-    p_start, p_end, p_indent, _ = find_anchor(text, ".".join(parts[:deepest]))
+    _, p_end, p_indent, _ = find_anchor(text, ".".join(parts[:deepest]))
     insert_at = section_end(text, p_end, p_indent)
     return text[:insert_at] + block + text[insert_at:]
 
 
-_COMMENTED_TOP_KEY_RE_TMPL = r"^#(?P<key>{key}):[ \t]*.*$"
+# Живые шаблоны пишут закомментированную секцию как «# key:» — с пробелом после
+# решётки; синтетическая форма «#key:» тоже встречается. Понимаем обе.
+_COMMENTED_TOP_KEY_RE_TMPL = r"^#[ \t]?(?P<key>{key}):[ \t]*.*$"
+_COMMENT_PREFIX_RE = re.compile(r"^#[ \t]?")
+
+
+def _uncomment(line: str) -> str:
+    """Снять префикс комментария: решётку и ОДИН пробел за ней, если он есть.
+
+    Снятие одной решётки оставило бы у «# gc:» ведущий пробел — ключ верхнего
+    уровня с отступом ломает YAML, а вложенные строки съезжали бы на столбец
+    против канона файла."""
+    return _COMMENT_PREFIX_RE.sub("", line, count=1)
 
 
 def uncomment_template_block(template_text: str, top_key: str) -> str:
@@ -173,17 +185,20 @@ def uncomment_template_block(template_text: str, top_key: str) -> str:
     cstart = start
     while cstart > 0 and lines[cstart - 1].startswith("#"):
         cstart -= 1
-    # Тело: подряд строки `#key: value`, которые после снятия '#' выглядят как
-    # отступленный (вложенный) ключ — закомментированные поля блока.
+    # Тело: подряд строки, которые после снятия префикса выглядят вложенными —
+    # закомментированные поля (и элементы списка) блока. Отступ и есть признак
+    # принадлежности: строка без него — уже следующая секция или разделитель.
     end = start + 1
     while end < len(lines):
         line = lines[end]
-        if line.startswith("#") and line[1:2] in (" ", "\t") and _KEY_LINE_RE.match(line[1:]):
-            end += 1
-            continue
-        break
-    out = [lines[i] for i in range(cstart, start)]      # описание — как есть
-    out += [lines[i][1:] for i in range(start, end)]    # шапка + поля — раскомментированы
+        if not line.startswith("#"):
+            break
+        body = _uncomment(line)
+        if not body[:1].isspace() or not _KEY_LINE_RE.match(body):
+            break
+        end += 1
+    out = [lines[i] for i in range(cstart, start)]            # описание — как есть
+    out += [_uncomment(lines[i]) for i in range(start, end)]  # шапка + поля — раскомментированы
     return "".join(out)
 
 

@@ -133,7 +133,6 @@ def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]
             i += 1
             continue
         msg = messages[i]
-        msg_type = msg.get("type", "message")
         role = msg.get("role")
 
         if _is_tool_call(msg):

@@ -265,6 +265,20 @@ def map_message(
             )
         return None
 
+    # SESSION_TODO call — чек-лист inline (kind=todo); успешный output глушим ниже.
+    # Битые аргументы (items is None) — НЕ чек-лист: проваливаемся в generic
+    # call-строку, статус сбоя виден механикой (не врём «чек-лист очищен»).
+    if typ == "function_call" and name == "session_todo":
+        from tools.subagents.progress import todo_items_from_arguments
+        _todo_items = todo_items_from_arguments(msg.get("arguments"))
+        if _todo_items is not None:
+            return TraceEvent(
+                no=no, event_ts_utc_iso=ts, kind="todo",
+                title="session_todo", summary=_todo_checklist_summary(_todo_items),
+                full_payload=msg, message_id=mid,
+                call_id=call_id, tool_name=name,
+            )
+
     # INTERMEDIATE_REPLY output — глушим (машинный статус не нужен). Как и у
     # submit_solution: в chat_completions у output НЕТ name, но output-JSON
     # содержит "tool" → проверяем оба пути (иначе паразитная строка `  |- …`).
@@ -279,6 +293,25 @@ def map_message(
                 _ir_data = None
             if isinstance(_ir_data, dict) and tool_id(_ir_data.get("tool")) == "intermediate_reply":
                 return None
+
+    # SESSION_TODO output — успешный глушим (машинный статус не нужен; чек-лист
+    # уже в call). Ошибку (ok: false) НЕ глушим: битый вызов рендерится generic
+    # call-строкой, и его провал должен быть виден.
+    if typ == "function_call_output":
+        _st_out = msg.get("output")
+        _st_data = None
+        if isinstance(_st_out, str):
+            try:
+                _st_data = json.loads(_st_out)
+            except json.JSONDecodeError:
+                _st_data = None
+        _st_is_todo = name == "session_todo" or (
+            isinstance(_st_data, dict) and tool_id(_st_data.get("tool")) == "session_todo"
+        )
+        if _st_is_todo and not (
+            isinstance(_st_data, dict) and _st_data.get("ok") is False
+        ):
+            return None
 
     # SUBMIT_SOLUTION output — глушим в двух случаях:
     # 1. backend прислал `name == "submit_solution"` в output-payload (responses-mode).
@@ -404,6 +437,28 @@ def _text_preview(v: Any, limit: int) -> str:
     if len(text) > limit:
         text = text[:limit].rstrip() + "…"
     return repr(text)
+
+
+_TODO_GLYPHS = {"completed": "✓", "in_progress": "→", "pending": "○"}
+
+
+def _todo_checklist_summary(todos: list) -> str:
+    """Первая строка `чек-лист K/M`, далее пункты ✓/→/○. Пустой список — «очищен»."""
+    lines: list[str] = []
+    done = 0
+    for item in todos:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        glyph = _TODO_GLYPHS.get(item.get("status"))
+        if not content or glyph is None:
+            continue
+        if item.get("status") == "completed":
+            done += 1
+        lines.append(f"  {glyph} {content}")
+    if not lines:
+        return "чек-лист очищен"
+    return "\n".join([f"чек-лист {done}/{len(lines)}", *lines])
 
 
 def _arg_summary(name: str, args: dict) -> str:

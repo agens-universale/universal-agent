@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Iterator, Optional
 
 from usage.account import CATEGORY_UNCATEGORIZED, UsageAccount
+from usage.currency import provider_currency_for_url
 from usage.normalize import normalize_usage
 
 _log = logging.getLogger(__name__)
@@ -57,10 +58,20 @@ def usage_scope(
         _usage_ctx.reset(token)
 
 
-def record_usage(raw_usage: Any) -> None:
+def _currency_for(endpoint_url: str | None) -> str | None:
+    """Валюта фактической цены этого вызова.
+
+    Адрес не передан → ``None``: сумма ляжет как «валюта неизвестна» и будет
+    разрешена при показе по текущему конфигу (поведение старых версий).
+    """
+    return provider_currency_for_url(endpoint_url) if endpoint_url else None
+
+
+def record_usage(raw_usage: Any, endpoint_url: str | None = None) -> None:
     """Записать usage из ответа модели в активный контекст.
 
-    Зовётся из ``connect_backend`` сразу после получения ответа. Никогда не кидает.
+    Зовётся из ``connect_backend`` сразу после получения ответа: ``endpoint_url`` —
+    адрес именно этого вызова, по нему фиксируется валюта цены. Никогда не кидает.
     """
     ctx = _usage_ctx.get()
     if ctx is None:
@@ -70,13 +81,17 @@ def record_usage(raw_usage: Any) -> None:
             "usage recorded outside usage_scope (uncategorized); parsed=%s",
             parsed,
         )
-        _orphan_account.add_record(raw_usage)
+        _orphan_account.add_record(raw_usage, endpoint_url)
         return
     parsed = normalize_usage(raw_usage, ctx.backend_mode)
     if parsed is None:
         ctx.account.add_missing(ctx.category)
     else:
-        ctx.account.add(ctx.category, parsed[0], parsed[1], parsed[2])
+        ctx.account.add(
+            ctx.category, parsed.input, parsed.output, parsed.cached,
+            cost=parsed.cost, billed=parsed.billed,
+            currency=_currency_for(endpoint_url),
+        )
 
 
 class _OrphanAccount:
@@ -85,12 +100,16 @@ class _OrphanAccount:
     def __init__(self) -> None:
         self.account = UsageAccount()
 
-    def add_record(self, raw_usage: Any) -> None:
+    def add_record(self, raw_usage: Any, endpoint_url: str | None = None) -> None:
         parsed = normalize_usage(raw_usage)
         if parsed is None:
             self.account.add_missing(CATEGORY_UNCATEGORIZED)
         else:
-            self.account.add(CATEGORY_UNCATEGORIZED, parsed[0], parsed[1], parsed[2])
+            self.account.add(
+                CATEGORY_UNCATEGORIZED, parsed.input, parsed.output, parsed.cached,
+                cost=parsed.cost, billed=parsed.billed,
+                currency=_currency_for(endpoint_url),
+            )
 
 
 _orphan_account = _OrphanAccount()

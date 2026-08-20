@@ -263,6 +263,9 @@ class SpecialAgent(AbstractSubagent):
             verify=verify,
             cert=cert,
             use_retry=bool(self.config_dict.get("use_retry", False)),
+            retry_embedded_choice_errors=bool(
+                self.config_dict.get("retry_embedded_choice_errors", True)
+            ),
             request_label="subagent_special_agent",
             runtime_notices_enabled=self._runtime_notices_enabled,
             notice_url=url,

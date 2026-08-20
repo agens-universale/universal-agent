@@ -119,15 +119,8 @@ TraceScreen #trace { height: auto; }
 
 /* Фокус строки события — сдвиг-безопасная подсветка фона (заменила [N]-префикс:
    background не рефлоунит контент, в отличие от prefix/border). */
-ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focus {
-    background: $focus-bg;
-}
-
-/* Whole-widget screen-selection для Table/Syntax (copy_text-путь, спека
-   2026-08-02 §5.2). CSS background — table/padding; у Syntax фон ячеек
-   переключается в AgentReplyLine._apply_syntax_select_bg (BAND↔FOCUS).
-   outline не используем: margin-left у .code-indent клипает левый край. */
-AgentReplyLine.-copy-selected {
+ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus,
+BlockPanel:focus, TodoBlock:focus {
     background: $focus-bg;
 }
 
@@ -143,19 +136,29 @@ AgentReplyLine.-copy-selected {
    (spec 2026-05-26 / code-block-highlight): первый prose-блок получает
    margin-top:1, остальные — 0, чтобы избежать двойных отступов внутри реплики. */
 .line-agent-cont { margin-top: 0; }
-.table-block { width: 1fr; margin: 1 0; }
-.table-block.table-indent { margin-left: 2; }  /* трейс/превью: вровень с текстом реплики (как код-панели) */
-
-/* Fenced code-block panel (spec 2026-05-26 / code-block-highlight):
-   Claude-style панель с фоном $band-bg, подсветка через rich.syntax. */
+/* Fenced code-block panel и markdown-таблица — общий виджет BlockPanel
+   (структурная раскладка — в BlockPanel.DEFAULT_CSS, здесь только тема).
+   ВАЖНО: отступы задаются ОДНИМ shorthand-правилом на класс. Textual не мёржит
+   margin-* из разных правил — отдельное `margin-left` затирает весь box вместе
+   с margin-top (эпизод 2026-08-04; такой же был с .set-gap/.set-spaced). */
 .code-block-panel {
     background: $band-bg;
     padding: 0 1;
-    margin-top: 1;
-    height: auto;
-    width: 1fr;
+    margin: 1 0 0 0;
 }
-.code-block-panel.code-indent { margin-left: 2; }  /* трейс/превью: вровень с текстом реплики; баннер — без отступа */
+.code-block-panel.code-indent { margin: 1 0 0 2; }  /* трейс/превью: вровень с текстом реплики; баннер — без отступа */
+
+.table-block {
+    background: $band-bg;
+    padding: 0 1;
+    margin: 1 0 1 0;
+}
+.table-block.table-indent { margin: 1 0 1 2; }  /* трейс/превью: вровень с текстом реплики (как код-панели) */
+
+/* Шапка блока: метка языка слева, кнопка копирования справа. */
+.block-label { color: $dim; }
+.block-copy  { color: $dim; }
+.block-copy:hover { color: $accent; }
 
 /* spec 2026-05-27 / tool-output-detail */
 .detail-section-header {
@@ -175,6 +178,16 @@ AgentReplyLine.-copy-selected {
     padding: 0 1;
 }
 
+/* чек-лист session_todo — маркер фазы хода, как ● и ·: обособлен пустой строкой
+   сверху. Только margin-top (общая конвенция трейса — разделение через отступ
+   СЛЕДУЮЩЕГО элемента, см. .user-band); нижний дал бы двойной зазор перед тулами. */
+.line-todo      { color: $ink; }        /* заголовок; воздух — на .todo-block */
+.line-todo-nested { color: $dim; }      /* заголовок чек-листа субагента */
+/* Воздух вокруг чек-листа — на блоке-контейнере: у основного только сверху
+   (снизу отделяет отступ следующей фазы), у субагентского с обеих сторон —
+   соседние nested-строки своих отступов не имеют. */
+.todo-block        { margin-top: 1; }
+.todo-block-nested { margin: 1 0; }
 .line-tool      { color: $dim; }       /* |- механика тула */
 /* Первый tool в группе (предыдущий ряд — не tool) отделён верхним отступом;
    подряд идущие tool-строки компактны (класс вешается в коде — Textual CSS

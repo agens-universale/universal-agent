@@ -13,20 +13,32 @@ from tui.services.notices_ui import (
 def test_notice_counts_and_badge():
     notices = [Notice("warning", "a", "x"), Notice("info", "b", "y")]
     assert notice_counts(notices) == (1, 1)
-    # счётчики читаются парой — точка отделяет их от подсказки, а не друг от друга
-    assert format_notices_badge(notices) == f"{WARN_GLYPH}1 {INFO_GLYPH}1 · F4/notices"
+    # счётчики читаются парой — точка отделяет их от подсказки, а не друг от друга;
+    # внутри пары пробел, между парами двойной: иначе «⚠ 1 ℹ 1» читается как четыре
+    # отдельных знака, а не как два счётчика
+    assert format_notices_badge(notices) == f"{WARN_GLYPH} 1  {INFO_GLYPH} 1 · F4/notices"
     assert format_notices_badge([]) == ""
 
 
-def test_glyph_width_matches_what_the_terminal_draws():
-    """Значок обязан считаться за ДВЕ ячейки — столько же, сколько терминал его рисует.
+def test_glyphs_do_not_bet_on_how_wide_the_terminal_draws_them():
+    """Значки — БЕЗ вариационного селектора, и число отделено пробелом.
 
-    Без вариационного селектора Rich считал его за одну, и склеенное число садилось
-    прямо на вторую половину значка: на экране «⚠2» превращалось в кашу (живая
-    приёмка). Пробелом эту разницу больше не затыкаем — он и был точкой разрыва."""
+    Ставка на ширину значка невозможна в принципе: Windows рисует голый «⚠» в две
+    ячейки, macOS — в одну, а с селектором U+FE0F macOS рисует цветную картинку,
+    наползающую на соседнюю клетку. Мы пробовали селектор (Rich считает такую пару
+    за 2) — на Windows сошлось, на macOS приклеенное вплотную число ушло под
+    картинку (отчёт коллеги 2026-08-18).
+
+    Работает не «правильный значок», а ПРОБЕЛ после него: нарисуется значок шире —
+    съест пробел, и ничего не спрячется. Так устроены остальные 45 мест в проекте
+    («⚠ MCP: 0/1 …», «⚠ не удалось проверить…»), и они на обеих системах целы."""
     for glyph in (WARN_GLYPH, INFO_GLYPH):
-        assert Text(glyph).cell_len == 2, f"{glyph!r} считается за {Text(glyph).cell_len}"
-        assert Text(f"{glyph}7").cell_len == 3   # число встаёт ПОСЛЕ значка
+        assert "️" not in glyph, f"{glyph!r}: вернулся селектор эмодзи U+FE0F"
+        assert "︎" not in glyph, f"{glyph!r}: селектор U+FE0E терминал вправе игнорировать"
+        assert len(glyph) == 1, f"{glyph!r}: значок обязан быть одним символом"
+        assert Text(glyph).cell_len == 1
+    badge = format_notices_badge([Notice("warning", "a", "x")], with_hint=False)
+    assert badge == f"{WARN_GLYPH} 1"       # число ОТДЕЛЕНО от значка
 
 
 def test_counter_pair_never_splits_on_wrap():
@@ -40,19 +52,21 @@ def test_counter_pair_never_splits_on_wrap():
 
     notices = [Notice("warning", "a", "x"), Notice("info", "b", "y"),
                Notice("info", "c", "z")]
-    line = footer_left_with_badge(
-        "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer",
-        format_notices_badge(notices), width=0)
-    for width in range(40, 100):
-        rendered = [seg.plain.rstrip()
-                    for seg in Text(line).wrap(Console(width=width), width)]
+    cmds = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
+    badge = format_notices_badge(notices)
+    # Ширину спрашиваем ту же, какой будем рисовать, — это и есть боевой путь:
+    # сборщик сам решает, встаёт блок в строку команд или уходит вниз целиком.
+    for width in range(30, 120):
+        rendered = [seg.plain.rstrip() for seg in
+                    Text(footer_left_with_badge(cmds, badge, width=width))
+                    .wrap(Console(width=width), width)]
         for row in rendered:
             assert not row.endswith("⚠") and not row.endswith("ℹ"), (
                 f"ширина {width}: счётчик оторвался от глифа\n  " + "\n  ".join(rendered)
             )
 
 
-BADGE = f"{WARN_GLYPH}1 {INFO_GLYPH}2 · F4/notices"
+BADGE = f"{WARN_GLYPH} 1  {INFO_GLYPH} 2 · F4/notices"
 
 
 def test_badge_sits_beside_commands_when_it_fits():

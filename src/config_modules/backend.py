@@ -43,10 +43,12 @@ class BackendConfig(BaseModel):
     chat_completion_kwargs: dict[str, Any] = {}
     use_max_tokens_param: bool = False
     openai_strict_tools_schema: bool = False
+    send_tool_strict: bool = True
     use_ssl: bool | str = True
     cert_path: str | None = None
     key_path: str | None = None
     use_retry: bool = False
+    retry_embedded_choice_errors: bool = True
     # HTTP-таймаут одного запроса к LLM (connect + idle между чанками при stream).
     request_timeout_sec: int = DEFAULT_REQUEST_TIMEOUT_SEC
     stream: bool = True

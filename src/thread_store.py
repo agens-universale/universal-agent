@@ -627,10 +627,6 @@ class ThreadSession:
             backend_api_mode=backend_api_mode,
         )
 
-    def build_initial_messages(self, new_user_message: Dict[str, Any]) -> List[Dict[str, Any]]:
-        if self.previous_response_id is None:
-            return [*self.history_messages, new_user_message]
-        return [new_user_message]
 
     def set_runtime_messages(self, runtime_messages: List[Dict[str, Any]]) -> None:
         self.runtime_messages = runtime_messages

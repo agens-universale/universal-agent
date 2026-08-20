@@ -24,7 +24,7 @@ def test_replaces_empty_value():
 
 
 def test_ignores_commented_line_and_raises_when_absent():
-    text = "voice:\n#  model: whisper-1\n"
+    text = "agent:\n#  model: gigacode_agent_v1.6_rc\n"
     with pytest.raises(KeyError):
         w.set_scalar(text, "model", "x")
 
@@ -59,6 +59,69 @@ def test_write_values_updates_file_and_reports_missing(tmp_path):
 
 # ── Task 5: §6.4 — write_values разворачивает закомментированный блок шаблона ──
 
+def test_uncomment_template_block_shape():
+    tpl = ("# Описание секции\n"
+           "# gizmo:\n"
+           "#   provider: openai\n"
+           "#   url: https://x\n")
+    block = w.uncomment_template_block(tpl, "gizmo")
+    assert "# Описание секции\n" in block          # описание остаётся комментарием
+    assert "\ngizmo:\n" in "\n" + block            # шапка раскомментирована
+    assert "  provider: openai" in block           # поле — с отступом канона
+
+
+def test_uncomment_template_block_reads_the_tight_comment_form_too():
+    """Форма без пробела после решётки тоже понимается — шаблоны бывают и такие."""
+    tpl = "#gizmo:\n#  provider: openai\n"
+    block = w.uncomment_template_block(tpl, "gizmo")
+    assert "\ngizmo:\n" in "\n" + block
+    assert "provider: openai" in block
+
+
+# ── §6.4 на НАСТОЯЩЕМ шаблоне: якорь там пишется «# key:», с пробелом ──
+
+def _real_template() -> str:
+    from pathlib import Path
+    from config import _default_config_path
+    return Path(_default_config_path()).read_text(encoding="utf-8")
+
+
+def test_uncomment_template_block_finds_the_real_anchor():
+    """Живые шаблоны комментируют секции как «# gc:» — с пробелом после решётки.
+    Regex требовал «#gc:», блок не находился, и write_values молча уносил ключ в
+    missing. Тест выше собирает шаблон сам и проверяет формат, которого в шаблонах
+    не бывает, — поэтому дыру не видел."""
+    block = w.uncomment_template_block(_real_template(), "gc")
+    assert "\ngc:\n" in "\n" + block            # шапка раскомментирована и БЕЗ отступа
+    assert "\n  force_collect:" in "\n" + block  # поле — вложенным, как положено YAML
+
+
+def test_uncomment_template_block_unfolds_a_list_section():
+    """Список пресетов — тот же случай: строки блока не «ключ: значение», а элементы."""
+    block = w.uncomment_template_block(_real_template(), "endpoint_presets")
+    assert "\nendpoint_presets:\n" in "\n" + block
+    assert "\n  - name: OpenRouter" in "\n" + block
+
+
+def test_write_values_unfolds_a_commented_section_and_keeps_yaml_valid(tmp_path):
+    """Сквозной путь: секции в файле нет вовсе → блок разворачивается из шаблона,
+    значение пишется, документ остаётся валидным YAML (шапка с ведущим пробелом
+    сломала бы разбор)."""
+    import yaml
+    from config import _default_config_path
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("backend:\n  completions_url: http://h/v1/chat/completions\n",
+                   encoding="utf-8")
+    missing = w.write_values(cfg, {"gc.force_collect": "true"},
+                             template_path=_default_config_path())
+    assert missing == []
+    data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert "gc" in data and "force_collect" in data["gc"]   # секция развернулась целиком
+    assert data["backend"]["completions_url"] == "http://h/v1/chat/completions"
+
+
+# ── §6.4 на voice-секции: она в шаблоне тоже закомментирована ──
+
 def test_write_voice_values_uncomments_template_block(tmp_path):
     """§6.4: voice-блок шаблона закомментирован — write_values разворачивает его."""
     from config import _default_config_path, validate_config_text
@@ -81,17 +144,6 @@ def test_write_voice_values_uncomments_template_block(tmp_path):
     assert w.write_values(cfg, {"voice.model": "whisper-large"},
                           template_path=template, validate=validate_config_text) == []
     assert 'model: "whisper-large"' in cfg.read_text(encoding="utf-8")
-
-
-def test_uncomment_template_block_shape():
-    tpl = ("# Описание секции\n"
-           "#voice:\n"
-           "#  provider: openai\n"
-           "#  url: https://x\n")
-    block = w.uncomment_template_block(tpl, "voice")
-    assert "# Описание секции\n" in block          # описание остаётся комментарием
-    assert "\nvoice:\n" in "\n" + block            # шапка раскомментирована
-    assert "  provider: openai" in block
 
 
 # ── Fix round 1: третий fallback не трогает частично живую секцию ──

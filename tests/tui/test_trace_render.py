@@ -15,24 +15,24 @@ def test_compaction_label_legacy_no_chars():
     assert build_compaction_label(2, comp) == "контекст сжат #2 · 5→1"
 
 
-def test_render_code_block_with_lang():
+def test_block_panel_for_code_with_lang():
     pytest.importorskip("textual")
-    from tui.services.trace_render import render_code_block
-    w = render_code_block("print(1)", "python", event_no=1)
+    from tui.widgets.block_panel import BlockPanel
+    w = BlockPanel.for_code("print(1)", "python", event_no=1)
     assert w.has_class("code-block-panel")
 
 
-def test_render_code_block_unknown_lang_fallback():
+def test_block_panel_for_code_unknown_lang_fallback():
     pytest.importorskip("textual")
-    from tui.services.trace_render import render_code_block
-    w = render_code_block("x = 1", "no-such-lang-xyz", event_no=2)
+    from tui.widgets.block_panel import BlockPanel
+    w = BlockPanel.for_code("x = 1", "no-such-lang-xyz", event_no=2)
     assert w.has_class("code-block-panel")
 
 
-def test_render_code_block_no_lang_fallback():
+def test_block_panel_for_code_no_lang_fallback():
     pytest.importorskip("textual")
-    from tui.services.trace_render import render_code_block
-    w = render_code_block("plain text", None, event_no=3)
+    from tui.widgets.block_panel import BlockPanel
+    w = BlockPanel.for_code("plain text", None, event_no=3)
     assert w.has_class("code-block-panel")
 
 
@@ -54,8 +54,6 @@ def test_build_agent_widgets_code_and_prose_order_and_focus():
     assert len(ws) == 3
     assert ws[0].has_class("code-block-panel") is False  # первый proza
     assert ws[1].has_class("code-block-panel") is True    # code-block
-    # focusable только у первого (Tab-стоп события)
-    assert getattr(ws[0], "_focusable", None) in (True, None)  # см. AgentReplyLine/TraceRow API
 
 
 def _env(payload, ts="2026-05-30T10:00:00Z"):
@@ -263,6 +261,58 @@ async def test_readonly_submit_note_label():
         assert notes[0]._content.plain == "заметка: проверь X"
 
 
+def test_code_block_builds_block_panel():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    from tui.widgets.block_panel import BlockPanel
+
+    widgets = build_block_widgets("текст\n\n```python\nx = 1\n```",
+                                  prose_bullet=True, event_no=5)
+    panels = [w for w in widgets if isinstance(w, BlockPanel)]
+    assert len(panels) == 1
+    assert panels[0].has_class("code-block-panel")
+    assert panels[0].has_class("code-indent")
+
+
+def test_table_builds_block_panel():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    from tui.widgets.block_panel import BlockPanel
+
+    text = "до\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
+    panels = [w for w in build_block_widgets(text, prose_bullet=True, event_no=6)
+              if isinstance(w, BlockPanel)]
+    assert len(panels) == 1
+    assert panels[0].has_class("table-block")
+
+
+def test_banner_blocks_have_no_indent():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    from tui.widgets.block_panel import BlockPanel
+
+    widgets = build_block_widgets("```python\nx = 1\n```",
+                                  prose_bullet=False, event_no=1)
+    panel = next(w for w in widgets if isinstance(w, BlockPanel))
+    assert not panel.has_class("code-indent")
+
+
+def test_first_widget_is_the_only_tab_stop():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```\n\nещё проза",
+                                  prose_bullet=True, event_no=5)
+    assert [w.can_focus for w in widgets] == [True, False, False]
+
+
+def test_event_no_bound_to_every_widget():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```",
+                                  prose_bullet=True, event_no=9)
+    assert all(w._event_no == 9 for w in widgets)
+
+
 @pytest.mark.asyncio
 async def test_intermediate_reply_row_has_top_margin(tmp_path):
     """`·`-реплика (intermediate_reply) — фаза хода, как ●-проза:
@@ -280,3 +330,137 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
         scr.query_one("#trace", VerticalScroll).mount(row)
         await pilot.pause()
         assert row.styles.margin.top == 1
+
+
+def test_dispatch_readonly_renders_todo_checklist():
+    """C1: read-only preview должен рендерить session_todo как чек-лист
+    (паритет с живым путём main.py), а не ронять в generic line-meta."""
+    pytest.importorskip("textual")
+    import json
+    from tui.services.trace_mapper import map_message
+    from tui.services.trace_render import _dispatch_readonly
+    from tui.widgets.trace_row import TraceRow
+
+    ev = map_message(
+        {"type": "function_call", "name": "session_todo", "call_id": "c1",
+         "arguments": json.dumps({"todos": [
+             {"content": "Изучить", "status": "completed"},
+             {"content": "Тест", "status": "in_progress"},
+         ]}, ensure_ascii=False)},
+        no=1, ts="t",
+    )
+    assert ev.kind == "todo"
+
+    mounted = []
+
+    class _FakeTarget:
+        def mount(self, w):
+            mounted.append(w)
+
+    _dispatch_readonly(_FakeTarget(), ev, {})
+    # v5: чек-лист — один блок-виджет (единица выделения), строки внутри него.
+    assert len(mounted) == 1
+    block = mounted[0]
+    assert block.has_class("todo-block") and block.can_focus
+    rows = block.todo_rows
+    assert len(rows) == 3
+    assert all(isinstance(row, TraceRow) for row in rows)
+    assert rows[0].has_class("line-todo")      # НЕ line-meta
+
+
+def test_kind_literal_includes_todo():
+    """C2: тип Kind должен объявлять 'todo' (честность контракта)."""
+    from typing import get_args
+    from tui.models import Kind
+    assert "todo" in get_args(Kind)
+
+
+def test_todo_event_renders_rich_text_with_glyph_colors():
+    """kind=todo → TraceRow с rich.Text (канон §2), а не plain-строкой."""
+    from rich.text import Text as RichText
+    from tui.models import TraceEvent
+    from tui.services.trace_render import _dispatch_readonly
+
+    todos = [{"content": "Шаг раз", "status": "completed"},
+             {"content": "Шаг два", "status": "in_progress"}]
+    payload = {"type": "function_call", "name": "session_todo",
+               "arguments": {"todos": todos}}
+    ev = TraceEvent(no=1, event_ts_utc_iso="", kind="todo", title="session_todo",
+                    summary="чек-лист 1/2", full_payload=payload,
+                    call_id="c1", tool_name="session_todo")
+
+    mounted = []
+
+    class _Target:
+        def mount(self, w, **kw):
+            mounted.append(w)
+
+    _dispatch_readonly(_Target(), ev, calls={})
+    # v5: один блок-виджет; строки внутри — заголовок + строка на пункт.
+    assert len(mounted) == 1
+    rows = mounted[0].todo_rows
+    header = rows[0]._content
+    assert isinstance(header, RichText)
+    assert header.plain == "session_todo   чек-лист 1/2"
+    # Текст пункта — в content-колонке, отступ+глиф — в prefix: перенос
+    # длинного пункта выравнивается под началом текста.
+    assert rows[1]._prefix.plain == "     ✓ "
+    assert rows[1]._content.plain == "Шаг раз"
+    assert rows[2]._prefix.plain == "     → "
+    assert rows[2]._content.plain == "Шаг два"
+    # Tab-стоп один — сам блок; строки внутри не фокусируются.
+    assert mounted[0].can_focus and not any(r.can_focus for r in rows)
+
+
+def test_readonly_error_msg_finalizes_its_call_row():
+    """Схемная ошибка вызова (technical error_message с call_id) обязана
+    финализировать строку вызова ✗, как в живом трейсе (_render_error_msg).
+
+    Иначе в превью строка навсегда остаётся «выполняется» (пульсирующий ▸),
+    а ошибка уезжает отдельной [!]-строкой — так выглядел битый session_todo.
+    """
+    pytest.importorskip("textual")
+    from tui.models import TraceEvent
+    from tui.services.trace_render import _dispatch_readonly
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    mounted = []
+
+    class _Target:
+        children = ()          # is_tool_group_start смотрит на потомков контейнера
+
+        def mount(self, w, **kw):
+            mounted.append(w)
+
+    calls: dict = {}
+    call_ev = TraceEvent(no=1, event_ts_utc_iso="", kind="call", title="session_todo",
+                         summary="session_todo(todos=<list 1>)", full_payload={},
+                         call_id="c1", tool_name="session_todo")
+    _dispatch_readonly(_Target(), call_ev, calls)
+    err_ev = TraceEvent(no=2, event_ts_utc_iso="", kind="error_msg", title="",
+                        summary="Wrong arguments for `session_todo`", full_payload={},
+                        call_id="c1")
+    _dispatch_readonly(_Target(), err_ev, calls)
+
+    assert len(mounted) == 1, "ошибка не должна добавлять отдельную [!]-строку"
+    row = mounted[0]
+    assert isinstance(row, ToolCallRow)
+    assert row._is_error is True and row._result is not None
+
+
+def test_readonly_error_msg_without_call_row_still_shown():
+    """Ошибка без известного вызова — прежняя [!]-строка, ничего не теряем."""
+    pytest.importorskip("textual")
+    from tui.models import TraceEvent
+    from tui.services.trace_render import _dispatch_readonly
+
+    mounted = []
+
+    class _Target:
+        def mount(self, w, **kw):
+            mounted.append(w)
+
+    ev = TraceEvent(no=1, event_ts_utc_iso="", kind="error_msg", title="",
+                    summary="что-то сломалось", full_payload={}, call_id="unknown")
+    _dispatch_readonly(_Target(), ev, {})
+    assert len(mounted) == 1

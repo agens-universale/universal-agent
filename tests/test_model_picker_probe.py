@@ -57,32 +57,34 @@ def test_probe_post_status_and_body():
         seen["url"], seen["body"] = url, body
         return mp.HttpReply(status=200, payload={"ok": True}, network_error="")
 
-    status, err, lat, json_body = mp.probe_post("http://x/v1/chat/completions", "Bearer t", "m1",
-                                                http_post_ex=post_ex)
+    status, err, lat, payload = mp.probe_post("http://x/v1/chat/completions", "Bearer t", "m1",
+                                              http_post_ex=post_ex)
     assert status == 200 and err == "" and lat >= 0
-    assert json_body is True                        # payload распарсился → тело JSON
+    # Отдаём само тело, а не флаг «оно было JSON»: по нему проба отличает ответ на
+    # наш токен от ответа на заведомо мусорный, когда статус у обоих одинаковый.
+    assert payload == {"ok": True}
     assert seen["url"] == "http://x/v1/chat/completions"
     assert seen["body"]["max_tokens"] == 1 and seen["body"]["model"] == "m1"
 
 
 def test_probe_post_non_json_body_flagged():
-    """HTML/текстовое тело (payload=None при живом статусе) → json_body=False —
-    различитель «ответило приложение» vs «404-страница гейтвея/Express»."""
+    """HTML/текстовое тело при живом статусе → payload=None. По нему проба
+    различает «ответило приложение» и «404-страница гейтвея/Express»."""
     def post_ex(url, headers, body, verify):
         return mp.HttpReply(status=404, payload=None, network_error="")
 
-    status, err, _, json_body = mp.probe_post("http://x/v1/chat/completions", None, "m1",
-                                              http_post_ex=post_ex)
-    assert status == 404 and json_body is False
+    status, err, _, payload = mp.probe_post("http://x/v1/chat/completions", None, "m1",
+                                            http_post_ex=post_ex)
+    assert status == 404 and payload is None
 
 
 def test_probe_post_network_error():
     def post_ex(url, headers, body, verify):
         return mp.HttpReply(status=None, payload=None, network_error="connection refused")
 
-    status, err, _, json_body = mp.probe_post("http://x/v1/chat/completions", None, "m1",
-                                              http_post_ex=post_ex)
-    assert status is None and "connection" in err and json_body is False
+    status, err, _, payload = mp.probe_post("http://x/v1/chat/completions", None, "m1",
+                                            http_post_ex=post_ex)
+    assert status is None and "connection" in err and payload is None
 
 
 def test_get_ex_broken_body_keeps_status(monkeypatch):

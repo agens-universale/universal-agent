@@ -44,18 +44,6 @@ _NO_MATCH = "ничего не найдено — впишите вручную"
 _FIELD_PLACEHOLDER = "поиск или имя модели"
 
 
-def _plural_models(n: int) -> str:
-    """1 модель · 2-4 модели · 5+ моделей (11-14 — исключение: «моделей»)."""
-    if 11 <= (n % 100) <= 14:
-        return "моделей"
-    d = n % 10
-    if d == 1:
-        return "модель"
-    if 2 <= d <= 4:
-        return "модели"
-    return "моделей"
-
-
 class ModelEditor(Vertical):
     def __init__(self, *, current: str, endpoint: str, auth: str | None,
                  verify: bool, fetch, input_id: str = "onb-model",
@@ -386,7 +374,8 @@ class ModelEditor(Vertical):
         """Счётчик, «ничего не найдено» и ⚠ — обновляются ТЕКСТОМ, без ремонтажа."""
         from onboarding_fields import MODEL_WARN
         n = sum(1 for r in self._rows if r.kind in ("current", "model"))
-        self._set_status(self._count_id(), f"{n} {_plural_models(n)}")
+        from tui.services.probe_presentation import plural_models
+        self._set_status(self._count_id(), f"{n} {plural_models(n)}")
         no_match = bool(self._filter) and not any(r.kind == "model" for r in self._rows)
         self._set_status(self._nomatch_id(), _NO_MATCH if no_match else "")
         warn = any(r.kind in ("current", "model") and r.model is not None

@@ -10,6 +10,8 @@ STATE_SCHEMA_VERSION = "v2"
 
 WORKING_MEMORY_REGISTERS = ("goal", "constraints", "state", "knowledge")
 
+TODO_STATUSES = ("pending", "in_progress", "completed")
+
 
 class StateSchemaError(ValueError):
     """Invalid or unsupported state / thread meta payload."""
@@ -96,6 +98,21 @@ def normalize_working_memory(raw: Any) -> dict[str, str]:
     return out
 
 
+def normalize_session_todo(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        content = str(item.get("content") or "").strip()
+        status = item.get("status")
+        if not content or status not in TODO_STATUSES:
+            continue
+        out.append({"content": content, "status": status})
+    return out
+
+
 def serialize_shared_block(shared: Any) -> dict[str, Any]:
     # JSON key ``working_memory`` — legacy persist name; same dict as ``session_memory`` tool.
     working_memory = normalize_working_memory(getattr(shared, "working_memory", None))
@@ -111,4 +128,5 @@ def serialize_shared_block(shared: Any) -> dict[str, Any]:
         "notes_md": notes_md,
         "fetch_url_cache": cache,
         "confirm_rules": rules,
+        "session_todo": normalize_session_todo(getattr(shared, "session_todo", None)),
     }

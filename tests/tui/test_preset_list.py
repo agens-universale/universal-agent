@@ -11,7 +11,7 @@ from textual.widgets import Input, Static
 
 from config_modules.endpoint_presets import EndpointPreset
 
-_HINT = "пресеты · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
+_HINT = "провайдеры · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
 
 _PRESETS = [
     EndpointPreset(name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions"),
@@ -89,7 +89,11 @@ async def test_pick_returns_selected_url_and_closes_list():
         assert picked.url == "https://foundation-models.api.cloud.ru/v1/chat/completions"
         assert host.ctrl.is_open is False
         assert not list(host.query(".test-preset-row"))
-        assert not list(host.query(".host-url-preset-hint"))
+        # Подсказка переживает подстановку: строка под полем постоянна, меняется только
+        # текст (канон 2026-08-17). Раньше pick() уносил её вместе со строками, и форма
+        # дёргалась на строку вверх ровно в момент выбора.
+        hint = [w for w in host.query(".host-url-preset-hint") if not w._pruning]
+        assert hint and "показать список" in str(hint[-1].render())
 
 
 async def test_pick_with_no_presets_left_visible_returns_none():
@@ -156,7 +160,7 @@ async def test_apply_filter_narrows_to_one_row_empty_filter_shows_all():
         assert len(visible) == 3
 
 
-async def test_close_removes_everything_and_reopen_does_not_duplicate_rows():
+async def test_close_removes_rows_but_keeps_the_hint():
     host = _Host()
     app = _harness(host)
     async with app.run_test() as pilot:
@@ -166,7 +170,8 @@ async def test_close_removes_everything_and_reopen_does_not_duplicate_rows():
         host.ctrl.close()
         await pilot.pause()
         assert not list(host.query(".test-preset-row"))
-        assert not list(host.query(".host-url-preset-hint"))
+        hint = [w for w in host.query(".host-url-preset-hint") if not w._pruning]
+        assert hint and "показать список" in str(hint[-1].render())
         host.ctrl.open()
         await pilot.pause()
         host.ctrl.open()                       # повторный open() — без дублей строк
@@ -191,16 +196,19 @@ async def test_open_with_empty_field_shows_all_cursor_on_first():
 
 
 async def test_open_with_preset_url_in_field_highlights_that_preset():
-    """В поле — URL, совпадающий с одним из пресетов → список раскрывается,
-    подсвечен ИМЕННО он: Enter вернёт тот же пресет и подстановка ничего не
-    испортит (значение поля останется тем же самым)."""
+    """В поле — URL, совпадающий с одним из пресетов → подсвечен ИМЕННО он: Enter
+    вернёт тот же пресет и подстановка ничего не испортит (значение поля останется
+    тем же самым).
+
+    Раскрытие здесь ФОРСИРОВАННОЕ (`reload()` — то же, что Alt+↓): сам по себе
+    заполненный адрес список больше не поднимает (канон 2026-08-17)."""
     host = _Host()
     app = _harness(host)
     async with app.run_test() as pilot:
         await pilot.pause()
         cloud_url = "https://foundation-models.api.cloud.ru/v1/chat/completions"
         host.query_one("#host-url", Input).value = cloud_url
-        host.ctrl.open()
+        host.ctrl.reload()
         await pilot.pause()
         assert host.ctrl.is_open is True
         assert host.ctrl._idx == 1                     # Cloud.ru — второй по счёту пресет
@@ -249,14 +257,18 @@ async def test_hint_calls_it_no_match_when_forced_open_has_no_highlight():
 
 
 async def test_initial_index_matches_the_preset_with_that_url():
-    """В поле — URL одного из пресетов → подсвечена ИМЕННО эта строка."""
+    """В поле — URL одного из пресетов → подсвечена ИМЕННО эта строка.
+
+    Раскрытие форсированное (`reload()` = Alt+↓): заполненный адрес список сам не
+    поднимает, но `initial_index` работает и там — иначе Enter поверх раскрытого
+    списка подставил бы первый пресет вместо текущего."""
     host = _Host()
     app = _harness(host)
     async with app.run_test() as pilot:
         await pilot.pause()
         cloud_url = "https://foundation-models.api.cloud.ru/v1/chat/completions"
         host.query_one("#host-url", Input).value = cloud_url
-        host.ctrl.open()
+        host.ctrl.reload()
         await pilot.pause()
         assert host.ctrl.selected_item is not None
         assert host.ctrl.selected_item.url == cloud_url
@@ -289,10 +301,61 @@ async def test_open_with_custom_address_in_field_does_not_open():
         await pilot.pause()
         assert host.ctrl.is_open is False
         assert not list(host.query(".test-preset-row"))
-        assert not list(host.query(".host-url-preset-hint"))
+        # Отказ раскрытия — тоже состояние, и строка обязана назвать способ вызвать
+        # список вручную: без неё о пресетах не узнать вовсе (канон 2026-08-17).
+        hint = [w for w in host.query(".host-url-preset-hint") if not w._pruning]
+        assert hint and "показать список" in str(hint[-1].render())
         # ↑/↓ формы (move() контроллера — no-op при закрытом списке, форма ведёт себя как без пресетов)
         host.ctrl.move(1)
         assert host.ctrl.is_open is False
         # Enter (pick()) на закрытом списке ничего не возвращает — поле не трогается
         assert host.ctrl.pick() is None
         assert host.query_one("#host-url", Input).value == own_url
+
+
+async def test_can_open_only_on_empty_value():
+    """Канон: список раскрыт тогда и только тогда, когда без него не двинуться.
+
+    Значение есть — любое, из каталога или своё — список свёрнут и стрелки у формы.
+    Раньше пресетное значение раскрывало список, и поведение экрана зависело от того,
+    попал ли адрес пользователя в наш каталог: убрали провайдера — форма изменилась."""
+    host = _Host()
+    async with _harness(host).run_test() as pilot:
+        await pilot.pause()
+        can_open = host.ctrl._can_open
+        assert can_open("") is True
+        assert can_open("https://foundation-models.api.cloud.ru/v1/chat/completions") is False
+        assert can_open("https://own-host/v1/chat/completions") is False
+
+
+async def test_can_open_guards_an_empty_catalog():
+    """Пустой каталог не раскрываем даже на пустом поле: раскрылась бы пустая рамка
+    со строкой, обещающей Enter там, где выбирать нечего, и ↑/↓ формы оказались бы
+    заперты в списке без единой строки."""
+    from tui.editors.preset_list import preset_list_controller
+    host = _Host()
+    async with _harness(host).run_test() as pilot:
+        await pilot.pause()
+        ctrl = preset_list_controller(host, presets=[], row_class="test-preset-row",
+                                      input_id="host-url", hint=_HINT)
+        assert ctrl._can_open("") is False
+
+
+async def test_empty_catalog_promises_nothing_under_the_field():
+    """Пустой каталог — строки под полем НЕТ вовсе.
+
+    Обещать «Alt+↓ — показать список» там, где списка не существует, значит звать в
+    пустую рамку: замер показал, что форсированное раскрытие её и даёт (0 строк,
+    хинт «в списке такого нет · Enter — оставить свой адрес»). Ровно от этого
+    охраняет `bool(presets)` в `can_open` — но охрана касалась только раскрытия, а
+    строка проговаривалась всё равно (находка независимого ревью 2026-08-18)."""
+    from tui.editors.preset_list import preset_list_controller
+    host = _Host()
+    async with _harness(host).run_test() as pilot:
+        await pilot.pause()
+        host.ctrl = preset_list_controller(host, presets=[], row_class="test-preset-row",
+                                           input_id="host-url", hint=_HINT)
+        host.ctrl.open()                       # отказ по пустому каталогу
+        await pilot.pause()
+        assert host.ctrl.is_open is False
+        assert not [w for w in host.query(".host-url-preset-hint") if not w._pruning]

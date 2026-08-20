@@ -1,18 +1,35 @@
 """Расчёт стоимости из ``UsageAccount`` + тарифов.
 
-Стоимость считается по модели прогона (`state.default_model`): сейчас все
-категории используют одну модель, поэтому тариф один. Структура результата
-поддерживает агрегацию по валютам (на случай разных моделей/валют в будущем):
-одна валюта → единый total; >1 → сабтоталы без общего total.
+Стоимость категории строится из двух возможных слагаемых (``CostPart``):
+факт от провайдера (биллинг части вызовов) и тарифный расчёт остатка
+(вызовы, для которых факта нет). Если для остатка тарифа тоже нет —
+категория помечается ``unpriced``, а не молча теряет деньги.
+
+Валюта факта фиксируется в момент вызова (см. ``usage.context``) и хранится
+вместе с суммой, поэтому смена провайдера посреди треда не переразмечает
+исторические деньги. ``endpoint_url`` здесь нужен только для старых ``meta``,
+где валюта не записана. Валюта тарифа — из ``pricing``. Если валюты разошлись,
+получаем несколько валют (``multi_currency``) — общий total не считаем,
+показываем сабтоталы.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict
 
-from config_modules.pricing import ResolvedTariff, resolve_model_tariff
-from usage.account import UsageAccount
+from config_modules.pricing import ResolvedTariff, coerce_pricing, resolve_model_tariff
+from usage.account import LEGACY_CURRENCY, MONEY_FIELD, UsageAccount
+from usage.currency import provider_currency_for_url
+
+
+@dataclass(frozen=True)
+class CostPart:
+    """Одно слагаемое стоимости категории: сумма, валюта и происхождение."""
+
+    amount: float
+    currency: str
+    source: str          # "provider" | "tariff"
 
 
 @dataclass
@@ -23,21 +40,36 @@ class CategoryCost:
     cached: int
     calls: int
     missing_usage_calls: int
-    cost: Optional[float]      # None → тарифа нет
-    currency: Optional[str]
+    parts: list[CostPart] = field(default_factory=list)
+    unpriced: bool = False      # есть вызовы, цену которых узнать нечем
+
+    @property
+    def cost_source(self) -> str:
+        sources = {p.source for p in self.parts}
+        if sources == {"provider"}:
+            return "provider"
+        if sources == {"tariff"}:
+            return "tariff"
+        if sources:
+            return "mixed"
+        return "none"
 
 
 @dataclass
 class CostReport:
     categories: list[CategoryCost] = field(default_factory=list)
-    # currency -> суммарная стоимость (учтённые категории)
+    # currency -> суммарная стоимость (учтённые категории). Порядок ключей —
+    # порядок первого появления валюты при обходе категорий (категории идут по
+    # убыванию токенов), то есть валюта основной работы оказывается первой.
+    # Порядок обязан быть стабильным: по нему строится строка футера.
     by_currency: Dict[str, float] = field(default_factory=dict)
     total_input: int = 0
     total_output: int = 0
     total_cached: int = 0
     total_calls: int = 0
     total_missing_usage_calls: int = 0
-    has_pricing: bool = False   # тариф найден хотя бы для одной категории
+    has_cost: bool = False      # есть хотя бы одна учтённая сумма (факт или тариф)
+    has_unpriced: bool = False  # есть категория с остатком, цену которого узнать нечем
 
     @property
     def multi_currency(self) -> bool:
@@ -62,15 +94,26 @@ def compute_cost(
     account: UsageAccount,
     pricing: object,
     model_name: str | None,
+    endpoint_url: str | None = None,
 ) -> CostReport:
     """Построить ``CostReport`` по аккаунту и тарифам.
 
     ``pricing`` — ``PricingConfig`` или сырой dict из config. ``model_name`` —
-    модель прогона; если тарифа нет / pricing выключен → стоимость None,
-    показываем только токены.
+    модель прогона. ``endpoint_url`` — адрес бэкенда (плоский ключ
+    ``completions_url``): нужен только для сумм из старых ``meta``, записанных
+    версией без валюты. Токены/вызовы по категориям считаются всегда, независимо
+    от ``pricing.enabled`` (счётчик usage не зависит от показа денег). Деньги
+    считаются только если ``pricing.enabled`` — тогда для каждой категории
+    стоимость собирается из факта провайдера (биллённая часть вызовов) и
+    тарифного расчёта остальных вызовов (если тариф известен); если и того,
+    и другого нет — категория помечается ``unpriced``.
     """
-    tariff = resolve_model_tariff(pricing, model_name)
-    report = CostReport(has_pricing=tariff is not None)
+    pricing_cfg = coerce_pricing(pricing)
+    tariff = resolve_model_tariff(pricing_cfg, model_name)
+    # Валюта для сумм без записанной валюты (старые meta) — по текущему конфигу,
+    # то есть ровно как вела себя предыдущая версия. Разбор один на отчёт.
+    legacy_currency = provider_currency_for_url(endpoint_url)
+    report = CostReport()
 
     # Порядок категорий стабильный: по убыванию суммарных токенов, потом по имени.
     def _sort_key(item):
@@ -85,12 +128,46 @@ def compute_cost(
         missing = int(bucket.get("missing_usage_calls", 0) or 0)
         if calls == 0:
             continue
-        cost: Optional[float] = None
-        currency: Optional[str] = None
-        if tariff is not None:
-            cost = _tariff_cost(tariff, inp, out, cached)
-            currency = tariff.currency
-            report.by_currency[currency] = report.by_currency.get(currency, 0.0) + cost
+
+        parts: list[CostPart] = []
+        unpriced = False
+        if pricing_cfg.enabled:
+            # Денежная сторона — только при включённом pricing (по умолчанию
+            # выключен). Токены/вызовы выше считаются в любом случае.
+            billed_calls = int(bucket.get("billed_calls", 0) or 0)
+            billed_input = int(bucket.get("billed_input", 0) or 0)
+            billed_output = int(bucket.get("billed_output", 0) or 0)
+            if billed_calls:
+                # По части на валюту факта. Суммы без записанной валюты (старые
+                # meta) сливаются с legacy-валютой — в одну часть, а не в две
+                # одинаковых.
+                billed: Dict[str, float] = {}
+                for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
+                    key = legacy_currency if cur == LEGACY_CURRENCY else cur
+                    billed[key] = billed.get(key, 0.0) + float(amount or 0.0)
+                for cur, amount in billed.items():
+                    parts.append(CostPart(amount, cur, "provider"))
+
+            rest_in = inp - billed_input
+            rest_out = out - billed_output
+            rest_cached = cached - int(bucket.get("billed_cached", 0) or 0)
+            # Остаток считаем по токенам, а не по вызовам: вызов без usage
+            # (``add_missing``) увеличивает ``calls``, не давая ни одного токена —
+            # по вызовам он выглядел бы как «остаток есть», хотя тарифить нечего,
+            # и создавал бы фантомную нулевую сумму во второй валюте.
+            has_rest = rest_in > 0 or rest_out > 0
+            if has_rest:
+                if tariff is not None:
+                    parts.append(CostPart(
+                        _tariff_cost(tariff, rest_in, rest_out, rest_cached),
+                        tariff.currency, "tariff"))
+                else:
+                    unpriced = True
+
+            for part in parts:
+                report.by_currency[part.currency] = report.by_currency.get(part.currency, 0.0) + part.amount
+            report.has_unpriced = report.has_unpriced or unpriced
+
         report.categories.append(
             CategoryCost(
                 category=category,
@@ -99,8 +176,8 @@ def compute_cost(
                 cached=cached,
                 calls=calls,
                 missing_usage_calls=missing,
-                cost=cost,
-                currency=currency,
+                parts=parts,
+                unpriced=unpriced,
             )
         )
         report.total_input += inp
@@ -109,4 +186,5 @@ def compute_cost(
         report.total_calls += calls
         report.total_missing_usage_calls += missing
 
+    report.has_cost = bool(report.by_currency)
     return report

@@ -5,13 +5,64 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from runtime_notices import maybe_push_llm_failure_notice
 from utils.connect_backend import request_backend_chat_completions
-from utils.backend_errors import is_retriable_backend_error
+from utils.backend_errors import EmbeddedChoiceError, is_retriable_backend_error
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
 # До 5 попыток с понижением max_tokens после HTTP-ошибки (один HTTP-запрос
 # на шаг, без transport-ретраев — сеть уже отработала на первой попытке).
 _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS = 5
+
+
+def _raise_embedded_from_error_dict(err: Dict[str, Any]) -> None:
+    code = err.get("code")
+    try:
+        status = int(code) if code is not None else None
+    except (TypeError, ValueError):
+        status = None
+    raise EmbeddedChoiceError(
+        "provider returned embedded choice error: "
+        f"code={code!r} message={err.get('message')!r}",
+        status_code=status,
+        metadata=err.get("metadata"),
+        raw_code=code,
+    )
+
+
+def _raise_on_embedded_choice_error(response: Dict[str, Any]) -> None:
+    """Поднять EmbeddedChoiceError, если провайдер зашил ошибку внутрь HTTP-200:
+    choices[0].error = {code, message, metadata} (стиль OpenRouter, напр. 504
+    "Upstream idle timeout"), top-level {"error": {...}} без choices, или
+    finish_reason="error" с пустым выбором (без content/tool_calls). Иначе такая
+    ошибка «успешно» проходит транспорт и фаталит позже в конвертации, уже за
+    retry-границей; вызывается до выхода из неё, поэтому получает тот же
+    ретрай-цикл, что и HTTP-ошибки.
+    finish_reason="error" С контентом не трогаем: его принимает permissive-путь
+    normalize_finish_reason (с warning).
+
+    Top-level форма ({"error": {...}} без choices) иначе падает KeyError'ом в
+    get_output_list (dct['choices']) за retry-границей; в стриме она уже
+    обрабатывается (chat_completions_stream.py)."""
+    if not isinstance(response, dict):
+        return
+    choices = response.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        ch0 = choices[0]
+        err = ch0.get("error")
+        if isinstance(err, dict):
+            _raise_embedded_from_error_dict(err)
+        fr = ch0.get("finish_reason")
+        if isinstance(fr, str) and fr.lower() == "error":
+            msg = ch0.get("message") or {}
+            if not (msg.get("content") or msg.get("tool_calls")):
+                raise EmbeddedChoiceError(
+                    "provider returned finish_reason='error' with empty choice"
+                )
+        return
+    # Нет валидного choices — проверяем top-level error (вторая типовая форма).
+    top_err = response.get("error")
+    if isinstance(top_err, dict):
+        _raise_embedded_from_error_dict(top_err)
 
 
 def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> int:
@@ -29,6 +80,7 @@ def request_chat_completions_with_policy(
     verify: bool,
     cert: Optional[Tuple[str, str]] = None,
     use_retry: bool,
+    retry_embedded_choice_errors: bool = True,
     logger: logging.Logger | None = None,
     on_delta=None,
     request_label: Optional[str] = None,
@@ -62,6 +114,8 @@ def request_chat_completions_with_policy(
             timeout=timeout,
             config_proxy=config_proxy,
         )
+        if retry_embedded_choice_errors:
+            _raise_on_embedded_choice_error(response)
         return response, payload
 
     try:
@@ -83,12 +137,10 @@ def request_chat_completions_with_policy(
                 configured=current_max_tokens,
                 minimum=min_response_tokens,
             )
-            if reduced_max_tokens >= current_max_tokens:
-                break
 
             run_logger.warning(
-                "chat/completions HTTP error; adaptive retry %s/%s with lower "
-                "max_tokens from %s to %s",
+                "chat/completions backend error; adaptive retry %s/%s "
+                "(max_tokens %s -> %s)",
                 step,
                 _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS,
                 current_max_tokens,

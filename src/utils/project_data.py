@@ -152,14 +152,6 @@ def _dedupe_ordered_abs_paths(paths: List[str]) -> List[str]:
     return out
 
 
-def _resolve_workspace_dir(config_dict: Optional[Dict[str, Any]]) -> str:
-    raw: Optional[Any] = None
-    if isinstance(config_dict, dict):
-        raw = config_dict.get("launch_root") or config_dict.get("project_root")
-    if raw:
-        return os.path.abspath(os.path.expanduser(os.path.normpath(str(raw))))
-    return os.path.abspath(os.getcwd())
-
 
 def _extra_write_roots(config_dict: Optional[Dict[str, Any]]) -> List[str]:
     if not isinstance(config_dict, dict):

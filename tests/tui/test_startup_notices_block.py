@@ -60,7 +60,7 @@ async def test_notices_line_format_b_glyph_and_breakdown(tmp_path):
         # Значок из общего источника: в нём вариационный селектор, и литерал разошёлся
         # бы с кодом по невидимому символу. Число склеено со значком — иначе перенос
         # строки в футере разрывал пару.
-        assert f"{WARN_GLYPH}2 · F4/notices" in card            # 2 warning'а, формат B
+        assert f"{WARN_GLYPH} 2 · F4/notices" in card            # 2 warning'а, формат B
         # строка уведомлений — базовым цветом карточки, без амбер-подсветки глифа
         from tui.palette import WARN
         t = scr._compose_card_lines(None)
