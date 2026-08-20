@@ -36,6 +36,7 @@ from gc_core.message_policy.user_stop import cancelled_by_user_output
 from gc_core.tools.subagents.active_scope import activate_child_input
 from gc_core.tools.subagents.progress import emit_progress
 from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity, persist_subagent_trace
+from gc_core.utils.aio_compat import run_coro_blocking
 
 _log = logging.getLogger(__name__)
 
@@ -117,7 +118,10 @@ class SubagentRunner:
             # create_instance некоторых субагентов (special_agent) делает LLM-вызов
             # генерации роли — относим его токены к категории subagent родителя.
             with usage_scope(self._orchestrator_state.usage, USAGE_CATEGORY_SUBAGENT):
-                instance = asyncio.run(
+                # Не asyncio.run: create_instance зовут и из-под работающего
+                # loop (TUI, сервер), где он падает «cannot be called from a
+                # running event loop».
+                instance = run_coro_blocking(
                     subagent_cls.create_instance(
                         task=task,
                         model=model,

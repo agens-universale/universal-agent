@@ -14,25 +14,17 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.exceptions import McpError
 
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.tools.connect_mcp.transport import _resolve_command
 
 
-def _run_coro(coro):
-    """Run a coroutine to completion, safe even when an event loop is already
-    running on the current thread (e.g. inside the TUI's Textual loop).
-
-    Plain ``asyncio.run()`` raises ``RuntimeError: asyncio.run() cannot be
-    called from a running event loop``. When that happens we execute the
-    coroutine in a fresh worker thread (which has no running loop), so MCP
-    tool listing/calls work both from the CLI (no loop) and the TUI (loop)."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
-        return _ex.submit(asyncio.run, coro).result()
+# Тело уехало в gc_core.utils.aio_compat: та же задача возникает не только у
+# MCP (см. subagents/runner), а раньше её же на весь процесс решал monkey-patch
+# asyncio.run в gc_server. Имя оставлено алиасом — им пользуются 30+ вызовов
+# в этом файле.
+_run_coro = run_coro_blocking
 
 
 # ---------------------------------------------------------------------------

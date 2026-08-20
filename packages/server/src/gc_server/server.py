@@ -15,7 +15,7 @@ from gc_core.config import build_auth_connector
 from gc_core.thread_store import load_thread_messages, load_thread_meta, resolve_threads_dir, validate_thread_id
 from gc_server.rest_api.agent_execution_registry import agent_run_registry
 from gc_server.rest_api.server_config import PROJECT_ROOT, build_agent_config_for_server, load_server_config
-from gc_server.rest_api.utils import ensure_task_id, normalize_system, patch_asyncio_run_for_fastapi
+from gc_server.rest_api.utils import ensure_task_id, normalize_system
 from gc_server.server_cleanup_threads import register_cleanup_threads_on_startup, register_swarm_cleanup_on_startup
 from gc_core.trace_id import normalize_trace_id
 
@@ -41,8 +41,6 @@ except (ModuleNotFoundError, ImportError) as e:
     swarm_storage = None  # type: ignore[assignment]
 
 
-# Настраиваем безопасный asyncio.run для работы внутри FastAPI/uvicorn.
-patch_asyncio_run_for_fastapi()
 
 
 SERVER_CONFIG: Dict[str, Any] = load_server_config()

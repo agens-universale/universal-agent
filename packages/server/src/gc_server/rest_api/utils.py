@@ -1,43 +1,5 @@
-import asyncio
-import threading
 from typing import Any, Dict, Optional
 from uuid import uuid4
-
-
-def patch_asyncio_run_for_fastapi() -> None:
-    """
-    Безопасный monkey-patch asyncio.run для работы внутри FastAPI/uvicorn.
-
-    - Если event loop не запущен — ведёт себя как обычный asyncio.run.
-    - Если loop уже есть — выполняет корутину в отдельном треде с собственным loop.
-    """
-    _original_asyncio_run = asyncio.run
-
-    def _safe_asyncio_run(coro, *args, **kwargs):
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return _original_asyncio_run(coro, *args, **kwargs)
-
-        result_box: Dict[str, Any] = {}
-        error_box: Dict[str, BaseException] = {}
-
-        def _runner() -> None:
-            try:
-                result_box["value"] = _original_asyncio_run(coro, *args, **kwargs)
-            except BaseException as exc:  # noqa: BLE001
-                error_box["error"] = exc
-
-        t = threading.Thread(target=_runner, daemon=True)
-        t.start()
-        t.join()
-
-        if "error" in error_box:
-            raise error_box["error"]
-
-        return result_box.get("value")
-
-    asyncio.run = _safe_asyncio_run  # type: ignore[assignment]
 
 
 def normalize_system(value: Optional[str], *, default_system: str) -> str:
@@ -70,5 +32,5 @@ def ensure_task_id(payload: Dict[str, Any]) -> str:
     return task_id
 
 
-__all__ = ["patch_asyncio_run_for_fastapi", "normalize_system", "ensure_task_id"]
+__all__ = ["normalize_system", "ensure_task_id"]
 
