@@ -151,6 +151,56 @@ def test_model_unavailable_ignores_non_network_request_exceptions():
     ) is False
 
 
+def _embedded_exc(response):
+    """Исключение строит ПРОД (`_raise_on_embedded_choice_error`) из реального
+    тела ответа — руками не собираем: иначе тест проверял бы наши догадки о
+    форме, а не то, что действительно присылает прокси."""
+    from request_backend_policy import _raise_on_embedded_choice_error
+    try:
+        _raise_on_embedded_choice_error(response)
+    except EmbeddedChoiceError as exc:
+        return exc
+    raise AssertionError("ожидали EmbeddedChoiceError")
+
+
+def test_model_unavailable_covers_embedded_choice_errors():
+    """Прокси заворачивает отказ в HTTP-200 (choices[0].error), поэтому такой же
+    отказ модели приходит другим типом исключения. Без этой ветки предохранитель
+    и фоллбэк «привязка недоступна → активная модель» слепы ровно к тем
+    провайдерам, ради которых develop и завёл EmbeddedChoiceError."""
+    from utils.backend_errors import is_model_unavailable_error
+    upstream_timeout = {"choices": [{"error": {
+        "code": 504, "message": "Upstream idle timeout",
+        "metadata": {"error_type": "timeout"}}}]}
+    assert is_model_unavailable_error(_embedded_exc(upstream_timeout)) is True
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {"code": 401, "message": "bad key"}}]})
+    ) is True
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {"code": 404, "message": "no such model"}}]})
+    ) is True
+    # Вторая типовая форма — ошибка верхнего уровня, без choices.
+    assert is_model_unavailable_error(
+        _embedded_exc({"error": {"code": 503, "message": "service unavailable"}})
+    ) is True
+
+
+def test_model_unavailable_ignores_embedded_without_http_status():
+    """Нечисловой код (insufficient_quota/invalid_api_key) и полное отсутствие
+    кода (finish_reason="error" с пустым выбором) дают status_code=None. Гасить
+    по ним алиас на всю сессию нельзя: первое — деньги и ключи, повтором другой
+    моделью не лечится, второе — неизвестно что. Та же осторожность, что у
+    BackendStreamError без статуса."""
+    from utils.backend_errors import is_model_unavailable_error
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {
+            "code": "insufficient_quota", "message": "quota exceeded"}}]})
+    ) is False
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"finish_reason": "error", "message": {}}]})
+    ) is False
+
+
 def test_finish_known_accept():
     for fr in ("stop", "tool_calls", "length"):
         d = normalize_finish_reason(fr, has_content=True, has_tool_calls=False)

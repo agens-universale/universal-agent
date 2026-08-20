@@ -161,6 +161,14 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
+    elif isinstance(exc, EmbeddedChoiceError):
+        # Прокси кладёт отказ ВНУТРЬ HTTP-200 (choices[0].error / top-level error):
+        # снаружи запрос «успешен», и без этой ветки тот же самый отказ модели —
+        # 5xx, 401, 404 — не считался бы недоступностью только из-за обёртки.
+        # status_code=None (нечисловой код вроде insufficient_quota либо код
+        # отсутствует вовсе) уходит на общий путь ниже и даёт False: гасить алиас
+        # на всю сессию по неизвестной причине нельзя.
+        status_code = exc.status_code
     elif isinstance(
         exc,
         (
