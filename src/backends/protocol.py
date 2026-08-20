@@ -2,12 +2,38 @@
 (task container). Tools keep validation/envelopes; backends only answer "where
 does this byte live / where does this command run"."""
 import shlex
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
 # Потолок captured-буфера на поток (decoded UTF-8 chars). Spec D2 / D8.
 DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS = 60_000
+
+# Harbor walk/listdir private channel (B1). Not tool exec; fail-closed on hit.
+WALK_OUTPUT_MAX_CHARS = 50_000_000
+
+# Wire format for find listing (smoke ≡ production ≡ harbor walk).
+FIND_PRINTF_FORMAT = "%P\\t%y\\n"
+
+
+class WalkOutputTooLargeError(OSError):
+    """Harbor traverse stdout hit walk ceiling — tree is incomplete (fail-closed)."""
+
+    def __init__(
+        self,
+        path: str,
+        *,
+        ceiling_chars: int = WALK_OUTPUT_MAX_CHARS,
+        message: Optional[str] = None,
+    ) -> None:
+        self.path = path
+        self.ceiling_chars = ceiling_chars
+        msg = message or (
+            f"directory listing under {path!r} exceeds walk output ceiling "
+            f"({ceiling_chars} chars); narrow the path or raise the ceiling"
+        )
+        super().__init__(msg)
 
 
 @dataclass
@@ -53,6 +79,110 @@ class FsBackend(ABC):
     default_exec_timeout: Optional[int] = None
     # Потолок RAM-буфера stdout/stderr на поток (spec D2/D8).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+
+    # Capability probe cache (lazy, thread-safe once). Subclasses may set
+    # overrides via ``_cap_overrides`` without running probes (FakeBackend).
+    _cap_lock: Optional[threading.Lock] = None
+    _has_find_cache: Optional[bool] = None
+    _has_grep_cache: Optional[bool] = None
+    _grep_exclude_dir_cache: Optional[bool] = None
+    _grep_include_cache: Optional[bool] = None
+    _cap_overrides: Optional[dict] = None
+
+    def _ensure_cap_lock(self) -> threading.Lock:
+        if self._cap_lock is None:
+            self._cap_lock = threading.Lock()
+        return self._cap_lock
+
+    def _cap_override(self, name: str) -> Optional[bool]:
+        ov = self._cap_overrides
+        if not ov:
+            return None
+        if name not in ov:
+            return None
+        return bool(ov[name])
+
+    @property
+    def has_find(self) -> bool:
+        """Usable GNU-style find with ``-printf '%P\\t%y\\n'`` (list / by-name / walk)."""
+        ov = self._cap_override("has_find")
+        if ov is not None:
+            return ov
+        if self._has_find_cache is not None:
+            return self._has_find_cache
+        with self._ensure_cap_lock():
+            if self._has_find_cache is not None:
+                return self._has_find_cache
+            try:
+                from backends.capabilities import probe_has_find
+
+                self._has_find_cache = bool(probe_has_find(self))
+            except Exception:
+                self._has_find_cache = False
+            return self._has_find_cache
+
+    @property
+    def has_grep(self) -> bool:
+        """Usable grep for content search (``-E``, ``-n``, ``-R``)."""
+        ov = self._cap_override("has_grep")
+        if ov is not None:
+            return ov
+        if self._has_grep_cache is not None:
+            return self._has_grep_cache
+        with self._ensure_cap_lock():
+            if self._has_grep_cache is not None:
+                return self._has_grep_cache
+            try:
+                from backends.capabilities import probe_has_grep
+
+                self._has_grep_cache = bool(probe_has_grep(self))
+            except Exception:
+                self._has_grep_cache = False
+            return self._has_grep_cache
+
+    @property
+    def grep_exclude_dir(self) -> bool:
+        """Internal: ``--exclude-dir=NAME`` hides hits (lazy smoke)."""
+        ov = self._cap_override("grep_exclude_dir")
+        if ov is not None:
+            return ov
+        if self._grep_exclude_dir_cache is not None:
+            return self._grep_exclude_dir_cache
+        with self._ensure_cap_lock():
+            if self._grep_exclude_dir_cache is not None:
+                return self._grep_exclude_dir_cache
+            if not self.has_grep:
+                self._grep_exclude_dir_cache = False
+                return False
+            try:
+                from backends.capabilities import probe_grep_exclude_dir
+
+                self._grep_exclude_dir_cache = bool(probe_grep_exclude_dir(self))
+            except Exception:
+                self._grep_exclude_dir_cache = False
+            return self._grep_exclude_dir_cache
+
+    @property
+    def grep_include(self) -> bool:
+        """Internal: ``--include='*.ext'`` works (lazy smoke)."""
+        ov = self._cap_override("grep_include")
+        if ov is not None:
+            return ov
+        if self._grep_include_cache is not None:
+            return self._grep_include_cache
+        with self._ensure_cap_lock():
+            if self._grep_include_cache is not None:
+                return self._grep_include_cache
+            if not self.has_grep:
+                self._grep_include_cache = False
+                return False
+            try:
+                from backends.capabilities import probe_grep_include
+
+                self._grep_include_cache = bool(probe_grep_include(self))
+            except Exception:
+                self._grep_include_cache = False
+            return self._grep_include_cache
 
     # --- stat ---
     @abstractmethod

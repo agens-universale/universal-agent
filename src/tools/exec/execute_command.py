@@ -110,7 +110,7 @@ Important Usage Rules:
    - After ensuring proper quoting, execute the command.
    - Capture the output of the command.
    - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings
-3. VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. You MUST avoid read tools like `cat`, `head`, `tail`, and `ls`, and instead use filesystem tools (`fs_find_in_files`, `fs_find_files_by_name`, `fs_list_files`, `fs_read_file`, `fs_search_and_replace`, …).
+3. Prefer filesystem tools for structured search/list/read (`fs_find_in_files`, `fs_find_files_by_name`, `fs_list_files`, `fs_read_file`, `fs_search_and_replace`, …). Shell `find`/`grep`/`rg`/`cat`/`ls` are allowed when useful; remember exec stdout is capped (~60k chars) and may truncate.
 4. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.
     <good-example>
     pytest /foo/bar/tests

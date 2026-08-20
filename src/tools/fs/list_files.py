@@ -15,6 +15,7 @@ from security.read_guard import (
 )
 from security.path_policy import resolve_tool_context, _extract_config_dict
 from tools.fs.agent_hidden import is_agent_hidden
+from utils.native_fs_search import native_list_entries
 
 
 class ListFiles(AbstractSimpleTool):
@@ -123,7 +124,37 @@ Examples:
         if error is not None:
             payload["error"] = error
         payload["entries"] = entries if entries is not None else []
+        # listing_backend set by caller on success paths via optional kw — see __call__
 
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _result_with_backend(
+        self,
+        *,
+        path: str,
+        glob: Optional[str],
+        max_depth: Optional[int],
+        max_entries: Optional[int],
+        ok: bool,
+        entries: Optional[List[Dict[str, Any]]] = None,
+        truncated: bool = False,
+        error: Optional[Dict[str, Any]] = None,
+        listing_backend: Optional[str] = None,
+    ) -> str:
+        raw = self._result(
+            path=path,
+            glob=glob,
+            max_depth=max_depth,
+            max_entries=max_entries,
+            ok=ok,
+            entries=entries,
+            truncated=truncated,
+            error=error,
+        )
+        if listing_backend is None:
+            return raw
+        payload = json.loads(raw)
+        payload["listing_backend"] = listing_backend
         return json.dumps(payload, ensure_ascii=False)
 
     def _resolve_read_guard(self) -> tuple:
@@ -220,6 +251,36 @@ Examples:
 
             file_matcher = _matches
 
+        def _rg_pass(filepath: str) -> bool:
+            return self._read_guard_pass(filepath, _rg_cfg, _rg_root, _rg_extra)
+
+        # Native find path when backend has usable find (no is_sandbox branch).
+        try:
+            native = native_list_entries(
+                self._backend,
+                path,
+                max_depth=effective_max_depth,
+                max_entries=max_entries,
+                file_matcher=file_matcher,
+                is_hidden_name=is_agent_hidden,
+                read_guard_pass=_rg_pass,
+                make_entry=lambda fp, is_d: self._entry(fp, is_d),
+            )
+            if native is not None:
+                entries, hit_limit, listing_backend = native
+                return self._result_with_backend(
+                    path=path,
+                    glob=glob,
+                    max_depth=effective_max_depth,
+                    max_entries=max_entries,
+                    ok=True,
+                    entries=entries,
+                    truncated=hit_limit,
+                    listing_backend=listing_backend,
+                )
+        except Exception:
+            pass
+
         result: List[Dict[str, Any]] = []
         try:
             hit_limit: bool
@@ -257,7 +318,16 @@ Examples:
         if max_entries is not None and len(result) > max_entries:
             result = result[:max_entries]
 
-        return _result(ok=True, entries=result, truncated=hit_limit)
+        return self._result_with_backend(
+            path=path,
+            glob=glob,
+            max_depth=effective_max_depth,
+            max_entries=max_entries,
+            ok=True,
+            entries=result,
+            truncated=hit_limit,
+            listing_backend="python",
+        )
 
     def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
         return {

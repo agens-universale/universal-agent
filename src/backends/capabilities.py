@@ -1,0 +1,373 @@
+"""Usable-capability probes for FsBackend (find/grep).
+
+Probes run production-shaped recipes (not ``command -v`` / ``--version`` alone).
+Any step failure → False; never raise to tool callers.
+"""
+from __future__ import annotations
+
+import os
+import re
+import shlex
+import tempfile
+import uuid
+from typing import TYPE_CHECKING, List, Optional, Sequence
+
+if TYPE_CHECKING:
+    from backends.protocol import FsBackend
+
+# Shared find wire (smoke ≡ production ≡ harbor walk).
+FIND_PRINTF_TEMPLATE = "%P\\t%y\\n"
+
+_GREP_CLEAN_ENV = {
+    "GREP_OPTIONS": "",
+    "GREP_COLORS": "",
+    "GREP_COLOR": "",
+}
+
+
+def _probe_tmp_name() -> str:
+    return f"gc_probe_{uuid.uuid4().hex[:12]}"
+
+
+def _run_argv(
+    backend: "FsBackend",
+    argv: Sequence[str],
+    *,
+    stdin: Optional[str] = None,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+    timeout: int = 15,
+):
+    merged = dict(_GREP_CLEAN_ENV)
+    if env:
+        merged.update(env)
+    return backend.exec_argv(
+        list(argv), stdin=stdin, cwd=cwd, timeout=timeout, env=merged
+    )
+
+
+def _which_bin(backend: "FsBackend", name: str) -> Optional[str]:
+    """Resolve binary via backend exec (no shell alias). Fail → None."""
+    # Prefer `command -v` (POSIX); fall back to plain name.
+    try:
+        res = backend.exec(f"command -v {shlex.quote(name)}", timeout=10)
+        if res.return_code == 0:
+            path = (res.stdout or "").strip().splitlines()
+            if path and path[0]:
+                return path[0].strip()
+    except Exception:
+        pass
+    try:
+        res = _run_argv(backend, [name, "--help"], timeout=5)
+        # Windows find.exe --help may succeed with different semantics; callers
+        # still smoke real recipes.
+        if res.return_code is not None and res.return_code in (0, 1, 2):
+            return name
+    except Exception:
+        pass
+    return name  # try bare name in recipe; smoke decides
+
+
+def parse_find_printf_lines(stdout: str) -> List[tuple[str, bool]]:
+    """Parse ``%P\\t%y\\n`` lines → [(relpath, is_dir), ...]."""
+    out: List[tuple[str, bool]] = []
+    for line in (stdout or "").splitlines():
+        if not line.strip():
+            continue
+        if "\t" not in line:
+            continue
+        rel, _, kind = line.partition("\t")
+        if not kind:
+            continue
+        # %y: f=file, d=directory, l=symlink, …
+        out.append((rel, kind[:1] == "d"))
+    return out
+
+
+def probe_has_find(backend: "FsBackend") -> bool:
+    """True only if find -printf production wire parses a known row."""
+    find_bin = _which_bin(backend, "find")
+    if not find_bin:
+        return False
+
+    # Prefer backend-local temp when sandbox; else host mkdtemp + path if local.
+    tmp_remote: Optional[str] = None
+    host_tmp: Optional[str] = None
+    known = "probe_known.txt"
+    try:
+        if getattr(backend, "is_sandbox", False):
+            # Create temp dir inside container via mktemp/mkdir.
+            res = backend.exec("mktemp -d -t gc_probe_XXXXXX", timeout=10)
+            if res.return_code != 0 or not (res.stdout or "").strip():
+                # Fallback fixed path under /tmp
+                tmp_remote = f"/tmp/{_probe_tmp_name()}"
+                mk = backend.exec(f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
+                if mk.return_code != 0:
+                    return False
+            else:
+                tmp_remote = (res.stdout or "").strip().splitlines()[0].strip()
+            known_path = f"{tmp_remote.rstrip('/')}/{known}"
+            w = backend.exec(
+                f"printf 'x\\n' > {shlex.quote(known_path)}", timeout=10
+            )
+            if w.return_code != 0:
+                return False
+            root = tmp_remote
+        else:
+            host_tmp = tempfile.mkdtemp(prefix="gc_probe_")
+            known_path = os.path.join(host_tmp, known)
+            with open(known_path, "w", encoding="utf-8") as fh:
+                fh.write("x\n")
+            root = host_tmp
+
+        argv = [
+            find_bin,
+            root,
+            "-mindepth",
+            "1",
+            "-printf",
+            "%P\t%y\n",
+        ]
+        # exec_argv passes real tab/newline in the format string.
+        res = _run_argv(backend, argv, timeout=15)
+        if res.return_code not in (0, None):
+            # find returns 0 on success; some return 1 with partial — require 0
+            if res.return_code != 0:
+                return False
+        if getattr(res, "stdout_hit_capture_cap", False):
+            return False
+        rows = parse_find_printf_lines(res.stdout or "")
+        for rel, is_dir in rows:
+            if rel == known or rel.endswith("/" + known) or rel.endswith(known):
+                if not is_dir:
+                    return True
+        # Accept any file row named known basename
+        bases = {os.path.basename(r) for r, d in rows if not d}
+        return known in bases
+    except Exception:
+        return False
+    finally:
+        try:
+            if tmp_remote:
+                backend.exec(f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
+        except Exception:
+            pass
+        if host_tmp:
+            try:
+                import shutil
+
+                shutil.rmtree(host_tmp, ignore_errors=True)
+            except Exception:
+                pass
+
+
+def probe_has_grep(backend: "FsBackend") -> bool:
+    """Smoke: -E -n pipe + -R -E -n on a temp file."""
+    grep_bin = _which_bin(backend, "grep")
+    if not grep_bin:
+        return False
+    try:
+        res = _run_argv(
+            backend,
+            [grep_bin, "-E", "-n", "--color=never", "b[ae]ta"],
+            stdin="alpha\nbeta\n",
+            timeout=10,
+        )
+        out = res.stdout or ""
+        if "beta" not in out or not re.search(r"^\d+:", out, re.M):
+            return False
+    except Exception:
+        return False
+
+    tmp_remote: Optional[str] = None
+    host_tmp: Optional[str] = None
+    try:
+        if getattr(backend, "is_sandbox", False):
+            res = backend.exec("mktemp -d -t gc_probe_XXXXXX", timeout=10)
+            if res.return_code != 0 or not (res.stdout or "").strip():
+                tmp_remote = f"/tmp/{_probe_tmp_name()}"
+                mk = backend.exec(f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
+                if mk.return_code != 0:
+                    return False
+            else:
+                tmp_remote = (res.stdout or "").strip().splitlines()[0].strip()
+            fpath = f"{tmp_remote.rstrip('/')}/beta.txt"
+            w = backend.exec(
+                f"printf 'alpha\\nbeta\\n' > {shlex.quote(fpath)}", timeout=10
+            )
+            if w.return_code != 0:
+                return False
+            root = tmp_remote
+        else:
+            host_tmp = tempfile.mkdtemp(prefix="gc_probe_")
+            fpath = os.path.join(host_tmp, "beta.txt")
+            with open(fpath, "w", encoding="utf-8") as fh:
+                fh.write("alpha\nbeta\n")
+            root = host_tmp
+
+        res = _run_argv(
+            backend,
+            [
+                grep_bin,
+                "-R",
+                "-E",
+                "-n",
+                "--color=never",
+                "--",
+                "b[ae]ta",
+                root,
+            ],
+            timeout=15,
+        )
+        if res.return_code not in (0, 1):
+            return False
+        text = res.stdout or ""
+        if "beta" not in text:
+            return False
+        # Expect path:line:text shape
+        if not re.search(r":\d+:", text):
+            return False
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            if tmp_remote:
+                backend.exec(f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
+        except Exception:
+            pass
+        if host_tmp:
+            try:
+                import shutil
+
+                shutil.rmtree(host_tmp, ignore_errors=True)
+            except Exception:
+                pass
+
+
+def _make_probe_tree(backend: "FsBackend"):
+    """Create tmp with skip/hit.txt and keep/hit.txt. Returns (root, cleanup)."""
+    tmp_remote: Optional[str] = None
+    host_tmp: Optional[str] = None
+
+    def cleanup() -> None:
+        try:
+            if tmp_remote:
+                backend.exec(f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
+        except Exception:
+            pass
+        if host_tmp:
+            try:
+                import shutil
+
+                shutil.rmtree(host_tmp, ignore_errors=True)
+            except Exception:
+                pass
+
+    if getattr(backend, "is_sandbox", False):
+        res = backend.exec("mktemp -d -t gc_probe_XXXXXX", timeout=10)
+        if res.return_code != 0 or not (res.stdout or "").strip():
+            tmp_remote = f"/tmp/{_probe_tmp_name()}"
+            mk = backend.exec(f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
+            if mk.return_code != 0:
+                return None, cleanup
+        else:
+            tmp_remote = (res.stdout or "").strip().splitlines()[0].strip()
+        root = tmp_remote
+        cmds = (
+            f"mkdir -p {shlex.quote(root + '/skip')} {shlex.quote(root + '/keep')} && "
+            f"printf 'secret\\n' > {shlex.quote(root + '/skip/hit.txt')} && "
+            f"printf 'secret\\n' > {shlex.quote(root + '/keep/hit.txt')} && "
+            f"printf 'secret\\n' > {shlex.quote(root + '/other.py')} && "
+            f"printf 'secret\\n' > {shlex.quote(root + '/other.txt')}"
+        )
+        w = backend.exec(cmds, timeout=10)
+        if w.return_code != 0:
+            return None, cleanup
+        return root, cleanup
+
+    host_tmp = tempfile.mkdtemp(prefix="gc_probe_")
+    os.makedirs(os.path.join(host_tmp, "skip"), exist_ok=True)
+    os.makedirs(os.path.join(host_tmp, "keep"), exist_ok=True)
+    for rel in ("skip/hit.txt", "keep/hit.txt", "other.py", "other.txt"):
+        with open(os.path.join(host_tmp, rel), "w", encoding="utf-8") as fh:
+            fh.write("secret\n")
+    return host_tmp, cleanup
+
+
+def probe_grep_exclude_dir(backend: "FsBackend") -> bool:
+    grep_bin = _which_bin(backend, "grep")
+    if not grep_bin:
+        return False
+    root, cleanup = _make_probe_tree(backend)
+    try:
+        if not root:
+            return False
+        res = _run_argv(
+            backend,
+            [
+                grep_bin,
+                "-R",
+                "-E",
+                "-n",
+                "--color=never",
+                "--exclude-dir=skip",
+                "--",
+                "secret",
+                root,
+            ],
+            timeout=15,
+        )
+        text = res.stdout or ""
+        if "skip" in text.replace("\\", "/"):
+            # path component skip should not appear
+            for line in text.splitlines():
+                if "/skip/" in line.replace("\\", "/") or line.replace(
+                    "\\", "/"
+                ).startswith("skip/"):
+                    return False
+                # also basename-only path forms
+                if re.search(r"(^|/)skip/", line.replace("\\", "/")):
+                    return False
+        if "keep" not in text and "hit.txt" not in text:
+            return False
+        return res.return_code in (0, 1)
+    except Exception:
+        return False
+    finally:
+        cleanup()
+
+
+def probe_grep_include(backend: "FsBackend") -> bool:
+    grep_bin = _which_bin(backend, "grep")
+    if not grep_bin:
+        return False
+    root, cleanup = _make_probe_tree(backend)
+    try:
+        if not root:
+            return False
+        res = _run_argv(
+            backend,
+            [
+                grep_bin,
+                "-R",
+                "-E",
+                "-n",
+                "--color=never",
+                "--include=*.py",
+                "--",
+                "secret",
+                root,
+            ],
+            timeout=15,
+        )
+        text = res.stdout or ""
+        if "other.py" not in text:
+            return False
+        if "other.txt" in text:
+            return False
+        return res.return_code in (0, 1)
+    except Exception:
+        return False
+    finally:
+        cleanup()

@@ -836,6 +836,7 @@ class FindInFiles(AbstractSimpleTool):
             query_mode=query_mode,
             mode="file",
             effective_ci=effective_ci,
+            search_backend="python",
         )
 
     # ------------------------------------------------------------------
@@ -1055,6 +1056,121 @@ class FindInFiles(AbstractSimpleTool):
             key=lambda e: (e.get("reason") or "", e.get("path") or ""),
         )
 
+    def _try_native_grep_directory(
+        self,
+        *,
+        path: str,
+        pattern: str,
+        query_mode: str,
+        pattern_mode: PatternMode,
+        effective_ci: bool,
+        file_pattern: Optional[str],
+        accepted_excludes: List[str],
+        exclude_soft_errors: List[Dict[str, str]],
+        limit_requested: int,
+        limit_eff: int,
+        limit_capped: bool,
+        config: FsFindInFilesConfig,
+        report_path: str,
+        show_excluded_dirs: bool,
+    ) -> Optional[str]:
+        """Attempt native grep. None → continue Python path."""
+        from utils.native_fs_search import (
+            can_native_grep_content,
+            count_native_candidates,
+            hard_exclude_names_for_grep,
+            run_native_grep,
+        )
+        from utils.pattern_native_gate import is_grep_native_safe
+
+        # Affix/complex open budgets and multi-hit regex semantics stay on Python.
+        if pattern_mode in (PatternMode.AFFIX_OR, PatternMode.COMPLEX):
+            return None
+
+        plan = is_grep_native_safe(
+            pattern, query_mode=query_mode, case_insensitive=effective_ci
+        )
+        exclude_names = hard_exclude_names_for_grep(config.exclude_dir_names)
+        exclude_dot = True
+        if not can_native_grep_content(
+            self._backend,
+            plan=plan,
+            exclude_dir_names=exclude_names,
+            call_exclude_dirs=accepted_excludes,
+            file_pattern=file_pattern,
+            exclude_nested_dot_dirs=exclude_dot,
+        ):
+            return None
+        assert plan is not None
+
+        # Same candidate ceiling as Python path (scan automaton refuse).
+        n = count_native_candidates(
+            self._backend,
+            path,
+            exclude_dir_names=exclude_names,
+            exclude_nested_dot_dirs=exclude_dot,
+            file_pattern=file_pattern,
+        )
+        if n is None:
+            return None
+        candidate_limit = self._candidate_limit_for_mode(pattern_mode, config)
+        if n > candidate_limit:
+            # Fall through to Python so refuse envelope/breakdown stay identical.
+            return None
+
+        def _rp(p: str) -> str:
+            return tool_report_abspath(p, workspace=self._workspace)
+
+        result = run_native_grep(
+            self._backend,
+            path,
+            plan,
+            exclude_dir_names=exclude_names,
+            exclude_nested_dot_dirs=exclude_dot,
+            file_pattern=file_pattern,
+            max_matches=limit_eff,
+            report_path=_rp,
+            is_dir_target=True,
+        )
+        if result is None:
+            return None
+
+        count = len(result.matches)
+        stop_reason: Optional[str] = None
+        guidance: Optional[str] = None
+        # Parity with Python path: count >= limit_eff → match_limit (A boundary).
+        hit_limit = bool(result.truncated) or count >= limit_eff
+        scan_complete = not hit_limit
+        more = hit_limit
+        if hit_limit:
+            stop_reason = "match_limit"
+            guidance = self._match_limit_guidance(limit_eff)
+            scan_complete = False
+        elif limit_capped:
+            stop_reason, guidance = self._cap_stop_info(
+                True, limit_requested, limit_eff, count=count
+            )
+
+        return self._build_response(
+            matches=result.matches,
+            count=count,
+            stop_reason=stop_reason,
+            guidance=guidance,
+            scan_complete=scan_complete,
+            more_matches_may_exist=more,
+            limit_requested=limit_requested,
+            limit_eff=limit_eff,
+            limit_capped=limit_capped,
+            path=report_path,
+            pattern=pattern,
+            query_mode=query_mode,
+            mode="dir",
+            effective_ci=effective_ci,
+            file_pattern=file_pattern,
+            exclude_dir_errors=exclude_soft_errors or None,
+            search_backend="grep",
+        )
+
     # ------------------------------------------------------------------
     # directory (§3 / §5 / §6)
     # ------------------------------------------------------------------
@@ -1091,6 +1207,26 @@ class FindInFiles(AbstractSimpleTool):
         if excl_err is not None:
             return self._error("invalid_argument", "exclude_dirs", excl_err)
         assert accepted_excludes is not None
+
+        # --- native grep (gates) before Python pipeline ---
+        native_resp = self._try_native_grep_directory(
+            path=path,
+            pattern=pattern,
+            query_mode=query_mode,
+            pattern_mode=pattern_mode,
+            effective_ci=effective_ci,
+            file_pattern=file_pattern,
+            accepted_excludes=accepted_excludes,
+            exclude_soft_errors=exclude_soft_errors,
+            limit_requested=limit_requested,
+            limit_eff=limit_eff,
+            limit_capped=limit_capped,
+            config=config,
+            report_path=report_path,
+            show_excluded_dirs=show_excluded_dirs,
+        )
+        if native_resp is not None:
+            return native_resp
 
         rg_cfg = parse_read_guard_config(cfg_dict)
         rg_root = rg_context.launch_root if rg_cfg.enabled else None
@@ -1398,6 +1534,7 @@ class FindInFiles(AbstractSimpleTool):
                 if show_excluded_dirs
                 else None
             ),
+            search_backend="python",
         )
 
     # ------------------------------------------------------------------
@@ -1454,6 +1591,7 @@ class FindInFiles(AbstractSimpleTool):
         candidate_limit: Optional[int] = None,
         breakdown: Optional[Dict[str, Any]] = None,
         excluded_dirs: Optional[List[Dict[str, str]]] = None,
+        search_backend: Optional[str] = None,
     ) -> str:
         """Slim agent-facing payload (RESPONSE-CONTRACT). Omit-if-absent."""
         payload: Dict[str, Any] = {
@@ -1486,6 +1624,8 @@ class FindInFiles(AbstractSimpleTool):
             payload["file_pattern"] = file_pattern
         if exclude_dir_errors:
             payload["exclude_dir_errors"] = exclude_dir_errors
+        if search_backend is not None:
+            payload["search_backend"] = search_backend
 
         # Refuse breakdown only (too_many_candidate_files).
         if stop_reason == "too_many_candidate_files":

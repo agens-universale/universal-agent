@@ -154,6 +154,37 @@ class FindFilesByName(AbstractSimpleTool):
             payload["error"] = error
         return json.dumps(payload, ensure_ascii=False)
 
+    def _result_listing(
+        self,
+        *,
+        path: str,
+        query: Optional[str],
+        case_insensitive: bool,
+        max_matches: int,
+        ok: bool,
+        matches: Optional[List[Dict[str, Any]]] = None,
+        truncated: bool = False,
+        walk_stats: Optional[Dict[str, Any]] = None,
+        error: Optional[Dict[str, Any]] = None,
+        listing_backend: Optional[str] = None,
+    ) -> str:
+        raw = self._result(
+            path=path,
+            query=query,
+            case_insensitive=case_insensitive,
+            max_matches=max_matches,
+            ok=ok,
+            matches=matches,
+            truncated=truncated,
+            walk_stats=walk_stats,
+            error=error,
+        )
+        if listing_backend is None:
+            return raw
+        payload = json.loads(raw)
+        payload["listing_backend"] = listing_backend
+        return json.dumps(payload, ensure_ascii=False)
+
     def _resolve_read_guard(self) -> Tuple[Any, Any, Any]:
         context = resolve_tool_context(self)
         config_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
@@ -324,6 +355,7 @@ class FindFilesByName(AbstractSimpleTool):
         truncated = False
         stop_reason = "completed"
         root_norm = os.path.normpath(path)
+        listing_backend = "python"
 
         exclude_names = effective_exclude_dir_names()
 
@@ -343,28 +375,79 @@ class FindFilesByName(AbstractSimpleTool):
                 return False
             return True
 
-        try:
-            walk_iter = self._backend.iter_walk(path, should_descend=_should_descend)
-            for rel, is_d in walk_iter:
-                base = os.path.basename(rel)
-                if is_agent_hidden(base):
+        def _rel_skipped(rel: str) -> bool:
+            """Skip entries under excluded/dot/agent-hidden path segments (not root)."""
+            parts = rel.replace("\\", "/").split("/")
+            for i, part in enumerate(parts[:-1] if parts else []):
+                if not part:
                     continue
-                visited += 1
-                if visited > DEFAULT_MAX_VISITED:
-                    truncated = True
-                    stop_reason = "max_visited"
-                    break
+                if is_agent_hidden(part):
+                    return True
+                if should_skip_nested_dir_name(
+                    part,
+                    exclude_names=exclude_names,
+                    exclude_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
+                ):
+                    return True
+            base = parts[-1] if parts else ""
+            if is_agent_hidden(base):
+                return True
+            return False
 
-                abs_path = self._backend.join(path, rel)
-                if not self._read_guard_pass(abs_path, _rg_cfg, _rg_root, _rg_extra):
-                    continue
-                if not matcher(rel, base):
-                    continue
-                matches.append(self._entry(abs_path, is_d))
-                if len(matches) >= max_matches:
-                    truncated = True
-                    stop_reason = "max_matches"
-                    break
+        try:
+            # Native: find dump + Python name filter / excludes (spec §5).
+            from utils.native_fs_search import native_find_by_name_rows
+
+            native_rows = native_find_by_name_rows(self._backend, path)
+            if native_rows is not None:
+                listing_backend = "find"
+                for rel, is_d in native_rows:
+                    if _rel_skipped(rel):
+                        continue
+                    base = os.path.basename(rel.replace("\\", "/"))
+                    visited += 1
+                    if visited > DEFAULT_MAX_VISITED:
+                        truncated = True
+                        stop_reason = "max_visited"
+                        break
+                    abs_path = self._backend.join(path, rel)
+                    if not self._read_guard_pass(
+                        abs_path, _rg_cfg, _rg_root, _rg_extra
+                    ):
+                        continue
+                    if not matcher(rel, base):
+                        continue
+                    matches.append(self._entry(abs_path, is_d))
+                    if len(matches) >= max_matches:
+                        truncated = True
+                        stop_reason = "max_matches"
+                        break
+            else:
+                walk_iter = self._backend.iter_walk(
+                    path, should_descend=_should_descend
+                )
+                for rel, is_d in walk_iter:
+                    base = os.path.basename(rel)
+                    if is_agent_hidden(base):
+                        continue
+                    visited += 1
+                    if visited > DEFAULT_MAX_VISITED:
+                        truncated = True
+                        stop_reason = "max_visited"
+                        break
+
+                    abs_path = self._backend.join(path, rel)
+                    if not self._read_guard_pass(
+                        abs_path, _rg_cfg, _rg_root, _rg_extra
+                    ):
+                        continue
+                    if not matcher(rel, base):
+                        continue
+                    matches.append(self._entry(abs_path, is_d))
+                    if len(matches) >= max_matches:
+                        truncated = True
+                        stop_reason = "max_matches"
+                        break
         except PermissionError as e:
             return _result(
                 ok=False,
@@ -379,7 +462,11 @@ class FindFilesByName(AbstractSimpleTool):
         if stop_reason == "completed":
             truncated = False
 
-        return _result(
+        return self._result_listing(
+            path=path,
+            query=query,
+            case_insensitive=ci,
+            max_matches=max_matches,
             ok=True,
             matches=matches,
             truncated=truncated,
@@ -388,4 +475,5 @@ class FindFilesByName(AbstractSimpleTool):
                 "stop_reason": stop_reason,
                 "max_visited": DEFAULT_MAX_VISITED,
             },
+            listing_backend=listing_backend,
         )
