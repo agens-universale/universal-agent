@@ -1,4 +1,6 @@
+import asyncio
 import difflib
+import inspect
 import json
 import traceback
 import logging
@@ -237,15 +239,21 @@ def build_tools_data(
     return tools_data, tools_spec, tools_description, mcp_status
 
 
-def apply_tool(
+def _prepare_tool_call(
     tool_name: str,
     arguments: str | Dict[str, Any],
     tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
     ctx: Optional[Any] = None,
     **kwargs: Any,
-) -> str:
+) -> "tuple[Any, Dict[str, Any]] | str":
     """
-    Вызвать тул по имени.
+    Подготовить вызов тула: вернуть ``(тул, аргументы)`` либо готовую строку-ответ.
+
+    Строка — это ранний выход, к самому вызову не ведущий: неизвестный тул,
+    серверный сабагент, результат локального SubagentRunner. Общая часть для
+    синхронного ``apply_tool`` и асинхронного ``aapply_tool``: валидация,
+    strip инжектируемых полей и сборка фабрики у них одна и та же, различается
+    ТОЛЬКО способ позвать сам тул.
 
     - tools_data_ — явный словарь tools_data (обычный путь в тестах/утилитах);
     - ctx — RunContext; если передан и tools_data_ не задан, берём tools_data из ctx.
@@ -359,39 +367,91 @@ def apply_tool(
     if config_dict:
         fabric_kwargs.setdefault("config_dict", config_dict)
     tool = tool_fabric(**fabric_kwargs)
-    # log.debug(
-    #    "apply_tool log:\nkwargs:\n%s\narguments:\n %s\ntool_fabric:\n%s\ntool:\n%s",
-    #    kwargs,
-    #    arguments,
-    #    tool_fabric,
-    #    tool,
-    #)
-    try:
-        res = tool.__call__(**arguments)
-    except Exception as e:  # noqa: BLE001
-        res = str(e)
-        res += (
-            "\n"
-            + "Agent tool execution Error in cli agent tool execution: "
-            + traceback.format_exc()
-        )
+    return tool, arguments
 
+
+def _tool_exception_output(exc: BaseException) -> str:
+    """Текст, который агент увидит вместо результата упавшего тула."""
+    return (
+        str(exc)
+        + "\n"
+        + "Agent tool execution Error in cli agent tool execution: "
+        + traceback.format_exc()
+    )
+
+
+def _tool_result_to_text(res: Any) -> str:
     if isinstance(res, str):
-        res_str = res
-    elif isinstance(res, list):
-        res_str = json.dumps(res, ensure_ascii=False)
-    elif isinstance(res, dict):
-        res_str = json.dumps(res, ensure_ascii=False)
-    else:
-        res_str = str(res)
+        return res
+    if isinstance(res, (list, dict)):
+        return json.dumps(res, ensure_ascii=False)
+    return str(res)
 
-    return res_str
+
+def apply_tool(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
+    ctx: Optional[Any] = None,
+    **kwargs: Any,
+) -> str:
+    """
+    Вызвать тул по имени (синхронно).
+
+    Контракт не менялся: та же сигнатура, тот же строковый результат, портала
+    на пути нет. Асинхронный тул синхронным путём позвать нельзя — об этом
+    говорится прямо, а не возвращается корутина, приведённая к строке.
+    """
+    prepared = _prepare_tool_call(tool_name, arguments, tools_data_, ctx, **kwargs)
+    if isinstance(prepared, str):
+        return prepared
+    tool, args = prepared
+    if inspect.iscoroutinefunction(tool.__call__):
+        return (
+            f"Tool {tool_name} is async; call it through aapply_tool() "
+            f"(sync apply_tool cannot await)."
+        )
+    try:
+        res = tool(**args)
+    except Exception as e:  # noqa: BLE001
+        res = _tool_exception_output(e)
+    return _tool_result_to_text(res)
+
+
+async def aapply_tool(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
+    ctx: Optional[Any] = None,
+    **kwargs: Any,
+) -> str:
+    """
+    Вызвать тул по имени (асинхронно), приняв и синхронный, и асинхронный тул.
+
+    Корутину ждём, обычную функцию уводим в поток. Смешение легально навсегда:
+    у встраивающих SDK свои тулы, и переезд ядра на asyncio не имеет права
+    требовать от них переписывания — синхронный ``__call__`` продолжает
+    работать, просто не блокируя loop.
+    """
+    prepared = _prepare_tool_call(tool_name, arguments, tools_data_, ctx, **kwargs)
+    if isinstance(prepared, str):
+        return prepared
+    tool, args = prepared
+    try:
+        if inspect.iscoroutinefunction(tool.__call__):
+            res = await tool(**args)
+        else:
+            res = await asyncio.to_thread(lambda: tool(**args))
+    except Exception as e:  # noqa: BLE001
+        res = _tool_exception_output(e)
+    return _tool_result_to_text(res)
 
 
 __all__ = [
     "WrongFunctionArgumentsException",
     "build_tools_data",
     "apply_tool",
+    "aapply_tool",
     "format_unknown_tool_output",
     "is_unknown_tool_output",
 ]
