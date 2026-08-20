@@ -4,11 +4,16 @@ from gc_core import request_backend_policy as policy
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 
+async def _anoop(*_a, **_k):
+    """Пауза политики стала кооперативной (asyncio.sleep)."""
+    return None
+
+
 def test_policy_retries_stream_error_then_succeeds(monkeypatch):
-    monkeypatch.setattr(policy.time, "sleep", lambda *_a, **_k: None)  # без задержки
+    monkeypatch.setattr(policy.asyncio, "sleep", _anoop)  # без задержки
     calls = {"n": 0}
 
-    def _fake_request(payload, headers, url, verify, use_retry, logger, on_delta, cert=None, timeout=600, config_proxy=None):
+    async def _fake_request(payload, headers, url, verify, use_retry, logger, on_delta, cert=None, timeout=600, config_proxy=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise BackendStreamError(
@@ -16,7 +21,7 @@ def test_policy_retries_stream_error_then_succeeds(monkeypatch):
             )
         return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
 
-    monkeypatch.setattr(policy, "request_backend_chat_completions", _fake_request)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", _fake_request)
 
     res, _payload = policy.request_chat_completions_with_policy(
         payload_factory=lambda mt: {"max_tokens": mt},

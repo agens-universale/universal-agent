@@ -107,7 +107,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
     def _fake_create_call_headers(_state, _ctx):
         return {"Authorization": "Bearer fake"}
 
-    def _fake_request_backend_chat_completions(data, *_args, **_kwargs):
+    async def _fake_request_backend_chat_completions(data, *_args, **_kwargs):
         captured["messages"] = data.get("messages", [])
         return {
             "id": "chat_1",
@@ -123,7 +123,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         processing_module, "create_call_headers", _fake_create_call_headers
     )
     monkeypatch.setattr(
-        "gc_core.request_backend_policy.request_backend_chat_completions",
+        "gc_core.request_backend_policy.arequest_backend_chat_completions",
         _fake_request_backend_chat_completions,
     )
 

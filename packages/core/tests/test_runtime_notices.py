@@ -72,7 +72,7 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
     def boom(*args, **kwargs):
         raise _http_error(400, {"message": "bad request"})
 
-    monkeypatch.setattr(policy, "request_backend_chat_completions", boom)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", boom)
 
     with pytest.raises(requests.exceptions.HTTPError):
         policy.request_chat_completions_with_policy(
@@ -99,7 +99,7 @@ def test_policy_skips_notice_when_disabled(monkeypatch):
     def boom(*args, **kwargs):
         raise _http_error(500, {"message": "fail"})
 
-    monkeypatch.setattr(policy, "request_backend_chat_completions", boom)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", boom)
 
     with pytest.raises(requests.exceptions.HTTPError):
         policy.request_chat_completions_with_policy(

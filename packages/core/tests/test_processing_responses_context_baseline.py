@@ -19,6 +19,11 @@ from gc_testkit.intent_fixtures import (
 from gc_testkit.paths import module_dir
 
 
+async def _anoop(*_a, **_k):
+    """Пауза политики стала кооперативной (asyncio.sleep, Задача 11)."""
+    return None
+
+
 def teardown_module(_module) -> None:
     # Нельзя выкидывать processing_responses: тесты вида
     # `from processing_responses import f` держат f с устаревшим __globals__;
@@ -274,7 +279,7 @@ def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch
     max_tokens_seen: list[int] = []
     use_retry_seen: list[bool] = []
 
-    def _fake_request_backend(data, *_args, **kwargs):
+    async def _fake_request_backend(data, *_args, **kwargs):
         max_tokens_seen.append(data["max_tokens"])
         use_retry_seen.append(bool(kwargs.get("use_retry")))
         if len(max_tokens_seen) < 3:
@@ -283,10 +288,10 @@ def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch
 
     monkeypatch.setattr(
         request_policy,
-        "request_backend_chat_completions",
+        "arequest_backend_chat_completions",
         _fake_request_backend,
     )
-    monkeypatch.setattr(request_policy.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(request_policy.asyncio, "sleep", _anoop)
 
     response, payload = request_policy.request_chat_completions_with_policy(
         payload_factory=lambda max_tokens: {"max_tokens": max_tokens},
@@ -342,16 +347,16 @@ def test_run_agent_propagates_backend_http_error(monkeypatch):
 def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch):
     max_tokens_seen: list[int] = []
 
-    def _fake_request_backend(data, *_args, **_kwargs):
+    async def _fake_request_backend(data, *_args, **_kwargs):
         max_tokens_seen.append(data["max_tokens"])
         raise requests.exceptions.ConnectionError("network is down")
 
     monkeypatch.setattr(
         request_policy,
-        "request_backend_chat_completions",
+        "arequest_backend_chat_completions",
         _fake_request_backend,
     )
-    monkeypatch.setattr(request_policy.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(request_policy.asyncio, "sleep", _anoop)
 
     with pytest.raises(requests.exceptions.ConnectionError):
         request_policy.request_chat_completions_with_policy(

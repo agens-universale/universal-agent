@@ -98,11 +98,11 @@ def test_policy_forwards_timeout(monkeypatch):
 
     seen = {}
 
-    def fake_req(*_args, **kwargs):
+    async def fake_req(*_args, **kwargs):
         seen["timeout"] = kwargs.get("timeout")
         return {"choices": [{"message": {"content": "ok"}}]}
 
-    monkeypatch.setattr(policy, "request_backend_chat_completions", fake_req)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", fake_req)
     policy.request_chat_completions_with_policy(
         payload_factory=lambda mt: {"max_tokens": mt},
         initial_max_tokens=100,

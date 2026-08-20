@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from gc_core.request_backend_policy import request_chat_completions_with_policy
+from gc_core.request_backend_policy import arequest_chat_completions_with_policy
 from gc_core.utils.ssl_config import get_backend_client_cert
 from gc_core.utils.connect_backend import create_call_headers
 from gc_core.usage.account import category_for_request_label
@@ -158,7 +158,7 @@ def _build_chat_completion_payload(
     return payload
 
 
-def request_chat_completion_text(
+async def arequest_chat_completion_text(
     *,
     ctx: Any,
     state: Any,
@@ -193,7 +193,7 @@ def request_chat_completion_text(
     headers = create_call_headers(state, ctx)
     usage_category = category_for_request_label(request_label)
     with usage_scope(getattr(state, "usage", None), usage_category, "chat_completions"):
-        res, _call_data = request_chat_completions_with_policy(
+        res, _call_data = await arequest_chat_completions_with_policy(
             payload_factory=_payload_factory,
             initial_max_tokens=max_tokens,
             min_response_tokens=min_response_tokens,
@@ -219,3 +219,10 @@ def request_chat_completion_text(
         else ""
     )
     return (text or "").strip()
+
+
+def request_chat_completion_text(**kwargs: Any) -> str:
+    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(arequest_chat_completion_text(**kwargs))

@@ -15,7 +15,7 @@ def _cfg(**overrides):
 def _patch_policy(monkeypatch):
     captured = {}
 
-    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+    async def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
         payload = payload_factory(initial_max_tokens)
         captured["payload"] = payload
         captured["initial_max_tokens"] = initial_max_tokens
@@ -23,7 +23,7 @@ def _patch_policy(monkeypatch):
 
     monkeypatch.setattr(
         llm_chat_client,
-        "request_chat_completions_with_policy",
+        "arequest_chat_completions_with_policy",
         _fake_policy,
     )
     monkeypatch.setattr(llm_chat_client, "create_call_headers", lambda _s, _c: {})

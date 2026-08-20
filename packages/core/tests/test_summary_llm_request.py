@@ -125,13 +125,13 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
 ):
     captured = {}
 
-    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+    async def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
         captured["payload"] = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "ok"}}]}, {}
 
     monkeypatch.setattr(
         llm_chat_client,
-        "request_chat_completions_with_policy",
+        "arequest_chat_completions_with_policy",
         _fake_policy,
     )
     monkeypatch.setattr(llm_chat_client, "create_call_headers", lambda _s, _c: {})

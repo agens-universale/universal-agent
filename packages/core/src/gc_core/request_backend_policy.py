@@ -1,11 +1,12 @@
+import asyncio
 import logging
-import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
-from gc_core.utils.connect_backend import request_backend_chat_completions
+from gc_core.utils.connect_backend import arequest_backend_chat_completions
 from gc_core.utils.backend_errors import EmbeddedChoiceError, is_retriable_backend_error
+from gc_core.utils.portal import get_portal
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
@@ -70,7 +71,7 @@ def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> in
     return max(int(minimum), reduced)
 
 
-def request_chat_completions_with_policy(
+async def arequest_chat_completions_with_policy(
     *,
     payload_factory: Callable[[int], Dict[str, Any]],
     initial_max_tokens: int,
@@ -98,11 +99,11 @@ def request_chat_completions_with_policy(
     transport retries. Connection errors/timeouts are not retried here.
     """
 
-    def _send_once(
+    async def _send_once(
         max_tokens: int, *, transport_use_retry: bool
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         payload = payload_factory(max_tokens)
-        response = request_backend_chat_completions(
+        response = await arequest_backend_chat_completions(
             payload,
             headers,
             url=url,
@@ -119,7 +120,7 @@ def request_chat_completions_with_policy(
         return response, payload
 
     try:
-        return _send_once(initial_max_tokens, transport_use_retry=use_retry)
+        return await _send_once(initial_max_tokens, transport_use_retry=use_retry)
     except Exception as first_exc:
         if not is_retriable_backend_error(first_exc):
             maybe_push_llm_failure_notice(
@@ -147,9 +148,10 @@ def request_chat_completions_with_policy(
                 reduced_max_tokens,
                 exc_info=True,
             )
-            time.sleep(_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC)
+            # Пауза кооперативная: time.sleep заморозил бы весь loop.
+            await asyncio.sleep(_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC)
             try:
-                return _send_once(reduced_max_tokens, transport_use_retry=False)
+                return await _send_once(reduced_max_tokens, transport_use_retry=False)
             except Exception as retry_exc:
                 current_max_tokens = reduced_max_tokens
                 if not is_retriable_backend_error(retry_exc):
@@ -167,3 +169,10 @@ def request_chat_completions_with_policy(
             enabled=runtime_notices_enabled,
         )
         raise first_exc
+
+
+def request_chat_completions_with_policy(
+    **kwargs: Any,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
+    return get_portal().run(arequest_chat_completions_with_policy(**kwargs))
