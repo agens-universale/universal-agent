@@ -2157,16 +2157,25 @@ def _model_hint(scr):
 
 
 async def _open_model_field(app, scr, pilot, tries=100):
-    """Курсор — на поле «Модель» облачной панели; ждём ответа загрузки (воркер-поток)."""
+    """Курсор — на поле «Модель» облачной панели, список раскрыт; ждём ответа загрузки.
+
+    Сам список раскрывается только на ПУСТОМ поле (канон 2026-08-20): при сохранённом
+    id раскрытие — явная просьба человека, `Alt+↓`. Тестам нужен раскрытый список в
+    обоих случаях, поэтому просим явно там, где автовход промолчал."""
     await _open_cloud(app, scr, pilot)
     await _to_field(pilot, _TO_MODEL_FIELD)
+    ctrl = scr._voice_list_ctrl()
+    if ctrl is not None and not ctrl.is_open:
+        await pilot.press("alt+down")
+        await pilot.pause()
     await _wait(pilot, lambda: _model_hint(scr) != "загружаю модели…", tries=tries)
 
 
 @pytest.mark.asyncio
-async def test_model_list_opens_when_the_cursor_enters_the_field(tmp_path):
-    """Вход курсора на «Модель» облака сам идёт за списком на сервер и раскрывает его —
-    канон поля со списком (у языка так же, только данные локальные).
+async def test_model_list_opens_on_alt_down_over_a_saved_id(tmp_path):
+    """Модель уже сохранена — вход курсора список НЕ раскрывает и в сеть не ходит
+    (живой смок 2026-08-20: раскрытие поверх выбранного значения только мешало, а
+    каждый заход на поле стоил запроса). Раскрывает `Alt+↓`, и вот он идёт на сервер.
 
     Сохранённый id (`whisper-old`) среди ответа сервера не значится — ни одна строка
     не подсвечена (видно по отсутствию `▸` в `_model_rows`), и хинт обязан звать Enter
@@ -2179,7 +2188,12 @@ async def test_model_list_opens_when_the_cursor_enters_the_field(tmp_path):
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.models = _MODELS
         assert not _model_rows(scr)
-        await _open_model_field(app, scr, pilot)
+        await _open_cloud(app, scr, pilot)
+        await _to_field(pilot, _TO_MODEL_FIELD)
+        assert not _model_rows(scr), "вход на заполненное поле список не раскрывает"
+        assert fake.model_calls == [], "и в сеть за списком не ходит"
+        await pilot.press("alt+down")                   # явная просьба показать список
+        await _wait(pilot, lambda: _model_hint(scr) != "загружаю модели…")
         assert _focused_id(scr) == "voice-model"
         assert _model_rows(scr) == ["  whisper-large-v3-turbo",
                                     "  Systran/faster-whisper-small"]
@@ -2469,6 +2483,7 @@ async def test_picking_a_model_from_the_list_drops_the_probe_verdict(tmp_path):
         await pilot.pause()
         assert "42" in str(scr.query_one(".set-probe", Static).render())
         await _to_field(pilot, _TO_MODEL_FIELD)
+        await pilot.press("alt+down")                  # id сохранён — раскрываем явно
         await _wait(pilot, lambda: _model_rows(scr))
         await pilot.press("down")                      # встали на строку списка
         await pilot.pause()
@@ -4240,3 +4255,27 @@ async def test_alive_delivery_updates_menu_rows_in_place(tmp_path):
         rows_after = list(scr.query(".set-menurow"))
         assert [id(w) for w in rows_after] == [id(w) for w in rows_before], \
             "доставка живости пересобрала меню вместо точечного обновления строк"
+
+
+@pytest.mark.asyncio
+async def test_escape_over_a_saved_model_keeps_it_in_the_field(tmp_path):
+    """Список раскрыт поверх сохранённого id — Esc возвращает ЕГО, а не пустоту.
+
+    Живой смок 2026-08-20: список моделей раскрывался сам при каждом входе на поле,
+    и `Esc` («убрать ненужный список») оставлял поле пустым — на экране это читалось
+    как «отменил выбор модели». Раскрытие поверх значения теперь идёт только явным
+    `Alt+↓`, а закрытие возвращает в поле ровно то, что там было."""
+    from tui.app import TuiApp
+    from textual.widgets import Input
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
+        fake.models = _MODELS
+        await _open_model_field(app, scr, pilot)       # заполнено → раскрыл Alt+↓
+        assert _model_rows(scr), "предусловие: список раскрыт"
+        assert scr.query_one("#voice-model", Input).value == "whisper-old"
+
+        await pilot.press("escape")                    # убрать ненужный список
+        await pilot.pause()
+        assert not _model_rows(scr)
+        assert scr.query_one("#voice-model", Input).value == "whisper-old"

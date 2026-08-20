@@ -799,7 +799,7 @@ async def test_model_list_loads_rows_into_a_capped_scroll_frame():
     ed = _cloud(fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         assert _model_rows(ed) == ["▸ whisper-large-v3-turbo",
                                    "  Systran/faster-whisper-small"]
@@ -817,7 +817,7 @@ async def test_model_list_shares_frame_with_its_field():
     ed = _cloud(fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         group = ed.query_one("#voice-model-group")
         assert "field-group" in group.classes
@@ -860,7 +860,7 @@ async def test_model_list_says_it_is_loading_before_the_answer():
     ed = _cloud(fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test():
-        ed.model_list.open()                    # воркер ещё не ответил
+        ed.model_list.open(forced=True)                    # воркер ещё не ответил
         assert _model_hint(ed) == "загружаю модели…"
         assert not ed.query(".voice-model-scroll")
 
@@ -874,7 +874,7 @@ async def test_model_list_failure_does_not_block_manual_entry():
     ed = _cloud({"model": "my-own-stt"}, fetch=_boom)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_hint(ed) != "загружаю модели…")
         assert _model_hint(ed) == "не удалось получить список — можно вписать вручную"
         assert ed.model_list.move(1) is False and ed.model_list.has_matches is False
@@ -886,7 +886,7 @@ async def test_model_list_reports_an_empty_server_answer():
     ed = _cloud(fetch=lambda url, token, verify, **kw: [])
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_hint(ed) != "загружаю модели…")
         assert _model_hint(ed) == "сервер не вернул моделей"
         assert not ed.query(".voice-model-row")
@@ -904,7 +904,7 @@ async def test_model_list_stays_silent_without_a_url():
     ed = _cloud({"url": ""}, fetch=_fetch)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open()          # именно автовход: на явную просьбу молчать нельзя
         await pilot.pause()
         assert calls == []
         assert ed.model_list.is_open is False
@@ -922,14 +922,14 @@ async def test_model_list_asks_the_address_and_token_of_the_fields():
                 saved_token="saved-secret", verify_ssl=False)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: seen)
         assert seen[-1] == ("https://s.x/v1/audio/transcriptions", "saved-secret", False)
         ed.model_list.close()
         ed.query_one("#voice-url", Input).value = "https://other.x/v1/audio/transcriptions"
         ed.query_one("#voice-token", Input).value = "typed-now"
         await pilot.pause()
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: len(seen) > 1)
         assert seen[-1] == ("https://other.x/v1/audio/transcriptions", "typed-now", False)
 
@@ -940,7 +940,7 @@ async def test_model_list_ignores_a_stale_answer():
     ed = _cloud(fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         stale_gen = ed.model_list._gen - 1
         ed.model_list._on_loaded(["ghost-model"], stale_gen, "")
@@ -958,7 +958,7 @@ async def test_model_list_filters_by_typing_and_picks_into_the_field():
     async with app.run_test() as pilot:
         ed.focus_field("model")
         await pilot.pause()
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         ed.query_one("#voice-model", Input).value = "faster"
         await pilot.pause()
@@ -972,7 +972,7 @@ async def test_model_list_hint_is_honest_when_the_filter_matches_nothing():
     ed = _cloud(fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         ed.model_list.apply_filter("no-such-model")
         assert _model_rows(ed) == []
@@ -985,7 +985,7 @@ async def test_model_list_reload_asks_the_server_again():
     ed = _cloud(fetch=lambda url, token, verify, **kw: answers.pop(0))
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_hint(ed) != "загружаю модели…")
         assert _model_hint(ed) == "не удалось получить список — можно вписать вручную"
         ed.model_list.reload()
@@ -999,7 +999,7 @@ async def test_model_list_and_lang_list_do_not_share_widgets():
     ed = _cloud(fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         ed.lang_list.open()
         assert len(_lang_rows(ed)) == 100 and len(_model_rows(ed)) == 2
@@ -1015,7 +1015,7 @@ async def test_model_list_highlights_the_current_model():
                 fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         assert _model_rows(ed) == ["  whisper-large-v3-turbo",
                                    "▸ Systran/faster-whisper-small"]
@@ -1027,7 +1027,7 @@ async def test_model_list_highlights_nothing_for_an_own_id():
     ed = _cloud({"model": "my-own-stt"}, fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         assert not [r for r in _model_rows(ed) if r.startswith("▸")]
         assert ed.pick_in("model") is False
@@ -1044,7 +1044,7 @@ async def test_model_list_reload_keeps_the_pre_filter_baseline():
         field = ed.query_one("#voice-model", Input)
         field.focus()
         await pilot.pause()
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         field.value = "faster"                       # печать = фильтр
         await pilot.pause()
@@ -1063,7 +1063,7 @@ async def test_model_list_reload_keeps_the_typed_filter_in_sync():
         field = ed.query_one("#voice-model", Input)
         field.focus()
         await pilot.pause()
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         field.value = "faster"
         await pilot.pause()
@@ -1079,7 +1079,7 @@ async def test_model_list_reload_of_a_collapsed_list_shows_everything():
     ed = _cloud({"model": "whisper-old"}, fetch=lambda url, token, verify, **kw: _STT)
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
         ed.model_list.close()
         await pilot.pause()
@@ -1097,7 +1097,7 @@ async def test_model_list_reload_without_typing_shows_everything():
                 fetch=lambda url, token, verify, **kw: answers.pop(0))
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.model_list.open()
+        ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_hint(ed) != "загружаю модели…")
         assert _model_hint(ed) == "не удалось получить список — можно вписать вручную"
         ed.model_list.reload()

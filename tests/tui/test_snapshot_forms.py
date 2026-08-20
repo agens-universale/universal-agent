@@ -258,10 +258,11 @@ def test_settings_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
     assert snap_compare(app, terminal_size=_SIZE, run_before=setup)
 
 
-# Адрес совпадает с пресетом Groq (спека 2026-08-05 §3) — тем же приёмом, что и
-# юнит-тест `test_url_list_opens_when_the_cursor_enters_the_field` в
-# test_settings_voice.py: только так вход курсора на поле раскрывает список сам,
-# без Alt+↓, и подсвечивает СВОЙ пресет, а не первую строку.
+# Адрес совпадает с пресетом Groq (спека 2026-08-05 §3): раскрытый список тогда
+# подсвечивает СВОЙ пресет, а не первую строку. Раскрываем `Alt+↓` — поверх
+# заполненного поля список сам не раскрывается (канон форм 2026-08-17, `can_open`);
+# гейт стережёт юнит-тест `test_preset_url_opens_only_on_alt_down_and_highlights_the_match`
+# в test_settings_voice.py, а этот эталон — вид самого раскрытого списка.
 _URL_PRESET_CONFIG = ("model: m\nvoice:\n"
                       "  url: https://api.groq.com/openai/v1/audio/transcriptions\n"
                       "  token: old-token\n  model: whisper-1\n")
@@ -281,6 +282,8 @@ def test_settings_voice_url_presets_snapshot(snap_compare, tmp_path, monkeypatch
         open_settings_section(scr, "Голосовой ввод")
         await pilot.pause()
         await pilot.press("tab")        # строка режима → группа полей, первое поле — «URL»
+        await pilot.pause()
+        await pilot.press("alt+down")   # адрес задан — список раскрывает явная клавиша
         await pilot.pause()
         await _freeze_cursors(pilot)
 
