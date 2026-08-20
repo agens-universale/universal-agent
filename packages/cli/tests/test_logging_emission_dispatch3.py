@@ -221,7 +221,12 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
         patch.object(cli_module, "build_auth_connector", return_value=None), \
         patch.object(cli_module, "create_run_context", return_value=ctx), \
         patch.object(cli_module, "AgentExecutor") as mock_executor_cls:
-        mock_executor_cls.return_value.run.return_value = "the final answer text"
+        # Точка входа CLI асинхронная (Задача 23 async-переезда): прогон идёт
+        # через arun, и заглушка обязана быть корутинной.
+        async def _arun(*_a, **_kw):
+            return "the final answer text"
+
+        mock_executor_cls.return_value.arun = _arun
 
         rc = cli_module.main()
         assert rc == 0

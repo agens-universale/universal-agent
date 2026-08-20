@@ -1,3 +1,4 @@
+import asyncio
 import threading
 import time
 from dataclasses import dataclass
@@ -20,7 +21,12 @@ class ActiveRun:
     system: str
     task_id: str
     executor: Any
-    thread: threading.Thread
+    #: Прогон агента. С переездом ядра на asyncio это ``asyncio.Task`` на loop
+    #: сервера, а не поток: uvicorn и так асинхронный, и держать поток на
+    #: каждый висящий запрос было нужно только потому, что ядро блокировало.
+    #: Поле оставлено под прежним именем — его читают снаружи как «то, чем
+    #: идёт прогон».
+    thread: Any
     started_at: float
     finished_at: Optional[float]
     thread_id: Optional[str]
@@ -76,7 +82,7 @@ class AgentRunRegistry:
             self._cleanup_completed_locked()
             return self._completed.get(key)
 
-    def start_if_absent(
+    async def astart_if_absent(
         self,
         *,
         system: str,
@@ -98,10 +104,10 @@ class AgentRunRegistry:
             started_at = time.time()
             run_ref: ActiveRun | None = None
 
-            def _runner() -> None:
+            async def _runner() -> None:
                 nonlocal run_ref
                 try:
-                    result = executor.run(
+                    result = await executor.arun(
                         [initial_user_message],
                         thread_id=thread_id,
                         system=system,
@@ -129,7 +135,10 @@ class AgentRunRegistry:
                             self._completed[key] = run_ref
                             self._cleanup_completed_locked()
 
-            t = threading.Thread(target=_runner, name=f"agent-run:{key}", daemon=True)
+            # Таска, а не поток: эндпоинт уже на loop, а ядро больше не блокирует.
+            t = asyncio.get_running_loop().create_task(
+                _runner(), name=f"agent-run:{key}"
+            )
             run_ref = ActiveRun(
                 key=key,
                 system=system,
@@ -142,8 +151,13 @@ class AgentRunRegistry:
                 last_activity_at=started_at,
             )
             self._runs[key] = run_ref
-            t.start()
             return run_ref
+
+    def start_if_absent(self, **kwargs: Any) -> ActiveRun:
+        """Синхронный двойник — для вызывающих вне loop и тестов."""
+        from gc_core.utils.aio_compat import run_coro_blocking
+
+        return run_coro_blocking(self.astart_if_absent(**kwargs))
 
     def add_user_message(
         self,
@@ -174,4 +188,3 @@ class AgentRunRegistry:
 
 
 agent_run_registry = AgentRunRegistry()
-

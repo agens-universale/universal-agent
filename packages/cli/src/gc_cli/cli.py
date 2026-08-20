@@ -252,7 +252,7 @@ def _run_init_agents_md() -> int:
     return 0
 
 
-def main() -> int:
+async def amain() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
     создание RunContext и запуск агента.
@@ -346,13 +346,18 @@ def main() -> int:
 
     executor = AgentExecutor(ctx)
     try:
-        response = executor.run(
+        response = await executor.arun(
             user_parts,
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             verbose=verbose,
         )
     finally:
+        # Пул httpx привязан к этому loop — закрыть его надо до его остановки,
+        # иначе на выходе получим «Event loop is closed» из деструктора.
+        from gc_core.utils.async_http import aclose_clients
+
+        await aclose_clients()
         if auto_mcp:
             shutdown_mcp_daemons()
     formatted = format_json_for_display(response)
@@ -367,6 +372,16 @@ def main() -> int:
     return 0
 
 
+def main() -> int:
+    """Синхронная точка входа команды ``gc-cli``.
+
+    Сам прогон асинхронный (``amain``), поэтому здесь заводится ОДИН loop на
+    процесс — и портал, через который шли бы синхронные шимы, не нужен вовсе.
+    """
+    import asyncio
+
+    return asyncio.run(amain())
+
+
 if __name__ == "__main__":
-    # -q "создай подпапку test_project. в ней напиши на python модуль вычисления чисел фиббоначи. там же в отдельном файле напиши тесты. как прогонишь все тесты, запусти посчитай первые 1000е числео фиббоначи и сложи результат в json файл там же. Пиши быстрый код, чтобы кешировало расчеты и долго не считало. Скажи мне чему будет равно 1000-е числов фиббоначи, умноженное на 3."
-    main()
+    raise SystemExit(main())

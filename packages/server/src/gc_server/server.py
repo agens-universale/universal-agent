@@ -346,7 +346,7 @@ async def events_webhook(request: Request):
     auth_connector = build_auth_connector(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 
-    agent_run_registry.start_if_absent(
+    await agent_run_registry.astart_if_absent(
         system=system,
         task_id=task_id,
         executor_factory=AgentExecutor,

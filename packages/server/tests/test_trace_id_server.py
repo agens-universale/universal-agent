@@ -14,7 +14,7 @@ def client(monkeypatch, tmp_path):
         captured["config_dict"] = config_dict
         return object()
 
-    def _fake_start_if_absent(**kwargs):
+    async def _fake_start_if_absent(**kwargs):
         captured["start_kwargs"] = kwargs
         return True
 
@@ -25,7 +25,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "create_run_context", _fake_create_run_context)
     monkeypatch.setattr(server, "build_auth_connector", lambda cfg: None)
     monkeypatch.setattr(
-        server.agent_run_registry, "start_if_absent", _fake_start_if_absent
+        server.agent_run_registry, "astart_if_absent", _fake_start_if_absent
     )
     monkeypatch.setattr(
         server.agent_run_registry, "add_user_message", _fake_add_user_message

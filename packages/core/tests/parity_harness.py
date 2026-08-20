@@ -161,6 +161,45 @@ def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
     return backend
 
 
+
+def install_many(monkeypatch, backends: dict) -> dict:
+    """Подменить транспорт НЕСКОЛЬКИМИ сценариями, по одному на модель.
+
+    Один общий сценарий на двух агентов не годится: ходы раздаются в порядке
+    ВЫЗОВОВ, и второй агент забирает финализатор первого. Такой тест меряет не
+    параллельность, а очередь — что и случилось при первой попытке измерить
+    Задачу 26.
+
+    ``backends`` — ``{имя_модели: ScriptedBackend}``; конфиги агентов должны
+    отличаться полем ``model``.
+    """
+    import httpx
+
+    from gc_core.utils import connect_backend
+
+    def handler(request: "httpx.Request") -> "httpx.Response":
+        payload = json.loads(request.content or b"{}")
+        model = payload.get("model")
+        backend = backends.get(model)
+        if backend is None:
+            raise AssertionError(
+                f"нет сценария для модели {model!r}; есть: {sorted(backends)}"
+            )
+        turn = backend.next_payload(payload)
+        if payload.get("stream"):
+            return httpx.Response(
+                200, text=_as_sse(turn),
+                headers={"content-type": "text/event-stream"},
+            )
+        return httpx.Response(200, json=turn)
+
+    monkeypatch.setattr(
+        connect_backend, "get_async_client",
+        lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    return backends
+
+
 def assistant_tool_call(name: str, arguments: dict, call_id: str = "c1") -> dict:
     """Ход модели «вызвать тул» в формате chat/completions."""
     return {
