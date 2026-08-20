@@ -167,6 +167,22 @@ def test_main_transport_resolve_is_pinned_to_turn_level():
     assert pr._resolve_main_for_turn(state, ctx).alias == "smart"
 
 
+def test_turn_level_is_declared_on_state_before_any_turn():
+    """`turn_level` — служебное поле прогона, значит объявлено в State наравне с
+    `turn_tool_calls`. Три читателя берут его через `getattr(..., None)`, и без
+    объявления «ход ещё не начинали» неотличимо от «поля нет вовсе»: транспорт
+    молча уходил бы на живой резолв — ровно тот дрейф /level посреди хода, ради
+    которого пин и заведён."""
+    state = _make_state()
+    assert hasattr(state, "turn_level")
+    assert state.turn_level is None
+
+    level = {"value": "light"}
+    ctx = SimpleNamespace(model_router=_two_slot_router(level))
+    begin_turn(state, ctx)
+    assert state.turn_level == "light"
+
+
 def test_pinned_main_resolve_still_checks_circuit_breaker():
     """Пин фиксирует ВЫБОР модели, а не её здоровье: алиас, открывшийся посреди
     хода, обязан отказать резолву так же, как при живом `resolve("main")`."""
