@@ -199,7 +199,25 @@ def create_run_context(
     return ctx
 
 
+async def acreate_run_context(config_dict: Dict[str, Any], **kwargs: Any) -> RunContext:
+    """Собрать RunContext, не блокируя event loop.
+
+    Сборка включает MCP-дискавери: сетевые вызовы к каждому серверу с общим
+    дедлайном. Именно её TUI прячет в фоновый поток (``AgentRunner.warm``), а
+    асинхронному вызывающему достаточно ``await``.
+
+    Пока это ``to_thread`` над синхронной сборкой: MCP-клиент внутри всё ещё
+    синхронный (его переезд — отдельная задача плана). Для вызывающего разницы
+    нет — loop свободен; когда клиент станет асинхронным, тело поменяется, а
+    контракт останется.
+    """
+    import asyncio
+
+    return await asyncio.to_thread(lambda: create_run_context(config_dict, **kwargs))
+
+
 __all__ = [
     "RunContext",
+    "acreate_run_context",
     "create_run_context",
 ]

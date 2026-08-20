@@ -144,7 +144,7 @@ class SummaryTriggersTest(unittest.TestCase):
             def _hist_exceeds(**_kwargs):
                 return truth.popleft() if truth else False
 
-            def _fake_run_agent(messages, state, _ctx, **kwargs):
+            async def _fake_run_agent(messages, state, _ctx, **kwargs):
                 call_order.append("run_agent")
                 # Как в processing_responses.run_agent: сначала коммит батча в state.
                 state.messages += list(messages)
@@ -171,7 +171,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 st.messages = [sys_m] if sys_m else []
 
             with patch.object(
-                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
@@ -198,7 +198,7 @@ class SummaryTriggersTest(unittest.TestCase):
             def _hist_exceeds(**_kwargs):
                 return truth.popleft() if truth else False
 
-            def _fake_run_agent(messages, state, _ctx, **kwargs):
+            async def _fake_run_agent(messages, state, _ctx, **kwargs):
                 state.messages += list(messages)
                 pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
                 if pre_backend_hook is not None:
@@ -222,7 +222,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 st.messages = [sys_m] if sys_m else []
 
             with patch.object(
-                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
@@ -243,7 +243,7 @@ class SummaryTriggersTest(unittest.TestCase):
             ctx = self._make_ctx(tmp_dir, backend_api_mode="responses")
 
             with patch.object(
-                agent_executor_module, "run_agent", return_value="ok"
+                agent_executor_module, "arun_agent", return_value="ok"
             ), patch.object(
                 run_summary_coordinator_module, "run_summary_compaction"
             ) as compaction_mock:
@@ -259,12 +259,12 @@ class SummaryTriggersTest(unittest.TestCase):
             ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             captured: dict = {}
 
-            def _fake_run_agent(messages, state, _ctx, **kwargs):
+            async def _fake_run_agent(messages, state, _ctx, **kwargs):
                 captured.update(kwargs)
                 return "ok"
 
             with patch.object(
-                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
@@ -324,7 +324,7 @@ class SummaryTriggersTest(unittest.TestCase):
                     indent=2,
                 )
 
-            def _fake_run_agent(messages, _state, _ctx, **kwargs):
+            async def _fake_run_agent(messages, _state, _ctx, **kwargs):
                 persist_cb = kwargs.get("persist_messages_callback")
                 if callable(persist_cb):
                     # Реплика реального run_agent: первый persist в chat_completions
@@ -333,7 +333,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 return "ok"
 
             with patch.object(
-                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",

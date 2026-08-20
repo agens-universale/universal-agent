@@ -96,6 +96,39 @@ class ScriptedBackend:
         return self._next(json)
 
 
+
+def _as_sse(turn: dict) -> str:
+    """Разложить готовый ответ модели в SSE-чанки.
+
+    Сценарии написаны в форме не-стримового ответа (так их проще читать), а
+    транспорт умеет обе формы. Перевод здесь, чтобы сценарий был один на оба
+    пути: иначе стримовый и не-стримовый прогоны сравнивались бы по разным
+    входным данным, и гейт паритета ничего бы не значил.
+    """
+    choice = (turn.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    chunks: list[dict] = []
+    base = {"id": turn.get("id", "scripted"), "model": turn.get("model", "scripted")}
+
+    content = message.get("content")
+    if content:
+        chunks.append({**base, "choices": [{"index": 0, "delta": {"role": "assistant",
+                                                                 "content": content}}]})
+    for i, call in enumerate(message.get("tool_calls") or []):
+        chunks.append({**base, "choices": [{"index": 0, "delta": {"tool_calls": [{
+            "index": i,
+            "id": call.get("id"),
+            "type": call.get("type", "function"),
+            "function": call.get("function", {}),
+        }]}}]})
+    chunks.append({**base,
+                   "choices": [{"index": 0, "delta": {},
+                                "finish_reason": choice.get("finish_reason") or "stop"}],
+                   "usage": turn.get("usage")})
+    body = "".join(f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks)
+    return body + "data: [DONE]\n\n"
+
+
 def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
     """Подменить транспорт запросов к модели.
 
@@ -110,7 +143,16 @@ def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
 
     def handler(request: "httpx.Request") -> "httpx.Response":
         payload = json.loads(request.content or b"{}")
-        return httpx.Response(200, json=backend.next_payload(payload))
+        turn = backend.next_payload(payload)
+        if payload.get("stream"):
+            # Вызывающий попросил стрим (это делает TUI и AsyncAgent через
+            # on_stream_delta) — отдаём тот же ход в форме SSE. Иначе сборка
+            # получит JSON вместо чанков и сочтёт ответ пустым.
+            return httpx.Response(
+                200, text=_as_sse(turn),
+                headers={"content-type": "text/event-stream"},
+            )
+        return httpx.Response(200, json=turn)
 
     monkeypatch.setattr(
         connect_backend, "get_async_client",

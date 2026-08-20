@@ -43,12 +43,12 @@ def _run(tmp_path, log_format, **run_kwargs):
     """Прогнать run() с заглушкой вместо цикла агента; вернуть текст лога."""
     ctx = create_run_context(_config(tmp_path, log_format))
 
-    def _fake_run_agent(messages, state, _ctx, **_kwargs):
+    async def _fake_run_agent(messages, state, _ctx, **_kwargs):
         state.messages += list(messages)
         return "ok"
 
     with patch.object(
-        agent_executor_module, "run_agent", side_effect=_fake_run_agent
+        agent_executor_module, "arun_agent", side_effect=_fake_run_agent
     ):
         executor = agent_executor_module.AgentExecutor(ctx)
         result = executor.run(["привет"], verbose=False, **run_kwargs)
@@ -120,12 +120,12 @@ def test_no_crash_when_logger_is_absent(tmp_path):
     ctx = create_run_context(_config(tmp_path, "jsonl"))
     ctx.logger = None
 
-    def _fake_run_agent(messages, state, _ctx, **_kwargs):
+    async def _fake_run_agent(messages, state, _ctx, **_kwargs):
         state.messages += list(messages)
         return "ok"
 
     with patch.object(
-        agent_executor_module, "run_agent", side_effect=_fake_run_agent
+        agent_executor_module, "arun_agent", side_effect=_fake_run_agent
     ):
         executor = agent_executor_module.AgentExecutor(ctx)
         assert executor.run(["привет"], thread_id="thr-1", system="cli") == "ok"

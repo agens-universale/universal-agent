@@ -154,7 +154,7 @@ class TestC2AgentExecutorFinally:
         monkeypatch.setattr(ae, "gc",
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
         # run_agent — немедленный выход без HTTP/MCP.
-        monkeypatch.setattr(ae, "run_agent", lambda *a, **kw: {"finished": True})
+        monkeypatch.setattr(ae, "arun_agent", lambda *a, **kw: {"finished": True})
         ctx = create_run_context(self._make_cfg(tmp_path), auth_connector=None)
         ex = ae.AgentExecutor(ctx)
         ex.run([{"role": "user", "content": "x"}],
@@ -169,7 +169,7 @@ class TestC2AgentExecutorFinally:
         monkeypatch.setattr(ae, "gc",
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
         monkeypatch.setattr(
-            ae, "run_agent",
+            ae, "arun_agent",
             lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
         )
         ctx = create_run_context(self._make_cfg(tmp_path), auth_connector=None)

@@ -11,7 +11,7 @@ import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
-from gc_core.processing_responses import run_agent
+from gc_core.processing_responses import arun_agent
 from gc_core.run_context import RunContext
 from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
@@ -91,6 +91,15 @@ def _append_trace_id_to_meta(
         return
 
 
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
 class AgentExecutor:
     """
     Потокобезопасный запуск агента с возможностью добавлять сообщения во время run
@@ -107,7 +116,7 @@ class AgentExecutor:
         self._stop_pending: bool = False
         self.last_terminal_outcome: Optional[str] = None
 
-    def run(
+    async def arun(
         self,
         messages: list[str],
         *,
@@ -120,9 +129,13 @@ class AgentExecutor:
         display_contents: list[str | None] | None = None,
         skills_loaded: list[str | None] | None = None,
     ) -> Any:
-        """Запускает агента. При каждом вызове state создаётся заново.
+        """Прогон агента, не блокирующий вызывающий loop.
 
-        messages: непустой список текстов — каждый элемент уходит отдельным user-сообщением.
+        При каждом вызове state создаётся заново. messages — непустой список
+        текстов, каждый уходит отдельным user-сообщением.
+
+        Синхронный ``run`` остался: он зовёт эту же реализацию через портал, и
+        его контракт (сигнатура, блокирующая семантика, результат) не менялся.
         """
         config_dict = self._ctx.config_dict
         logger = getattr(self._ctx, "logger", None)
@@ -472,7 +485,7 @@ class AgentExecutor:
         run_start_usage = UsageAccount.from_meta(state.usage.to_meta())
         state.run_start_usage_meta = run_start_usage.to_meta()
         try:
-            response = run_agent(
+            response = await _maybe_await(arun_agent(
                 messages,
                 state,
                 self._ctx,
@@ -494,7 +507,7 @@ class AgentExecutor:
                 mark_finish_gate_checking=(
                     lambda active: set_tui_finish_gate_checking(thread_session, active)
                 ),
-            )
+            ))
             self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
             if thread_session is not None and not (
                 state.discard_writes_after_stop and state.stop_requested
@@ -567,6 +580,17 @@ class AgentExecutor:
                 extra={"event": "log_path", "path": getattr(self._ctx, "logging_path", None)},
             )
         return response
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        """Синхронный прогон агента.
+
+        Контракт не изменился: вызов блокирует поток до конца хода и
+        возвращает то же, что раньше. Реализация одна — ``arun``; здесь только
+        портал.
+        """
+        from gc_core.utils.portal import get_portal
+
+        return get_portal().run(self.arun(*args, **kwargs))
 
     def add_message(self, message: dict) -> None:
         """Потокобезопасно добавляет сообщение в очередь активного скоупа.
