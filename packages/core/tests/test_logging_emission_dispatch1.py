@@ -18,6 +18,8 @@ import requests
 
 from gc_core.utils.logging_module import create_run_logger
 
+from transport_fakes import install_transport, json_response, stream_response
+
 
 def _make_logger(tmp_path, level="info"):
     cfg = {
@@ -128,15 +130,7 @@ def test_backend_request_and_response_events_chat_completions(tmp_path, monkeypa
 
     logger, path = _make_logger(tmp_path, level="debug")
 
-    def fake_post(url, json=None, headers=None, verify=True, **kw):
-        import types
-
-        r = types.SimpleNamespace()
-        r.raise_for_status = lambda: None
-        r.json = lambda: {"choices": [{"message": {"content": "hi"}}]}
-        return r
-
-    monkeypatch.setattr(connect_backend._NO_NETRC_SESSION, "post", fake_post)
+    install_transport(monkeypatch, json_response({"choices": [{"message": {"content": "hi"}}]}))
     connect_backend.request_backend_chat_completions(
         {"model": "m", "messages": []}, {}, url="http://x", verify=True, logger=logger,
     )
@@ -155,24 +149,9 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
 
     logger, path = _make_logger(tmp_path, level="debug")
 
-    class _FakeStreamResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def raise_for_status(self):
-            pass
-
-        headers = {}
-
-        def iter_lines(self):
-            yield b"not-json-at-all"
-
-    monkeypatch.setattr(
-        connect_backend._NO_NETRC_SESSION, "post", lambda *a, **kw: _FakeStreamResponse()
-    )
+    # Ответ, который не разбирается как JSON: событие backend_responses_json_error
+    # должно попасть в лог, а исключение — подняться.
+    install_transport(monkeypatch, stream_response("data: not-json-at-all\n\n"))
 
     with pytest.raises(Exception):
         connect_backend.request_backend_responses(

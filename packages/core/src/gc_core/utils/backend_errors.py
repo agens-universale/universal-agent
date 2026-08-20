@@ -1,6 +1,7 @@
 """Классификация ошибок бэкенда для восстановления в цикле агента."""
 from __future__ import annotations
 
+import httpx
 import requests
 from typing import NamedTuple
 
@@ -45,13 +46,35 @@ class EmbeddedChoiceError(Exception):
         self.raw_code = raw_code
 
 
+#: Исключения «HTTP-статус не тот» у обоих транспортов. requests остался у
+#: тулов (fetch_url, download_file) и MCP, httpx пришёл в путь к модели —
+#: классификация ошибки не должна зависеть от того, кто из них её поднял.
+HTTP_STATUS_ERRORS = (requests.exceptions.HTTPError, httpx.HTTPStatusError)
+
+#: Сетевые сбои (таймаут, обрыв, DNS) у обоих транспортов.
+HTTP_TRANSPORT_ERRORS = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.RequestException,
+    httpx.TimeoutException,
+    httpx.TransportError,
+)
+
+
+def http_status_code(exc: BaseException) -> "int | None":
+    """Код HTTP-ошибки независимо от транспорта; None — это не HTTP-ошибка."""
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        return getattr(getattr(exc, "response", None), "status_code", None)
+    return None
+
+
 def is_auth_error(exc: BaseException) -> bool:
     """401 от бэкенда — истёкший/невалидный токен доступа. Лечится пере-выпуском
     токена (`auth_connector.get_token(force=True)`) + повтор запроса один раз
     (см. `_request_backend_canonical`). 403 сюда НЕ входит: forbidden рефрешем не
     чинится. Провайдер-агностично: HTTPError (non-stream) и BackendStreamError (stream)."""
-    if isinstance(exc, requests.exceptions.HTTPError):
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        status_code = http_status_code(exc)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
     elif isinstance(exc, EmbeddedChoiceError):
@@ -70,8 +93,8 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
     Паритет stream ↔ non-stream: HTTP 4xx/5xx (кроме auth 401/403/404) ИЛИ
     стрим-ошибка (SSE error в 200-стриме) с таким же кодом. Нечисловой код
     (content_filter) → False."""
-    if isinstance(exc, requests.exceptions.HTTPError):
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        status_code = http_status_code(exc)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
     elif isinstance(exc, EmbeddedChoiceError):

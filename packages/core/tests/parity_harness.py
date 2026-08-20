@@ -87,16 +87,35 @@ class ScriptedBackend:
         self._i += 1
         return _Response(turn)
 
-    # requests.Session.post
+    def next_payload(self, request_payload: dict | None) -> dict:
+        """Следующий ход сценария как словарь ответа модели."""
+        return self._next(request_payload)._payload
+
+    # requests.Session.post — оставлено для прямых тестов транспорта
     def post(self, url: str, json: dict | None = None, **kw: Any) -> _Response:
         return self._next(json)
 
 
 def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
-    """Подменить синхронный транспорт. Async-двойник появится в Задаче 9."""
+    """Подменить транспорт запросов к модели.
+
+    С Задачи 9 путь к модели один — httpx.AsyncClient (синхронный вход остался
+    шимом через портал), поэтому подменяется фабрика клиента, а не приватная
+    requests-сессия. Один установщик обслуживает и синхронный прогон, и
+    асинхронный: гейт паритета обязан кормить оба одним и тем же сценарием.
+    """
+    import httpx
+
     from gc_core.utils import connect_backend
 
-    monkeypatch.setattr(connect_backend._NO_NETRC_SESSION, "post", backend.post)
+    def handler(request: "httpx.Request") -> "httpx.Response":
+        payload = json.loads(request.content or b"{}")
+        return httpx.Response(200, json=backend.next_payload(payload))
+
+    monkeypatch.setattr(
+        connect_backend, "get_async_client",
+        lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
     return backend
 
 

@@ -28,15 +28,33 @@ async def test_different_proxies_give_different_clients():
 
 def test_client_is_not_shared_across_loops():
     """Клиент привязан к своему loop: общий на процесс дал бы «Event loop is
-    closed» на живом запросе к модели."""
-    async def grab():
-        c = get_async_client(verify=True)
-        try:
-            return id(c)
-        finally:
+    closed» на живом запросе к модели.
+
+    Сравнивать id() объектов нельзя — после закрытия первого клиента второй
+    может лечь по тому же адресу. Считаем фактические создания.
+    """
+    import httpx
+
+    created = []
+    real_init = httpx.AsyncClient.__init__
+
+    def _counting_init(self, *args, **kwargs):
+        created.append(1)
+        return real_init(self, *args, **kwargs)
+
+    httpx.AsyncClient.__init__ = _counting_init
+    try:
+        async def grab():
+            get_async_client(verify=True)
+            get_async_client(verify=True)   # тот же loop → переиспользование
             await aclose_clients()
 
-    assert asyncio.run(grab()) != asyncio.run(grab())
+        asyncio.run(grab())
+        asyncio.run(grab())
+    finally:
+        httpx.AsyncClient.__init__ = real_init
+
+    assert len(created) == 2, "на каждый loop должен создаваться свой клиент"
 
 
 async def test_trust_env_is_off():

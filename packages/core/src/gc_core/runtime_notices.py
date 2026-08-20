@@ -12,7 +12,7 @@ from typing import Callable, List, Optional
 import requests
 
 from gc_core.startup_notices import Notice
-from gc_core.utils.backend_errors import EmbeddedChoiceError
+from gc_core.utils.backend_errors import HTTP_STATUS_ERRORS, EmbeddedChoiceError
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 _MAX_NOTICES = 50
@@ -128,7 +128,7 @@ def push_runtime_notice(notice: Notice) -> None:
 def _extract_http_detail(exc: BaseException) -> tuple[Optional[int], str]:
     status: Optional[int] = None
     body = ""
-    if isinstance(exc, requests.exceptions.HTTPError):
+    if isinstance(exc, HTTP_STATUS_ERRORS):
         resp = getattr(exc, "response", None)
         status = getattr(resp, "status_code", None)
         try:

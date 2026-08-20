@@ -41,54 +41,49 @@ def test_get_backend_client_cert():
     assert get_backend_client_cert({}) is None
 
 
-from unittest.mock import MagicMock, patch
+from transport_fakes import install_transport, sse_body, stream_response
 
 
-def test_chat_completions_passes_verify_and_cert():
+def test_chat_completions_passes_verify_and_cert(monkeypatch):
     from gc_core.utils import connect_backend
-    fake = MagicMock()
-    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
-    fake.raise_for_status.return_value = None
-    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
+    spy = install_transport(monkeypatch)
+    if True:
         connect_backend.request_backend_chat_completions(
             {"messages": []}, {}, url="https://b/v1/chat",
             verify="/ca.pem", cert=("/c.crt", "/k.key"), use_retry=False,
         )
-    kwargs = post.call_args.kwargs
+    kwargs = spy.last_client_kwargs
     assert kwargs["verify"] == "/ca.pem"
     assert kwargs["cert"] == ("/c.crt", "/k.key")
 
 
-def test_responses_passes_verify_and_cert():
+def test_responses_passes_verify_and_cert(monkeypatch):
+    """Режим responses (deprecated) — тот же контракт TLS, что у chat/completions."""
     from gc_core.utils import connect_backend
-    fake = MagicMock()
-    fake.__enter__.return_value = fake
-    fake.__exit__.return_value = False
-    fake.headers = {}
-    fake.iter_lines.return_value = [
-        b'data: {"type":"response.completed","response":{"id":"r1","output":[]}}'
-    ]
-    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
-        connect_backend.request_backend_responses(
-            {"messages": []}, {}, url="https://b/v1/responses",
-            verify="/ca.pem", cert=("/c.crt", "/k.key"), use_retry=False,
-        )
-    kwargs = post.call_args.kwargs
+
+    spy = install_transport(monkeypatch, stream_response(sse_body(
+        {"type": "response.completed", "response": {"id": "r1", "output": []}},
+        done=False,
+    )))
+    connect_backend.request_backend_responses(
+        {"messages": []}, {}, url="https://b/v1/responses",
+        verify="/ca.pem", cert=("/c.crt", "/k.key"), use_retry=False,
+    )
+
+    kwargs = spy.last_client_kwargs
     assert kwargs["verify"] == "/ca.pem"
     assert kwargs["cert"] == ("/c.crt", "/k.key")
 
 
-def test_backend_cert_defaults_none_backward_compat():
+def test_backend_cert_defaults_none_backward_compat(monkeypatch):
     from gc_core.utils import connect_backend
-    fake = MagicMock()
-    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
-    fake.raise_for_status.return_value = None
-    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
+    spy = install_transport(monkeypatch)
+    if True:
         connect_backend.request_backend_chat_completions(
             {"messages": []}, {}, url="https://b/v1/chat", verify=True, use_retry=False,
         )
-    assert post.call_args.kwargs["cert"] is None
-    assert post.call_args.kwargs["verify"] is True
+    assert spy.last_client_kwargs["cert"] is None
+    assert spy.last_client_kwargs["verify"] is True
 
 
 def test_mcp_use_ssl_alias_unified():

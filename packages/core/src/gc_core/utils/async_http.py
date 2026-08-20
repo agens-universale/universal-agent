@@ -44,7 +44,6 @@ def get_async_client(
     verify: bool = True,
     cert: Optional[tuple] = None,
     proxies: Optional[dict] = None,
-    timeout: Optional[float] = None,
 ) -> httpx.AsyncClient:
     """Клиент для текущего loop. Переиспользуется — пул соединений живёт."""
     loop_key = id(asyncio.get_running_loop())
@@ -57,7 +56,9 @@ def get_async_client(
             cert=cert,
             mounts=mounts_from_proxies(proxies),
             trust_env=False,
-            timeout=timeout,
+            # Таймаут НЕ здесь: он у каждого запроса свой (backend.request_timeout_sec
+            # против коротких проб), а клиент переиспользуется. Зашитый в клиент
+            # таймаут молча применился бы к чужому запросу.
         )
         _clients[key] = client
     return client
