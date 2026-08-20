@@ -15,6 +15,14 @@ from tests.tui.conftest import open_settings_section
 
 
 def _fake_probe(result=None):
+    """Дефолт — УСПЕШНЫЙ вердикт, а не `None`: воркер проб моделей эндпоинта
+    разыменовывает `result.models` (`tui/screens/settings.py`), поэтому `None`
+    роняет не строку пробы, а весь экран через `WorkerFailed`. Эталон вердикта
+    один на все settings-тесты — `_probe_ok` из `test_settings_screen`."""
+    if result is None:
+        from tests.tui.test_settings_screen import _probe_ok
+        result = _probe_ok()
+
     def probe_fn(endpoint, auth, verify, model, **kw):
         return result
     return probe_fn
