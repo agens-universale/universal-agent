@@ -197,7 +197,7 @@ async def test_footer_shows_notices_badge_and_buffer_key_together():
         assert "F4/notices" in footer               # наш суффикс на месте
         # счётчики парой, без точки между собой (решение владельца против варианта develop)
         from tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH
-        assert f"{WARN_GLYPH}1 · {INFO_GLYPH}" not in footer
+        assert f"{WARN_GLYPH} 1 · {INFO_GLYPH}" not in footer
 
 
 @pytest.mark.asyncio

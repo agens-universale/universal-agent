@@ -111,17 +111,21 @@ class WorkingMemory(AbstractSimpleTool):
                 "Use fixed registers only: "
                 "goal = user intent, desired outcome, success criteria, definition of done; "
                 "constraints = hard requirements, preferences, prohibitions, format/technical/safety limits; "
-                "state = current plan, progress, completed steps, open TODOs, blockers, next actions, active hypotheses; "
+                "state = blockers, active hypotheses, findings in progress, decisions still "
+                "open — narrative working state. The step-by-step plan with statuses belongs "
+                "in the session_todo checklist tool when it is available; if that tool is NOT "
+                "available, keep the plan here instead. Never keep the same steps in both "
+                "places; "
                 "knowledge = stable verified facts, architecture decisions, implementation notes, artifact references, evidence. "
                 "Actions: list, read, append (short delta), write (full replace of one register; rare). "
                 "Every response includes per-register length vs limit in registers. "
                 "Use append for compact new deltas only. Use write for full replace: compaction, cleanup, deduplication, or removing obsolete information. "
                 "Maintenance: when register sizes in that metadata approach or exceed limits, proactively compact the affected register—read it, then write the compact full replacement (deduplicate, drop obsolete detail; do not keep appending into an overfull register). "
-                "Move bulky details to a file/artifact when needed; keep a concise form of what belongs in that register per the definitions above (e.g. facts, decisions, plan/TODOs, blockers, artifact links—not chain-of-thought or raw dumps). "
+                "Move bulky details to a file/artifact when needed; keep a concise form of what belongs in that register per the definitions above (e.g. facts, decisions, blockers, artifact links—not chain-of-thought or raw dumps). "
                 "Do not wait for the user to ask; memory hygiene is part of using this tool. "
                 "Do NOT store chain-of-thought, verbose reasoning, raw logs, large blobs, full file contents, repetitive history, or transient chatter. "
-                "Register selection: objective/done criteria -> goal; requirements/preferences -> constraints; progress/TODO/blocker/next action -> state; stable fact/decision/artifact/evidence -> knowledge. "
-                "If unsure: actionable unresolved information -> state; stable reusable information -> knowledge; requirement/preference -> constraints; desired outcome -> goal. "
+                "Register selection: objective/done criteria -> goal; requirements/preferences -> constraints; blocker/hypothesis/open decision -> state; stable fact/decision/artifact/evidence -> knowledge; step-by-step plan and step statuses -> session_todo tool when available, otherwise -> state. "
+                "If unsure: an actionable STEP of the task -> session_todo (or state if that tool is absent); other unresolved information -> state; stable reusable information -> knowledge; requirement/preference -> constraints; desired outcome -> goal. "
                 "Keep memory compact, structured, and durable."
             ),
             "parameters": {
@@ -204,7 +208,7 @@ It stores compact durable task state that survives dialog summarization.
 Registers:
 - goal: user intent, desired outcome, success criteria, definition of done
 - constraints: hard requirements, preferences, prohibitions, format/technical/safety limits
-- state: current plan, progress, completed steps, open TODOs, blockers, next actions, active hypotheses
+- state: blockers, active hypotheses, findings in progress, decisions still open — narrative working state. The step-by-step plan with statuses belongs in the session_todo checklist tool when it is available; if that tool is NOT available, keep the plan here instead. Never keep the same steps in both places
 - knowledge: stable verified facts, architecture decisions, implementation notes, artifact references, evidence (file refs: full absolute paths as in tools, e.g. `/home/.../src/backends/local.py` — never basename-only)
 
 Actions:
@@ -216,17 +220,18 @@ Actions:
 Maintenance (register hygiene):
 - Every tool response includes per-register length vs limit in `registers`.
 - When sizes approach or exceed limits, read the affected register and write a compact full replacement (deduplicate, drop obsolete detail; do not keep appending into an overfull register).
-- Move bulky details to a file/artifact when needed; keep a concise form of register-appropriate content per definitions above (facts, decisions, plan/TODOs, blockers, artifact links—not chain-of-thought or raw dumps).
+- Move bulky details to a file/artifact when needed; keep a concise form of register-appropriate content per definitions above (facts, decisions, blockers, artifact links—not chain-of-thought or raw dumps).
 - Do not wait for the user to ask; memory hygiene is part of using this tool.
 
 Register selection:
 - objective/done criteria -> goal
 - requirements/preferences -> constraints
-- progress/TODO/blocker/next action -> state
+- blocker/hypothesis/open decision -> state
+- step-by-step plan and step statuses -> session_todo tool when available, otherwise -> state
 - stable fact/decision/artifact/evidence -> knowledge
 
 If unsure:
-- actionable unresolved information -> state
+- an actionable STEP of the task -> session_todo (or state if that tool is absent); other unresolved information -> state
 - stable reusable information -> knowledge
 - requirement/preference -> constraints
 - desired outcome -> goal

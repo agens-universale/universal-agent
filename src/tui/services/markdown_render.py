@@ -187,8 +187,9 @@ def render_prose(text: str) -> Text:
 def build_markdown_table(headers: list[str], rows: list[list[str]],
                          aligns: list[str]) -> "Table":
     """Структура таблицы → rich.Table (полная сетка box.SQUARE, рамка dim,
-    заголовок accent-bold, в ячейках — inline-разметка). Ширину не фиксируем:
-    обёртка-Static (.table-block, width:1fr) даёт ширину, rich переносит ячейки."""
+    заголовок accent-bold, в ячейках — inline-разметка). Ширину не фиксируем
+    здесь: её задаёт вызывающий `table_render.table_to_text(..., width=)`,
+    которым пользуется `BlockPanel._refresh_body`."""
     import rich.box as _box
     from rich.table import Table
     from rich.text import Text as _Text

@@ -6,16 +6,39 @@ from config_modules.endpoint_presets import (
 from config_modules.root import AppConfig
 
 
+_EXPECTED = [
+    ("OpenRouter", "https://openrouter.ai/api/v1/chat/completions"),
+    ("GigaCode", "https://litellm-proxy.sberai-rnd.ru/v1/chat/completions"),
+    ("Cloud.ru", "https://foundation-models.api.cloud.ru/v1/chat/completions"),
+    ("RouterAI", "https://routerai.ru/api/v1/chat/completions"),
+]
+
+
 def test_default_presets_names_and_urls():
-    assert [p.name for p in DEFAULT_ENDPOINT_PRESETS] == ["OpenRouter", "Cloud.ru", "GigaCode"]
-    assert DEFAULT_ENDPOINT_PRESETS[0].url == "https://openrouter.ai/api/v1/chat/completions"
-    assert DEFAULT_ENDPOINT_PRESETS[1].url == "https://foundation-models.api.cloud.ru/v1/chat/completions"
-    assert DEFAULT_ENDPOINT_PRESETS[2].url == "https://litellm-proxy.sberai-rnd.ru/v1/chat/completions"
+    """Порядок — часть контракта, а не оформление: поле адреса пусто только на
+    первом экране мастера, и там курсор встаёт на первый пункт (field_list
+    _pick_index). То есть первый пресет — это предложение по умолчанию тому, кто
+    ничего не набрал; дальше идут сберовские, затем прочие внешние."""
+    assert [(p.name, p.url) for p in DEFAULT_ENDPOINT_PRESETS] == _EXPECTED
 
 
 def test_appconfig_defaults_to_presets():
     cfg = AppConfig()
-    assert [p.name for p in cfg.endpoint_presets] == ["OpenRouter", "Cloud.ru", "GigaCode"]
+    assert [p.name for p in cfg.endpoint_presets] == [n for n, _ in _EXPECTED]
+
+
+def test_default_presets_are_not_materialized_into_the_template():
+    """Шаблоны отдают блок ЗАКОММЕНТИРОВАННЫМ, чтобы каталог провайдеров жил в
+    одном месте — в коде — и обновлялся вместе с версией. Развёрнутый блок
+    впечатывался бы копией в конфиг каждому при первом запуске, и следующий
+    добавленный провайдер до людей уже не доехал бы (живой случай 2026-08-17:
+    в песочнице осталось три пресета из пяти)."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    for name in ("config.default.yml", "demo_config.yml"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "\nendpoint_presets:" not in text, f"{name}: блок развёрнут"
+        assert "# endpoint_presets:" in text, f"{name}: нет закомментированного образца"
 
 
 def test_from_config_missing_key_gives_default():

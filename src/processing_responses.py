@@ -14,6 +14,7 @@ from constants.tool_names import (
     FINISH_TOOL_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
     SESSION_COMPACT_TOOL_NAME,
+    SESSION_TODO_TOOL_NAME,
     TURN_FINALIZING_TOOLS,
 )
 from run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
@@ -37,6 +38,7 @@ from tools.subagents.progress import (
     emit_progress,
     extract_intermediate_prose,
     parse_tool_result_status,
+    todo_items_from_arguments,
 )
 from tools.subagents.sidecar import persist_subagent_trace
 from model_router import AliasCircuitOpenError
@@ -466,6 +468,7 @@ def _request_backend_canonical_once(
             verify=verify,
             cert=cert,
             use_retry=use_retry,
+            retry_embedded_choice_errors=cfg.get("retry_embedded_choice_errors", True),
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,
             request_label="main_agent",
@@ -715,13 +718,18 @@ def process_tool_calls(
         )
         emit_tool_row = persist_tool_trace
         if emit_tool_row:
+            _todo_items = (
+                todo_items_from_arguments(tool_arguments)
+                if tool_name == SESSION_TODO_TOOL_NAME else None
+            )
             emit_progress(
                 ctx,
                 state,
                 "tool_start",
                 tool_name=tool_name,
                 tool_call_id=call_id_str,
-                args_summary=brief_args_summary(tool_arguments),
+                args_summary=brief_args_summary(tool_arguments, tool_name=tool_name),
+                todo_items=_todo_items,
             )
         if persist_tool_trace:
             persist_subagent_trace(ctx, kind="call", payload=dict(m))

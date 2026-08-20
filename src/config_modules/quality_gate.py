@@ -35,12 +35,6 @@ def normalize_quality_gate_config(cfg: QualityGateConfig) -> None:
         cfg.max_message_chars = DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
 
 
-def digest_limits_from_config(cfg: QualityGateConfig) -> dict[str, int]:
-    return {
-        "max_dialogue_chars": cfg.max_dialogue_chars,
-        "max_message_chars": cfg.max_message_chars,
-    }
-
 
 def digest_limits_from_params(params: dict | None) -> dict[str, int]:
     """

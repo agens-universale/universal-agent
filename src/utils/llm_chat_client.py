@@ -245,6 +245,7 @@ def _send_chat_completion_text(
             verify=verify,
             cert=cert,
             use_retry=use_retry,
+            retry_embedded_choice_errors=cfg.get("retry_embedded_choice_errors", True),
             logger=getattr(ctx, "logger", None),
             request_label=request_label,
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),

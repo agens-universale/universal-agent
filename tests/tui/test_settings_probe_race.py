@@ -106,8 +106,10 @@ async def test_autoprobe_survives_enter_absorbed_by_presets(tmp_path):
     import tui.app as app_mod
     from textual import events
     from tui.screens.settings import SettingsScreen
-    preset_url = '"https://openrouter.ai/api/v1/chat/completions"'   # DEFAULT_ENDPOINT_PRESETS[0]
-    cfg_file = _write_cfg(tmp_path, url=preset_url)   # совпадает с пресетом → список раскрыт, подсвечен он
+    # Адрес ПУСТОЙ: по канону 2026-08-17 список раскрывается только на пустом поле —
+    # а тесту нужен именно раскрытый, чтобы Enter был им поглощён. Раньше сюда годился
+    # пресетный адрес, но заполненное поле список больше не поднимает.
+    cfg_file = _write_cfg(tmp_path, url='""')
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
         app.push_screen(SettingsScreen(config=_cfg(), config_path=str(cfg_file),

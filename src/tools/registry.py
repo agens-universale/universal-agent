@@ -18,6 +18,7 @@ from tools.project.project_memory import ProjectMemory
 from tools.session.read_user_intent_log import ReadUserIntentLog
 from tools.session.session_compact import SessionCompact
 from tools.session.think import Think
+from tools.session.todo import SessionTodo
 from tools.session.working_memory import WorkingMemory
 from tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 from tools.turn.submit_solution import SubmitSolution
@@ -76,6 +77,7 @@ def _session_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         "session_think": _tool_entry(Think),
         "session_read_stored_tool_output": _tool_entry(ReadStoredToolOutput),
         "session_memory": _tool_entry(WorkingMemory),
+        "session_todo": _tool_entry(SessionTodo),
     }
 
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()

@@ -314,10 +314,11 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     (спека 2026-08-06 §4.4) — общий хинт-механизм списков (`show_closed_hint`,
     дословно `LIST_CLOSED_HINT`). До правки `escape_presets` сворачивал список молча.
 
-    Фикс-раунд 1 (ревью): подсказка не переживает уход курсора с адреса — с чужого
-    поля `Alt+↓` список адреса уже не раскрывает (`reload_presets` гейтует именно
-    позицию курсора). Полный путь: Esc → хинт появился → стрелкой ушли на «Токен» →
-    хинта нет → стрелкой вернулись → список раскрылся заново, хинт снова канонный
+    Канон 2026-08-17: строка под адресом ПОСТОЯННА — уход курсора её не снимает.
+    Она ярлык способа, а не команда момента (как `Space — переключить` у галки,
+    работающая только со своей позиции); что нажимать сейчас, отвечает футер.
+    Полный путь: Esc → хинт появился → ушли на «Токен» → хинт НА МЕСТЕ (раньше он
+    исчезал) → вернулись на пустой адрес → список поднялся снова, хинт канонный
     (`_PRESET_HINT_EMPTY` — мастер на пустом адресе зовёт выбрать провайдера явно)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -336,7 +337,8 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
         assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT
         await pilot.press("down")                  # уйти с адреса на токен
         await pilot.pause()
-        assert not scr.query(".conn-url-preset-hint")   # подсказка ушла вместе с курсором
+        hints = scr.query(".conn-url-preset-hint")
+        assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT   # строка постоянна
         await pilot.press("up")                    # вернуться на адрес
         await pilot.pause()
         assert scr.query(".conn-preset-row")        # список раскрылся заново
@@ -742,8 +744,12 @@ async def test_connection_auto_probe_runs_on_leaving_token_field(tmp_path):
         ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
         await pilot.press("down")             # уход с адреса на токен — триггер пробы
         await pilot.pause()
-        await wait_until(pilot, lambda: "доступен" in str(scr.query_one(".onb-conn-probe").render()),
-                          "проба завершилась")
+        # Фейк отвечает и на контрольный запрос без токена → честный вердикт
+        # «авторизация не требуется», а не «доступен».
+        await wait_until(pilot,
+                         lambda: "не требует" in str(scr.query_one(".onb-conn-probe").render())
+                         or "не требуется" in str(scr.query_one(".onb-conn-probe").render()),
+                         "проба завершилась")
 
 
 @pytest.mark.asyncio
@@ -769,8 +775,13 @@ async def test_connection_preset_pick_triggers_auto_probe(tmp_path):
         await pilot.press("enter")              # подставляет первый пресет
         await pilot.pause()
         assert not ed.presets_open
-        await wait_until(pilot, lambda: "доступен" in str(scr.query_one(".onb-conn-probe").render()),
-                          "проба завершилась")
+        # Фейк отвечает и на контрольный запрос без токена → честный вердикт
+        # «авторизация не требуется», а не «доступен»: токен здесь ни на что
+        # не влияет, и писать про него что-либо было бы неправдой.
+        await wait_until(pilot,
+                         lambda: "не требует" in str(scr.query_one(".onb-conn-probe").render())
+                         or "не требуется" in str(scr.query_one(".onb-conn-probe").render()),
+                         "проба завершилась")
 
 
 @pytest.mark.asyncio
@@ -1462,10 +1473,14 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
     cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
                                auth="Bearer sk-REALSECRET123")
     cfg = _resolved_conn_cfg(cfg_path)
-    seen = {}
+    seen = []
 
+    # Сервер, ТРЕБУЮЩИЙ авторизацию: иначе токену просто некуда доехать —
+    # проба, получив ok на контрольный запрос, второй раз не пойдёт.
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
-        seen["auth"] = auth
+        seen.append(auth)
+        if auth is None:
+            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -1474,8 +1489,8 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._auto_probe()
-        await wait_until(pilot, lambda: "auth" in seen, "проба ушла")
-        assert seen["auth"] == "Bearer sk-REALSECRET123"
+        await wait_until(pilot, lambda: len(seen) >= 2, "проба ушла с токеном")
+        assert seen == [None, "Bearer sk-REALSECRET123"]
 
 
 @pytest.mark.asyncio
@@ -1493,10 +1508,14 @@ async def test_auto_probe_resolves_env_ref_token_when_field_untouched(tmp_path, 
     cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
                                auth="Bearer ${ENV:GC_TOKEN}")
     cfg = _resolved_conn_cfg(cfg_path)
-    seen = {}
+    seen = []
 
+    # Сервер, ТРЕБУЮЩИЙ авторизацию (см. соседний тест): без 401 на контрольный
+    # запрос проба до токена не дойдёт и проверять было бы нечего.
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
-        seen["auth"] = auth
+        seen.append(auth)
+        if auth is None:
+            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -1505,8 +1524,8 @@ async def test_auto_probe_resolves_env_ref_token_when_field_untouched(tmp_path, 
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._auto_probe()
-        await wait_until(pilot, lambda: "auth" in seen, "проба ушла")
-        assert seen["auth"] == "Bearer sk-REALSECRET123"
+        await wait_until(pilot, lambda: len(seen) >= 2, "проба ушла с токеном")
+        assert seen == [None, "Bearer sk-REALSECRET123"]
 
 
 # --- гейт «пустой адрес» на ссылке ${ENV:...}, у которой нет переменной ---
@@ -1757,3 +1776,141 @@ async def test_alt_down_on_the_model_step_goes_past_the_session_cache(tmp_path):
         await pilot.press("alt+down")
         await wait_until(pilot, lambda: any("deepseek" in r for r in rows()),
                          "перечитывание должно идти мимо сессионного кэша")
+
+
+def test_wizard_checks_token_on_the_real_route():
+    """Мастер не должен писать «доступен» по публичной models-цепочке: у
+    OpenRouter она отвечает без токена, а chat/completions его требует. Считаем
+    вызовы — контроль без токена и повтор с ним, а не один запрос."""
+    from tui.services.settings_probe import ProbeResult
+    seen = []
+
+    def fake_auth(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        seen.append(auth)
+        if auth is None:
+            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+        return ProbeResult("ok", 200, None, 5, "доступен")
+
+    screen = _screen(probe=fake_auth)
+    result = screen._run_connection_probe("http://x/v1/chat/completions",
+                                          "Bearer good", True, None)
+    assert seen == [None, "Bearer good"]
+    assert result.auth_state == "accepted" and "токен принят" in result.detail
+
+
+# ── Ctrl+U и автопроба шага «Подключение» (разбор ревью 2026-08-18) ──
+
+def _fake_auth_probe(seen=None):
+    """Заглушка с сигнатурой `probe_auth`: сети нет, вызовы можно считать."""
+    from tui.services.settings_probe import ProbeResult
+
+    def probe(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        if seen is not None:
+            seen.append(auth)
+        return ProbeResult("ok", 200, None, 1, "доступен")
+
+    return probe
+
+
+async def _conn_step(pilot, tmp_path, **over):
+    """Мастер на шаге «Подключение» поверх конфига с СОХРАНЁННЫМ токеном."""
+    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
+                               auth="Bearer sk-SECRET", model="m")
+    cfg = _resolved_conn_cfg(cfg_path)
+    kw = dict(review_all=True, config_path=str(cfg_path), config=cfg,
+              probe=_fake_auth_probe())
+    kw.update(over)
+    scr = _screen(**kw)
+    await pilot.app.push_screen(scr)
+    await pilot.pause()
+    from tui.editors.connection import ConnectionEditor
+    ed = scr.query_one(ConnectionEditor)
+    ed.escape_presets()
+    return scr, ed
+
+
+def _count_probes(scr):
+    """Считает фактические пробы, не подменяя их: снимок пишет сам `_auto_probe`."""
+    calls = []
+    orig = scr._auto_probe
+
+    def counted():
+        calls.append(1)
+        orig()
+
+    scr._auto_probe = counted
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_wizard_ctrl_u_on_token_clears_saved_token(tmp_path):
+    """Ctrl+U на поле токена снимает сохранённый — та же клавиша, что в /settings.
+
+    Ветка обработчика читала `ConnectionEditor` раньше функционально-локальных
+    импортов ниже по той же `on_key`: имя было локальным для всей функции, и
+    первое же нажатие роняло мастер (`except NoMatches` этого не ловит)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr, ed = await _conn_step(pilot, tmp_path)
+        ed.move(1)                          # лента курсора: адрес → токен
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert ed.token_cleared is True
+
+
+@pytest.mark.asyncio
+async def test_wizard_ctrl_u_on_address_field_leaves_token_alone(tmp_path):
+    """Ctrl+U — клавиша поля токена (футер обещает её только там). На адресе она
+    молчит: иначе сохранённый токен помечается к удалению незаметно для того, кто
+    целился очистить строку адреса."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr, ed = await _conn_step(pilot, tmp_path)
+        await pilot.press("ctrl+u")         # курсор на адресе (позиция 0)
+        await pilot.pause()
+        assert ed.token_cleared is False
+
+
+@pytest.mark.asyncio
+async def test_wizard_arrows_without_edits_do_not_reprobe(tmp_path):
+    """Ходьба по форме без правок не стучится в сервер.
+
+    Гейт по снимку был только у ветки адреса: уход с токена/прокси звал пробу
+    безусловно, и пролистанная стрелками форма давала запрос на каждое нажатие
+    (на платном провайдере — деньги)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr, ed = await _conn_step(pilot, tmp_path)
+        calls = _count_probes(scr)
+        await pilot.press("down")           # уход с адреса — первая (и единственная) проба
+        await pilot.press("down")
+        await pilot.press("up")
+        await pilot.press("up")
+        await pilot.pause()
+        assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_wizard_reprobes_after_token_cleared(tmp_path):
+    """Очистка токена — изменение того, что уйдёт в запрос, значит пробу надо
+    повторить. Снимок хранил только (адрес, набранный токен, прокси): Ctrl+U его
+    не двигал, и на экране оставался вердикт «токен принят» под конфигурацией,
+    где токена уже нет."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr, ed = await _conn_step(pilot, tmp_path)
+        calls = _count_probes(scr)
+        await pilot.press("down")           # уход с адреса → проба #1
+        await pilot.press("ctrl+u")         # курсор на токене — снять сохранённый
+        await pilot.press("down")           # уход с токена → проба обязана повториться
+        await pilot.pause()
+        assert ed.token_cleared is True
+        assert len(calls) == 2

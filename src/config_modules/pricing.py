@@ -72,10 +72,27 @@ def _coerce_pricing(raw: Any) -> PricingConfig:
     return PricingConfig()
 
 
+# Публичный алиас для внешних модулей (см. usage/cost.py) — приватное имя
+# остаётся ради вызовов внутри этого файла.
+coerce_pricing = _coerce_pricing
+
+
 def pricing_from_config_dict(config_dict: dict[str, Any] | None) -> PricingConfig:
     """Достать ``PricingConfig`` из плоского config_dict (ключ ``pricing``)."""
     cfg = config_dict if isinstance(config_dict, dict) else {}
     return _coerce_pricing(cfg.get("pricing"))
+
+
+def _rates_configured(input_rate: Any, output_rate: Any) -> bool:
+    """Ставки заданы, если хотя бы одна из двух ненулевая.
+
+    Оба нуля трактуются как «не задано»: показывать «0.0 ₽» — значит выдавать
+    «цена неизвестна» за «бесплатно». ``cache_read: 0`` этим правилом не затронут —
+    там ноль осмыслен.
+    """
+    if input_rate is None or output_rate is None:
+        return False
+    return float(input_rate) != 0 or float(output_rate) != 0
 
 
 def resolve_model_tariff(
@@ -86,6 +103,11 @@ def resolve_model_tariff(
 
     Порядок: сначала ищем ``model_name`` в ``models`` (точное переопределение);
     если не нашли — берём верхнеуровневый дефолтный тариф (``pricing.input/output``).
+
+    Нулевые ставки на input и output трактуются как «не задано», а не как «бесплатно»:
+    модель-специфичная запись (0, 0) откатывается к верхнеуровневому тарифу;
+    верхнеуровневые (0, 0) возвращают None.
+
     Возвращает None, если pricing выключен или тарифа нет ни там, ни там — тогда
     вызывающий код показывает токены без цены.
     """
@@ -97,7 +119,7 @@ def resolve_model_tariff(
     currency: str = pricing.currency
 
     tariff = pricing.models.get(model_name) if model_name else None
-    if tariff is not None:
+    if tariff is not None and _rates_configured(tariff.input, tariff.output):
         # Переопределение под конкретную модель (с наследованием глобальных currency/per_tokens
         # и верхнеуровневого cache_read, если в модели он не задан).
         inp = float(tariff.input)
@@ -107,7 +129,7 @@ def resolve_model_tariff(
             currency = tariff.currency
         if tariff.per_tokens is not None:
             per_tokens = tariff.per_tokens
-    elif pricing.input is not None and pricing.output is not None:
+    elif _rates_configured(pricing.input, pricing.output):
         # Дефолтный тариф верхнего уровня (одно-модельный сетап).
         inp = float(pricing.input)
         out = float(pricing.output)

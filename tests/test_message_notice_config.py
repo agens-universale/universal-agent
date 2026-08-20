@@ -4,27 +4,29 @@ from pydantic import ValidationError
 
 from config import load_config
 from config_modules.message_notice import (
-    ProjectMemoryNoticeConfig,
     ToolUsageNoticeRule,
     active_tool_usage_notice_rules,
-    project_memory_notice_enabled,
-    project_memory_notice_from_config_dict,
-    normalize_project_memory_notice_config,
     tool_usage_notice_rules_from_config_dict,
+)
+from config_modules.project_memory import (
+    ProjectMemoryConfig,
+    normalize_project_memory_config,
+    project_memory_from_config_dict,
+    project_memory_notice_enabled,
 )
 from config_modules.root import AppConfig
 
 
 def test_project_memory_notice_defaults():
-    cfg = ProjectMemoryNoticeConfig()
+    cfg = ProjectMemoryConfig()
     assert cfg.check_interval_messages == 5
     assert cfg.max_chars == 10_000
     assert cfg.max_append_chars == 3_000
 
 
 def test_normalize_long_memory_notice_rejects_non_positive():
-    cfg = ProjectMemoryNoticeConfig(check_interval_messages=-1)
-    normalize_project_memory_notice_config(cfg)
+    cfg = ProjectMemoryConfig(check_interval_messages=-1)
+    normalize_project_memory_config(cfg)
     assert cfg.check_interval_messages == 5
 
 
@@ -59,7 +61,7 @@ def test_app_config_rejects_unknown_keys_in_notice_sections():
 
 
 def test_project_memory_notice_from_config_dict_from_params():
-    cfg = project_memory_notice_from_config_dict(
+    cfg = project_memory_from_config_dict(
         {"project_memory_params": {"check_interval_messages": 3}}
     )
     assert cfg.check_interval_messages == 3
@@ -124,11 +126,6 @@ def test_project_memory_notice_enabled_from_nested_and_flat_config():
 
 
 def test_normalize_project_memory_limits_rejects_non_positive():
-    from config_modules.project_memory import (
-        ProjectMemoryConfig,
-        normalize_project_memory_config,
-    )
-
     cfg = ProjectMemoryConfig(max_chars=-1, max_append_chars=0)
     normalize_project_memory_config(cfg)
     assert cfg.max_chars == 10_000

@@ -4,7 +4,6 @@ from typing import Any
 
 from config_modules.message_notice import (
     ToolUsageNoticeRule,
-    active_tool_usage_notice_rules,
     tool_usage_notice_policy_enabled,
 )
 from message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_CURRENT_CONTEXT

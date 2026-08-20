@@ -10,7 +10,7 @@ import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -132,7 +132,10 @@ def _requests_get_ex(
         except ValueError:
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
-    except requests.exceptions.RequestException as exc:
+    # UnicodeEncodeError — не сеть: заголовки кодируются в latin-1, и токен с
+    # кириллицей рвёт запрос в клиенте. Это ValueError, мимо RequestException, —
+    # без перехвата исключение уходит наверх и там читается как «сервер недоступен».
+    except (requests.exceptions.RequestException, UnicodeEncodeError) as exc:
         return HttpReply(
             status=None,
             payload=None,
@@ -163,7 +166,8 @@ def _requests_post_ex(
         except ValueError:
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
-    except requests.exceptions.RequestException as exc:
+    # см. комментарий в _requests_get_ex: кириллица в токене — ValueError, не сеть
+    except (requests.exceptions.RequestException, UnicodeEncodeError) as exc:
         return HttpReply(
             status=None,
             payload=None,
@@ -189,28 +193,6 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
     except urllib.error.HTTPError as exc:
         return HttpReply(status=exc.code, payload=None)
     except (urllib.error.URLError, socket.timeout, ssl.SSLError, OSError) as exc:
-        return HttpReply(status=None, payload=None, network_error=str(exc) or exc.__class__.__name__)
-
-
-def _urllib_post_ex(url: str, headers: dict, body: dict, verify: bool) -> HttpReply:
-    """Legacy urllib POST (без proxy). Оставлен для unit-тестов транспорта."""
-    import socket
-    import ssl
-    import urllib.error
-    import urllib.request
-    ctx = None if verify else ssl._create_unverified_context()
-    data = json.dumps(body).encode("utf-8")
-    req = _request(url, headers, data=data, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
-            try:
-                payload = json.loads(resp.read().decode("utf-8"))
-            except ValueError:
-                payload = None
-            return HttpReply(status=resp.status, payload=payload)
-    except urllib.error.HTTPError as exc:
-        return HttpReply(status=exc.code, payload=None)
-    except (urllib.error.URLError, socket.timeout, ssl.SSLError, OSError, ValueError) as exc:
         return HttpReply(status=None, payload=None, network_error=str(exc) or exc.__class__.__name__)
 
 
@@ -255,10 +237,13 @@ def probe_fetch(completions_url: str, auth_header: Optional[str], *,
 
 def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
                verify: bool = True, config_proxy: Optional[str] = None,
-               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int, bool]:
+               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int, Any]:
     """Минимальный POST в сам chat/completions (ступень 2 probe).
-    → (status, net_err, latency_ms, json_body); json_body — тело ответа было JSON
-    (ответило приложение), а не HTML/текст 404-страницы гейтвея/Express."""
+    → (status, net_err, latency_ms, payload); payload — разобранное JSON-тело или
+    None, если ответ не JSON (HTML/текст 404-страницы гейтвея/Express).
+
+    Отдаём тело, а не флаг «оно было JSON»: по нему проба отличает ответ на наш
+    токен от ответа на заведомо мусорный, когда статус у обоих одинаковый."""
     import time
     if http_post_ex is None:
         def post_ex(url, headers, body, verify):
@@ -271,16 +256,7 @@ def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
     t0 = time.monotonic()
     reply = post_ex(completions_url, headers, body, verify)
     return (reply.status, reply.network_error, int((time.monotonic() - t0) * 1000),
-            reply.payload is not None)
-
-
-def _urllib_get(url: str, headers: dict, verify: bool) -> dict:
-    import ssl
-    import urllib.request
-    ctx = None if verify else ssl._create_unverified_context()
-    req = _request(url, headers)
-    with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+            reply.payload)
 
 
 def fetch_models(completions_url: str, auth_header: Optional[str], *,

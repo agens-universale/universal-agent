@@ -4,7 +4,6 @@ import os
 
 from security.path_policy import enforce_write_guard
 from tools.simple_tool_base import AbstractSimpleTool
-from utils.atomic_io import atomic_replace
 from utils.file_text import sha256_hex_of_bytes
 from utils.tool_report_paths import tool_report_abspath
 

@@ -27,7 +27,13 @@ _URL_ERROR = "нужны http(s):// и хост"
 _URL_EMPTY = "введите адрес"
 _TOKEN_EMPTY = "введите токен"
 _TOKEN_PH_CREATE = "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"
+_TOKEN_PH_CLEARED = "токен очищен · будет удалён при сохранении"
+_TOKEN_CLEAR_HINT = "Ctrl+U — очистить токен"
 _PRESET_HINT_EMPTY = "выберите провайдера или впишите свой адрес · Enter — подставить"
+# Набранного нет в каталоге: список свёрнут (предлагать нечего), но молчать об этом —
+# значит оставить человека гадать, сработал ли фильтр. Клавиша названа та же, что и в
+# обычном свёрнутом состоянии: у `Enter` здесь ровно его всегдашний смысл — сохранить.
+_PRESET_NO_MATCH_CLOSED = "в списке такого нет · Alt+↓ — показать список"
 
 
 def _auth_active(header: str | None) -> int | None:
@@ -39,8 +45,8 @@ def _auth_active(header: str | None) -> int | None:
 
 class ConnectionEditor(Vertical):
     class Ready(Message):
-        """Редактор собран: адрес в поле, судьба пресет-листа решена (раскрыт по канону
-        §2.1 — или нет, если в поле свой адрес). Хозяину пора пересчитать хром секции.
+        """Редактор собран: адрес в поле, судьба пресет-листа решена (раскрыт, только
+        если поле пусто — канон 2026-08-17). Хозяину пора пересчитать хром секции.
 
         Хозяин считает футер и dirty-маркер сразу после монтажа тела и повторяет расчёт
         `call_after_refresh`, но `on_mount` редактора идёт ЕЩЁ позже — в первом кадре
@@ -70,15 +76,71 @@ class ConnectionEditor(Vertical):
         self._idx = 0
         self._initial_url = self._url_current
         self._initial_proxy = self._proxy_current
+        # Третье состояние поля токена. Пусто = «не менять», напечатано = «заменить»,
+        # помечено = «стереть сохранённый». Нужно потому, что значение токена, в
+        # отличие от прочих полей, физически не в Input: он секрет, поле держат
+        # пустым, и обычным Backspace стирать нечего.
+        self._token_cleared = False
         # Контроллер пресет-листа заводится в on_mount (ему нужны смонтированные поля),
         # но спросить о нём могут раньше: футер хоста считается сразу после mount(),
         # когда редактор в дереве уже есть, а своего on_mount ещё не прошёл.
         self._presets_ctrl = None
 
     # --- рендер ---
+    @property
+    def token_cleared(self) -> bool:
+        """Сохранённый токен помечен к удалению (Ctrl+U). Хозяева спрашивают, чтобы
+        проба ушла без токена ещё до сохранения."""
+        return self._token_cleared
+
     def _token_is_mask(self) -> bool:
         """placeholder токена сейчас — маска сохранённого значения, а не подсказка."""
+        if self._token_cleared:
+            return False        # маска сохранённого лгала бы: его уже стёрли
         return _auth_active(self._auth_header) == 0 and bool(self._auth_header)
+
+    def on_token_field_with_saved(self) -> bool:
+        """Курсор ленты стоит на токене, и есть что стирать. По этому признаку
+        футер секции обещает Ctrl+U — ровно как Alt+↓ обещается по `on_url_field`:
+        клавиша, названная там, где она молчит, — та же ложь, что умолчание о
+        работающей."""
+        return self._positions[self._idx] == "conn-token" and self._token_is_mask()
+
+    def clear_token(self) -> bool:
+        """Ctrl+U на поле токена: стереть СОХРАНЁННЫЙ токен. True — обработали.
+
+        Действует сразу: маска уходит, проба с этого момента идёт без токена, и
+        передумать можно, просто набрав новый (пометка снимется). В файл попадёт
+        при сохранении — как и всё остальное в форме.
+
+        Позицию курсора спрашиваем здесь, а не у хозяев: клавиша обещана футером
+        ровно на поле токена (`on_token_field_with_saved`), и на адресе она обязана
+        молчать — иначе сохранённый токен помечается к удалению у того, кто целился
+        очистить строку адреса. Гейт внутри — чтобы его не пришлось помнить каждой
+        копии обработчика (мастер и /settings)."""
+        if self._no_auth or not self.on_token_field_with_saved():
+            return False        # не то поле или стирать нечего — клавиша не наша
+        self._token_cleared = True
+        inp = self.query_one("#conn-token", Input)
+        inp.value = ""
+        inp.placeholder = self._token_placeholder()
+        inp.set_class(False, "has-saved")
+        self.query_one("#conn-token-label", Static).update(self._token_label())
+        return True
+
+    def probe_snapshot(self) -> tuple:
+        """Слепок всего, от чего зависит исход пробы: адрес, набранный токен, прокси
+        и то, чего в полях нет вовсе — галка «без авторизации» и пометка «сохранённый
+        стёрт» (Ctrl+U: проба с этого момента идёт без токена).
+
+        Хозяева сравнивают его со снимком прошлой пробы, чтобы ходьба по форме без
+        правок не била в сервер. Собран здесь, а не на местах вызова: `peek()` — про
+        поля, а состояние редактора к нему приходится помнить отдельно, и склеенный
+        у хозяина снимок разъезжается между копиями (Ctrl+U забыли в обеих).
+
+        Первым элементом — адрес: по нему хозяин отличает «проверять нечего»."""
+        url, auth_idx, token_raw, proxy = self.peek()
+        return (url, auth_idx, token_raw, self._token_cleared, proxy)
 
     def _token_placeholder(self) -> str:
         """placeholder ≠ значение: действующий токен — маской (и НИКАКОГО хинта —
@@ -87,7 +149,16 @@ class ConnectionEditor(Vertical):
         печать заменяет, пустое поле = «не менять»/«не задан»."""
         if self._token_is_mask():
             return onboarding.display_secret(self._auth_header)
+        if self._token_cleared:
+            return _TOKEN_PH_CLEARED
         return _TOKEN_PH_CREATE if self.create_mode else "введите токен"
+
+    def _token_label(self) -> str:
+        """Заголовок поля токена. Клавиша очистки называется здесь, а не в футере:
+        футер секции уже на пределе ширины (см. _FOOTER_BY_VIEW в settings), а
+        главное — подсказка нужна там, куда смотрят, как «Space — переключить»
+        у галки. Обещаем только когда есть что стирать."""
+        return "Токен   Ctrl+U — очистить" if self._token_is_mask() else "Токен"
 
     def _proxy_placeholder(self) -> str:
         """placeholder для поля прокси: действующее значение маской, пусто — подсказка."""
@@ -120,7 +191,7 @@ class ConnectionEditor(Vertical):
         # монтирует редактор без await). query_one("#conn-url") там уже гоночный.
         # Поле монтируется ПУСТЫМ, адрес в него кладёт on_mount (`write_field`):
         # смонтированное со значением, оно постит на себя `Input.Changed`, а пресет-лист
-        # к этому моменту уже раскрыт (канон §2.1) — хозяин принимал бы событие за печать
+        # к этому моменту уже раскрыт (пустое поле) — хозяин принимал бы событие за печать
         # и сужал список до одной строки (живой смок 2026-08-04, см. on_mount).
         self._url_input = PasteInput(value="",
                                      placeholder="напр. https://host/v1/chat/completions",
@@ -130,7 +201,8 @@ class ConnectionEditor(Vertical):
             # специфичности (#conn-url.set-framed — id+класс) и дал бы вторую
             # рамку внутри первой.
             yield self._url_input
-        yield Static("Токен", classes="onb-hint onb-dyn set-group-gap", id="conn-token-label")
+        yield Static(self._token_label(), classes="onb-hint onb-dyn set-group-gap",
+                     id="conn-token-label")
         # has-saved: placeholder говорит одно из двух (маска сохранённого /
         # подсказка-объяснение), и различать их надо не вчитываясь — маркер красит
         # маску цветом значения (спека §3.4).
@@ -155,16 +227,15 @@ class ConnectionEditor(Vertical):
         write_field(self._url_input, self._url_current)
         self._url_input.focus()
         # Онбординг (create_mode, поле ещё пустое) — первичный хинт зовёт выбрать
-        # провайдера явно (спека §2.1); settings/edit — канонный хинт «пресеты · …».
+        # провайдера явно (спека §2.1); settings/edit — канонный хинт «провайдеры · …».
         hint = _PRESET_HINT_EMPTY if self.create_mode and not self._url_current else _PRESET_HINT
         self._presets_ctrl = preset_list_controller(
             self, presets=self._presets, row_class="conn-preset-row",
             input_id="conn-url", hint=hint, on_pick=self._apply_preset,
         )
-        # Канон §2.1: пресеты раскрыты сразу, как только курсор/фокус на адресе —
-        # в т.ч. на mount (фокус стартует на url), независимо от того, задан ли
-        # уже адрес (утверждённый мокап settings-секции показывает лист открытым
-        # ПОД заполненным адресом).
+        # Канон 2026-08-17: раскрываем, только если поле пусто (решает `can_open`).
+        # При заданном адресе список остаётся свёрнутым, стрелки — у формы, а способ
+        # вызвать его назван постоянной строкой под полем («Alt+↓ — показать список»).
         self._presets_ctrl.open()
         self.post_message(self.Ready())
 
@@ -205,13 +276,13 @@ class ConnectionEditor(Vertical):
             self._idx = (self._idx + delta) % len(self._positions)
         target = self._positions[self._idx]
         if target == "conn-url":
-            self._presets_ctrl.open()          # канон §2.1: вход на адрес — всегда раскрыть
-        else:
-            # Курсор ушёл с адреса — подсказка возврата (`show_closed_hint`,
-            # спека 2026-08-06 §4.4) не имеет права остаться висеть под чужим полем:
-            # `Alt+↓` оттуда список адреса уже не раскрывает (`reload_presets` гейтует
-            # именно позицию курсора): поле оставили — подсказка уходит с ним.
-            self._presets_ctrl.hide_closed_hint()
+            # Канон 2026-08-17: раскрываем, только если поле пусто (решает `can_open`).
+            # Есть значение — список остаётся свёрнутым, стрелки у формы.
+            self._presets_ctrl.open()
+        # Строка-подсказка под адресом постоянна, и уход курсора её не снимает: она
+        # ярлык способа («вот чем список раскрывается»), а не команда момента — как
+        # `Space — переключить` у галки, работающая только со своей позиции. Что
+        # нажимать сейчас, отвечает футер: он обещает `Alt+↓` только на адресе.
         if not self.create_mode:
             w = self.query_one("#conn-noauth", Static)
             (w.add_class if target is None else w.remove_class)("selected")
@@ -243,12 +314,11 @@ class ConnectionEditor(Vertical):
         write_field(self.query_one("#conn-url", Input), preset.url)
 
     def enter_presets(self) -> bool:
-        """Список раскрыт (канон §2.1: он раскрыт сразу же на входе в поле
-        адреса) — Enter подставляет выделенный пресет и сворачивает список
-        (True, обработано — хост НЕ сабмитит форму); список УЖЕ свёрнут
-        (Esc) — Enter здесь обычный submit секции (False), список сам собой
-        второй раз не открывается — снова раскрыть можно, только уйдя с поля
-        адреса и вернувшись на него."""
+        """Список раскрыт (канон 2026-08-17: раскрывается на пустом поле либо по
+        Alt+↓) — Enter подставляет выделенный пресет и сворачивает список
+        (True, обработано — хост НЕ сабмитит форму); список свёрнут — Enter здесь
+        обычный submit секции (False). Сам собой список второй раз не открывается:
+        значение уже задано, и вернуть его можно только явным Alt+↓."""
         if not self._presets_ctrl.is_open:
             return False
         self._presets_ctrl.pick()            # подстановку делает `_apply_preset`
@@ -259,18 +329,47 @@ class ConnectionEditor(Vertical):
         остаётся открытой. True — обработано; False — списка нет, хост решает
         сам (обычно — закрыть секцию).
 
-        Свернув список, показываем хинт возврата (`show_closed_hint`, спека
-        2026-08-06 §4.4): без него `Esc` уводил бы пресет-лист в один конец без
-        обратного пути, поле остаётся в фокусе."""
+        Хинт возврата показывать отдельно не нужно: `close()` сам приводит строку
+        под полем в согласие с состоянием списка (`_sync_hint`, канон 2026-08-17).
+        Раньше здесь стоял явный `show_closed_hint()` — без него `Esc` уводил
+        пресет-лист в один конец без обратного пути; теперь это забота контроллера,
+        и путей ремонта не осталось ни одного."""
         if not self._presets_ctrl.is_open:
             return False
         self._presets_ctrl.close()
-        self._presets_ctrl.show_closed_hint()
         return True
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "conn-url":
-            self._presets_ctrl.apply_filter(event.input.value)   # no-op, если список свёрнут
+            # Канон 2026-08-17 в редакции 2026-08-18: список раскрыт, пока значение
+            # складывается И есть из чего выбирать. Оба множителя проверяются здесь и
+            # только по текущему тексту — предыстория поля роли не играет. Раньше
+            # правило формулировалось над ЗНАЧЕНИЕМ и решалось на входе курсора, и
+            # потому с пустого поля печать фильтровала, а с заполненного не делала
+            # ничего: одно действие, два поведения — ровно та несогласованность, ради
+            # которой канон и затевался.
+            value = event.input.value
+            if not self._presets_ctrl.would_match(value):
+                # Набрано то, чего в каталоге нет. Список свёрнут — но молчать нельзя:
+                # строка под полем говорит, что совпадений не нашлось, и чем список
+                # вернуть. Раньше он оставался раскрытым пустым с обещанием «Enter —
+                # оставить свой адрес» — выдуманное значение клавиши, которая везде
+                # сохраняет форму; заодно первое нажатие уходило на сворачивание,
+                # а не на переход дальше.
+                self._presets_ctrl.close(closed_hint=_PRESET_NO_MATCH_CLOSED)
+                return
+            if self._presets_ctrl.is_open:
+                self._presets_ctrl.apply_filter(value)
+            else:
+                # Правка поля — значение складывается, и список обязан помочь фильтром.
+                # `reopen_for_typing`, а не `open()`: он не трогает `_value0`, и Esc
+                # после раскрытия по печати вернёт исходный адрес, а не набранное.
+                self._presets_ctrl.reopen_for_typing(value)
+                self._presets_ctrl.apply_filter(value)
+        elif event.input.id == "conn-token" and event.input.value:
+            # Очистил, а потом набрал новый — пометка снимается сама. Иначе
+            # commit пошёл бы по ветке «стереть» и набранное молча пропало бы.
+            self._token_cleared = False
 
     # focus_first() здесь больше нет: он повторял приземление `move()` (раскрыть список
     # на адресе, снять подсветку галки, сфокусировать поле), только грубее — всегда на
@@ -341,6 +440,8 @@ class ConnectionEditor(Vertical):
             return True
         if proxy != self._initial_proxy:
             return True
+        if self._token_cleared:
+            return True                      # Ctrl+U: сохранённый токен помечен к удалению
         active = _auth_active(self._auth_header)
         if self._no_auth != (active == 1):
             return True                      # галка отличается от действующего варианта
@@ -371,6 +472,8 @@ class ConnectionEditor(Vertical):
                 header = ""                  # снять действующую авторизацию
         elif token:
             header = onboarding.authorization_header(token)
+        elif self._token_cleared:
+            header = ""                      # Ctrl+U: стереть сохранённый токен
         elif active == 1 and not self.create_mode:
             # действовала «без авторизации», галку сняли (выбран Bearer), токена
             # нет ни в поле, ни действующего — честная ошибка (пользователь явно

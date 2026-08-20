@@ -8,6 +8,12 @@ from config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
 from intent_log import serialize, tail_preview
 from intent_log.record import IntentRecord
 
+_SESSION_TODO_HINT = (
+    "The block above is the current task checklist for this thread. Continue it "
+    "with the session_todo tool instead of starting a new one: mark finished steps "
+    "completed, set the next step to in_progress, and add steps as new work appears."
+)
+
 _SESSION_MEMORY_HINT = (
     "The block above inlines the current session memory snapshot for this thread. "
     "Prefer this snapshot when present; use the session memory tool (append or write "
@@ -105,6 +111,7 @@ def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
     session_memory_block: str = "",
+    session_todo_block: str = "",
     user_intent_log_preview: Mapping[str, Any] | None = None,
     current_user_intent_jsonl: str = "",
 ) -> str:
@@ -116,6 +123,12 @@ def build_dialog_summary_content(
         lines.append("")
         lines.append(sm_block)
         lines.append(_SESSION_MEMORY_HINT)
+
+    todo_block = str(session_todo_block or "").strip()
+    if todo_block:
+        lines.append("")
+        lines.append(todo_block)
+        lines.append(_SESSION_TODO_HINT)
 
     if user_intent_log_preview is not None:
         log_section = render_user_intent_log_block(user_intent_log_preview)

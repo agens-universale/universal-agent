@@ -192,7 +192,8 @@ class SessionsScreen(Screen):
         if not usage:
             return None
         cfg = getattr(self.app, "_config", None) or {}
-        return format_nonzero_cost(usage, cfg.get("pricing"), cfg.get("model"))
+        return format_nonzero_cost(usage, cfg.get("pricing"), cfg.get("model"),
+                                   cfg.get("completions_url"))
 
     def _session_is_busy(self, thread_id: str) -> bool:
         """Чужой свежий lock → сессия занята другим TUI."""
@@ -452,6 +453,7 @@ class SessionsScreen(Screen):
             return
         tid = task.thread_id
         segments = self._store.read_segments(tid)
+        subagent_records = self._store.read_subagent_trace(tid)
         from tui.screens.preview import PreviewScreen
 
         def _on_result(resume: bool) -> None:
@@ -460,6 +462,7 @@ class SessionsScreen(Screen):
 
         self.app.push_screen(
             PreviewScreen(segments=segments, thread_id=tid,
-                          project_path=self._project_path()),
+                          project_path=self._project_path(),
+                          subagent_records=subagent_records),
             _on_result,
         )

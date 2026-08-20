@@ -179,9 +179,9 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
     `wait_probe=False` — для тестов, которым нужен вид секции ДО вердикта
     («— не проверено» / «проверяю…»); тогда ждать осадки должен сам тест.
 
-    `url` — адрес в файле конфига. Дефолтный («http://host/…») в пресетах не
-    значится, и пресет-лист на нём не раскрывается вовсе (`can_open`): тесту про
-    раскрытый список нужен адрес пресета либо пустой."""
+    `url` — адрес в файле конфига. Список раскрывается только над ПУСТЫМ полем
+    (`can_open`) — поверх любого заданного адреса, хоть пресетного, он свёрнут:
+    тесту про раскрытый список нужен пустой адрес либо форсированное раскрытие."""
     import tui.app as app_mod
     from tests.tui.test_settings_screen import _cfg, _mk_screen, _write_cfg
     cfg_file = (_write_cfg(tmp_path) if url is None
@@ -195,6 +195,9 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
             scr = _mk_screen(config_path=str(cfg_file))
             if probe is not None:
                 scr._probe_fn = probe      # иначе остаётся ok-проба из _mk_screen
+                # Вердикт «Подключения» идёт через отдельный слот: не подменив его,
+                # тест с фейком полез бы в сеть настоящей probe_auth.
+                scr._auth_probe_fn = probe
             await pilot.app.push_screen(scr)
             await pilot.pause()
             open_settings_section(scr, "Подключение")
@@ -290,6 +293,34 @@ def _isolated_config_layers(tmp_path):
                     lambda: tmp_path / "config.local.yml"), \
          mock.patch("config._project_local_config_path", lambda: None):
         yield
+@pytest.fixture
+def tui_app_factory():
+    """Мини-хост с реальными стилями приложения — для проверки CSS-контракта.
+
+    styles.tcss ссылается на кастомные переменные ($bg, $ink, ...), которые
+    в проде инжектит TuiApp.get_css_variables() из tui.palette — без этого
+    переопределения обычный App падает на парсинге стилшита
+    (UnresolvedVariableError), поэтому мини-хост его тоже переопределяет.
+    """
+    from textual.app import App, ComposeResult
+
+    from tui import palette
+
+    def _factory(widget):
+        class _StyledHost(App):
+            CSS_PATH = str(Path(__file__).resolve().parents[2] / "src" / "tui" / "styles.tcss")
+
+            def get_css_variables(self) -> dict:
+                variables = super().get_css_variables()
+                variables.update(palette.css_variables())
+                return variables
+
+            def compose(self) -> ComposeResult:
+                yield widget
+
+        return _StyledHost()
+
+    return _factory
 
 
 @pytest.fixture(scope="session", autouse=True)

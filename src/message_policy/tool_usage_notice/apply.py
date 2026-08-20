@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from config_modules.message_notice import (
-    active_tool_usage_notice_rules,
-    project_memory_notice_from_config_dict,
-)
+from config_modules.message_notice import active_tool_usage_notice_rules
+from config_modules.project_memory import project_memory_from_config_dict
 from message_policy.project_memory_notice.policy import (
     collect_project_memory_hints,
     on_persist_steps,
     project_memory_hints_enabled,
     wrap_project_memory_hint_user_message,
 )
+from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from message_policy.notice_policy_log import log_notice_policy_step
+from message_policy.todo_reminder import apply_todo_reminder
+from message_policy.tool_availability import available_tool_names, tool_is_available
 from message_policy.tool_usage_notice.policy import (
     batch_used_tool,
     collect_tool_usage_notices,
@@ -73,13 +74,25 @@ def apply_tool_usage_notice_before_llm(
     if not isinstance(meta, dict):
         meta = {}
 
-    notice_rules = active_tool_usage_notice_rules(cfg)
+    # Единый гейт канала: подсказываем только про тулы, которые в этом ране есть.
+    # Проверки по конфигу ниже (stop_tools) остаются — этот гейт строго у́же и
+    # ловит то, чего конфиг на этом уровне не знает: сужение набора дочернего рана
+    # файлом сабагента, harbor, неподнявшийся MCP. См. tool_availability.
+    available_tools = available_tool_names(ctx, state)
+
+    notice_rules = [
+        rule
+        for rule in active_tool_usage_notice_rules(cfg)
+        if tool_is_available(available_tools, rule.tool_name)
+    ]
     tool_thresholds = _tool_thresholds(notice_rules)
     counters_before = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
 
-    project_hints_enabled = project_memory_hints_enabled(cfg)
+    project_hints_enabled = project_memory_hints_enabled(cfg) and tool_is_available(
+        available_tools, PROJECT_MEMORY_TOOL_NAME
+    )
     project_interval = (
-        project_memory_notice_from_config_dict(cfg).check_interval_messages
+        project_memory_from_config_dict(cfg).check_interval_messages
         if project_hints_enabled
         else None
     )
@@ -95,9 +108,10 @@ def apply_tool_usage_notice_before_llm(
     out = list(messages)
 
     emitted_project_hints: list[str] = []
-    for hint_text in collect_project_memory_hints(state, meta, ctx, cfg):
-        out.append(wrap_project_memory_hint_user_message(hint_text, suffix="mem_project"))
-        emitted_project_hints.append(hint_text)
+    if project_hints_enabled:
+        for hint_text in collect_project_memory_hints(state, meta, ctx, cfg):
+            out.append(wrap_project_memory_hint_user_message(hint_text, suffix="mem_project"))
+            emitted_project_hints.append(hint_text)
 
     project_check_final = get_project_memory_check_cnt(meta) if project_hints_enabled else None
     project_reset = (
@@ -112,6 +126,14 @@ def apply_tool_usage_notice_before_llm(
 
     for notice_text in collect_tool_usage_notices(state, notice_rules, registers=registers):
         out.append(wrap_tool_usage_notice_user_message(notice_text))
+
+    out = apply_todo_reminder(
+        out,
+        state,
+        cfg,
+        step_messages=step_messages,
+        available_tools=available_tools,
+    )
 
     counters_final = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
     emitted_tools = {

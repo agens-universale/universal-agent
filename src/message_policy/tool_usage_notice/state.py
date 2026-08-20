@@ -6,10 +6,12 @@ META_PROJECT_MEMORY_CONTENT_HASH = "project_memory_content_hash"
 META_TOOL_USAGE_NOTICE_CNT = "tool_usage_notice_cnt"
 META_MEMORY_NOTICE_CNT = "memory_notice_cnt"
 META_PROJECT_MEMORY_CHECK_CNT = "project_memory_check_cnt"
+META_TODO_REMINDER_CNT = "todo_reminder_cnt"
 
 STATE_META_KEYS = (
     META_PROJECT_MEMORY_CONTENT_HASH,
     META_TOOL_USAGE_NOTICE_CNT,
+    META_TODO_REMINDER_CNT,
 )
 EPHEMERAL_META_KEYS = (META_PROJECT_MEMORY_CHECK_CNT,)
 PERSISTED_META_KEYS = STATE_META_KEYS + EPHEMERAL_META_KEYS
@@ -51,6 +53,11 @@ def hydrate_tool_usage_notice_state(state: Any, meta: dict[str, Any] | None) -> 
         if legacy > 0:
             counters = {"session_memory": legacy}
     state.tool_usage_notice_cnt = counters
+    # Счётчик протухания чек-листа: без переноса через meta задача из серии
+    # коротких ходов никогда не докатывается до напоминания (State — per-run).
+    state.todo_reminder_cnt = _coerce_non_negative_int(
+        session.get(META_TODO_REMINDER_CNT, 0)
+    )
 
 
 def persist_tool_usage_notice_state(state: Any, meta: dict[str, Any]) -> None:
@@ -63,6 +70,9 @@ def persist_tool_usage_notice_state(state: Any, meta: dict[str, Any]) -> None:
         _coerce_tool_usage_notice_counters(raw_counters)
         if isinstance(raw_counters, dict)
         else {}
+    )
+    meta[META_TODO_REMINDER_CNT] = _coerce_non_negative_int(
+        getattr(state, "todo_reminder_cnt", 0)
     )
 
 

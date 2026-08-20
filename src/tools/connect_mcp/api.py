@@ -129,7 +129,7 @@ def _pick_filename(
             fname = os.path.basename(raw_name.strip())
     if not fname:
         fname = f"{base_tool_name}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-    stem, had_ext = os.path.splitext(fname)
+    stem, _ = os.path.splitext(fname)
     return stem + ext
 
 

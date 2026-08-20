@@ -14,7 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from constants.tool_names import FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME
+from constants.tool_names import (
+    FINISH_TOOL_NAME,
+    READ_STORED_TOOL_OUTPUT_NAME,
+    SESSION_MEMORY_TOOL_NAME,
+    SESSION_TODO_TOOL_NAME,
+)
 from tools.subagents.abstract_subagent import AbstractSubagent
 from tools.subagents.custom.file_definitions import SubagentDefinition
 
@@ -35,11 +40,23 @@ class FileDefinedSubagent(AbstractSubagent):
     #   сабагент докручивает до subagent_max_steps и не сдаёт ничего;
     # - session_read_stored_tool_output: оборачивание больших выводов безусловно, и в
     #   подсказке прямым текстом «Continue with session_read_stored_tool_output».
-    #   Без тула ребёнку велят вызвать то, чего у него нет.
-    # Оба отказа выглядят как «модель тупит», поэтому ядро не отдаётся на усмотрение
+    #   Без тула ребёнку велят вызвать то, чего у него нет;
+    # - session_memory: харнес шлёт ребёнку bootstrap памяти на первом же шаге
+    #   (``runner.py``: «update persistent registers with the thread memory tool»)
+    #   и периодический tool_usage_notice. Оба текста рождаются из ГЛОБАЛЬНОГО
+    #   конфига и про `tools` файла не знают — без тула ребёнку снова велят вызвать
+    #   то, чего у него нет;
+    # - session_todo: тот же класс отказа — todo_reminder зовёт завести чек-лист,
+    #   сверяясь только с глобальным stop_tools.
+    # Все отказы выглядят как «модель тупит», поэтому ядро не отдаётся на усмотрение
     # файла вовсе — это не запрет, а гарантия.
-    # Канон здесь, не в file_definitions: это runtime policy сдачи/stored output.
-    REQUIRED_TOOL_NAMES = frozenset({FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME})
+    # Канон здесь, не в file_definitions: это runtime policy сдачи/stored output/памяти.
+    REQUIRED_TOOL_NAMES = frozenset({
+        FINISH_TOOL_NAME,
+        READ_STORED_TOOL_OUTPUT_NAME,
+        SESSION_MEMORY_TOOL_NAME,
+        SESSION_TODO_TOOL_NAME,
+    })
 
     def __init__(self, definition: SubagentDefinition, task: str, reason: str = "") -> None:
         self.definition = definition

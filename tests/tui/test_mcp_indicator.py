@@ -138,7 +138,7 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
         from tui.services.notices_ui import WARN_GLYPH
         assert card == (
             "⚠ MCP: 0/1 — ни один не подключился · /mcp\n\n"
-            f"{WARN_GLYPH}1 · F4/notices\n\n"
+            f"{WARN_GLYPH} 1 · F4/notices\n\n"
             "✓ готов к работе"
         ), f"Формат карточки разошёлся: {card!r}"
         # Ровно одна «готов» во всём трейсе (готовность только в карточке).

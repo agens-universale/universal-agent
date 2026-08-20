@@ -1,7 +1,4 @@
-import json
-from typing import Any, Dict, Optional, Tuple
 
-from thread_store import load_thread_meta, resolve_threads_dir, save_thread_meta
 from tools.simple_tool_base import AbstractSimpleTool
 
 

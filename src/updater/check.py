@@ -45,11 +45,6 @@ def check_for_update(
     return CheckResult("update", remote, "доступна новая версия")
 
 
-def record_check_ts(now: float, path=None) -> None:
-    """Пишет last_update_check_ts через upgrade_gate.write_state."""
-    import upgrade_gate
-    upgrade_gate.write_state({"last_update_check_ts": now}, path)
-
 
 def record_check_result(now: float, remote_commit, installed_commit=None, path=None) -> None:
     """Стамп времени (троттл) + последний известный remote-коммит + установленный НА
