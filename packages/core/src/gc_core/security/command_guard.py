@@ -15,6 +15,7 @@ from typing import Any, Callable
 from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE, effective_command_cwd
 from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
 from gc_core.security.protected_paths import classify_path, protected_paths, protection_enabled
+from gc_core.security.dual_wrapper import dual_wrap
 
 _TOKEN_RE = re.compile(r"[\s=;&|()<>]+")
 
@@ -69,23 +70,22 @@ def enforce_command_guard(
     Activated only when protection_enabled(config_dict) is True.
     """
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
+        def _flow(*args: Any, **kwargs: Any):
             self_obj = args[0] if args else None
             ctx_obj = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
             cfg = _extract_config_dict(self_obj, ctx_obj, kwargs)
 
             if not protection_enabled(cfg):
-                return func(*args, **kwargs)
+                return (yield)
 
             # Extract the payload (command string or code string).
             try:
                 bound = inspect.signature(func).bind_partial(*args, **kwargs)
                 payload = bound.arguments.get(payload_arg)
                 if not isinstance(payload, str):
-                    return func(*args, **kwargs)
+                    return (yield)
             except Exception:
-                return func(*args, **kwargs)
+                return (yield)
 
             # For the security scan we need the project root (launch_root) so that
             # project_gc_dir resolves the correct .gc directory.  Relative path
@@ -102,7 +102,7 @@ def enforce_command_guard(
             decision = scan_command_for_protected(payload, cwd=launch_root, extra=extra)
 
             if decision == "allow":
-                return func(*args, **kwargs)
+                return (yield)
 
             if decision == "ask":
                 from gc_core.security.confirm_port import request_confirm
@@ -114,7 +114,7 @@ def enforce_command_guard(
                     decision_key=f"command:{payload}",
                 )
                 if confirmed:
-                    return func(*args, **kwargs)
+                    return (yield)
                 # ask not confirmed → instructive blocked result
                 err = {
                     "type": "protected_path_denied",
@@ -148,6 +148,6 @@ def enforce_command_guard(
                 ensure_ascii=False,
             )
 
-        return wrapper
+        return dual_wrap(func, _flow)
 
     return decorator

@@ -10,6 +10,7 @@ import sys
 from typing import Any, Callable, Iterable
 
 from gc_core.trace_id import trace_id_from_config
+from gc_core.security.dual_wrapper import dual_wrap
 
 
 @dataclass(frozen=True)
@@ -187,8 +188,7 @@ def enforce_write_guard(
     blocked_result_factory: Callable[[dict[str, Any]], str] | None = None,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
+        def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
             # Floor carve-out: runs BEFORE the write_guard.enabled gate so it
             # applies unconditionally (Spec B §6).
@@ -251,7 +251,7 @@ def enforce_write_guard(
                     decision="executed",
                     reason_code="policy_disabled",
                 )
-                return func(*args, **kwargs)
+                return (yield)
             if candidate_path is None:
                 try:
                     candidate_path = _extract_named_value(
@@ -263,7 +263,7 @@ def enforce_write_guard(
                         "path",
                     )
                 except ValueError:
-                    return func(*args, **kwargs)
+                    return (yield)
             try:
                 check_write_path_allowed(
                     candidate_path,
@@ -284,7 +284,7 @@ def enforce_write_guard(
                         reason_code="policy_allow_out_of_perimeter",
                         risk_flags=["out_of_perimeter"],
                     )
-                    return func(*args, **kwargs)
+                    return (yield)
                 if wg_mode == "ask":
                     confirmed = _ask_user_confirmation_for_write(
                         tool_name=_tool_name(func, args),
@@ -302,7 +302,7 @@ def enforce_write_guard(
                             reason_code="policy_ask_confirmed",
                             risk_flags=["out_of_perimeter"],
                         )
-                        return func(*args, **kwargs)
+                        return (yield)
                     # cancelled — продолжаем в стандартный blocked-flow ниже,
                     # но помечаем error.type для отличимости в логах.
                     exc.error["type"] = "write_guard_cancelled_by_user"
@@ -331,9 +331,9 @@ def enforce_write_guard(
                 decision="executed",
                 reason_code="policy_allow",
             )
-            return func(*args, **kwargs)
+            return (yield)
 
-        return wrapper
+        return dual_wrap(func, _flow)
 
     return decorator
 

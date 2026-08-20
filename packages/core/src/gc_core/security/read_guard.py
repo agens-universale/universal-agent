@@ -20,6 +20,7 @@ from typing import Any, Callable
 from gc_core.security.confirm_port import request_confirm
 from gc_core.security.path_policy import audit_policy_decision, resolve_tool_context, _extract_named_value, _tool_name
 from gc_core.security.protected_paths import classify_path, protected_paths, protection_enabled
+from gc_core.security.dual_wrapper import dual_wrap
 
 
 _GLOB_WILDCARD_MARKERS = {"*", "all"}
@@ -330,8 +331,7 @@ def enforce_read_guard(
     и url-тулам (url_policy).
     """
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
+        def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
             config_dict = _config_from_context(context)
             cfg = parse_read_guard_config(config_dict)
@@ -370,7 +370,7 @@ def enforce_read_guard(
                     decision="executed",
                     reason_code="policy_disabled",
                 )
-                return func(*args, **kwargs)
+                return (yield)
 
             try:
                 candidate_path = _extract_named_value(
@@ -379,7 +379,7 @@ def enforce_read_guard(
             except ValueError:
                 # Аргумент path отсутствует/некорректен — пусть сам тул вернёт
                 # его validation error.
-                return func(*args, **kwargs)
+                return (yield)
 
             skills_root = _resolve_skills_root(config_dict)
             extra_allowed = [skills_root] if skills_root else None
@@ -402,7 +402,7 @@ def enforce_read_guard(
                         reason_code="policy_allow_out_of_perimeter",
                         risk_flags=["out_of_perimeter"],
                     )
-                    return func(*args, **kwargs)
+                    return (yield)
                 if mode == "ask":
                     _rg_path = exc.error.get("path", candidate_path)
                     confirmed = request_confirm(
@@ -425,7 +425,7 @@ def enforce_read_guard(
                             reason_code="policy_ask_confirmed",
                             risk_flags=["out_of_perimeter"],
                         )
-                        return func(*args, **kwargs)
+                        return (yield)
                     exc.error["type"] = "read_guard_cancelled_by_user"
                     exc.error["message"] = (
                         f"User declined the read of '{_rg_path}'. Do NOT retry the same "
@@ -445,7 +445,7 @@ def enforce_read_guard(
             except ValueError as exc:
                 # Пустой path и т.п. — отдадим обычный validation error через тул.
                 _ = exc
-                return func(*args, **kwargs)
+                return (yield)
 
             audit_policy_decision(
                 context,
@@ -453,8 +453,8 @@ def enforce_read_guard(
                 decision="executed",
                 reason_code="policy_allow",
             )
-            return func(*args, **kwargs)
-        return wrapper
+            return (yield)
+        return dual_wrap(func, _flow)
     return decorator
 
 

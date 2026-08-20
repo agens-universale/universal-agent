@@ -18,6 +18,7 @@ from gc_core.message_projection import project_text_for_model
 from gc_core.summarize.llm import auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens, request_auxiliary_completion_text
 from gc_core.utils.project_data import os_label
 from gc_core.bundled_assets import bundled_root
+from gc_core.security.dual_wrapper import dual_wrap
 
 SAFE_VERDICT = "safe"
 DANGEROUS_VERDICT = "potentially_dangerous"
@@ -336,8 +337,7 @@ def moderate_command_execution(
     blocked_result_factory: Callable[[dict[str, Any]], str] | None = None,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
+        def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
             # Если в config_dict отсутствует блок command_moderation вообще —
             # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
@@ -349,17 +349,17 @@ def moderate_command_execution(
             )
             cm_cfg = _cfg.get("command_moderation")
             if not isinstance(cm_cfg, dict):
-                return func(*args, **kwargs)
+                return (yield)
             # Runtime-fallback при отсутствии enabled — OFF (судья не вызывается).
             # На нормальном пути load_config кладёт command_moderation из pydantic
             # (secure-by-default enabled=True), поэтому fallback достижим лишь в
             # обход load_config (bespoke/тест-конфиги), а не в проде.
             if not bool(cm_cfg.get("enabled", False)):
-                return func(*args, **kwargs)
+                return (yield)
             try:
                 payload = _extract_payload(func, args, kwargs, payload_arg, payload_extractor)
             except ValueError:
-                return func(*args, **kwargs)
+                return (yield)
             moderation_context = _build_context(tool_name or func.__name__, context, kwargs)
             if moderation_context.mode == "allow":
                 audit_policy_decision(
@@ -368,7 +368,7 @@ def moderate_command_execution(
                     decision="executed",
                     reason_code="policy_allow",
                 )
-                return func(*args, **kwargs)
+                return (yield)
 
             judge_result = None
             judge_available = True
@@ -429,7 +429,7 @@ def moderate_command_execution(
                     risk_flags=decision.risk_flags,
                     error_type=decision.error_type,
                 )
-                return func(*args, **kwargs)
+                return (yield)
             error = make_block_error(
                 decision,
                 payload,
@@ -458,7 +458,7 @@ def moderate_command_execution(
                 ensure_ascii=False,
             )
 
-        return wrapper
+        return dual_wrap(func, _flow)
 
     return decorator
 
