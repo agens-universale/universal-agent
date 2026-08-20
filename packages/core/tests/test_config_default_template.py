@@ -61,6 +61,12 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
 # Полный справочник значений — demo_config.yml.
 # Пополнять только осознанно; при появлении ключа в шаблоне — удалять отсюда.
 EXPERT_ONLY_KEYS: set = {
+    # --- каталог провайдеров: намеренно живёт в коде, а не в шаблоне ---
+    # Развёрнутый блок впечатывался бы копией в конфиг каждому при первом запуске,
+    # и следующий добавленный провайдер до людей уже не доехал бы. В шаблоне он
+    # лежит закомментированным — как образец формата (сторож этого —
+    # test_default_presets_are_not_materialized_into_the_template).
+    "endpoint_presets",
     # --- agent: тюнинги finish gate / output storage ---
     # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
     "agent.finish_gate_max_iterations",
@@ -104,6 +110,9 @@ EXPERT_ONLY_KEYS: set = {
     "backend.chat_completion_kwargs",
     # Минимум токенов в ответе (провайдеро-специфичный параметр).
     "backend.chat_completions_min_response_tokens",
+    # Ретрай ошибки, зашитой прокси в HTTP-200 (choices[0].error / top-level
+    # error / finish_reason=error); дефолт true, тюнинг — под конкретный прокси.
+    "backend.retry_embedded_choice_errors",
     # Глобальный флаг стриминга; управляется через tui.stream (в шаблоне есть).
     "backend.stream",
 

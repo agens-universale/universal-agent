@@ -241,8 +241,27 @@ class CommandPalette(VerticalScroll):
             name_w = self._name_col_w()
         return f" {f'/{cmd.name}'.ljust(name_w)}{cmd.description}"
 
+    def _hotkey_col_w(self) -> int:
+        """Колонка, с которой начинаются хоткеи, или 0 — их нет ни у одной видимой
+        строки. Считается по самому длинному видимому описанию (тот же приём, что у
+        имени): иначе хоткеи вставали бы в хвост строк разной длины лесенкой.
+
+        Зазор +3, как и у колонки описаний (§4): было +2, и на строке с самым длинным
+        описанием рядом оказывались два разных зазора — 3 слева от описания и 2 справа.
+        На одной строке это видно глазом (находка живой приёмки)."""
+        rows = [c for c in self._visible_rows()]
+        if not any(c.hotkey for c in rows):
+            return 0
+        # По ВСЕМ видимым описаниям, а не только по строкам с хоткеем: у длинного
+        # описания без клавиши иначе не осталось бы зазора вовсе.
+        return max(len(c.description) for c in rows) + 3
+
     def _format_row(self, cmd: Command) -> str:
-        return self._row_head(cmd)
+        head = self._row_head(cmd)
+        col = self._hotkey_col_w()
+        if not col or not cmd.hotkey:
+            return head              # колонку держит паддинг соседей, пустой хвост не нужен
+        return head + " " * (col - len(cmd.description)) + cmd.hotkey
 
     def _my_base_w(self, name: str) -> int:
         """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва)."""

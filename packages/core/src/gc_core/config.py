@@ -208,6 +208,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "cert_path": app_cfg.backend.cert_path,
         "key_path": app_cfg.backend.key_path,
         "use_retry": app_cfg.backend.use_retry,
+        "retry_embedded_choice_errors": app_cfg.backend.retry_embedded_choice_errors,
         "backend_request_timeout_sec": app_cfg.backend.request_timeout_sec,
         "proxy": app_cfg.backend.proxy,
         "stream": app_cfg.backend.stream,  # legacy: канонический ключ — tui.stream
@@ -224,6 +225,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "update": app_cfg.update.model_dump(),  # спека D: check/extra_args
         "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
         "tui_file_view": app_cfg.tui.file_view.model_dump(),
+        "endpoint_presets": [p.model_dump() for p in app_cfg.endpoint_presets],
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,

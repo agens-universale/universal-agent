@@ -68,7 +68,6 @@ class CommandTextArea(TextArea):
             event.stop()
             event.prevent_default()
             self.post_message(self.Submitted(self.submission_text()))
-            self._clear_chip_state()
             return
         # let TextArea handle other keys normally (printable insert, navigation, …)
         await super()._on_key(event)
@@ -82,6 +81,13 @@ class CommandTextArea(TextArea):
     def _clear_chip_state(self) -> None:
         self._chips.reset()
         self._close_expand_window()
+
+    def _on_text_area_changed(self, event: TextArea.Changed) -> None:
+        # Буфер опустел (отправка/очистка) — плашки потеряли привязку к тексту.
+        # Сбрасываем стор здесь, а не в Enter-ветке: Enter теперь не всегда
+        # «отправка» (например, файловый пикер достраивает путь, оставляя текст в поле).
+        if not self.text:
+            self._clear_chip_state()
 
     def _insert_replacing_selection(self, text: str) -> None:
         start, end = sorted(self.selection)

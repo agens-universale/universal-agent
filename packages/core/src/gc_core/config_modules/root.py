@@ -7,7 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
-from gc_core.config_modules.agent import AgentConfig, DEFAULT_FINISH_GATE_MAX_ITERATIONS, DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
+from gc_core.config_modules.agent import (
+    AgentConfig,
+    DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+    DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+)
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.config_modules.logging_config import LoggingConfig
 from gc_core.config_modules.mcp import McpConfig
@@ -16,18 +20,41 @@ from gc_core.config_modules.security import SecurityConfig
 from gc_core.config_modules.stored_outputs import normalize_tool_output_limits
 from gc_core.config_modules.intent_scope import IntentScopeConfig, normalize_intent_scope_config
 from gc_core.config_modules.quality_gate import QualityGateConfig, normalize_quality_gate_config
-from gc_core.config_modules.working_memory import WorkingMemoryConfig, normalize_working_memory_config
+from gc_core.config_modules.working_memory import (
+    WorkingMemoryConfig,
+    normalize_working_memory_config,
+)
 from gc_core.config_modules.todo import TodoConfig, normalize_todo_config
-from gc_core.config_modules.message_notice import ToolUsageNoticeRule, normalize_tool_usage_notice_rules
-from gc_core.config_modules.project_memory import ProjectMemoryConfig, normalize_project_memory_config
+from gc_core.config_modules.message_notice import (
+    ToolUsageNoticeRule,
+    normalize_tool_usage_notice_rules,
+)
+from gc_core.config_modules.project_memory import (
+    ProjectMemoryConfig,
+    normalize_project_memory_config,
+)
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
 from gc_core.config_modules.pricing import PricingConfig
 from gc_core.config_modules.tui import TuiConfig
+from gc_core.config_modules.endpoint_presets import EndpointPreset, default_endpoint_presets
 from gc_core.config_modules.update import UpdateConfig
 from gc_core.config_modules.diff_tui import DiffTuiConfig
 from gc_core.config_modules.fs_tools import FsToolsConfig
-from gc_core.config_modules.summary import DEFAULT_INCREMENTAL_BATCH_MULTIPLIER, DEFAULT_INTENT_LOG_PREVIEW_CHARS, DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS, DEFAULT_LAST_DIALOG_STEPS_COUNT, DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS, DEFAULT_MAX_DIALOGUE_CHARS, DEFAULT_MAX_MESSAGE_CHARS, DEFAULT_TURN_END_TRIGGER_RATIO, SummaryConfig
-from gc_core.config_modules.strip_tags_projection import StripTagsProjectionConfig, normalize_strip_tags_projection_config
+from gc_core.config_modules.summary import (
+    DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
+    DEFAULT_INTENT_LOG_PREVIEW_CHARS,
+    DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+    DEFAULT_LAST_DIALOG_STEPS_COUNT,
+    DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
+    DEFAULT_MAX_DIALOGUE_CHARS,
+    DEFAULT_MAX_MESSAGE_CHARS,
+    DEFAULT_TURN_END_TRIGGER_RATIO,
+    SummaryConfig,
+)
+from gc_core.config_modules.strip_tags_projection import (
+    StripTagsProjectionConfig,
+    normalize_strip_tags_projection_config,
+)
 
 
 class AgentAuthConfig(BaseModel):
@@ -53,6 +80,7 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
+    endpoint_presets: list[EndpointPreset] = Field(default_factory=default_endpoint_presets)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)

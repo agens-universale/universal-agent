@@ -8,8 +8,14 @@ import pytest
 import requests
 
 from gc_core import request_backend_policy as policy
-from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices, notice_from_llm_failure, push_runtime_notice
+from gc_core.runtime_notices import (
+    clear_runtime_notices,
+    collect_runtime_notices,
+    notice_from_llm_failure,
+    push_runtime_notice,
+)
 from gc_core.startup_notices import Notice
+from gc_core.utils.backend_errors import EmbeddedChoiceError
 
 
 def _http_error(status: int, body: dict) -> requests.exceptions.HTTPError:
@@ -37,6 +43,20 @@ def test_notice_from_http_error_includes_status_and_detail():
     assert "HTTP 400" in n.message
     assert "судья" in n.message
     assert "reasoning_effort" in n.highlights or "low" in n.message
+
+
+def test_notice_from_embedded_choice_error_shows_http_status():
+    """EmbeddedChoiceError несёт status_code (напр. 504) — в TUI должен попасть
+    «HTTP 504», а не обезличенное «Ошибка LLM»."""
+    exc = EmbeddedChoiceError(
+        "provider returned embedded choice error: code=504 "
+        "message='Upstream idle timeout exceeded'",
+        status_code=504,
+        raw_code=504,
+    )
+    n = notice_from_llm_failure(exc, request_label="main_agent", url="http://x/v1/chat/completions")
+    assert n.code == "llm_error_504"
+    assert "HTTP 504" in n.message
 
 
 def test_push_dedup_same_code_and_message():

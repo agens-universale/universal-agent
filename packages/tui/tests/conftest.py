@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 import shutil
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
+from typing import Callable
+from unittest import mock
 
 import pytest
 
@@ -42,6 +45,86 @@ def _isolate_agent_state(tmp_path, monkeypatch):
     from gc_core import upgrade_gate
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_model_list_cache():
+    """ModelEditor ходит за списком моделей через session-кэш
+    (`tui.services.model_list_cache`) — модуль-уровневый dict переживает между
+    тестами. Разные тесты часто бьют по одному и тому же (url, auth, verify,
+    proxy) — например, общий дефолт `_cfg()`/`_write_cfg()` в test_settings_screen —
+    с разными монки-патченными/инжектированными списками моделей: без сброса
+    первый тест в порядке прогона молча кэширует свой список для соседей.
+    Автосброс до и после каждого теста (после — на случай, если тест сам не
+    дошёл до конца)."""
+    from gc_tui.services.model_list_cache import clear_cache
+    clear_cache()
+    yield
+    clear_cache()
+
+
+async def wait_until(
+    pilot,
+    cond: Callable[[], bool],
+    what: str,
+    *,
+    steps: int = 200,
+    step_s: float = 0.05,
+) -> None:
+    """Ждать наблюдаемое условие (до ~10 с при дефолтах), не слепой pause."""
+    for _ in range(steps):
+        if cond():
+            return
+        await pilot.pause(step_s)
+    raise AssertionError(f"timeout: {what}")
+
+
+def settings_section_index(name: str) -> int:
+    """Индекс секции SettingsScreen по отображаемому имени (SECTIONS), а не
+    хардкод-номером: вставка новой секции в SECTIONS сдвигает номера соседей,
+    но не имена — тест, прибитый к номеру, тихо открывает не ту секцию."""
+    from gc_tui.screens.settings import SECTIONS
+    return SECTIONS.index(name)
+
+
+def open_settings_section(scr, name: str) -> None:
+    """Открыть секцию SettingsScreen хаба настроек ПО ИМЕНИ вместо хардкод-индекса
+    (см. settings_section_index) — драйвер для scr._menu_idx/_open_section."""
+    idx = settings_section_index(name)
+    scr._menu_idx = idx
+    scr._open_section(idx)
+
+
+# --- фейки для форм (мастер + /settings) --------------------------------------
+#
+# Тесты форм раз за разом подсовывают одни и те же три подмены: пробу подключения,
+# её же с журналом вызовов и загрузчик списка моделей. Держим их в одном месте —
+# иначе у каждого файла своя копия с чуть иной сигнатурой, и «проверено ли, что
+# прокси доехал до запроса» приходится выяснять заново в каждом.
+
+
+
+
+
+
+
+
+# --- монтаж экранов форм ------------------------------------------------------
+#
+# Каждый хелпер — асинхронный контекст-менеджер, отдающий `(pilot, экран)` уже в
+# нужном состоянии. Собраны ПОВЕРХ фабрик соседних тест-файлов (`_screen`,
+# `_mk_screen`, `_write_cfg`, `_harness`), а не рядом с ними: логика монтажа
+# одного и того же экрана не должна расходиться по четырём копиям.
+
+
+
+
+
+
+
+
+
+
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -7,6 +7,9 @@ ADDRESS_HINT = "напр. https://host/v1/chat/completions"
 AUTH_OPTIONS = ("Bearer-токен", "без авторизации (токен не нужен)", "пропустить")
 TOKEN_HINT = "токен (ввод скрыт)"
 NO_AUTH_NOTE = "без авторизации — заголовок не отправляется"
+NO_AUTH_LABEL = "без авторизации"
+NO_AUTH_TOGGLE_HINT = "Space — переключить"
+NO_AUTH_FROZEN_PLACEHOLDER = "не используется"
 MODEL_NO_LIST = "список не получен — впишите имя вручную"
 MODEL_WARN = ("отмеченные модели могут не поддерживать инструменты (tools) — "
               "с ними агент может работать некорректно")
