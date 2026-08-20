@@ -22,13 +22,13 @@ def teardown_module(_module) -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
     cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = real_tools.apply_tool
+        cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
 agent_executor_module = None
@@ -41,11 +41,11 @@ def setup_module(_module) -> None:
     tools_pkg = sys.modules["gc_core.tools"]
     from gc_core import processing_responses as pr
 
-    pr.apply_tool = tools_pkg.apply_tool
+    pr.aapply_tool = tools_pkg.aapply_tool
     pr.WrongFunctionArgumentsException = tools_pkg.WrongFunctionArgumentsException
     cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = tools_pkg.apply_tool
+        cycle_stop_mod.aapply_tool = tools_pkg.aapply_tool
 
     for mod in ("agent_executor", "run_summary_coordinator"):
         sys.modules.pop(mod, None)
@@ -67,13 +67,13 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         return "ok"
 
     def _build_tools_data(_config_dict):
         return {}, [], []
 
-    tools_pkg.apply_tool = _apply_tool
+    tools_pkg.aapply_tool = _apply_tool
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_dir = module_dir("tools")

@@ -36,7 +36,7 @@ def test_process_tool_calls_skips_second_finalizer(monkeypatch):
     from gc_core import processing_responses as pr
 
     calls = []
-    monkeypatch.setattr(pr, "apply_tool",
+    monkeypatch.setattr(pr, "aapply_tool",
                         lambda **kw: calls.append(kw["tool_name"]) or '{"ok": true}')
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output",
                         lambda res, **kw: res)
@@ -68,7 +68,7 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
     persisted = []
     order = []
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         order.append(kw["tool_name"])
         if kw["tool_name"] == "turn_ask_human":
             flushed = [m for batch in persisted for m in batch]
@@ -76,7 +76,7 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
                 "session_memory output должен быть сфлашен ДО turn_ask_human"
         return '{"ok": true}'
 
-    monkeypatch.setattr(pr, "apply_tool", fake_apply)
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
@@ -110,14 +110,14 @@ def test_flush_skipped_outputs_before_ask_human(monkeypatch):
 
     persisted = []
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         if kw["tool_name"] == "turn_ask_human":
             flushed = [m for batch in persisted for m in batch]
             assert any(m.get("call_id") == "c3" for m in flushed), \
                 "skip-output пропущенного тула должен быть сфлашен ДО turn_ask_human"
         return '{"ok": true}'
 
-    monkeypatch.setattr(pr, "apply_tool", fake_apply)
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")

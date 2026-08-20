@@ -84,7 +84,7 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
 
     monkeypatch.setattr(
         pr,
-        "apply_tool",
+        "aapply_tool",
         lambda **kw: json.dumps(
             {
                 "ok": False,
@@ -123,7 +123,7 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
 def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
     from gc_core import processing_responses as pr
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         if kw["tool_name"] == "phase1":
             return json.dumps(
                 {
@@ -139,7 +139,7 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
             )
         return json.dumps({"ok": True, "message": "done"})
 
-    monkeypatch.setattr(pr, "apply_tool", fake_apply)
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
@@ -176,13 +176,13 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
             "message": "Unknown tool 'phase1'. Use only tools from the provided tool list.",
         }
     )
-    monkeypatch.setattr(pr, "apply_tool", lambda **_kw: unknown_payload)
+    monkeypatch.setattr(pr, "aapply_tool", lambda **_kw: unknown_payload)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
 
     round_id = {"n": 0}
 
-    def fake_process_tool_outputs(messages, state, ctx):
+    async def fake_process_tool_outputs(messages, state, ctx):
         round_id["n"] += 1
         return (
             [
@@ -196,7 +196,7 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
             f"resp_{round_id['n']}",
         )
 
-    monkeypatch.setattr(pr, "process_tool_outputs", fake_process_tool_outputs)
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", fake_process_tool_outputs)
 
     state = _make_state(max_steps=50)
     ctx = SimpleNamespace(
@@ -240,13 +240,13 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
             "message": "Unknown tool 'phase1'. Use only tools from the provided tool list.",
         }
     )
-    monkeypatch.setattr(pr, "apply_tool", lambda **_kw: unknown_payload)
+    monkeypatch.setattr(pr, "aapply_tool", lambda **_kw: unknown_payload)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
 
     round_id = {"n": 0}
 
-    def fake_process_tool_outputs(messages, state, ctx):
+    async def fake_process_tool_outputs(messages, state, ctx):
         round_id["n"] += 1
         return (
             [
@@ -260,7 +260,7 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
             f"resp_{round_id['n']}",
         )
 
-    monkeypatch.setattr(pr, "process_tool_outputs", fake_process_tool_outputs)
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", fake_process_tool_outputs)
 
     state = _make_state(max_steps=50)
     ctx = SimpleNamespace(

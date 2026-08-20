@@ -133,7 +133,7 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
 
     gate_calls: list = []
 
-    def _capture(**_kwargs):
+    async def _capture(**_kwargs):
         gate_calls.append(1)
         return ValidationResult(
             ok=True, action="accept", trace_ok=True, report_ok=True,
@@ -142,12 +142,12 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
         )
 
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _capture
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture
     )
 
     phase = {"n": 0}
 
-    def _fake_user_ask(_messages, _state, _ctx):
+    async def _fake_user_ask(_messages, _state, _ctx):
         phase["n"] += 1
         if phase["n"] == 1:
             return [{
@@ -170,8 +170,8 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
             "id": "fc_finish",
         }], "r2"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
-    monkeypatch.setattr(pr, "apply_tool", lambda **_kw: "ok")
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aapply_tool", lambda **_kw: "ok")
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
 

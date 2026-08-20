@@ -44,7 +44,7 @@ def _make_ctx(**overrides):
 
 def test_step_limit_envelope_shape(monkeypatch):
     monkeypatch.setattr(
-        summary_llm, "request_chat_completion_text",
+        summary_llm, "arequest_chat_completion_text",
         lambda **kw: "## Intent\n\nDid stuff.",
     )
     state = _make_state(max_steps=1)
@@ -64,7 +64,7 @@ def test_step_limit_envelope_shape(monkeypatch):
 
 def test_tool_call_limit_envelope_shape(monkeypatch):
     monkeypatch.setattr(
-        summary_llm, "request_chat_completion_text",
+        summary_llm, "arequest_chat_completion_text",
         lambda **kw: "summary text",
     )
     state = _make_state(max_steps=10)
@@ -80,7 +80,7 @@ def test_tool_call_limit_envelope_shape(monkeypatch):
 
 def test_token_limit_envelope_shape(monkeypatch):
     monkeypatch.setattr(
-        summary_llm, "request_chat_completion_text",
+        summary_llm, "arequest_chat_completion_text",
         lambda **kw: "token summary",
     )
     state = _make_state(max_steps=10)
@@ -100,9 +100,9 @@ def test_token_limit_envelope_shape(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
-    def _boom(**kw):
+    async def _boom(**kw):
         raise RuntimeError("LLM down")
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _boom)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _boom)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]
@@ -120,7 +120,7 @@ def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
 
 def test_raw_non_markdown_text_still_in_summary(monkeypatch):
     monkeypatch.setattr(
-        summary_llm, "request_chat_completion_text",
+        summary_llm, "arequest_chat_completion_text",
         lambda **kw: "not json, just plain text",
     )
     state = _make_state(max_steps=1)
@@ -138,11 +138,11 @@ def test_raw_non_markdown_text_still_in_summary(monkeypatch):
 def test_kill_switch_disables_llm_call(monkeypatch):
     called = {"n": 0}
 
-    def _fake_llm(**kw):
+    async def _fake_llm(**kw):
         called["n"] += 1
         return "should not be called"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_llm)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]
@@ -159,11 +159,11 @@ def test_kill_switch_disables_llm_call(monkeypatch):
 def test_no_working_memory_in_prompt(monkeypatch):
     captured = {}
 
-    def _capture_llm(**kw):
+    async def _capture_llm(**kw):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -187,11 +187,11 @@ def test_no_working_memory_in_prompt(monkeypatch):
 def test_system_message_not_in_trace(monkeypatch):
     captured = {}
 
-    def _capture_llm(**kw):
+    async def _capture_llm(**kw):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -211,11 +211,11 @@ def test_system_message_not_in_trace(monkeypatch):
 def test_function_call_serialized_in_trace(monkeypatch):
     captured = {}
 
-    def _capture_llm(**kw):
+    async def _capture_llm(**kw):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [

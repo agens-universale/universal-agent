@@ -23,7 +23,7 @@ def _run_ctx():
 def test_context_overflow_triggers_compaction_and_retries(monkeypatch):
     calls = {"backend": 0, "compact": 0}
 
-    def _fake_process_user_ask(messages, state, ctx):
+    async def _fake_process_user_ask(messages, state, ctx):
         calls["backend"] += 1
         if calls["backend"] == 1:
             raise ValueError(
@@ -32,7 +32,7 @@ def test_context_overflow_triggers_compaction_and_retries(monkeypatch):
             )
         return [{"role": "assistant", "type": "message", "content": "готово"}], "resp_2"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
 
     result = pr.run_agent(
         [{"role": "user", "content": "сделай", "id": "u1"}],
@@ -49,10 +49,10 @@ def test_context_overflow_triggers_compaction_and_retries(monkeypatch):
 def test_non_overflow_error_still_propagates(monkeypatch):
     import pytest
 
-    def _boom(messages, state, ctx):
+    async def _boom(messages, state, ctx):
         raise ValueError("some other backend failure")
 
-    monkeypatch.setattr(pr, "process_user_ask", _boom)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _boom)
 
     with pytest.raises(ValueError, match="some other backend failure"):
         pr.run_agent(

@@ -35,7 +35,7 @@ def test_deny_rejects_generic():
 
 
 def test_judge_accept(monkeypatch):
-    monkeypatch.setattr(taj, "judge_text_answer",
+    monkeypatch.setattr(taj, "ajudge_text_answer",
                         lambda *a, **k: SimpleNamespace(action="accept"))
     d = should_return_text_answer(_ctx("judge"), object(), "answer")
     assert d.accept is True and d.reject_feedback is None
@@ -46,7 +46,7 @@ def test_judge_reject_carries_feedback(monkeypatch):
                            trace_gaps=["need to run tests"], missing_requirements=[],
                            report_mismatches=[], conflicts=[], coverage_score=0.0,
                            feedback_for_agent="", is_question=False)
-    monkeypatch.setattr(taj, "judge_text_answer", lambda *a, **k: res)
+    monkeypatch.setattr(taj, "ajudge_text_answer", lambda *a, **k: res)
     d = should_return_text_answer(_ctx("judge"), object(), "answer")
     assert d.accept is False
     assert d.reject_feedback is not None
@@ -60,7 +60,7 @@ def test_judge_reject_is_question_omits_tool_hint(monkeypatch):
                            trace_gaps=["need user choice"], missing_requirements=[],
                            report_mismatches=[], conflicts=[], coverage_score=0.0,
                            feedback_for_agent="", is_question=True)
-    monkeypatch.setattr(taj, "judge_text_answer", lambda *a, **k: res)
+    monkeypatch.setattr(taj, "ajudge_text_answer", lambda *a, **k: res)
     d = should_return_text_answer(_ctx("judge"), object(), "1 или 2?")
     assert d.accept is False
     assert d.reject_feedback is not None
@@ -70,7 +70,7 @@ def test_judge_reject_is_question_omits_tool_hint(monkeypatch):
 
 
 def test_judge_error_falls_back_to_generic(monkeypatch):
-    monkeypatch.setattr(taj, "judge_text_answer", lambda *a, **k: None)
+    monkeypatch.setattr(taj, "ajudge_text_answer", lambda *a, **k: None)
     d = should_return_text_answer(_ctx("judge"), object(), "answer")
     assert d.accept is False and d.reject_feedback is None
 
@@ -78,7 +78,7 @@ def test_judge_error_falls_back_to_generic(monkeypatch):
 def test_judge_not_available_without_chat_completions_backend(monkeypatch):
     """judge_available инфраструктурный: backend != chat_completions → deny без судьи."""
     called = {"n": 0}
-    monkeypatch.setattr(taj, "judge_text_answer",
+    monkeypatch.setattr(taj, "ajudge_text_answer",
                         lambda *a, **k: called.__setitem__("n", called["n"] + 1))
     d = should_return_text_answer(_ctx("judge", backend="responses"), object(), "answer")
     assert d.accept is False and called["n"] == 0
@@ -87,23 +87,23 @@ def test_judge_not_available_without_chat_completions_backend(monkeypatch):
 # ── старые тесты переведены на новую сигнатуру ───────────────────────────────
 
 def test_judge_accepts_when_action_accept(monkeypatch):
-    monkeypatch.setattr(taj, "validate_final_report_vs_user_intent",
+    monkeypatch.setattr(taj, "avalidate_final_report_vs_user_intent",
                         lambda **kw: type("R", (), {"action": "accept"})())
     result = taj.judge_text_answer(_ctx(), _S(), "Привет! Чем помочь?")
     assert getattr(result, "action", None) == "accept"
 
 
 def test_judge_bounces_when_action_continue(monkeypatch):
-    monkeypatch.setattr(taj, "validate_final_report_vs_user_intent",
+    monkeypatch.setattr(taj, "avalidate_final_report_vs_user_intent",
                         lambda **kw: type("R", (), {"action": "continue_work"})())
     result = taj.judge_text_answer(_ctx(), _S(), "Сейчас сделаю...")
     assert getattr(result, "action", None) == "continue_work"
 
 
 def test_judge_bounces_on_validator_error(monkeypatch):
-    def boom(**kw):
+    async def boom(**kw):
         raise RuntimeError("validator down")
-    monkeypatch.setattr(taj, "validate_final_report_vs_user_intent", boom)
+    monkeypatch.setattr(taj, "avalidate_final_report_vs_user_intent", boom)
     result = taj.judge_text_answer(_ctx(), _S(), "что-то")
     assert result is None   # строгий fallback → None
 
@@ -111,9 +111,9 @@ def test_judge_bounces_on_validator_error(monkeypatch):
 def test_judge_passes_text_as_finish_arguments(monkeypatch):
     """Текст подаётся судье как finish_handoff_arguments (полный контекст — изнутри)."""
     seen = {}
-    def cap(**kw):
+    async def cap(**kw):
         seen.update(kw)
         return type("R", (), {"action": "accept"})()
-    monkeypatch.setattr(taj, "validate_final_report_vs_user_intent", cap)
+    monkeypatch.setattr(taj, "avalidate_final_report_vs_user_intent", cap)
     taj.judge_text_answer(_ctx(), _S(), "мой текст-ответ")
     assert seen["finish_handoff_arguments"] == "мой текст-ответ"

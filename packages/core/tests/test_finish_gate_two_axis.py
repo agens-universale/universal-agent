@@ -1,3 +1,4 @@
+import asyncio
 """E2E finish gate — регрессия §1.2 SPEC (две оси, fix_report без повтора ask_human)."""
 
 import importlib
@@ -44,7 +45,7 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         arguments = _kwargs.get("arguments")
         try:
             payload = json.loads(arguments) if isinstance(arguments, str) else {}
@@ -66,7 +67,7 @@ def _stub_tools_modules() -> None:
     def _build_tools_data(_config_dict):
         return {}, [], []
 
-    tools_pkg.apply_tool = _apply_tool
+    tools_pkg.aapply_tool = _apply_tool
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_dir = module_dir("tools")
@@ -75,7 +76,7 @@ def _stub_tools_modules() -> None:
 
     from gc_core.message_policy import cycle_stop as cycle_stop_mod
 
-    cycle_stop_mod.apply_tool = tools_pkg.apply_tool
+    cycle_stop_mod.aapply_tool = tools_pkg.aapply_tool
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -89,7 +90,7 @@ def _load_processing_responses():
     processing_module = pm
     run_agent = ra
     State = St
-    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
+    pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
     yield
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
@@ -145,7 +146,7 @@ def _submit_solution_call(
     }
 
 
-def _scenario_12_validation(**_kwargs):
+async def _scenario_12_validation(**_kwargs):
     """trace_ok: ask_human уже был; report_ok: full_solution не подходит."""
     return ValidationResult(
         ok=False,
@@ -164,7 +165,7 @@ def _scenario_12_validation(**_kwargs):
 
 
 def test_fix_report_feedback_does_not_repeat_ask_human():
-    validation = _scenario_12_validation()
+    validation = asyncio.run(_scenario_12_validation())
     feedback = build_finish_gate_feedback(validation)
     assert "fix_report" in feedback
     assert "without repeating" in feedback
@@ -177,7 +178,7 @@ def test_fix_report_feedback_does_not_repeat_ask_human():
 def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _scenario_12_validation,
     )
     state = _make_state()
@@ -200,11 +201,11 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
 def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _scenario_12_validation,
     )
 
-    def _stub_user_ask(_messages, _state, _ctx):
+    async def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -217,7 +218,7 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -247,7 +248,7 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
 
 
 def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
-    def _accept(**_kwargs):
+    async def _accept(**_kwargs):
         return ValidationResult(
             ok=True,
             action="accept",
@@ -263,7 +264,7 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _accept,
     )
 
@@ -284,7 +285,7 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
     assert state.current_user_intent == []
 
 
-def _continue_work_validation(**_kwargs):
+async def _continue_work_validation(**_kwargs):
     return ValidationResult(
         ok=False,
         action="continue_work",
@@ -299,7 +300,7 @@ def _continue_work_validation(**_kwargs):
     )
 
 
-def _handoff_phantom_validation(**_kwargs):
+async def _handoff_phantom_validation(**_kwargs):
     return ValidationResult(
         ok=False,
         action="fix_report",
@@ -315,7 +316,7 @@ def _handoff_phantom_validation(**_kwargs):
 
 
 def test_handoff_artifacts_fix_report_lists_paths():
-    feedback = build_finish_gate_feedback(_handoff_phantom_validation())
+    feedback = build_finish_gate_feedback(asyncio.run(_handoff_phantom_validation()))
     assert "fix_report" in feedback
     assert "phantom_plan.md" in feedback
 
@@ -323,11 +324,11 @@ def test_handoff_artifacts_fix_report_lists_paths():
 def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _continue_work_validation,
     )
 
-    def _stub_user_ask(_messages, _state, _ctx):
+    async def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -340,7 +341,7 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -370,7 +371,7 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
 
 
 def test_main_accept_after_ask_human_trace(monkeypatch):
-    def _accept(**kwargs):
+    async def _accept(**kwargs):
         assert kwargs.get("finish_handoff_arguments")
         args = kwargs["finish_handoff_arguments"]
         if isinstance(args, str):
@@ -391,7 +392,7 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _accept,
     )
 
@@ -420,11 +421,11 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
 def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _handoff_phantom_validation,
     )
 
-    def _stub_user_ask(_messages, _state, _ctx):
+    async def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -437,7 +438,7 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -470,7 +471,7 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
 def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     captured: dict = {}
 
-    def _capture(**kwargs):
+    async def _capture(**kwargs):
         captured.update(kwargs)
         return ValidationResult(
             ok=True,
@@ -487,7 +488,7 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _capture,
     )
     state = _make_state()
@@ -516,10 +517,10 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
     """Reject finish gate must not return finish_arguments; inject technical user feedback."""
     validate_calls = {"n": 0}
 
-    def _validate(**_kwargs):
+    async def _validate(**_kwargs):
         validate_calls["n"] += 1
         if validate_calls["n"] == 1:
-            return _scenario_12_validation()
+            return await _scenario_12_validation()
         return ValidationResult(
             ok=True,
             action="accept",
@@ -535,7 +536,7 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _validate,
     )
     monkeypatch.setattr(
@@ -546,14 +547,14 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
 
     user_ask_batches: list[list] = []
 
-    def _stub_user_ask(in_messages, _state, _ctx):
+    async def _stub_user_ask(in_messages, _state, _ctx):
         user_ask_batches.append(list(in_messages))
         return (
             [_submit_solution_call(solution_type="direct_answer")],
             "rid_retry",
         )
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=10)
     seed_state_intent(

@@ -1,3 +1,5 @@
+import asyncio
+import inspect
 import gc
 import json
 import time
@@ -9,21 +11,21 @@ from gc_core.intent_guard.feedback import build_finish_gate_feedback, build_fini
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME, FINISH_TOOL_NAME, INTERMEDIATE_REPLY_TOOL_NAME, SESSION_COMPACT_TOOL_NAME, SESSION_TODO_TOOL_NAME, TURN_FINALIZING_TOOLS
 from gc_core.run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from gc_core.intent_guard.guard import FinishGateGuard
-from gc_core.intent_guard.text_answer_judge import should_return_text_answer
+from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, get_function_call_output_text
 from gc_core.intent_scope.hook import maybe_update_intent_scope_from_tool
 from gc_core.intent_scope.final_answer import maybe_record_final_answer_intent
-from gc_core.message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
+from gc_core.message_policy.cycle_stop import aappend_cycle_stop_tool_outputs_for_batch
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
 from gc_core.summarize.limit_trace_summary import build_limit_envelope
-from gc_core.request_backend_policy import request_chat_completions_with_policy
-from gc_core.tools import apply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
+from gc_core.request_backend_policy import arequest_chat_completions_with_policy
+from gc_core.tools import aapply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from gc_core.tools.subagents.progress import brief_args_summary, emit_progress, extract_intermediate_prose, parse_tool_result_status, todo_items_from_arguments
 from gc_core.tools.subagents.sidecar import persist_subagent_trace
 from gc_core.utils.connect_backend import create_call_headers
-from gc_core.utils.connect_backend import request_backend_responses as request_backend
+from gc_core.utils.connect_backend import arequest_backend_responses as arequest_backend
 from gc_core.utils.ssl_config import get_backend_client_cert
 from gc_core.utils.logging_module import human_console_enabled
 from gc_core.utils.backend_errors import is_auth_error, is_context_overflow_error
@@ -47,8 +49,45 @@ from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_noti
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
 
 import logging
+from gc_core.utils.portal import get_portal
 
 _fallback_logger = logging.getLogger(__name__)
+
+
+
+
+async def _maybe_await(value: Any):
+    """Дождаться значения, если это корутина.
+
+    Ставится на швах, которые вызывающие и тесты штатно подменяют: диспетчер
+    тулов, судьи, ступени цикла. Форма заглушки (обычная функция или
+    корутинная) — дело подменяющего, а не цикла: требовать от каждой заглушки
+    корутинности значило бы менять контракт внедрения заодно с переездом.
+    """
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def _acall_blocking_hook(fn, *args: Any, **kwargs: Any):
+    """Позвать «тяжёлый» колбэк вызывающего, не занимая event loop.
+
+    Компакция контекста и intent-scope делают собственные LLM-вызовы и
+    остаются синхронными (подсистема большая, а работает редко — раз в N
+    шагов). Из асинхронного цикла их нельзя звать напрямую двумя способами
+    сразу: прямой вызов заморозил бы loop на всё время суммаризации, а
+    синхронный шим внутри них упёрся бы в портал и поднял
+    SyncApiInsideEventLoopError.
+
+    Поэтому — в поток: loop свободен, а LLM-вызовы внутри всё равно уходят на
+    портальный loop асинхронно. Корутинный колбэк (если вызывающий уже
+    переехал) просто ждём.
+    """
+    if fn is None:
+        return None
+    if inspect.iscoroutinefunction(fn):
+        return await fn(*args, **kwargs)
+    return await asyncio.to_thread(lambda: fn(*args, **kwargs))
 
 
 def _maybe_persist(
@@ -191,7 +230,7 @@ def _mode_requires_backend_call(mode: str) -> bool:
     return mode in {"user_ask", "function_call_output"}
 
 
-def _request_backend_canonical(
+async def _arequest_backend_canonical(
     messages: List[Dict],
     state: State,
     ctx: Any,
@@ -204,7 +243,7 @@ def _request_backend_canonical(
     Прочие ошибки — наверх без изменений. Все call-site получают это единообразно."""
     auth_connector = getattr(ctx, "auth_connector", None)
     try:
-        return _request_backend_canonical_once(
+        return await _arequest_backend_canonical_once(
             messages, state, ctx, set_previous_response_id=set_previous_response_id
         )
     except Exception as exc:
@@ -215,12 +254,12 @@ def _request_backend_canonical(
             "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
         )
         auth_connector.get_token(force=True)
-        return _request_backend_canonical_once(
+        return await _arequest_backend_canonical_once(
             messages, state, ctx, set_previous_response_id=set_previous_response_id
         )
 
 
-def _request_backend_canonical_once(
+async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
     ctx: Any,
@@ -251,7 +290,7 @@ def _request_backend_canonical_once(
             set_previous_response_id=set_previous_response_id,
         )
         with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
-            res, res_headers = request_backend(
+            res, res_headers = await arequest_backend(
                 call_data,
                 call_headers,
                 url=url,
@@ -299,7 +338,7 @@ def _request_backend_canonical_once(
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
 
     with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
-        res, call_data = request_chat_completions_with_policy(
+        res, call_data = await arequest_chat_completions_with_policy(
             payload_factory=_create_payload,
             initial_max_tokens=completions_max_tokens,
             min_response_tokens=min_response_tokens,
@@ -421,8 +460,8 @@ def check_trace_finished(messages: List[Dict]) -> Union[Tuple[str, str], None]:
     return None
 
 
-def process_user_ask(messages, state: State, ctx: Any):
-    resp_messages, response_id, res_headers = _request_backend_canonical(
+async def aprocess_user_ask(messages, state: State, ctx: Any):
+    resp_messages, response_id, res_headers = await _arequest_backend_canonical(
         messages,
         state,
         ctx,
@@ -441,7 +480,7 @@ def split_at_first_finalizer(tool_calls: List[Dict]) -> tuple[List[Dict], List[D
     return tool_calls, []
 
 
-def process_tool_calls(
+async def aprocess_tool_calls(
     messages: List[Dict],
     state: State,
     ctx: Any,
@@ -577,14 +616,14 @@ def process_tool_calls(
             # call_id для субагента: чтобы вложенные строки в TUI знали,
             # под какой корневой subagent_* они относятся.
             state.tool_calls += 1
-            tool_res_raw = apply_tool(
+            tool_res_raw = await _maybe_await(aapply_tool(
                 tool_name=tool_name,
                 arguments=tool_arguments,
                 ctx=ctx,
                 state=state,
                 run_agent_func=run_agent_func,
                 call_id=tool_call_id,
-            )
+            ))
         except WrongFunctionArgumentsException as exc:
             if getattr(exc, "call_id", None) is None:
                 exc.call_id = tool_call_id
@@ -686,7 +725,7 @@ def process_tool_calls(
             logger=getattr(ctx, "logger", None),
         )
         if tool_name != FINISH_TOOL_NAME:
-            maybe_update_intent_scope_from_tool(
+            await _acall_blocking_hook(maybe_update_intent_scope_from_tool,
                 tool_name=tool_name,
                 tool_output_raw=tool_res_raw,
                 tool_arguments=tool_arguments,
@@ -759,8 +798,8 @@ def process_tool_calls(
     return tools_outputs
 
 
-def process_tool_outputs(messages, state: State, ctx: Any):
-    resp_messages, response_id, res_headers = _request_backend_canonical(
+async def aprocess_tool_outputs(messages, state: State, ctx: Any):
+    resp_messages, response_id, res_headers = await _arequest_backend_canonical(
         messages,
         state,
         ctx,
@@ -769,7 +808,7 @@ def process_tool_outputs(messages, state: State, ctx: Any):
     return resp_messages, response_id
 
 
-def run_agent(
+async def arun_agent(
     messages,
     state: State,
     ctx: Any,
@@ -915,7 +954,7 @@ def run_agent(
                 and pre_backend_compaction_hook is not None
             ):
                 try:
-                    pre_backend_compaction_hook(messages, mode)
+                    await _acall_blocking_hook(pre_backend_compaction_hook, messages, mode)
                 except Exception as pre_backend_exc:
                     run_logger.warning(
                         "Pre-backend compaction hook warning: %s",
@@ -979,7 +1018,7 @@ def run_agent(
             try:
                 if mode == "user_ask":
                     try:
-                        messages, response_id = process_user_ask(messages, state, ctx)
+                        messages, response_id = await aprocess_user_ask(messages, state, ctx)
                     except Exception as user_ask_exc:
                         can_retry_with_full_history = (
                             backend_mode == "responses"
@@ -996,7 +1035,7 @@ def run_agent(
                         )
                         full_history_messages = get_full_history_messages()
                         state.previous_response_id = None
-                        messages, response_id, _ = _request_backend_canonical(
+                        messages, response_id, _ = await _arequest_backend_canonical(
                             full_history_messages,
                             state,
                             ctx,
@@ -1017,11 +1056,11 @@ def run_agent(
                         pending_tool_calls = grouped_messages.get("tool_calls", [])
                         # Emit synthetic outputs for all pending tool_calls once (incl. finish):
                         # chat/completions needs tool rows after assistant.tool_calls.
-                        append_cycle_stop_tool_outputs_for_batch(
+                        await aappend_cycle_stop_tool_outputs_for_batch(
                             state=state,
                             ctx=ctx,
                             tool_calls=pending_tool_calls,
-                            run_agent_func=run_agent,
+                            run_agent_func=arun_agent,
                             persist_messages_callback=persist_messages_callback,
                             backend_mode=backend_mode,
                         )
@@ -1037,9 +1076,9 @@ def run_agent(
                             if checking:
                                 mark_finish_gate_checking(True)
                             try:
-                                decision = gate.evaluate_turn_finish(
+                                decision = await _maybe_await(gate.aevaluate_turn_finish(
                                     finish_handoff_arguments=finish_arguments,
-                                )
+                                ))
                             finally:
                                 if checking:
                                     mark_finish_gate_checking(False)
@@ -1053,7 +1092,7 @@ def run_agent(
                             final_submit_output = get_function_call_output_text(
                                 state.messages, finish_call_id
                             )
-                            maybe_update_intent_scope_from_tool(
+                            await _acall_blocking_hook(maybe_update_intent_scope_from_tool,
                                 tool_name=FINISH_TOOL_NAME,
                                 tool_output_raw=final_submit_output or "",
                                 tool_arguments=finish_arguments or "",
@@ -1082,7 +1121,7 @@ def run_agent(
                                 state.steps += 1
                                 state.flush_current_user_intent()
                                 if turn_end_compaction_hook is not None:
-                                    turn_end_compaction_hook()
+                                    await _acall_blocking_hook(turn_end_compaction_hook)
                                 # Сообщение, пришедшее во время (блокирующей) компакции, не
                                 # теряем: продолжаем новым ходом на уже сжатом контексте.
                                 if get_pending_messages is not None:
@@ -1096,8 +1135,8 @@ def run_agent(
                             state.steps += 1
                             return finish_arguments
                     else:
-                        messages = process_tool_calls(
-                            messages, state, ctx, run_agent_func=run_agent,
+                        messages = await aprocess_tool_calls(
+                            messages, state, ctx, run_agent_func=arun_agent,
                             persist_messages_callback=persist_messages_callback,
                         )
                         n_unknown = int(
@@ -1121,14 +1160,16 @@ def run_agent(
                         # Полный ход: LLM уже вернул tools, batch исполнен.
                         count_completed_step = True
                 elif mode == "function_call_output":
-                    messages, response_id = process_tool_outputs(messages, state, ctx)
+                    messages, response_id = await aprocess_tool_outputs(messages, state, ctx)
                     if backend_mode == "responses":
                         state.previous_response_id = response_id
                     state.last_backend_response_id = response_id
                     # Half-turn: как user_ask — ждём разбора ответа модели.
                 elif mode == "text_response":
                     assistant_text = extract_last_assistant_text(messages)
-                    decision = should_return_text_answer(ctx, state, assistant_text)
+                    decision = await _maybe_await(
+                        ashould_return_text_answer(ctx, state, assistant_text)
+                    )
                     if decision.accept:
                         # Финальная проза принята → TUI-индикатор «✓ завершаю…»
                         # на время записи/саммари/flush (mark_finalizing пишет
@@ -1145,7 +1186,7 @@ def run_agent(
                             if mark_finalizing is not None:
                                 mark_finalizing(False)
                         if turn_end_compaction_hook is not None:
-                            turn_end_compaction_hook()
+                            await _acall_blocking_hook(turn_end_compaction_hook)
                         if get_pending_messages is not None:
                             pending = get_pending_messages()
                             if pending:
@@ -1208,7 +1249,7 @@ def run_agent(
                         _MAX_CONTEXT_OVERFLOW_RETRIES,
                         backend_exc,
                     )
-                    force_compact_hook()
+                    await _acall_blocking_hook(force_compact_hook)
                     continue
                 raise
 
@@ -1222,3 +1263,35 @@ def run_agent(
             pass
         elif count_completed_step:
             state.steps += 1
+
+
+# --- синхронные двойники --------------------------------------------------
+#
+# Реализация у каждой ступени цикла одна — асинхронная. Здесь только портал:
+# сигнатуры, блокирующая семантика и возвращаемые значения прежние, поэтому
+# agent_executor, тесты и встраивающий код правок не требуют.
+
+
+def _request_backend_canonical(*args: Any, **kwargs: Any):
+    return get_portal().run(_arequest_backend_canonical(*args, **kwargs))
+
+
+def process_user_ask(*args: Any, **kwargs: Any):
+    return get_portal().run(aprocess_user_ask(*args, **kwargs))
+
+
+def process_tool_calls(*args: Any, **kwargs: Any):
+    return get_portal().run(aprocess_tool_calls(*args, **kwargs))
+
+
+def process_tool_outputs(*args: Any, **kwargs: Any):
+    return get_portal().run(aprocess_tool_outputs(*args, **kwargs))
+
+
+def run_agent(*args: Any, **kwargs: Any) -> Union[str, None]:
+    """Синхронный прогон цикла агента.
+
+    Контракт не изменился: вызов блокирует поток до конца хода и возвращает то
+    же, что раньше.
+    """
+    return get_portal().run(arun_agent(*args, **kwargs))

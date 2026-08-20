@@ -167,7 +167,7 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
     persisted: list = []
     order: list[str] = []
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         order.append(kw["tool_name"])
         if kw["tool_name"] == "exec_python":
             flushed = [m for batch in persisted for m in batch]
@@ -176,7 +176,7 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
             )
         return '{"ok": true}'
 
-    monkeypatch.setattr(pr, "apply_tool", fake_apply)
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")

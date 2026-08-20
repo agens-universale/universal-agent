@@ -11,7 +11,7 @@ from gc_core import processing_responses as pr
 def _patch_policy(monkeypatch):
     seen = {}
 
-    def fake_policy(
+    async def fake_policy(
         *,
         payload_factory,
         initial_max_tokens,
@@ -36,7 +36,7 @@ def _patch_policy(monkeypatch):
             {"max_tokens": initial_max_tokens},
         )
 
-    monkeypatch.setattr(pr, "request_chat_completions_with_policy", fake_policy)
+    monkeypatch.setattr(pr, "arequest_chat_completions_with_policy", fake_policy)
     return seen
 
 

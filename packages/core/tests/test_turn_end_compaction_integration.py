@@ -83,7 +83,7 @@ def _expected_finish_arguments() -> str:
     return _submit_solution_call()["arguments"]
 
 
-def _accept_validation(**_kwargs):
+async def _accept_validation(**_kwargs):
     return ValidationResult(
         ok=True,
         action="accept",
@@ -98,7 +98,7 @@ def _accept_validation(**_kwargs):
     )
 
 
-def _reject_validation(**_kwargs):
+async def _reject_validation(**_kwargs):
     return ValidationResult(
         ok=False,
         action="fix_report_and_continue",
@@ -138,7 +138,7 @@ def _seed_long_history(state: State, *, user_chars: int = 80) -> None:
 def _accept_finish_gate(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _accept_validation,
     )
 
@@ -216,7 +216,7 @@ def test_turn_end_above_threshold_replaces_trace(monkeypatch):
 def test_turn_end_reject_skips_compaction(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _reject_validation,
     )
     state = _make_state(max_steps=0)
@@ -230,7 +230,7 @@ def test_turn_end_reject_skips_compaction(monkeypatch):
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
 
-    def _stub_user_ask(_messages, _state, _ctx):
+    async def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -243,7 +243,7 @@ def test_turn_end_reject_skips_compaction(monkeypatch):
             "rid",
         )
 
-    monkeypatch.setattr(pr, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _stub_user_ask)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
     pr.run_agent(
@@ -258,12 +258,12 @@ def test_turn_end_reject_skips_compaction(monkeypatch):
 
 
 def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
-    def _raise_validation(*_args, **_kwargs):
+    async def _raise_validation(*_args, **_kwargs):
         raise RuntimeError("validation backend failure")
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _raise_validation,
     )
     state = _make_state()
@@ -418,19 +418,19 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
         def list_skills(self):
             return []
 
-    def _raise_validation(*_args, **_kwargs):
+    async def _raise_validation(*_args, **_kwargs):
         raise RuntimeError("validation backend failure")
 
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         return ([_submit_solution_call()], "resp_stub")
 
     recorded: list[str] = []
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _raise_validation,
     )
-    monkeypatch.setattr(pr, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
     # Строковые пути: после reload в test_summary_triggers импорт ``rsc`` в этом файле
     # может указывать на старый модуль, а AgentExecutor — на актуальный.
     monkeypatch.setattr(

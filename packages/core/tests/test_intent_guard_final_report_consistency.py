@@ -37,7 +37,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             digest_chars=40,
         )
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_payload_includes_trace_digest_and_no_user_intent_log(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
         validate_final_report_vs_user_intent(
@@ -53,7 +53,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertIn("<dialog_history>", user_content)
         self.assertNotIn("user_intent_log", user_content)
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_uses_two_axis_parser_fix_report(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json(
             action="fix_report",
@@ -73,7 +73,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertTrue(result.trace_ok)
         self.assertFalse(result.report_ok)
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_broken_llm_json_retries_then_fails_open(self, mock_llm) -> None:
         mock_llm.return_value = "not json"
         result = validate_final_report_vs_user_intent(
@@ -99,7 +99,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertIn("not json", retry_user)
         self.assertIn("Do NOT reason", retry_user)
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_unparseable_first_reply_retry_recovers(self, mock_llm) -> None:
         mock_llm.side_effect = [
             "<think>\nlong truncated reasoning without json\n",
@@ -137,7 +137,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             10000,
         )
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_first_prompt_forbids_reasoning_out_loud(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
         validate_final_report_vs_user_intent(
@@ -151,7 +151,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertIn("Do NOT reason out loud", user_content)
         self.assertIn("Return ONLY a single raw JSON object", user_content)
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_uses_chat_completions_llm_completion_kwargs(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
         validate_final_report_vs_user_intent(
@@ -166,7 +166,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             {"reasoning_effort": "none"},
         )
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_request_label_finish_gate(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
         validate_final_report_vs_user_intent(
@@ -182,7 +182,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             "intent_guard_finish_gate",
         )
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_payload_agent_kind_main_and_subagent(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
         validate_final_report_vs_user_intent(
@@ -208,7 +208,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertIn('"agent_kind": "subagent"', sub_content)
 
     @patch("gc_core.intent_guard.final_report_consistency.build_finish_gate_trace_digest")
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_builds_digest_when_not_passed(self, mock_llm, mock_digest) -> None:
         mock_llm.return_value = _validator_json()
         mock_digest.return_value = self.digest

@@ -42,7 +42,7 @@ def _patch_process_tool_calls(monkeypatch, pr, *, apply=None):
         applied.append(kw["tool_name"])
         return '{"ok": true}'
 
-    monkeypatch.setattr(pr, "apply_tool", apply or _default_apply)
+    monkeypatch.setattr(pr, "aapply_tool", apply or _default_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
     monkeypatch.setattr(pr, "generate_message_id_func", _unique_id_factory())

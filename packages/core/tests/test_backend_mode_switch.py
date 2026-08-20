@@ -20,13 +20,13 @@ def _restore_tools_and_dependents() -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
     cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = real_tools.apply_tool
+        cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -42,13 +42,13 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         raise AssertionError("apply_tool should not be called in this test")
 
     def _build_tools_data(_config_dict):
         return {}, [], []
 
-    tools_pkg.apply_tool = _apply_tool
+    tools_pkg.aapply_tool = _apply_tool
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_pkg.is_unknown_tool_output = lambda *_a, **_kw: False
@@ -210,10 +210,10 @@ class BackendModeSwitchTest(unittest.TestCase):
                     ), payload
 
                 with patch.object(
-                    processing_module, "request_backend", side_effect=_mock_responses_backend
+                    processing_module, "arequest_backend", side_effect=_mock_responses_backend
                 ), patch.object(
                     processing_module,
-                    "request_chat_completions_with_policy",
+                    "arequest_chat_completions_with_policy",
                     side_effect=_mock_chat_completions_policy,
                 ):
                     executor = agent_executor_module.AgentExecutor(ctx)

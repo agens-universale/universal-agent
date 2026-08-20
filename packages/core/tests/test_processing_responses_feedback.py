@@ -18,13 +18,13 @@ def teardown_module(_module) -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
     cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = real_tools.apply_tool
+        cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -38,10 +38,10 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         raise AssertionError("apply_tool should not be called in this test")
 
-    tools_pkg.apply_tool = _apply_tool
+    tools_pkg.aapply_tool = _apply_tool
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_pkg.is_unknown_tool_output = lambda _output: False
     tools_dir = module_dir("tools")
@@ -58,7 +58,7 @@ def setup_module(_module) -> None:
     from gc_core import processing_responses as pm
 
     processing_module = pm
-    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
+    pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
 
 
 def test_make_technical_feedback_message_wraps_generic_feedback():

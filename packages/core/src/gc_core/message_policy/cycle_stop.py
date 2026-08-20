@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from gc_core.tools import apply_tool
+from gc_core.tools import aapply_tool
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
 from gc_core.tools.turn.submit_solution import SubmitSolution
@@ -10,7 +10,17 @@ from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_t
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 
-def _resolve_finish_turn_output_on_cycle_stop(
+async def _maybe_await(value):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+
+async def _resolve_finish_turn_output_on_cycle_stop(
     *,
     state: Any,
     ctx: Any,
@@ -22,13 +32,13 @@ def _resolve_finish_turn_output_on_cycle_stop(
     if isinstance(candidate, str) and candidate.strip():
         return candidate
     try:
-        applied = apply_tool(
+        applied = await _maybe_await(aapply_tool(
             tool_name=FINISH_TOOL_NAME,
             arguments=tool_arguments,
             ctx=ctx,
             state=state,
             run_agent_func=run_agent_func,
-        )
+        ))
         if isinstance(applied, str) and applied.strip():
             return applied
     except Exception:
@@ -38,7 +48,7 @@ def _resolve_finish_turn_output_on_cycle_stop(
     )
 
 
-def _resolve_tool_output_on_cycle_stop(
+async def _resolve_tool_output_on_cycle_stop(
     *,
     state: Any,
     ctx: Any,
@@ -47,7 +57,7 @@ def _resolve_tool_output_on_cycle_stop(
     run_agent_func: Callable,
 ) -> str:
     if tool_name == FINISH_TOOL_NAME:
-        return _resolve_finish_turn_output_on_cycle_stop(
+        return await _resolve_finish_turn_output_on_cycle_stop(
             state=state,
             ctx=ctx,
             tool_arguments=tool_arguments,
@@ -79,7 +89,7 @@ def _resolve_tool_output_on_cycle_stop(
     return tool_res
 
 
-def append_cycle_stop_tool_outputs_for_batch(
+async def aappend_cycle_stop_tool_outputs_for_batch(
     *,
     state: Any,
     ctx: Any,
@@ -98,7 +108,7 @@ def append_cycle_stop_tool_outputs_for_batch(
         tool_name = str(tool_call.get("name") or "")
         if not isinstance(call_id, str) or not call_id:
             continue
-        tool_res = _resolve_tool_output_on_cycle_stop(
+        tool_res = await _resolve_tool_output_on_cycle_stop(
             state=state,
             ctx=ctx,
             tool_name=tool_name,
@@ -127,3 +137,10 @@ def append_cycle_stop_tool_outputs_for_batch(
     state.messages.extend(synthetic_messages)
     if persist_messages_callback is not None and immediate_persist:
         persist_messages_callback(immediate_persist)
+
+
+def append_cycle_stop_tool_outputs_for_batch(*args, **kwargs):
+    """Синхронный двойник — для вызывающих вне цикла агента и тестов."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(aappend_cycle_stop_tool_outputs_for_batch(*args, **kwargs))

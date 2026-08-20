@@ -35,14 +35,14 @@ def test_fallback_aggregated_keeps_tool_output_as_is():
 def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
     logged = {}
 
-    def _fake_request(**kwargs):
+    async def _fake_request(**kwargs):
         return "<think>r</think>one-line summary"
 
     def _fake_log(*, logger, label, messages, output_text):
         logged["output_text"] = output_text
         logged["label"] = label
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_request)
     monkeypatch.setattr(summary_llm, "log_llm_prompt_and_result", _fake_log)
 
     ctx = SimpleNamespace(
@@ -135,7 +135,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         summary_llm,
-        "request_chat_completion_text",
+        "arequest_chat_completion_text",
         lambda **kwargs: _DIRTY_EXTRA + "one-line summary",
     )
     assert (
@@ -150,7 +150,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         summary_llm,
-        "request_chat_completion_text",
+        "arequest_chat_completion_text",
         lambda **kwargs: _DIRTY_EXTRA + "compressed",
     )
     compact_res = compaction.compact_text("long memory", ctx, state)
@@ -168,7 +168,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(
         summary_llm,
-        "request_chat_completion_text",
+        "arequest_chat_completion_text",
         lambda **kwargs: _DIRTY_EXTRA + json.dumps(finish_payload),
     )
     projected_finish = summary_llm.request_auxiliary_completion_text(

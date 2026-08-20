@@ -28,7 +28,7 @@ def _run_with_finish_reason(monkeypatch, finish_reason):
     Возвращает feedback, переданный в _make_technical_feedback_user_message."""
     captured_feedback = {}
 
-    def _fake_process_user_ask(messages, state, ctx):
+    async def _fake_process_user_ask(messages, state, ctx):
         if not captured_feedback.get("backend_called"):
             captured_feedback["backend_called"] = True
             return [{
@@ -44,7 +44,7 @@ def _run_with_finish_reason(monkeypatch, finish_reason):
             "content": "готово",
         }], "resp_2"
 
-    def _fake_process_tool_calls(messages, state, ctx, **_kwargs):
+    async def _fake_process_tool_calls(messages, state, ctx, **_kwargs):
         raise pr.WrongFunctionArgumentsException(
             message="некорректный JSON: Expecting property name enclosed in double quotes",
             received_args='{"path": "/tmp/x.md", "content": "hello"}',
@@ -56,8 +56,8 @@ def _run_with_finish_reason(monkeypatch, finish_reason):
         captured_feedback["content"] = content
         return {"role": "user", "id": "m_tech", "content": content}
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_process_user_ask)
-    monkeypatch.setattr(pr, "process_tool_calls", _fake_process_tool_calls)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_process_tool_calls)
     monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
     # Избегаем дёрганья LLM-summarizer для intent-log при финальном ответе.
     monkeypatch.setattr(pr, "maybe_record_final_answer_intent", lambda **_kw: None)

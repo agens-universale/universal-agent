@@ -239,6 +239,37 @@ def build_tools_data(
     return tools_data, tools_spec, tools_description, mcp_status
 
 
+class _SubagentTool:
+    """Вызов субагента, отложенный до диспетчера.
+
+    Раньше подготовка вызова исполняла субагента прямо в себе. Пока всё было
+    синхронным, это было незаметно; теперь подготовка общая для sync- и
+    async-пути и не может решать за них, как ждать долгий вложенный прогон.
+
+    ``acall`` — быстрый путь для async-диспетчера (субагент идёт на том же
+    loop). ``__call__`` — синхронный, для прямых вызовов apply_tool и тестов.
+    """
+
+    def __init__(self, runner, *, tool_name, arguments, run_agent_func, parent_call_id):
+        self._runner = runner
+        self._tool_name = tool_name
+        self._arguments = arguments
+        self._run_agent_func = run_agent_func
+        self._parent_call_id = parent_call_id
+
+    def __call__(self) -> str:
+        return self._runner.run(
+            self._tool_name, self._arguments, self._run_agent_func,
+            parent_call_id=self._parent_call_id,
+        )
+
+    async def acall(self) -> str:
+        return await self._runner.arun(
+            self._tool_name, self._arguments, self._run_agent_func,
+            parent_call_id=self._parent_call_id,
+        )
+
+
 def _prepare_tool_call(
     tool_name: str,
     arguments: str | Dict[str, Any],
@@ -314,12 +345,13 @@ def _prepare_tool_call(
             injected_fields=entry.get("injected_fields") or [],
         )
         runner = SubagentRunner(ctx, orchestrator_state, config_dict)
-        return runner.run(
-            tool_name,
-            parsed_args,
-            run_agent_func,
+        return _SubagentTool(
+            runner,
+            tool_name=tool_name,
+            arguments=parsed_args,
+            run_agent_func=run_agent_func,
             parent_call_id=kwargs.get("call_id"),
-        )
+        ), {}
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
     log = _fallback_logger
@@ -437,8 +469,12 @@ async def aapply_tool(
     if isinstance(prepared, str):
         return prepared
     tool, args = prepared
+    acall = getattr(tool, "acall", None)
     try:
-        if inspect.iscoroutinefunction(tool.__call__):
+        if callable(acall):
+            # Тул объявил асинхронный вход: зовём его, не занимая поток.
+            res = await acall(**args)
+        elif inspect.iscoroutinefunction(tool.__call__):
             res = await tool(**args)
         else:
             res = await asyncio.to_thread(lambda: tool(**args))

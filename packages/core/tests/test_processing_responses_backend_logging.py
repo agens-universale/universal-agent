@@ -14,13 +14,13 @@ def teardown_module(_module) -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
     cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = real_tools.apply_tool
+        cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -34,10 +34,10 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         raise AssertionError("apply_tool should not be called in this test")
 
-    tools_pkg.apply_tool = _apply_tool
+    tools_pkg.aapply_tool = _apply_tool
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
@@ -55,7 +55,7 @@ def setup_module(_module) -> None:
     from gc_core.states import State as St
 
     processing_module = proc
-    proc.apply_tool = sys.modules["gc_core.tools"].apply_tool
+    proc.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
     State = St
 
 
@@ -66,7 +66,7 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
     def _fake_create_call_data(_messages, _state, **_kwargs):
         return {"model": "CodeChat", "messages": [{"role": "user", "content": "ping"}], "tools": []}
 
-    def _fake_request_policy(*_args, **_kwargs):
+    async def _fake_request_policy(*_args, **_kwargs):
         # Нет поля choices -> внутри конвертации будет KeyError('choices').
         return (
             {"id": "chat_1", "object": "chat.completion", "model": "CodeChat"},
@@ -81,7 +81,7 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
     )
     monkeypatch.setattr(
         processing_module,
-        "request_chat_completions_with_policy",
+        "arequest_chat_completions_with_policy",
         _fake_request_policy,
     )
 

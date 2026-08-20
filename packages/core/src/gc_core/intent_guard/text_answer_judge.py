@@ -11,10 +11,19 @@ from dataclasses import dataclass
 from typing import Any
 
 from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
-from gc_core.intent_guard.final_report_consistency import validate_final_report_vs_user_intent
+from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
 from gc_core.intent_guard.guard import judge_available
 from gc_core.intent_guard.feedback import build_text_answer_reject_feedback
 from gc_core.intent_guard.validation_result import ValidationResult
+
+
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 @dataclass(frozen=True)
@@ -23,7 +32,7 @@ class TextAnswerDecision:
     reject_feedback: str | None = None
 
 
-def judge_text_answer(ctx: Any, state: Any, assistant_text: str) -> ValidationResult | None:
+async def ajudge_text_answer(ctx: Any, state: Any, assistant_text: str) -> ValidationResult | None:
     """Результат валидатора для текст-ответа; None → ошибка (→ generic bounce)."""
     try:
         current = records_to_jsonl_lines(
@@ -32,18 +41,18 @@ def judge_text_answer(ctx: Any, state: Any, assistant_text: str) -> ValidationRe
         context_log = records_to_jsonl_lines(
             deserialize_list(getattr(state, "user_intent_log", []) or [])
         )
-        return validate_final_report_vs_user_intent(
+        return await _maybe_await(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=current,
             context_user_messages=context_log,
             finish_handoff_arguments=assistant_text,
-        )
+        ))
     except Exception:
         return None
 
 
-def should_return_text_answer(ctx: Any, state: Any, assistant_text: str) -> TextAnswerDecision:
+async def ashould_return_text_answer(ctx: Any, state: Any, assistant_text: str) -> TextAnswerDecision:
     """Принять ли текст-ответ как ответ хода — по режиму ``text_answer_mode``.
 
     Пустой текст → reject (любой режим). ``allow`` → accept без судьи. ``judge`` →
@@ -60,10 +69,24 @@ def should_return_text_answer(ctx: Any, state: Any, assistant_text: str) -> Text
     if mode == "judge":
         if not judge_available(cfg):
             return TextAnswerDecision(False)
-        result = judge_text_answer(ctx, state, assistant_text)
+        result = await _maybe_await(ajudge_text_answer(ctx, state, assistant_text))
         if result is None:
             return TextAnswerDecision(False)
         if getattr(result, "action", "") == "accept":
             return TextAnswerDecision(True)
         return TextAnswerDecision(False, build_text_answer_reject_feedback(result))
     return TextAnswerDecision(False)
+
+
+def should_return_text_answer(*args: Any, **kwargs: Any):
+    """Синхронный двойник — для вызывающих вне цикла агента и тестов."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(ashould_return_text_answer(*args, **kwargs))
+
+
+def judge_text_answer(*args: Any, **kwargs: Any):
+    """Синхронный двойник — для вызывающих вне цикла агента и тестов."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(ajudge_text_answer(*args, **kwargs))

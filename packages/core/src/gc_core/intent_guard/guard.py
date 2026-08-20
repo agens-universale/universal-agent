@@ -8,7 +8,7 @@ from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
 from gc_core.intent_guard.trace_digest import build_finish_gate_trace_digest
 from gc_core.intent_guard.agent_logging import log_finish_gate_decision, log_finish_gate_skipped, log_finish_gate_validate_done, log_finish_gate_validate_start
 from gc_core.intent_guard.feedback import build_finish_gate_feedback
-from gc_core.intent_guard.final_report_consistency import validate_final_report_vs_user_intent
+from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
 from gc_core.intent_guard.validation_result import ValidationResult
 
 _logger = logging.getLogger(__name__)
@@ -59,6 +59,15 @@ def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
     return value
 
 
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
 @dataclass(frozen=True)
 class FinishGateDecision:
     outcome: Literal[
@@ -100,7 +109,7 @@ class FinishGateGuard:
             return int(getattr(self._state, "turn_tool_calls", 0) or 0) >= 1
         return True
 
-    def evaluate_turn_finish(
+    async def aevaluate_turn_finish(
         self,
         *,
         finish_handoff_arguments: Any,
@@ -181,13 +190,13 @@ class FinishGateGuard:
         )
 
         try:
-            validation = validate_final_report_vs_user_intent(
+            validation = await _maybe_await(avalidate_final_report_vs_user_intent(
                 ctx=self._ctx,
                 state=self._state,
                 current_user_requests=current_user_intent,
                 context_user_messages=user_intent_log,
                 finish_handoff_arguments=finish_handoff_arguments,
-            )
+            ))
         except Exception as exc:
             self._logger.warning(
                 "finish_gate validator error; fail-open accept so pending finish handoff "
@@ -240,3 +249,13 @@ class FinishGateGuard:
             feedback_preview=feedback_text,
         )
         return decision
+
+
+def _evaluate_turn_finish_sync(self, *args: Any, **kwargs: Any):
+    """Синхронный двойник судьи — для вызывающих вне цикла агента и тестов."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(self.aevaluate_turn_finish(*args, **kwargs))
+
+
+FinishGateGuard.evaluate_turn_finish = _evaluate_turn_finish_sync

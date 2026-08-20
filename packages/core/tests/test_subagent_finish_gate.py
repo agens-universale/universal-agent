@@ -71,7 +71,7 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
 
     captured: dict[str, object] = {}
 
-    def _continue_work(**kwargs):
+    async def _continue_work(**kwargs):
         captured["current_user_requests"] = list(kwargs.get("current_user_requests") or [])
         return ValidationResult(
             ok=False,
@@ -88,7 +88,7 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
 
     with patch.object(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _continue_work,
     ):
         guard = FinishGateGuard(ctx=_make_ctx(cfg), state=child)

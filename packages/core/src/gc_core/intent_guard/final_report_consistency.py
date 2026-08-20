@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest, build_finish_gate_trace_digest
 from gc_core.intent_guard.validation_result import ValidationResult, fail_open_validation_result, parse_validator_response
-from gc_core.summarize.llm import auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens, request_auxiliary_completion_text
+from gc_core.summarize.llm import arequest_auxiliary_completion_text, auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
 from gc_core.bundled_assets import bundled_root
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
@@ -135,7 +135,7 @@ def _build_finish_gate_retry_user_prompt(
     )
 
 
-def _request_finish_gate_once(
+async def _arequest_finish_gate_once(
     *,
     ctx: Any,
     state: Any,
@@ -147,7 +147,7 @@ def _request_finish_gate_once(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    return request_auxiliary_completion_text(
+    return await arequest_auxiliary_completion_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
@@ -157,7 +157,7 @@ def _request_finish_gate_once(
     )
 
 
-def validate_final_report_vs_user_intent(
+async def avalidate_final_report_vs_user_intent(
     *,
     ctx: Any,
     state: Any,
@@ -203,7 +203,7 @@ def validate_final_report_vs_user_intent(
         "agent_kind": "subagent" if is_subagent else "main",
     }
 
-    raw = _request_finish_gate_once(
+    raw = await _arequest_finish_gate_once(
         ctx=ctx,
         state=state,
         system_prompt=system_prompt,
@@ -222,7 +222,7 @@ def validate_final_report_vs_user_intent(
             len(raw or ""),
         )
 
-    raw_retry = _request_finish_gate_once(
+    raw_retry = await _arequest_finish_gate_once(
         ctx=ctx,
         state=state,
         system_prompt=system_prompt,
@@ -236,3 +236,16 @@ def validate_final_report_vs_user_intent(
     if parsed_retry is not None:
         return parsed_retry
     return fail_open_validation_result()
+
+
+def validate_final_report_vs_user_intent(**kwargs: Any) -> ValidationResult:
+    """Синхронный двойник судьи finish-gate.
+
+    Внутри асинхронного цикла звать нельзя — портал поднимет
+    SyncApiInsideEventLoopError. И это правильно: fail-open вокруг судьи
+    проглотил бы такую ошибку и молча выключил проверку (поймано гейтом
+    паритета при переезде цикла).
+    """
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(avalidate_final_report_vs_user_intent(**kwargs))

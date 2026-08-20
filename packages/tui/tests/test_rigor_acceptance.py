@@ -269,10 +269,10 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
     from gc_core import processing_responses as pr
     from gc_core.tools import WrongFunctionArgumentsException
 
-    def _boom(**kw):
+    async def _boom(**kw):
         raise WrongFunctionArgumentsException("bad args", "{}", tool_name=kw["tool_name"])
 
-    monkeypatch.setattr(pr, "apply_tool", _boom)
+    monkeypatch.setattr(pr, "aapply_tool", _boom)
 
     class _State:
         messages = []

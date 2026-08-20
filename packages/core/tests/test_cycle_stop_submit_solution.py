@@ -94,7 +94,7 @@ def test_invalid_arguments_fall_back_to_cycle_stop_error_without_apply_tool(monk
         raise AssertionError("apply_tool must not run when arguments are not JSON")
 
     monkeypatch.setattr(
-        "gc_core.message_policy.cycle_stop.apply_tool",
+        "gc_core.message_policy.cycle_stop.aapply_tool",
         _apply_tool_should_not_run,
     )
 

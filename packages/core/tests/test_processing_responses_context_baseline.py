@@ -34,13 +34,13 @@ def teardown_module(_module) -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
     cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
     if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = real_tools.apply_tool
+        cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
 processing_module = None
@@ -61,7 +61,7 @@ def setup_module(module) -> None:
     request_policy = rq
     run_agent = ra
     State = St
-    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
+    pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -75,7 +75,7 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         tool_name = _kwargs.get("tool_name")
         if tool_name == "turn_finish":
             arguments = _kwargs.get("arguments")
@@ -100,16 +100,19 @@ def _stub_tools_modules() -> None:
     def _build_tools_data(_config_dict):
         return {}, [], []
 
-    tools_pkg.apply_tool = _apply_tool
+    tools_pkg.aapply_tool = _apply_tool
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    # Цикл импортирует ещё и распознаватель «неизвестный тул» — заглушка обязана
+    # его отдавать, иначе импорт processing_responses падает на пустом месте.
+    tools_pkg.is_unknown_tool_output = lambda *_a, **_k: False
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
 
     from gc_core.message_policy import cycle_stop as _cycle_stop_mod
 
-    _cycle_stop_mod.apply_tool = tools_pkg.apply_tool
+    _cycle_stop_mod.aapply_tool = tools_pkg.aapply_tool
 
 
 def _make_state(*, max_steps: int = 5):
@@ -200,14 +203,14 @@ def _http_error(status_code: int = 500) -> requests.exceptions.HTTPError:
 def test_run_agent_calls_pre_backend_hook_before_user_message_backend(monkeypatch):
     order: list[str] = []
 
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         order.append("backend")
         return [_submit_solution_call()], "resp_1"
 
     def _pre_backend_hook(_messages, _mode):
         order.append(f"pre:{_mode}")
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
 
     result = run_agent(
         [{"role": "user", "content": "hello", "id": "m1"}],
@@ -223,7 +226,7 @@ def test_run_agent_calls_pre_backend_hook_before_user_message_backend(monkeypatc
 def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(monkeypatch):
     order: list[str] = []
 
-    def _fake_process_tool_outputs(_messages, _state, _ctx):
+    async def _fake_process_tool_outputs(_messages, _state, _ctx):
         order.append("backend")
         return [_submit_solution_call()], "resp_1"
 
@@ -231,7 +234,7 @@ def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(monkeypatch
         order.append(f"pre:{_mode}")
 
     monkeypatch.setattr(
-        processing_module, "process_tool_outputs", _fake_process_tool_outputs
+        processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs
     )
 
     result = run_agent(
@@ -259,10 +262,10 @@ def test_run_agent_responses_mode_does_not_call_pre_backend_hook(monkeypatch):
     def _pre_backend_hook(_messages, mode):
         hook_calls.append(str(mode))
 
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         return [_submit_solution_call()], "resp_1"
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
 
     result = run_agent(
         [{"role": "user", "content": "hello", "id": "m1"}],
@@ -313,11 +316,11 @@ def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch
 def test_run_agent_propagates_backend_connection_error(monkeypatch):
     """После исчерпания transport-ретраев не подменяем ошибку no-tool-call bounce."""
 
-    def _failing_process_user_ask(_messages, _state, _ctx):
+    async def _failing_process_user_ask(_messages, _state, _ctx):
         raise requests.exceptions.ConnectionError("network is down")
 
     monkeypatch.setattr(
-        processing_module, "process_user_ask", _failing_process_user_ask
+        processing_module, "aprocess_user_ask", _failing_process_user_ask
     )
 
     with pytest.raises(requests.exceptions.ConnectionError, match="network is down"):
@@ -329,11 +332,11 @@ def test_run_agent_propagates_backend_connection_error(monkeypatch):
 
 
 def test_run_agent_propagates_backend_http_error(monkeypatch):
-    def _failing_process_user_ask(_messages, _state, _ctx):
+    async def _failing_process_user_ask(_messages, _state, _ctx):
         raise _http_error(503)
 
     monkeypatch.setattr(
-        processing_module, "process_user_ask", _failing_process_user_ask
+        processing_module, "aprocess_user_ask", _failing_process_user_ask
     )
 
     with pytest.raises(requests.exceptions.HTTPError):
@@ -405,12 +408,12 @@ def test_turn_finish_validation_failure_fails_open(monkeypatch):
     state = _make_state()
     seed_state_intent(state, current=["актуальный вопрос"])
 
-    def _raise_validation(*_args, **_kwargs):
+    async def _raise_validation(*_args, **_kwargs):
         raise RuntimeError("validation backend failure")
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _raise_validation,
     )
 
@@ -459,7 +462,7 @@ def test_turn_finish_validation_receives_context_and_current_scope(monkeypatch):
     )
     captured: dict[str, object] = {}
 
-    def _fake_validation(**kwargs):
+    async def _fake_validation(**kwargs):
         captured.update(kwargs)
         return ValidationResult(
             ok=True,
@@ -476,7 +479,7 @@ def test_turn_finish_validation_receives_context_and_current_scope(monkeypatch):
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _fake_validation,
     )
 
@@ -525,7 +528,7 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
         return_value=digest,
     ) as mock_build:
         with patch(
-            "gc_core.summarize.llm.request_chat_completion_text",
+            "gc_core.summarize.llm.arequest_chat_completion_text",
             return_value=validator_json,
         ):
             run_agent(
@@ -545,7 +548,7 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
     получает невалидную цепочку assistant.tool_calls → user."""
     recorded: list[list[str | None]] = []
 
-    def _reject_validation(**_kwargs):
+    async def _reject_validation(**_kwargs):
         return ValidationResult(
             ok=False,
             action="fix_report_and_continue",
@@ -559,7 +562,7 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
             feedback_for_agent="improve the answer",
         )
 
-    real_append = processing_module.append_cycle_stop_tool_outputs_for_batch
+    real_append = processing_module.aappend_cycle_stop_tool_outputs_for_batch
 
     def _spy_append_cycle_stop(**kwargs):
         tool_calls = kwargs.get("tool_calls") or []
@@ -568,16 +571,16 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _reject_validation,
     )
     monkeypatch.setattr(
         processing_module,
-        "append_cycle_stop_tool_outputs_for_batch",
+        "aappend_cycle_stop_tool_outputs_for_batch",
         _spy_append_cycle_stop,
     )
 
-    def _stub_user_ask(_messages, _state, _ctx):
+    async def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -590,7 +593,7 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
     seed_state_intent(state, log=["user question"], current=["user question"])

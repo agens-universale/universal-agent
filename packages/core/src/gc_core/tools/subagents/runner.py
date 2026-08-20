@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -58,6 +59,13 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
     return ""
 
 
+async def _maybe_await(value: Any) -> Any:
+    """Дождаться значения, если это корутина."""
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
 class SubagentRunner:
     """Создаёт дочерний State и запускает run_agent для субагента."""
 
@@ -84,6 +92,26 @@ class SubagentRunner:
         *,
         parent_call_id: Optional[str] = None,
     ) -> str:
+        """Синхронный вход (прямые вызовы apply_tool, тесты)."""
+        return run_coro_blocking(
+            self.arun(tool_name, arguments, run_agent_func,
+                      parent_call_id=parent_call_id)
+        )
+
+    async def arun(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        run_agent_func: Callable,
+        *,
+        parent_call_id: Optional[str] = None,
+    ) -> str:
+        """Прогон субагента.
+
+        Асинхронный, потому что внутри — полноценный прогон агента: держать на
+        нём поток означало бы, что переезд ядра на asyncio останавливается на
+        границе субагентов, а они самые долгие.
+        """
         self._parent_call_id = parent_call_id or ""
         self._active_tool_name = tool_name
         subagent_cls = get_subagent_class(tool_name, self._config)
@@ -101,9 +129,16 @@ class SubagentRunner:
                 message="Subagent arguments must be an object.",
                 retryable=False,
             )
-        return self._run_internal(tool_name, subagent_cls, arguments, run_agent_func)
+        return await self._arun_internal(tool_name, subagent_cls, arguments, run_agent_func)
 
-    def _run_internal(
+    def _run_internal(self, *args: Any, **kwargs: Any) -> str:
+        """Синхронный вход в тело субагента.
+
+        Тело асинхронное (внутри — полноценный прогон агента); этот двойник
+        оставлен для прямых вызовов из тестов и стороннего кода."""
+        return run_coro_blocking(self._arun_internal(*args, **kwargs))
+
+    async def _arun_internal(
         self,
         tool_name: str,
         subagent_cls: Any,
@@ -256,7 +291,9 @@ class SubagentRunner:
                     )
 
                 scope.set_on_enqueue(_on_child_user_enqueue)
-                result = run_agent_func(
+                # run_agent_func — arun_agent (корутинная) в обычном пути и
+                # синхронная заглушка в тестах: принимаем обе формы.
+                result = await _maybe_await(run_agent_func(
                     messages,
                     child_state,
                     child_ctx,
@@ -265,7 +302,7 @@ class SubagentRunner:
                     pre_backend_compaction_hook=pre_backend_compaction_hook,
                     session_meta=child_meta,
                     get_pending_messages=scope.drain,
-                )
+                ))
         except Exception as exc:
             self._log_lifecycle(
                 event="subagent_error",

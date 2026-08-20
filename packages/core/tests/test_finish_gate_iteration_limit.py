@@ -54,13 +54,13 @@ class FinishGateIterationLimitTest(unittest.TestCase):
         )
         validate_calls: list[int] = []
 
-        def _counting_reject(**kwargs):
+        async def _counting_reject(**kwargs):
             validate_calls.append(1)
             return _reject_validation(**kwargs)
 
         with patch.object(
             intent_guard_guard_module,
-            "validate_final_report_vs_user_intent",
+            "avalidate_final_report_vs_user_intent",
             _counting_reject,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)

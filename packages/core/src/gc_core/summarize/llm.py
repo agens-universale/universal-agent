@@ -4,7 +4,16 @@ from typing import Any, Dict, List, Optional
 
 from gc_core.config_modules.merge import deep_merge
 from gc_core.message_projection import project_text_for_model
-from gc_core.utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
+from gc_core.utils.llm_chat_client import arequest_chat_completion_text, log_llm_prompt_and_result
+
+
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def _require_chat_completions_llm(ctx: Any) -> Any:
@@ -45,7 +54,7 @@ def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
     return DEFAULT_JUDGE_MAX_TOKENS
 
 
-def request_auxiliary_completion_text(
+async def arequest_auxiliary_completion_text(
     *,
     ctx: Any,
     state: Any,
@@ -60,14 +69,14 @@ def request_auxiliary_completion_text(
 
     Main agent ``request_chat_completion_text`` stays dirty (canonical persist).
     """
-    raw = request_chat_completion_text(
+    raw = await _maybe_await(arequest_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=messages,
         max_tokens=max_tokens,
         request_label=request_label,
         payload_overrides=payload_overrides,
-    )
+    ))
     if log_prompt:
         active_logger = logger if logger is not None else getattr(ctx, "logger", None)
         log_llm_prompt_and_result(
@@ -79,7 +88,7 @@ def request_auxiliary_completion_text(
     return project_text_for_model(raw)
 
 
-def request_summary_text(
+async def arequest_summary_text(
     *,
     ctx: Any,
     state: Any,
@@ -100,7 +109,7 @@ def request_summary_text(
         raise RuntimeError(
             "RunContext.chat_completions_llm.max_tokens must be a positive int"
         )
-    return request_auxiliary_completion_text(
+    return await arequest_auxiliary_completion_text(
         ctx=ctx,
         state=state,
         messages=messages,
@@ -109,3 +118,23 @@ def request_summary_text(
         payload_overrides=effective_overrides,
         logger=logger,
     )
+
+
+# --- синхронные двойники ---------------------------------------------------
+#
+# Нужны вызывающим вне цикла агента (ручной /compact в TUI, тесты). Внутри
+# асинхронного цикла звать их НЕЛЬЗЯ: портал поднимет
+# SyncApiInsideEventLoopError — и это правильно, потому что fail-open вокруг
+# судей проглотил бы такую ошибку и молча выключил проверку.
+
+
+def request_auxiliary_completion_text(**kwargs: Any) -> str:
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(arequest_auxiliary_completion_text(**kwargs))
+
+
+def request_summary_text(**kwargs: Any) -> str:
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(arequest_summary_text(**kwargs))

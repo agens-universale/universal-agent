@@ -48,7 +48,7 @@ def _fc(name: str, call_id: str, arguments: str = "{}"):
 def _patch_process(monkeypatch, *, apply_return):
     from gc_core import processing_responses as pr
 
-    monkeypatch.setattr(pr, "apply_tool", lambda **kw: apply_return)
+    monkeypatch.setattr(pr, "aapply_tool", lambda **kw: apply_return)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")

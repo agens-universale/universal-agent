@@ -1,10 +1,20 @@
 from typing import Any, Dict
 
 from gc_core.config_modules.backend import parse_chat_completions_max_tokens
-from gc_core.request_backend_policy import request_chat_completions_with_policy
+from gc_core.request_backend_policy import arequest_chat_completions_with_policy
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 from gc_core.trace_id import trace_id_from_config, trace_header_name, model_trace_header_enabled
 from gc_core.utils.ssl_config import get_backend_client_cert
+
+
+async def _maybe_await(value):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
 
 _ROLE_GENERATION_MAX_TOKENS = 4096
 
@@ -185,10 +195,10 @@ class SpecialAgent(AbstractSubagent):
             config_dict or {},
             runtime_notices_enabled=bool(kwargs.get("runtime_notices_enabled", False)),
         )
-        instance.agent_role = instance._generate_role(role, role_description, model)
+        instance.agent_role = await instance._agenerate_role(role, role_description, model)
         return instance
 
-    def _generate_role(self, role: str, role_description: str, model: str) -> str:
+    async def _agenerate_role(self, role: str, role_description: str, model: str) -> str:
         """Генерирует системный промпт для роли через LLM-вызов chat/completions."""
         prompt = (
             _ROLE_GENERATE_PROMPT
@@ -250,7 +260,9 @@ class SpecialAgent(AbstractSubagent):
             self.config_dict.get("chat_completions_min_response_tokens", 1024),
             default=1024,
         )
-        res_data, _call_data = request_chat_completions_with_policy(
+        # create_instance и так корутина: генерация роли идёт асинхронно,
+        # синхронный шим тут упёрся бы в портал изнутри его же loop.
+        res_data, _call_data = await _maybe_await(arequest_chat_completions_with_policy(
             payload_factory=payload_factory,
             initial_max_tokens=_ROLE_GENERATION_MAX_TOKENS,
             min_response_tokens=min_response_tokens,
@@ -267,7 +279,7 @@ class SpecialAgent(AbstractSubagent):
             notice_url=url,
             timeout=float(self.config_dict["backend_request_timeout_sec"]),
             config_proxy=self.config_dict.get("proxy"),
-        )
+        ))
         return res_data["choices"][0]["message"]["content"]
 
     def get_initial_data(self):

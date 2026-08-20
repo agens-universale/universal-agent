@@ -222,7 +222,7 @@ class TestProcessToolCallsForwardsCallId:
             seen.update(kwargs)
             return '{"ok": true}'
 
-        monkeypatch.setattr("gc_core.processing_responses.apply_tool", _fake_apply_tool)
+        monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
         process_tool_calls(
             messages=[
                 {

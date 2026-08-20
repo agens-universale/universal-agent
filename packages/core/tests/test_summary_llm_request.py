@@ -34,12 +34,12 @@ def test_auxiliary_llm_judge_max_tokens_falls_back_to_default():
 def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
     captured = {}
 
-    def _fake_request(*, max_tokens=None, payload_overrides=None, **kwargs):
+    async def _fake_request(*, max_tokens=None, payload_overrides=None, **kwargs):
         captured["max_tokens"] = max_tokens
         captured["payload_overrides"] = payload_overrides
         return "<think>x</think>summary ok"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_request)
 
     ctx = SimpleNamespace(
         chat_completions_llm=SimpleNamespace(
@@ -64,11 +64,11 @@ def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
 def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
     captured = {}
 
-    def _fake_request(*, payload_overrides=None, **kwargs):
+    async def _fake_request(*, payload_overrides=None, **kwargs):
         captured["payload_overrides"] = payload_overrides
         return "ok"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_request)
 
     ctx = SimpleNamespace(
         chat_completions_llm=SimpleNamespace(

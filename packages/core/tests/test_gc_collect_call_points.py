@@ -197,7 +197,7 @@ class TestC3ProcessingResponses:
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
         # Замокаем _request_backend_canonical, чтобы не делать реальных запросов.
         monkeypatch.setattr(
-            pr, "_request_backend_canonical",
+            pr, "_arequest_backend_canonical",
             lambda messages, state, ctx: ([{"role": "assistant", "content": "ok"}],
                                           "rid", {}),
         )

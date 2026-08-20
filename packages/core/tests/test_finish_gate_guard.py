@@ -113,7 +113,7 @@ class FinishGateGuardTest(unittest.TestCase):
             finish_gate_rejection_count=0,
         )
 
-        def _reject(**_kwargs):
+        async def _reject(**_kwargs):
             return ValidationResult(
                 ok=False,
                 action="continue_work",
@@ -129,7 +129,7 @@ class FinishGateGuardTest(unittest.TestCase):
 
         with patch.object(
             intent_guard_guard_module,
-            "validate_final_report_vs_user_intent",
+            "avalidate_final_report_vs_user_intent",
             _reject,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
@@ -152,12 +152,12 @@ class FinishGateGuardTest(unittest.TestCase):
             finish_gate_rejection_count=0,
         )
 
-        def _raise(**_kwargs):
+        async def _raise(**_kwargs):
             raise RuntimeError("llm down")
 
         with patch.object(
             intent_guard_guard_module,
-            "validate_final_report_vs_user_intent",
+            "avalidate_final_report_vs_user_intent",
             _raise,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
@@ -185,7 +185,7 @@ class FinishGateGuardTest(unittest.TestCase):
         )
         captured: dict[str, list[str]] = {}
 
-        def _capture(**kwargs):
+        async def _capture(**kwargs):
             captured["current"] = list(kwargs.get("current_user_requests") or [])
             captured["context"] = list(kwargs.get("context_user_messages") or [])
             return ValidationResult(
@@ -203,7 +203,7 @@ class FinishGateGuardTest(unittest.TestCase):
 
         with patch.object(
             intent_guard_guard_module,
-            "validate_final_report_vs_user_intent",
+            "avalidate_final_report_vs_user_intent",
             _capture,
         ):
             FinishGateGuard(ctx=ctx, state=state).evaluate_turn_finish(

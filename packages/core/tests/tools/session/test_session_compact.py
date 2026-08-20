@@ -136,7 +136,7 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
             return json.dumps({"tool": "session_compact", "ok": True, "compacted": True})
         return "{}"
 
-    monkeypatch.setattr("gc_core.processing_responses.apply_tool", fake_apply_tool)
+    monkeypatch.setattr("gc_core.processing_responses.aapply_tool", fake_apply_tool)
     monkeypatch.setattr(
         "gc_core.processing_responses.maybe_store_and_wrap_tool_output",
         lambda tool_res, **_kw: tool_res,
@@ -196,7 +196,7 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
             return json.dumps({"tool": "session_compact", "ok": True})
         return json.dumps({"tool": "session_think", "ok": True})
 
-    monkeypatch.setattr("gc_core.processing_responses.apply_tool", fake_apply_tool)
+    monkeypatch.setattr("gc_core.processing_responses.aapply_tool", fake_apply_tool)
     monkeypatch.setattr(
         "gc_core.processing_responses.maybe_store_and_wrap_tool_output",
         lambda tool_res, **_kw: tool_res,
