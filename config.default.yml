@@ -288,12 +288,12 @@ voice_endpoint_presets:
 # (Linux дополнительно: системный libportaudio2).
 # Подходит любой /v1/audio/transcriptions-совместимый сервис.
 # Локальный приватный сервис одной командой: gc-voice install (см. инструкцию).
-#voice:
-#  provider: openai
-#  url: https://stt.example.com/v1/audio/transcriptions
-#  token: "sk-..."
-#  model: whisper-1
-#  language: ru
-#  max_seconds: 120
-#  timeout_seconds: 60
-#  verify-ssl: true
+# voice:
+#   provider: openai
+#   url: https://stt.example.com/v1/audio/transcriptions
+#   token: "sk-..."
+#   model: whisper-1
+#   language: ru
+#   max_seconds: 120
+#   timeout_seconds: 60
+#   verify-ssl: true

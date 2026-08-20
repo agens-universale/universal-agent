@@ -122,6 +122,19 @@ def test_write_values_unfolds_a_commented_section_and_keeps_yaml_valid(tmp_path)
 
 # ── §6.4 на voice-секции: она в шаблоне тоже закомментирована ──
 
+def test_uncomment_voice_block_keeps_the_canonical_indent():
+    """Отступ развёрнутого voice-блока — 2 пробела, как во всём файле.
+
+    Разворот снимает решётку И один пробел за ней, поэтому шаблон обязан писать
+    закомментированную секцию формой «# voice:» / «#␣␣␣url:». Прежняя форма
+    «#voice:» с двумя пробелами давала после разворота отступ 1: YAML при этом
+    валиден, поэтому ни один сторож этого не ловил, — а канон файла и последующая
+    дописка ключа блоком из шаблона (у него отступ 2) разъезжались."""
+    block = w.uncomment_template_block(_real_template(), "voice")
+    assert "\nvoice:\n" in "\n" + block            # шапка без отступа
+    assert "\n  provider: openai" in "\n" + block   # поле — ровно два пробела
+
+
 def test_write_voice_values_uncomments_template_block(tmp_path):
     """§6.4: voice-блок шаблона закомментирован — write_values разворачивает его."""
     from config import _default_config_path, validate_config_text

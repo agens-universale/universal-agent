@@ -135,8 +135,8 @@ _VOICE_FOOTER_CLOUD_FIELD = (f"↑/↓ · {_TAB_TO_VARIANTS} · Enter — сох
 # поле» его и так гасит, а `_voice_request_remove` стреляет только на строке
 # «Локальный сервис» — обещание было прямой ложью (спека §2.11).
 # Глагол — дословно `LIST_CLOSED_HINT`: эта самая строка стоит сейчас под полем
-# (её ставит `show_closed_hint`), и звать одну клавишу двумя словами на одном экране
-# нельзя (§5.4).
+# (её держит `FieldListController._sync_hint`), и звать одну клавишу двумя словами
+# на одном экране нельзя (§5.4).
 _VOICE_FOOTER_LOCAL_LANG = (f"↑/↓ · {_TAB_TO_VARIANTS} · Enter — сохранить язык · "
                             f"{LIST_CLOSED_HINT} · PgUp/PgDn — секции · Esc — меню")
 # То же для полей со списком («Язык», «Модель», «URL» — спека 2026-08-05 §3) облачной
@@ -1718,8 +1718,10 @@ class SettingsScreen(Screen):
         active = ed.list_for(self._voice_cursor_field())
         for ctrl in (ed.lang_list, ed.model_list, ed.url_list):
             if ctrl is not None and ctrl is not active:
+                # Строку под полем снимать не надо: с канона 2026-08-17 она функция
+                # состояния списка и живёт постоянно («вот чем список раскрывается»),
+                # а не команда момента — её приводит в согласие сам `close()`.
                 ctrl.close()
-                ctrl.hide_closed_hint()       # поле оставили — подсказка уходит с ним
         if active is None:
             return
         if self._voice_list_reopen_gate:
@@ -3190,8 +3192,7 @@ class SettingsScreen(Screen):
                     # Esc сворачивает СПИСОК и оставляет курсор в поле (из секции не
                     # выходим): стрелки после него снова водят ленту.
                     event.stop()
-                    ctrl.close()
-                    ctrl.show_closed_hint()   # свернули — говорим, чем раскрыть обратно
+                    ctrl.close()              # `close` сам скажет строкой, чем вернуть
                     self._refresh_footer()
                     return
             if self._view in _EDITOR_SECTIONS and self._pending_env_save is not None:

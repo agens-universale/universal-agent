@@ -267,8 +267,10 @@ def _stub_model_transport(monkeypatch, handler):
         except Exception:                          # сервер ответил не тем
             return mp.HttpReply(status=404, payload=None)
 
+    # Единственный сетевой шов `fetch_models` — `_requests_get_ex`. Прежде рядом
+    # подменялся ещё и `_urllib_get` (старый фолбэк): его удалили как мёртвый код,
+    # и подмена несуществующего имени роняла бы тест на AttributeError.
     monkeypatch.setattr(mp, "_requests_get_ex", _requests_get_ex)
-    monkeypatch.setattr(mp, "_urllib_get", handler)
 
 
 def test_list_models_sends_bearer_and_returns_ids(monkeypatch):

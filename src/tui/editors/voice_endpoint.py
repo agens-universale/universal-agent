@@ -230,6 +230,12 @@ class ModelListController(FieldListController):
             render_row=self._model_row, matches=lambda item, q: q in item.lower(),
             initial_index=self._model_initial_index, hint=self._model_hint,
             on_pick=on_pick, closed_hint=_MODEL_RELOAD_HINT,
+            # Строки сетевого списка приносит `_load` (потому и `_begin_open` свой), но
+            # объявить источник всё равно обязаны: база спрашивает его, когда решает,
+            # есть ли что обещать свёрнутым состоянием («не звать раскрыть список,
+            # которого нет»). Без объявления она считает список вечно пустым и молча
+            # оставляет под полем подсказку РАСКРЫТОГО — после Esc текст не менялся.
+            rows_source=lambda: self._items,
         )
         self._fetch = fetch
         self._config_proxy = config_proxy
@@ -254,7 +260,12 @@ class ModelListController(FieldListController):
 
     def _on_close(self) -> None:
         self._gen += 1             # летящая загрузка этого раскрытия больше не наша
-        self._items = ()
+        # `_items` НЕ обнуляем: это последний известный ответ сервера, и по нему база
+        # решает, обещать ли что-нибудь под свёрнутым списком. Обещать надо — `Alt+↓`
+        # у сетевого списка уходит в сеть, а не показывает уже добытое; обнулив строки,
+        # мы говорили базе «показывать нечего», и она молчала, оставляя под полем
+        # подсказку РАСКРЫТОГО списка. Показать их снова нельзя: `_visible`/`_idx`
+        # сброшены, а следующее раскрытие всё равно идёт за свежими (`_begin_open`).
         self._visible = []
         self._idx = None
         self._status = ""

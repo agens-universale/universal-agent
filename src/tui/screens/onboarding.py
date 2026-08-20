@@ -968,8 +968,10 @@ class OnboardingScreen(Screen):
         active = ed.list_for(self._voice_cursor_field())
         for ctrl in (ed.lang_list, ed.model_list, ed.url_list):
             if ctrl is not None and ctrl is not active:
+                # Строку под полем `close()` приводит в согласие сам: с канона
+                # 2026-08-17 она постоянна и называет способ («вот чем раскрыть»),
+                # а не команду момента — снимать её с уходом курсора больше нечем.
                 ctrl.close()
-                ctrl.hide_closed_hint()    # поле оставили — подсказка уходит с ним
         if active is not None:
             active.open()
 
@@ -1385,8 +1387,7 @@ class OnboardingScreen(Screen):
         if ctrl is not None and ctrl.is_open:
             if event.key == "escape":
                 event.stop()
-                ctrl.close()
-                ctrl.show_closed_hint()    # свернули — говорим, чем раскрыть обратно
+                ctrl.close()               # `close` сам скажет строкой, чем вернуть
                 self._refresh_footer()     # клавиши вернулись полю — футер тоже
                 return
             if event.key in ("up", "down"):
