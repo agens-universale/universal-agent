@@ -244,7 +244,7 @@ async def test_lang_list_opens_with_hint_then_all_codes():
     ed = _four()
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         assert str(ed.query_one(".voice-lang-hint").render()) == (
             "языки · печать — фильтр/свой код · Enter — подставить · Esc — свернуть")
         rows = _lang_rows(ed)
@@ -282,7 +282,7 @@ async def test_lang_list_carries_every_whisper_language():
     ed = _four()
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         rows = _lang_rows(ed)
         assert "  haw   гавайский" in rows
         assert "  yue   кантонский" in rows
@@ -295,7 +295,7 @@ async def test_lang_list_rows_live_in_a_capped_scroll_frame():
     ed = _four()
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         scroll = ed.query_one(".voice-lang-scroll")
         assert isinstance(scroll, VerticalScroll)
         assert "dropdown-scroll" in scroll.classes and "onb-dyn" in scroll.classes
@@ -311,7 +311,7 @@ async def test_lang_list_scroll_frame_goes_away_with_the_list():
     ed = _four()
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.lang_list.close()
         await pilot.pause()
         assert not ed.query(".voice-lang-scroll") and not ed.query(".voice-lang-row")
@@ -328,7 +328,7 @@ async def test_lang_list_scrolls_the_highlighted_row_inside_the_frame(monkeypatc
     ed = _four()
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.lang_list.apply_filter("йоруба")          # последний код списка — заведомо за фолдом
         for _ in range(5):                           # call_after_refresh — после layout-прохода
             await pilot.pause()
@@ -342,7 +342,7 @@ async def test_lang_list_highlights_the_current_code():
     ed = _four({"language": "de"})
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         assert [r for r in _lang_rows(ed) if r.startswith("▸")] == ["▸ de    немецкий"]
 
 
@@ -351,7 +351,7 @@ async def test_lang_list_highlights_nothing_for_an_own_code():
     ed = _four({"language": "zz"})
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         assert not [r for r in _lang_rows(ed) if r.startswith("▸")]
         assert ed.pick_language() is False
         assert ed.query_one("#voice-lang", Input).value == "zz"
@@ -363,7 +363,7 @@ async def test_lang_list_filters_by_code_and_by_name_without_rebuilding_dom():
     ed = _four()
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         before = list(ed.query(".voice-lang-row"))
         ed.lang_list.apply_filter("нем")
         assert _lang_rows(ed) == ["▸ de    немецкий"]
@@ -378,7 +378,7 @@ async def test_lang_list_hint_is_honest_when_nothing_matches():
     ed = _four()
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.lang_list.apply_filter("zz")
         assert _lang_rows(ed) == []
         assert str(ed.query_one(".voice-lang-hint").render()) == (
@@ -392,7 +392,7 @@ async def test_lang_list_move_cycles_and_reports_that_it_ate_the_key():
     app = _harness(ed)
     async with app.run_test():
         assert ed.lang_list.move(1) is False        # свёрнут — клавиша не наша
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         assert ed.lang_list.move(1) is True
         assert [r for r in _lang_rows(ed) if r.startswith("▸")] == ["▸ en    английский"]
         ed.lang_list.move(-1)
@@ -404,7 +404,7 @@ async def test_lang_list_pick_substitutes_and_collapses():
     ed = _four({"language": "de"})
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.lang_list.apply_filter("франц")
         assert ed.pick_language() is True
         assert ed.query_one("#voice-lang", Input).value == "fr"
@@ -426,7 +426,7 @@ async def test_lang_list_rows_sit_right_under_the_field():
     app = _harness(ed)
     async with app.run_test():
         ed._show_error("ошибка снизу")
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         children = list(ed.children)
         i = children.index(ed.query_one("#voice-lang-group"))
         assert "voice-lang-hint" in children[i + 1].classes
@@ -439,7 +439,7 @@ async def test_voice_list_shares_frame_with_its_field():
     ed = _four()
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         group = ed.query_one("#voice-lang-group")
         assert "field-group" in group.classes
         field = ed.query_one("#voice-lang", Input)
@@ -476,7 +476,7 @@ async def test_lang_list_close_restores_the_pre_filter_code():
     ed = _four({"language": "en"})
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.query_one("#voice-lang", Input).value = "нем"
         await pilot.pause()
         assert _lang_rows(ed) == ["▸ de    немецкий"]
@@ -489,7 +489,7 @@ async def test_lang_list_pick_keeps_what_it_put_in_the_field():
     ed = _four({"language": "en"})
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.query_one("#voice-lang", Input).value = "нем"
         await pilot.pause()
         assert ed.pick_language() is True
@@ -501,7 +501,7 @@ async def test_lang_list_pick_keeps_an_own_code_typed_over_the_filter():
     ed = _four({"language": "en"})
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.query_one("#voice-lang", Input).value = "zz"
         await pilot.pause()
         assert ed.pick_language() is False
@@ -519,7 +519,7 @@ async def test_lang_list_pick_makes_the_new_value_the_baseline():
         field = ed.query_one("#voice-lang", Input)
         field.focus()
         await pilot.pause()
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         field.value = "англ"
         await pilot.pause()
         assert ed.pick_language() is True and field.value == "en"
@@ -539,7 +539,7 @@ async def test_lang_list_own_code_becomes_the_baseline_too():
         field = ed.query_one("#voice-lang", Input)
         field.focus()
         await pilot.pause()
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         field.value = "zz"
         await pilot.pause()
         assert ed.pick_language() is False    # подставлять нечего — сохранится введённое
@@ -559,7 +559,7 @@ async def test_programmatic_write_leaves_the_cursor_inside_the_value():
         field = ed.query_one("#voice-lang", Input)
         field.focus()
         await pilot.pause()
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         field.value = "англ"
         field.cursor_position = 4            # как после печати — курсор в конце
         await pilot.pause()
@@ -567,7 +567,7 @@ async def test_programmatic_write_leaves_the_cursor_inside_the_value():
         assert field.value == "ru"
         assert field.cursor_position <= len("ru")
 
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         field.value = "англ"
         field.cursor_position = 4
         await pilot.pause()
@@ -582,7 +582,7 @@ async def test_lang_list_move_gives_the_key_back_when_nothing_matches():
     ed = _four()
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         assert ed.lang_list.move(1) is True
         ed.query_one("#voice-lang", Input).value = "zz"
         await pilot.pause()
@@ -605,7 +605,7 @@ async def test_lang_list_scrolls_the_hint_when_no_row_is_highlighted(monkeypatch
     ed = _four({"language": "zz"})
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         for _ in range(5):                  # call_after_refresh — после layout-прохода
             await pilot.pause()
         assert ed.query_one(".voice-lang-hint") in seen
@@ -619,7 +619,7 @@ async def test_lang_list_reopen_for_typing_opens_a_closed_list_and_filters():
     ed = _four({"language": "en"})
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.lang_list.close()                     # свернули — как после Esc
         assert ed.lang_list.is_open is False
         ed.lang_list.reopen_for_typing("нем")
@@ -633,7 +633,7 @@ async def test_lang_list_reopen_for_typing_is_a_noop_when_already_open():
     ed = _four()
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         before = list(ed.query(".voice-lang-row"))
         assert len(_lang_rows(ed)) == 100
         ed.lang_list.reopen_for_typing("de")
@@ -652,7 +652,7 @@ async def test_lang_list_reopen_for_typing_does_not_touch_value0():
     ed = _four({"language": "en"})
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.lang_list.open()                      # _value0 = "en"
+        ed.lang_list.open(forced=True)                      # _value0 = "en"
         ed.lang_list.close()                     # свернули, поле всё ещё "en"
         ed.query_one("#voice-lang", Input).value = "нем"   # печать уже поменяла текст поля
         await pilot.pause()
@@ -670,7 +670,7 @@ async def test_editor_typing_reopens_a_closed_list_when_the_field_has_focus():
     async with app.run_test() as pilot:
         ed.focus_field("language")
         await pilot.pause()                     # focus() у Textual отложенный
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         ed.lang_list.close()
         assert ed.lang_list.is_open is False
         assert ed.query_one("#voice-lang", Input).has_focus
@@ -712,7 +712,7 @@ async def test_lang_list_does_not_open_without_the_field():
     ed = VoiceEndpointEditor(values={}, fields=("url", "token", "model"))
     app = _harness(ed)
     async with app.run_test():
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         assert ed.lang_list.is_open is False
         assert not ed.query(".voice-lang-row")
         assert ed.pick_language() is False
@@ -909,9 +909,11 @@ async def test_model_list_stays_silent_without_a_url():
         assert calls == []
         assert ed.model_list.is_open is False
         assert not ed.query(".voice-model-row")
-        # «Молчит» — это пустой текст: строку-подсказку контроллер с канона 2026-08-17
-        # не сносит, он лишь приводит её в согласие с состоянием списка.
-        assert not _model_hint(ed)
+        # «Молчит» — это «строк нет и в сеть не ходили». Строка под полем при этом
+        # стоит и называет клавишу (канон 2026-08-20: у полей со списком подсказка
+        # есть с первого кадра, а сходить и объяснить — дело самой клавиши).
+        from tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
+        assert _model_hint(ed) == _MODEL_RELOAD_HINT
 
 
 async def test_model_list_asks_the_address_and_token_of_the_fields():
@@ -1001,7 +1003,7 @@ async def test_model_list_and_lang_list_do_not_share_widgets():
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
-        ed.lang_list.open()
+        ed.lang_list.open(forced=True)
         assert len(_lang_rows(ed)) == 100 and len(_model_rows(ed)) == 2
         ed.lang_list.close()
         await pilot.pause()
@@ -1103,3 +1105,56 @@ async def test_model_list_reload_without_typing_shows_everything():
         ed.model_list.reload()
         assert await _settle(pilot, lambda: _model_rows(ed))
         assert len(_model_rows(ed)) == 2
+
+
+@pytest.mark.parametrize("list_attr, key, value", [
+    ("url_list", "url", "https://api.groq.com/openai/v1/audio/transcriptions"),
+    ("model_list", "model", "whisper-1"),
+    ("lang_list", "language", "ru"),
+])
+async def test_no_list_of_the_panel_opens_over_a_filled_field(list_attr, key, value):
+    """Правило раскрытия ОДНО на все три списка панели: сам — только на пустом поле,
+    поверх значения — явная клавиша.
+
+    Живой смок 2026-08-20: правило чинилось по одному полю (сначала адрес, потом
+    модель), и «Язык» остался с прежним поведением — список раскрывался поверх
+    сохранённого кода, а Esc его стирал. Тест держит весь класс полей разом, чтобы
+    следующая правка снова не оставила одно из них позади."""
+    from config_modules.endpoint_presets import EndpointPreset
+    presets = [EndpointPreset(name="Groq",
+                              url="https://api.groq.com/openai/v1/audio/transcriptions"),
+               EndpointPreset(name="OpenAI",
+                              url="https://api.openai.com/v1/audio/transcriptions")]
+    ed = _cloud({key: value}, fetch=lambda *a, **kw: _STT, url_presets=presets)
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        ctrl = getattr(ed, list_attr)
+        ctrl.open()                                   # как вход курсора на поле
+        await pilot.pause()
+        assert ctrl.is_open is False, "список раскрылся сам поверх значения"
+        ctrl.open(forced=True)                        # как Alt+↓
+        await pilot.pause()
+        assert ctrl.is_open is True, "явная клавиша обязана раскрыть"
+
+
+@pytest.mark.parametrize("list_attr, field_id, key, value", [
+    ("url_list", "voice-url", "url", "https://api.groq.com/openai/v1/audio/transcriptions"),
+    ("model_list", "voice-model", "model", "whisper-1"),
+    ("lang_list", "voice-lang", "language", "ru"),
+])
+async def test_escape_over_a_filled_field_keeps_its_value(list_attr, field_id, key, value):
+    """И закрытие ОДНО на все три: Esc убирает список, значение поля остаётся."""
+    from config_modules.endpoint_presets import EndpointPreset
+    presets = [EndpointPreset(name="Groq",
+                              url="https://api.groq.com/openai/v1/audio/transcriptions"),
+               EndpointPreset(name="OpenAI",
+                              url="https://api.openai.com/v1/audio/transcriptions")]
+    ed = _cloud({key: value}, fetch=lambda *a, **kw: _STT, url_presets=presets)
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        ctrl = getattr(ed, list_attr)
+        ctrl.open(forced=True)
+        await pilot.pause()
+        ctrl.close()
+        await pilot.pause()
+        assert ed.query_one(f"#{field_id}", Input).value == value

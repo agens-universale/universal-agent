@@ -153,6 +153,31 @@ def _selected_rows(scr):
     return [i for i, w in enumerate(rows) if "selected" in w.classes]
 
 
+async def _expand_list(pilot):
+    """Раскрыть список поля под курсором, если он не раскрылся сам.
+
+    С канона 2026-08-20 списки панели раскрываются автоматически только на ПУСТОМ
+    поле; там, где значение уже задано, раскрытие — часть сценария человека (`Alt+↓`),
+    а не проверяемое поведение. Само правило стерегут параметризованные тесты в
+    test_editors_voice_endpoint.py."""
+    ctrl = getattr(pilot.app.screen, "_voice_list_ctrl", lambda: None)()
+    if ctrl is not None and not ctrl.is_open:
+        await pilot.press("alt+down")
+        await pilot.pause()
+
+
+_LIST_HINT_CLASSES = ("voice-url-preset-hint", "voice-model-hint", "voice-lang-hint")
+
+
+def _field_labels(ed) -> list[str]:
+    """Подписи полей редактора.
+
+    Строки-подсказки списков носят тот же класс `onb-hint` и с канона 2026-08-20 стоят
+    под полями с первого кадра — в перечень подписей они не входят."""
+    return [str(w.render()) for w in ed.query(".onb-hint")
+            if not any(c in w.classes for c in _LIST_HINT_CLASSES)]
+
+
 async def _open_voice(app, scr, pilot):
     from tui.screens.settings import _VOICE
     await app.push_screen(scr)
@@ -187,14 +212,21 @@ async def _open_local(app, scr, pilot):
         await pilot.pause()
 
 
-async def _to_field(pilot, n=0):
+async def _to_field(pilot, n=0, *, expand=True):
     """Курсор со строки режима на n-е поле её панели (0 — первое). Tab входит в ГРУППУ
     полей, стрелки двигают уже внутри неё (спека §4.1): сквозной ленты «строки → поля»
-    больше нет, и одной стрелкой с режима в поле не попасть."""
+    больше нет, и одной стрелкой с режима в поле не попасть.
+
+    `expand` — раскрыть список поля, если он не раскрылся сам. С канона 2026-08-20 он
+    раскрывается автоматически только на ПУСТОМ поле, а большинство тестов писалось,
+    когда вход раскрывал список всегда: чтобы их смысл не поехал, делаем то же, что
+    человек, — жмём `Alt+↓`. Тесты про САМО правило раскрытия передают `expand=False`."""
     await pilot.press("tab")
     for _ in range(n):
         await pilot.press("down")
     await pilot.pause()
+    if expand:
+        await _expand_list(pilot)
 
 
 # --- макет секции: строки режима со статусом, поля панели ---------------------
@@ -372,8 +404,7 @@ async def test_cloud_pane_fields_prefilled_and_editable(tmp_path):
                             config_text=CLOUD_CONFIG + "  language: en\n")
         await _open_cloud(app, scr, pilot)
         ed = scr.query_one(VoiceEndpointEditor)
-        assert [str(w.render()) for w in ed.query(".onb-hint")] == \
-            ["URL", "Токен", "Модель", "Язык"]
+        assert _field_labels(ed) == ["URL", "Токен", "Модель", "Язык"]
         assert scr.query_one("#voice-url", Input).value == "https://old.x/v1/audio/transcriptions"
         assert scr.query_one("#voice-model", Input).value == "whisper-old"
         assert scr.query_one("#voice-lang", Input).value == "en"
@@ -881,6 +912,7 @@ async def test_footer_follows_a_mouse_click_into_the_field(tmp_path):
         await _open_local(app, scr, pilot)
         scr.query_one("#voice-lang", Input).focus()
         await pilot.pause()
+        await _expand_list(pilot)                         # код задан — раскрываем Alt+↓
         assert "Enter — включить" not in _footer(scr)     # футер строки режима ушёл
         assert "Esc — свернуть" in _footer(scr)
         await pilot.press("escape")
@@ -1031,7 +1063,8 @@ async def test_arrows_walk_the_rows_then_tab_walks_all_cloud_fields(tmp_path):
             await pilot.press("down")
             await pilot.pause()
             assert (_cursor_row(scr), _focused_id(scr)) == (1, focus)
-        await pilot.press("escape")                      # свернуть список языков
+        # Список языка сам не раскрылся — код в поле уже есть (канон 2026-08-20), и
+        # сворачивать перед следующей стрелкой нечего.
         await pilot.press("down")
         await pilot.pause()
         assert (_cursor_row(scr), _focused_id(scr)) == (1, "voice-url")
@@ -1049,14 +1082,13 @@ async def test_arrows_walk_the_cloud_fields_back_up(tmp_path):
         scr, _ = _mk_screen(tmp_path, OFF)
         await _open_cloud(app, scr, pilot)
         scr.query_one("#voice-url", Input).value = _URL
-        await _to_field(pilot, 3)                        # до последнего поля группы
+        await _to_field(pilot, 3, expand=False)          # до последнего поля группы
         assert _focused_id(scr) == "voice-lang"
-        await pilot.press("escape")                      # список языков забирает стрелки себе
+        # Список языка сам не раскрылся (код в поле есть) — сворачивать нечего.
         for focus in ("voice-model", "voice-token", "voice-url", "voice-lang"):
             await pilot.press("up")
             await pilot.pause()
             assert (_cursor_row(scr), _focused_id(scr)) == (1, focus)
-        await pilot.press("escape")                      # снова раскрытый список языков
         await pilot.press("tab")                         # из полей — на строку режима
         await pilot.pause()
         assert (_cursor_row(scr), _focused_id(scr)) == (1, None)
@@ -1114,12 +1146,15 @@ async def test_cloud_row_itself_does_not_grab_the_field(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_reentering_section_restores_field_cursor(tmp_path):
-    """Курсор помнит место и после ухода из секции: вернулись — фокус снова в том же
-    поле. Ставит его редактор на СВОЁМ монтировании: снаружи (после mount секции) полей
-    в дереве ещё нет, и попытка сфокусировать их роняла бы воркер NoMatches."""
+async def test_reentering_section_starts_from_the_default_cursor(tmp_path):
+    """Повторный вход в секцию ставит курсор на дефолт — строку действующего режима.
+
+    Память места между заходами была исключением одной этой секции (живой смок
+    2026-08-20): возврат попадал сразу в поле «Модель» или «Язык» и раскрывал там
+    список, которого человек не просил. Остальные секции хаба входят с дефолта, и
+    голос теперь тоже — правило одно на экран."""
     from tui.app import TuiApp
-    from tui.screens.settings import _MODES, _VOICE
+    from tui.screens.settings import _MODES, _VOICE, _VOICE_GROUP_VARIANTS
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF)
@@ -1137,7 +1172,9 @@ async def test_reentering_section_restores_field_cursor(tmp_path):
         await pilot.press("pageup")
         await pilot.pause()
         assert scr._view == _VOICE
-        assert _focused_id(scr) == "voice-model"
+        assert _focused_id(scr) is None                  # курсор в строках режима
+        assert scr._voice_cursor_group() == _VOICE_GROUP_VARIANTS
+        assert not _model_rows(scr) and not _lang_rows(scr)   # и ни один список не раскрыт
         assert app.is_running
 
 
@@ -1153,9 +1190,10 @@ async def test_mouse_click_into_field_moves_the_cursor(tmp_path):
         await _open_cloud(app, scr, pilot)
         scr.query_one("#voice-lang", Input).focus()       # эмуляция клика по полю
         await pilot.pause()
+        await _expand_list(pilot)                          # код задан — раскрываем Alt+↓
         assert (scr._voice_cursor_group(), scr._voice_cursor_field()) == ("fields", "language")
         assert (_cursor_row(scr), _selected_rows(scr)) == (1, [])   # ▸ у владельца, фон снят
-        await pilot.press("escape")                       # клик раскрыл список — свернуть
+        await pilot.press("escape")                       # свернуть раскрытый список
         await pilot.press("up")
         await pilot.pause()
         assert _focused_id(scr) == "voice-model"
@@ -1853,7 +1891,9 @@ async def test_escape_collapses_the_list_and_keeps_the_cursor_in_the_field(tmp_p
         await pilot.press("up")
         await pilot.pause()
         assert (_cursor_row(scr), _focused_id(scr)) == (1, None)
-        assert _lang_hint(scr) is None                     # подсказка ушла вместе с полем
+        # Строка под полем остаётся: она про поле, а не про курсор (канон 2026-08-20 —
+        # подсказки стоят под всеми полями со списком с первого кадра).
+        assert _lang_hint(scr) == _LIST_CLOSED_HINT
 
 
 @pytest.mark.asyncio
@@ -1911,6 +1951,7 @@ async def test_leaving_the_field_collapses_the_list(tmp_path):
         await _open_cloud(app, scr, pilot)
         scr.query_one("#voice-lang", Input).focus()        # как клик мышью по полю
         await pilot.pause()
+        await _expand_list(pilot)                           # код задан — раскрываем Alt+↓
         assert len(_lang_rows(scr)) == 100
         scr.query_one("#voice-url", Input).focus()         # клик в соседнее поле
         await pilot.pause()
@@ -1920,8 +1961,12 @@ async def test_leaving_the_field_collapses_the_list(tmp_path):
 
 @pytest.mark.asyncio
 async def test_leaving_the_section_collapses_the_list(tmp_path):
+    """Уход из секции уносит список, а возврат начинается с дефолта — со строк режима.
+
+    Раньше секция помнила место и раскрывала список заново (живой смок 2026-08-20:
+    возврат попадал сразу в поле и раскрывал то, чего человек не просил)."""
     from tui.app import TuiApp
-    from tui.screens.settings import _MODES, _VOICE
+    from tui.screens.settings import _MODES, _VOICE, _VOICE_GROUP_VARIANTS
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, LOCAL)
@@ -1933,7 +1978,9 @@ async def test_leaving_the_section_collapses_the_list(tmp_path):
         assert scr._view == _MODES and not scr.query(".voice-lang-row")
         await pilot.press("pageup")
         await pilot.pause()
-        assert scr._view == _VOICE and len(_lang_rows(scr)) == 100   # вернулись — раскрыт
+        assert scr._view == _VOICE
+        assert not _lang_rows(scr)                                   # вернулись — свёрнут
+        assert scr._voice_cursor_group() == _VOICE_GROUP_VARIANTS    # и курсор на дефолте
 
 
 @pytest.mark.asyncio
@@ -2018,9 +2065,13 @@ async def test_cloud_save_leaves_the_list_collapsed(tmp_path):
         assert "Esc — свернуть" not in _footer(scr)
         assert _focused_id(scr) == "voice-lang"
         await pilot.press("up")                           # стрелки свободны — ушли на «Модель»
-        await pilot.press("down")                         # и вернулись: список снова раскрыт
+        await pilot.press("down")                         # и вернулись на «Язык»
         await pilot.pause()
         assert scr.query_one("#voice-lang", Input).value == "ru"
+        # Код в поле есть — вход его список не раскрывает (канон 2026-08-20); показать
+        # список по-прежнему может Alt+↓.
+        assert not _lang_rows(scr)
+        await _expand_list(pilot)
         assert len(_lang_rows(scr)) == 100
 
 
@@ -2189,7 +2240,7 @@ async def test_model_list_opens_on_alt_down_over_a_saved_id(tmp_path):
         fake.models = _MODELS
         assert not _model_rows(scr)
         await _open_cloud(app, scr, pilot)
-        await _to_field(pilot, _TO_MODEL_FIELD)
+        await _to_field(pilot, _TO_MODEL_FIELD, expand=False)
         assert not _model_rows(scr), "вход на заполненное поле список не раскрывает"
         assert fake.model_calls == [], "и в сеть за списком не ходит"
         await pilot.press("alt+down")                   # явная просьба показать список
@@ -2205,15 +2256,21 @@ async def test_model_list_opens_on_alt_down_over_a_saved_id(tmp_path):
 
 @pytest.mark.asyncio
 async def test_model_list_says_nothing_without_a_url(tmp_path):
-    """Адреса ещё нет — в сеть не ходим и молчим: человек только начал заполнять форму."""
+    """Адреса ещё нет — в сеть не ходим и списка не показываем: человек только начал
+    заполнять форму, и вход курсора в поле не повод его отчитывать.
+
+    Строка под полем при этом стоит (канон 2026-08-20: у полей со списком она есть с
+    первого кадра) и называет клавишу — та сходит и объяснит, чего не хватает."""
     from tui.app import TuiApp
+    from tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF)          # voice-секции в файле нет
         fake.models = _MODELS
         await _open_model_field(app, scr, pilot)
         assert fake.model_calls == []
-        assert not _model_rows(scr) and _model_hint(scr) is None
+        assert not _model_rows(scr)
+        assert _model_hint(scr) == _MODEL_RELOAD_HINT
 
 
 @pytest.mark.asyncio
@@ -2238,10 +2295,13 @@ async def test_alt_down_on_empty_url_model_field_explains_instead_of_silence(tmp
         await pilot.pause()
         await pilot.press("down", "down")               # URL → Токен → Модель
         await pilot.pause()
+        from tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
         assert _focused_id(scr) == "voice-model"         # предусловие: курсор на «Модели»
-        # Предусловие: автовход тих. Строку-подсказку контроллер с канона 2026-08-17
-        # не сносит, поэтому «тихо» — это пустой текст, а не отсутствие виджета.
-        assert not _model_hint(scr)
+        # Предусловие: автовход тих — строк нет и в сеть не ходили. Под полем при этом
+        # стоит обещание клавиши (канон 2026-08-20), а не объяснение: отчитывать
+        # человека за то, что он просто дошёл до поля, не за что.
+        assert not _model_rows(scr)
+        assert _model_hint(scr) == _MODEL_RELOAD_HINT
         await pilot.press("alt+down")
         await pilot.pause()
         assert _model_hint(scr) == "сначала укажите адрес endpoint"
@@ -2391,6 +2451,7 @@ async def test_only_one_list_is_open_at_a_time(tmp_path):
         await pilot.press("down")                      # на «Язык»
         await pilot.pause()
         assert _focused_id(scr) == "voice-lang"
+        await _expand_list(pilot)                      # код задан — раскрываем Alt+↓
         assert len(_lang_rows(scr)) == 100 and not _model_rows(scr)
 
 
@@ -2645,7 +2706,7 @@ async def test_preset_url_opens_only_on_alt_down_and_highlights_the_match(tmp_pa
                             config_text=f"model: m\nvoice:\n  url: {groq}\n  model: whisper-1\n")
         await _open_cloud(app, scr, pilot)
         assert not _url_rows(scr)                      # на строке режима списка нет
-        await _to_field(pilot)                          # в поле «URL»
+        await _to_field(pilot, expand=False)            # в поле «URL», как это делает человек
         assert _focused_id(scr) == "voice-url"
         assert not _url_rows(scr)                      # адрес задан — список свёрнут
         await pilot.press("alt+down")                   # явная просьба показать список
@@ -2666,7 +2727,7 @@ async def test_own_url_does_not_auto_open_but_alt_down_opens_it(tmp_path):
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)   # url: https://old.x/…
         await _open_cloud(app, scr, pilot)
-        await _to_field(pilot)
+        await _to_field(pilot, expand=False)
         assert not _url_rows(scr)
         await pilot.press("alt+down")
         await pilot.pause()
@@ -2684,7 +2745,7 @@ async def test_ctrl_space_probes_the_url_field_regardless_of_the_list_state(tmp_
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.probe_result = ProbeResult(ok=True, latency_ms=10, error=None)
         await _open_cloud(app, scr, pilot)
-        await _to_field(pilot)                          # url: чужой адрес, список свёрнут
+        await _to_field(pilot, expand=False)             # url: чужой адрес, список свёрнут
         await pilot.press("ctrl+space")                  # порядок 1: проба раньше раскрытия
         assert await _wait(pilot, lambda: fake.probe_calls), \
             "ручная проверка должна уйти со свёрнутым списком"
@@ -2766,7 +2827,7 @@ async def test_footer_follows_the_url_field_and_its_list(tmp_path):
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
-        await _to_field(pilot)                          # url: чужой адрес, список свёрнут
+        await _to_field(pilot, expand=False)            # url: чужой адрес, список свёрнут
         assert _footer(scr) == _VOICE_FOOTER_CLOUD_LIST
         await pilot.press("alt+down")                    # раскрыть явно — поверх своего адреса
         await pilot.pause()
@@ -3762,7 +3823,7 @@ async def test_footer_hints_alt_down_and_ctrl_space_when_collapsed_on_the_cloud_
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
-        await _to_field(pilot)                             # url — чужой адрес, список свёрнут
+        await _to_field(pilot, expand=False)               # url — чужой адрес, список свёрнут
         assert LIST_CLOSED_HINT in _footer(scr)
         await pilot.press("down")                          # token — списка у него нет вовсе
         await pilot.pause()
@@ -3770,9 +3831,10 @@ async def test_footer_hints_alt_down_and_ctrl_space_when_collapsed_on_the_cloud_
         await pilot.press("down")                          # model — сервер не ответил
         await pilot.pause()
         assert LIST_CLOSED_HINT not in _footer(scr)
-        await pilot.press("down")                          # voice-lang, список раскрылся
+        await pilot.press("down")                          # voice-lang
         await pilot.pause()
         assert _focused_id(scr) == "voice-lang"
+        await _expand_list(pilot)                          # код задан — раскрываем Alt+↓
         assert LIST_CLOSED_HINT not in _footer(scr)
         await pilot.press("escape")
         await pilot.pause()
@@ -4081,6 +4143,7 @@ async def test_tab_collapses_the_open_list_before_leaving(tmp_path):
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         scr._set_voice_cursor(group="fields", position=3)  # «Язык» — поле со списком
         await pilot.pause()
+        await _expand_list(pilot)                          # код задан — раскрываем Alt+↓
         ctrl = scr._voice_list_ctrl()
         assert ctrl is not None and ctrl.is_open
         await pilot.press("tab")
@@ -4279,3 +4342,57 @@ async def test_escape_over_a_saved_model_keeps_it_in_the_field(tmp_path):
         await pilot.pause()
         assert not _model_rows(scr)
         assert scr.query_one("#voice-model", Input).value == "whisper-old"
+
+
+@pytest.mark.asyncio
+async def test_leaving_to_the_menu_and_coming_back_opens_no_list(tmp_path):
+    """Ушли в меню настроек с курсором в поле со списком, вернулись — секция начинается
+    со строк режима, и ни один список не раскрыт.
+
+    Живой смок 2026-08-20: секция помнила место, возврат попадал сразу в «Модель» или
+    «Язык», и список раскрывался там, где человек его не просил — а `Esc`, которым его
+    убирали, откатывал поле. Память места была исключением одной этой секции."""
+    from tui.app import TuiApp
+    from tui.screens.settings import _VOICE, _VOICE_GROUP_VARIANTS
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG + "  language: en\n")
+        fake.models = _MODELS
+        await _open_cloud(app, scr, pilot)
+        await _to_field(pilot, _TO_MODEL_FIELD)         # курсор в поле «Модель»
+        assert _focused_id(scr) == "voice-model"
+        await pilot.press("escape")                     # свернуть список
+        await pilot.pause()
+        await pilot.press("escape")                     # из секции — в меню настроек
+        await pilot.pause()
+        assert scr._view == "menu"
+
+        scr._open_section(_VOICE)                       # Enter по строке «Голосовой ввод»
+        await pilot.pause()
+        assert scr._voice_cursor_group() == _VOICE_GROUP_VARIANTS
+        assert _focused_id(scr) is None
+        assert not _model_rows(scr) and not _lang_rows(scr) and not _url_rows(scr)
+
+
+@pytest.mark.asyncio
+async def test_list_hints_stand_under_every_field_from_the_first_frame(tmp_path):
+    """Строка «чем раскрыть список» стоит под КАЖДЫМ полем со списком сразу.
+
+    Живой смок 2026-08-20: строку монтировал сам контроллер — при первом раскрытии.
+    Под «URL» она появлялась, только когда курсор туда заходил, под «Моделью» — после
+    первого Alt+↓, и панель показывала мешанину: у одного поля подсказка есть, у
+    соседнего нет. На «Подключении» этого не видно — там поле со списком одно и курсор
+    стартует на нём."""
+    from tui.app import TuiApp
+    from tui.editors.field_list import LIST_CLOSED_HINT
+    from tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
+        fake.models = _MODELS
+        await _open_cloud(app, scr, pilot)      # курсор на строке режима, в поля не заходили
+        await pilot.pause()
+        assert _url_hint(scr) == LIST_CLOSED_HINT
+        assert _lang_hint(scr) == LIST_CLOSED_HINT
+        # Сетевой список обещает свой глагол и до первой загрузки: клавиша идёт на сервер.
+        assert _model_hint(scr) == _MODEL_RELOAD_HINT

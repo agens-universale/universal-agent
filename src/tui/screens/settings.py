@@ -3049,6 +3049,14 @@ class SettingsScreen(Screen):
         self._reset_voice_probe()             # + вердикт/воркер probe прошлого сеанса
         self._voice_cloud_draft = None        # черновик endpoint живёт в пределах одного захода
         self._voice_list_reopen_gate = False  # гейт одноразовый и в пределах одного захода
+        # Курсор голосовой секции — на дефолт при КАЖДОМ заходе, как `_update_idx` ниже и
+        # как все прочие секции. Память места между заходами была исключением одной этой
+        # секции (живой смок 2026-08-20): возврат из меню попадал сразу в поле «Модель»
+        # или «Язык», и список раскрывался там, где человек его не просил.
+        self._voice_cursor_placed = False
+        self._voice_group = _VOICE_GROUP_VARIANTS
+        self._voice_field_idx = 0
+        self._modes_idx = 0                   # то же правило: «Режимы» тоже помнили место
         if i == _UPDATE:
             self._update_idx = None     # пересчитать дефолт-курсор при (пере)входе в секцию
         self._render_view()

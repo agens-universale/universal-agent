@@ -196,7 +196,12 @@ def lang_list_controller(host, *, input_id: str, langs=VOICE_LANGUAGES,
                          on_pick=None) -> FieldListController:
     """Раскрывающийся список кодов языка под полем «Язык» — общий контроллер со своими
     параметрами: строки-константа, две колонки (код и название), фильтр по обоим
-    («нем» → de), подсветка действующего кода."""
+    («нем» → de), подсветка действующего кода.
+
+    Раскрытие — по общему правилу панели (`can_open`): сам только на пустом поле,
+    поверх значения — `Alt+↓` или печать. Правило одно на все три списка панели, и
+    заводить исключение «язык всегда раскрывается» нельзя: тогда одно и то же
+    действие (вход курсора на поле) вело бы себя по-разному в соседних строках."""
     return FieldListController(
         host, input_id=input_id, row_class=_LANG_ROW_CLASS,
         hint_class=_LANG_HINT_CLASS, scroll_class=_LANG_SCROLL_CLASS,
@@ -204,6 +209,7 @@ def lang_list_controller(host, *, input_id: str, langs=VOICE_LANGUAGES,
         matches=lambda item, q: q in item[0] or q in item[1],
         value_of=lambda item: item[0], initial_index=_lang_initial_index,
         hint=lambda ok: _LANG_HINT if ok else _LANG_HINT_NO_MATCH,
+        can_open=lambda value: not value,
         on_pick=on_pick,
     )
 
@@ -265,6 +271,14 @@ class ModelListController(FieldListController):
         загруженного списка у нас нет (`close` его уносит), фильтровать пока нечего."""
         self._mount_hint(field)
         self._load(text)
+
+    def _can_promise(self) -> bool:
+        """Строка под свёрнутым списком стоит ВСЕГДА, даже когда строк ещё нет.
+
+        База молчит, когда показывать нечего, — у статического списка это честно. Здесь
+        нет: `Alt+↓` не показывает уже добытое, а идёт за ним на сервер, и обещание
+        уместно и до первой загрузки, и после того, как закрытие унесло строки."""
+        return True
 
     def _on_close(self) -> None:
         self._gen += 1             # летящая загрузка этого раскрытия больше не наша
@@ -529,6 +543,17 @@ class VoiceEndpointEditor(Vertical):
             self.focus_field(self._autofocus)
         elif self._autofocus:
             self.focus_first()
+        # Строки под полями со списком — с ПЕРВОГО кадра формы, а не после первого
+        # раскрытия: полей со списком здесь три, курсор стартует на строке режима, и
+        # без этого подсказка была только под тем полем, куда он успел зайти (живой
+        # смок 2026-08-20). `call_after_refresh` — поля в группе монтируются вторым
+        # проходом, и на своём `on_mount` контроллер их ещё не находит.
+        self.call_after_refresh(self._sync_list_hints)
+
+    def _sync_list_hints(self) -> None:
+        for ctrl in (self.url_list, self.model_list, self.lang_list):
+            if ctrl is not None:
+                ctrl.sync_hint()
 
     def focus_first(self) -> None:
         """Поля монтируются в уже активный экран — Textual не фокусирует их сама

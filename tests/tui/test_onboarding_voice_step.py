@@ -567,7 +567,13 @@ async def test_voice_cloud_fields_are_framed_editor(monkeypatch):
         await pilot.press("enter")
         await pilot.pause()
         ed = screen.query_one(VoiceEndpointEditor)
-        assert [str(w.render()) for w in ed.query(".onb-hint")] == ["URL", "Токен", "Модель"]
+        # Строки-подсказки списков носят тот же класс `onb-hint` и с канона 2026-08-20
+        # стоят под полями с первого кадра — в перечень подписей они не входят.
+        labels = [str(w.render()) for w in ed.query(".onb-hint")
+                  if not any(c in w.classes for c in ("voice-url-preset-hint",
+                                                      "voice-model-hint",
+                                                      "voice-lang-hint"))]
+        assert labels == ["URL", "Токен", "Модель"]
         assert "set-framed" in ed.query_one("#voice-token", Input).classes
         for wid, group_id in (("#voice-url", "#voice-url-group"),
                               ("#voice-model", "#voice-model-group")):
@@ -702,6 +708,12 @@ def _voice_editor(screen):
 def _model_rows(screen):
     from textual.widgets import Static
     return [str(w.render()) for w in screen.query(".voice-model-row") if w.display]
+
+
+def _list_hint(screen, cls: str):
+    """Строка-подсказка под полем со списком (канон `_lang_hint` /settings)."""
+    hints = list(screen.query(f".{cls}"))
+    return str(hints[-1].render()) if hints else None
 
 
 async def _to_cloud_fields(pilot, screen, url="https://s.x/v1/audio/transcriptions"):
@@ -1928,3 +1940,23 @@ async def test_model_list_falls_back_to_config_proxy_when_connection_step_not_vi
         await pilot.pause()
         await pilot.pause()
         assert voice.model_proxies == ["http://corp:3128"]
+
+
+@pytest.mark.asyncio
+async def test_list_hints_stand_under_every_field_from_the_first_frame():
+    """Шаг мастера — тот же контракт, что у секции /settings: строка «чем раскрыть
+    список» стоит под каждым полем со списком сразу, а не после первого раскрытия."""
+    from tui.app import TuiApp
+    from tui.editors.field_list import LIST_CLOSED_HINT
+    from tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
+    app = TuiApp(config={"model": "M"})
+    voice = FakeVoice()
+    voice.models = _MODELS
+    async with app.run_test() as pilot:
+        screen = _screen(app, voice)
+        await app.push_screen(screen)
+        await _to_voice_step(pilot, screen)
+        await _to_cloud_fields(pilot, screen)
+        await pilot.pause()
+        assert _list_hint(screen, "voice-url-preset-hint") == LIST_CLOSED_HINT
+        assert _list_hint(screen, "voice-model-hint") == _MODEL_RELOAD_HINT
