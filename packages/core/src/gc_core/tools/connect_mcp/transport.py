@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import json
 import subprocess
+import queue
 import threading
 import requests
 
@@ -176,20 +177,75 @@ _INITIALIZED_PAYLOAD: Dict[str, Any] = {
 }
 
 
-def _readline_with_timeout(stream: "Any", timeout: float) -> str | None:
-    """Прочитать одну строку из stream с таймаутом (кроссплатформенно)."""
-    result: list[str | None] = [None]
-    def read():
-        try:
-            line = stream.readline()
-            result[0] = line if isinstance(line, str) else (line.decode("utf-8") if line else "")
-        except Exception:
-            result[0] = None
+class _LineReader:
+    """Один читающий поток на ПРОЦЕСС, а не на строку.
 
-    t = threading.Thread(target=read, daemon=True)
-    t.start()
-    t.join(timeout=timeout)
-    return result[0] if result[0] is not None else None
+    Прежняя реализация заводила поток на каждую прочитанную строку JSON-RPC —
+    до 32 потоков на один вызов MCP-тула (``persistent_stdio`` читает в цикле,
+    пропуская уведомления сервера). Хуже того, при таймауте такой поток
+    оставался висеть на ``readline`` навсегда: join с таймаутом отпускает
+    вызывающего, но не сам поток. Долгоживущий сервер накапливал их молча.
+
+    Здесь поток один и живёт столько же, сколько процесс; строки складываются
+    в очередь, а таймаут — это таймаут ожидания очереди.
+
+    Почему вообще поток: ``readline`` на pipe нельзя прервать по таймауту
+    кроссплатформенно — ``selectors`` не работает с pipe на Windows.
+    """
+
+    __slots__ = ("_queue", "_thread", "_stream")
+
+    def __init__(self, stream: "Any") -> None:
+        self._stream = stream
+        self._queue: "queue.Queue[str | None]" = queue.Queue()
+        self._thread = threading.Thread(
+            target=self._pump, daemon=True, name="mcp-stdio-reader"
+        )
+        self._thread.start()
+
+    def _pump(self) -> None:
+        try:
+            for line in iter(self._stream.readline, ""):
+                if line in (b"", None):
+                    break
+                text = line if isinstance(line, str) else line.decode("utf-8", "replace")
+                self._queue.put(text)
+        except Exception:
+            pass
+        finally:
+            # None — маркер «поток кончился»: без него читатель ждал бы таймаут
+            # на каждой строке после смерти процесса.
+            self._queue.put(None)
+
+    def readline(self, timeout: float) -> "str | None":
+        try:
+            return self._queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+
+#: Читатели по объекту потока: у одного процесса один читатель, сколько бы раз
+#: его ни просили прочитать строку. WeakKeyDictionary нельзя (файловые объекты
+#: не всегда слабоссылаемы), поэтому чистим по факту закрытия процесса.
+_READERS: "dict[int, _LineReader]" = {}
+
+
+def _readline_with_timeout(stream: "Any", timeout: float) -> "str | None":
+    """Прочитать одну строку из stream с таймаутом (кроссплатформенно)."""
+    if stream is None:
+        return None
+    key = id(stream)
+    reader = _READERS.get(key)
+    if reader is None:
+        reader = _LineReader(stream)
+        _READERS[key] = reader
+    return reader.readline(timeout)
+
+
+def forget_stdio_reader(stream: "Any") -> None:
+    """Забыть читателя закрытого процесса (зовётся при остановке сервера)."""
+    if stream is not None:
+        _READERS.pop(id(stream), None)
 
 
 def _resolve_command(command: str) -> str:

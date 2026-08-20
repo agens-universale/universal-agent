@@ -57,6 +57,10 @@ class RunContext:
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
+    # Порт «спросить человека»: обычная функция или корутинная. Не задан —
+    # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
+    # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
+    ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
 

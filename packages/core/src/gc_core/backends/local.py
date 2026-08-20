@@ -1,14 +1,15 @@
 """Host implementation of FsBackend (os / open() / subprocess); the host-I/O
 details that used to live inline in the tools are concentrated here."""
+import asyncio
 import codecs
 import hashlib
 import os
 import stat as stat_module
 import subprocess
 import sys
-import threading
 from typing import Any, Callable, Dict, Iterable, Optional
 
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, ExecResult, FsBackend
 from gc_core.utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
 
@@ -210,16 +211,10 @@ class LocalFsBackend(FsBackend):
     def exec(self, command: str, *, cwd: Optional[str] = None,
              timeout: Optional[int] = None,
              env: Optional[dict] = None) -> ExecResult:
-        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
-        return _run_bounded_process(
-            command,
-            shell=True,
-            cwd=cwd,
-            timeout=timeout,
-            env=merged_env,
-            stdin_text=None,
-            capture_max_chars=self.exec_output_capture_max_chars,
-        )
+        # Реализация одна — асинхронная (см. _arun_bounded_process): она не
+        # держит по два дренажных потока на вызов. Синхронный вход остаётся
+        # блокирующим, как и был.
+        return run_coro_blocking(self.aexec(command, cwd=cwd, timeout=timeout, env=env))
 
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
@@ -229,27 +224,44 @@ class LocalFsBackend(FsBackend):
         # string, which breaks under Windows cmd.exe (no printf, single quotes
         # not honored). An argv list + stdin goes through CreateProcess /
         # execvp uniformly on every OS.
-        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
-        return _run_bounded_process(
-            [str(a) for a in argv],
-            shell=False,
-            cwd=cwd,
-            timeout=timeout,
-            env=merged_env,
-            stdin_text=stdin,
-            capture_max_chars=self.exec_output_capture_max_chars,
+        return run_coro_blocking(
+            self.aexec_argv(argv, stdin=stdin, cwd=cwd, timeout=timeout, env=env)
         )
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
                    env: Optional[dict] = None) -> ExecResult:
-        return _run_bounded_process(
-            [sys.executable, "-u", "-"],
-            shell=False,
-            cwd=cwd,
-            timeout=timeout,
-            env=_sanitize_env(env),
-            stdin_text=code,
+        return run_coro_blocking(
+            self.arun_python(code, cwd=cwd, timeout=timeout, env=env)
+        )
+
+    # --- exec (async) ---
+    async def aexec(self, command: str, *, cwd: Optional[str] = None,
+                    timeout: Optional[int] = None,
+                    env: Optional[dict] = None) -> ExecResult:
+        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        return await _arun_bounded_process(
+            command, shell=True, cwd=cwd, timeout=timeout, env=merged_env,
+            stdin_text=None, capture_max_chars=self.exec_output_capture_max_chars,
+        )
+
+    async def aexec_argv(self, argv: list, *, stdin: Optional[str] = None,
+                         cwd: Optional[str] = None,
+                         timeout: Optional[int] = None,
+                         env: Optional[dict] = None) -> ExecResult:
+        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        return await _arun_bounded_process(
+            [str(a) for a in argv], shell=False, cwd=cwd, timeout=timeout,
+            env=merged_env, stdin_text=stdin,
+            capture_max_chars=self.exec_output_capture_max_chars,
+        )
+
+    async def arun_python(self, code: str, *, cwd: Optional[str] = None,
+                          timeout: Optional[int] = None,
+                          env: Optional[dict] = None) -> ExecResult:
+        return await _arun_bounded_process(
+            [sys.executable, "-u", "-"], shell=False, cwd=cwd, timeout=timeout,
+            env=_sanitize_env(env), stdin_text=code,
             capture_max_chars=self.exec_output_capture_max_chars,
         )
 
@@ -272,64 +284,56 @@ _CAPTURED_READY_TIMEOUT_SEC = 30
 _DRAIN_JOIN_TIMEOUT_SEC = 2
 
 
-def _drain_pipe(pipe, capture_max_chars: int, on_captured=None) -> tuple[str, bool]:
-    """Прочитать ``pipe`` в строку ≤ ``capture_max_chars``; дальше слить в никуда.
 
-    ``on_captured(text, hit_cap)`` вызывается ровно один раз — сразу после заполнения
-    буфера (в т.ч. при hit_cap, *до* конца discard), чтобы caller не ждал drain.
 
-    Возвращает ``(text, hit_cap)``. Инкрементальный UTF-8 декодер (errors=replace)
-    безопасно обрабатывает многобайтовые границы чанков.
-    """
+
+
+
+# --- асинхронный запуск процесса (async-переезд, Задача 18) -----------------
+#
+# Прежняя реализация держала ПО ДВА потока на каждый вызов: pipe нельзя просто
+# не читать — заполненный буфер заблокирует запись в дочернем процессе, а
+# читать оба потока из одного треда нельзя, не рискуя дедлоком. asyncio решает
+# ту же задачу двумя корутинами на одном loop.
+#
+# Семантика сохранена дословно: буфер ограничен, хвост дочитывается в никуда
+# (иначе процесс встанет на записи), таймаут убивает процесс и отдаёт частичный
+# буфер с ``return_code=None``.
+
+
+async def _adrain_stream(stream, capture_max_chars: int) -> tuple:
+    """Асинхронный двойник ``_drain_pipe``: то же ограничение, тот же декодер."""
     decoder = codecs.lookup("utf-8").incrementaldecoder(errors="replace")
-    parts: list[str] = []
+    parts: list = []
     total = 0
     hit_cap = False
-    published = False
-
-    def _publish() -> None:
-        nonlocal published
-        if published:
-            return
-        published = True
-        if on_captured is not None:
-            on_captured("".join(parts), hit_cap)
-
     try:
         while True:
-            chunk = pipe.read(_READ_CHUNK)
+            chunk = await stream.read(_READ_CHUNK)
             if not chunk:
                 break
-            if not hit_cap:
-                decoded = decoder.decode(chunk)
-                room = capture_max_chars - total
-                if room <= 0:
-                    hit_cap = True
-                    _publish()
-                elif len(decoded) <= room:
-                    parts.append(decoded)
-                    total += len(decoded)
-                else:
-                    parts.append(decoded[:room])
-                    total = capture_max_chars
-                    hit_cap = True
-                    _publish()
-            # после hit_cap продолжаем читать (drain & discard), чтобы pipe не
-            # заблокировал процесс и не повесил его запись.
-    finally:
-        try:
-            pipe.close()
-        except Exception:
-            pass
-        # финализируем декодер (flush возможного неполного остатка — только если
-        # не hit cap; при hit cap хвост отброшен по определению).
-        if not hit_cap:
-            parts.append(decoder.decode(b"", final=True))
-        _publish()
+            if hit_cap:
+                # drain & discard: не читать нельзя — pipe заблокирует процесс.
+                continue
+            decoded = decoder.decode(chunk)
+            room = capture_max_chars - total
+            if room <= 0:
+                hit_cap = True
+            elif len(decoded) <= room:
+                parts.append(decoded)
+                total += len(decoded)
+            else:
+                parts.append(decoded[:room])
+                total = capture_max_chars
+                hit_cap = True
+    except Exception:
+        pass
+    if not hit_cap:
+        parts.append(decoder.decode(b"", final=True))
     return "".join(parts), hit_cap
 
 
-def _run_bounded_process(
+async def _arun_bounded_process(
     args,
     *,
     shell: bool,
@@ -339,84 +343,48 @@ def _run_bounded_process(
     stdin_text: Optional[str],
     capture_max_chars: int,
 ) -> ExecResult:
-    """Запустить процесс с bounded-буфером на stdout/stderr (thread-per-pipe).
-
-    ``stdin_text`` — опциональный ввод (run_python); ``None`` → stdin=DEVNULL.
-    Timeout: kill процесса, ``timed_out=True``, ``return_code=None``, partial-буфер.
-    Captured публикуется сразу по заполнению cap — не ждём конца discard.
-    """
+    """Запустить процесс с ограниченным буфером, не занимая ни одного потока."""
     from gc_core.utils.win_console import preserve_console_mode
 
-    stdin_arg = subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL
+    stdin_arg = (
+        asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL
+    )
     with preserve_console_mode():
-        proc = subprocess.Popen(
-            args,
-            shell=shell,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=stdin_arg,
-            cwd=cwd,
-            env=env,
-            bufsize=0,
-        )
+        if shell:
+            proc = await asyncio.create_subprocess_shell(
+                args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
+            )
 
-    stdout_buf: list[str] = []
-    stderr_buf: list[str] = []
-    stdout_hit = [False]
-    stderr_hit = [False]
-    stdout_ready = threading.Event()
-    stderr_ready = threading.Event()
-
-    def _reader(
-        pipe,
-        sink: list[str],
-        hit_flag: list[bool],
-        ready: threading.Event,
-    ) -> None:
-        def on_captured(text: str, hit: bool) -> None:
-            if not sink:
-                sink.append(text)
-                hit_flag[0] = hit
-            ready.set()
-
+    if stdin_text is not None and proc.stdin is not None:
         try:
-            _drain_pipe(pipe, capture_max_chars, on_captured=on_captured)
+            proc.stdin.write(stdin_text.encode("utf-8"))
+            await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
         finally:
-            if not sink:
-                sink.append("")
-            ready.set()
-
-    t_out = threading.Thread(
-        target=_reader,
-        args=(proc.stdout, stdout_buf, stdout_hit, stdout_ready),
-        daemon=True,
-        name="exec-stdout-reader",
-    )
-    t_err = threading.Thread(
-        target=_reader,
-        args=(proc.stderr, stderr_buf, stderr_hit, stderr_ready),
-        daemon=True,
-        name="exec-stderr-reader",
-    )
-    t_out.start()
-    t_err.start()
-
-    try:
-        if stdin_text is not None and proc.stdin is not None:
             try:
-                proc.stdin.write(stdin_text.encode("utf-8"))
-            except (BrokenPipeError, OSError):
+                proc.stdin.close()
+            except Exception:
                 pass
-            finally:
-                try:
-                    proc.stdin.close()
-                except Exception:
-                    pass
 
-        proc.wait(timeout=timeout)
-        return_code: Optional[int] = proc.returncode
-        timed_out = False
-    except subprocess.TimeoutExpired:
+    out_task = asyncio.ensure_future(_adrain_stream(proc.stdout, capture_max_chars))
+    err_task = asyncio.ensure_future(_adrain_stream(proc.stderr, capture_max_chars))
+
+    timed_out = False
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=timeout)
+        return_code = proc.returncode
+    except asyncio.TimeoutError:
         timed_out = True
         return_code = None
         try:
@@ -424,25 +392,32 @@ def _run_bounded_process(
         except Exception:
             pass
         try:
-            proc.wait(timeout=5)
+            await asyncio.wait_for(proc.wait(), timeout=5)
         except Exception:
             pass
 
-    # Captured уже в sink после on_captured — не блокируемся на discard гигабайта.
-    stdout_ready.wait(timeout=_CAPTURED_READY_TIMEOUT_SEC)
-    stderr_ready.wait(timeout=_CAPTURED_READY_TIMEOUT_SEC)
-    # Параллельный короткий join: типичный хвост pipe дочитается; долгий discard
-    # не удерживает tool-call (reader продолжит в фоне).
-    t_out.join(timeout=_DRAIN_JOIN_TIMEOUT_SEC)
-    t_err.join(timeout=_DRAIN_JOIN_TIMEOUT_SEC)
+    # Хвост pipe дочитываем ограниченно: долгий discard не должен удерживать
+    # tool-call — тот же приём, что у синхронного join с таймаутом.
+    _done, pending = await asyncio.wait(
+        {out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC
+    )
+    for task in pending:
+        task.cancel()
 
+    def _result(task):
+        if task in pending or task.cancelled():
+            return "", False
+        return ("", False) if task.exception() is not None else task.result()
+
+    stdout_text, stdout_hit = _result(out_task)
+    stderr_text, stderr_hit = _result(err_task)
     return ExecResult(
-        stdout=stdout_buf[0] if stdout_buf else "",
-        stderr=stderr_buf[0] if stderr_buf else "",
+        stdout=stdout_text,
+        stderr=stderr_text,
         return_code=return_code,
         timed_out=timed_out,
-        stdout_hit_capture_cap=stdout_hit[0],
-        stderr_hit_capture_cap=stderr_hit[0],
+        stdout_hit_capture_cap=stdout_hit,
+        stderr_hit_capture_cap=stderr_hit,
     )
 
 

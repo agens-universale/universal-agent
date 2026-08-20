@@ -7,6 +7,7 @@ import pytest
 from gc_core.run_context import create_run_context
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult, FsBackend
+import threading
 
 
 @pytest.fixture()
@@ -209,26 +210,35 @@ def test_exec_default_capture_cap_is_60k(be):
     assert be.exec_output_capture_max_chars == 60_000
 
 
-def test_exec_reader_threads_are_daemon(be, monkeypatch):
-    """A12: stdout/stderr readers must be daemon so mid-drain exit is not blocked."""
-    import threading
 
-    from gc_core.backends import local as local_mod
 
-    created = []
-    RealThread = threading.Thread
+def test_exec_spawns_no_helper_threads(be):
+    """Ни одного вспомогательного потока на вызов.
 
-    def TrackingThread(*args, **kwargs):
-        t = RealThread(*args, **kwargs)
-        created.append(t)
-        return t
-
-    monkeypatch.setattr(local_mod.threading, "Thread", TrackingThread)
+    Прежняя реализация держала два дренажных потока: pipe нельзя не читать —
+    заполненный буфер блокирует запись в дочернем процессе. Теперь ту же
+    работу делают две корутины, и тест сторожит, чтобы потоки не вернулись
+    (раньше здесь проверялось, что они хотя бы демонские).
+    """
+    before = threading.active_count()
     res = be.exec("echo hi", timeout=10)
     assert res.return_code == 0
-    readers = [t for t in created if t.name in ("exec-stdout-reader", "exec-stderr-reader")]
-    assert len(readers) == 2
-    assert all(t.daemon for t in readers)
+    assert threading.active_count() == before
+
+
+def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be):
+    """Захват ограничен, но процесс дочитывается и завершается сам.
+
+    Раньше это проверялось на приватном _drain_pipe; теперь — на поведении
+    exec, то есть на том, что реально важно вызывающему.
+    """
+    be.exec_output_capture_max_chars = 40
+    res = be.exec('python -c "print(\'z\' * 20000)"', timeout=15)
+
+    assert len(res.stdout) <= 40
+    assert res.stdout_hit_capture_cap is True
+    assert res.return_code == 0
+    assert res.timed_out is False
 
 
 def test_exec_bounded_stdout_not_killed(be):
@@ -316,50 +326,3 @@ def test_run_python_timeout(be, tmp_path):
     assert "go" in res.stdout
 
 
-def test_drain_pipe_publishes_captured_before_discard_finishes():
-    """on_captured fires at hit_cap while remaining bytes are still being drained."""
-    import threading
-    from gc_core.backends.local import _drain_pipe
-
-    class SlowAfterCapPipe:
-        def __init__(self):
-            self._chunks = [b"A" * 50, b"B" * 50]  # first fills cap=40, second drains
-            self._i = 0
-            self.second_started = threading.Event()
-            self.release_second = threading.Event()
-
-        def read(self, n):
-            if self._i >= len(self._chunks):
-                return b""
-            chunk = self._chunks[self._i]
-            self._i += 1
-            if self._i == 2:
-                self.second_started.set()
-                self.release_second.wait(timeout=5)
-            return chunk
-
-        def close(self):
-            pass
-
-    pipe = SlowAfterCapPipe()
-    published = threading.Event()
-    seen = {}
-
-    def on_captured(text, hit):
-        seen["text"] = text
-        seen["hit"] = hit
-        published.set()
-
-    def run():
-        _drain_pipe(pipe, 40, on_captured=on_captured)
-
-    t = threading.Thread(target=run)
-    t.start()
-    assert published.wait(timeout=2), "captured must publish before discard completes"
-    assert pipe.second_started.wait(timeout=2)
-    assert seen["hit"] is True
-    assert len(seen["text"]) == 40
-    assert seen["text"] == "A" * 40
-    pipe.release_second.set()
-    t.join(timeout=5)
-    assert not t.is_alive()

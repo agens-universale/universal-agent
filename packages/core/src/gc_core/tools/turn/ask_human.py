@@ -1,8 +1,10 @@
+import inspect
 import sys
 import json
 import logging
 from typing import Optional, Dict, Any
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.aio_compat import run_coro_blocking
 
 _logger = logging.getLogger(__name__)
 
@@ -35,6 +37,38 @@ _TOOL_DESCRIPTION = (
     "When a finite choice set fits, prefer explicit options (A/B/C, numbered list, yes/no). "
     "After each call, follow the hint field in the tool result to classify and act on the reply."
 )
+
+
+def _read_human_response(ctx: "Any", question: str) -> str:
+    """Спросить человека через порт вызывающего, а по умолчанию — через stdin.
+
+    Ядро — библиотека: у встраивающего приложения свой способ спросить
+    пользователя (веб-форма, чат, очередь), и ``input()`` там не просто
+    неуместен, а невозможен — stdin принадлежит не ему.
+
+    Порт задаётся полем ``ctx.ask_human``: обычная функция или корутинная —
+    принимаются обе. Порт не задан → прежнее поведение, чтение stdin построчно
+    до пустой строки или EOF; так работает CLI, и его контракт не меняется.
+    """
+    port = getattr(ctx, "ask_human", None)
+    if callable(port):
+        result = port(question)
+        if inspect.isawaitable(result):
+            # Порт вызывающего асинхронный, а тул синхронный: ждём через общий
+            # хелпер — он умеет и «нет loop», и «loop уже крутится».
+            result = run_coro_blocking(result)
+        return (str(result) if result is not None else "").strip()
+
+    lines: list[str] = []
+    while True:
+        try:
+            line = input()
+            if line == "":
+                break
+            lines.append(line)
+        except EOFError:
+            break
+    return "\n".join(lines).strip()
 
 
 class AskHuman(AbstractSimpleTool):
@@ -234,18 +268,7 @@ Do not implement until they confirm.
                 extra={"event": "ask_human_question", "question": question},
             )
 
-            # Read multi-line input until EOF or empty line
-            lines = []
-            while True:
-                try:
-                    line = input()
-                    if line == "":
-                        break
-                    lines.append(line)
-                except EOFError:
-                    break
-
-            response = "\n".join(lines).strip()
+            response = _read_human_response(self._ctx, question)
 
             if response == "":
                 response = "(empty response)"

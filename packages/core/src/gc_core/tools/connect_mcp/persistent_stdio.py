@@ -29,7 +29,7 @@ import signal
 import subprocess
 import threading
 
-from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, _INITIALIZED_PAYLOAD, _readline_with_timeout, _resolve_command
+from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, _INITIALIZED_PAYLOAD, _readline_with_timeout, _resolve_command, forget_stdio_reader
 
 
 def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
@@ -181,6 +181,9 @@ class PersistentStdioSession:
             self._proc = None
             if proc is None:
                 return
+            # Забыть читателя stdout: он живёт столько же, сколько процесс, и
+            # без этого его запись осталась бы в реестре навсегда.
+            forget_stdio_reader(getattr(proc, "stdout", None))
             # Некоторые MCP-серверы поднимают внешних, detached-потомков:
             # например @playwright/mcp на macOS может запустить системный Google Chrome
             # (ppid=1, не в нашей process group), поэтому killpg до него не
