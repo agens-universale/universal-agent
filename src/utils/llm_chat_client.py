@@ -232,7 +232,8 @@ def _send_chat_completion_text(
     )
     headers = create_call_headers(state, ctx, resolved=resolved)
     url = resolved.url if resolved is not None else cfg["completions_url"]
-    verify, cert, use_retry, timeout, config_proxy = resolve_network_params(cfg, resolved)
+    (verify, cert, use_retry, timeout, config_proxy,
+     retry_embedded_choice_errors) = resolve_network_params(cfg, resolved)
 
     usage_category = category_for_request_label(request_label)
     with usage_scope(getattr(state, "usage", None), usage_category, "chat_completions"):
@@ -245,7 +246,7 @@ def _send_chat_completion_text(
             verify=verify,
             cert=cert,
             use_retry=use_retry,
-            retry_embedded_choice_errors=cfg.get("retry_embedded_choice_errors", True),
+            retry_embedded_choice_errors=retry_embedded_choice_errors,
             logger=getattr(ctx, "logger", None),
             request_label=request_label,
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),

@@ -832,3 +832,88 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
     )
     assert captured["url"] == "http://legacy.local/v1/chat/completions"
     assert captured["payload"]["model"] == "legacy-model"
+
+
+def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(monkeypatch):
+    """Секция модели принимает ВЕСЬ BackendConfig, поэтому в ней законны и
+    `retry_embedded_choice_errors`, и лимиты токенов. Читались они плоско из cfg —
+    и модель с маленьким окном получала запрос от чужого потолка, а тюнинг ретрая
+    под конкретный прокси не применялся вовсе (соседний use_retry при этом
+    оверрайд уважал)."""
+    import processing_responses as processing_module
+
+    captured = {}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        captured.update(kwargs)
+        captured["initial_max_tokens"] = initial_max_tokens
+        payload_factory(initial_max_tokens)
+        return {"id": "chat_1", "choices": [{"index": 0, "message": {
+            "role": "assistant", "content": "hi", "tool_calls": []},
+            "finish_reason": "stop"}]}, {}
+
+    monkeypatch.setattr(
+        processing_module, "request_chat_completions_with_policy", _fake_policy)
+
+    router = SimpleNamespace(resolve=Mock(return_value=_resolved(
+        model="tiny-model",
+        backend_overrides={
+            "retry_embedded_choice_errors": False,
+            "chat_completions_max_tokens": 4096,
+            "chat_completions_min_response_tokens": 256,
+        },
+    )))
+    ctx = SimpleNamespace(
+        config_dict={
+            "backend_api_mode": "chat_completions",
+            "completions_url": "http://legacy.local/v1/chat/completions",
+            "use_ssl": True,
+            "use_retry": False,
+            "backend_request_timeout_sec": 600,
+            "retry_embedded_choice_errors": True,
+            "chat_completions_max_tokens": 32768,
+            "chat_completions_min_response_tokens": 1024,
+        },
+        model_router=router,
+        auth_connector=None,
+        logger=None,
+    )
+
+    processing_module._request_backend_canonical_once(
+        [{"role": "user", "content": "hi"}], _state(default_model="legacy-model"), ctx)
+
+    assert captured["retry_embedded_choice_errors"] is False
+    assert captured["initial_max_tokens"] == 4096
+    assert captured["min_response_tokens"] == 256
+
+
+def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
+    """То же для служебной воронки: единственное поле backend, которое она читала
+    мимо оверрайдов, — ретрай зашитой ошибки."""
+    captured = {}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        captured.update(kwargs)
+        payload_factory(initial_max_tokens)
+        return {"choices": [{"message": {"content": "ok"}}]}, {}
+
+    monkeypatch.setattr(llm_chat_client, "request_chat_completions_with_policy", _fake_policy)
+    monkeypatch.setattr(
+        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {})
+
+    router = SimpleNamespace(resolve=Mock(return_value=_resolved(
+        backend_overrides={"retry_embedded_choice_errors": False})))
+    ctx = SimpleNamespace(
+        config_dict={
+            "completions_url": "http://legacy.local/v1/chat/completions",
+            "backend_request_timeout_sec": 600,
+            "retry_embedded_choice_errors": True,
+        },
+        model_router=router,
+        logger=None,
+    )
+    llm_chat_client.request_chat_completion_text(
+        ctx=ctx, state=_state(), messages=[{"role": "user", "content": "hi"}],
+        max_tokens=10, consumer="summary")
+
+    assert captured["retry_embedded_choice_errors"] is False

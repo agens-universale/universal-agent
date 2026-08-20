@@ -43,7 +43,12 @@ from tools.subagents.progress import (
 from tools.subagents.sidecar import persist_subagent_trace
 from model_router import AliasCircuitOpenError
 from runtime_notices import maybe_push_llm_failure_notice
-from utils.connect_backend import create_call_headers, resolve_network_params
+from utils.connect_backend import (
+    NO_BACKEND_OVERRIDE,
+    backend_override_value,
+    create_call_headers,
+    resolve_network_params,
+)
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.logging_module import human_console_enabled
 from utils.backend_errors import (
@@ -395,9 +400,8 @@ def _request_backend_canonical_once(
     # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
     # из ResolvedModel действует только id модели, сетевые параметры — легаси cfg.
     resolved_for_network = resolved if backend_mode == "chat_completions" else None
-    verify, cert, use_retry, request_timeout_sec, config_proxy = resolve_network_params(
-        cfg, resolved_for_network
-    )
+    (verify, cert, use_retry, request_timeout_sec, config_proxy,
+     retry_embedded_choice_errors) = resolve_network_params(cfg, resolved_for_network)
 
     if backend_mode == "responses":
         # Responses-режим: из ResolvedModel действует только id модели (спека §4) —
@@ -439,11 +443,26 @@ def _request_backend_canonical_once(
         tools=getattr(state, "tools", []),
         default_model=getattr(state, "default_model", None),
     )
+    # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
+    # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
+    # долбил бы её от чужого потолка к чужому полу. Тот же приём, что в служебной
+    # воронке (`utils/llm_chat_client._send_chat_completion_text`).
+    _max_tokens_override = backend_override_value(
+        resolved_for_network, "chat_completions_max_tokens"
+    )
     completions_max_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_max_tokens", 8096), default=8096
+        cfg.get("chat_completions_max_tokens", 8096)
+        if _max_tokens_override is NO_BACKEND_OVERRIDE
+        else _max_tokens_override,
+        default=8096,
+    )
+    _min_tokens_override = backend_override_value(
+        resolved_for_network, "chat_completions_min_response_tokens"
     )
     min_response_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_min_response_tokens", 1024),
+        cfg.get("chat_completions_min_response_tokens", 1024)
+        if _min_tokens_override is NO_BACKEND_OVERRIDE
+        else _min_tokens_override,
         default=1024,
     )
 
@@ -468,7 +487,7 @@ def _request_backend_canonical_once(
             verify=verify,
             cert=cert,
             use_retry=use_retry,
-            retry_embedded_choice_errors=cfg.get("retry_embedded_choice_errors", True),
+            retry_embedded_choice_errors=retry_embedded_choice_errors,
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,
             request_label="main_agent",
