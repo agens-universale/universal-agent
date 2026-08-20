@@ -705,21 +705,36 @@ class TraceScreen(Screen):
         left_badge = format_notices_badge(self._collect_footer_notices())
 
         def build(profile_cols: "int | None", layout_width: int,
-                  *, with_transition: bool = True) -> "Text":
+                  *, with_transition: bool = True,
+                  with_request: bool = True, with_prices: bool = True) -> "Text":
             head = self._footer_head(with_profile=profile_cols is not None,
                                       profile_name_cols=profile_cols or _PROFILE_NAME_MAX_COLS,
                                       snapshot=snapshot, with_transition=with_transition,
                                       meter=meter)
-            if request_seg is None and session_seg is None:
+            request = request_seg if (with_prices and with_request) else None
+            session = session_seg if with_prices else None
+            if request is None and session is None:
                 return head
-            return compose_adaptive_footer_right(head, request_seg, session_seg, layout_width)
+            return compose_adaptive_footer_right(head, request, session, layout_width)
+
+        def width_of(result: "Text") -> int:
+            return max(cell_len(line) for line in result.plain.split("\n"))
+
+        # Пол левой колонки. Обычный `_FOOTER_LEFT` — список F-подсказок: его не жаль
+        # ни перенести, ни укоротить с хвоста. Но когда слева стоят КРИТИЧНЫЕ клавиши
+        # («Ctrl+C/stop» во время хода, ответ на ask_human), урезать их нечем: другого
+        # способа остановить агента или ответить ему нет. Их ширина резервируется, и
+        # жертвует дальше правая колонка, а не левая.
+        left_floor = 0 if left_commands == _FOOTER_LEFT else cell_len(left_commands)
 
         def fits(result: "Text", allowed_left_rows: int) -> bool:
             lines = result.plain.split("\n")
-            need = max(cell_len(line) for line in lines)
+            need = width_of(result)
             if len(lines) > 2 or need > available:
                 return False
             left_width = total - need - _FOOTER_CHROME_COLS
+            if left_width < left_floor:
+                return False
             return left_width > 0 and footer_left_rows(
                 left_commands, left_badge, width=left_width) <= allowed_left_rows
 
@@ -738,14 +753,50 @@ class TraceScreen(Screen):
                 if fits(result, allowed_left_rows):
                     return result
 
-        # Ступень 6: не подошло ничего — снимаем блок за стрелкой; точка
-        # уровня, факт-модель и плашка контекста остаются всегда. Раскладка
-        # самая узкая из возможных (цены внизу), чтобы отобрать у левой
-        # минимум. Возврат БЕЗУСЛОВНЫЙ, без предиката: на этом шаге левой
-        # может достаться меньше, чем ей нужно даже на два ряда — в два ряда
-        # её укладывает собственный сторож (`footer_left_with_badge`), он
-        # самодостаточен и на эту лесенку не полагается.
-        return build(None, _RIGHT_PRICES_DOWN, with_transition=False)
+        # Резерв (ступени 6-8), от богатого к бедному: снимается блок за стрелкой,
+        # затем «запрос» (сессия остаётся), затем цены целиком. Точка уровня,
+        # факт-модель и плашка контекста остаются всегда.
+        #
+        # Почему цены вообще стали жертвой (решение владельца, синк 2026-08-20):
+        # раньше последняя ступень возвращалась БЕЗУСЛОВНО, и на узком окне левой
+        # доставалось меньше нуля колонок — «Ctrl+C/stop» рвался пополам или исчезал
+        # совсем. Цену прогона можно посмотреть и потом, а остановить агента больше
+        # нечем, поэтому обмен идёт в эту сторону.
+        #
+        # И почему берётся не первый попавшийся: когда цены стоят на второй строке,
+        # ширину правой колонки диктуют ОНИ, а не шапка, — тогда снятие имени профиля
+        # и перехода не освобождает ни колонки. Поэтому если место не нашлось ни на
+        # одной ступени, берётся вариант с МИНИМАЛЬНОЙ шириной, а среди равных по
+        # ширине — первый, то есть самый богатый: жертва принимается только когда
+        # она что-то даёт.
+        # Ужатие шапки перебирается ЗАНОВО на каждом уровне цен: снятая строка
+        # «запрос» освобождает больше, чем имя профиля, и после неё имя часто
+        # возвращается на место. Перебирать в другом порядке значило бы отдавать
+        # имя навсегда ради экономии, которой хватило бы и без него.
+        head_ladder = ((_PROFILE_NAME_MAX_COLS, True), (None, True), (None, False))
+        # Ценами жертвуем ТОЛЬКО ради пола левой колонки. Когда слева обычные
+        # F-подсказки, пола нет и терять цены не за что: место всё равно достанется
+        # подсказкам, которые не жалко перенести или укоротить.
+        price_ladder = (({}, {"with_request": False}, {"with_prices": False})
+                        if left_floor else ({},))
+        reserve = [build(cols, _RIGHT_PRICES_DOWN, with_transition=transition, **prices)
+                   for prices in price_ladder
+                   for cols, transition in head_ladder]
+        for candidate in reserve:
+            if fits(candidate, 2):
+                return candidate
+        # Не подошло ничего — и дальше важно, ПОЧЕМУ.
+        affordable = [c for c in reserve if width_of(c) <= available]
+        if affordable:
+            # Правая в свою ширину влезает; не хватило ЛЕВОЙ. Её беда снятием
+            # имени профиля не лечится — ширину правой диктует строка цен, и
+            # шапка на неё не влияет. Отдаём самый узкий из подошедших, а среди
+            # равных по ширине — первый, то есть самый богатый.
+            return min(affordable, key=width_of)
+        # Правая не влезает даже в отведённую ей ширину: её обрежет терминал, и
+        # действует прежний контракт вёрстки — самый бедный вариант, где переход
+        # снят последним (`test_footer_drops_transition_last_...`).
+        return reserve[-1]
 
     def _footer_total_width(self) -> int:
         """Ширина всего футера — её и делят между собой колонки."""
