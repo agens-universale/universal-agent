@@ -16,6 +16,13 @@ from pathlib import Path
 import pytest
 
 
+def _notices(*, warnings=0, infos=0):
+    """Уведомления под бейдж — ровно столько, сколько просят по уровням."""
+    from startup_notices import Notice
+    return ([Notice("warning", f"w{i}", "предупреждение") for i in range(warnings)]
+            + [Notice("info", f"i{i}", "сообщение") for i in range(infos)])
+
+
 def _write_task(tmp_path, tid):
     meta = {"thread_id": tid, "status": "stopped",
             "updated_at": "2026-05-28T12:00:00+00:00", "messages_count": 0}
@@ -293,11 +300,15 @@ def test_footer_left_never_renders_three_rows():
     Порядок жертв: подсказка «F4/notices» уходит раньше счётчиков, счётчики —
     раньше команд."""
     from rich.cells import cell_len
-    from tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH, footer_left_with_badge
+    from tui.services.notices_ui import footer_left_with_badge, format_notices_badge
 
     commands = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
-    counts = f"{WARN_GLYPH}3 {INFO_GLYPH}2"               # 7 колонок
-    badge = f"{counts} · F4/notices"                      # 20 колонок — длинный
+    # Бейдж собирает прод (`format_notices_badge`), а не тест руками: склеенное
+    # «⚠3 ℹ2» разошлось бы с «⚠ 3  ℹ 2» прода молча — сторож ширины остался бы
+    # зелёным на строке, которой в футере не бывает.
+    notices = _notices(warnings=3, infos=2)
+    counts = format_notices_badge(notices, with_hint=False)
+    badge = format_notices_badge(notices)
     for width in range(1, 91):
         text = footer_left_with_badge(commands, badge, width=width)
         rows = _rendered_rows(text, width)
@@ -315,10 +326,10 @@ def test_footer_left_guard_keeps_stop_key_at_any_width():
     терялся хвост бейджа. Ужимается бейдж; команды — последнее, что снимается
     слева."""
     from rich.cells import cell_len
-    from tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH, footer_left_with_badge
+    from tui.services.notices_ui import footer_left_with_badge, format_notices_badge
 
     commands = "Ctrl+C/stop"
-    badge = f"{WARN_GLYPH}4 {INFO_GLYPH}2 · F4/notices"
+    badge = format_notices_badge(_notices(warnings=4, infos=2))
     # Ниже собственной ширины стоп-клавишу не показать целиком ни при какой
     # раскладке — там остаётся только потолок в два ряда (тест выше).
     for width in range(cell_len(commands), 91):
