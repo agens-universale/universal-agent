@@ -1,41 +1,68 @@
+"""HTTP-тулы: fetch_url / simple_fetch_url.
+
+С переезда на httpx (Задача 19) тулы асинхронные, а сеть подменяется
+транспортом httpx, а не заглушкой requests: подмена на уровне транспорта
+проверяет и путь редиректов, который у этих тулов свой.
+"""
+import asyncio
 import json
 from types import SimpleNamespace
 
-import requests
+import httpx
 
 from gc_core.tools.exec import fetch_url as fetch_url_module
 from gc_core.tools.exec.fetch_url import FetchUrl
 from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
+from gc_core.utils import async_http
 
 
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
-class _Resp:
-    def __init__(self, text, content_type="text/html", status_code=200, url="https://x", content=None):
-        self.text = text
-        if content is None:
-            content = text.encode("utf-8")
-        self.content = content
-        self.headers = {"Content-Type": content_type}
-        self.status_code = status_code
-        self.url = url
 
-    def raise_for_status(self):
-        return None
+def _resp(text="", content_type="text/html", status_code=200, content=None):
+    """Ответ сети как его отдаст httpx."""
+    return httpx.Response(
+        status_code,
+        content=content if content is not None else text.encode("utf-8"),
+        headers={"Content-Type": content_type},
+    )
 
 
-class _SessionStub:
-    def __init__(self, response):
-        self._response = response
+def _install(monkeypatch, handler):
+    """Подменить транспорт httpx у HTTP-тулов.
 
-    def __enter__(self):
-        return self
+    ``handler`` — либо ``httpx.Response``, либо функция ``request → Response``,
+    либо исключение, которое надо поднять.
+    """
+    def _dispatch(request: httpx.Request) -> httpx.Response:
+        if isinstance(handler, BaseException):
+            raise handler
+        if callable(handler):
+            return handler(request)
+        return handler
 
-    def __exit__(self, exc_type, exc, tb):
-        return False
+    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
+        transport=httpx.MockTransport(_dispatch)
+    )
 
-    def get(self, *_args, **_kwargs):
-        return self._response
+    # Патчим globals САМОЙ функции тула, а не модуль «по имени»: conftest
+    # каталога tests/tools подменяет gc_core.tools на время импорта, и класс
+    # оказывается замкнут на другой экземпляр модуля. Подмена по sys.modules
+    # промахивалась — тест молча уходил в настоящую сеть и сравнивал ответ
+    # example.com с ожидаемым HTML.
+    import inspect
+
+    monkeypatch.setattr(async_http, "get_async_client", factory)
+    for cls in (FetchUrl, SimpleFetchUrl):
+        target = inspect.unwrap(cls.__call__)
+        globals_dict = getattr(target, "__globals__", None)
+        if globals_dict is not None and "get_async_client" in globals_dict:
+            monkeypatch.setitem(globals_dict, "get_async_client", factory)
+
+
+def _call(tool, **kwargs) -> str:
+    """Позвать асинхронный тул из синхронного теста."""
+    return asyncio.run(tool(**kwargs))
 
 
 def _url_policy_config(allowed_schemes=None, url_blacklist=None):
@@ -50,25 +77,24 @@ def _url_policy_config(allowed_schemes=None, url_blacklist=None):
 
 def test_fetch_url_validation():
     tool = with_local_ctx(FetchUrl)
-    assert json.loads(tool(url=""))["error"]["field"] == "url"
-    assert json.loads(tool(url="ftp://x"))["error"]["field"] == "url"
-    assert json.loads(tool(url="https://x", timeout_seconds=-1))["error"]["field"] == "timeout_seconds"
-    assert json.loads(tool(url="https://x", max_preview_chars=0))["error"]["field"] == "max_preview_chars"
-    assert json.loads(tool(url="https://x", offset=-1))["error"]["field"] == "offset"
-    assert json.loads(tool(url="https://x", limit=0))["error"]["field"] == "limit"
+    assert json.loads(_call(tool, url=""))["error"]["field"] == "url"
+    assert json.loads(_call(tool, url="ftp://x"))["error"]["field"] == "url"
+    assert json.loads(_call(tool, url="https://x", timeout_seconds=-1))["error"]["field"] == "timeout_seconds"
+    assert json.loads(_call(tool, url="https://x", max_preview_chars=0))["error"]["field"] == "max_preview_chars"
+    assert json.loads(_call(tool, url="https://x", offset=-1))["error"]["field"] == "offset"
+    assert json.loads(_call(tool, url="https://x", limit=0))["error"]["field"] == "limit"
 
 
 def test_fetch_url_policy_blocks_before_request(monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("request should not be executed for blocked URL")
 
-    monkeypatch.setattr(requests, "get", fail_if_called)
+    _install(monkeypatch, fail_if_called)
 
-    data = json.loads(
-        with_local_ctx(FetchUrl, config_dict=_url_policy_config(url_blacklist=["blocked.example"]))(
-            url="https://blocked.example/page"
-        )
-    )
+    data = json.loads(_call(
+        with_local_ctx(FetchUrl, config_dict=_url_policy_config(url_blacklist=["blocked.example"])),
+            url="https://blocked.example/page",
+        ))
 
     assert data["ok"] is False
     assert data["result_type"] == "error"
@@ -80,29 +106,28 @@ def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(monk
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("request should not be executed for blocked URL")
 
-    monkeypatch.setattr(requests, "get", fail_if_called)
+    _install(monkeypatch, fail_if_called)
 
-    data = json.loads(
-        with_local_ctx(FetchUrl, config_dict=_url_policy_config(allowed_schemes=["https"]))(
-            url="http://example.com"
-        )
-    )
+    data = json.loads(_call(
+        with_local_ctx(FetchUrl, config_dict=_url_policy_config(allowed_schemes=["https"])),
+            url="http://example.com",
+        ))
 
     assert data["ok"] is False
     assert data["error"]["type"] == "url_validation_failed"
 
 
 def test_fetch_url_binary(monkeypatch):
-    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp("", content_type="application/pdf"))
-    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com/a.pdf"))
+    _install(monkeypatch, _resp("", content_type="application/pdf"))
+    data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com/a.pdf"))
     assert data["ok"] is True and data["is_binary"] is True and data["content"] == "binary data"
 
 
 def test_fetch_url_extraction_fallback(monkeypatch):
-    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp("<html><body><p>hello world</p></body></html>"))
+    _install(monkeypatch, _resp("<html><body><p>hello world</p></body></html>"))
     monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: None)
     monkeypatch.setattr(fetch_url_module, "Document", lambda *a, **k: SimpleNamespace(summary=lambda html_partial=True: "<p>fallback</p>"))
-    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com"))
+    data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com"))
     assert data["ok"] is True
     assert data["is_binary"] is False
     assert data["content"]
@@ -110,10 +135,10 @@ def test_fetch_url_extraction_fallback(monkeypatch):
 
 def test_fetch_url_request_failure(monkeypatch):
     def _raise(*_a, **_k):
-        raise requests.RequestException("boom")
+        raise httpx.ConnectError("boom")
 
-    monkeypatch.setattr(requests, "get", _raise)
-    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com"))
+    _install(monkeypatch, _raise)
+    data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com"))
     assert data["ok"] is False
     assert data["error"]["type"] == "request_failed"
 
@@ -123,15 +148,15 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
 
     def _get(*_a, **_k):
         calls["n"] += 1
-        return _Resp("<html></html>", url="https://example.com")
+        return _resp("<html></html>")
 
-    monkeypatch.setattr(requests, "get", _get)
+    _install(monkeypatch, _get)
     monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = FetchUrl(state=state)
 
-    first = json.loads(tool(url="https://example.com", offset=5, limit=10))
+    first = json.loads(_call(tool, url="https://example.com", offset=5, limit=10))
     assert first["ok"] is True
     assert first["content"] == "FGHIJKLMNO"
     assert first["total_chars"] == 26
@@ -141,7 +166,7 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
     assert first["cache_hit"] is False
     assert state.shared.fetch_url_cache["https://example.com"]["content"] == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    second = json.loads(tool(url="https://example.com", offset=20, limit=10))
+    second = json.loads(_call(tool, url="https://example.com", offset=20, limit=10))
     assert second["ok"] is True
     assert second["content"] == "UVWXYZ"
     assert second["returned_chars"] == 6
@@ -153,13 +178,13 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
 
 def test_fetch_url_offset_beyond_end_returns_empty_from_cache(monkeypatch):
     monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "short")
-    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp("<html></html>", url="https://example.com"))
+    _install(monkeypatch, _resp("<html></html>"))
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = FetchUrl(state=state)
-    _ = json.loads(tool(url="https://example.com", offset=0, limit=5))
+    _ = json.loads(_call(tool, url="https://example.com", offset=0, limit=5))
 
-    data = json.loads(tool(url="https://example.com", offset=99, limit=5))
+    data = json.loads(_call(tool, url="https://example.com", offset=99, limit=5))
     assert data["ok"] is True
     assert data["content"] == ""
     assert data["returned_chars"] == 0
@@ -169,10 +194,10 @@ def test_fetch_url_offset_beyond_end_returns_empty_from_cache(monkeypatch):
 
 
 def test_fetch_url_does_not_cache_binary(monkeypatch):
-    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp("", content_type="application/pdf"))
+    _install(monkeypatch, _resp("", content_type="application/pdf"))
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
-    data = json.loads(FetchUrl(state=state)(url="https://example.com/a.pdf"))
+    data = json.loads(_call(FetchUrl(state=state), url="https://example.com/a.pdf"))
     assert data["ok"] is True
     assert data["is_binary"] is True
     assert state.shared.fetch_url_cache == {}
@@ -180,38 +205,27 @@ def test_fetch_url_does_not_cache_binary(monkeypatch):
 
 def test_fetch_url_marks_unknown_binary_bytes_as_binary(monkeypatch):
     binary_payload = b"\x00\x89\x10\x02\x00"
-    monkeypatch.setattr(
-        requests,
-        "get",
-        lambda *a, **k: _Resp(
+    _install(monkeypatch, _resp(
             "",
             content_type="",
-            url="https://example.com/blob",
             content=binary_payload,
         ),
     )
-    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com/blob"))
+    data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com/blob"))
     assert data["ok"] is True
     assert data["is_binary"] is True
     assert data["result_type"] == "binary"
 
 
 def test_simple_fetch_url_extracts_html_and_supports_pagination(monkeypatch):
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(
-            _Resp(
+    _install(monkeypatch, _resp(
                 "<html><body><div>One <b>Two</b></div><p>Three</p></body></html>",
                 content_type="text/html",
-                url="https://example.com",
-            )
-        ),
-    )
+            ))
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = SimpleFetchUrl(state=state)
-    first = json.loads(tool(url="https://example.com", offset=0, limit=7))
-    second = json.loads(tool(url="https://example.com", offset=7, limit=50))
+    first = json.loads(_call(tool, url="https://example.com", offset=0, limit=7))
+    second = json.loads(_call(tool, url="https://example.com", offset=7, limit=50))
 
     assert first["ok"] is True
     assert first["result_type"] == "content"
@@ -227,13 +241,15 @@ def test_simple_fetch_url_policy_blocks_before_request(monkeypatch):
     def fail_session_if_called():
         raise AssertionError("session should not be created for blocked URL")
 
-    monkeypatch.setattr(requests, "Session", fail_session_if_called)
+    def _fail_if_called(request):
+        raise AssertionError("политика обязана заблокировать ДО запроса")
 
-    data = json.loads(
-        with_local_ctx(SimpleFetchUrl, config_dict=_url_policy_config(url_blacklist=["*.internal"]))(
-            url="https://api.internal/path"
-        )
-    )
+    _install(monkeypatch, _fail_if_called)
+
+    data = json.loads(_call(
+        with_local_ctx(SimpleFetchUrl, config_dict=_url_policy_config(url_blacklist=["*.internal"])),
+            url="https://api.internal/path",
+        ))
 
     assert data["ok"] is False
     assert data["result_type"] == "error"
@@ -250,12 +266,9 @@ def test_simple_fetch_url_handles_lists_headings_pre_and_tables(monkeypatch):
         "<table><tr><td>a</td><td>b</td></tr></table>"
         "</body></html>"
     )
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(html, content_type="text/html", url="https://example.com")),
+    _install(monkeypatch, _resp(html, content_type="text/html"),
     )
-    data = json.loads(with_local_ctx(SimpleFetchUrl)(url="https://example.com"))
+    data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com"))
     text = data["content"]
     assert data["ok"] is True
     assert "## Title" in text
@@ -266,19 +279,12 @@ def test_simple_fetch_url_handles_lists_headings_pre_and_tables(monkeypatch):
 
 def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
     html = "<html><body><p>Привет, мир!</p></body></html>"
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(
-            _Resp(
+    _install(monkeypatch, _resp(
                 html,
                 content_type="text/html; charset=utf-8",
-                url="https://example.com",
                 content=html.encode("utf-8"),
-            )
-        ),
-    )
-    data = json.loads(with_local_ctx(SimpleFetchUrl)(url="https://example.com"))
+            ))
+    data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com"))
     assert data["ok"] is True
     assert data["is_binary"] is False
     assert data["result_type"] == "content"

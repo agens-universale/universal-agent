@@ -1,3 +1,6 @@
+import asyncio
+
+import httpx
 import json
 import os
 
@@ -72,21 +75,70 @@ def _config(launch_root, *, download_dir="downloads", max_bytes=52_428_800, writ
     return cfg
 
 
+
+def _resp(content=b"", content_type="application/octet-stream", status_code=200, headers=None):
+    """Ответ сети как его отдаст httpx."""
+    hdrs = {"Content-Type": content_type}
+    if headers:
+        hdrs.update(headers)
+    return httpx.Response(status_code, content=content, headers=hdrs)
+
+
+def _redirect_chain(responses):
+    """Отдавать заготовленные ответы по порядку — для проверки редиректов."""
+    queue = list(responses)
+
+    def _handler(request):
+        return queue.pop(0) if queue else httpx.Response(200, content=b"")
+
+    return _handler
+
+
+def _install(monkeypatch, handler):
+    """Подменить транспорт httpx у DownloadFile.
+
+    Патчим globals самой функции тула, а не модуль «по имени»: conftest
+    каталога tests/tools подменяет gc_core.tools на время импорта, и класс
+    оказывается замкнут на другой экземпляр модуля — подмена по sys.modules
+    промахнулась бы, и тест ушёл бы в настоящую сеть.
+    """
+    import inspect
+
+    from gc_core.utils import async_http
+
+    def _dispatch(request):
+        if isinstance(handler, BaseException):
+            raise handler
+        if callable(handler):
+            return handler(request)
+        return handler
+
+    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
+        transport=httpx.MockTransport(_dispatch)
+    )
+    monkeypatch.setattr(async_http, "get_async_client", factory)
+    for target in (DownloadFile.__call__, DownloadFile._http_get_bytes,
+                   DownloadFile._fetch_with_redirect_validation):
+        globals_dict = getattr(inspect.unwrap(target), "__globals__", None)
+        if globals_dict is not None and "get_async_client" in globals_dict:
+            monkeypatch.setitem(globals_dict, "get_async_client", factory)
+
+
+def _call(tool, **kwargs) -> str:
+    """Позвать асинхронный тул из синхронного теста."""
+    return asyncio.run(tool(**kwargs))
+
+
 def test_download_file_pdf_happy_path(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=PDF_BYTES, url="https://example.com/report.pdf")),
-    )
+    _install(monkeypatch, _resp(content=PDF_BYTES))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/report.pdf",
             filename="report.pdf",
-        )
-    )
+        ))
 
     dest = launch_root / "downloads" / "report.pdf"
     assert result["ok"] is True
@@ -100,18 +152,13 @@ def test_download_file_pdf_happy_path(tmp_path, monkeypatch):
 def test_download_file_docx_zip_header(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=DOCX_BYTES, url="https://example.com/doc.docx")),
-    )
+    _install(monkeypatch, _resp(content=DOCX_BYTES))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/doc.docx",
             filename="doc.docx",
-        )
-    )
+        ))
 
     assert result["ok"] is True
     assert (launch_root / "downloads" / "doc.docx").read_bytes() == DOCX_BYTES
@@ -128,18 +175,13 @@ def test_download_file_docx_zip_header(tmp_path, monkeypatch):
 def test_download_file_plain_text_extensions(tmp_path, monkeypatch, filename, body):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=body, url=f"https://example.com/{filename}")),
-    )
+    _install(monkeypatch, _resp(content=body))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url=f"https://example.com/{filename}",
             filename=filename,
-        )
-    )
+        ))
 
     dest = launch_root / "downloads" / filename
     assert result["ok"] is True
@@ -150,18 +192,13 @@ def test_download_file_plain_text_extensions(tmp_path, monkeypatch, filename, bo
 def test_download_file_plain_text_rejects_null_bytes(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=b"text\x00binary", url="https://example.com/notes.txt")),
-    )
+    _install(monkeypatch, _resp(content=b"text\x00binary"))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/notes.txt",
             filename="notes.txt",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "format_blocked"
@@ -172,12 +209,11 @@ def test_download_file_invalid_filename_path_traversal(tmp_path):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/x.pdf",
             filename="../../x.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "invalid_filename"
@@ -195,18 +231,13 @@ def test_download_file_invalid_filename_path_traversal(tmp_path):
 def test_download_file_accepts_spaces_parens_unicode(tmp_path, monkeypatch, filename, body):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=body, url=f"https://example.com/{filename}")),
-    )
+    _install(monkeypatch, _resp(content=body))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/x.pdf",
             filename=filename,
-        )
-    )
+        ))
 
     assert result["ok"] is True
     assert result["filename"] == filename
@@ -218,12 +249,11 @@ def test_download_file_rejects_null_and_newlines(tmp_path, bad_char):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/x.pdf",
             filename=f"bad{bad_char}name.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "invalid_filename"
@@ -233,12 +263,11 @@ def test_download_file_format_blocked_extension(tmp_path):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/malware.exe",
             filename="malware.exe",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "format_blocked"
@@ -247,18 +276,13 @@ def test_download_file_format_blocked_extension(tmp_path):
 def test_download_file_format_blocked_magic_mismatch(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=EXE_BYTES, url="https://example.com/fake.pdf")),
-    )
+    _install(monkeypatch, _resp(content=EXE_BYTES))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/fake.pdf",
             filename="fake.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "format_blocked"
@@ -273,18 +297,13 @@ def test_download_file_exists(tmp_path, monkeypatch):
     target = existing / "report.pdf"
     target.write_bytes(b"existing")
 
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=PDF_BYTES)),
-    )
+    _install(monkeypatch, _resp(content=PDF_BYTES))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/report.pdf",
             filename="report.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "file_exists"
@@ -294,18 +313,13 @@ def test_download_file_exists(tmp_path, monkeypatch):
 def test_download_file_too_large(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=PDF_BYTES, url="https://example.com/big.pdf")),
-    )
+    _install(monkeypatch, _resp(content=PDF_BYTES))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=10))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=10)),
             url="https://example.com/big.pdf",
             filename="big.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "file_too_large"
@@ -315,15 +329,14 @@ def test_download_file_too_large(tmp_path, monkeypatch):
 def test_download_file_redirect_blocked_by_policy(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    redirect = _Resp(
+    redirect = _resp(
         content=b"",
         status_code=302,
-        url="https://example.com/start",
         headers={"Location": "http://169.254.169.254/latest/meta-data"},
     )
-    monkeypatch.setattr(requests, "Session", lambda: _RedirectSessionStub([redirect]))
+    _install(monkeypatch, _redirect_chain([redirect]))
 
-    result = json.loads(
+    result = json.loads(_call(
         with_local_ctx(DownloadFile, config_dict=_config(
                 launch_root,
                 url_policy={
@@ -332,11 +345,10 @@ def test_download_file_redirect_blocked_by_policy(tmp_path, monkeypatch):
                     "url_blacklist": ["169.254.*"],
                 },
             )
-        )(
+        ),
             url="https://example.com/start",
             filename="meta.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "url_blocked_by_policy"
@@ -346,18 +358,13 @@ def test_download_file_redirect_blocked_by_policy(tmp_path, monkeypatch):
 def test_download_file_relative_download_dir(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=PDF_BYTES)),
-    )
+    _install(monkeypatch, _resp(content=PDF_BYTES))
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root, download_dir="incoming"))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root, download_dir="incoming")),
             url="https://example.com/report.pdf",
             filename="report.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is True
     assert (launch_root / "incoming" / "report.pdf").exists()
@@ -367,23 +374,18 @@ def test_download_file_absolute_download_dir_in_extra_paths(tmp_path, monkeypatc
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     scratch = tmp_path / "agent-scratch" / "downloads"
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=PDF_BYTES)),
-    )
+    _install(monkeypatch, _resp(content=PDF_BYTES))
 
-    result = json.loads(
+    result = json.loads(_call(
         with_local_ctx(DownloadFile, config_dict=_config(
                 launch_root,
                 download_dir=str(scratch),
                 write_guard={"enabled": True, "mode": "deny", "extra_paths": [str(scratch.parent)]},
             )
-        )(
+        ),
             url="https://example.com/report.pdf",
             filename="report.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is True
     assert (scratch / "report.pdf").exists()
@@ -393,23 +395,18 @@ def test_download_file_absolute_download_dir_outside_perimeter(tmp_path, monkeyp
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     outside = tmp_path / "outside-downloads"
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=PDF_BYTES)),
-    )
+    _install(monkeypatch, _resp(content=PDF_BYTES))
 
-    result = json.loads(
+    result = json.loads(_call(
         with_local_ctx(DownloadFile, config_dict=_config(
                 launch_root,
                 download_dir=str(outside),
                 write_guard={"enabled": True, "mode": "deny", "extra_paths": []},
             )
-        )(
+        ),
             url="https://example.com/report.pdf",
             filename="report.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "write_guard_violation"
@@ -435,23 +432,18 @@ def test_download_file_descriptions_are_tool_agnostic():
 def test_download_file_atomic_write_replace_failure(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    monkeypatch.setattr(
-        requests,
-        "Session",
-        lambda: _SessionStub(_Resp(content=PDF_BYTES)),
-    )
+    _install(monkeypatch, _resp(content=PDF_BYTES))
 
     def fail_replace(src, dst):
         raise OSError("replace failed")
 
     monkeypatch.setattr(os, "replace", fail_replace)
 
-    result = json.loads(
-        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+    result = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
             url="https://example.com/report.pdf",
             filename="report.pdf",
-        )
-    )
+        ))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "write_failed"

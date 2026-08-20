@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import html as html_lib
 import json
@@ -7,10 +8,18 @@ from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urljoin
 
-import requests
+import httpx
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
+from gc_core.utils.async_http import get_async_client
+
+
+def _response_url(exc: Exception) -> "str | None":
+    """URL из ответа-ошибки строкой: httpx.URL в JSON не сериализуется."""
+    response = getattr(exc, "response", None)
+    url = getattr(response, "url", None)
+    return str(url) if url is not None else None
 
 
 class _RedirectBlocked(Exception):
@@ -375,7 +384,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         )
 
     @enforce_url_policy(url_arg="url")
-    def __call__(
+    async def __call__(
         self,
         url: str,
         timeout_seconds: Optional[int] = None,
@@ -470,11 +479,13 @@ class SimpleFetchUrl(AbstractSimpleTool):
         _url_blacklist = list(_up.get("url_blacklist") or [])
         _max_redirects = 10
 
-        def _fetch_with_redirect_validation(session, start_url, headers, timeout):
+        async def _fetch_with_redirect_validation(session, start_url, headers, timeout):
             """Manual redirect loop с per-hop validate_url_policy."""
             current = start_url
             for _ in range(_max_redirects + 1):
-                resp = session.get(current, headers=headers, timeout=timeout, allow_redirects=False)
+                resp = await session.get(
+                    current, headers=headers, timeout=timeout, follow_redirects=False
+                )
                 status = getattr(resp, "status_code", 0) or 0
                 # 3xx redirect codes. Используем status_code чтобы не зависеть
                 # от Response.is_redirect (отсутствует в тест-stubах).
@@ -499,10 +510,15 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 )
             )
 
-        with requests.Session() as session:
+        # Клиент общий и переиспользуемый (пул соединений), закрывать его здесь
+        # нельзя — он принадлежит loop, а не одному вызову.
+        session = get_async_client()
+        if True:
             for attempt in range(1, attempts + 1):
                 try:
-                    response = _fetch_with_redirect_validation(session, normalized_url, headers, effective_timeout)
+                    response = await _fetch_with_redirect_validation(
+                        session, normalized_url, headers, effective_timeout
+                    )
                     response.raise_for_status()
                     break
                 except _RedirectBlocked as redirect_exc:
@@ -520,13 +536,13 @@ class SimpleFetchUrl(AbstractSimpleTool):
                             "blocked_on_redirect": True,
                         },
                     )
-                except requests.RequestException as exc:
+                except httpx.HTTPError as exc:
                     status = getattr(getattr(exc, "response", None), "status_code", None)
                     retryable = status is None or status in (429,) or status >= 500
                     if (not retryable) or attempt == attempts:
                         return _result(
                             ok=False,
-                            final_url=getattr(getattr(exc, "response", None), "url", None),
+                            final_url=_response_url(exc),
                             status_code=status,
                             content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
                             if getattr(exc, "response", None) is not None
@@ -540,13 +556,13 @@ class SimpleFetchUrl(AbstractSimpleTool):
                                 "retryable": retryable,
                             },
                         )
-                    time.sleep(self.retry_backoff_seconds * attempt)
+                    await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
         if response is None:
             return _result(ok=False, result_type="error", error={"type": "request_failed", "message": "Unknown request failure."})
 
         content_type = response.headers.get("Content-Type", "")
-        final_url = response.url
+        final_url = str(response.url)
         status_code = response.status_code
         raw_content = getattr(response, "content", b"")
         content_type_binary = self._is_binary_content_type(content_type)

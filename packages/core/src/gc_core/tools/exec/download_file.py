@@ -1,10 +1,11 @@
+import asyncio
 import json
 import os
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-import requests
+import httpx
 
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
 from gc_core.security.path_policy import WriteGuardViolation, audit_policy_decision, check_write_path_allowed, normalize_path_for_policy, resolve_tool_context
@@ -12,6 +13,7 @@ from gc_core.security.url_policy import UrlPolicyDecision, enforce_url_policy, v
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.async_http import get_async_client
 
 
 class _RedirectBlocked(Exception):
@@ -243,19 +245,21 @@ class DownloadFile(AbstractSimpleTool):
         )
         return None
 
-    def _fetch_with_redirect_validation(
+    async def _fetch_with_redirect_validation(
         self,
-        session: requests.Session,
+        session: "httpx.AsyncClient",
         start_url: str,
         headers: Dict[str, str],
         timeout: int,
         *,
         allowed_schemes: list[str],
         url_blacklist: list[str],
-    ) -> requests.Response:
+    ) -> "httpx.Response":
         current = start_url
         for _ in range(self._MAX_REDIRECTS + 1):
-            response = session.get(current, headers=headers, timeout=timeout, allow_redirects=False)
+            response = await session.get(
+                current, headers=headers, timeout=timeout, follow_redirects=False
+            )
             status = getattr(response, "status_code", 0) or 0
             if not (300 <= status < 400):
                 return response
@@ -276,7 +280,7 @@ class DownloadFile(AbstractSimpleTool):
             )
         )
 
-    def _http_get_bytes(self, url: str, max_bytes: int) -> tuple[bytes, Optional[Dict[str, Any]]]:
+    async def _http_get_bytes(self, url: str, max_bytes: int) -> tuple[bytes, Optional[Dict[str, Any]]]:
         context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
         headers = {
             "User-Agent": self.default_user_agent,
@@ -289,10 +293,12 @@ class DownloadFile(AbstractSimpleTool):
         }
         response = None
         attempts = 1 + self.max_retries
-        with requests.Session() as session:
+        # Клиент общий и переиспользуемый — закрывать его здесь нельзя.
+        session = get_async_client()
+        if True:
             for attempt in range(1, attempts + 1):
                 try:
-                    response = self._fetch_with_redirect_validation(
+                    response = await self._fetch_with_redirect_validation(
                         session,
                         url,
                         headers,
@@ -310,7 +316,7 @@ class DownloadFile(AbstractSimpleTool):
                         "matched_rule": decision.matched_rule,
                         "blocked_on_redirect": True,
                     }
-                except requests.RequestException as exc:
+                except httpx.HTTPError as exc:
                     status = getattr(getattr(exc, "response", None), "status_code", None)
                     retryable = status is None or status in (429,) or status >= 500
                     if (not retryable) or attempt == attempts:
@@ -321,7 +327,7 @@ class DownloadFile(AbstractSimpleTool):
                             "attempts_total": attempts,
                             "retryable": retryable,
                         }
-                    time.sleep(self.retry_backoff_seconds * attempt)
+                    await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
         if response is None:
             return b"", {"type": "request_failed", "message": "Unknown request failure."}
@@ -352,7 +358,7 @@ class DownloadFile(AbstractSimpleTool):
         return None
 
     @enforce_url_policy(url_arg="url")
-    def __call__(self, url: str, filename: str, **kwargs: Any) -> str:
+    async def __call__(self, url: str, filename: str, **kwargs: Any) -> str:
         if not isinstance(url, str):
             return self._result(error={"type": "invalid_argument", "field": "url"})
         normalized_url = url.strip()
@@ -387,7 +393,7 @@ class DownloadFile(AbstractSimpleTool):
                 error={"type": "file_exists", "message": "Destination file already exists."},
             )
 
-        body, request_error = self._http_get_bytes(normalized_url, max_bytes)
+        body, request_error = await self._http_get_bytes(normalized_url, max_bytes)
         if request_error is not None:
             return self._result(path=dest, filename=validated_filename, error=request_error)
 

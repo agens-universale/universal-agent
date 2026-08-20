@@ -1,4 +1,5 @@
 import html as html_lib
+import asyncio
 import functools
 import json
 import re
@@ -6,12 +7,20 @@ import time
 from collections import OrderedDict
 from typing import Optional, Dict, Any, Tuple
 
-import requests
+import httpx
 import trafilatura
 from readability import Document
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.security.url_policy import enforce_url_policy
+from gc_core.utils.async_http import get_async_client
+
+
+def _response_url(exc: Exception) -> "str | None":
+    """URL из ответа-ошибки строкой: httpx.URL в JSON не сериализуется."""
+    response = getattr(exc, "response", None)
+    url = getattr(response, "url", None)
+    return str(url) if url is not None else None
 
 
 class FetchUrl(AbstractSimpleTool):
@@ -380,7 +389,7 @@ Usage:
         )
 
     @enforce_url_policy(url_arg="url")
-    def __call__(
+    async def __call__(
         self,
         url: str,
         timeout_seconds: Optional[int] = None,
@@ -495,22 +504,24 @@ Usage:
         attempts = 1 + self.max_retries
         for attempt in range(1, attempts + 1):
             try:
-                response = requests.get(
+                # Таймаут — на запрос: клиент общий и переиспользуется.
+                client = get_async_client()
+                response = await client.get(
                     normalized_url,
                     headers=headers,
                     timeout=effective_timeout,
-                    allow_redirects=True,
+                    follow_redirects=True,
                 )
                 response.raise_for_status()
                 break
-            except requests.RequestException as exc:
+            except httpx.HTTPError as exc:
                 last_exc = exc
                 status = getattr(getattr(exc, "response", None), "status_code", None)
                 retryable = status is None or status in (429,) or status >= 500
                 if (not retryable) or attempt == attempts:
                     return _result(
                         ok=False,
-                        final_url=getattr(getattr(exc, "response", None), "url", None),
+                        final_url=_response_url(exc),
                         status_code=status,
                         content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
                         if getattr(exc, "response", None) is not None
@@ -524,7 +535,7 @@ Usage:
                             "retryable": retryable,
                         },
                     )
-                time.sleep(self.retry_backoff_seconds * attempt)
+                await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
         if response is None:
             return _result(
@@ -538,7 +549,7 @@ Usage:
             )
 
         content_type = response.headers.get("Content-Type", "")
-        final_url = response.url
+        final_url = str(response.url)
         status_code = response.status_code
         raw_content = getattr(response, "content", b"")
         content_type_binary = self._is_binary_content_type(content_type)
@@ -587,7 +598,7 @@ Usage:
 
         extracted_text = trafilatura.extract(
             text,
-            url=response.url,
+            url=str(response.url),
             include_links=True,
             include_images=False,
             favor_recall=True,
@@ -621,11 +632,11 @@ Usage:
 
         try:
             sanitized_text = self._sanitize_for_xml(text)
-            readable_doc = Document(sanitized_text, url=response.url)
+            readable_doc = Document(sanitized_text, url=str(response.url))
             summary_html = readable_doc.summary(html_partial=True) or ""
             fallback_text = trafilatura.extract(
                 summary_html,
-                url=response.url,
+                url=str(response.url),
                 include_links=False,
                 include_images=False,
                 favor_recall=True,
