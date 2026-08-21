@@ -7,6 +7,8 @@
 собирает сам. Сбой судьи → bounce (строгий fallback)."""
 from __future__ import annotations
 
+import functools
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -78,6 +80,7 @@ async def ashould_return_text_answer(ctx: Any, state: Any, assistant_text: str) 
     return TextAnswerDecision(False)
 
 
+@functools.wraps(ashould_return_text_answer)
 def should_return_text_answer(*args: Any, **kwargs: Any):
     """Синхронный двойник — для вызывающих вне цикла агента и тестов."""
     from gc_core.utils.portal import get_portal
@@ -85,6 +88,7 @@ def should_return_text_answer(*args: Any, **kwargs: Any):
     return get_portal().run(ashould_return_text_answer(*args, **kwargs))
 
 
+@functools.wraps(ajudge_text_answer)
 def judge_text_answer(*args: Any, **kwargs: Any):
     """Синхронный двойник — для вызывающих вне цикла агента и тестов."""
     from gc_core.utils.portal import get_portal

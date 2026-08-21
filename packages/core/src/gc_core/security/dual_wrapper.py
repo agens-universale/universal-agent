@@ -30,6 +30,7 @@ sync- и async-копией, — это дыра, которую никто не
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
 from typing import Any, Callable, Generator
@@ -75,7 +76,12 @@ def dual_wrap(
         @functools.wraps(func)
         async def awrapper(*args: Any, **kwargs: Any) -> Any:
             gen = flow(*args, **kwargs)
-            needs_call, early = _start(gen)
+            # Тело гварда синхронное, и в режиме `ask` внутри него живёт
+            # ожидание человека (request_confirm → input()). Прямой прогон
+            # заморозил бы event loop вызывающего до ответа — то есть,
+            # возможно, навсегда. В поток: политика над строками — чистый CPU,
+            # ждать человека там безопасно.
+            needs_call, early = await asyncio.to_thread(_start, gen)
             if not needs_call:
                 return early
             try:
@@ -86,7 +92,8 @@ def dual_wrap(
                 # интерпретатора уже в чужом месте.
                 gen.close()
                 raise
-            return _finish(gen, result)
+            # _finish тоже может ждать человека (постобработка в режиме ask).
+            return await asyncio.to_thread(_finish, gen, result)
 
         return awrapper
 

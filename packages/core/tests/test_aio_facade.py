@@ -89,19 +89,38 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
     assert threading.active_count() <= before + 2
 
 
+def _finish_with_prose(prose: str, report: str = "готово") -> dict:
+    """Ход модели: текст ответа И финализатор в одном сообщении.
+
+    Голый ``_finish`` несёт ``content: None``, поэтому content-дельт у него нет
+    вовсе — на нём стриминг проверить нельзя. Провайдеры такую форму отдают
+    штатно: проза плюс вызов тула.
+    """
+    turn = _finish(report)
+    turn["choices"][0]["message"]["content"] = prose
+    return turn
+
+
 async def test_facade_streams_deltas(tmp_path, monkeypatch):
-    """stream() отдаёт дельты и доигрывает ход до конца."""
+    """stream() отдаёт дельты ответа и доигрывает ход до конца."""
     cfg = parity_config(tmp_path, monkeypatch)
-    install(monkeypatch, ScriptedBackend(_scenario("поток")))
+    install(monkeypatch, ScriptedBackend(
+        [_finish_with_prose("считаю ответ"), judge_accept()]
+    ))
 
     seen = []
     async with await AsyncAgent.create(cfg) as agent:
         async for kind, text in agent.stream("привет", thread_id="t1"):
             seen.append((kind, text))
 
-    # Скриптованный бэкенд не стримит, поэтому дельт может не быть вовсе —
-    # проверяем, что итератор корректно завершился, а не завис.
-    assert isinstance(seen, list)
+    # Утверждаем СОСТАВ, а не тип. Прежнее `assert isinstance(seen, list)`
+    # оставалось зелёным, даже когда доставка дельт вырезана целиком: мутация
+    # строки `loop.call_soon_threadsafe(...)` в AsyncAgent.create не роняла ни
+    # одного теста — у стримингового API SDK не было гейта вовсе.
+    assert seen, "stream() не отдал ни одной дельты"
+    assert "answer" in [kind for kind, _ in seen], seen
+    answer = "".join(text for kind, text in seen if kind == "answer")
+    assert answer == "считаю ответ", answer
 
 
 async def test_stream_propagates_run_error(tmp_path, monkeypatch):

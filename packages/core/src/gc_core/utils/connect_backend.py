@@ -1,3 +1,4 @@
+import functools
 import logging
 import os
 import httpx
@@ -178,6 +179,29 @@ def _report_chat_http_error(*, status, err_text, url, data, logger) -> None:
         print(f"request messages summary={messages_summary}")
 
 
+async def _aiter_utf8_lines(response: "httpx.Response"):
+    """Строки SSE, декодированные строго как UTF-8.
+
+    ``httpx.aiter_lines()`` декодирует по charset из заголовка ответа, а
+    синхронный путь до переезда делал ``line.decode("utf-8", errors="replace")``
+    независимо от того, что объявил провайдер. Разница не теоретическая:
+    провайдер, объявивший ISO-8859-1 или windows-1251, портил ответ там, где
+    старый путь давал верный текст. Тело SSE у OpenAI-совместимых API — всегда
+    UTF-8, что бы ни стояло в заголовке.
+    """
+    buf = b""
+    async for chunk in response.aiter_bytes():
+        buf += chunk
+        while True:
+            idx = buf.find(b"\n")
+            if idx == -1:
+                break
+            line, buf = buf[:idx], buf[idx + 1:]
+            yield line.decode("utf-8", errors="replace")
+    if buf:
+        yield buf.decode("utf-8", errors="replace")
+
+
 async def _aread_error_text(response: "httpx.Response") -> Optional[str]:
     """Тело ответа-ошибки. У стримового ответа оно недоступно до aread()."""
     try:
@@ -227,7 +251,7 @@ async def arequest_backend_responses(
     ) as r:
         r.raise_for_status()
         r_headers = r.headers
-        async for line in r.aiter_lines():
+        async for line in _aiter_utf8_lines(r):
             # Пустые строки — разделители событий SSE. requests.iter_lines их
             # проглатывал, httpx.aiter_lines отдаёт: без фильтра «последним
             # чанком» оказался бы пустой разделитель, и режим responses падал
@@ -257,6 +281,7 @@ async def arequest_backend_responses(
     return response_obj, r_headers
 
 
+@functools.wraps(arequest_backend_responses)
 def request_backend_responses(*args: Any, **kwargs: Any) -> Tuple[Dict, Dict]:
     """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
     return get_portal().run(arequest_backend_responses(*args, **kwargs))
@@ -320,7 +345,7 @@ async def arequest_backend_chat_completions(
             on_delta("reset", "")
 
             assembler = StreamAssembler(on_delta=on_delta)
-            async for line in r.aiter_lines():
+            async for line in _aiter_utf8_lines(r):
                 assembler.feed_line(line)
             assembler.flush()
             assembled = assembler.result()
@@ -359,6 +384,7 @@ async def arequest_backend_chat_completions(
     return payload
 
 
+@functools.wraps(arequest_backend_chat_completions)
 def request_backend_chat_completions(*args: Any, **kwargs: Any):
     """Синхронный двойник. Реализация одна — асинхронная; здесь только портал.
 

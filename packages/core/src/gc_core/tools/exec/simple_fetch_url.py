@@ -2,6 +2,7 @@ import asyncio
 import functools
 import html as html_lib
 import json
+import os
 import re
 import time
 from collections import OrderedDict
@@ -11,8 +12,10 @@ from urllib.parse import urljoin
 import httpx
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
 from gc_core.utils.async_http import get_async_client
+from gc_core.utils.http_proxy import resolve_proxies
 
 
 def _response_url(exc: Exception) -> "str | None":
@@ -383,8 +386,18 @@ class SimpleFetchUrl(AbstractSimpleTool):
             error=error,
         )
 
+    def __call__(self, *args: Any, **kwargs: Any) -> str:
+        """Синхронный вход: прямые вызовы ``apply_tool`` и тесты.
+
+        Форма из docs/async.md: реализация одна — ``acall``; здесь только
+        способ её дождаться. Без этого ``apply_tool`` возвращал бы строку
+        «tool is async», то есть три встроенных тула молча переставали
+        работать через публичную синхронную точку SDK.
+        """
+        return run_coro_blocking(self.acall(*args, **kwargs))
+
     @enforce_url_policy(url_arg="url")
-    async def __call__(
+    async def acall(
         self,
         url: str,
         timeout_seconds: Optional[int] = None,
@@ -512,7 +525,9 @@ class SimpleFetchUrl(AbstractSimpleTool):
 
         # Клиент общий и переиспользуемый (пул соединений), закрывать его здесь
         # нельзя — он принадлежит loop, а не одному вызову.
-        session = get_async_client()
+        session = get_async_client(
+            proxies=resolve_proxies(None, os.environ, normalized_url)
+        )
         if True:
             for attempt in range(1, attempts + 1):
                 try:

@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator, Optional
 
 from gc_core.agent_executor import AgentExecutor
 from gc_core.run_context import acreate_run_context
+from gc_core.utils.async_http import acquire_clients
 
 #: Метка «прогон кончился» в очереди дельт. Отдельный объект, а не None:
 #: None — легальное значение, которое может прийти от колбэка.
@@ -49,6 +50,7 @@ class AsyncAgent:
             if on_stream_delta is not None:
                 on_stream_delta(kind, text)
 
+        acquire_clients()
         ctx = await acreate_run_context(
             config_dict,
             auth_connector=auth_connector,
@@ -102,10 +104,15 @@ class AsyncAgent:
         self._executor.stop_run()
 
     async def aclose(self) -> None:
-        """Закрыть сетевые клиенты этого loop."""
-        from gc_core.utils.async_http import aclose_clients
+        """Отпустить сетевой пул.
 
-        await aclose_clients()
+        Пул общий на loop, поэтому закрываем его только когда ушёл последний
+        агент: иначе ``aclose`` одного рвал бы запрос соседнего — сценарий не
+        экзотический, он в приёмочном тесте и в examples/async_embed.py.
+        """
+        from gc_core.utils.async_http import release_clients
+
+        await release_clients()
 
     async def __aenter__(self) -> "AsyncAgent":
         return self

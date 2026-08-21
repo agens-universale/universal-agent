@@ -95,6 +95,20 @@ def _load_processing_responses():
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
+    # Вернуть НАСТОЯЩИЙ диспетчер. Выбросить пакет из sys.modules мало: имена
+    # уже связаны в модулях-потребителях (`from gc_core.tools import ...`), и
+    # без восстановления заглушка, отдающая turn_finish на ЛЮБОЙ тул, жила бы
+    # до конца сессии — все последующие тесты с настоящим вызовом тулов
+    # молча проверяли бы её вместо ядра. Так же поступает teardown в
+    # test_summary_triggers.py.
+    import importlib
+
+    real_tools = importlib.import_module("gc_core.tools")
+    pm.aapply_tool = real_tools.aapply_tool
+    pm.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
+    from gc_core.message_policy import cycle_stop as cycle_stop_mod
+
+    cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
 def _make_state(*, max_steps: int = 5, parent_state_id=None):

@@ -154,10 +154,17 @@ class AgentRunRegistry:
             return run_ref
 
     def start_if_absent(self, **kwargs: Any) -> ActiveRun:
-        """Синхронный двойник — для вызывающих вне loop и тестов."""
-        from gc_core.utils.aio_compat import run_coro_blocking
+        """Синхронный двойник — для вызывающих вне loop и тестов.
 
-        return run_coro_blocking(self.astart_if_absent(**kwargs))
+        Через портал, а НЕ через ``run_coro_blocking``: ``astart_if_absent``
+        только ставит таску и сразу возвращается, а одноразовый loop
+        ``asyncio.run`` закрывается следом — прогон отменялся на первом же
+        ``await``, не начавшись. Портальный loop живёт всё время процесса,
+        поэтому поставленная на него таска действительно исполняется.
+        """
+        from gc_core.utils.portal import get_portal
+
+        return get_portal().run(self.astart_if_absent(**kwargs))
 
     def add_user_message(
         self,

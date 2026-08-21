@@ -71,6 +71,23 @@ class AgentRunner:
         except Exception:
             pass
 
+    def _read_stdin_answer(self, _question: str) -> str:
+        """Порт «спросить человека» для ядра: ответ из очереди TUI.
+
+        Мост ``redirect_stdin`` потоко-локален, а диспетчер тулов уводит
+        синхронный тул в ``asyncio.to_thread`` — на другом потоке назначения
+        нет, и ``input()`` проваливался на настоящий stdin, занятый Textual:
+        ask_human возвращал пустую строку. Очередь общая на runner, поэтому
+        порт работает с любого потока.
+        """
+        lines: list[str] = []
+        while True:
+            line = self._stdin_queue.get()
+            if line in ("", "\n"):
+                break
+            lines.append(line.rstrip("\n"))
+        return "\n".join(lines).strip()
+
     def _ensure_executor(self) -> Any:
         with self._build_lock:
             if self._executor is None:
@@ -79,6 +96,15 @@ class AgentRunner:
                         "AgentRunner: ни executor, ни executor_factory не заданы"
                     )
                 self._executor = self._executor_factory()
+                # Ставим порт на ctx собранного executor: ядро спросит через
+                # него вместо stdin. redirect_stdin оставляем — он страхует
+                # чужой код, который всё ещё зовёт input() напрямую.
+                ctx = getattr(self._executor, "_ctx", None)
+                if ctx is not None and getattr(ctx, "ask_human", None) is None:
+                    try:
+                        ctx.ask_human = self._read_stdin_answer
+                    except Exception:
+                        pass
             return self._executor
 
     def warm(self) -> None:

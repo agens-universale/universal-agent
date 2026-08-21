@@ -4,6 +4,7 @@
 нельзя не читать — заполненный буфер блокирует запись в дочернем процессе.
 """
 import asyncio
+import pytest
 import threading
 import time
 
@@ -106,3 +107,71 @@ async def test_async_and_sync_results_agree():
     assert async_res.stdout == sync_res.stdout
     assert async_res.return_code == sync_res.return_code
     assert async_res.timed_out == sync_res.timed_out
+
+
+# --- регрессии, найденные ревизией переезда --------------------------------
+#
+# Три свойства, которые синхронная реализация держала, а асинхронная потеряла.
+# Каждое было незакрыто тестом: мутация `continue`→`break` в _adrain_stream
+# оставляла все 205 тестов exec зелёными.
+
+
+async def test_captured_survives_drain_timeout():
+    """Захваченное отдаётся, даже если хвост дочитать не успели.
+
+    Свойство удалённого при переезде test_drain_pipe_publishes_captured_
+    before_discard_finishes: по достижении лимита буфер публикуется сразу, и
+    вызывающий не ждёт конца отбрасывания. Фоновый потомок держит pipe
+    открытым, поэтому дренаж до EOF не дойдёт и будет снят по таймауту.
+    """
+    backend = LocalFsBackend(exec_output_capture_max_chars=1000)
+    res = await backend.aexec(
+        "python -c \"print('A'*200000)\"; (sleep 20 &)", timeout=10
+    )
+
+    assert res.stdout_hit_capture_cap is True
+    assert len(res.stdout) == 1000, "захваченное потеряно вместе с отменой дренажа"
+    assert res.stdout == "A" * 1000
+
+
+async def test_background_child_is_not_a_timeout():
+    """Фоновый потомок, унаследовавший stdout, — не повод объявлять таймаут.
+
+    ``Process.wait()`` резолвится только по EOF всех pipe'ов, поэтому наивная
+    реализация выжигала весь таймаут и теряла уже напечатанный вывод.
+    Синхронный ``Popen.wait()`` возвращался по выходу процесса.
+    """
+    backend = LocalFsBackend()
+    res = await backend.aexec("echo раз; (sleep 20 &); echo два", timeout=8)
+
+    assert res.timed_out is False, "ложный таймаут из-за фонового потомка"
+    assert res.return_code == 0
+    assert res.stdout.split() == ["раз", "два"]
+
+
+async def test_cancel_kills_the_child():
+    """Отмена прогона не оставляет процесс-сироту."""
+    import os
+    import subprocess
+
+    mark = f"gcexecprobe{os.getpid()}"
+    code = f"import time; _={mark!r}; time.sleep(30)"
+
+    def alive() -> list:
+        out = subprocess.run(["pgrep", "-f", mark], capture_output=True, text=True).stdout
+        return [p for p in out.split() if p and int(p) != os.getpid()]
+
+    backend = LocalFsBackend()
+    task = asyncio.create_task(backend.aexec_argv(["python", "-c", code]))
+    await asyncio.sleep(0.8)
+    assert len(alive()) == 1, "процесс не стартовал — тест ничего не проверяет"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.5)
+
+    survivors = alive()
+    for pid in survivors:
+        subprocess.run(["kill", "-9", pid])
+    assert survivors == [], "после отмены остался процесс-сирота"

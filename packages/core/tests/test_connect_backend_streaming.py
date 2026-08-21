@@ -115,3 +115,35 @@ def test_non_stream_http_error_reraises_with_body(monkeypatch, capsys):
             url="http://x", verify=True, use_retry=False,
         )
     assert "messages[0].content" in capsys.readouterr().out
+
+
+def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(monkeypatch):
+    """Кодировка тела SSE — всегда UTF-8, что бы ни объявил провайдер.
+
+    Регрессия переезда: ``httpx.aiter_lines()`` декодирует по charset из
+    заголовка, а синхронный путь до переезда декодировал UTF-8 принудительно.
+    Провайдер, объявивший windows-1251 (или ISO-8859-1) при UTF-8 теле, портил
+    ответ агента — без единого покрасневшего теста.
+    """
+    chunk = {"choices": [{"index": 0,
+                          "delta": {"role": "assistant", "content": "Привет, мир"}}]}
+    done = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+    body = (
+        f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        f"data: {json.dumps(done, ensure_ascii=False)}\n\n"
+        "data: [DONE]\n\n"
+    ).encode("utf-8")
+
+    def handler(request):
+        return httpx.Response(
+            200, content=body,
+            headers={"content-type": "text/event-stream; charset=windows-1251"},
+        )
+
+    _install(monkeypatch, handler)
+    res = connect_backend.request_backend_chat_completions(
+        {"model": "m", "messages": []}, {}, url="http://x",
+        on_delta=lambda kind, text: None, use_retry=False,
+    )
+
+    assert res["choices"][0]["message"]["content"] == "Привет, мир"

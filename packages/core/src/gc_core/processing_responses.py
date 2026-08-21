@@ -1,3 +1,4 @@
+import functools
 import asyncio
 import inspect
 import gc
@@ -924,14 +925,14 @@ async def arun_agent(
             if not pending_tool_exec:
                 if state.steps >= state.max_steps:
                     state.terminal_outcome = "step_limit"
-                    return build_limit_envelope(state, "step_limit", ctx)
+                    return await _acall_blocking_hook(build_limit_envelope, state, "step_limit", ctx)
 
                 if (
                     max_tool_calls_limit is not None
                     and state.tool_calls >= max_tool_calls_limit
                 ):
                     state.terminal_outcome = "tool_call_limit"
-                    return build_limit_envelope(state, "tool_call_limit", ctx)
+                    return await _acall_blocking_hook(build_limit_envelope, state, "tool_call_limit", ctx)
 
                 if session_token_limit is not None:
                     _baseline = UsageAccount.from_meta(
@@ -940,7 +941,7 @@ async def arun_agent(
                     _spent = state.usage.delta_from(_baseline).totals()["total"]
                     if _spent >= session_token_limit:
                         state.terminal_outcome = "token_limit"
-                        return build_limit_envelope(state, "token_limit", ctx)
+                        return await _acall_blocking_hook(build_limit_envelope, state, "token_limit", ctx)
 
             if tool_error_cnt > max_tool_errors:
                 state.terminal_outcome = "tool_errors"
@@ -1178,7 +1179,12 @@ async def arun_agent(
                         if mark_finalizing is not None:
                             mark_finalizing(True)
                         try:
-                            maybe_record_final_answer_intent(
+                            # В поток, как соседние intent-scope хуки: внутри
+                            # синхронный aux-LLM, и прямой вызов из корутины
+                            # упирается в портал, а fail-open это глотает —
+                            # сводка молча подменялась сырым текстом.
+                            await _acall_blocking_hook(
+                                maybe_record_final_answer_intent,
                                 assistant_text=assistant_text, state=state, ctx=ctx
                             )
                             state.flush_current_user_intent()
@@ -1272,22 +1278,27 @@ async def arun_agent(
 # agent_executor, тесты и встраивающий код правок не требуют.
 
 
+@functools.wraps(_arequest_backend_canonical)
 def _request_backend_canonical(*args: Any, **kwargs: Any):
     return get_portal().run(_arequest_backend_canonical(*args, **kwargs))
 
 
+@functools.wraps(aprocess_user_ask)
 def process_user_ask(*args: Any, **kwargs: Any):
     return get_portal().run(aprocess_user_ask(*args, **kwargs))
 
 
+@functools.wraps(aprocess_tool_calls)
 def process_tool_calls(*args: Any, **kwargs: Any):
     return get_portal().run(aprocess_tool_calls(*args, **kwargs))
 
 
+@functools.wraps(aprocess_tool_outputs)
 def process_tool_outputs(*args: Any, **kwargs: Any):
     return get_portal().run(aprocess_tool_outputs(*args, **kwargs))
 
 
+@functools.wraps(arun_agent)
 def run_agent(*args: Any, **kwargs: Any) -> Union[str, None]:
     """Синхронный прогон цикла агента.
 

@@ -6,12 +6,14 @@ State создаётся заново при каждом run(). Возвращ�
 нельзя мутировать снаружи; изменения — только через add_message() или под get_lock().
 """
 
+import functools
+import asyncio
 import gc
 import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
-from gc_core.processing_responses import arun_agent
+from gc_core.processing_responses import _acall_blocking_hook, arun_agent
 from gc_core.run_context import RunContext
 from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
@@ -359,7 +361,13 @@ class AgentExecutor:
         setattr(self._ctx, "on_summary_applied", summary.on_summary_applied)
         setattr(self._ctx, "is_cli_mode", is_cli_mode)
 
-        summary.pre_run_compact_if_needed(trigger_reason="pre_run")
+        # В поток, как и три остальных хука компакции: внутри — синхронный
+        # aux-LLM, и прямой вызов из корутины упирается в портал
+        # (SyncApiInsideEventLoopError), который собственный fail-open
+        # компакции молча глотает — компакция выключалась целиком.
+        await _acall_blocking_hook(
+            summary.pre_run_compact_if_needed, trigger_reason="pre_run"
+        )
 
         if not messages:
             raise ValueError(
@@ -528,11 +536,16 @@ class AgentExecutor:
         finally:
             # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.
-            PersistentStdioRegistry.instance().close_all()
+            #
+            # В поток: закрытие синхронное и небыстрое (terminate → wait до 5с →
+            # killpg → join потоков). Прямой вызов отсюда морозит loop
+            # вызывающего на всё это время — замерено 5с на одну сессию,
+            # игнорирующую SIGTERM, и 15с на три.
+            await asyncio.to_thread(PersistentStdioRegistry.instance().close_all)
             # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http):
             # закрываем все открытые ClientSession в их фоновом event loop и гасим loop.
             try:
-                _STREAM_SESSION_MANAGER.close_all()
+                await asyncio.to_thread(_STREAM_SESSION_MANAGER.close_all)
             except Exception:
                 pass
             # C2: после закрытия MCP/stdio — подбираем циклический мусор
@@ -581,6 +594,7 @@ class AgentExecutor:
             )
         return response
 
+    @functools.wraps(arun)
     def run(self, *args: Any, **kwargs: Any) -> Any:
         """Синхронный прогон агента.
 

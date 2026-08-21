@@ -13,7 +13,9 @@ from gc_core.security.url_policy import UrlPolicyDecision, enforce_url_policy, v
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.async_http import get_async_client
+from gc_core.utils.http_proxy import resolve_proxies
 
 
 class _RedirectBlocked(Exception):
@@ -294,7 +296,9 @@ class DownloadFile(AbstractSimpleTool):
         response = None
         attempts = 1 + self.max_retries
         # Клиент общий и переиспользуемый — закрывать его здесь нельзя.
-        session = get_async_client()
+        session = get_async_client(
+            proxies=resolve_proxies(None, os.environ, url)
+        )
         if True:
             for attempt in range(1, attempts + 1):
                 try:
@@ -357,8 +361,18 @@ class DownloadFile(AbstractSimpleTool):
             return {"type": "write_failed", "message": str(exc)}
         return None
 
+    def __call__(self, *args: Any, **kwargs: Any) -> str:
+        """Синхронный вход: прямые вызовы ``apply_tool`` и тесты.
+
+        Форма из docs/async.md: реализация одна — ``acall``; здесь только
+        способ её дождаться. Без этого ``apply_tool`` возвращал бы строку
+        «tool is async», то есть три встроенных тула молча переставали
+        работать через публичную синхронную точку SDK.
+        """
+        return run_coro_blocking(self.acall(*args, **kwargs))
+
     @enforce_url_policy(url_arg="url")
-    async def __call__(self, url: str, filename: str, **kwargs: Any) -> str:
+    async def acall(self, url: str, filename: str, **kwargs: Any) -> str:
         if not isinstance(url, str):
             return self._result(error={"type": "invalid_argument", "field": "url"})
         normalized_url = url.strip()

@@ -1,12 +1,18 @@
-"""Гейт переезда на async: два прогона одного сценария обязаны совпасть.
+"""Гейт переезда на async: прогон обязан совпасть с до-миграционным.
 
-Сегодня сравниваются два СИНХРОННЫХ прогона — тавтология, и это намеренно:
-харнесс должен существовать до первой async-строки, иначе доказывать
-эквивалентность будет нечем. В Задаче 16 (`AgentExecutor.arun`) вторым
-аргументом сравнения встанет асинхронный прогон, и тест станет настоящим
-гейтом — без правок в этом файле, кроме добавления второго сценария.
+Гейтов здесь два, и они разные по силе:
 
-См. docs/plans/2026-08-20-async-core.md, Задача 1.
+* ``test_async_run_matches_sync_run`` сравнивает ``arun`` с ``run``. После
+  Задачи 16 это тавтология по построению — ``run`` есть ``portal.run(arun)``,
+  обе стороны исполняют одну корутину. Тест не бесполезен (ловит зависимость
+  поведения от того, на каком loop идёт прогон), но расхождение с прежним
+  ядром поймать не может.
+* ``test_async_run_matches_pre_migration_reference`` сравнивает с ЭТАЛОНОМ,
+  снятым на до-async коде и закоммиченным в ``fixtures/``. Вот он и есть
+  доказательство эквивалентности, которое план объявлял целью Задачи 1.
+
+См. docs/plans/2026-08-20-async-core.md, Задача 1, и
+docs/reports/2026-08-21-async-core-audit.md.
 """
 import asyncio
 
@@ -122,3 +128,31 @@ def test_scenario_is_consumed_exactly(tmp_path, monkeypatch):
 
     backend.assert_clean()
     assert len(backend.calls) == len(TURNS)
+
+
+def test_async_run_matches_pre_migration_reference(tmp_path, monkeypatch):
+    """НАСТОЯЩИЙ ГЕЙТ ПЕРЕЕЗДА: сверка с прогоном на ДО-async коде.
+
+    ``test_async_run_matches_sync_run`` выше тавтологичен по построению:
+    ``AgentExecutor.run`` — это ``get_portal().run(self.arun(...))``, то есть
+    обе стороны сравнения исполняют ОДНУ корутину. Он ловит зависимость
+    поведения от выбора loop, но расхождение с тем, как ядро вело себя ДО
+    переезда, поймать не может — а именно это план объявлял целью Задачи 1.
+
+    Эталон снят на aa363554 (первый коммит переезда: добавлен только харнесс,
+    рантайм идентичен базе c96f26ff) и закоммичен в fixtures. Пересчитывать его
+    нельзя — он и есть точка отсчёта.
+    """
+    import json
+    from pathlib import Path
+
+    reference = json.loads(
+        (Path(__file__).parent / "fixtures" / "parity_reference_c96f26ff.json")
+        .read_text(encoding="utf-8")
+    )
+
+    answer, dump, backend = _run_once(tmp_path, monkeypatch, mode="async")
+
+    assert answer == reference["answer"], "ответ разошёлся с до-async прогоном"
+    assert dump == reference["dump"], "дамп треда разошёлся с до-async прогоном"
+    backend.assert_clean()

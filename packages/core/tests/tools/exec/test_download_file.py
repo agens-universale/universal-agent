@@ -125,8 +125,14 @@ def _install(monkeypatch, handler):
 
 
 def _call(tool, **kwargs) -> str:
-    """Позвать асинхронный тул из синхронного теста."""
-    return asyncio.run(tool(**kwargs))
+    """Позвать тул синхронно — той же дорогой, что ``apply_tool``.
+
+    У тула две точки входа: корутинная ``acall`` для цикла агента и
+    синхронная ``__call__`` поверх неё (форма из docs/async.md). Гоняем
+    синхронную: она проходит всю цепочку и заодно сторожит, что публичный
+    синхронный вход не отвалится снова.
+    """
+    return tool(**kwargs)
 
 
 def test_download_file_pdf_happy_path(tmp_path, monkeypatch):

@@ -325,6 +325,10 @@ def _stdio_exchange(
             else:
                 results.append({})
     finally:
+        # Забыть читателя ДО убийства процесса: реестр _READERS держит сильную
+        # ссылку на stdout, и без этого каждый одноразовый вызов оставлял бы
+        # запись и открытый дескриптор навсегда (10 вызовов = +10 fd).
+        forget_stdio_reader(getattr(proc, "stdout", None))
         try:
             proc.terminate()
         except Exception:

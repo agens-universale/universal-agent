@@ -237,8 +237,13 @@ def _run_update() -> int:
     return 0
 
 
-def _run_init_agents_md() -> int:
-    """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md."""
+async def _run_init_agents_md() -> int:
+    """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md.
+
+    Корутина, потому что зовётся из-под ``asyncio.run(amain())``: синхронный
+    ``run()`` оттуда упирается в портал и падает
+    SyncApiInsideEventLoopError — команда не работала вовсе.
+    """
     from gc_core.instructions.init_agents_md import build_init_prompt
     from gc_core.security.confirm_port import confirm_available
 
@@ -247,7 +252,7 @@ def _run_init_agents_md() -> int:
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 
     prompt = build_init_prompt(cwd=os.getcwd(), can_ask=confirm_available(ctx))
-    AgentExecutor(ctx).run([prompt])  # агент пишет AGENTS.md сам (write_to_file)
+    await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам (write_to_file)
     print("[gc] --init: генерация AGENTS.md завершена", file=sys.stderr)
     return 0
 
@@ -276,7 +281,7 @@ async def amain() -> int:
         return _run_update()
 
     if getattr(arg_parser.run_args, "init", False):
-        return _run_init_agents_md()
+        return await _run_init_agents_md()
 
     config_arg = arg_parser.run_args.config
     just_created = _bootstrap_user_config() if config_arg is None else False

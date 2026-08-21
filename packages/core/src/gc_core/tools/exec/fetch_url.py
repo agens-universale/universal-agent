@@ -2,6 +2,7 @@ import html as html_lib
 import asyncio
 import functools
 import json
+import os
 import re
 import time
 from collections import OrderedDict
@@ -12,8 +13,10 @@ import trafilatura
 from readability import Document
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.utils.async_http import get_async_client
+from gc_core.utils.http_proxy import resolve_proxies
 
 
 def _response_url(exc: Exception) -> "str | None":
@@ -388,8 +391,42 @@ Usage:
             error=error,
         )
 
+    def _parse_primary(self, text: str, url: str) -> tuple:
+        """Метаданные + основной текст. Синхронно и дорого — звать через to_thread."""
+        return self._extract_meta(text), trafilatura.extract(
+            text,
+            url=url,
+            include_links=True,
+            include_images=False,
+            favor_recall=True,
+        )
+
+    def _parse_readability(self, text: str, url: str) -> tuple:
+        """Запасной разбор через readability. Синхронно и дорого — через to_thread."""
+        sanitized_text = self._sanitize_for_xml(text)
+        readable_doc = Document(sanitized_text, url=url)
+        summary_html = readable_doc.summary(html_partial=True) or ""
+        fallback_text = trafilatura.extract(
+            summary_html,
+            url=url,
+            include_links=False,
+            include_images=False,
+            favor_recall=True,
+        )
+        return summary_html, fallback_text
+
+    def __call__(self, *args: Any, **kwargs: Any) -> str:
+        """Синхронный вход: прямые вызовы ``apply_tool`` и тесты.
+
+        Форма из docs/async.md: реализация одна — ``acall``; здесь только
+        способ её дождаться. Без этого ``apply_tool`` возвращал бы строку
+        «tool is async», то есть три встроенных тула молча переставали
+        работать через публичную синхронную точку SDK.
+        """
+        return run_coro_blocking(self.acall(*args, **kwargs))
+
     @enforce_url_policy(url_arg="url")
-    async def __call__(
+    async def acall(
         self,
         url: str,
         timeout_seconds: Optional[int] = None,
@@ -505,7 +542,9 @@ Usage:
         for attempt in range(1, attempts + 1):
             try:
                 # Таймаут — на запрос: клиент общий и переиспользуется.
-                client = get_async_client()
+                client = get_async_client(
+                    proxies=resolve_proxies(None, os.environ, normalized_url)
+                )
                 response = await client.get(
                     normalized_url,
                     headers=headers,
@@ -594,14 +633,12 @@ Usage:
                 error={"type": "decode_failed", "message": str(e)},
             )
 
-        page_meta = self._extract_meta(text)
-
-        extracted_text = trafilatura.extract(
-            text,
-            url=str(response.url),
-            include_links=True,
-            include_images=False,
-            favor_recall=True,
+        # Разбор — в поток: он синхронный, тяжёлый (trafilatura/lxml) и на
+        # больших страницах занимает секунды. Пока __call__ был синхронным,
+        # диспетчер уводил в поток весь тул; теперь тул корутинный, и без
+        # to_thread разбор встал бы на event loop вызывающего.
+        page_meta, extracted_text = await asyncio.to_thread(
+            self._parse_primary, text, str(response.url)
         )
 
         if extracted_text and extracted_text.strip():
@@ -631,15 +668,8 @@ Usage:
                 )
 
         try:
-            sanitized_text = self._sanitize_for_xml(text)
-            readable_doc = Document(sanitized_text, url=str(response.url))
-            summary_html = readable_doc.summary(html_partial=True) or ""
-            fallback_text = trafilatura.extract(
-                summary_html,
-                url=str(response.url),
-                include_links=False,
-                include_images=False,
-                favor_recall=True,
+            summary_html, fallback_text = await asyncio.to_thread(
+                self._parse_readability, text, str(response.url)
             )
             if fallback_text and fallback_text.strip():
                 c = fallback_text.strip()

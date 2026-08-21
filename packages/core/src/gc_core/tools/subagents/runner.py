@@ -153,10 +153,12 @@ class SubagentRunner:
             # create_instance некоторых субагентов (special_agent) делает LLM-вызов
             # генерации роли — относим его токены к категории subagent родителя.
             with usage_scope(self._orchestrator_state.usage, USAGE_CATEGORY_SUBAGENT):
-                # Не asyncio.run: create_instance зовут и из-под работающего
-                # loop (TUI, сервер), где он падает «cannot be called from a
-                # running event loop».
-                instance = run_coro_blocking(
+                # Прямой await, а не run_coro_blocking: тело уже асинхронное.
+                # Хелпер при живом loop блокирует поток этого самого loop на
+                # всё время LLM-вызова генерации роли, а заодно теряет
+                # contextvars — usage_scope выше не доходил до вызова, и токены
+                # роли уходили в uncategorized.
+                instance = await _maybe_await(
                     subagent_cls.create_instance(
                         task=task,
                         model=model,

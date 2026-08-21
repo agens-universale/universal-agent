@@ -54,15 +54,21 @@ def _install(monkeypatch, handler):
 
     monkeypatch.setattr(async_http, "get_async_client", factory)
     for cls in (FetchUrl, SimpleFetchUrl):
-        target = inspect.unwrap(cls.__call__)
+        target = inspect.unwrap(getattr(cls, 'acall', cls.__call__))
         globals_dict = getattr(target, "__globals__", None)
         if globals_dict is not None and "get_async_client" in globals_dict:
             monkeypatch.setitem(globals_dict, "get_async_client", factory)
 
 
 def _call(tool, **kwargs) -> str:
-    """Позвать асинхронный тул из синхронного теста."""
-    return asyncio.run(tool(**kwargs))
+    """Позвать тул синхронно — той же дорогой, что ``apply_tool``.
+
+    У тула две точки входа: корутинная ``acall`` для цикла агента и
+    синхронная ``__call__`` поверх неё (форма из docs/async.md). Гоняем
+    синхронную: она проходит всю цепочку и заодно сторожит, что публичный
+    синхронный вход не отвалится снова.
+    """
+    return tool(**kwargs)
 
 
 def _url_policy_config(allowed_schemes=None, url_blacklist=None):

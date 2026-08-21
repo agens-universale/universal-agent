@@ -6,6 +6,7 @@ import hashlib
 import os
 import stat as stat_module
 import subprocess
+import time
 import sys
 from typing import Any, Callable, Dict, Iterable, Optional
 
@@ -301,8 +302,29 @@ _DRAIN_JOIN_TIMEOUT_SEC = 2
 # буфер с ``return_code=None``.
 
 
-async def _adrain_stream(stream, capture_max_chars: int) -> tuple:
-    """Асинхронный двойник ``_drain_pipe``: то же ограничение, тот же декодер."""
+class _Capture:
+    """Захваченное из одного pipe, доступное ДО конца дренажа.
+
+    Синхронный ``_drain_pipe`` публиковал буфер через колбэк ``on_captured``
+    сразу по достижении лимита и не заставлял вызывающего ждать конца
+    отбрасывания хвоста. Асинхронный двойник возвращал результат только
+    через ``task.result()`` — то есть при отмене или таймауте дренажа всё
+    захваченное терялось. Держим его в объекте, переживающем отмену таски.
+    """
+
+    __slots__ = ("text", "hit_cap")
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.hit_cap = False
+
+
+async def _adrain_stream(stream, capture_max_chars: int, sink: "_Capture") -> None:
+    """Асинхронный двойник ``_drain_pipe``: то же ограничение, тот же декодер.
+
+    Пишет в ``sink`` по ходу дела: по достижении лимита — сразу, иначе — на
+    EOF. Отмена таски после этого уже не отнимает захваченное.
+    """
     decoder = codecs.lookup("utf-8").incrementaldecoder(errors="replace")
     parts: list = []
     total = 0
@@ -326,11 +348,49 @@ async def _adrain_stream(stream, capture_max_chars: int) -> tuple:
                 parts.append(decoded[:room])
                 total = capture_max_chars
                 hit_cap = True
+            if hit_cap:
+                # Публикуем немедленно: дальше только отбрасывание хвоста, и
+                # ждать его вызывающему незачем.
+                sink.text = "".join(parts)
+                sink.hit_cap = True
+    except asyncio.CancelledError:
+        # Отмена по таймауту дренажа: отдаём то, что уже прочли, и уходим.
+        if not hit_cap:
+            sink.text = "".join(parts)
+        raise
     except Exception:
-        pass
+        if not hit_cap:
+            sink.text = "".join(parts)
+        return
     if not hit_cap:
         parts.append(decoder.decode(b"", final=True))
-    return "".join(parts), hit_cap
+        sink.text = "".join(parts)
+        sink.hit_cap = False
+
+
+async def _await_process_exit(proc, timeout: Optional[float]):
+    """Дождаться ВЫХОДА процесса, а не EOF его pipe'ов.
+
+    ``Process.wait()`` резолвится только когда закрыты все пайпы (asyncio
+    будит ожидающих из ``_call_connection_lost``). Команда, оставившая
+    фонового потомка с унаследованным stdout, держит pipe открытым — и такой
+    wait выжигал весь таймаут, отдавая ложный ``timed_out`` и теряя вывод,
+    который команда уже успела напечатать. Синхронный ``Popen.wait()``
+    возвращался по выходу процесса независимо от пайпов; сохраняем это.
+
+    ``proc.returncode`` выставляется в ``_process_exited`` — раньше закрытия
+    пайпов и независимо от него.
+    """
+    deadline = None if timeout is None else time.monotonic() + float(timeout)
+    delay = 0.001
+    while proc.returncode is None:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise asyncio.TimeoutError
+        await asyncio.sleep(delay)
+        # Растим паузу: короткие команды ловим почти мгновенно, длинные не
+        # заставляют loop просыпаться сотни раз в секунду.
+        delay = min(delay * 2, 0.05)
+    return proc.returncode
 
 
 async def _arun_bounded_process(
@@ -377,48 +437,65 @@ async def _arun_bounded_process(
             except Exception:
                 pass
 
-    out_task = asyncio.ensure_future(_adrain_stream(proc.stdout, capture_max_chars))
-    err_task = asyncio.ensure_future(_adrain_stream(proc.stderr, capture_max_chars))
+    out_sink, err_sink = _Capture(), _Capture()
+    out_task = asyncio.ensure_future(
+        _adrain_stream(proc.stdout, capture_max_chars, out_sink)
+    )
+    err_task = asyncio.ensure_future(
+        _adrain_stream(proc.stderr, capture_max_chars, err_sink)
+    )
 
     timed_out = False
     try:
-        await asyncio.wait_for(proc.wait(), timeout=timeout)
-        return_code = proc.returncode
-    except asyncio.TimeoutError:
-        timed_out = True
-        return_code = None
         try:
-            proc.kill()
-        except Exception:
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=5)
-        except Exception:
-            pass
+            await _await_process_exit(proc, timeout)
+            return_code = proc.returncode
+        except asyncio.TimeoutError:
+            timed_out = True
+            return_code = None
+            _kill_quietly(proc)
+            try:
+                await _await_process_exit(proc, 5)
+            except Exception:
+                pass
 
-    # Хвост pipe дочитываем ограниченно: долгий discard не должен удерживать
-    # tool-call — тот же приём, что у синхронного join с таймаутом.
-    _done, pending = await asyncio.wait(
-        {out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC
-    )
-    for task in pending:
-        task.cancel()
+        # Хвост pipe дочитываем ограниченно: долгий discard не должен удерживать
+        # tool-call — тот же приём, что у синхронного join с таймаутом.
+        _done, pending = await asyncio.wait(
+            {out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            # Дожидаемся отмены: cancel() только ПРОСИТ прекратить, а забрать
+            # прочитанное успевает лишь except-ветка внутри корутины — без
+            # этого захваченное терялось ровно там, где мы его спасаем.
+            await asyncio.gather(*pending, return_exceptions=True)
+    except asyncio.CancelledError:
+        # Вызывающего сняли (сервер отменил прогон, упал сосед по TaskGroup) —
+        # без этого процесс и обе дренажные корутины пережили бы отмену.
+        _kill_quietly(proc)
+        for task in (out_task, err_task):
+            task.cancel()
+        raise
 
-    def _result(task):
-        if task in pending or task.cancelled():
-            return "", False
-        return ("", False) if task.exception() is not None else task.result()
-
-    stdout_text, stdout_hit = _result(out_task)
-    stderr_text, stderr_hit = _result(err_task)
+    # Читаем из sink, а НЕ из task.result(): отменённая по таймауту дренажа
+    # таска результата не отдаст, но захваченное к тому моменту уже там.
     return ExecResult(
-        stdout=stdout_text,
-        stderr=stderr_text,
+        stdout=out_sink.text,
+        stderr=err_sink.text,
         return_code=return_code,
         timed_out=timed_out,
-        stdout_hit_capture_cap=stdout_hit,
-        stderr_hit_capture_cap=stderr_hit,
+        stdout_hit_capture_cap=out_sink.hit_cap,
+        stderr_hit_capture_cap=err_sink.hit_cap,
     )
+
+
+def _kill_quietly(proc) -> None:
+    try:
+        proc.kill()
+    except Exception:
+        pass
 
 
 # --- python-subprocess env allowlist (moved from run_python_code.py) ---
