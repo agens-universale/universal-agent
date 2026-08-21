@@ -1,4 +1,8 @@
-"""Native find/grep recipes for fs tools (capability-gated).
+"""Native grep recipes for fs content search (capability-gated).
+
+List / by-name enumeration is NOT here: tools use backend.walk / listdir /
+iter_walk (Harbor private walk channel ~50M fail-closed; local os.walk).
+Tool-exec (60k) must never dump a full tree.
 
 Correctness > speed. On any anomaly callers fall back to the Python path.
 """
@@ -9,10 +13,8 @@ import os
 import re
 import shlex
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from backends.capabilities import parse_find_printf_lines
-from backends.walk_util import iter_walk_from_flat
 from utils.fs_search_walk import effective_exclude_dir_names
 from utils.pattern_native_gate import NativeGrepPlan, is_safe_grep_include
 
@@ -32,13 +34,6 @@ class NativeGrepResult:
     truncated: bool
     hit_capture_cap: bool
     backend: str = "grep"
-
-
-def can_native_list(backend: Any) -> bool:
-    try:
-        return bool(getattr(backend, "has_find", False))
-    except Exception:
-        return False
 
 
 def can_native_grep_content(
@@ -86,123 +81,6 @@ def can_native_grep_content(
                 return False
 
     return True
-
-
-def native_find_dump(
-    backend: Any,
-    path: str,
-    *,
-    maxdepth: Optional[int] = None,
-) -> Optional[List[Tuple[str, bool]]]:
-    """Run find -printf wire; return rows or None on failure."""
-    argv: List[str] = ["find", path, "-mindepth", "1"]
-    if maxdepth is not None:
-        argv.extend(["-maxdepth", str(int(maxdepth))])
-    argv.extend(["-printf", "%P\t%y\n"])
-    try:
-        res = backend.exec_argv(argv, timeout=120, env=dict(_GREP_CLEAN_ENV))
-    except Exception as exc:
-        log.debug("native find dump failed: %s", exc)
-        return None
-    if getattr(res, "timed_out", False):
-        return None
-    if res.return_code != 0:
-        return None
-    return parse_find_printf_lines(res.stdout or "")
-
-
-def native_list_entries(
-    backend: Any,
-    path: str,
-    *,
-    max_depth: int,
-    max_entries: Optional[int],
-    file_matcher: Optional[Callable[[str], bool]],
-    is_hidden_name: Callable[[str], bool],
-    read_guard_pass: Callable[[str], bool],
-    make_entry: Callable[[str, bool], Dict[str, Any]],
-) -> Optional[Tuple[List[Dict[str, Any]], bool, str]]:
-    """Native list via find dump + Python order/filters (parity with python path).
-
-    Order must match ``listdir`` (depth 0) / ``iter_walk`` (depth ≥ 1): not raw
-    find inode order. Agent-hidden dirs are pruned so children are never listed.
-
-    Returns ``(entries, truncated, listing_backend)`` or None → Python fallback.
-    """
-    if not can_native_list(backend):
-        return None
-    # list_files: max_depth=0 → immediate children → find -maxdepth 1
-    depth = int(max_depth)
-    find_maxdepth = max(1, depth + 1)
-
-    rows = native_find_dump(backend, path, maxdepth=find_maxdepth)
-    if rows is None:
-        return None
-
-    rows = [(rel.replace("\\", "/"), is_dir) for rel, is_dir in rows]
-
-    if depth == 0:
-        # Parity with backend.listdir: alphabetical by name (not dirs-first).
-        ordered: List[Tuple[str, bool]] = sorted(
-            ((rel, is_dir) for rel, is_dir in rows if "/" not in rel),
-            key=lambda item: item[0],
-        )
-    else:
-        def _should_descend(abs_path: str) -> bool:
-            base = os.path.basename(abs_path.rstrip("/") or abs_path)
-            if is_hidden_name(base):
-                return False
-            if not read_guard_pass(abs_path):
-                return False
-            rel = os.path.relpath(abs_path, path).replace(os.sep, "/")
-            if rel in (".", ""):
-                return True
-            if rel.count("/") >= depth:
-                return False
-            return True
-
-        ordered = list(
-            iter_walk_from_flat(
-                rows,
-                should_descend=_should_descend,
-                join=backend.join,
-                root=path,
-            )
-        )
-
-    result: List[Dict[str, Any]] = []
-    hit_limit = False
-    scan_max = (max_entries + 1) if max_entries is not None else None
-
-    for rel, is_dir in ordered:
-        base = os.path.basename(rel)
-        if is_hidden_name(base):
-            continue
-        if file_matcher is not None and not file_matcher(rel):
-            continue
-        abs_path = backend.join(path, rel)
-        if not read_guard_pass(abs_path):
-            continue
-        result.append(make_entry(abs_path, is_dir))
-        if scan_max is not None and len(result) >= scan_max:
-            hit_limit = True
-            break
-
-    if max_entries is not None and len(result) > max_entries:
-        result = result[:max_entries]
-        hit_limit = True
-
-    return result, hit_limit, "find"
-
-
-def native_find_by_name_rows(
-    backend: Any,
-    path: str,
-) -> Optional[List[Tuple[str, bool]]]:
-    """Full-tree find dump for by-name (Python matcher applies excludes/glob)."""
-    if not can_native_list(backend):
-        return None
-    return native_find_dump(backend, path, maxdepth=None)
 
 
 def parse_grep_match_lines(

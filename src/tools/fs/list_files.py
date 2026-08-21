@@ -15,7 +15,6 @@ from security.read_guard import (
 )
 from security.path_policy import resolve_tool_context, _extract_config_dict
 from tools.fs.agent_hidden import is_agent_hidden
-from utils.native_fs_search import native_list_entries
 
 
 class ListFiles(AbstractSimpleTool):
@@ -251,36 +250,10 @@ Examples:
 
             file_matcher = _matches
 
-        def _rg_pass(filepath: str) -> bool:
-            return self._read_guard_pass(filepath, _rg_cfg, _rg_root, _rg_extra)
-
-        # Native find path when backend has usable find (no is_sandbox branch).
-        try:
-            native = native_list_entries(
-                self._backend,
-                path,
-                max_depth=effective_max_depth,
-                max_entries=max_entries,
-                file_matcher=file_matcher,
-                is_hidden_name=is_agent_hidden,
-                read_guard_pass=_rg_pass,
-                make_entry=lambda fp, is_d: self._entry(fp, is_d),
-            )
-            if native is not None:
-                entries, hit_limit, listing_backend = native
-                return self._result_with_backend(
-                    path=path,
-                    glob=glob,
-                    max_depth=effective_max_depth,
-                    max_entries=max_entries,
-                    ok=True,
-                    entries=entries,
-                    truncated=hit_limit,
-                    listing_backend=listing_backend,
-                )
-        except Exception:
-            pass
-
+        # Enumeration always via backend traverse API (listdir / iter_walk).
+        # Harbor: walk/listdir use private find channel (~50M, fail-closed) —
+        # never tool-exec 60k. Local: os.listdir / os.walk. Name/glob filter is
+        # Python on that stream (no separate native find dump).
         result: List[Dict[str, Any]] = []
         try:
             hit_limit: bool

@@ -355,6 +355,8 @@ class FindFilesByName(AbstractSimpleTool):
         truncated = False
         stop_reason = "completed"
         root_norm = os.path.normpath(path)
+        # Enumeration via backend.iter_walk only (Harbor: private walk channel
+        # ~50M fail-closed; local: os.walk). No tool-exec find dump (60k).
         listing_backend = "python"
 
         exclude_names = effective_exclude_dir_names()
@@ -375,79 +377,32 @@ class FindFilesByName(AbstractSimpleTool):
                 return False
             return True
 
-        def _rel_skipped(rel: str) -> bool:
-            """Skip entries under excluded/dot/agent-hidden path segments (not root)."""
-            parts = rel.replace("\\", "/").split("/")
-            for i, part in enumerate(parts[:-1] if parts else []):
-                if not part:
-                    continue
-                if is_agent_hidden(part):
-                    return True
-                if should_skip_nested_dir_name(
-                    part,
-                    exclude_names=exclude_names,
-                    exclude_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
-                ):
-                    return True
-            base = parts[-1] if parts else ""
-            if is_agent_hidden(base):
-                return True
-            return False
-
         try:
-            # Native: find dump + Python name filter / excludes (spec §5).
-            from utils.native_fs_search import native_find_by_name_rows
+            walk_iter = self._backend.iter_walk(
+                path, should_descend=_should_descend
+            )
+            for rel, is_d in walk_iter:
+                base = os.path.basename(rel)
+                if is_agent_hidden(base):
+                    continue
+                visited += 1
+                if visited > DEFAULT_MAX_VISITED:
+                    truncated = True
+                    stop_reason = "max_visited"
+                    break
 
-            native_rows = native_find_by_name_rows(self._backend, path)
-            if native_rows is not None:
-                listing_backend = "find"
-                for rel, is_d in native_rows:
-                    if _rel_skipped(rel):
-                        continue
-                    base = os.path.basename(rel.replace("\\", "/"))
-                    visited += 1
-                    if visited > DEFAULT_MAX_VISITED:
-                        truncated = True
-                        stop_reason = "max_visited"
-                        break
-                    abs_path = self._backend.join(path, rel)
-                    if not self._read_guard_pass(
-                        abs_path, _rg_cfg, _rg_root, _rg_extra
-                    ):
-                        continue
-                    if not matcher(rel, base):
-                        continue
-                    matches.append(self._entry(abs_path, is_d))
-                    if len(matches) >= max_matches:
-                        truncated = True
-                        stop_reason = "max_matches"
-                        break
-            else:
-                walk_iter = self._backend.iter_walk(
-                    path, should_descend=_should_descend
-                )
-                for rel, is_d in walk_iter:
-                    base = os.path.basename(rel)
-                    if is_agent_hidden(base):
-                        continue
-                    visited += 1
-                    if visited > DEFAULT_MAX_VISITED:
-                        truncated = True
-                        stop_reason = "max_visited"
-                        break
-
-                    abs_path = self._backend.join(path, rel)
-                    if not self._read_guard_pass(
-                        abs_path, _rg_cfg, _rg_root, _rg_extra
-                    ):
-                        continue
-                    if not matcher(rel, base):
-                        continue
-                    matches.append(self._entry(abs_path, is_d))
-                    if len(matches) >= max_matches:
-                        truncated = True
-                        stop_reason = "max_matches"
-                        break
+                abs_path = self._backend.join(path, rel)
+                if not self._read_guard_pass(
+                    abs_path, _rg_cfg, _rg_root, _rg_extra
+                ):
+                    continue
+                if not matcher(rel, base):
+                    continue
+                matches.append(self._entry(abs_path, is_d))
+                if len(matches) >= max_matches:
+                    truncated = True
+                    stop_reason = "max_matches"
+                    break
         except PermissionError as e:
             return _result(
                 ok=False,
