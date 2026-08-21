@@ -8,7 +8,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from gc_core.run_context import create_run_context
+from gc_core.run_context import acreate_run_context, create_run_context
 from gc_core.agent_executor import AgentExecutor
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.config import build_auth_connector
@@ -344,7 +344,11 @@ async def events_webhook(request: Request):
         # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
         config_dict["trace_id"] = trace_id
     auth_connector = build_auth_connector(config_dict)
-    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+    # Асинхронная сборка: внутри MCP-дискавери — сетевые вызовы к каждому
+    # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на всё
+    # это время, а с переездом прогоны стали тасками на общем loop, поэтому
+    # заморозка била разом по всем эндпоинтам и всем идущим прогонам.
+    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
 
     await agent_run_registry.astart_if_absent(
         system=system,
