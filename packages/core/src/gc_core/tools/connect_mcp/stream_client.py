@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import asyncio
-import threading
-import concurrent.futures
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -20,131 +18,106 @@ from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.tools.connect_mcp.transport import _resolve_command
 
 
-# Тело уехало в gc_core.utils.aio_compat: та же задача возникает не только у
-# MCP (см. subagents/runner), а раньше её же на весь процесс решал monkey-patch
-# asyncio.run в gc_server. Имя оставлено алиасом — им пользуются 30+ вызовов
-# в этом файле.
-_run_coro = run_coro_blocking
-
-
 # ---------------------------------------------------------------------------
-# Persistent session manager
-# Keeps one MCP ClientSession alive per server key in a background event loop.
-# This lets browser (and other stateful) MCP servers maintain context across
-# multiple tool calls within a single gc-cli process.
+# Кэш персистентных MCP-сессий
 # ---------------------------------------------------------------------------
 
 class _PersistentSessionManager:
+    """Кэш живых ``ClientSession``, ключ — ``(id(loop), server_key)``.
+
+    Раньше здесь крутился ВЕЧНЫЙ event loop в фоновом демон-потоке, а вызовы
+    уезжали в него через ``run_coroutine_threadsafe``. Это было нужно, пока
+    ядро было синхронным: корутину SDK негде было исполнить. Теперь цикл
+    агента асинхронный, и сессия живёт прямо на loop вызывающего.
+
+    Ключ включает ``id(loop)`` по той же причине, что у httpx-клиентов в
+    ``utils/async_http.py``: ``ClientSession`` держит открытые соединения,
+    привязанные к своему loop. Сессия, открытая на портальном loop и
+    переиспользованная на loop приложения, дала бы «Event loop is closed» в
+    самый неудобный момент — посреди вызова тула.
+
+    Состав кэша остаётся ПРОЦЕССНЫМ: сессии по-прежнему общие для всех
+    RunContext на одном loop. Разделение «сессия на RunContext» — отдельная
+    задача, в этот переезд не входит.
     """
-    Runs a dedicated asyncio event loop in a background daemon thread.
-    Caches open MCP ClientSession objects keyed by server_key.
-    All async calls are dispatched to that loop via run_coroutine_threadsafe.
-    """
 
-    def __init__(self):
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._thread: Optional[threading.Thread] = None
-        self._lock = threading.Lock()
-        # server_key -> open ClientSession (async object in _loop)
-        self._sessions: Dict[str, Any] = {}
-        # server_key -> context managers stack (for cleanup)
-        self._cm_stacks: Dict[str, Any] = {}
+    def __init__(self) -> None:
+        # (id(loop), server_key) -> открытая ClientSession
+        self._sessions: Dict[tuple, Any] = {}
+        # (id(loop), server_key) -> стек контекст-менеджеров для закрытия
+        self._cm_stacks: Dict[tuple, Any] = {}
 
-    def _ensure_loop(self):
-        with self._lock:
-            if self._loop is None or not self._loop.is_running():
-                self._loop = asyncio.new_event_loop()
-                self._thread = threading.Thread(
-                    target=self._loop.run_forever,
-                    daemon=True,
-                    name="mcp-session-loop",
-                )
-                self._thread.start()
+    @staticmethod
+    def _loop_id() -> int:
+        return id(asyncio.get_running_loop())
 
-    def run(self, coro) -> Any:
-        """Submit a coroutine to the background loop and block until done."""
-        self._ensure_loop()
-        fut = concurrent.futures.Future()
-
-        async def _wrapper():
-            try:
-                result = await coro
-                fut.set_result(result)
-            except Exception as exc:
-                fut.set_exception(exc)
-
-        asyncio.run_coroutine_threadsafe(_wrapper(), self._loop)
-        return fut.result(timeout=120)
+    def _key(self, server_key: str) -> tuple:
+        return (self._loop_id(), server_key)
 
     def get_session(self, server_key: str) -> Optional[Any]:
-        return self._sessions.get(server_key)
+        try:
+            return self._sessions.get(self._key(server_key))
+        except RuntimeError:
+            # Живого loop нет — значит и сессии на нём быть не может.
+            return None
 
-    def set_session(self, server_key: str, session: Any, cm_stack: Any):
-        self._sessions[server_key] = session
-        self._cm_stacks[server_key] = cm_stack
+    def set_session(self, server_key: str, session: Any, cm_stack: Any) -> None:
+        key = self._key(server_key)
+        self._sessions[key] = session
+        self._cm_stacks[key] = cm_stack
 
-    def invalidate(self, server_key: str):
-        """Remove cached session (e.g. after an error)."""
-        self._sessions.pop(server_key, None)
-        self._cm_stacks.pop(server_key, None)
+    def invalidate(self, server_key: str) -> None:
+        """Забыть сессию (после ошибки). Стек НЕ закрываем: loop может быть чужим."""
+        try:
+            key = self._key(server_key)
+        except RuntimeError:
+            return
+        self._sessions.pop(key, None)
+        self._cm_stacks.pop(key, None)
+
+    async def _aclose_stack(self, cms: Any) -> None:
+        # cm_stack — кортеж контекст-менеджеров в порядке открытия;
+        # закрываем в обратном, глотая ошибку по каждому.
+        for cm in reversed(cms):
+            try:
+                await cm.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+    async def aclose_all(self) -> None:
+        """Закрыть сессии ТЕКУЩЕГО loop. Чужие не трогаем — их закроет владелец."""
+        try:
+            loop_id = self._loop_id()
+        except RuntimeError:
+            return
+        keys = [k for k in self._cm_stacks if k[0] == loop_id]
+        for key in keys:
+            cms = self._cm_stacks.pop(key, None)
+            self._sessions.pop(key, None)
+            if cms is not None:
+                await self._aclose_stack(cms)
 
     def close_all(self) -> None:
+        """Синхронный двойник — для вызывающих вне loop и старых call-site.
+
+        Если loop живёт на этом потоке, звать нельзя: получился бы вложенный
+        ``asyncio.run``. Такой вызывающий обязан использовать ``aclose_all``.
         """
-        Закрыть все открытые сессии и остановить фоновый loop.
-        Безопасно вызывать из основного потока; каждый cm_stack закрывается
-        в своём же event loop через run_coroutine_threadsafe.
-        Ничего не делает, если loop не запускался.
-        """
-        with self._lock:
-            loop = self._loop
-            stacks = list(self._cm_stacks.items())
-            self._sessions.clear()
-            self._cm_stacks.clear()
-
-        if loop is None or not loop.is_running():
-            return
-
-        async def _close_stack(cms: Any) -> None:
-            # cm_stack — tuple контекст-менеджеров в порядке открытия;
-            # закрываем в обратном порядке, глотая ошибки по каждому.
-            for cm in reversed(cms):
-                try:
-                    await cm.__aexit__(None, None, None)
-                except Exception:
-                    pass
-
-        for _key, cm_stack in stacks:
-            fut = concurrent.futures.Future()
-
-            async def _wrapper(cms=cm_stack):
-                try:
-                    await _close_stack(cms)
-                    fut.set_result(None)
-                except Exception as exc:
-                    fut.set_exception(exc)
-
-            try:
-                asyncio.run_coroutine_threadsafe(_wrapper(), loop)
-                fut.result(timeout=15)
-            except Exception:
-                pass
-
-        # Останавливаем loop и даём фоновому потоку завершиться.
         try:
-            loop.call_soon_threadsafe(loop.stop)
-        except Exception:
+            asyncio.get_running_loop()
+        except RuntimeError:
             pass
-        thread = self._thread
-        if thread is not None:
-            try:
-                thread.join(timeout=5)
-            except Exception:
-                pass
-
-        with self._lock:
-            if self._loop is loop:
-                self._loop = None
-                self._thread = None
+        else:
+            raise RuntimeError(
+                "close_all() вызван из работающего event loop; используйте "
+                "await aclose_all()"
+            )
+        if not self._cm_stacks:
+            return
+        # Сессии принадлежат уже мёртвым loop: их корректно закрыть нечем,
+        # просто отпускаем ссылки, чтобы не течь.
+        self._sessions.clear()
+        self._cm_stacks.clear()
 
 
 _SESSION_MANAGER = _PersistentSessionManager()
@@ -330,29 +303,38 @@ async def _list_tools_stream_sse_async(
         return tools
 
 
-def list_tools_stream_sse(
+async def alist_tools_stream_sse(
     url: str,
     server_cfg: Dict[str, Any],
     token: Optional[str],
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
-    """
-    Синхронная обёртка над _list_tools_stream_sse_async для кода реестра тулов.
+    """Список тулов по SSE, не занимая поток.
 
     url: базовый URL сервера из конфига (без /sse в конце).
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
     extra_headers = server_cfg.get("headers") or None
-    return _run_coro(
-        _list_tools_stream_sse_async(
-            base_url=url,
-            token=token,
-            extra_headers=extra_headers,
-            timeout=timeout,
-            verify=verify,
-            cert=cert,
-        )
+    return await _list_tools_stream_sse_async(
+        base_url=url,
+        token=token,
+        extra_headers=extra_headers,
+        timeout=timeout,
+        verify=verify,
+        cert=cert,
+    )
+
+
+def list_tools_stream_sse(
+    url: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str],
+    timeout: float = 10.0,
+) -> List[Dict[str, Any]]:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    return run_coro_blocking(
+        alist_tools_stream_sse(url, server_cfg, token, timeout)
     )
 
 
@@ -470,7 +452,7 @@ async def _call_tool_stream_sse_persistent(
     return await _call(session)
 
 
-def call_tool_stream_sse(
+async def acall_tool_stream_sse(
     url: str,
     server_cfg: Dict[str, Any],
     token: Optional[str],
@@ -478,11 +460,10 @@ def call_tool_stream_sse(
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Синхронная обёртка над _call_tool_stream_sse_async для tools/call.
+    """Вызов тула по SSE, не занимая поток.
 
-    Если server_cfg.persistent_session=true — используется persistent режим
-    (сессия живёт между вызовами). Иначе — stateless (как раньше).
+    Если server_cfg.persistent_session=true — persistent режим (сессия живёт
+    между вызовами). Иначе stateless.
 
     url: базовый URL сервера из конфига (без /sse в конце).
     """
@@ -493,33 +474,43 @@ def call_tool_stream_sse(
     if bool(server_cfg.get("persistent_session")):
         server_key = f"stream_sse::{url}"
         try:
-            return _SESSION_MANAGER.run(
-                _call_tool_stream_sse_persistent(
-                    server_key=server_key,
-                    base_url=url,
-                    token=token,
-                    extra_headers=extra_headers,
-                    timeout=timeout,
-                    verify=verify,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    cert=cert,
-                )
+            return await _call_tool_stream_sse_persistent(
+                server_key=server_key,
+                base_url=url,
+                token=token,
+                extra_headers=extra_headers,
+                timeout=timeout,
+                verify=verify,
+                tool_name=tool_name,
+                arguments=arguments,
+                cert=cert,
             )
         except Exception:
-            _SESSION_MANAGER.invalidate(f"stream_sse::{url}")
+            _SESSION_MANAGER.invalidate(server_key)
 
-    return _run_coro(
-        _call_tool_stream_sse_async(
-            base_url=url,
-            token=token,
-            extra_headers=extra_headers,
-            timeout=timeout,
-            verify=verify,
-            tool_name=tool_name,
-            arguments=arguments,
-            cert=cert,
-        )
+    return await _call_tool_stream_sse_async(
+        base_url=url,
+        token=token,
+        extra_headers=extra_headers,
+        timeout=timeout,
+        verify=verify,
+        tool_name=tool_name,
+        arguments=arguments,
+        cert=cert,
+    )
+
+
+def call_tool_stream_sse(
+    url: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str],
+    timeout: float,
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    return run_coro_blocking(
+        acall_tool_stream_sse(url, server_cfg, token, timeout, tool_name, arguments)
     )
 
 
@@ -584,29 +575,38 @@ async def _list_tools_stream_http_async(
     return []
 
 
-def list_tools_stream_http(
+async def alist_tools_stream_http(
     url: str,
     server_cfg: Dict[str, Any],
     token: Optional[str],
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
-    """
-    Синхронная обёртка над _list_tools_stream_http_async.
+    """Список тулов по streamable HTTP, не занимая поток.
 
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
     extra_headers = server_cfg.get("headers") or None
-    return _run_coro(
-        _list_tools_stream_http_async(
-            base_url=url,
-            token=token,
-            extra_headers=extra_headers,
-            timeout=timeout,
-            verify=verify,
-            cert=cert,
-        )
+    return await _list_tools_stream_http_async(
+        base_url=url,
+        token=token,
+        extra_headers=extra_headers,
+        timeout=timeout,
+        verify=verify,
+        cert=cert,
+    )
+
+
+def list_tools_stream_http(
+    url: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str],
+    timeout: float = 10.0,
+) -> List[Dict[str, Any]]:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    return run_coro_blocking(
+        alist_tools_stream_http(url, server_cfg, token, timeout)
     )
 
 
@@ -749,7 +749,7 @@ async def _call_tool_stream_http_persistent(
     return {"content": [], "isError": True}
 
 
-def call_tool_stream_http(
+async def acall_tool_stream_http(
     url: str,
     server_cfg: Dict[str, Any],
     token: Optional[str],
@@ -757,8 +757,8 @@ def call_tool_stream_http(
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Синхронная обёртка над _call_tool_stream_http_async.
+    """Вызов тула по streamable HTTP, не занимая поток.
+
     Персистентная сессия включается флагом `persistent_session: true`
     (единый дефолт со всеми остальными транспортами — False).
 
@@ -769,49 +769,51 @@ def call_tool_stream_http(
     extra_headers = server_cfg.get("headers") or None
     server_key = f"stream_http::{url}"
 
-    persistent = bool(server_cfg.get("persistent_session"))
-    if not persistent:
-        return _run_coro(
-            _call_tool_stream_http_async(
-                base_url=url,
-                token=token,
-                extra_headers=extra_headers,
-                timeout=timeout,
-                verify=verify,
-                tool_name=tool_name,
-                arguments=arguments,
-                cert=cert,
-            )
+    async def _stateless() -> Dict[str, Any]:
+        return await _call_tool_stream_http_async(
+            base_url=url,
+            token=token,
+            extra_headers=extra_headers,
+            timeout=timeout,
+            verify=verify,
+            tool_name=tool_name,
+            arguments=arguments,
+            cert=cert,
         )
 
+    if not bool(server_cfg.get("persistent_session")):
+        return await _stateless()
+
     try:
-        return _SESSION_MANAGER.run(
-            _call_tool_stream_http_persistent(
-                server_key=server_key,
-                base_url=url,
-                token=token,
-                extra_headers=extra_headers,
-                timeout=timeout,
-                verify=verify,
-                tool_name=tool_name,
-                arguments=arguments,
-                cert=cert,
-            )
+        return await _call_tool_stream_http_persistent(
+            server_key=server_key,
+            base_url=url,
+            token=token,
+            extra_headers=extra_headers,
+            timeout=timeout,
+            verify=verify,
+            tool_name=tool_name,
+            arguments=arguments,
+            cert=cert,
         )
     except Exception:
-        # Fallback to stateless mode on any persistent session failure
-        return _run_coro(
-            _call_tool_stream_http_async(
-                base_url=url,
-                token=token,
-                extra_headers=extra_headers,
-                timeout=timeout,
-                verify=verify,
-                tool_name=tool_name,
-                arguments=arguments,
-                cert=cert,
-            )
-        )
+        # Персистентная сессия не задалась — забываем её и идём stateless.
+        _SESSION_MANAGER.invalidate(server_key)
+        return await _stateless()
+
+
+def call_tool_stream_http(
+    url: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str],
+    timeout: float,
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    return run_coro_blocking(
+        acall_tool_stream_http(url, server_cfg, token, timeout, tool_name, arguments)
+    )
 
 
 async def _list_tools_stream_stdio_async(
@@ -856,19 +858,23 @@ async def _list_tools_stream_stdio_async(
         return tools
 
 
+async def alist_tools_stream_stdio(
+    server_cfg: Dict[str, Any],
+    timeout: float = 10.0,
+) -> List[Dict[str, Any]]:
+    """Список тулов по stdio (через SDK), не занимая поток."""
+    return await _list_tools_stream_stdio_async(
+        server_cfg=server_cfg,
+        timeout=timeout,
+    )
+
+
 def list_tools_stream_stdio(
     server_cfg: Dict[str, Any],
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
-    """
-    Синхронная обёртка над _list_tools_stream_stdio_async.
-    """
-    return _run_coro(
-        _list_tools_stream_stdio_async(
-            server_cfg=server_cfg,
-            timeout=timeout,
-        )
-    )
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    return run_coro_blocking(alist_tools_stream_stdio(server_cfg, timeout))
 
 
 async def _call_tool_stream_stdio_async(
@@ -968,14 +974,13 @@ async def _call_tool_stream_stdio_persistent(
     return await _call(session)
 
 
-def call_tool_stream_stdio(
+async def acall_tool_stream_stdio(
     server_cfg: Dict[str, Any],
     timeout: float,
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Синхронная обёртка над _call_tool_stream_stdio_async.
+    """Вызов тула по stdio (через SDK), не занимая поток.
 
     При persistent_session=true субпроцесс и ClientSession держатся живыми
     между вызовами (одна Chromium-сессия на весь цикл работы агента).
@@ -986,28 +991,43 @@ def call_tool_stream_stdio(
         args_key = ",".join(str(a) for a in (args if isinstance(args, list) else [args]))
         server_key = f"stream_stdio::{server_cfg.get('command')}::{args_key}"
         try:
-            return _SESSION_MANAGER.run(
-                _call_tool_stream_stdio_persistent(
-                    server_key=server_key,
-                    server_cfg=server_cfg,
-                    timeout=timeout,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                )
+            return await _call_tool_stream_stdio_persistent(
+                server_key=server_key,
+                server_cfg=server_cfg,
+                timeout=timeout,
+                tool_name=tool_name,
+                arguments=arguments,
             )
         except Exception:
             _SESSION_MANAGER.invalidate(server_key)
 
-    return _run_coro(
-        _call_tool_stream_stdio_async(
-            server_cfg=server_cfg,
-            timeout=timeout,
-            tool_name=tool_name,
-            arguments=arguments,
-        )
+    return await _call_tool_stream_stdio_async(
+        server_cfg=server_cfg,
+        timeout=timeout,
+        tool_name=tool_name,
+        arguments=arguments,
     )
 
+
+def call_tool_stream_stdio(
+    server_cfg: Dict[str, Any],
+    timeout: float,
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    return run_coro_blocking(
+        acall_tool_stream_stdio(server_cfg, timeout, tool_name, arguments)
+    )
+
+
 __all__ = [
+    "acall_tool_stream_http",
+    "acall_tool_stream_sse",
+    "acall_tool_stream_stdio",
+    "alist_tools_stream_http",
+    "alist_tools_stream_sse",
+    "alist_tools_stream_stdio",
     "list_tools_stream_sse",
     "call_tool_stream_sse",
     "list_tools_stream_http",

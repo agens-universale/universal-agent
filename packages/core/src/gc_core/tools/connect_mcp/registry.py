@@ -9,6 +9,7 @@ import requests
 import logging
 
 logger = logging.getLogger(__name__)
+from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
 from gc_core.tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry, is_persistent_stdio
 from gc_core.tools.connect_mcp.stream_client import list_tools_stream_http, list_tools_stream_sse, list_tools_stream_stdio
@@ -203,15 +204,10 @@ def _discover_one(
         )
         server_description = server_cfg.get("description") or ""
 
-        # persistent_session унифицирован: легаси `sse`/`http` транспорт не имеет
-        # своей персистентной сессии, поэтому при флаге true роутим через
-        # SDK-клиент `stream_sse`/`stream_http` (то же делаем и в call_mcp_tool).
-        effective_transport = transport
-        if server_cfg.get("persistent_session"):
-            if transport == "sse":
-                effective_transport = "stream_sse"
-            elif transport == "http":
-                effective_transport = "stream_http"
+        # Правила выбора транспорта — общие с call_mcp_tool, см. transport_policy.
+        effective_transport = resolve_effective_transport(
+            server_cfg, server_name=server_name
+        )
 
         if effective_transport == "stream_sse":
             tools_raw = list_tools_stream_sse(

@@ -55,7 +55,10 @@ def _send_initialized_notification(
 
     headers: Dict[str, str] = {
         "Content-Type": "application/json",
-        "Accept": "application/json",
+        # Спека streamable HTTP требует готовности принять ОБА типа: сервер
+        # вправе ответить и JSON, и SSE. Только "application/json" даёт
+        # 406 Not Acceptable у совместимой реализации (проверено на FastMCP).
+        "Accept": "application/json, text/event-stream",
         "mcp-session-id": session_id,
     }
     extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
@@ -97,7 +100,10 @@ def _init_mcp_session(
 
     headers: Dict[str, str] = {
         "Content-Type": "application/json",
-        "Accept": "application/json",
+        # Спека streamable HTTP требует готовности принять ОБА типа: сервер
+        # вправе ответить и JSON, и SSE. Только "application/json" даёт
+        # 406 Not Acceptable у совместимой реализации (проверено на FastMCP).
+        "Accept": "application/json, text/event-stream",
     }
     extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
     headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
@@ -127,7 +133,10 @@ def _tools_list_request(
     Вызвать MCP-метод tools/list и вернуть список tools.
     """
     headers: Dict[str, str] = {
-        "Accept": "application/json",
+        # Спека streamable HTTP требует готовности принять ОБА типа: сервер
+        # вправе ответить и JSON, и SSE. Только "application/json" даёт
+        # 406 Not Acceptable у совместимой реализации (проверено на FastMCP).
+        "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "mcp-session-id": session_id,
     }
@@ -175,7 +184,10 @@ def _call_mcp_tool(
     Если server_key передан и в ответе есть mcp-session-id — обновляем кэш сессии.
     """
     headers: Dict[str, str] = {
-        "Accept": "application/json",
+        # Спека streamable HTTP требует готовности принять ОБА типа: сервер
+        # вправе ответить и JSON, и SSE. Только "application/json" даёт
+        # 406 Not Acceptable у совместимой реализации (проверено на FastMCP).
+        "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "mcp-session-id": session_id,
     }

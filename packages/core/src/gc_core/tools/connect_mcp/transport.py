@@ -29,8 +29,16 @@ def _request_http(
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """
     Обычный HTTP: один POST, тело — JSON. Ответ — один JSON-объект.
+
+    ``Accept`` обязателен: спека streamable HTTP требует, чтобы клиент был
+    готов принять и JSON, и SSE — сервер вправе ответить любым из двух.
+    Совместимая реализация без этого заголовка отвечает 406 Not Acceptable
+    (проверено на FastMCP). Соседний ``_request_sse`` его ставил, а этот —
+    нет, и транспорт ``http`` не работал ни с одним спек-совместимым сервером.
     """
     url = _normalize_url(url)
+    headers = dict(headers)
+    headers.setdefault("Accept", "application/json, text/event-stream")
     resp = requests.post(
         url,
         json=json_payload,
@@ -46,6 +54,25 @@ def _request_http(
     # Пустое тело (например, на notifications/initialized) — не парсить как JSON
     if not resp.content or not resp.content.strip():
         return out_headers, {}
+
+    # Ответ может прийти В ДВУХ ФОРМАХ, и это не прихоть сервера: раз клиент
+    # заявил, что принимает и JSON, и SSE, спека streamable HTTP разрешает
+    # ответить любой. FastMCP на tools/list отвечает именно SSE-обёрткой
+    # (`event: message` / `data: {…}`), и голый resp.json() на ней падает —
+    # транспорт молча возвращал пустоту и «0 тулов» при успешном коннекте.
+    content_type = (out_headers.get("content-type") or "").lower()
+    if "text/event-stream" in content_type:
+        if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):
+            resp.encoding = "utf-8"
+        for line in resp.text.splitlines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            parsed = _try_parse_json_rpc(line[len("data:"):].strip())
+            if parsed is not None:
+                return out_headers, parsed
+        return out_headers, {}
+
     try:
         return out_headers, resp.json()
     except (ValueError, json.JSONDecodeError):

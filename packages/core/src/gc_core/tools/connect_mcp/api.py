@@ -14,6 +14,7 @@ from gc_core.tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry, is_persistent_stdio
 from gc_core.tools.connect_mcp.registry import get_all_tools
 from gc_core.tools.connect_mcp.stream_client import call_tool_stream_http, call_tool_stream_sse, call_tool_stream_stdio
+from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
 from gc_core.tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
 from gc_core.utils.retry import retry_with_backoff
 
@@ -298,16 +299,11 @@ def call_mcp_tool(
 
     use_retry = bool(server_cfg.get("use_retry", default_use_retry))
 
-    # persistent_session унифицирован для всех транспортов: для легаси `sse`/`http`
-    # (one-shot через transport.py) своего пула соединений нет, поэтому при флаге
-    # true роутим через SDK-клиент `stream_sse`/`stream_http` — там уже живёт
-    # `_PersistentSessionManager` с длинной ClientSession.
-    effective_transport = transport
-    if server_cfg.get("persistent_session"):
-        if transport == "sse":
-            effective_transport = "stream_sse"
-        elif transport == "http":
-            effective_transport = "stream_http"
+    # Правила выбора (persistent_session, депрекейт sse) — в transport_policy,
+    # общем с registry: раньше они дублировались и разъезжались.
+    effective_transport = resolve_effective_transport(
+        server_cfg, server_name=server_key
+    )
 
     @retry_with_backoff(
         operation_name=f"MCP tool call ({server_key}:{base_tool_name})",

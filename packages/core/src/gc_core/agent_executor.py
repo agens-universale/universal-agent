@@ -545,7 +545,10 @@ class AgentExecutor:
             # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http):
             # закрываем все открытые ClientSession в их фоновом event loop и гасим loop.
             try:
-                await asyncio.to_thread(_STREAM_SESSION_MANAGER.close_all)
+                # НЕ через to_thread: сессии теперь ключуются по id(loop) и
+                # живут на ЭТОМ loop — из чужого потока их не видно и закрыть
+                # нечем. Закрытие асинхронное и быстрое (сеть + пайпы).
+                await _STREAM_SESSION_MANAGER.aclose_all()
             except Exception:
                 pass
             # C2: после закрытия MCP/stdio — подбираем циклический мусор
