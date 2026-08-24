@@ -4,13 +4,16 @@
 """
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import asyncio
 import json
 import subprocess
 import queue
 import threading
+import time
 
 import httpx
 
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
 
 
@@ -219,6 +222,12 @@ _INITIALIZED_PAYLOAD: Dict[str, Any] = {
 class _LineReader:
     """Один читающий поток на ПРОЦЕСС, а не на строку.
 
+    Остался только для ДОЛГОЖИВУЩИХ stdio-сессий (``persistent_stdio``), где
+    процесс делят разные loop и потому он на ``subprocess.Popen`` — там
+    прервать блокирующий ``readline`` нечем, кроме отдельного потока.
+    Одноразовый обмен переехал на ``_astdio_exchange``, и таймаут чтения там
+    нативный: ``asyncio.wait_for`` вокруг ``StreamReader.readline()``.
+
     Прежняя реализация заводила поток на каждую прочитанную строку JSON-RPC —
     до 32 потоков на один вызов MCP-тула (``persistent_stdio`` читает в цикле,
     пропуская уведомления сервера). Хуже того, при таймауте такой поток
@@ -300,8 +309,14 @@ def _resolve_command(command: str) -> str:
     return resolve_mcp_command(command)
 
 
-def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
-    """Запустить процесс MCP-сервера по конфигу (command, args, cwd, env)."""
+def _stdio_command(server_cfg: Dict[str, Any]) -> Tuple[List[str], Any, Dict[str, str]]:
+    """Разобрать конфиг stdio-сервера в ``(argv, cwd, env)``.
+
+    Общее для обоих способов запуска — синхронного ``Popen`` (долгоживущая
+    сессия) и ``create_subprocess_exec`` (одноразовый обмен). Второй копии
+    разбора быть не должно: расхождение здесь означало бы, что один и тот же
+    сервер стартует с разным окружением.
+    """
     command = server_cfg.get("command")
     if not command:
         raise ValueError("stdio MCP server config must have 'command'")
@@ -313,13 +328,18 @@ def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
         args = [args]
     cmd = [command] + [str(a) for a in args]
     cwd = server_cfg.get("cwd")
-    env_extra = server_cfg.get("env") or {}
+
     from gc_core.mcp_runtime.env import augment_process_env
 
     env = augment_process_env()
-    for k, v in env_extra.items():
+    for k, v in (server_cfg.get("env") or {}).items():
         env[str(k)] = str(v)
+    return cmd, cwd, env
 
+
+def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
+    """Запустить процесс MCP-сервера по конфигу (command, args, cwd, env)."""
+    cmd, cwd, env = _stdio_command(server_cfg)
     return subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -334,51 +354,93 @@ def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
     )
 
 
+async def _aspawn_stdio_process(server_cfg: Dict[str, Any]):
+    """Запустить процесс MCP-сервера на текущем loop.
+
+    Годится только для ОДНОРАЗОВОГО обмена: asyncio-подпроцесс привязан к
+    своему loop, и на чужом падает с RuntimeError (проверено). Долгоживущая
+    сессия поэтому осталась на ``subprocess.Popen`` — см. ``persistent_stdio``.
+    """
+    cmd, cwd, env = _stdio_command(server_cfg)
+    return await asyncio.create_subprocess_exec(
+        *cmd,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        cwd=cwd,
+        env=env,
+    )
+
+
+async def _astdio_exchange(
+    server_cfg: Dict[str, Any],
+    timeout: float,
+    steps: List[Tuple[Dict[str, Any], bool]],
+) -> List[Dict[str, Any]]:
+    """Один процесс на обмен, без потоков.
+
+    Таймаут чтения здесь нативный — ``asyncio.wait_for`` вокруг
+    ``StreamReader.readline()``. Раньше на каждую строку JSON-RPC заводился
+    поток (``_LineReader``): прервать блокирующий ``readline`` на pipe иначе
+    было нечем, и ``selectors`` на Windows с pipe не работает. Корутину
+    прервать можно, поэтому поток на этом пути больше не нужен.
+    """
+    proc = await _aspawn_stdio_process(server_cfg)
+    results: List[Dict[str, Any]] = []
+    try:
+        for payload, expect_response in steps:
+            proc.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
+            await proc.stdin.drain()
+            if not expect_response:
+                results.append({})
+                continue
+            try:
+                raw = await asyncio.wait_for(proc.stdout.readline(), timeout)
+            except (asyncio.TimeoutError, TimeoutError):
+                results.append({})
+                continue
+            line_in = raw.decode("utf-8", "replace").strip()
+            try:
+                results.append(json.loads(line_in) if line_in else {})
+            except json.JSONDecodeError:
+                results.append({})
+    finally:
+        await _akill_process(proc)
+    return results
+
+
+async def _akill_process(proc) -> None:
+    """Завершить процесс, не дожидаясь EOF его пайпов.
+
+    ``Process.wait()`` резолвится только когда закрыты ВСЕ пайпы, а не когда
+    процесс вышел: сервер, оставивший фонового потомка с унаследованным
+    stdout, подвесил бы нас на полный таймаут. Ждём ``returncode`` — он
+    выставляется по выходу процесса. Та же грабля, что была в
+    ``backends/local.py``.
+    """
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()
+    except (ProcessLookupError, OSError):
+        return
+    deadline = time.monotonic() + 5.0
+    while proc.returncode is None and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    if proc.returncode is None:
+        try:
+            proc.kill()
+        except (ProcessLookupError, OSError):
+            pass
+
+
 def _stdio_exchange(
     server_cfg: Dict[str, Any],
     timeout: float,
     steps: List[Tuple[Dict[str, Any], bool]],
 ) -> List[Dict[str, Any]]:
-    """
-    Запустить процесс, выполнить последовательность шагов (payload, expect_response),
-    после каждого payload при expect_response=True прочитать одну строку JSON-RPC.
-    Процесс по завершении обмена завершается.
-    """
-    proc = _spawn_stdio_process(server_cfg)
-    results: List[Dict[str, Any]] = []
-    try:
-        for payload, expect_response in steps:
-            line_out = json.dumps(payload) + "\n"
-            proc.stdin.write(line_out)
-            proc.stdin.flush()
-            if expect_response:
-                line_in = _readline_with_timeout(proc.stdout, timeout)
-                if line_in is None:
-                    results.append({})
-                else:
-                    line_in = line_in.strip()
-                    try:
-                        results.append(json.loads(line_in) if line_in else {})
-                    except json.JSONDecodeError:
-                        results.append({})
-            else:
-                results.append({})
-    finally:
-        # Забыть читателя ДО убийства процесса: реестр _READERS держит сильную
-        # ссылку на stdout, и без этого каждый одноразовый вызов оставлял бы
-        # запись и открытый дескриптор навсегда (10 вызовов = +10 fd).
-        forget_stdio_reader(getattr(proc, "stdout", None))
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        except Exception:
-            pass
-    return results
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    return run_coro_blocking(_astdio_exchange(server_cfg, timeout, steps))
 
 
 def _request_stdio(
