@@ -129,7 +129,10 @@ class FindInFiles(AbstractSimpleTool):
             },
             "case_insensitive": {
                 "type": "boolean",
-                "description": "Ignore letter case. Default false.",
+                "description": (
+                    "Ignore letter case when matching. Default false (case-sensitive, "
+                    "like grep). Set true for case-insensitive search."
+                ),
                 "default": False,
             },
             "file_pattern": {
@@ -200,7 +203,8 @@ class FindInFiles(AbstractSimpleTool):
             "(query_mode defaults to python-re).\n"
             "Optional: query_mode (python-re default; text=exact substring; "
             "python-re-dotall=cross-line '.'), "
-            "limit (default 100, max 300; no pagination), case_insensitive, "
+            "limit (default 100, max 300; no pagination), "
+            "case_insensitive (default false), "
             "file_pattern (directory only; basename-only like '*.py' matches any depth), "
             "exclude_dirs, "
             "show_excluded_dirs (default false; full skipped-dirs list when needed).\n"
@@ -609,10 +613,24 @@ class FindInFiles(AbstractSimpleTool):
         )
 
     @staticmethod
-    def _match_limit_guidance(limit_eff: int) -> str:
+    def _match_limit_guidance(
+        limit_eff: int,
+        *,
+        limit_capped: bool = False,
+        limit_requested: Optional[int] = None,
+    ) -> str:
+        if limit_capped:
+            requested = (
+                str(limit_requested) if limit_requested is not None else "the requested value"
+            )
+            return (
+                f"Results truncated (showing up to {limit_eff} matches). "
+                f"Requested limit {requested} was capped; increasing "
+                "limit further will not help — narrow path/pattern."
+            )
         return (
-            f"Stopped after {limit_eff} matches (limit_eff). More may exist. "
-            "Work with these hits or narrow path/pattern and search again."
+            f"Results truncated (showing up to {limit_eff} matches). "
+            "Increase limit if you need more."
         )
 
     # ------------------------------------------------------------------
@@ -815,7 +833,9 @@ class FindInFiles(AbstractSimpleTool):
             stop_reason = "match_limit"
             more_matches_may_exist = True
             scan_complete = False
-            guidance = self._match_limit_guidance(limit_eff)
+            guidance = self._match_limit_guidance(
+                limit_eff, limit_capped=limit_capped, limit_requested=limit_requested
+            )
         elif limit_capped:
             stop_reason, guidance = self._cap_stop_info(
                 True, limit_requested, limit_eff, count=count
@@ -1144,7 +1164,9 @@ class FindInFiles(AbstractSimpleTool):
         more = hit_limit
         if hit_limit:
             stop_reason = "match_limit"
-            guidance = self._match_limit_guidance(limit_eff)
+            guidance = self._match_limit_guidance(
+                limit_eff, limit_capped=limit_capped, limit_requested=limit_requested
+            )
             scan_complete = False
         elif limit_capped:
             stop_reason, guidance = self._cap_stop_info(
@@ -1497,7 +1519,9 @@ class FindInFiles(AbstractSimpleTool):
             stop_reason = "match_limit"
             more_matches_may_exist = True
             scan_complete = False
-            guidance = self._match_limit_guidance(limit_eff)
+            guidance = self._match_limit_guidance(
+                limit_eff, limit_capped=limit_capped, limit_requested=limit_requested
+            )
         elif shared.stop_reason == "too_many_files_opened":
             stop_reason = "too_many_files_opened"
             more_matches_may_exist = True

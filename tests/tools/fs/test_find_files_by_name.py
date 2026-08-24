@@ -141,6 +141,24 @@ def test_find_max_matches_truncates(tmp_path: Path):
     assert res["count"] == 2
     assert res["truncated"] is True
     assert res["walk_stats"]["stop_reason"] == "max_matches"
+    assert "max_matches" in res["guidance"]
+    assert "max_visited" not in res["guidance"]
+
+
+def test_summary_for_max_visited_does_not_blame_max_matches(tmp_path: Path):
+    raw = _tool()._result(
+        path=str(tmp_path),
+        query="*",
+        case_insensitive=True,
+        max_matches=100,
+        ok=True,
+        matches=[],
+        truncated=True,
+        walk_stats={"visited": 500_001, "stop_reason": "max_visited", "max_visited": 500_000},
+    )
+    res = json.loads(raw)
+    assert "max_visited" in res["guidance"]
+    assert "Increase max_matches" not in res["guidance"]
 
 
 def test_find_max_matches_hard_cap_200(tmp_path: Path):
@@ -152,6 +170,7 @@ def test_find_max_matches_hard_cap_200(tmp_path: Path):
     assert res["max_matches"] == 200
     assert res["count"] == 5
     assert res["truncated"] is False
+    assert "guidance" not in res
 
 
 def test_find_case_insensitive(tmp_path: Path):

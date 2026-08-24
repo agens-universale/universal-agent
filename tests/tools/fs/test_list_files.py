@@ -28,8 +28,10 @@ def test_list_depth_glob_and_truncate(tmp_path):
     res = json.loads(with_local_ctx(ListFiles)(path=str(tmp_path), max_depth=2, glob="**/*.py"))
     assert res["ok"] is True and res["count"] == 1
     assert Path(res["entries"][0]["path"]) == (tmp_path / "src" / "a.py").resolve()
+    assert "guidance" not in res
     trunc = json.loads(with_local_ctx(ListFiles)(path=str(tmp_path), max_depth=2, max_entries=1))
     assert trunc["truncated"] is True and trunc["count"] == 1
+    assert "max_entries" in trunc["guidance"]
 
 
 def test_list_validation_and_not_found(tmp_path):

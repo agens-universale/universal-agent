@@ -88,7 +88,9 @@ class FindFilesByName(AbstractSimpleTool):
                         "type": "boolean",
                         "description": (
                             "Ignore letter case when matching. Default true. "
-                            "Set false for case-sensitive match."
+                            "Set false for case-sensitive match. "
+                            "Does not require an exact file name: query is still "
+                            "a substring or glob."
                         ),
                     },
                     "max_matches": {
@@ -121,7 +123,7 @@ class FindFilesByName(AbstractSimpleTool):
             "Args: path (required, absolute directory), query (required), "
             "case_insensitive (default true), max_matches (default 100, maximum 200).\n"
             "Response: ok, matches[{path, type, …}], count, truncated, "
-            "walk_stats (visited, stop_reason).\n"
+            "walk_stats (visited, stop_reason); guidance only when truncated.\n"
         )
 
     def _result(
@@ -148,6 +150,19 @@ class FindFilesByName(AbstractSimpleTool):
             "count": len(matches) if matches is not None else 0,
             "matches": matches if matches is not None else [],
         }
+        if truncated:
+            stop = (walk_stats or {}).get("stop_reason")
+            if stop == "max_visited":
+                cap = (walk_stats or {}).get("max_visited", DEFAULT_MAX_VISITED)
+                payload["guidance"] = (
+                    f"Search stopped after visiting {cap} entries (max_visited). "
+                    "Narrow path or query; increasing max_matches will not help."
+                )
+            else:
+                payload["guidance"] = (
+                    f"Results truncated (showing up to {max_matches} matches). "
+                    "Increase max_matches if you need more."
+                )
         if walk_stats is not None:
             payload["walk_stats"] = walk_stats
         if error is not None:

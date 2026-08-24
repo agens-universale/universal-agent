@@ -134,7 +134,7 @@ class TestSingleFile:
         # agent set limit=10 itself → no limit_requested
         assert "limit_requested" not in data
         assert "limit_capped" not in data
-        assert "limit_eff" in data["guidance"]
+        assert "Increase limit" in data["guidance"]
 
     def test_single_file_limit_capped(self, tmp_path):
         f = tmp_path / "many.py"
@@ -146,6 +146,8 @@ class TestSingleFile:
         assert data["limit_capped"] is True
         assert data["count"] == 300
         assert data["stop_reason"] == "match_limit"
+        assert "Increase limit" not in data["guidance"]
+        assert "narrow path/pattern" in data["guidance"]
 
     def test_single_file_limit_capped_no_match(self, tmp_path):
         f = tmp_path / "t.txt"

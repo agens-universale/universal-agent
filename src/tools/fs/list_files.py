@@ -88,7 +88,8 @@ At most max_entries results (default 200); truncated=true means the list was cut
 Args: path (required, absolute directory), glob (optional), max_depth (default 0), max_entries (default 200).
 
 Response JSON: ok, path, max_depth, max_entries, truncated, count, entries
-[{path, type: file|directory, is_hidden}], optional glob, optional error.
+[{path, type: file|directory, is_hidden}], optional glob, optional error,
+optional guidance (only when truncated).
 
 Examples:
 {"path": "/home/user/project"}
@@ -118,6 +119,11 @@ Examples:
             "truncated": truncated,
             "count": len(entries) if entries is not None else 0,
         }
+        if truncated:
+            payload["guidance"] = (
+                f"Results truncated (showing up to {max_entries} entries). "
+                "Increase max_entries if you need more."
+            )
         if glob is not None:
             payload["glob"] = glob
         if error is not None:
