@@ -34,16 +34,41 @@ def build_guard_label(title: str, via: str | None = None) -> Text:
     return t
 
 
-# Варианты: (keycap, label). 0 — once, 1 — session, 2 — deny.
+# Варианты 2×2: (keycap, label, choice_id).
+# 0 — Y allow_remember, 1 — O allow_once, 2 — N deny_remember, 3 — T deny_once.
+# «И подобные в сессии» = soft signal судье через insession_examples (не hard allow/deny класса).
 _OPTIONS = [
-    ("[Y]", "Разрешить"),
-    ("[S]", "Разрешить в текущей сессии — не спрашивать снова"),
-    ("[N]", "Нет — отклонить"),
+    ("[Y]", "Разрешить команду и подобные в сессии", "allow_remember"),
+    ("[O]", "Разрешить разово", "allow_once"),
+    ("[N]", "Запретить команду и подобные в сессии", "deny_remember"),
+    ("[T]", "Запретить разово", "deny_once"),
 ]
+
+# Метки primary payload-поля — рендерится первым, multiline, cb-payload class.
+_PAYLOAD_LABELS = frozenset({
+    "команда", "код", "command", "code", "path", "url", "путь",
+})
+
+
+def _is_payload_label(label: str) -> bool:
+    return str(label).strip().casefold() in _PAYLOAD_LABELS
+
+
+def _fmt_payload_value(value: object, *, limit: int = 500) -> str:
+    """Multiline payload: newlines preserved; over limit → head + ``… (+N chars)``."""
+    if isinstance(value, (list, tuple)):
+        text = "\n".join(str(x) for x in value)
+    else:
+        text = str(value)
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    return f"{text[:limit]}\n… (+{omitted} chars)"
 
 
 def _fmt_field_value(value: object, *, limit: int = 200) -> str:
-    """Однострочное компактное значение поля: списки — через запятую,
+    """Однострочное компактное значение мета-поля: списки — через запятую,
     переводы строк схлопнуты, длинное — усечено."""
     if isinstance(value, (list, tuple)):
         text = ", ".join(str(x) for x in value)
@@ -56,7 +81,7 @@ def _fmt_field_value(value: object, *, limit: int = 200) -> str:
 def _render_options(selected: int) -> Text:
     """Вертикальный рендер вариантов; выбранный — teal-«кнопка», прочие — keycap accent + текст dim."""
     t = Text()
-    for idx, (key, label) in enumerate(_OPTIONS):
+    for idx, (key, label, _choice) in enumerate(_OPTIONS):
         if idx > 0:
             t.append("\n")
         prefix = "▸ " if idx == selected else "  "
@@ -70,8 +95,10 @@ def _render_options(selected: int) -> Text:
 
 
 def choice_for(selected: int) -> str:
-    """Маппинг индекса выделенного варианта → строка выбора."""
-    return ("once", "session", "deny")[selected] if 0 <= selected < 3 else "deny"
+    """Маппинг индекса выделенного варианта → строка выбора (4-way)."""
+    if 0 <= selected < len(_OPTIONS):
+        return _OPTIONS[selected][2]
+    return "deny_remember"
 
 
 class ConfirmBanner(Vertical):
@@ -107,10 +134,15 @@ class ConfirmBanner(Vertical):
         )
         yield Static(self.question, classes="cb-question", markup=False)
         for label, value in self.fields:
-            text = _fmt_field_value(value)
+            if _is_payload_label(label):
+                text = _fmt_payload_value(value)
+                css_class = "cb-payload"
+            else:
+                text = _fmt_field_value(value)
+                css_class = "cb-field"
             if not text:
                 continue  # пустые поля (напр. Reason="") не засоряют баннер
-            yield Static(f"  {label}: {text}", classes="cb-field", markup=False)
+            yield Static(f"  {label}: {text}", classes=css_class, markup=False)
         yield Static("", classes="cb-spacer")  # пустая строка отделяет инфо от вариантов
         opts = Static(_render_options(self.selected), classes="cb-options")
         self._options_static = opts

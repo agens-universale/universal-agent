@@ -56,6 +56,8 @@ def test_fetch_url_validation():
     assert json.loads(tool(url="https://x", max_preview_chars=0))["error"]["field"] == "max_preview_chars"
     assert json.loads(tool(url="https://x", offset=-1))["error"]["field"] == "offset"
     assert json.loads(tool(url="https://x", limit=0))["error"]["field"] == "limit"
+    assert json.loads(tool(url="https://x", proxy="not-a-proxy"))["error"]["field"] == "proxy"
+    assert json.loads(tool(url="https://x", proxy=123))["error"]["field"] == "proxy"
 
 
 def test_fetch_url_policy_blocks_before_request(monkeypatch):
@@ -282,3 +284,109 @@ def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
     assert data["ok"] is True
     assert data["is_binary"] is False
     assert data["result_type"] == "content"
+
+
+def test_fetch_url_passes_proxy_to_requests(monkeypatch):
+    seen = {}
+
+    def _get(url, **kwargs):
+        seen["url"] = url
+        seen["proxies"] = kwargs.get("proxies")
+        return _Resp("<html><body><p>hello via proxy</p></body></html>", url=url)
+
+    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura,
+        "extract",
+        lambda *a, **k: "hello via proxy",
+    )
+
+    proxy = "socks5h://127.0.0.1:1080"
+    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com", proxy=proxy))
+    assert data["ok"] is True
+    assert data["content"] == "hello via proxy"
+    assert seen["proxies"] == {"http": proxy, "https": proxy}
+
+
+def test_fetch_url_cache_keyed_by_proxy(monkeypatch):
+    calls = {"n": 0}
+
+    def _get(url, **kwargs):
+        calls["n"] += 1
+        proxies = kwargs.get("proxies") or {}
+        tag = proxies.get("http") or "direct"
+        return _Resp(f"<html></html>", url=url)
+
+    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura,
+        "extract",
+        lambda *a, **k: f"body-{calls['n']}",
+    )
+
+    state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
+    tool = FetchUrl(state=state)
+
+    first = json.loads(tool(url="https://example.com"))
+    second = json.loads(tool(url="https://example.com", proxy="socks5h://127.0.0.1:1080"))
+    third = json.loads(tool(url="https://example.com", proxy="socks5h://127.0.0.1:1080"))
+
+    assert first["ok"] is True and first["cache_hit"] is False
+    assert second["ok"] is True and second["cache_hit"] is False
+    assert third["ok"] is True and third["cache_hit"] is True
+    assert first["content"] != second["content"]
+    assert second["content"] == third["content"]
+    assert calls["n"] == 2
+    assert "https://example.com" in state.shared.fetch_url_cache
+    assert "https://example.com||proxy=socks5h://127.0.0.1:1080" in state.shared.fetch_url_cache
+
+
+def test_simple_fetch_url_passes_proxy_to_session(monkeypatch):
+    seen = {}
+
+    class _ProxySessionStub(_SessionStub):
+        def get(self, url, **kwargs):
+            seen["proxies"] = kwargs.get("proxies")
+            return self._response
+
+    monkeypatch.setattr(
+        requests,
+        "Session",
+        lambda: _ProxySessionStub(
+            _Resp(
+                "<html><body><p>proxied content here</p></body></html>",
+                content_type="text/html",
+                url="https://example.com",
+            )
+        ),
+    )
+    proxy = "http://proxy.local:8080"
+    data = json.loads(
+        with_local_ctx(SimpleFetchUrl)(url="https://example.com", proxy=proxy)
+    )
+    assert data["ok"] is True
+    assert "proxied content" in data["content"]
+    assert seen["proxies"] == {"http": proxy, "https": proxy}
+
+
+def test_simple_fetch_url_proxy_validation():
+    tool = with_local_ctx(SimpleFetchUrl)
+    assert json.loads(tool(url="https://x", proxy="ftp://bad"))["error"]["field"] == "proxy"
+
+
+def test_fetch_url_empty_proxy_is_direct(monkeypatch):
+    seen = {}
+
+    def _get(url, **kwargs):
+        seen["proxies"] = kwargs.get("proxies")
+        return _Resp("<html></html>", url=url)
+
+    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "ok")
+
+    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com", proxy=""))
+    assert data["ok"] is True
+    assert "proxies" not in seen or seen["proxies"] is None
+
+    data2 = json.loads(with_local_ctx(FetchUrl)(url="https://example.com/b", proxy="   "))
+    assert data2["ok"] is True

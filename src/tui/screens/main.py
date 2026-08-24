@@ -2908,13 +2908,21 @@ class TraceScreen(Screen):
                 banner.move_selection(1)
             elif key == "enter":
                 from tui.widgets.confirm_banner import choice_for
-                self._answer_confirm(choice_for(banner.selected) if banner is not None else "deny")
-            elif key in ("y", "Y"):
-                self._answer_confirm("once")
-            elif key in ("s", "S"):
-                self._answer_confirm("session")
-            elif key in ("n", "N", "escape"):
-                self._answer_confirm("deny")
+                self._answer_confirm(choice_for(banner.selected) if banner is not None else "deny_remember")
+            else:
+                # Same physical-key sets as CLI / confirm_port (QWERTY + ЙЦУКЕН).
+                from security.confirm_port import (
+                    CONFIRM_DENY_REMEMBER,
+                    CONFIRM_KEY_N,
+                    CONFIRM_KEY_O,
+                    CONFIRM_KEY_T,
+                    CONFIRM_KEY_Y,
+                    normalize_confirm_key,
+                )
+                if key == "escape" or key in CONFIRM_KEY_N:
+                    self._answer_confirm(CONFIRM_DENY_REMEMBER)
+                elif key in CONFIRM_KEY_Y or key in CONFIRM_KEY_O or key in CONFIRM_KEY_T:
+                    self._answer_confirm(normalize_confirm_key(key))
             # иначе — проглотить без действия (нет случайного ввода)
             event.stop()
             event.prevent_default()

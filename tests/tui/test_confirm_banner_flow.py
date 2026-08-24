@@ -25,8 +25,8 @@ class _StubRunner:
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_y_answers_once(tmp_path):
-    """«y» при активном баннере: submit_confirm_reply("once"), баннер снят."""
+async def test_confirm_banner_y_answers_allow_remember(tmp_path):
+    """«y» при активном баннере: submit_confirm_reply("allow_remember"), баннер снят."""
     pytest.importorskip("textual")
     from textual.containers import Horizontal
     from tui.app import TuiApp
@@ -50,7 +50,7 @@ async def test_confirm_banner_y_answers_once(tmp_path):
         await pilot.press("y")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["once"]
+        assert runner.replies == ["allow_remember"]
         assert not scr._confirm_active
         assert scr._confirm_banner is None
         assert len(pilot.app.query(ConfirmBanner)) == 0
@@ -59,8 +59,8 @@ async def test_confirm_banner_y_answers_once(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_s_answers_session(tmp_path):
-    """«s» при активном баннере: submit_confirm_reply("session")."""
+async def test_confirm_banner_o_answers_allow_once(tmp_path):
+    """«o» при активном баннере: submit_confirm_reply("allow_once")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -75,17 +75,17 @@ async def test_confirm_banner_s_answers_session(tmp_path):
         scr.show_confirm_banner("Тест", "Разрешить?")
         await pilot.pause(0.1)
 
-        await pilot.press("s")
+        await pilot.press("o")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["session"]
+        assert runner.replies == ["allow_once"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_n_answers_deny(tmp_path):
-    """«n» при активном баннере: submit_confirm_reply("deny")."""
+async def test_confirm_banner_n_answers_deny_remember(tmp_path):
+    """«n» при активном баннере: submit_confirm_reply("deny_remember")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -103,14 +103,14 @@ async def test_confirm_banner_n_answers_deny(tmp_path):
         await pilot.press("n")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["deny"]
+        assert runner.replies == ["deny_remember"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_escape_answers_deny(tmp_path):
-    """Esc при активном баннере: submit_confirm_reply("deny"), не проваливается
+async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
+    """Esc при активном баннере: submit_confirm_reply("deny_remember"), не проваливается
     в глобальную Esc-лестницу (нет exit-модалки)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -129,7 +129,7 @@ async def test_confirm_banner_escape_answers_deny(tmp_path):
         await pilot.press("escape")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["deny"]
+        assert runner.replies == ["deny_remember"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # Не открылась exit-модалка (screen_stack == 1)
@@ -137,8 +137,8 @@ async def test_confirm_banner_escape_answers_deny(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_enter_default_answers_once(tmp_path):
-    """Enter без навигации (selected==0): submit_confirm_reply("once")."""
+async def test_confirm_banner_enter_default_answers_allow_remember(tmp_path):
+    """Enter без навигации (selected==0): submit_confirm_reply("allow_remember")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -156,14 +156,14 @@ async def test_confirm_banner_enter_default_answers_once(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["once"]
+        assert runner.replies == ["allow_remember"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_down_then_enter_answers_session(tmp_path):
-    """↓ + Enter (selected==1): submit_confirm_reply("session")."""
+async def test_confirm_banner_down_then_enter_answers_allow_once(tmp_path):
+    """↓ + Enter (selected==1): submit_confirm_reply("allow_once")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -183,7 +183,7 @@ async def test_confirm_banner_down_then_enter_answers_session(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["session"]
+        assert runner.replies == ["allow_once"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
@@ -245,7 +245,7 @@ async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
         stack = [type(s).__name__ for s in pilot.app.screen_stack]
         assert "ToolCallDetailScreen" not in stack, stack
         assert not any(isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack)
-        assert runner.replies == ["once"]
+        assert runner.replies == ["allow_remember"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 

@@ -78,6 +78,7 @@ class ModerationContext:
     has_venv: bool = False
     allowed_command_examples: list[str] = field(default_factory=list)
     denied_command_examples: list[str] = field(default_factory=list)
+    insession_examples: dict[str, list[str]] = field(default_factory=lambda: {"allowed": [], "denied": []})
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,7 @@ def build_judge_payload(
         },
         "allowed_command_examples": context.allowed_command_examples,
         "denied_command_examples": context.denied_command_examples,
+        "insession_examples": context.insession_examples,
         "never_touch_paths": never_touch,
     }
 
@@ -459,6 +461,13 @@ def _build_context(
     kwargs: dict[str, Any],
 ) -> ModerationContext:
     cwd_value = effective_command_cwd(tool_name, kwargs, context)
+    insession_examples: dict[str, list[str]] = {"allowed": [], "denied": []}
+    permission_store = getattr(context.ctx, "permission_store", None)
+    if permission_store is not None:
+        try:
+            insession_examples = permission_store.insession_examples()
+        except Exception:
+            insession_examples = {"allowed": [], "denied": []}
     return ModerationContext(
         tool_name=tool_name,
         launch_root=context.launch_root,
@@ -470,6 +479,7 @@ def _build_context(
         has_venv=bool(os.environ.get("VIRTUAL_ENV")),
         allowed_command_examples=context.allowed_command_examples,
         denied_command_examples=context.denied_command_examples,
+        insession_examples=insession_examples,
     )
 
 
@@ -545,11 +555,13 @@ def _join_reasons(reasons: list[str], *, default: str) -> str:
     return "; ".join(reason for reason in reasons if reason) or default
 
 
-def _payload_preview(payload: str, limit: int = 200) -> str:
-    compact = " ".join(payload.split())
-    if len(compact) <= limit:
-        return compact
-    return compact[:limit]
+def _payload_preview(payload: str, limit: int = 500) -> str:
+    """Payload preview for confirm: multiline kept; over limit → head + ``… (+N chars)``."""
+    text = payload.strip()
+    if len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    return f"{text[:limit]}\n… (+{omitted} chars)"
 
 
 def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Callable[[dict[str, Any]], dict[str, Any]]:
@@ -707,18 +719,24 @@ def _ask_user_confirmation(
     decision: ExecutionDecision,
     ctx: Any = None,
 ) -> bool:
+    primary_label = _primary_payload_label(context.tool_name)
+    # Payload first (bright), then dim meta — SPEC §3.5b. Tool already in question.
     return request_confirm(
         title="Проверка команды",
-        question=f"Разрешить выполнение команды? ({context.tool_name})",
+        question=f"Разрешить запуск? ({context.tool_name})",
         fields=[
-            ("Tool", context.tool_name),
-            ("Reason", decision.reason),
-            ("Risk flags", ", ".join(decision.risk_flags) or "-"),
-            ("Preview", _payload_preview(payload)),
+            (primary_label, _payload_preview(payload)),
+            ("Причина", decision.reason),
+            ("Риски", ", ".join(decision.risk_flags) or "-"),
         ],
         ctx=ctx,
         decision_key=f"command:{payload}",
     )
+
+
+def _primary_payload_label(tool_name: str) -> str:
+    """Primary payload field label: Команда (shell) / Код (python)."""
+    return "Код" if tool_name == EXEC_PYTHON_NAME else "Команда"
 
 
 def _tool_blocked_result(args: tuple[Any, ...]) -> Callable[..., str] | None:
