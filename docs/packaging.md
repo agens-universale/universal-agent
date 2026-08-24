@@ -35,6 +35,85 @@ uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent
 
 Смена профиля — это переустановка, нужен `--force`.
 
+> **Две оговорки, пока раскладка не влита в дефолтную ветку.** Проверено
+> прогоном 24.08.2026.
+>
+> 1. **Только SSH.** Репозиторий приватный, и `git+https://` падает на
+>    `fatal: could not read Username for 'https://gitverse.ru'`. Подставляйте
+>    `git+ssh://git@gitverse.ru/gigacode-ai/universal-agent` (нужен ключ) либо
+>    токен в URL для CI.
+> 2. **Ревизия обязательна.** В `master` каталога `packages/` ещё нет — там
+>    старая плоская раскладка и `gc-ua 0.2.3`. Установка без ревизии либо
+>    падает (`does not appear to be a Python project: neither 'setup.py' nor
+>    'pyproject.toml' found` — для любого `#subdirectory=packages/…`), либо
+>    молча ставит версию двухлетней давности (для короткой команды `gc-ua`).
+>    Пока `feat/module-split` не влита, дописывайте `@<ветка|тег|sha>` перед
+>    решёткой.
+
+### Ядро как библиотека: `pip install` и `uv pip install`
+
+У `gc-core` нет команд — `uv tool install` для него бессмысленен (он кладёт в
+PATH исполняемые файлы, а их нет). Встраивающему нужен обычный install в своё
+окружение:
+
+```bash
+REPO=git+ssh://git@gitverse.ru/gigacode-ai/universal-agent
+REV=feat/async-core        # пока раскладка не в master — см. оговорку выше
+
+pip install    "gc-core @ $REPO@$REV#subdirectory=packages/core"
+uv pip install "gc-core @ $REPO@$REV#subdirectory=packages/core"
+```
+
+Форма `имя @ git+…@<ревизия>#subdirectory=…` — это PEP 508 direct reference;
+pip и uv понимают её одинаково. Ревизией может быть ветка, тег или sha —
+`@88e6214e` даёт воспроизводимую установку.
+
+В зависимости проекта — `uv add` с той же строкой. Он разложит её в
+`[tool.uv.sources]` и прибьёт в `uv.lock` конкретный коммит, поэтому у коллеги
+после `uv sync` встанет ровно та же ревизия, а не «что сейчас в ветке»:
+
+```bash
+uv add "gc-core @ $REPO@$REV#subdirectory=packages/core"
+```
+
+записывает в манифест:
+
+```toml
+[tool.uv.sources]
+gc-core = { git = "ssh://git@gitverse.ru/gigacode-ai/universal-agent", subdirectory = "packages/core", rev = "feat/async-core" }
+```
+
+У pip лока нет: в `requirements.txt` попадёт ветка, и завтра приедет другой
+коммит — если нужна воспроизводимость, указывайте тег или sha явно.
+
+Обновление, когда ветка уехала вперёд, а версия не менялась: без явного флага
+оба менеджера решат, что пакет уже стоит, и сборку пропустят.
+
+```bash
+pip install --force-reinstall --no-deps "gc-core @ $REPO@$REV#subdirectory=packages/core"
+uv pip install --reinstall              "gc-core @ $REPO@$REV#subdirectory=packages/core"
+uv lock --upgrade-package gc-core && uv sync     # если добавляли через uv add
+```
+
+Проверка, что встало именно ядро и оно не тянет фронтенды:
+
+```bash
+python -c "import gc_core, sys; \
+print([m for m in ('gc_cli','gc_tui','gc_server') if m in sys.modules])"
+# []
+```
+
+> **Async-фасад `gc_core.aio` пока живёт только в ветке `feat/async-core`.**
+> Установка без ревизии берёт дефолтную ветку, где его ещё нет, и
+> `import gc_core.aio` упадёт с `ModuleNotFoundError`. Пока ветка не влита,
+> указывайте её явно:
+>
+> ```bash
+> pip install "gc-core @ git+ssh://git@gitverse.ru/gigacode-ai/universal-agent@feat/async-core#subdirectory=packages/core"
+> ```
+>
+> Что даёт async-вход и когда он нужен — [docs/async.md](async.md).
+
 ### Почему у частичных профилей есть `#subdirectory=`, а у `gc-ua` нет
 
 Потому что **uv читает из git-репозитория только корневой `pyproject.toml`**.
