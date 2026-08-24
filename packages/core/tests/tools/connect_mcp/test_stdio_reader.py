@@ -66,14 +66,21 @@ def test_one_thread_per_stream_not_per_line(monkeypatch):
 
 def test_timeout_returns_none_without_leaking_a_thread_per_call():
     """Молчащий сервер: таймаут отдаёт None, но потоки не копятся."""
+    def _readers() -> int:
+        # Считаем ИМЕННО читателей stdio, а не все потоки процесса. Глобальный
+        # счётчик здесь врёт: соседние тесты (дискавери MCP) оставляют
+        # брошенные по дедлайну daemon-потоки, и те умирают в произвольный
+        # момент — равенство до/после ломалось от постороннего шума.
+        return sum(1 for t in threading.enumerate() if t.name == "mcp-stdio-reader")
+
     stream = _SlowStream(["одна\n"], hang_after=1)
     try:
         assert _readline_with_timeout(stream, 2).strip() == "одна"
-        before = threading.active_count()
+        before = _readers()
         for _ in range(5):
             assert _readline_with_timeout(stream, 0.05) is None
         # Раньше каждый такой вызов оставлял по висящему потоку.
-        assert threading.active_count() == before
+        assert _readers() == before
     finally:
         forget_stdio_reader(stream)
 
