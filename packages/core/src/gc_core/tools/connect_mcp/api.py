@@ -8,7 +8,7 @@ import os
 import time
 import uuid
 
-import requests
+import httpx
 
 from gc_core.config import load_config
 from gc_core.tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
@@ -437,7 +437,7 @@ def call_mcp_tool(
 
         try:
             data_local = do_call(session_id)
-        except requests.HTTPError:
+        except httpx.HTTPStatusError:
             _MCP_SESSIONS.pop(server_key, None)
             session_id = _get_or_init_session_id(
                 server_key, url, server_cfg, token=token, timeout=timeout

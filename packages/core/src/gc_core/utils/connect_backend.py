@@ -2,7 +2,6 @@ import functools
 import logging
 import os
 import httpx
-import requests
 import re
 import json
 from copy import deepcopy

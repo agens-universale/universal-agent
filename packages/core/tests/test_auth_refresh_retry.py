@@ -3,7 +3,7 @@
 import types
 
 import pytest
-import requests
+import httpx
 
 from gc_core import processing_responses as pr
 
@@ -23,9 +23,10 @@ def _ctx(auth):
 
 
 def _http_401():
-    resp = requests.Response()
-    resp.status_code = 401
-    return requests.exceptions.HTTPError(response=resp)
+    """401 в форме httpx: requests ушёл из зависимостей ядра."""
+    request = httpx.Request("POST", "http://backend.invalid/v1")
+    resp = httpx.Response(401, request=request)
+    return httpx.HTTPStatusError("unauthorized", request=request, response=resp)
 
 
 def test_retry_once_on_401_refreshes_and_succeeds(monkeypatch):
@@ -67,7 +68,7 @@ def test_second_401_after_refresh_propagates(monkeypatch):
         raise _http_401()
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
-    with pytest.raises(requests.exceptions.HTTPError):
+    with pytest.raises(httpx.HTTPStatusError):
         pr._request_backend_canonical([], object(), _ctx(auth))
     assert calls["n"] == 2 and auth.force_calls == 1  # ровно 1 refresh, потом наверх
 
@@ -80,6 +81,6 @@ def test_no_auth_connector_no_retry(monkeypatch):
         raise _http_401()
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
-    with pytest.raises(requests.exceptions.HTTPError):
+    with pytest.raises(httpx.HTTPStatusError):
         pr._request_backend_canonical([], object(), _ctx(None))
     assert calls["n"] == 1

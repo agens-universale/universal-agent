@@ -852,7 +852,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "readability-lxml" },
-    { name = "requests", extra = ["socks"] },
     { name = "trafilatura" },
 ]
 
@@ -867,7 +866,6 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "readability-lxml" },
-    { name = "requests", extras = ["socks"] },
     { name = "trafilatura" },
 ]
 

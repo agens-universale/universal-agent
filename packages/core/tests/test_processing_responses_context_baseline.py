@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from gc_core.intent_guard import guard as intent_guard_guard
 import pytest
-import requests
+import httpx
 
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_testkit.intent_fixtures import (
@@ -193,11 +193,11 @@ def _chat_response(content: str = "ok"):
     }
 
 
-def _http_error(status_code: int = 500) -> requests.exceptions.HTTPError:
-    response = requests.Response()
-    response.status_code = status_code
-    response._content = b"backend failed"
-    return requests.exceptions.HTTPError("backend failed", response=response)
+def _http_error(status_code: int = 500) -> httpx.HTTPStatusError:
+    """Ошибка HTTP в форме httpx: requests ушёл из зависимостей ядра."""
+    request = httpx.Request("POST", "http://backend.invalid/v1")
+    response = httpx.Response(status_code, text="backend failed", request=request)
+    return httpx.HTTPStatusError("backend failed", request=request, response=response)
 
 
 def test_run_agent_calls_pre_backend_hook_before_user_message_backend(monkeypatch):
@@ -317,13 +317,13 @@ def test_run_agent_propagates_backend_connection_error(monkeypatch):
     """После исчерпания transport-ретраев не подменяем ошибку no-tool-call bounce."""
 
     async def _failing_process_user_ask(_messages, _state, _ctx):
-        raise requests.exceptions.ConnectionError("network is down")
+        raise httpx.ConnectError("network is down")
 
     monkeypatch.setattr(
         processing_module, "aprocess_user_ask", _failing_process_user_ask
     )
 
-    with pytest.raises(requests.exceptions.ConnectionError, match="network is down"):
+    with pytest.raises(httpx.ConnectError, match="network is down"):
         run_agent(
             [{"role": "user", "content": "hello", "id": "m1"}],
             _make_state(),
@@ -339,7 +339,7 @@ def test_run_agent_propagates_backend_http_error(monkeypatch):
         processing_module, "aprocess_user_ask", _failing_process_user_ask
     )
 
-    with pytest.raises(requests.exceptions.HTTPError):
+    with pytest.raises(httpx.HTTPStatusError):
         run_agent(
             [{"role": "user", "content": "hello", "id": "m1"}],
             _make_state(),
@@ -352,7 +352,7 @@ def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch
 
     async def _fake_request_backend(data, *_args, **_kwargs):
         max_tokens_seen.append(data["max_tokens"])
-        raise requests.exceptions.ConnectionError("network is down")
+        raise httpx.ConnectError("network is down")
 
     monkeypatch.setattr(
         request_policy,
@@ -361,7 +361,7 @@ def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch
     )
     monkeypatch.setattr(request_policy.asyncio, "sleep", _anoop)
 
-    with pytest.raises(requests.exceptions.ConnectionError):
+    with pytest.raises(httpx.ConnectError):
         request_policy.request_chat_completions_with_policy(
             payload_factory=lambda max_tokens: {"max_tokens": max_tokens},
             initial_max_tokens=100,

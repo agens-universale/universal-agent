@@ -8,7 +8,8 @@ import json
 import subprocess
 import queue
 import threading
-import requests
+
+import httpx
 
 from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
 
@@ -17,6 +18,25 @@ def _normalize_url(url: str) -> str:
     if not url.startswith("http://") and not url.startswith("https://"):
         return f"http://{url}"
     return url
+
+
+def _sync_client(
+    verify: Union[bool, str] = True,
+    cert: Optional[tuple] = None,
+) -> httpx.Client:
+    """Клиент на один обмен: у httpx TLS задаётся при создании, не на запросе.
+
+    ``trust_env=False`` — тот же контракт, что у остального ядра: ``~/.netrc``
+    не читаем (Basic-auth оттуда перетирает явный Authorization), прокси и CA
+    передаём явно.
+    """
+    from gc_core.utils.async_http import build_ssl_context
+
+    return httpx.Client(
+        verify=build_ssl_context(verify, cert),
+        trust_env=False,
+        follow_redirects=True,
+    )
 
 
 def _request_http(
@@ -39,17 +59,10 @@ def _request_http(
     url = _normalize_url(url)
     headers = dict(headers)
     headers.setdefault("Accept", "application/json, text/event-stream")
-    resp = requests.post(
-        url,
-        json=json_payload,
-        headers=headers,
-        timeout=timeout,
-        stream=False,
-        verify=verify,
-        cert=cert,
-    )
+    with _sync_client(verify, cert) as client:
+        resp = client.post(url, json=json_payload, headers=headers, timeout=timeout)
     resp.raise_for_status()
-    # CaseInsensitiveDict -> dict для единообразия
+    # Headers httpx -> обычный dict для единообразия
     out_headers = {k.lower(): v for k, v in resp.headers.items()}
     # Пустое тело (например, на notifications/initialized) — не парсить как JSON
     if not resp.content or not resp.content.strip():
@@ -92,7 +105,7 @@ def _try_parse_json_rpc(s: str) -> Dict[str, Any] | None:
     return None
 
 
-def _read_sse_first_json(resp: "requests.Response", timeout: float) -> Dict[str, Any]:
+def _read_sse_first_json(resp: "httpx.Response", timeout: float) -> Dict[str, Any]:
     """
     Читать стрим SSE построчно; вернуть первый JSON-RPC ответ (с result или error).
     Поддерживается многострочное событие: после "data:" следующие строки до пустой
@@ -103,7 +116,9 @@ def _read_sse_first_json(resp: "requests.Response", timeout: float) -> Dict[str,
 
     from gc_core.config_modules import env_vars
     debug = env_vars.env.mcp_debug
-    for line in resp.iter_lines(decode_unicode=True):
+    # httpx.iter_lines отдаёт уже декодированные str — параметра decode_unicode
+    # у него нет (это имя из requests).
+    for line in resp.iter_lines():
         if line is None:
             continue
         if debug:
@@ -164,24 +179,21 @@ def _request_sse(
     headers = dict(headers)
     headers["Accept"] = "application/json, text/event-stream"
 
-    resp = requests.post(
-        url,
-        json=json_payload,
-        headers=headers,
-        timeout=timeout,
-        stream=True,
-        verify=verify,
-        cert=cert,
-    )
-    resp.raise_for_status()
-    # Ответ SSE часто в UTF-8; без явной кодировки requests может взять Latin-1 и сломать JSON с кириллицей
-    if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):
-        resp.encoding = "utf-8"
-    out_headers = {k.lower(): v for k, v in resp.headers.items()}
-    try:
-        body = _read_sse_first_json(resp, timeout)
-    finally:
-        resp.close()
+    # Стрим у httpx — контекстный менеджер: тело читается ВНУТРИ блока, за его
+    # пределами соединение уже закрыто. Поэтому и разбор идёт внутри.
+    with _sync_client(verify, cert) as client:
+        with client.stream(
+            "POST", url, json=json_payload, headers=headers, timeout=timeout
+        ) as resp:
+            resp.raise_for_status()
+            # SSE почти всегда UTF-8; без явного указания httpx может взять
+            # заявленную сервером кодировку и сломать JSON с кириллицей.
+            if resp.encoding is None or resp.encoding.lower() in (
+                "iso-8859-1", "ascii",
+            ):
+                resp.encoding = "utf-8"
+            out_headers = {k.lower(): v for k, v in resp.headers.items()}
+            body = _read_sse_first_json(resp, timeout)
     return out_headers, body
 
 

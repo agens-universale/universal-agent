@@ -1,4 +1,4 @@
-import requests
+import httpx
 
 from gc_core.utils.backend_errors import EmbeddedChoiceError, is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
 from gc_core.utils.chat_completions_stream import BackendStreamError
@@ -15,6 +15,14 @@ def _resp(*, content="", tool_calls=None, finish_reason=None, error=None, top_er
     if top_error is not None:
         dct["error"] = top_error
     return dct
+
+
+
+def _http_status_error(status: int) -> httpx.HTTPStatusError:
+    """HTTP-ошибка в форме httpx: requests ушёл из зависимостей ядра."""
+    request = httpx.Request("POST", "http://backend.invalid/v1")
+    response = httpx.Response(status, request=request)
+    return httpx.HTTPStatusError("http error", request=request, response=response)
 
 
 def test_empty_completion_true_when_nothing():
@@ -79,8 +87,7 @@ def test_retriable_stream_nonnumeric_false():
     assert is_retriable_backend_error(BackendStreamError("x", status_code="content_filter")) is False
 
 def test_retriable_http_500():
-    resp = requests.Response(); resp.status_code = 500
-    assert is_retriable_backend_error(requests.exceptions.HTTPError(response=resp)) is True
+    assert is_retriable_backend_error(_http_status_error(500)) is True
 
 def test_retriable_unrelated_false():
     assert is_retriable_backend_error(ValueError("boom")) is False
@@ -107,16 +114,14 @@ def test_retriable_embedded_no_code_true():
 
 
 def test_auth_error_http_401_true():
-    resp = requests.Response(); resp.status_code = 401
-    assert is_auth_error(requests.exceptions.HTTPError(response=resp)) is True
+    assert is_auth_error(_http_status_error(401)) is True
 
 def test_auth_error_stream_401_true():
     assert is_auth_error(BackendStreamError("unauthorized", status_code=401)) is True
 
 def test_auth_error_403_and_500_false():
     for code in (403, 404, 500):
-        resp = requests.Response(); resp.status_code = code
-        assert is_auth_error(requests.exceptions.HTTPError(response=resp)) is False
+        assert is_auth_error(_http_status_error(code)) is False
 
 def test_auth_error_unrelated_false():
     assert is_auth_error(ValueError("boom")) is False

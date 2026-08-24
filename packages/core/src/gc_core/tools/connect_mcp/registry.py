@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 
-import requests
+import httpx
 
 import logging
 
@@ -277,7 +277,7 @@ def _discover_one(
                 tools_raw = _tools_list_request(
                     url, session_id=session_id, server_cfg=server_cfg, token=token
                 )
-            except requests.HTTPError:
+            except httpx.HTTPStatusError:
                 _MCP_SESSIONS.pop(server_name, None)
                 session_id = _get_or_init_session_id(
                     server_name, url, server_cfg, token=token

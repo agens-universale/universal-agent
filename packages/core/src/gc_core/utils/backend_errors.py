@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import httpx
-import requests
 from typing import NamedTuple
 
 from gc_core.utils.chat_completions_stream import BackendStreamError
@@ -46,16 +45,14 @@ class EmbeddedChoiceError(Exception):
         self.raw_code = raw_code
 
 
-#: Исключения «HTTP-статус не тот» у обоих транспортов. requests остался у
-#: тулов (fetch_url, download_file) и MCP, httpx пришёл в путь к модели —
-#: классификация ошибки не должна зависеть от того, кто из них её поднял.
-HTTP_STATUS_ERRORS = (requests.exceptions.HTTPError, httpx.HTTPStatusError)
+#: Исключение «HTTP-статус не тот». Кортеж, а не один класс: форма пережила
+#: время, когда транспортов было два (requests у тулов и MCP, httpx у модели),
+#: и вызывающие полагаются на isinstance с кортежем.
+HTTP_STATUS_ERRORS = (httpx.HTTPStatusError,)
 
-#: Сетевые сбои (таймаут, обрыв, DNS) у обоих транспортов.
+#: Сетевые сбои: таймаут, обрыв, DNS. TransportError покрывает всё это,
+#: TimeoutException оставлен явно — он читается в списке.
 HTTP_TRANSPORT_ERRORS = (
-    requests.exceptions.Timeout,
-    requests.exceptions.ConnectionError,
-    requests.exceptions.RequestException,
     httpx.TimeoutException,
     httpx.TransportError,
 )

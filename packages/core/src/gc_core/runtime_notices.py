@@ -9,7 +9,6 @@ import json
 import threading
 from typing import Callable, List, Optional
 
-import requests
 
 from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import HTTP_STATUS_ERRORS, EmbeddedChoiceError

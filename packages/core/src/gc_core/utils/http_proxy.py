@@ -4,7 +4,7 @@ HTTP proxy resolver для backend-вызовов.
 D1: trust_env=False, proxy только через явный proxies= на запросе.
 D2: одно поле backend.proxy → {http, https} в dict.
 D3: config → env (HTTPS_PROXY→HTTP_PROXY→ALL_PROXY) → None.
-D4: NO_PROXY через requests.utils.should_bypass_proxies (url-параметр обязателен).
+D4: NO_PROXY через utils.no_proxy.should_bypass_proxies (url-параметр обязателен).
 D5: скоуп v1 — только backend, не тулы.
 
 Proxies считаются НА ЗАПРОС (нужен url для D4), не один раз на сессию.
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-import requests.utils
+from gc_core.utils.no_proxy import should_bypass_proxies
 
 
 def _env_proxy(environ: dict[str, str]) -> Optional[str]:
@@ -80,7 +80,7 @@ def resolve_proxies(
     # Сливаем NO_PROXY из uppercase/lowercase; should_bypass_proxies принимает строку
     raw_no_proxy = environ.get("NO_PROXY", "") or environ.get("no_proxy", "")
 
-    if raw_no_proxy and requests.utils.should_bypass_proxies(url, no_proxy=raw_no_proxy):
+    if raw_no_proxy and should_bypass_proxies(url, raw_no_proxy):
         return None
 
     return proxies
