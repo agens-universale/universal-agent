@@ -6,7 +6,7 @@ import copy
 import logging
 from typing import Any, Dict
 
-from gc_core.tools.connect_mcp.api import call_mcp_tool
+from gc_core.tools.connect_mcp.api import acall_mcp_tool, call_mcp_tool
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.schema_optional import apply_openai_strict_object
 from gc_core.trace_id import trace_id_from_config, trace_header_name
@@ -34,7 +34,25 @@ class MCPToolWrapper:
         self._timeout = timeout
         self._default_use_retry = default_use_retry
 
+    async def acall(self, **arguments: Any) -> Any:
+        """Быстрый путь для цикла агента: диспетчер зовёт его без потока.
+
+        Форма из docs/async.md — тул с парой ``acall``/``__call__``.
+        Для SDK-транспортов вызов идёт прямо на loop вызывающего; легаси
+        (свои http/stdio на requests и subprocess) уходят в поток внутри
+        ``acall_mcp_tool``, потому что прервать их всё равно нечем.
+        """
+        return await acall_mcp_tool(
+            full_tool_name=self._full_tool_name,
+            arguments=arguments,
+            servers_cfg=self._servers_cfg,
+            tools_registry=self._tools_registry,
+            timeout=self._timeout,
+            default_use_retry=self._default_use_retry,
+        )
+
     def __call__(self, **arguments: Any) -> Any:
+        """Синхронный вход: прямые вызовы apply_tool, gc-mcp и тесты."""
         return call_mcp_tool(
             full_tool_name=self._full_tool_name,
             arguments=arguments,
