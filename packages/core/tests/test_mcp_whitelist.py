@@ -82,7 +82,12 @@ def test_filter_warns_on_unknown_names(caplog):
 
 
 def test_discover_one_applies_whitelist(monkeypatch):
-    monkeypatch.setattr(reg, "list_tools_stream_stdio", lambda **kw: list(_RAW))
+    # Шов переехал: с переездом MCP на нативный async (Задача 20) дискавери
+    # зовёт асинхронную точку `alist_tools_stream_stdio`, а не синхронный шим.
+    async def _fake(**kw):
+        return list(_RAW)
+
+    monkeypatch.setattr(reg, "alist_tools_stream_stdio", _fake)
     server_cfg = {
         "transport": "stream_stdio",
         "command": "x",

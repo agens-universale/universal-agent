@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 
+import asyncio
 import json
-import threading
 import time
 
 import requests
@@ -12,7 +12,13 @@ logger = logging.getLogger(__name__)
 from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
 from gc_core.tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry, is_persistent_stdio
-from gc_core.tools.connect_mcp.stream_client import list_tools_stream_http, list_tools_stream_sse, list_tools_stream_stdio
+from gc_core.tools.connect_mcp.stream_client import (
+    alist_tools_stream_http,
+    alist_tools_stream_sse,
+    alist_tools_stream_stdio,
+)
+from gc_core.tools.connect_mcp.abandonable import run_abandonable
+from gc_core.utils.aio_compat import run_coro_blocking
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -164,6 +170,31 @@ def _apply_tools_whitelist(
     return filtered
 
 
+async def _afetch_tools_sdk(
+    effective_transport: str,
+    *,
+    url: Optional[str],
+    server_cfg: Dict[str, Any],
+    token: Optional[str],
+    timeout: float,
+) -> list:
+    """Список тулов по SDK-транспорту, нативно, без потока.
+
+    Синхронные имена ``list_tools_stream_*`` — шимы через
+    ``run_coro_blocking``; из уже асинхронного контекста они завели бы лишний
+    loop в отдельном потоке. Здесь берём асинхронные точки напрямую.
+    """
+    if effective_transport == "stream_sse":
+        return await alist_tools_stream_sse(
+            url=url, server_cfg=server_cfg, token=token, timeout=timeout
+        )
+    if effective_transport == "stream_http":
+        return await alist_tools_stream_http(
+            url=url, server_cfg=server_cfg, token=token, timeout=timeout
+        )
+    return await alist_tools_stream_stdio(server_cfg=server_cfg, timeout=timeout)
+
+
 def _discover_one(
     server_name: str,
     server_cfg: Dict[str, Any],
@@ -209,24 +240,16 @@ def _discover_one(
             server_cfg, server_name=server_name
         )
 
-        if effective_transport == "stream_sse":
-            tools_raw = list_tools_stream_sse(
-                url=url,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-            )
-        elif effective_transport == "stream_http":
-            tools_raw = list_tools_stream_http(
-                url=url,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-            )
-        elif transport == "stream_stdio":
-            tools_raw = list_tools_stream_stdio(
-                server_cfg=server_cfg,
-                timeout=timeout,
+        if effective_transport in ("stream_sse", "stream_http", "stream_stdio"):
+            # SDK-транспорты асинхронны насквозь — зовём их без потока.
+            tools_raw = run_coro_blocking(
+                _afetch_tools_sdk(
+                    effective_transport,
+                    url=url,
+                    server_cfg=server_cfg,
+                    token=token,
+                    timeout=timeout,
+                )
             )
         elif is_persistent_stdio(server_cfg):
             session = PersistentStdioRegistry.instance().get_or_create(
@@ -338,26 +361,31 @@ def _build_tools_registry(
 
     results: Dict[str, tuple] = {}
 
-    def _worker(name, cfg):
-        result = _discover_one(name, cfg, timeout=discovery_timeout_sec)
+    async def _one(name: str, cfg: Dict[str, Any]) -> None:
+        # _discover_one синхронна (легаси-транспорты на requests/subprocess),
+        # поэтому уходит в поток. НЕ asyncio.to_thread: его пул дефолтный, и
+        # asyncio.run на выходе дожидается всех его воркеров — зависший сервер
+        # держал бы процесс после истёкшего дедлайна (см. abandonable.py).
+        result = await run_abandonable(
+            _discover_one, name, cfg, timeout=discovery_timeout_sec
+        )
         results[name] = result
         if on_progress is not None:
             on_progress(name, result[1])
 
-    threads = []
-    for name, cfg in items:
-        th = threading.Thread(
-            target=_worker,
-            args=(name, cfg),
-            daemon=True,
-            name=f"mcp-discover-{name}",
-        )
-        th.start()
-        threads.append((name, th))
+    async def _all() -> None:
+        # Общий дедлайн на весь веер — как и был. Не успевшие попадают в ветку
+        # «таймаут подключения» ниже: их просто нет в results.
+        try:
+            async with asyncio.timeout(discovery_timeout_sec):
+                await asyncio.gather(
+                    *(_one(name, cfg) for name, cfg in items),
+                    return_exceptions=True,
+                )
+        except TimeoutError:
+            pass
 
-    deadline = time.monotonic() + discovery_timeout_sec
-    for name, th in threads:
-        th.join(timeout=max(0.0, deadline - time.monotonic()))
+    run_coro_blocking(_all())
 
     for name, cfg in items:
         if name in results:
