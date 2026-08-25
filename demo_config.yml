@@ -53,11 +53,18 @@ level: default
 #   flash:                                  # алиас — язык slots/assign
 #     model: qwen/qwen-2.5-flash            # провайдерский id; опущен → id = алиас
 #     url: https://openrouter.ai/api/v1/chat/completions
-#     token: sk-or-...                      # "" = явно без авторизации; нет ключа →
-#                                            # наследование Authorization из backend
+#     token: sk-or-...                      # адрес и токен — ПАРА: задан один →
+#                                            # задавайте и второй; "" = «без
+#                                            # авторизации»; нет обоих → пара
+#                                            # наследуется из backend
 #   glm-local:
 #     url: http://127.0.0.1:8014/v1/chat/completions
-#     # model нет → провайдерский id = "glm-local"; token нет → наследуется backend
+#     token: ""                              # локальный сервер ключа не требует
+#     # model нет → провайдерский id = "glm-local"
+#   deepseek-max:
+#     model: deepseek/deepseek-chat-v3-0324
+#     url: https://api.provider.example/v1/chat/completions
+#     token: sk-...
 #
 # slots:                                    # уровни — УКАЗАТЕЛИ в models (не копии)
 #   light: flash

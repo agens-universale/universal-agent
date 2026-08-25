@@ -10,7 +10,7 @@
   трёх местах, роняет этот тест.
 - комментарии не расходятся со схемой: минимум — все ключи демо парсятся
   схемой (покрыто первым пунктом), плюс token-примеры демонстрируют обе
-  семантики (наследование при отсутствии ключа vs явное значение).
+  семантики своего токена (значение vs `token: ""`).
 """
 from pathlib import Path
 
@@ -90,26 +90,29 @@ def test_demo_profile_covers_all_service_consumers(demo_profile_raw):
 
 
 def test_demo_profile_models_demonstrate_both_token_semantics(demo_profile_raw):
-    """Хотя бы одна модель с явным token (не наследует), хотя бы одна — без
-    ключа token вовсе (наследует Authorization из эффективного backend)."""
+    """Обе семантики СВОЕГО токена: значение (свой ключ провайдера) и `token: ""`
+    («сервер не требует авторизации»). Третьей — «ключа token нет» — у записи со
+    своим адресом больше не существует: адрес и токен задаются парой (§2), и
+    справочник обязан показывать именно ту форму, которую примет валидатор."""
     models = demo_profile_raw["models"]
-    assert any("token" in entry for entry in models.values()), (
-        "нет примера модели с явным token"
+    assert any(entry.get("token") for entry in models.values()), (
+        "нет примера модели со своим token"
     )
-    assert any("token" not in entry for entry in models.values()), (
-        "нет примера модели без token (наследование от backend)"
+    assert any(entry.get("token") == "" for entry in models.values()), (
+        'нет примера модели с token: "" (адрес без авторизации)'
     )
 
 
 def test_demo_profile_has_full_and_minimal_registry_forms(demo_profile_raw):
-    """Полная форма (model+url+token+pricing+backend) и минимальная (только url)."""
+    """Полная форма (model+url+token+pricing+backend) и минимальная. Минимальная
+    после правила пары (§2) — это ровно `url` + `token`, а не «только url»."""
     models = demo_profile_raw["models"]
     full_form_keys = {"model", "url", "token", "pricing", "backend"}
     assert any(full_form_keys <= set(entry) for entry in models.values()), (
         "нет примера полной формы записи модели (model/url/token/pricing/backend)"
     )
-    assert any(set(entry) == {"url"} for entry in models.values()), (
-        "нет примера минимальной формы записи модели (только url)"
+    assert any(set(entry) == {"url", "token"} for entry in models.values()), (
+        "нет примера минимальной формы записи модели (url + token)"
     )
 
 

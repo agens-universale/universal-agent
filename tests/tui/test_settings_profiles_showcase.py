@@ -83,7 +83,7 @@ async def test_profiles_section_lists_both_roots_with_source(tmp_path, monkeypat
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     _write(tmp_path / "base" / "profiles" / "home.yml",
           "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
 
@@ -118,7 +118,7 @@ async def test_profiles_section_tie_break_one_row_shadow_in_hint(tmp_path, monke
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     proj_profile = _write(project_dir / ".gc" / "profiles" / "work.yml",
-                          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+                          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     base_profile = _write(tmp_path / "base" / "profiles" / "work.yml",
                           "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
 
@@ -146,7 +146,7 @@ async def test_profiles_section_overlay_suffix_shows_plus_security(tmp_path, mon
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n"
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\n"
           "slots:\n  default: flash\n"
           "security:\n  command_moderation:\n    enabled: true\n")
 
@@ -167,7 +167,7 @@ async def test_profiles_section_slot_composition_shown_inline(tmp_path, monkeypa
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n  glm:\n    url: http://y\n"
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\n  glm:\n    url: http://y\n    token: \"\"\n"
           "slots:\n  default: glm\n  light: flash\n")
 
     app = app_mod.TuiApp(config=_base_dict())
@@ -231,7 +231,7 @@ async def test_activate_project_profile_writes_project_config_creates_file(tmp_p
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     project_config = project_dir / ".gc" / "config.yml"
     assert not project_config.exists()
 
@@ -397,7 +397,7 @@ async def test_shadow_hint_shown_when_profile_active(tmp_path, monkeypatch):
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
     _write(tmp_path / "base" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
 
     app = app_mod.TuiApp(config={**_base_dict(), "profile": "work", "models": {"flash": {}}})
     async with app.run_test() as pilot:
@@ -520,7 +520,7 @@ async def test_config_screen_header_shows_profile_level_model(tmp_path, monkeypa
         lambda: tmp_path / "no-managed.yml",
     )
     profile_path = _write(project_dir / ".gc" / "profiles" / "work.yml",
-                          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+                          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
 
     app = app_mod.TuiApp(config={"profile": "work", "level": "default",
@@ -637,7 +637,7 @@ def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
 
     from config import load_config_ex
@@ -1084,7 +1084,7 @@ async def test_profiles_cursor_survives_row_disappearing_under_it(tmp_path, monk
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     profiles_dir = tmp_path / "base" / "profiles"
     _write(profiles_dir / "home.yml", "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
-    _write(profiles_dir / "work.yml", "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+    _write(profiles_dir / "work.yml", "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:

@@ -49,6 +49,43 @@ def validate_level_value(value: str) -> str:
     return value
 
 
+def validate_registry_pairs(raw: dict, source: str = "") -> None:
+    """§3, точка B: проверка правила пары на СЫРОМ документе одного слоя, до слияния.
+
+    Нужна отдельно от валидатора `ModelEntry`: слои сливаются `deep_merge` рекурсивно по
+    ключам, поэтому слой, задавший ОДИН адрес поверх чужой полной пары, даёт итоговую
+    запись с полной парой — и проверка итогового документа молчит, пока токен базы уходит
+    на адрес слоя. Здесь же видно, ЧЕЙ это файл.
+
+    Работает по сырому словарю намеренно: `url: null` («слой снимает адрес») отличается от
+    отсутствия ключа только наличием ключа, и после pydantic это различие уже потеряно."""
+    models = (raw or {}).get("models")
+    if not isinstance(models, dict):
+        return
+    prefix = f"{source}: " if source else ""
+    for alias, entry in models.items():
+        if not isinstance(entry, dict):
+            continue
+        backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+        headers = (backend.get("chat_completion_headers")
+                   if isinstance(backend.get("chat_completion_headers"), dict) else {})
+        has_address = bool(entry.get("url") or backend.get("completions_url")
+                           or backend.get("proxy"))
+        has_token = "token" in entry and entry["token"] is not None
+        has_token = has_token or headers.get("Authorization") is not None
+        if has_address and not has_token:
+            raise ValueError(
+                f'{prefix}models.{alias}: задан свой адрес, но не задан токен — укажите '
+                'token (или token: "" — «сервер не требует авторизации»), либо уберите '
+                "адрес, чтобы запись работала через общее подключение"
+            )
+        if has_token and not has_address:
+            raise ValueError(
+                f"{prefix}models.{alias}: задан свой токен, но не задан адрес — укажите "
+                "url, либо уберите token, чтобы запись работала через общее подключение"
+            )
+
+
 class ModelEntry(BaseModel):
     """Запись реестра `models`: алиас (ключ словаря) → провайдерская модель + точечные
     оверлеи backend/pricing поверх эффективной секции backend."""
@@ -76,6 +113,38 @@ class ModelEntry(BaseModel):
             raise ValueError(
                 "models.<alias>: url и backend.completions_url — два написания одного "
                 "и того же — оставьте что-то одно"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_connection_pair(self) -> "ModelEntry":
+        """§2: своё подключение задаётся ЦЕЛИКОМ. Адрес и токен принадлежат одному
+        провайдеру: половина пары либо уносит общий ключ на чужой хост (свой адрес без
+        токена), либо уезжает вслед за сменой общего адреса (свой токен без адреса).
+
+        Прокси считается адресом: он определяет, куда физически уходит запрос
+        (`connect_backend.resolve_network_params`). `use_ssl`/сертификаты — не адрес, у них
+        своё предупреждение (спека §7)."""
+        backend = self.backend
+        has_address = bool(
+            self.url is not None
+            or (backend is not None and (backend.completions_url or backend.proxy))
+        )
+        has_token = bool(
+            self.token is not None
+            or (backend is not None
+                and backend.chat_completion_headers.get("Authorization") is not None)
+        )
+        if has_address and not has_token:
+            raise ValueError(
+                'models.<alias>: задан свой адрес, но не задан токен — укажите token '
+                '(или token: "" — «сервер не требует авторизации»), либо уберите адрес, '
+                "чтобы запись работала через общее подключение"
+            )
+        if has_token and not has_address:
+            raise ValueError(
+                "models.<alias>: задан свой токен, но не задан адрес — укажите url, "
+                "либо уберите token, чтобы запись работала через общее подключение"
             )
         return self
 

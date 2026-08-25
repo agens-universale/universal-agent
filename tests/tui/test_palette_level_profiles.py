@@ -468,7 +468,7 @@ def _picker_app(tmp_path, monkeypatch, *, base_profile="", session=None):
     profiles_dir = tmp_path / "base" / "profiles"
     profiles_dir.mkdir(parents=True)
     (profiles_dir / "smoke.yml").write_text(
-        "models:\n  gc:\n    url: http://x\nslots:\n  default: gc\n", encoding="utf-8")
+        "models:\n  gc:\n    url: http://x\n    token: \"\"\nslots:\n  default: gc\n", encoding="utf-8")
     (profiles_dir / "alpha.yml").write_text("models: {}\n", encoding="utf-8")
 
     from tui.app import TuiApp
@@ -663,7 +663,7 @@ def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
     base_dir = tmp_path / "base"
     (base_dir / "profiles").mkdir(parents=True)
     (base_dir / "profiles" / "work.yml").write_text(
-        "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n",
+        "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n",
         encoding="utf-8")
     (base_dir / "config.yml").write_text(
         "profile: work\nbackend:\n  completions_url: http://b\n", encoding="utf-8")

@@ -109,8 +109,8 @@ def test_begin_turn_refixes_model_between_turns_when_level_changes():
     только через явный begin_turn, не сама по себе внутри текущего хода."""
     snapshot = _snapshot({
         "models": {
-            "fast": {"url": "http://fast/v1"},
-            "smart": {"url": "http://smart/v1"},
+            "fast": {"url": "http://fast/v1", "token": ""},
+            "smart": {"url": "http://smart/v1", "token": ""},
         },
         "slots": {"light": "fast", "max": "smart"},
     })
@@ -137,8 +137,8 @@ def test_begin_turn_refixes_model_between_turns_when_level_changes():
 def _two_slot_router(level_box: dict) -> ModelRouter:
     snapshot = _snapshot({
         "models": {
-            "fast": {"url": "http://fast/v1"},
-            "smart": {"url": "http://smart/v1"},
+            "fast": {"url": "http://fast/v1", "token": ""},
+            "smart": {"url": "http://smart/v1", "token": ""},
         },
         "slots": {"light": "fast", "max": "smart"},
     })

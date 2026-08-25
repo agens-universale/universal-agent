@@ -20,6 +20,7 @@ level: default
 # models:
 #   glm-local:
 #     url: http://127.0.0.1:8014/v1/chat/completions
+#     token: ""                # адрес и токен задаются вместе; "" = «без авторизации»
 # slots:
 #   default: glm-local
 # assign:

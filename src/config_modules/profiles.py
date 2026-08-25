@@ -17,7 +17,7 @@ import yaml
 
 from config_modules.compat import apply_compat
 from config_modules.env_interpolation import resolve_env_placeholders
-from config_modules.model_registry import RESERVED_WORDS
+from config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
 from config_modules.root import AppConfig
 
 
@@ -164,6 +164,10 @@ def load_profile_document(
     for fact in apply_compat(raw):
         if notices is not None:
             notices.append(f"{path}: {fact}")
+    # Пары «адрес+токен» — по СЫРОМУ документу и ДО схемы: слои сливаются позже,
+    # и половина пары, наложенная на чужую полную, даёт корректный на вид итог,
+    # пока токен базы уходит на адрес этого файла. Здесь же видно, чей это файл.
+    validate_registry_pairs(raw, source=str(path))
     AppConfig.model_validate(raw)
     if "profile" in raw:
         raise ValueError(

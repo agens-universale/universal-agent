@@ -20,7 +20,7 @@ from config_modules.security import (
     apply_cli_command_moderation_overrides,
 )
 from config_modules.compat import apply_compat
-from config_modules.model_registry import ModelEntry
+from config_modules.model_registry import ModelEntry, validate_registry_pairs
 from config_modules.model_sections_validation import validate_model_sections
 from config_modules.profiles import (
     ProfileMeta,
@@ -162,6 +162,10 @@ def apply_cli_overrides(
     if extra_overrides:
         resolved = resolve_env_placeholders(extra_overrides)
         config_dict.update(resolved)
+        if "models" in resolved:
+            # `--models` задаёт весь реестр строкой и идёт мимо схемы (плоский
+            # config_dict заполняется уже после валидации) — правило пары прогоняем явно.
+            validate_registry_pairs({"models": resolved["models"]}, source="--models")
         # Признак «ключ пришёл именно из CLI» (спека §2): нужен, среди прочего,
         # для детекта легаси-форса (см. cli_forces_legacy_model ниже).
         explicit = set(config_dict.get("cli_explicit_keys") or ())
@@ -448,6 +452,7 @@ def load_config_ex(
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
     raw_config = resolve_env_placeholders(raw_config)
+    validate_registry_pairs(raw_config, source=str(base_path))
 
     # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
     # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
@@ -456,6 +461,7 @@ def load_config_ex(
         with open(managed_path, "r", encoding="utf-8") as file:
             managed_raw = yaml.safe_load(file) or {}
         managed_raw = resolve_env_placeholders(managed_raw)
+        validate_registry_pairs(managed_raw, source=str(managed_path))
         raw_config = deep_merge(raw_config, managed_raw)
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
@@ -464,6 +470,7 @@ def load_config_ex(
         with open(project_path, "r", encoding="utf-8") as file:
             project_raw = yaml.safe_load(file) or {}
         project_raw = resolve_env_placeholders(project_raw)
+        validate_registry_pairs(project_raw, source=project_path)
         raw_config = deep_merge(raw_config, project_raw)
 
     # Профиль (спека §3): указатель резолвится из пре-профильного мержа выше (ось 1,
