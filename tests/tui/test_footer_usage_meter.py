@@ -101,7 +101,7 @@ async def test_no_usage_segment_when_runner_lacks_method(tmp_path):
         scr._active_task_id = "t1"
         app.active_runner = _Bare()
         right = scr._compose_footer_right().plain      # не должно кинуть
-        assert right == "m"
+        assert right == "● m"
 
 
 @pytest.mark.asyncio

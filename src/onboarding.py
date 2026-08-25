@@ -8,7 +8,7 @@
 (сертификатная авторизация — без статического токена). Подсказка перечисляет только
 реально незаполненное; если всё покрыто — позитивное «настроен».
 """
-from typing import Any, Callable, Dict, List, NamedTuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 from urllib.parse import urlparse
 
 import config_raw
@@ -170,8 +170,33 @@ def pending_requirements(config: Dict[str, Any]) -> List[_Requirement]:
 
 
 def is_unconfigured(config: Dict[str, Any]) -> bool:
-    """True, если конфиг ещё не готов к запуску (есть незакрытое требование)."""
+    """True, если конфиг ещё не готов к запуску (есть незакрытое требование).
+
+    Спека §11: заполненный merged-реестр моделей (`models` непуст, любой источник —
+    базовый конфиг, профиль, проектный слой) закрывает требование самостоятельно —
+    легаси-плейсхолдеры (`backend.completions_url`/`agent.model`) тогда не блокируют,
+    они лишь база наследования (`active_profile_or_registry_note`)."""
+    if config.get("models"):
+        return False
     return bool(pending_requirements(config))
+
+
+def active_profile_or_registry_note(config: Dict[str, Any]) -> Optional[str]:
+    """Спека §11: активный merged-реестр моделей ИЛИ выбранный профиль (любой
+    источник — базовый указатель, проектный, CLI) — мастер онбординга пишет
+    плоские легаси-поля (`backend.completions_url`/`agent.model`), но при живом
+    реестре/профиле они станут только БАЗОЙ НАСЛЕДОВАНИЯ для незаданного, а не
+    рабочей моделью (Router решает резолв через слоты/привязки, §6). Профиль —
+    более конкретная причина, чем голый реестр (частный случай §1), поэтому
+    проверяется первым."""
+    profile = config.get("profile") or None
+    if profile:
+        return (f'действует профиль "{profile}" — эти поля станут базой наследования, '
+                'а не рабочей моделью')
+    if config.get("models"):
+        return ("действует реестр моделей — эти поля станут базой наследования, "
+                "а не рабочей моделью")
+    return None
 
 
 def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli",
@@ -183,9 +208,11 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     just_created=True → конфиг создан этим запуском (иначе уже существовал).
     Если модель уже задана (а адрес/токен — нет), добавляем ремарку: эти поля
     нужны для preset-модели; либо укажи свою модель и адрес/токен под неё."""
+    profile_note = active_profile_or_registry_note(config)
     pending = pending_requirements(config)
     if not pending:
-        return f"[gc] Конфиг настроен: {config_path} — можно запускать."
+        base = f"[gc] Конфиг настроен: {config_path} — можно запускать."
+        return f"{base}\n[gc] {profile_note}." if profile_note else base
     fields = "\n".join(f"    • {r.hint}" for r in pending)
     note = ""
     if _model_set(config):
@@ -200,6 +227,8 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     else:
         header = "  GigaCode — настройка не завершена\n\n"
         location = f"  Конфигурация:\n    {config_path}\n\n"
+    if profile_note:
+        note += f"\n  {profile_note}.\n"
     return (
         f"\n{header}{location}"
         f"  Не заполнены обязательные поля:\n{fields}\n"

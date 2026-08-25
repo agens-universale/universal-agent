@@ -59,6 +59,15 @@ HANDOFF CONTRACT
         """
         ...
 
+    def finalize_role(self, ctx: Any, state: Any) -> None:
+        """Хук для субагентов, чья роль резолвится ПОСЛЕ сборки child-контекста
+        (нужен ``ctx.model_router``/сетевые параметры — например, LLM-генерация
+        роли у ``special_agent``). Вызывается runner'ом между ``create_instance``
+        и ``get_initial_data``. По умолчанию no-op — субагенты со статичной
+        ``agent_role`` (заданной на уровне класса) ничего не резолвят.
+        """
+        return
+
     @abstractmethod
     def get_initial_data(self) -> Tuple[str, str]:
         """

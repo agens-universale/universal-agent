@@ -20,6 +20,7 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     # --- Сентинелы онбординга: placeholder-значения, которые пользователь обязан вписать ---
     "backend.completions_url",                  # "http://your-backend:..." — инструкция вписать URL
     "backend.chat_completion_headers.Authorization",  # "Bearer <ВПИШИТЕ_ТОКЕН>" — инструкция вписать токен
+    "agent.model",                              # "<ВПИШИТЕ_МОДЕЛЬ>" — модель выбирается в мастере первого запуска
 
     # --- Preset-режим шаблона: chat_completions вместо responses (кодового дефолта) ---
     "backend.api_mode",                         # шаблон ориентирован на chat_completions
@@ -29,7 +30,6 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     "backend.use_retry",                        # true: рекомендованная настройка для продакшн
 
     # --- Preset-значения агента: рекомендованные настройки для продакшн-использования ---
-    "agent.model",                              # "gigacode_agent_v1.6_rc" — рекомендованная модель
     "agent.use_local_subagents",               # true: включены subagents в шаблоне
     "agent.subagent_max_steps",                # 500 вместо 100 — больший лимит для продакшн
     "agent.client_name",                       # "gc_ua_agent" — имя клиента для gc-ua
@@ -120,6 +120,7 @@ EXPERT_ONLY_KEYS: set = {
     "chat_completions.llm.max_tokens",
     "chat_completions.llm.completion_kwargs",
     "chat_completions.llm.judge_max_tokens",  # запас под CoT судей; секции нет в шаблоне
+    "chat_completions.llm.subagent_role_max_tokens",  # лимит генерации роли special_agent
     # --- backend mTLS: корп-сценарий, справочник — demo_config.yml ---
     "backend.cert_path",
     "backend.key_path",
@@ -177,6 +178,7 @@ EXPERT_ONLY_KEYS: set = {
     "project_memory.check_interval_messages",
     "project_memory.max_chars",
     "project_memory.max_append_chars",
+    "project_memory.compaction_max_tokens",
 
     # --- quality_gate: лимиты digest для finish gate ---
     # Экспертный тюнинг; дефолты подходят для большинства сценариев.
@@ -216,6 +218,22 @@ EXPERT_ONLY_KEYS: set = {
     "working_memory.max_chars_state",
     "working_memory.max_chars_knowledge",
     "working_memory.total_budget_chars",
+
+    # --- Профили v2 (волна A): секции models/slots/assign ---
+    # Схема готова (Task 1); полный документированный пример в шаблоне — Task 15.
+    # Указатели profile/level уже в шаблоне (совпадают с кодовыми дефолтами).
+    "models",
+    "slots.light",
+    "slots.default",
+    "slots.max",
+    "assign.finish_gate",
+    "assign.text_answer_judge",
+    "assign.command_judge",
+    "assign.summary",
+    "assign.intent_scope",
+    "assign.memory_compaction",
+    "assign.auto_judge",
+    "assign.subagents",
 }
 
 

@@ -20,6 +20,62 @@
 # CLI args (--max_steps 999) — самые сильные, перебивают и global, и project.
 # ---------------------------------------------------------------------------
 
+# -----------------------------------------------------------------------------
+# Профили и уровни моделей: указатели на активный профиль/уровень.
+# Подробно — docs/configuration.md, раздел «Профили и уровни моделей».
+#
+# profile: "" — какой профиль активен ("" или отсутствие ключа → без профиля).
+# level: default — глобальный дефолт уровня: light | default | max (нет ключа → default).
+#
+# Оба ключа выставляются с ЧЕТЫРЁХ поверхностей (по возрастанию приоритета —
+# обычные правила config precedence):
+#   1) ключ в config.yml (user < managed config.local.yml < проектный .gc/config.yml);
+#   2) CLI: --profile <имя>, --level <уровень> (перебивает файлы для этого запуска);
+#   3) палитра TUI: /profiles <имя>, /level <уровень> (сессионный тоггл — перебивает
+#      файлы и CLI, переживает смену профиля/конфига до конца сессии);
+#   4) Settings TUI (витрина профилей/уровня) — записывает в проектный/базовый
+#      config.yml (та же позиция, что и ручная правка ключа выше).
+#
+# Контент выбранного профиля (секции models/slots/assign + любые обычные секции
+# как оверлей) мержится ПОВЕРХ всех файловых слоёв, но ПОД CLI и сессией.
+profile: ""
+level: default
+
+# -----------------------------------------------------------------------------
+# Секции моделей: models (реестр) / slots (уровни → алиас) / assign (привязки
+# потребителей) — ОБЫЧНЫЕ секции конфига, та же схема в config.yml и в профиле
+# (схема одна и та же). Полный документированный образец — demo_profile.yml (все семь
+# субагентов поимённо + все служебные потребители + auto_judge + оверлей-пример).
+# Ниже — короткая версия прямо в config.yml (профиль не обязателен для работы
+# реестра моделей).
+# -----------------------------------------------------------------------------
+# models:
+#   flash:                                  # алиас — язык slots/assign
+#     model: qwen/qwen-2.5-flash            # провайдерский id; опущен → id = алиас
+#     url: https://openrouter.ai/api/v1/chat/completions
+#     token: sk-or-...                      # адрес и токен — ПАРА: задан один →
+#                                            # задавайте и второй; "" = «без
+#                                            # авторизации»; нет обоих → пара
+#                                            # наследуется из backend
+#   glm-local:
+#     url: http://127.0.0.1:8014/v1/chat/completions
+#     token: ""                              # локальный сервер ключа не требует
+#     # model нет → провайдерский id = "glm-local"
+#   deepseek-max:
+#     model: deepseek/deepseek-chat-v3-0324
+#     url: https://api.provider.example/v1/chat/completions
+#     token: sk-...
+#
+# slots:                                    # уровни — УКАЗАТЕЛИ в models (не копии)
+#   light: flash
+#   default: glm-local
+#
+# assign:                                   # справа — уровень (индирекция через slots)
+#   finish_gate: light                      # ИЛИ алиас (жёсткий пин конкретной модели)
+#   subagents:
+#     subagent_planner: glm-local           # конкретный субагент — жёсткий пин алиасом
+#     "*": default                          # остальные субагенты — уровнем
+
 backend:
   # responses | chat_completions
   api_mode: chat_completions
@@ -98,6 +154,9 @@ chat_completions:
     max_tokens: 8192
     # Судьи (command_moderation, finish_gate / text_answer): запас под обязательный CoT/<think>.
     judge_max_tokens: 10000
+    # Генерация роли special_agent (subagent:subagent_special_agent) — одноразовый
+    # системный промпт, без бюджета под CoT.
+    subagent_role_max_tokens: 4096
     completion_kwargs:
       separate_reasoning: false
       chat_template_kwargs:
@@ -291,6 +350,8 @@ project_memory:
   check_interval_messages: 5
   max_chars: 10000
   max_append_chars: 3000
+  # Лимит ответа LLM при append-overflow компакции project_memory.md.
+  compaction_max_tokens: 4000
 
 # Доп. strip-теги для for_model / aux LLM (summary, intent, judges, compaction).
 # <think> всегда on в коде и выключить нельзя; сюда — только extras.

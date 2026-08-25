@@ -81,7 +81,7 @@ async def test_settings_menu_lists_sections_with_values(tmp_path):
         app.push_screen(_mk_screen(config_path=str(cfg_file)))
         await pilot.pause()
         rows = _menu_lines(app.screen)
-        assert len(rows) == 5
+        assert len(rows) == 6
         assert any("Подключение" in r and "http://host" in r and "Bearer" in r for r in rows)
         assert not any("secret-token" in r for r in rows)  # маска!
         assert any("Модель" in r and "test-model" in r for r in rows)
@@ -147,7 +147,7 @@ async def test_settings_ctrl_pgup_pgdn_switch_sections():
         app.push_screen(_mk_screen())
         await pilot.pause()
         scr = app.screen
-        await pilot.press("down", "down", "enter")   # секция MCP
+        await pilot.press("down", "down", "down", "enter")   # секция MCP
         assert scr._view == _MCP
         await pilot.press("ctrl+pagedown")                   # → Режимы работы
         assert scr._view == _MODES
@@ -175,7 +175,7 @@ async def test_ctrl_pgdn_works_with_focus_in_input():
         await pilot.pause()
         assert scr._view == 1
         assert app.screen is scr                        # приложение живо
-        await pilot.press("ctrl+pagedown")               # секция 1 → 2 (MCP)
+        await pilot.press("ctrl+pagedown")               # секция 1 → 2 (Профили)
         await pilot.pause()
         assert scr._view == 2
         assert app.screen is scr
@@ -434,7 +434,7 @@ async def test_update_section_shows_version_and_sync_row(tmp_path, monkeypatch):
                                        on_apply=lambda: None,
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "enter")   # меню → Обновление (5/5)
+        await pilot.press("down", "down", "down", "down", "down", "enter")   # меню → Обновление (6/6)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in app.screen.query(".set-dyn"))
         assert "v0.3.0" in body and "master" in body
@@ -469,7 +469,7 @@ async def test_update_section_sync_runs_and_reports(tmp_path, monkeypatch):
                                        on_apply=lambda: applied.append(1),
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "enter", "enter")  # секция → выполнить sync
+        await pilot.press("down", "down", "down", "down", "down", "enter", "enter")  # секция → выполнить sync
         await pilot.pause()
         assert called["path"] == str(cfg_file)
         assert applied == [1]                          # конфиг перечитан после sync
@@ -509,7 +509,7 @@ async def test_update_section_dev_install_hides_source(monkeypatch, tmp_path):
                                        on_apply=lambda: None,
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "enter")
+        await pilot.press("down", "down", "down", "down", "down", "enter")
         body = " ".join(str(w.render()) for w in app.screen.query(".set-dyn"))
         assert "установка из исходников" in body
         assert "Обновить config.yml" in body           # sync доступен и для dev
@@ -794,7 +794,7 @@ async def test_mcp_section_mounts_editor(tmp_path, monkeypatch):
                              on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
         app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("down", "down", "enter")   # секция MCP (idx=2)
+        await pilot.press("down", "down", "down", "enter")   # секция MCP (idx=3)
         await pilot.pause()
         assert scr.query(McpSectionEditor)
 
@@ -818,7 +818,7 @@ async def test_mcp_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
                              on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
         app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("down", "down", "enter")   # секция MCP (idx=2)
+        await pilot.press("down", "down", "down", "enter")   # секция MCP (idx=3)
         await pilot.pause()
         ed = scr.query_one(McpSectionEditor)
         assert ed.request_install(["office"], verb="Обновить") is True   # поднять confirm-баннер
@@ -826,13 +826,13 @@ async def test_mcp_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
         assert ed.awaiting_confirm is True
         await pilot.press("pagedown")                        # попытка листнуть секцию
         await pilot.pause()
-        assert scr._view == 2                                # секция НЕ сменилась
+        assert scr._view == 3                                # секция НЕ сменилась
         assert ed.awaiting_confirm is True                   # баннер на месте
         assert list(ed.query(".mcp-confirm"))                # виджет баннера жив
         await pilot.press("escape")                          # отмена confirm
         await pilot.pause()
         assert ed.awaiting_confirm is False
-        assert scr._view == 2                                # escape отменил confirm, не секцию
+        assert scr._view == 3                                # escape отменил confirm, не секцию
 
 
 async def test_apply_endpoint_oserror_shows_notice(tmp_path, monkeypatch):
@@ -1044,7 +1044,7 @@ async def test_run_sync_on_apply_error_shows_notice(tmp_path, monkeypatch):
             probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        await pilot.press("down", "down", "down", "down", "enter", "enter")
+        await pilot.press("down", "down", "down", "down", "down", "enter", "enter")
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "не перечитан" in body and "reload failed" in body
@@ -1072,7 +1072,7 @@ async def test_esc_from_editor_section_clears_editor_and_restores_menu(tmp_path)
         await pilot.press("escape")                    # назад в меню
         await pilot.pause()
         assert not scr.query(ConnectionEditor)         # редактор удалён (баг 2)
-        assert len(scr.query(".set-menurow")) == 5         # меню восстановлено во фрейме
+        assert len(scr.query(".set-menurow")) == 6         # меню восстановлено во фрейме
         # мусор редактора (hint/input) не остался
         from textual.widgets import Input
         assert not scr.query(Input)
@@ -1899,7 +1899,7 @@ async def test_delete_key_in_mcp_section_reaches_screen(tmp_path, monkeypatch):
                              on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
         app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("down", "down", "enter")   # секция MCP (idx=2)
+        await pilot.press("down", "down", "down", "enter")   # секция MCP (idx=3)
         await pilot.pause()
         ed = scr.query_one(McpSectionEditor)
         for _ in range(50):                                  # статусы пакетов грузит фоновый воркер
@@ -2386,20 +2386,20 @@ async def test_save_without_session_does_not_warn_about_counters(tmp_path):
 
 
 def test_sections_composition_merged():
-    """5 секций, «Подключение» первая, «Режимы работы» между MCP-группой и
-    Обновлением; редакторные {conn,model}, probe {conn}."""
+    """6 секций, «Подключение» первая, «Профили» сразу за «Модель», «Режимы
+    работы» между MCP-группой и Обновлением; редакторные {conn,model}, probe {conn}."""
     from tui.screens import settings as s
-    assert s.SECTIONS == ("Подключение", "Модель", "MCP-серверы",
+    assert s.SECTIONS == ("Подключение", "Модель", "Профили", "MCP-серверы",
                           "Режимы работы", "Обновление")
-    assert (s._CONNECTION == 0 and s._MODEL == 1 and s._MCP == 2
-            and s._MODES == 3 and s._UPDATE == 4)
+    assert (s._CONNECTION == 0 and s._MODEL == 1 and s._PROFILES == 2
+            and s._MCP == 3 and s._MODES == 4 and s._UPDATE == 5)
     assert s._EDITOR_SECTIONS == {s._CONNECTION, s._MODEL}
     assert s._PROBE_SECTIONS == {s._CONNECTION}
 
 
 def test_sections_order_contains_modes():
     from tui.screens.settings import SECTIONS
-    assert SECTIONS == ("Подключение", "Модель", "MCP-серверы",
+    assert SECTIONS == ("Подключение", "Модель", "Профили", "MCP-серверы",
                         "Режимы работы", "Обновление")
 
 
@@ -2740,7 +2740,7 @@ async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(tmp_
         open_settings_section(scr, "Режимы работы")
         await pilot.pause()
         assert scr._view == settings_section_index("Режимы работы")
-        names = list(tg.TOGGLES.keys())
+        names = tg.group_toggle_names("rigor")   # fake — default group="rigor"
         fake_idx = names.index("fake")
         row_texts = [str(w.render()) for w in scr.query(".set-row")]
         assert any("фиктивный режим" in r and "f0" in r for r in row_texts)
@@ -2903,7 +2903,7 @@ async def test_modes_row_shows_session_override_note(tmp_path):
     показывают ГЛОБАЛ (секция правит его), не эффективное. Терминал шире (200
     колонок) — общие колонки секции выросли (глиф дерева + возможная 4-я позиция
     трека /rigor), хвост оверрайда проверяется независимо от ширины."""
-    from tui.toggles import TOGGLES
+    from tui.toggles import group_toggle_names
     app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
     async with app.run_test(size=(200, 24)) as pilot:
         scr = await _open_modes_section(pilot)
@@ -2915,7 +2915,7 @@ async def test_modes_row_shows_session_override_note(tmp_path):
         await pilot.pause(0.1)
 
         rows = [str(w.render()) for w in scr.query(".set-row")]
-        assert len(rows) == len(TOGGLES)                     # пометка не добавляет строк
+        assert len(rows) == len(group_toggle_names("rigor"))   # пометка не добавляет строк
 
         gate_row = next(r for r in rows if "самопроверка" in r)
         answers_row = next(r for r in rows if "формат ответа" in r)

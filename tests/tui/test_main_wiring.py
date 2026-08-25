@@ -27,6 +27,8 @@ def test_main_assembles_stack_dry_run(monkeypatch, tmp_path):
             called.update(kw)
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
         def run(self):
             return None
 
@@ -73,6 +75,9 @@ def test_main_auto_mcp_default_starts_and_stops_daemons(monkeypatch, tmp_path):
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
+
         def run(self):
             return None
 
@@ -107,6 +112,9 @@ def test_main_no_auto_mcp_skips_daemons(monkeypatch, tmp_path):
 
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
+
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
 
         def run(self):
             return None
@@ -143,6 +151,9 @@ def test_main_auto_mcp_flag_still_works(monkeypatch, tmp_path):
 
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
+
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
 
         def run(self):
             return None

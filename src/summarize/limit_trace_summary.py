@@ -164,6 +164,7 @@ def build_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
                 messages=messages,
                 max_tokens=max_tokens,
                 request_label=f"limit_trace_summary:{reason}",
+                consumer="summary",
                 logger=getattr(ctx, "logger", None),
             )
             if raw_summary is None:

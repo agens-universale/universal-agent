@@ -61,10 +61,31 @@ SESSION_KEYS: Dict[str, SessionKey] = {
         "tui.text_answer_mode", "tui_text_answer_mode", None,
         effective_text_answer_mode,
     ),
+    # Профили и уровни: `level` — обычный ключ, накладывается флагом на плоский
+    # "level" как любой другой. `profile` тоже регистрируется здесь для
+    # персиста/восстановления/санации (белый список), но его
+    # ЗНАЧЕНИЕ не читается через apply_overrides — TuiApp.effective_config() перехватывает
+    # его отдельно ДО generic-наложения (смена профиля требует пере-мержа base конфига,
+    # не просто подмены плоского ключа); apply_overrides всё равно проставляет
+    # плоский "profile" поверх пере-смерженной базы — так cfg["profile"] честно отражает
+    # сессионный выбор для витрин.
+    "level": SessionKey("level", "level"),
+    "profile": SessionKey("profile", "profile"),
 }
 
 
 META_KEY = "session_settings"
+BREAKER_META_KEY = "circuit_breaker"
+
+
+def read_breaker_from_meta(meta: Dict[str, Any]) -> Dict[str, str]:
+    """Снимок предохранителя моделей (спека §8) из метаданных треда."""
+    return dict(((meta or {}).get("tui") or {}).get(BREAKER_META_KEY) or {})
+
+
+def to_breaker_meta_patch(snapshot: Dict[str, str]) -> Dict[str, Any]:
+    """Снимок предохранителя как патч для meta.tui."""
+    return {BREAKER_META_KEY: dict(snapshot or {})}
 
 
 def read_from_meta(meta: Dict[str, Any]) -> Dict[str, Any]:

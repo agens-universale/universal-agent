@@ -20,6 +20,16 @@ from config_modules.security import (
     apply_cli_command_moderation_overrides,
 )
 from config_modules.compat import apply_compat
+from config_modules.model_registry import ModelEntry, validate_registry_pairs
+from config_modules.model_sections_validation import validate_model_sections
+from config_modules.profiles import (
+    ProfileMeta,
+    ProfileRef,
+    load_profile_document,
+    mtime_or_none,
+    profile_roots,
+    resolve_profile,
+)
 from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from config_modules import env_vars
 from bundled_assets import bundled_root
@@ -150,7 +160,16 @@ def apply_cli_overrides(
     trace_id: Optional[str] = None,
 ) -> None:
     if extra_overrides:
-        config_dict.update(resolve_env_placeholders(extra_overrides))
+        resolved = resolve_env_placeholders(extra_overrides)
+        config_dict.update(resolved)
+        if "models" in resolved:
+            # `--models` задаёт весь реестр строкой и идёт мимо схемы (плоский
+            # config_dict заполняется уже после валидации) — правило пары прогоняем явно.
+            validate_registry_pairs({"models": resolved["models"]}, source="--models")
+        # Признак «ключ пришёл именно из CLI» (спека §2): нужен, среди прочего,
+        # для детекта легаси-форса (см. cli_forces_legacy_model ниже).
+        explicit = set(config_dict.get("cli_explicit_keys") or ())
+        config_dict["cli_explicit_keys"] = sorted(explicit | set(resolved))
     effective_write_guard_override = False if no_write_guard else write_guard_enabled
     effective_read_guard_override = False if no_read_guard else read_guard_enabled
     apply_cli_command_moderation_overrides(
@@ -176,9 +195,43 @@ def apply_cli_overrides(
     sync_logging_flat_and_params(config_dict)
 
 
+def cli_forces_legacy_model(config_dict: Dict[str, Any]) -> bool:
+    """Легаси-форс (спека §2, §12.1): CLI явно передал `model`/`completions_url`
+    поверх непустого merged-реестра моделей — резолв уровней/алиасов у
+    ``ModelRouter`` отключается на этот запуск (``force_legacy=True``).
+    Профиль-слой обычных секций (гварды, суммаризация и пр.) при этом остаётся
+    в стопке — это решает исключительно резолв модели, не сборку конфига.
+    ``--model``/``--completions_url`` при пустом реестре — обычный легаси, без форса.
+    """
+    explicit = set(config_dict.get("cli_explicit_keys") or ())
+    if not explicit & {"model", "completions_url"}:
+        return False
+    return bool(config_dict.get("models"))
+
+
 def resolve_config_path(config_path: Optional[str] = None) -> str:
     """Путь config.yml, использованный сессией (та же цепочка, что в load_config)."""
     return config_path or _xdg_config_path() or _default_config_path()
+
+
+def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
+    """Проекция ``ModelEntry`` для ``ModelRouter`` (src/model_router.py).
+
+    ``authorization_header`` — уже Bearer-нормализованное значение (None=наследовать,
+    ""=явно без, иначе значение) — потребителю нужен именно computed-результат, не
+    сырой ``token``. ``backend_overrides`` — только явно заданные ключи
+    (``exclude_unset``), чтобы Router накладывал поверх эффективного backend лишь то,
+    что модель реально переопределяет, а не дефолты ``BackendConfig``.
+    """
+    return {
+        "model": entry.model,
+        "url": entry.url,
+        "authorization_header": entry.authorization_header,
+        "pricing": entry.pricing.model_dump() if entry.pricing is not None else None,
+        "backend_overrides": (
+            entry.backend.model_dump(exclude_unset=True) if entry.backend is not None else {}
+        ),
+    }
 
 
 def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
@@ -326,19 +379,80 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "diff_tui": app_cfg.diff_tui.model_dump(),
         "fs_tools": app_cfg.fs_tools.model_dump(),
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
+        # Секции моделей (спека §4/§5) — потребитель: ModelRouter (src/model_router.py).
+        # Router работает от этого снимка, а не от app_cfg напрямую (§6.4).
+        "models": {
+            alias: _serialize_model_entry(entry) for alias, entry in app_cfg.models.items()
+        },
+        "slots": app_cfg.slots.model_dump(),
+        "assign": app_cfg.assign.model_dump(),
+        "profile": app_cfg.profile,
     }
 
     return config_dict
 
 
-def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def _build_mtime_set(
+    base_path: Path,
+    managed_path: Path,
+    project_path: Optional[str],
+    active_name: Optional[str],
+    profile_roots_list: list[Path],
+) -> Dict[str, Optional[float]]:
+    """Снимок mtime базового/managed/проектного конфига + обоих кандидатных путей
+    активного профиля (спека §3.3): отсутствующий файл — ключ есть, значение None."""
+    project_config_path = Path(project_path) if project_path is not None else project_gc_dir() / "config.yml"
+    mtime_set: Dict[str, Optional[float]] = {
+        str(base_path): mtime_or_none(base_path),
+        str(managed_path): mtime_or_none(managed_path),
+        str(project_config_path): mtime_or_none(project_config_path),
+    }
+    if active_name:
+        for root in profile_roots_list:
+            candidate = Path(root) / f"{active_name}.yml"
+            mtime_set[str(candidate)] = mtime_or_none(candidate)
+    return mtime_set
+
+
+def profile_mtime_set(
+    config_path: Optional[str], active_name: Optional[str] = None
+) -> Dict[str, Optional[float]]:
+    """Тот же снимок, что строит `load_config_ex` (спека §3.3), но БЕЗ парсинга/
+    валидации файлов — только `stat()`. Точка входа для TUI (`set_config_path`):
+    связывание пути с окном не обязано гонять полную загрузку конфига ради снимка
+    свежести."""
+    path = resolve_config_path(config_path)
+    base_path = Path(path)
+    managed_path = managed_config_path()
+    project_path = _project_local_config_path()
+    roots = profile_roots(Path(os.getcwd()), base_path)
+    return _build_mtime_set(base_path, managed_path, project_path, active_name, roots)
+
+
+def load_config_ex(
+    config_path: Optional[str] = None,
+    *,
+    profile_override: Optional[str] = None,
+) -> tuple[Dict[str, Any], ProfileMeta]:
+    """Загрузить эффективный конфиг + метаданные резолва профиля (спека §2, §3).
+
+    Слои: base → managed → project (deep-merge, каждый слой интерполируется
+    ${ENV:VAR} сразу после чтения) → указатель `profile:` резолвится из этого мержа
+    (либо `profile_override`) → контент профиля мержится ПОВЕРХ → compat →
+    `AppConfig.model_validate` → `validate_model_sections` → resolve_paths/flatten.
+    `load_config` (ниже) — тонкая обёртка для обратной совместимости.
+    """
     if config_path is None and _xdg_config_path() is None:
         _bootstrap_user_config()
     path = resolve_config_path(config_path)
     config_dir = os.path.dirname(os.path.abspath(path))
+    base_path = Path(path)
+    notices: list[str] = []
 
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
+    raw_config = resolve_env_placeholders(raw_config)
+    validate_registry_pairs(raw_config, source=str(base_path))
 
     # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
     # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
@@ -346,6 +460,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
         with open(managed_path, "r", encoding="utf-8") as file:
             managed_raw = yaml.safe_load(file) or {}
+        managed_raw = resolve_env_placeholders(managed_raw)
+        validate_registry_pairs(managed_raw, source=str(managed_path))
         raw_config = deep_merge(raw_config, managed_raw)
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
@@ -353,22 +469,55 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
         with open(project_path, "r", encoding="utf-8") as file:
             project_raw = yaml.safe_load(file) or {}
+        project_raw = resolve_env_placeholders(project_raw)
+        validate_registry_pairs(project_raw, source=project_path)
         raw_config = deep_merge(raw_config, project_raw)
 
+    # Профиль (спека §3): указатель резолвится из пре-профильного мержа выше (ось 1,
+    # анти-рекурсия — профиль не может выбрать профиль), либо из явного override
+    # (CLI --profile / сессия). level: НЕ резолвится тут — обычный ключ полного мержа.
+    roots = profile_roots(Path(os.getcwd()), base_path)
+    pointer = (
+        profile_override
+        if profile_override is not None
+        else str(raw_config.get("profile") or "").strip()
+    )
+    ref: Optional[ProfileRef] = None
+    active_name: Optional[str] = pointer or None
+    if pointer:
+        ref = resolve_profile(pointer, roots, notices=notices)
+        profile_raw = load_profile_document(
+            ref.path,
+            warn_literal_tokens=(ref.root_kind == "project"),
+            notices=notices,
+        )
+        # Контент профиля мержится ПОВЕРХ base/managed/project (ось 2).
+        raw_config = deep_merge(raw_config, profile_raw)
+
+    mtime_set = _build_mtime_set(base_path, managed_path, project_path, active_name, roots)
+
     # Compat-слой (A4): rename/remove устаревших ключей in-memory, файл не трогаем.
+    # Применяется к итоговому мержу — профильный слой проходит его так же, как
+    # остальные (единый вызов после всех merge-слоёв, включая профиль).
     _compat_notices = apply_compat(raw_config)
 
-    # Резолв ${ENV:VAR} после всех merge-слоёв, до валидации — креды модели/MCP из окружения.
-    raw_config = resolve_env_placeholders(raw_config)
-
     app_cfg = AppConfig.model_validate(raw_config)
+    _model_section_notices = validate_model_sections(app_cfg)
     resolve_paths(app_cfg, config_dir)
     # Bootstrap for_model strip tags after validate/normalize (no hot-path yaml reads).
     configure_for_model_tags(app_cfg.strip_tags_projection.tags)
 
     config_dict = flatten_app_config(app_cfg)
+    config_dict["level"] = app_cfg.level
+    # Плоский `profile` — ДЕЙСТВУЮЩИЙ профиль, а не указатель из файлов: документу
+    # профиля запрещено нести ключ `profile:`, поэтому после мержа app_cfg.profile
+    # остаётся пойнтером config.yml и при `--profile other` (или сессионном выборе,
+    # §9.1) врал бы витринам — `active_profile_or_registry_note` называл бы чужое имя.
+    config_dict["profile"] = active_name or ""
     # Не поле схемы: результат разбора СЫРОГО конфига compat-слоем — докладывает загрузчик.
-    config_dict["compat_notices"] = _compat_notices
+    # Фаза 2 секций моделей (ссылочная целостность на merged-реестре) и лоадер
+    # профилей (зарезервированные имена, секрет-политика) — тот же канал notices.
+    config_dict["compat_notices"] = _compat_notices + _model_section_notices + notices
 
     apply_swarm_env_overrides(config_dict, config_dir)
 
@@ -378,13 +527,19 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     if verify is False:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    meta = ProfileMeta(active_name=active_name, ref=ref, mtime_set=mtime_set, notices=notices)
+    return config_dict, meta
+
+
+def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    config_dict, _meta = load_config_ex(config_path)
     return config_dict
 
 
 def validate_config_text(text: str) -> None:
     """Контрольная валидация текста config.yml перед записью (writer/sync).
 
-    Конвейер тот же, что в load_config: compat → ${ENV:VAR} → схема. Иначе файл со
+    Конвейер тот же, что в load_config_ex: ${ENV:VAR} → compat → схема. Иначе файл со
     старым (переименованным) ключом или с плейсхолдером в нестроковом поле проходил бы
     загрузку, но отвергался при записи — и юзер оказывался заблокирован в /settings.
     Бросает ValueError с человекочитаемой причиной.
@@ -395,8 +550,8 @@ def validate_config_text(text: str) -> None:
         raise ValueError(f"невалидный YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError("config.yml должен быть YAML-объектом")
-    apply_compat(raw)
     raw = resolve_env_placeholders(raw)
+    apply_compat(raw)
     try:
         AppConfig.model_validate(raw)
     except Exception as exc:

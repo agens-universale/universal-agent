@@ -9,6 +9,23 @@
 #   2) backend.chat_completion_headers.Authorization — токен доступа.
 # =============================================================================
 
+# Профили и уровни моделей: указатели на активный профиль/уровень. "" = профиль не выбран.
+# Секции models/slots/assign (реестр моделей, уровни, привязки) — опциональны.
+profile: ""
+level: default
+
+# Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
+# раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
+# симметричный пример как обычных секций config.yml — demo_config.yml):
+# models:
+#   glm-local:
+#     url: http://127.0.0.1:8014/v1/chat/completions
+#     token: ""                # адрес и токен задаются вместе; "" = «без авторизации»
+# slots:
+#   default: glm-local
+# assign:
+#   finish_gate: light
+
 backend:
   api_mode: chat_completions
   # Впишите endpoint (OpenAI-совместимый chat/completions), напр.:
@@ -37,7 +54,7 @@ backend:
     # Или из файла (chmod 600): Authorization: "Bearer ${FILE:~/.secrets/gc_api_key}"
 
 agent:
-  model: "gigacode_agent_v1.6_rc"
+  model: "<ВПИШИТЕ_МОДЕЛЬ>"
   system_prompt_id: v1
   use_server_subagents: false
   use_local_subagents: true

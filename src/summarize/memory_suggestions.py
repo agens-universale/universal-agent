@@ -63,6 +63,7 @@ def _request_patch(
         state=state,
         messages=request_messages,
         request_label=request_label,
+        consumer="summary",
         logger=logger,
     )
     return MemoryPatchLlmResult(
@@ -129,5 +130,6 @@ def request_memory_deltas_format_repair(
         state=state,
         messages=request_messages,
         request_label=MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
+        consumer="summary",
         max_tokens=max_tokens,
     )
