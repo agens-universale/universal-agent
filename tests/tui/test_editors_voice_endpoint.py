@@ -410,7 +410,12 @@ async def test_lang_list_pick_substitutes_and_collapses():
         assert ed.query_one("#voice-lang", Input).value == "fr"
         assert ed.lang_list.is_open is False
         await pilot.pause()
-        assert not ed.query(".voice-lang-row") and not ed.query(".voice-lang-hint")
+        assert not ed.query(".voice-lang-row")          # строки ушли со списком
+        # Строка под полем остаётся (канон форм 2026-08-17) и говорит, чем список
+        # вернуть: контроллер приводит её в согласие с состоянием, а не сносит.
+        from tui.editors.field_list import LIST_CLOSED_HINT
+        hints = list(ed.query(".voice-lang-hint"))
+        assert len(hints) == 1 and str(hints[0].render()) == LIST_CLOSED_HINT
 
 
 async def test_lang_list_rows_sit_right_under_the_field():
@@ -903,7 +908,10 @@ async def test_model_list_stays_silent_without_a_url():
         await pilot.pause()
         assert calls == []
         assert ed.model_list.is_open is False
-        assert not ed.query(".voice-model-row") and _model_hint(ed) is None
+        assert not ed.query(".voice-model-row")
+        # «Молчит» — это пустой текст: строку-подсказку контроллер с канона 2026-08-17
+        # не сносит, он лишь приводит её в согласие с состоянием списка.
+        assert not _model_hint(ed)
 
 
 async def test_model_list_asks_the_address_and_token_of_the_fields():

@@ -112,7 +112,7 @@ def test_the_wizard_and_the_settings_speak_of_tab_the_same_way():
 def test_all_footers_fit_the_two_line_budget():
     """`#set-footer`/`#onb-footer` — те же две строки БЕЗ скролла на ОБОИХ экранах
     (`styles.tcss`: одинаковые `height: 2; padding: 0 1`) — итоговая строка должна
-    укладываться в них на самом узком окне (`_VOICE_FOOTER_MIN_COLS`).
+    укладываться в них на самом узком окне (`_FOOTER_MIN_COLS`).
 
     Раньше сторож смотрел ТОЛЬКО на `_VOICE_FOOTER_*`: словарь `settings._FOOTERS` и
     футеры мастера оставались непроверенными — и именно там нашёлся реальный дефект
@@ -121,8 +121,8 @@ def test_all_footers_fit_the_two_line_budget():
     «Esc — меню» срезался. Общий контейнер — общий бюджет, общая проверка."""
     from tui.screens import settings as s
     for name, value in _all_footer_strings().items():
-        lines = footer_wrapped_lines(value, s._VOICE_FOOTER_MIN_COLS)
-        assert lines <= 2, (f"{name}: {lines} строки на {s._VOICE_FOOTER_MIN_COLS} колонках "
+        lines = footer_wrapped_lines(value, s._FOOTER_MIN_COLS)
+        assert lines <= 2, (f"{name}: {lines} строки на {s._FOOTER_MIN_COLS} колонках "
                             f"— хвост будет отрезан: {value}")
 
 

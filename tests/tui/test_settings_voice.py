@@ -1897,8 +1897,13 @@ async def test_saved_own_code_highlights_nothing_on_open(tmp_path):
 
 @pytest.mark.asyncio
 async def test_leaving_the_field_collapses_the_list(tmp_path):
-    """Уход курсора с поля сворачивает список — в т.ч. кликом мышью в другое поле."""
+    """Уход курсора с поля сворачивает список — в т.ч. кликом мышью в другое поле.
+
+    Строка под полем при этом ОСТАЁТСЯ (канон форм 2026-08-17): она называет способ
+    вернуть список, а не команду текущего момента, и её судьбой распоряжается сам
+    контроллер. Раньше голосовой экран снимал её вручную вслед за курсором."""
     from tui.app import TuiApp
+    from tui.editors.field_list import LIST_CLOSED_HINT
     from textual.widgets import Input
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
@@ -1909,7 +1914,8 @@ async def test_leaving_the_field_collapses_the_list(tmp_path):
         assert len(_lang_rows(scr)) == 100
         scr.query_one("#voice-url", Input).focus()         # клик в соседнее поле
         await pilot.pause()
-        assert not _lang_rows(scr) and _lang_hint(scr) is None
+        assert not _lang_rows(scr)                          # строки ушли со списком
+        assert _lang_hint(scr) == LIST_CLOSED_HINT          # строка-способ осталась
 
 
 @pytest.mark.asyncio
@@ -2219,7 +2225,9 @@ async def test_alt_down_on_empty_url_model_field_explains_instead_of_silence(tmp
         await pilot.press("down", "down")               # URL → Токен → Модель
         await pilot.pause()
         assert _focused_id(scr) == "voice-model"         # предусловие: курсор на «Модели»
-        assert _model_hint(scr) is None                  # предусловие: автовход тих
+        # Предусловие: автовход тих. Строку-подсказку контроллер с канона 2026-08-17
+        # не сносит, поэтому «тихо» — это пустой текст, а не отсутствие виджета.
+        assert not _model_hint(scr)
         await pilot.press("alt+down")
         await pilot.pause()
         assert _model_hint(scr) == "сначала укажите адрес endpoint"
@@ -2335,8 +2343,12 @@ async def test_saved_model_is_highlighted_and_kept_by_a_trusting_enter(tmp_path)
 @pytest.mark.asyncio
 async def test_leaving_the_model_field_collapses_its_list(tmp_path):
     """Уход курсора с поля сворачивает список моделей — как у языка, в т.ч. кликом мышью
-    в соседнее поле."""
+    в соседнее поле.
+
+    Строка под полем остаётся и здесь (канон 2026-08-17), но текст у неё свой: список
+    сетевой, и `Alt+↓` ему всегда «перечитать», а не «показать»."""
     from tui.app import TuiApp
+    from tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
     from textual.widgets import Input
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
@@ -2346,7 +2358,8 @@ async def test_leaving_the_model_field_collapses_its_list(tmp_path):
         assert _model_rows(scr)
         scr.query_one("#voice-url", Input).focus()     # как клик мышью по соседнему полю
         await pilot.pause()
-        assert not _model_rows(scr) and _model_hint(scr) is None
+        assert not _model_rows(scr)                     # строки ушли со списком
+        assert _model_hint(scr) == _MODEL_RELOAD_HINT   # строка-способ осталась
 
 
 @pytest.mark.asyncio
@@ -2601,9 +2614,14 @@ def _url_hint(scr):
 
 
 @pytest.mark.asyncio
-async def test_url_list_opens_when_the_cursor_enters_the_field(tmp_path):
-    """Вход курсора на «URL» раскрывает список пресетов (тот же канон, что у языка и
-    моделей выше): все три дефолта, ▸ — на действующем адресе."""
+async def test_preset_url_opens_only_on_alt_down_and_highlights_the_match(tmp_path):
+    """Адрес из каталога — список всё равно не раскрывается на входе (канон форм
+    2026-08-17: пресет-лист помощник, а не содержание поля, и раскрыт он, только пока
+    значение складывается). Alt+↓ раскрывает его целиком, ▸ — на совпавшем пресете.
+
+    До канона вход на заполненное поле раскрывал список сам, и это расходилось с
+    соседним `test_own_url_does_not_auto_open_but_alt_down_opens_it`: одно и то же
+    поле вело себя по-разному в зависимости от того, попал ли адрес в наш каталог."""
     from tui.app import TuiApp
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
@@ -2614,6 +2632,9 @@ async def test_url_list_opens_when_the_cursor_enters_the_field(tmp_path):
         assert not _url_rows(scr)                      # на строке режима списка нет
         await _to_field(pilot)                          # в поле «URL»
         assert _focused_id(scr) == "voice-url"
+        assert not _url_rows(scr)                      # адрес задан — список свёрнут
+        await pilot.press("alt+down")                   # явная просьба показать список
+        await pilot.pause()
         rows = _url_rows(scr)
         assert len(rows) == 3
         selected = _url_selected(scr)
@@ -3799,8 +3820,13 @@ async def test_esc_leaves_a_hint_on_how_to_reopen_the_list(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_the_reopen_hint_leaves_with_the_cursor(tmp_path):
-    """Ушли с поля — подсказка уходит с ним: она про поле под курсором, а не про секцию."""
+async def test_the_reopen_hint_stays_under_its_field(tmp_path):
+    """Ушли с поля — подсказка остаётся под ним (канон форм 2026-08-17).
+
+    Она ярлык способа («вот чем список раскрывается»), а не команда момента: что
+    нажимать сейчас, отвечает футер — он обещает `Alt+↓` только на своём поле. До
+    канона голосовой экран снимал строку вслед за курсором, и правило расходилось
+    с «Подключением», где она стоит постоянно."""
     from tui.app import TuiApp
     from tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
     app = TuiApp(config={"model": "M"})
@@ -3813,7 +3839,7 @@ async def test_the_reopen_hint_leaves_with_the_cursor(tmp_path):
         assert _model_hint(scr) == _MODEL_RELOAD_HINT
         await pilot.press("up")                       # курсор — на предыдущее поле
         await pilot.pause()
-        assert _model_hint(scr) is None
+        assert _model_hint(scr) == _MODEL_RELOAD_HINT
 
 
 def test_open_list_hint_offers_refresh_not_reopen():

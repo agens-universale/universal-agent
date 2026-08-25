@@ -859,10 +859,11 @@ def _url_rows(screen):
 
 
 @pytest.mark.asyncio
-async def test_url_field_opens_the_full_list_with_the_matching_preset_highlighted():
+async def test_alt_down_on_a_preset_url_opens_the_full_list_with_the_match_highlighted():
     """Поле уже содержит адрес пресета (черновик/повторный проход) — вход на «URL»
-    раскрывает список ЦЕЛИКОМ, курсор — на СОВПАВШЕМ пресете (тот же канон, что у
-    адреса «Подключения»)."""
+    список НЕ раскрывает (канон форм 2026-08-17: пресет-лист раскрыт, только пока
+    значение складывается), а Alt+↓ раскрывает его ЦЕЛИКОМ, курсор — на СОВПАВШЕМ
+    пресете. Тот же канон, что у адреса «Подключения»."""
     from tui.app import TuiApp
     from config_modules.voice_endpoint_presets import DEFAULT_VOICE_ENDPOINT_PRESETS
     app = TuiApp(config={"model": "M"})
@@ -874,7 +875,10 @@ async def test_url_field_opens_the_full_list_with_the_matching_preset_highlighte
         ed = await _to_cloud_fields(pilot, screen, url=groq.url)
         await pilot.press("tab")                      # курсор → в поля, на «URL»
         await pilot.pause()
-        assert ed.url_list is not None and ed.url_list.is_open
+        assert ed.url_list is not None and not ed.url_list.is_open   # адрес задан
+        await pilot.press("alt+down")                 # явная просьба показать список
+        await pilot.pause()
+        assert ed.url_list.is_open
         rows = _url_rows(screen)
         assert len(rows) == len(DEFAULT_VOICE_ENDPOINT_PRESETS)
         assert any(r.startswith("▸") and "Groq" in r for r in rows)
@@ -895,7 +899,9 @@ async def test_enter_on_a_foreign_url_preset_substitutes_and_clears_the_model():
         openai = DEFAULT_VOICE_ENDPOINT_PRESETS[0]
         ed = await _to_cloud_fields(pilot, screen, url=openai.url)
         screen.query_one("#voice-model", Input).value = "whisper-1"
-        await pilot.press("tab")                      # в поля, «URL», список раскрыт на OpenAI
+        await pilot.press("tab")                      # в поля, на «URL» (адрес задан — список свёрнут)
+        await pilot.pause()
+        await pilot.press("alt+down")                 # раскрыть явно: подсветка на OpenAI
         await pilot.pause()
         await pilot.press("down")                     # подсветить следующий пресет (Groq)
         await pilot.press("enter")

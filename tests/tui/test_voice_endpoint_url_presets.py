@@ -54,7 +54,10 @@ async def test_pick_of_foreign_preset_writes_url_and_clears_model():
                 url_presets=list(PRESETS))
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.url_list.open()
+        # `forced` — это Alt+↓: поверх заполненного поля пресет-лист сам не
+        # раскрывается (канон форм 2026-08-17, `can_open`), и раскрытие тут — часть
+        # сценария человека, а не проверяемое поведение.
+        ed.url_list.open(forced=True)
         assert ed.url_list.move(1) is True          # OpenAI -> Groq
         assert ed.pick_in("url") is True
         await pilot.pause()
@@ -68,7 +71,7 @@ async def test_pick_of_same_preset_keeps_model():
                 url_presets=list(PRESETS))
     app = _harness(ed)
     async with app.run_test() as pilot:
-        ed.url_list.open()                          # входит с подсветкой ЭТОГО пресета
+        ed.url_list.open(forced=True)               # входит с подсветкой ЭТОГО пресета
         assert ed.pick_in("url") is True
         await pilot.pause()
         assert ed.values()["url"] == PRESETS[0].url
