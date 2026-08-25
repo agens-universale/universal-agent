@@ -138,6 +138,9 @@ class OnboardingScreen(Screen):
         self._voice_group = _VOICE_GROUP_VARIANTS   # группа под курсором (спека §4.1)
         self._voice_field_idx = 0          # позиция в группе полей — своя у каждой группы
         self._voice_cloud: dict = {}       # url/token/model (выбор cloud)
+        # Ctrl+U на «Токене» голосового шага: пустое поле теперь значит «стереть
+        # сохранённый», а не «оставить как было» (флаг переживает пересборку полей).
+        self._voice_token_cleared: bool = False
         self._voice_prefilled = False      # status_cheap на шаге голоса — не чаще раза
         self._step = 0
         self._values: dict = {}
@@ -848,6 +851,14 @@ class OnboardingScreen(Screen):
         ed = self._voice_endpoint_editor()
         return ed.model_list if ed is not None else None
 
+    def _voice_clear_token(self) -> bool:
+        """Ctrl+U в полях голосового шага: стереть сохранённый токен. False — клавиша
+        не наша (фокус не на «Токене» либо стирать нечего), и её отдают полю ввода."""
+        ed = self._voice_endpoint_editor()
+        if ed is None:
+            return False
+        return ed.clear_token(self._voice_focused_field_key())
+
     def _voice_focused_field_key(self) -> str | None:
         """Ключ поля шага голоса под ФОКУСОМ (url/token/model) или None — фокус не на
         нём. У «Токена» списка нет (`list_for` отдаёт по нему None) — сверка тут только
@@ -1038,6 +1049,10 @@ class OnboardingScreen(Screen):
         from tui.editors.voice_endpoint import VoiceEndpointEditor
         for ed in self.query(VoiceEndpointEditor):
             self._voice_cloud = {**self._voice_cloud, **ed.values()}
+            if ed.token_cleared:
+                # Ctrl+U на «Токене»: пустота в черновике теперь ОСОЗНАННАЯ, и при
+                # записи её нельзя подменить сохранённым секретом (см. _commit_config).
+                self._voice_token_cleared = True
 
     def _voice_mark(self) -> None:
         """Пометить опцию под курсором (видимое ●), остаться на шаге (канон MCP-шага).
@@ -1212,17 +1227,27 @@ class OnboardingScreen(Screen):
             # Пустой черновик токена значит «оставить сохранённый» (канон «Подключения» —
             # /settings._voice_cloud_save), а не «стереть»: без подстановки запись
             # стёрла бы рабочий секрет. Фолбэк — только здесь, у самой записи.
-            dotted["voice.token"] = (self._voice_cloud["token"]
-                                     or str(self._voice_raw_cloud().get("token") or ""))
+            # Ctrl+U — исключение из фолбэка: там пустота осознанная, и секрет уходит.
+            dotted["voice.token"] = (
+                self._voice_cloud["token"]
+                or ("" if self._voice_token_cleared
+                    else str(self._voice_raw_cloud().get("token") or "")))
             dotted["voice.model"] = self._voice_cloud["model"]
         try:
-            w.write_values(
+            missing = w.write_values(
                 self._config_path, dotted,
                 template_path=_default_config_path(),
                 validate=validate_config_text,
             )
         except ValueError as exc:
             self.query_one("#onb-body", Static).update(f"✗ конфиг не записан: {exc}")
+            return False
+        if missing:
+            # Непустой список значит «файл НЕ тронут» (запись идёт «всё или ничего»).
+            # Прежде мы его игнорировали и рапортовали «✓ конфиг записан», хотя часть
+            # полей не сохранилась — находка ревью коллеги.
+            self.query_one("#onb-body", Static).update(
+                f"✗ конфиг не записан: не нашлись поля {', '.join(missing)}")
             return False
         self.query_one("#onb-body", Static).update("✓ конфиг записан")
         return True
@@ -1376,6 +1401,14 @@ class OnboardingScreen(Screen):
                 event.prevent_default()
                 event.stop()
                 self._refresh_footer()
+            return
+        if event.key == "ctrl+u" and self._voice_clear_token():
+            # Голосовой шаг: та же клавиша и тот же смысл, что на «Подключении» выше.
+            # Гейт («то ли поле, есть ли что стирать») живёт в редакторе — здесь только
+            # маршрут, чтобы условие не разъехалось между двумя экранами.
+            event.prevent_default()
+            event.stop()
+            self._refresh_footer()
             return
         # Раскрытый список поля под курсором забирает клавиши себе (канон /settings:
         # `is_open` проверяется первым) — иначе Esc выкинул бы из мастера, а стрелки

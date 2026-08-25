@@ -123,6 +123,12 @@ _VOICE_FOOTER_CLOUD = (f"↑/↓ · {_TAB_TO_FIELDS} · Enter — сохрани
 # а Tab ведёт в обратную сторону — ради одного этого слова футер и раздваивается.
 _VOICE_FOOTER_CLOUD_FIELD = (f"↑/↓ · {_TAB_TO_VARIANTS} · Enter — сохранить и включить · "
                              "Ctrl+Space — проверить связь · PgUp/PgDn — секции · Esc — меню")
+# Тот же «Токен», но под маской лежит СОХРАНЁННЫЙ секрет — Ctrl+U его стирает (канон
+# «Подключения», `_FOOTER_CONNECTION_TOKEN`). Обещаем ровно там, где клавише есть что
+# делать: на пустом поле она молчит, и называть её было бы ложью.
+_VOICE_FOOTER_CLOUD_TOKEN = (f"↑/↓ · {_TAB_TO_VARIANTS} · Enter — сохранить · "
+                             "Ctrl+U — очистить · Ctrl+Space — проверить связь · "
+                             "PgUp/PgDn — секции · Esc — меню")
 # Список свёрнут, курсор в поле «Язык»: раскрыть нечем стрелками — Alt+↓ делает это
 # явно (второй путь после печати, см. FieldListController.reopen_for_typing; роль
 # ушла с Ctrl+Space — спека 2026-08-06 §2, §4.1). Про Del
@@ -455,6 +461,10 @@ class SettingsScreen(Screen):
                 # же глаголом, что и раскрытое («перечитать список»), иначе оно
                 # разойдётся с хинтом под рамкой поля (`closed_hint`, находка C).
                 return _VOICE_FOOTER_CLOUD_LIST_MODEL if field == "model" else _VOICE_FOOTER_CLOUD_LIST
+            if field == "token" and self._voice_token_is_mask():
+                # Под маской — сохранённый секрет, и Ctrl+U его стирает: клавиша,
+                # промолчавшая в футере, для человека не существует.
+                return _VOICE_FOOTER_CLOUD_TOKEN
             # Курсор в вариантах (`field is None`) и курсор в поле без списка (осталось
             # одно — «Токен», URL ушёл в список выше) отличаются только направлением
             # Tab — им и раздвоен футер облачной панели.
@@ -1681,6 +1691,23 @@ class SettingsScreen(Screen):
         self._refresh_voice_rows()
         self._sync_voice_focus()
 
+    def _voice_token_is_mask(self) -> bool:
+        """Под полем «Токен» лежит сохранённый секрет — по этому признаку футер обещает
+        Ctrl+U (канон `_connection_can_clear_token` соседней секции)."""
+        try:
+            return self._voice_editor().token_is_mask()
+        except NoMatches:
+            return False
+
+    def _voice_clear_token(self) -> bool:
+        """Ctrl+U в полях голоса: стереть сохранённый токен. False — клавиша не наша
+        (курсор не на «Токене» либо стирать нечего), и её отдают полю ввода."""
+        try:
+            editor = self._voice_editor()
+        except NoMatches:
+            return False
+        return editor.clear_token(self._voice_cursor_field())
+
     def _voice_list_ctrl(self):
         """Контроллер списка ПОЛЯ ПОД КУРСОРОМ или None (у поля списка нет / редактора
         нет). Списков в панели три — языка, моделей и адреса (спека 2026-08-05 §3), —
@@ -2290,9 +2317,10 @@ class SettingsScreen(Screen):
         language = self._voice_language_to_save(vals["language"])
         if language is None:
             return                      # мусор в поле «Язык» в config.yml юзера не уезжает
-        if not token:
+        if not token and not editor.token_cleared:
             # Пусто = «не менять» (канон «Подключения»: поле токена — секрет, не
             # префиллено; пустое при сохранении не должно затирать уже сохранённый).
+            # Исключение — Ctrl+U: там пустота осознанная, и сохранённый уходит из файла.
             token = str(self._voice_raw_cloud().get("token") or "")
         # Свой endpoint — единственная запись голоса в ЮЗЕРСКИЙ config.yml (язык и режим
         # живут в managed-слое), поэтому guard пакетного шаблона нужен ровно здесь и
@@ -2553,13 +2581,18 @@ class SettingsScreen(Screen):
             return
         values = PRESETS[new_value] if spec.preset_keys else {spec.dotted: new_value}
         try:
-            w.write_values(
+            missing = w.write_values(
                 self._config_path, values,
                 template_path=_default_config_path(),
                 validate=validate_config_text,
             )
         except (ValueError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}")
+            return
+        if missing:
+            # Файл не тронут (запись «всё или ничего») — молчать нельзя, иначе слайдер
+            # покажет новое значение, которого в конфиге нет (находка ревью коллеги).
+            self._notice(f"✗ не сохранено: не нашлись ключи {', '.join(missing)}")
             return
         # Хвост записи — как у соседних секций (_do_save): перечитать сырые значения
         # файла и применить через инъектированный _on_apply, а не звать reload мимо него.
@@ -2953,11 +2986,16 @@ class SettingsScreen(Screen):
                 return
         dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in values.items()}
         try:
-            w.write_values(self._config_path, dotted,
-                           template_path=_default_config_path(),
-                           validate=validate_config_text)
+            missing = w.write_values(self._config_path, dotted,
+                                     template_path=_default_config_path(),
+                                     validate=validate_config_text)
         except (ValueError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}")
+            return
+        if missing:
+            # Файл не тронут (запись «всё или ничего»): рапортовать успех, оставив
+            # человека со старым конфигом, нельзя (находка ревью коллеги).
+            self._notice(f"✗ не сохранено: не нашлись ключи {', '.join(missing)}")
             return
         self._raw = self._read_raw()        # файл изменился — сырые значения перечитать
         # Состояние раннера снимаем ДО _on_apply: reload_config обнуляет active_runner,
@@ -3435,6 +3473,17 @@ class SettingsScreen(Screen):
             if event.key == "ctrl+u" and not self._voice_focus_in_editor():
                 event.stop()                # тот же гейт по фокусу, что у Del
                 self._voice_update_engine()
+                return
+            if event.key == "ctrl+u" and self._voice_clear_token():
+                # В полях та же клавиша стирает СОХРАНЁННЫЙ токен — как на
+                # «Подключении» (там `Ctrl+U` пришёл из develop). Голосовая панель
+                # показывает секрет такой же маской, а убрать его было нечем вовсе:
+                # поле пустое, а пустое значит «оставить как было». Гейт (то ли поле,
+                # есть ли что стирать) живёт в редакторе — здесь только маршрут.
+                event.prevent_default()
+                event.stop()
+                self._refresh_voice_hint()
+                self._refresh_footer()
                 return
             if event.key == "enter":
                 event.stop()

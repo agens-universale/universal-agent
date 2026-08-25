@@ -250,12 +250,16 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) 
             from config import _default_config_path, validate_config_text
             from onboarding import FIELD_ANCHOR_PATHS
             dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in values.items()}
-            for missing in onboarding_config_writer.write_values(
+            missing = onboarding_config_writer.write_values(
                 config_path, dotted,
                 template_path=_default_config_path(),
                 validate=validate_config_text,
-            ):
-                io.printer(f"  [warn] поле {missing} не найдено в конфиге — пропущено")
+            )
+            if missing:
+                # Запись идёт по правилу «всё или ничего», поэтому непустой список —
+                # это «файл не тронут», а не «часть полей пропущена» (канон 2026-08-20).
+                io.printer("\n  [ошибка] конфиг не записан: не нашлись поля "
+                           f"{', '.join(missing)} — впишите их вручную")
     except ValueError as exc:
         io.printer(f"\n  [ошибка] конфиг не записан: {exc}")
     except (KeyboardInterrupt, EOFError):

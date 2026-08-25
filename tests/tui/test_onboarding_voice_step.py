@@ -1579,6 +1579,47 @@ async def test_voice_step_prefills_cloud_from_config(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monkeypatch):
+    """Голосовой шаг мастера: Ctrl+U на «Токене» стирает СОХРАНЁННЫЙ секрет.
+
+    Тот же смысл и та же клавиша, что на шаге «Подключение» и в /settings — иначе
+    одна и та же маска на соседних экранах вела бы себя по-разному. Пустое поле само
+    по себе значит «оставить как было», поэтому убрать секрет было нечем."""
+    from tui.app import TuiApp
+    from textual.widgets import Input
+    from tui.services.voice_setup import VoiceStatus
+    _isolate_voice_state(monkeypatch, tmp_path)
+    app = TuiApp(config={"model": "M"})
+    voice = FakeVoice()
+    voice.status_cheap = lambda cfg: VoiceStatus(
+        installed=False, service_alive=False, port=None, model=None, mode="cloud")
+    config = {"voice": {"url": "https://stt.example.com/v1/audio/transcriptions",
+                        "token": "sk-real-secret-value", "model": "whisper-large-v3",
+                        "language": "ru"}}
+    cfg_path = _write_cloud_config(tmp_path, url=config["voice"]["url"],
+                                   token=config["voice"]["token"],
+                                   model=config["voice"]["model"])
+    async with app.run_test() as pilot:
+        screen = _screen_with_config(app, voice, config)
+        screen._config_path = cfg_path
+        await app.push_screen(screen)
+        await _goto_voice_step(pilot, screen)
+        await pilot.pause()
+        screen.query_one("#voice-token", Input).focus()
+        await pilot.pause()
+        ed = _voice_editor(screen)
+
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        token_field = screen.query_one("#voice-token", Input)
+        assert token_field.placeholder == ""            # маски сохранённого больше нет
+        assert ed.token_cleared is True
+
+        screen._capture_voice_fields()                  # то же, что делает уход с шага
+        assert screen._voice_token_cleared is True, "пометка обязана пережить пересборку"
+
+
+@pytest.mark.asyncio
 async def test_voice_step_prefills_local_from_config(tmp_path, monkeypatch):
     """То же самое для локального сервиса: курсор встаёт на «Локальный сервис»."""
     from tui.app import TuiApp

@@ -428,6 +428,9 @@ class VoiceEndpointEditor(Vertical):
         self._saved_token = saved_token or ""
         self._verify_ssl = verify_ssl
         self._inputs: dict = {}         # ключ → поле, заполняет compose (см. focus_field)
+        # Сохранённый токен помечен к удалению (Ctrl+U). Пустое поле само по себе значит
+        # «оставить как было» — стереть секрет иначе нечем (канон ConnectionEditor).
+        self._token_cleared = False
         # Поле последней ошибки submit() — хозяин ленты (`/settings._voice_cloud_save`)
         # ставит курсор/фокус по нему, а не всегда на URL (находка финального ревью
         # 2026-08-05: пустая «Модель» на чужом пресете уводила прочь от названного поля).
@@ -559,6 +562,38 @@ class VoiceEndpointEditor(Vertical):
         """Поля монтируются в уже активный экран — Textual не фокусирует их сама
         (канон ConnectionEditor.on_mount)."""
         self.focus_field(self._fields[0])
+
+    @property
+    def token_cleared(self) -> bool:
+        """Сохранённый токен помечен к удалению: пустое поле теперь значит «стереть»,
+        а не «оставить как было» — хозяин обязан спросить это перед записью."""
+        return self._token_cleared
+
+    def token_is_mask(self) -> bool:
+        """Под полем «Токен» лежит СОХРАНЁННЫЙ секрет (показан маской-placeholder) и его
+        ещё не стирали — значит `Ctrl+U` есть что делать, и футер вправе её обещать."""
+        return "token" in self._placeholders and not self._token_cleared
+
+    def clear_token(self, field_key: str | None) -> bool:
+        """`Ctrl+U` на поле «Токен»: стереть СОХРАНЁННЫЙ токен. True — обработали.
+
+        Тот же канон, что у «Подключения» (`ConnectionEditor.clear_token`): маска уходит
+        сразу, из `config.yml` секрет пропадёт при сохранении, передумать можно, просто
+        набрав новый. До этой правки стереть голосовой токен через интерфейс было нечем
+        вовсе — поле пустое, а пустое значит «оставить сохранённый».
+
+        Гейт держим внутри, а не у хозяев: клавишу зовут два экрана (мастер и
+        /settings), и помнить условие каждой копии — верный способ разъехаться."""
+        if field_key != "token" or not self.token_is_mask():
+            return False        # не то поле или стирать нечего — клавиша не наша
+        self._token_cleared = True
+        inp = self._inputs.get("token")
+        if inp is None:
+            return False
+        inp.value = ""
+        inp.placeholder = ""        # маски сохранённого больше нет — стирать нечего
+        inp.set_class(False, "has-saved")
+        return True
 
     def focus_field(self, key: str) -> None:
         """Фокус на поле по ключу — курсорная лента /settings ходит по всем полям

@@ -35,7 +35,12 @@ def test_escapes_quotes_and_backslashes():
     assert '    Authorization: "Bearer a\\"b\\\\c"' in out
 
 
-def test_write_values_updates_file_and_reports_missing(tmp_path):
+def test_write_values_updates_file(tmp_path):
+    """Все ключи нашлись — файл обновлён, соседние строки целы.
+
+    Случай «нашлись не все» проверяет
+    `test_write_values_leaves_the_file_untouched_when_a_key_cannot_be_written`: с
+    канона 2026-08-20 запись идёт по правилу «всё или ничего»."""
     cfg = tmp_path / "config.yml"
     cfg.write_text(
         "backend:\n"
@@ -48,13 +53,13 @@ def test_write_values_updates_file_and_reports_missing(tmp_path):
     )
     missing = w.write_values(
         cfg,
-        {"completions_url": "https://x/v1", "Authorization": "Bearer sk-1", "nope": "z"},
+        {"completions_url": "https://x/v1", "Authorization": "Bearer sk-1"},
     )
     out = cfg.read_text(encoding="utf-8")
+    assert missing == []
     assert '  completions_url: "https://x/v1"' in out
     assert '    Authorization: "Bearer sk-1"' in out
     assert '  model: "gigacode_agent_v1.6_rc"' in out    # не тронут
-    assert missing == ["nope"]
 
 
 # ── Task 5: §6.4 — write_values разворачивает закомментированный блок шаблона ──
@@ -159,17 +164,20 @@ def test_write_voice_values_uncomments_template_block(tmp_path):
     assert 'model: "whisper-large"' in cfg.read_text(encoding="utf-8")
 
 
-# ── Fix round 1: третий fallback не трогает частично живую секцию ──
+# ── Частично живая секция: дописываем в неё, а не сдаёмся ──
 
-def test_write_values_skips_uncomment_fallback_when_section_already_live(tmp_path):
-    """Юзер сам завёл voice: с одним полем (секция уже живая, но неполная).
+def test_write_values_extends_a_partially_live_section(tmp_path):
+    """Юзер завёл voice: с одним полем — остальные ДОПИСЫВАЮТСЯ в ту же секцию.
 
-    Третий fallback (uncomment_template_block) не должен дописывать в хвост
-    ВТОРОЙ, шаблонный voice-блок: PyYAML не ругается на дубли top-level ключей
-    и молча берёт последний — юзерский url тихо потерялся бы."""
+    Находка ревью коллеги: недостающие под-ключи уходили в `missing`, а соседи по
+    вызову всё равно попадали в файл. Человек получал половину настроек: /settings
+    говорил «не сохранено», мастер — «✓ конфиг записан», а в файле лежало ни то ни сё.
+
+    Второй top-level блок при этом заводить по-прежнему нельзя: PyYAML на дублях не
+    ругается и молча берёт последний — юзерский url тихо потерялся бы."""
     import re
     import yaml
-    from config import _default_config_path
+    from config import _default_config_path, validate_config_text
 
     template = Path(_default_config_path())
     cfg = tmp_path / "config.yml"
@@ -179,10 +187,33 @@ def test_write_values_skips_uncomment_fallback_when_section_already_live(tmp_pat
         encoding="utf-8",
     )
 
-    missing = w.write_values(cfg, {"voice.model": "wh"}, template_path=template)
+    missing = w.write_values(cfg, {"voice.model": "wh", "voice.language": "en"},
+                             template_path=template, validate=validate_config_text)
 
-    assert missing == ["voice.model"]
+    assert missing == []
     text = cfg.read_text(encoding="utf-8")
     assert len(re.findall(r"^voice:", text, re.MULTILINE)) == 1   # блок не задублирован
-    assert f'url: "{user_url}"' in text                            # юзерское значение цело
-    assert yaml.safe_load(text)["voice"]["url"] == user_url
+    voice = yaml.safe_load(text)["voice"]
+    assert voice["url"] == user_url                                # юзерское значение цело
+    assert voice["model"] == "wh" and voice["language"] == "en"    # дописанные — на месте
+
+
+def test_write_values_leaves_the_file_untouched_when_a_key_cannot_be_written(tmp_path):
+    """Записать удалось не всё — файл не трогаем вовсе.
+
+    Половина значений в конфиге хуже честного отказа: человек видит «не сохранено», а
+    на диске лежит новый адрес со старой моделью (находка ревью коллеги)."""
+    from config import _default_config_path
+
+    cfg = tmp_path / "config.yml"
+    before = "backend:\n  completions_url: http://h/v1/chat/completions\n"
+    cfg.write_text(before, encoding="utf-8")
+
+    missing = w.write_values(
+        cfg,
+        {"backend.completions_url": "http://new/v1/chat/completions", "nosuch.key": "x"},
+        template_path=_default_config_path(),
+    )
+
+    assert missing == ["nosuch.key"]
+    assert cfg.read_text(encoding="utf-8") == before

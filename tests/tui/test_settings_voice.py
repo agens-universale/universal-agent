@@ -635,6 +635,54 @@ async def test_token_placeholder_masks_the_saved_secret(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_ctrl_u_clears_the_saved_voice_token(tmp_path):
+    """Ctrl+U на «Токене» стирает СОХРАНЁННЫЙ секрет — как на «Подключении».
+
+    До этой правки убрать голосовой токен через интерфейс было нечем: поле пустое,
+    под ним маска, а пустое поле при сохранении значит «оставить как было» — секрет
+    жил в config.yml, пока его не удалят руками. Футер обещает клавишу ровно там, где
+    ей есть что делать."""
+    from tui.app import TuiApp
+    from textual.widgets import Input
+    from tui.screens.settings import _VOICE_FOOTER_CLOUD_TOKEN
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr, fake = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
+        await _open_cloud(app, scr, pilot)
+        await _to_field(pilot, 1, expand=False)          # курсор на «Токен»
+        assert _focused_id(scr) == "voice-token"
+        token = scr.query_one("#voice-token", Input)
+        assert token.value == "" and token.placeholder == "***"   # маска сохранённого
+        assert _footer(scr) == _VOICE_FOOTER_CLOUD_TOKEN
+
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert token.placeholder == ""                    # стирать больше нечего
+        assert _footer(scr) != _VOICE_FOOTER_CLOUD_TOKEN  # и клавишу больше не обещаем
+
+        await pilot.press("enter")                        # сохранить форму
+        await pilot.pause()
+        assert fake.calls == ["wire_cloud"]
+        assert fake.wired["token"] == "", "сохранённый токен обязан уйти из конфига"
+
+
+@pytest.mark.asyncio
+async def test_ctrl_u_on_a_plain_voice_field_is_not_ours(tmp_path):
+    """На поле без сохранённого секрета клавиша не наша — она уходит полю ввода
+    (штатное «удалить до начала строки»), а токен остаётся нетронутым."""
+    from tui.app import TuiApp
+    from textual.widgets import Input
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr, _ = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
+        await _open_cloud(app, scr, pilot)
+        await _to_field(pilot, expand=False)              # курсор на «URL»
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert scr.query_one("#voice-token", Input).placeholder == "***"
+
+
+@pytest.mark.asyncio
 async def test_token_placeholder_shows_env_ref_as_is(tmp_path):
     """Ссылка ${ENV:VAR} секретом не является: маска врала бы «токен задан» там, где
     его может не быть (канон display_secret)."""
