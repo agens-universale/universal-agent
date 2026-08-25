@@ -23,7 +23,7 @@ from gc_core.intent_log.user_turn import append_user_asks_from_messages, init_su
 from gc_core.run_context import RunContext
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.states import State
-from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, build_tools_data
+from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, abuild_tools_data
 from gc_core.tools.subagents.registry import get_subagent_class, resolve_subagent_definitions
 from gc_core.usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
 from gc_core.usage.account import UsageAccount
@@ -171,7 +171,7 @@ class SubagentRunner:
         agent_role, initial_message = instance.get_initial_data()
 
         try:
-            child_state = self._build_child_state(agent_role)
+            child_state = await self._build_child_state(agent_role)
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -209,7 +209,7 @@ class SubagentRunner:
             child_state.messages = messages.copy()
 
         try:
-            child_ctx = self._build_child_ctx(tool_name=tool_name)
+            child_ctx = await self._build_child_ctx(tool_name=tool_name)
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -520,11 +520,11 @@ class SubagentRunner:
             child_config[SUBAGENT_TOOLS_STOP_KEY] = list(definition.stop_tools)
         return child_config
 
-    def _build_child_state(self, agent_role: str) -> State:
+    async def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
         child_config = self._build_child_config()
         parent_backend = getattr(self._ctx, "os_backend", None)
-        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(
+        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = await abuild_tools_data(
             child_config,
             os_backend=parent_backend,
             logger=getattr(self._ctx, "logger", None),
@@ -638,7 +638,7 @@ class SubagentRunner:
         child_state.messages = messages.copy()
         return messages
 
-    def _build_child_ctx(self, tool_name: str) -> Any:
+    async def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
         child_config = self._build_child_config()
         child_run_id = generate_run_id()
@@ -657,7 +657,7 @@ class SubagentRunner:
         child_skills_registry = get_skills_registry(
             child_config, backend=parent_backend
         )
-        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(
+        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = await abuild_tools_data(
             child_config,
             os_backend=parent_backend,
             skills_registry=child_skills_registry,

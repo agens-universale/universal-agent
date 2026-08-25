@@ -167,6 +167,31 @@ def apply_subagent_tools_filter(
     return filtered
 
 
+def _collect_local_tools_data(
+    config_dict: Dict[str, Any],
+    *,
+    os_backend: FsBackend | None,
+    skills_registry: SkillsRegistry | None,
+) -> Dict[str, Dict[str, Any]]:
+    """Тулы, которые не требуют сети: builtin и скиллы.
+
+    Отдельно от MCP, потому что дискавери — единственный дорогой источник
+    (866–1405 мс против 2.4–6.9 мс на всё это), и только она бывает
+    асинхронной. Обе формы ``build_tools_data`` зовут этот сборщик как есть.
+    """
+    tools_data: Dict[str, Dict[str, Any]] = {}
+
+    builtin_tools_data = get_builtin_tools_data(config_dict)
+    for k, v in builtin_tools_data.items():
+        tools_data[k] = v
+
+    registry = skills_registry or get_skills_registry(config_dict, backend=os_backend)
+    skills_tools_data = get_skills_tools_data(registry)
+    for k, v in skills_tools_data.items():
+        tools_data[k] = v
+    return tools_data
+
+
 def build_tools_data(
     config_dict: Dict[str, Any],
     on_progress=None,
@@ -188,20 +213,62 @@ def build_tools_data(
     субагент — НА КАЖДЫЙ СПАВН, причём прямо на event loop (замер: 993 мс
     заморозки). Обоим достаточно передать сюда один кэш.
     """
-    tools_data: Dict[str, Dict[str, Any]] = {}
-
-    builtin_tools_data = get_builtin_tools_data(config_dict)
-    for k, v in builtin_tools_data.items():
-        tools_data[k] = v
-
-    registry = skills_registry or get_skills_registry(config_dict, backend=os_backend)
-    skills_tools_data = get_skills_tools_data(registry)
-    for k, v in skills_tools_data.items():
-        tools_data[k] = v
+    tools_data = _collect_local_tools_data(
+        config_dict, os_backend=os_backend, skills_registry=skills_registry
+    )
 
     mcp_tools_data, mcp_status = get_mcp_tools_data(
         config_dict, on_progress=on_progress, tools_cache=tools_cache
     )
+    return _finish_tools_data(
+        tools_data, mcp_tools_data, mcp_status, config_dict,
+        os_backend=os_backend, logger=logger,
+    )
+
+
+async def abuild_tools_data(
+    config_dict: Dict[str, Any],
+    on_progress=None,
+    *,
+    os_backend: FsBackend | None = None,
+    skills_registry: SkillsRegistry | None = None,
+    logger: Any = None,
+    tools_cache: Any = None,
+) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
+    """То же, что ``build_tools_data``, но дискавери ждётся без потока.
+
+    Дискавери — 99.7% времени сборки (866–1405 мс против 2.4–6.9 мс на всё
+    остальное), и только она здесь асинхронна. Остальные источники — builtin,
+    скиллы, субагенты — это словари в памяти.
+    """
+    from gc_core.tools.connect_mcp.agent_tools import aget_mcp_tools_data_for_config
+
+    tools_data = _collect_local_tools_data(
+        config_dict, os_backend=os_backend, skills_registry=skills_registry
+    )
+    mcp_tools_data, mcp_status = await aget_mcp_tools_data_for_config(
+        config_dict, on_progress, tools_cache=tools_cache
+    )
+    return _finish_tools_data(
+        tools_data, mcp_tools_data, mcp_status, config_dict,
+        os_backend=os_backend, logger=logger,
+    )
+
+
+def _finish_tools_data(
+    tools_data: Dict[str, Dict[str, Any]],
+    mcp_tools_data: Dict[str, Dict[str, Any]],
+    mcp_status: dict,
+    config_dict: Dict[str, Any],
+    *,
+    os_backend: FsBackend | None,
+    logger: Any,
+) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
+    """Досборка после дискавери: субагенты, фильтры, спеки. Ни сети, ни ожидания.
+
+    Одно тело на обе формы вызова — синхронную и асинхронную. Между ними
+    отличается ровно то, как дождаться MCP.
+    """
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 

@@ -83,11 +83,16 @@ def test_child_allow_list_narrows_the_set(shared_discovery):
 
 
 def test_filter_runs_after_mcp_assembly():
-    """Структурно: сначала MCP, потом фильтр — порядок обязателен.
+    """Структурно: сначала подмешать MCP, потом фильтровать — порядок обязателен.
 
-    Если фильтр переедет выше ``get_mcp_tools_data``, ``mcp_*`` станет
+    Если фильтр переедет ВЫШЕ подмешивания ``mcp_tools_data``, ``mcp_*`` станет
     нефильтруемым (об этом прямо сказано в докстроке
-    ``apply_subagent_tools_filter``), и общий кэш начнёт протекать.
+    ``apply_subagent_tools_filter``), и общий ToolsCache начнёт отдавать ребёнку
+    набор, который ему запрещён.
+
+    Смотрим ``_finish_tools_data``: досборка живёт там с тех пор, как у
+    ``build_tools_data`` появился асинхронный двойник — тело у них общее, и
+    порядок достаточно закрепить в одном месте.
     """
     import ast
 
@@ -97,18 +102,53 @@ def test_filter_runs_after_mcp_assembly():
     tree = ast.parse(src)
     fn = next(
         n for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == "build_tools_data"
+        if isinstance(n, ast.FunctionDef) and n.name == "_finish_tools_data"
     )
 
-    def line_of(name: str) -> int:
-        for node in ast.walk(fn):
-            if isinstance(node, ast.Call):
-                fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-                if fname == name:
-                    return node.lineno
-        raise AssertionError(f"не нашёл вызов {name} в build_tools_data")
+    merge_line = None
+    for node in ast.walk(fn):
+        # `for k, v in mcp_tools_data.items(): tools_data[k] = v`
+        if isinstance(node, ast.For) and isinstance(node.iter, ast.Call):
+            src_obj = getattr(node.iter.func, "value", None)
+            if isinstance(src_obj, ast.Name) and src_obj.id == "mcp_tools_data":
+                merge_line = node.lineno
+                break
+    assert merge_line is not None, "не нашёл подмешивание mcp_tools_data"
 
-    assert line_of("get_mcp_tools_data") < line_of("apply_subagent_tools_filter"), (
-        "фильтр субагента оказался ВЫШЕ сборки MCP — mcp_* перестанут "
+    filter_line = None
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call):
+            fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if fname == "apply_subagent_tools_filter":
+                filter_line = node.lineno
+                break
+    assert filter_line is not None, "не нашёл apply_subagent_tools_filter"
+
+    assert merge_line < filter_line, (
+        "фильтр субагента оказался ВЫШЕ подмешивания MCP — mcp_* перестанут "
         "фильтроваться, а общий ToolsCache начнёт отдавать ребёнку чужой набор"
     )
+
+
+def test_both_build_forms_share_the_finish():
+    """Обе формы сборки обязаны звать одну досборку — иначе порядок разъедется."""
+    import ast
+
+    from gc_testkit.paths import REPO
+
+    src = (REPO / "packages/core/src/gc_core/tools/__init__.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    for name, kind in (
+        ("build_tools_data", ast.FunctionDef),
+        ("abuild_tools_data", ast.AsyncFunctionDef),
+    ):
+        fn = next(n for n in ast.walk(tree) if isinstance(n, kind) and n.name == name)
+        calls = {
+            getattr(c.func, "id", None) or getattr(c.func, "attr", None)
+            for c in ast.walk(fn) if isinstance(c, ast.Call)
+        }
+        assert "_finish_tools_data" in calls, (
+            f"{name} не зовёт общую досборку — фильтр и спеки разъедутся между "
+            f"синхронной и асинхронной формами"
+        )

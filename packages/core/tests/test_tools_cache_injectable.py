@@ -98,13 +98,15 @@ def test_subagents_take_the_cache_from_parent_ctx():
     ).read_text(encoding="utf-8")
     tree = ast.parse(src)
 
+    # Имя асинхронное: сборки детей идут из уже работающего loop, поэтому
+    # зовут abuild_tools_data (синхронная там подняла бы ещё один loop в потоке).
     builds = [
         n for n in ast.walk(tree)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Name)
-        and n.func.id == "build_tools_data"
+        and n.func.id == "abuild_tools_data"
     ]
-    assert len(builds) == 2, f"ожидалось 2 вызова build_tools_data, нашлось {len(builds)}"
+    assert len(builds) == 2, f"ожидалось 2 вызова abuild_tools_data, нашлось {len(builds)}"
 
     for call in builds:
         assert any(kw.arg == "tools_cache" for kw in call.keywords), (

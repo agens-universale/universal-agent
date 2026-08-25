@@ -423,17 +423,16 @@ def _servers_cfg_with_trace(
     return out
 
 
-def get_mcp_tools_data_for_config(
+def _prepare_mcp_tools_data(
     config_dict: Dict[str, Any],
-    on_progress=None,
     *,
     tools_cache: Optional[ToolsCache] = None,
-) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    """
-    Собрать словарь MCP-инструментов в формате tools_data для заданного config_dict.
+):
+    """Подготовить кэш и конфиг серверов перед дискавери.
 
-    Возвращает `(tools_data, status_map)`, где `status_map` — per-server статус
-    дискавери из `ToolsCache.get_status()`.
+    Отдаёт ``(tools_cache, servers_cfg)`` либо ``None``, если MCP не настроен.
+    Вынесено, чтобы асинхронная и синхронная точки входа делили ОДНУ подготовку:
+    отличаются они ровно тем, как дождаться дискавери.
 
     ``tools_cache`` — кэш, которым владеет ВЫЗЫВАЮЩИЙ. Не передан — заводится
     свой, одноразовый: ровно прежнее поведение, каждая сборка платит полную
@@ -449,7 +448,7 @@ def get_mcp_tools_data_for_config(
     """
     servers_cfg = config_dict.get("mcp-servers") or {}
     if not servers_cfg:
-        return {}, {}
+        return None
     # Единственная точка: этот же объект уходит и в ToolsCache (весь discovery),
     # и в замыкание каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же
     # для сабагентов через build_tools_data(child_config).
@@ -469,14 +468,22 @@ def get_mcp_tools_data_for_config(
         # ключ считался от актуального набора серверов, а не от того, с которым
         # кэш когда-то создали.
         tools_cache.rebind(cfg)
+    return tools_cache, servers_cfg
 
-    try:
-        mcp_registry = tools_cache.get_tools(on_progress=on_progress)
-        status_map = tools_cache.get_status()
-    except Exception:
-        logger.error("Failed to load MCP tools", exc_info=True)
-        return {}, {}
 
+def _assemble_mcp_tools_data(
+    mcp_registry: Dict[str, Any],
+    status_map: Dict[str, Dict[str, Any]],
+    config_dict: Dict[str, Any],
+    servers_cfg: Dict[str, Any],
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Собрать tools_data из результата дискавери. Ни сети, ни ожидания.
+
+    Вынесено, чтобы у сборки был ОДИН экземпляр на обе формы вызова:
+    асинхронную и синхронную. Между ними отличается ровно одна строка — как
+    дождаться дискавери, — и дублировать ради неё сотню строк фабрик и
+    нормализации схем не за что.
+    """
     timeout = (
         config_dict.get("mcp-meta", {}).get("request_timeout_sec")
         or 600
@@ -519,7 +526,54 @@ def get_mcp_tools_data_for_config(
     return result, status_map
 
 
+async def aget_mcp_tools_data_for_config(
+    config_dict: Dict[str, Any],
+    on_progress=None,
+    *,
+    tools_cache: Optional[ToolsCache] = None,
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """MCP-тулы в формате tools_data, без потока на дискавери.
+
+    Основная реализация. Синхронное имя ``get_mcp_tools_data_for_config``
+    сохранено и работает через портал — на нём сидят прямые вызовы и тесты.
+    """
+    prepared = _prepare_mcp_tools_data(config_dict, tools_cache=tools_cache)
+    if prepared is None:
+        return {}, {}
+    cache, servers_cfg = prepared
+    try:
+        mcp_registry = await cache.aget_tools(on_progress=on_progress)
+        status_map = cache.get_status()
+    except Exception:
+        logger.error("Failed to load MCP tools", exc_info=True)
+        return {}, {}
+    return _assemble_mcp_tools_data(mcp_registry, status_map, config_dict, servers_cfg)
+
+
+def get_mcp_tools_data_for_config(
+    config_dict: Dict[str, Any],
+    on_progress=None,
+    *,
+    tools_cache: Optional[ToolsCache] = None,
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Синхронный двойник. Реализация одна — асинхронная.
+
+    ``run_coro_blocking``, а НЕ портал: портал отказывается работать из-под
+    работающего loop (SyncApiInsideEventLoopError), а сюда законно приходят
+    вызывающие, у которых loop уже крутится. До переезда дискавери звалась
+    через тот же хелпер — семантику сохраняем.
+    """
+    from gc_core.utils.aio_compat import run_coro_blocking
+
+    return run_coro_blocking(
+        aget_mcp_tools_data_for_config(
+            config_dict, on_progress, tools_cache=tools_cache
+        )
+    )
+
+
 __all__ = [
     "MCPToolWrapper",
+    "aget_mcp_tools_data_for_config",
     "get_mcp_tools_data_for_config",
 ]

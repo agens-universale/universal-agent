@@ -1,6 +1,7 @@
 """Subagent step-limit: ok=false, finish_reason=step_limit (не completed)."""
 from __future__ import annotations
 
+from gc_testkit import as_coro
 import json
 from types import SimpleNamespace
 
@@ -28,11 +29,11 @@ def _wire_runner(monkeypatch, runner, child):
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", lambda role: child)
+    monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
     monkeypatch.setattr(
         runner,
         "_build_child_ctx",
-        lambda tool_name: SimpleNamespace(logger=None, run_id="cr-step"),
+        as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr-step")),
     )
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)

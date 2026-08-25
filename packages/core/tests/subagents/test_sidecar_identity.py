@@ -1,8 +1,9 @@
 """Шаг 2: thread identity на child ctx + gate sidecar без sink."""
-
 from __future__ import annotations
 
 from types import SimpleNamespace
+
+import pytest
 
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink, child_progress_enabled
 from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity, resolve_sidecar_identity
@@ -107,7 +108,8 @@ class TestBindClearThreadIdentity:
 
 
 class TestChildCtxCopiesThreadIdentity:
-    def test_build_child_ctx_copies_identity_without_sink(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_build_child_ctx_copies_identity_without_sink(self, tmp_path):
         from gc_core.states import SharedStateData, State
         from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
@@ -158,7 +160,7 @@ class TestChildCtxCopiesThreadIdentity:
         )
         runner = SubagentRunner(parent, state, cfg)
         runner._parent_call_id = "call_sub"
-        child = runner._build_child_ctx(tool_name="subagent_worker")
+        child = await runner._build_child_ctx(tool_name="subagent_worker")
 
         assert child.threads_dir == str(tmp_path / "threads")
         assert child.system_id == "cli"

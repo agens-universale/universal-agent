@@ -1,5 +1,6 @@
 """Step 5: child HITL emit (ask_human / confirm) + tui_confirm on child ctx."""
 from __future__ import annotations
+import pytest
 
 import json
 from types import SimpleNamespace
@@ -21,7 +22,8 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
 
 
 class TestChildCtxCopiesTuiConfirm:
-    def test_build_child_ctx_copies_tui_confirm_and_tool_name(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_build_child_ctx_copies_tui_confirm_and_tool_name(self, tmp_path):
         from gc_core.states import SharedStateData, State
         from gc_core.tools.subagents.runner import SubagentRunner
 
@@ -70,7 +72,7 @@ class TestChildCtxCopiesTuiConfirm:
         parent.permission_store = object()
         runner = SubagentRunner(parent, state, cfg)
         runner._parent_call_id = "call_x"
-        child = runner._build_child_ctx(tool_name="subagent_worker")
+        child = await runner._build_child_ctx(tool_name="subagent_worker")
         assert child.tui_confirm is confirm
         assert child.subagent_tool_name == "subagent_worker"
         assert getattr(child, "permission_store", None) is parent.permission_store

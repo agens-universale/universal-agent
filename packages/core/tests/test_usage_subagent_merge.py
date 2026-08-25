@@ -1,5 +1,6 @@
 """Фаза 4: usage субагента сворачивается в категорию subagent родителя."""
 
+from gc_testkit import as_coro
 import json
 from types import SimpleNamespace
 
@@ -40,8 +41,8 @@ def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", lambda role: child)
-    monkeypatch.setattr(runner, "_build_child_ctx", lambda tool_name: SimpleNamespace(logger=None, run_id="cr"))
+    monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
+    monkeypatch.setattr(runner, "_build_child_ctx", as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr")))
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 

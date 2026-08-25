@@ -1,5 +1,6 @@
 """Раннер с кастомным сабагентом: прокидывание allow/stop в дочерний ран."""
 from types import SimpleNamespace
+import pytest
 
 from gc_core.run_context import create_run_context
 from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY
@@ -93,7 +94,8 @@ class TestChildConfig:
         assert "exec_command" not in data  # запрет из файла
 
 
-def test_both_build_sites_agree(tmp_path):
+@pytest.mark.asyncio
+async def test_both_build_sites_agree(tmp_path):
     """_build_child_state и _build_child_ctx обязаны видеть один и тот же конфиг.
 
     Раньше словарь собирался в двух местах независимо — именно этот класс
@@ -103,16 +105,17 @@ def test_both_build_sites_agree(tmp_path):
     cfg = _config(tmp_path, agents)
     _ctx, runner = _runner(tmp_path, cfg)
 
-    child_ctx = runner._build_child_ctx("subagent_alpha")
+    child_ctx = await runner._build_child_ctx("subagent_alpha")
     state_config = runner._build_child_config()
 
     for key in (SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, "use_local_subagents"):
         assert child_ctx.config_dict.get(key) == state_config.get(key)
 
 
-def test_child_tools_are_actually_narrowed(tmp_path):
+@pytest.mark.asyncio
+async def test_child_tools_are_actually_narrowed(tmp_path):
     agents = _agent_file(tmp_path, tools=("fs_read_file", *REQUIRED))
     _ctx, runner = _runner(tmp_path, _config(tmp_path, agents))
-    child_ctx = runner._build_child_ctx("subagent_alpha")
+    child_ctx = await runner._build_child_ctx("subagent_alpha")
     names = {s.get("name") for s in child_ctx.tools_spec}
     assert names == {"fs_read_file", *REQUIRED}

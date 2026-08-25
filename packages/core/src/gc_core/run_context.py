@@ -102,12 +102,94 @@ def create_run_context(
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
     - ``is_tui=True`` + LocalFsBackend → ``TrackingFsBackend`` (Diff journal/snapshot).
     """
+    prep = _prepare_run_context(
+        config_dict, run_id=run_id, environment=environment, loop=loop,
+        os_backend=os_backend,
+    )
+    with use_owner(prep.mcp_session_owner):
+        tools = build_tools_data(
+            config_dict,
+            on_progress=on_progress,
+            os_backend=prep.backend,
+            skills_registry=prep.skills_registry,
+            logger=prep.run_logger,
+            tools_cache=tools_cache,
+        )
+    return _finish_run_context(
+        config_dict, prep, tools,
+        auth_connector=auth_connector, environment=environment,
+        on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
+        is_tui=is_tui, tools_cache=tools_cache,
+    )
+
+
+async def _acreate_run_context_impl(
+    config_dict: Dict[str, Any],
+    *,
+    auth_connector: Optional[AuthConnector] = None,
+    run_id: Optional[str] = None,
+    on_progress=None,
+    environment: Optional[Any] = None,
+    loop: Optional[Any] = None,
+    os_backend: Optional[FsBackend] = None,
+    on_stream_delta=None,
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+    is_tui: bool = False,
+    tools_cache: Any = None,
+) -> RunContext:
+    """Тело асинхронной сборки: то же, что синхронное, но дискавери — await."""
+    from gc_core.tools import abuild_tools_data
+
+    prep = _prepare_run_context(
+        config_dict, run_id=run_id, environment=environment, loop=loop,
+        os_backend=os_backend,
+    )
+    with use_owner(prep.mcp_session_owner):
+        tools = await abuild_tools_data(
+            config_dict,
+            on_progress=on_progress,
+            os_backend=prep.backend,
+            skills_registry=prep.skills_registry,
+            logger=prep.run_logger,
+            tools_cache=tools_cache,
+        )
+    return _finish_run_context(
+        config_dict, prep, tools,
+        auth_connector=auth_connector, environment=environment,
+        on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
+        is_tui=is_tui, tools_cache=tools_cache,
+    )
+
+
+@dataclass
+class _RunContextPrep:
+    """Всё, что готово ДО сборки тулов. Одинаково для обеих форм вызова."""
+
+    run_id: str
+    backend: FsBackend
+    skills_registry: Any
+    run_logger: Any
+    logging_path: str
+    summary_trace_path: str
+    mcp_session_owner: str
+
+
+def _prepare_run_context(
+    config_dict: Dict[str, Any],
+    *,
+    run_id: Optional[str],
+    environment: Optional[Any],
+    loop: Optional[Any],
+    os_backend: Optional[FsBackend],
+) -> _RunContextPrep:
+    """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
+
+    Вынесено, чтобы синхронная и асинхронная сборка делили одно тело: между
+    ними отличается ровно один шаг — как дождаться дискавери.
+    """
     effective_run_id = run_id or generate_run_id()
     backend = resolve_os_backend(
-        config_dict,
-        environment=environment,
-        loop=loop,
-        override=os_backend,
+        config_dict, environment=environment, loop=loop, override=os_backend,
     )
     skills_registry = get_skills_registry(config_dict, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
@@ -121,16 +203,40 @@ def create_run_context(
     # контекст. Дискавери поднимает сессии прямо сейчас, поэтому она обязана
     # идти уже под ним — иначе поднятое ею оказалось бы ничьим, и ни один
     # прогон не смог бы это закрыть.
-    mcp_session_owner = new_owner_token()
-    with use_owner(mcp_session_owner):
-        tools_data, tools_spec, tools_description, mcp_status = build_tools_data(
-            config_dict,
-            on_progress=on_progress,
-            os_backend=backend,
-            skills_registry=skills_registry,
-            logger=run_logger,
-            tools_cache=tools_cache,
-        )
+    return _RunContextPrep(
+        run_id=effective_run_id,
+        backend=backend,
+        skills_registry=skills_registry,
+        run_logger=run_logger,
+        logging_path=logging_path,
+        summary_trace_path=summary_trace_path,
+        mcp_session_owner=new_owner_token(),
+    )
+
+
+def _finish_run_context(
+    config_dict: Dict[str, Any],
+    prep: "_RunContextPrep",
+    tools: tuple,
+    *,
+    auth_connector: Optional[AuthConnector],
+    environment: Optional[Any],
+    on_stream_delta,
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]],
+    is_tui: bool,
+    tools_cache: Any,
+) -> RunContext:
+    """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
+    tools_data, tools_spec, tools_description, mcp_status = tools
+    effective_run_id = prep.run_id
+    backend = prep.backend
+    skills_registry = prep.skills_registry
+    run_logger = prep.run_logger
+    logging_path = prep.logging_path
+    summary_trace_path = prep.summary_trace_path
+    mcp_session_owner = prep.mcp_session_owner
+    run_id = effective_run_id
+    os_backend = backend
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
@@ -228,24 +334,22 @@ def create_run_context(
 async def acreate_run_context(config_dict: Dict[str, Any], **kwargs: Any) -> RunContext:
     """Собрать RunContext, не блокируя event loop.
 
-    Сборка включает MCP-дискавери: сетевые вызовы к каждому серверу с общим
-    дедлайном. Именно её TUI прячет в фоновый поток (``AgentRunner.warm``), а
-    асинхронному вызывающему достаточно ``await``.
+    Настоящая корутина, а не ``to_thread`` над синхронной сборкой. Прежняя
+    форма работала (loop был свободен), но стоила дорого: замер давал 8 event
+    loop'ов и пик в 10 потоков на ОДНУ сборку — воркер пула, внутри него
+    ``asyncio.run``, а под ним по демон-потоку на сервер и ещё по ``asyncio.run``
+    в каждом. Нативный путь даёт ту же латентность при 1 loop и 5 потоках.
 
-    Пока это ``to_thread`` над синхронной сборкой — но НЕ потому, что MCP-клиент
-    синхронный: SDK-транспорты (``stream_*``) и одноразовый stdio давно нативно
-    асинхронны. Синхронными остались только легаси ``http``/``sse`` (sync
-    ``httpx.Client``) и persistent stdio (``Popen``, осознанно — сессия делится
-    между loop'ами). Их и ждёт ``to_thread``.
+    И уходит ловушка: отмена ожидания возвращала управление не сразу, а через
+    сотни миллисекунд — ``asyncio.run`` дожидался брошенного воркера
+    дефолтного пула (``shutdown_default_executor``). Это ровно то, что уровнем
+    ниже запрещает ``abandonable``, а на уровне контекста возвращалось обратно.
 
-    Цена нынешней формы измерена: 8 event loop'ов и пик в 10 потоков на одну
-    сборку против 1 loop и 5 потоков у прототипа с нативным await, при той же
-    латентности. Для вызывающего разницы нет — loop свободен; когда дискавери
-    станет асинхронной насквозь, тело поменяется, а контракт останется.
+    Дорогая часть здесь одна — MCP-дискавери; остальное занимает 2.4–6.9 мс и
+    остаётся синхронным, потому что это словари в памяти и короткий локальный
+    I/O (лог-файл, проба прав на запись в корне проекта).
     """
-    import asyncio
-
-    return await asyncio.to_thread(lambda: create_run_context(config_dict, **kwargs))
+    return await _acreate_run_context_impl(config_dict, **kwargs)
 
 
 __all__ = [

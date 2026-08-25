@@ -195,6 +195,95 @@ async def _afetch_tools_sdk(
     return await alist_tools_stream_stdio(server_cfg=server_cfg, timeout=timeout)
 
 
+async def _adiscover_one(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    *,
+    timeout: float,
+) -> tuple[list, dict]:
+    """Дискавери одного сервера, без потока там, где он не нужен.
+
+    Веток у ``_discover_one`` три, и асинхронна из них ровно одна:
+
+    * SDK (``stream_sse``/``stream_http``/``stream_stdio``) — насквозь async,
+      здесь берётся напрямую;
+    * persistent stdio — блокирующий ``Popen``, сессия делится между loop'ами
+      (см. докстроку ``persistent_stdio``), остаётся в потоке;
+    * легаси ``http``/``sse`` — синхронный ``httpx.Client``, тоже в потоке.
+
+    Поэтому двойник ЗАКОРАЧИВАЕТ первую ветку и отдаёт остальное прежнему
+    синхронному телу. Дублировать разбор конфига, нормализацию тулов и разбор
+    ошибок не нужно — они одинаковы для всех веток.
+
+    Поток здесь — ``run_abandonable``, а не ``asyncio.to_thread``, и это важно:
+    у последнего пул дефолтный, а ``asyncio.run`` на выходе дожидается ВСЕХ его
+    воркеров, так что зависший сервер держал бы процесс уже после истёкшего
+    дедлайна (см. ``abandonable``).
+    """
+    transport = server_cfg.get("transport") if isinstance(server_cfg, dict) else None
+    if isinstance(server_cfg, dict) and transport is not None:
+        effective = resolve_effective_transport(server_cfg, server_name=server_name)
+        if effective in ("stream_sse", "stream_http", "stream_stdio"):
+            return await _adiscover_one_sdk(
+                server_name, server_cfg, effective_transport=effective, timeout=timeout
+            )
+    return await run_abandonable(
+        _discover_one, server_name, server_cfg, timeout=timeout
+    )
+
+
+async def _adiscover_one_sdk(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    *,
+    effective_transport: str,
+    timeout: float,
+) -> tuple[list, dict]:
+    """SDK-ветка ``_discover_one`` без потока. Ошибки оформляет так же."""
+    t0 = time.monotonic()
+    try:
+        tools_raw = await _afetch_tools_sdk(
+            effective_transport,
+            url=server_cfg.get("url") or "",
+            server_cfg=server_cfg,
+            token=server_cfg.get("token"),
+            timeout=timeout,
+        )
+        tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
+        tools: list = []
+        for tool in tools_raw:
+            normalized = _normalize_tool(
+                server_name,
+                tool,
+                transport=server_cfg.get("transport"),
+                url=server_cfg.get("url") or "",
+                server_display_name=(
+                    server_cfg.get("server-name")
+                    or server_cfg.get("serever-name")
+                    or server_name
+                ),
+                server_description=server_cfg.get("description") or "",
+            )
+            if normalized is not None:
+                tools.append(normalized)
+        return tools, {
+            "status": "connected",
+            "reason": None,
+            "tool_count": len(tools),
+            "elapsed_ms": int((time.monotonic() - t0) * 1000),
+        }
+    except Exception as exc:  # noqa: BLE001 — дискавери никогда не бросает наверх
+        reason = _humanize_discovery_error(exc, server_cfg)
+        logger.warning("MCP discovery failed for %s: %s", server_name, exc)
+        print(f"[MCP] {server_name}: недоступен — {reason} (пропущен)")
+        return [], {
+            "status": "failed",
+            "reason": reason,
+            "tool_count": 0,
+            "elapsed_ms": int((time.monotonic() - t0) * 1000),
+        }
+
+
 def _discover_one(
     server_name: str,
     server_cfg: Dict[str, Any],
@@ -327,7 +416,7 @@ def _discover_one(
         }
 
 
-def _build_tools_registry(
+async def _abuild_tools_registry(
     servers_cfg: Dict[str, Dict[str, Any]],
     *,
     discovery_timeout_sec: float = 8,
@@ -362,13 +451,9 @@ def _build_tools_registry(
     results: Dict[str, tuple] = {}
 
     async def _one(name: str, cfg: Dict[str, Any]) -> None:
-        # _discover_one синхронна (легаси-транспорты на requests/subprocess),
-        # поэтому уходит в поток. НЕ asyncio.to_thread: его пул дефолтный, и
-        # asyncio.run на выходе дожидается всех его воркеров — зависший сервер
-        # держал бы процесс после истёкшего дедлайна (см. abandonable.py).
-        result = await run_abandonable(
-            _discover_one, name, cfg, timeout=discovery_timeout_sec
-        )
+        # _adiscover_one сама решает, нужен ли поток: SDK-транспорты она берёт
+        # нативно, а легаси и persistent stdio уводит в run_abandonable.
+        result = await _adiscover_one(name, cfg, timeout=discovery_timeout_sec)
         results[name] = result
         if on_progress is not None:
             on_progress(name, result[1])
@@ -385,7 +470,7 @@ def _build_tools_registry(
         except TimeoutError:
             pass
 
-    run_coro_blocking(_all())
+    await _all()
 
     for name, cfg in items:
         if name in results:
@@ -408,6 +493,29 @@ def _build_tools_registry(
                 name, server_cfg=cfg, tool=tool
             )
     return all_tools, status_map
+
+
+def _build_tools_registry(
+    servers_cfg: Dict[str, Dict[str, Any]],
+    *,
+    discovery_timeout_sec: float = 8,
+    on_progress=None,
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Синхронный двойник. Реализация одна — асинхронная.
+
+    ``run_coro_blocking``, а НЕ портал: портал отказывается работать из-под
+    работающего loop (SyncApiInsideEventLoopError), а сюда законно приходят
+    вызывающие, у которых loop уже крутится. До переезда дискавери звалась
+    через тот же хелпер — семантику сохраняем.
+    """
+    return run_coro_blocking(
+        _abuild_tools_registry(
+            servers_cfg,
+            discovery_timeout_sec=discovery_timeout_sec,
+            on_progress=on_progress,
+        )
+    )
+
 
 
 class ToolsCache:
@@ -491,9 +599,12 @@ class ToolsCache:
 
         return (time.time() - self._fetched_at) < ttl
 
-    def get_tools(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
-        """
-        Получить объединённый словарь тулов с учётом TTL и кэша.
+    async def aget_tools(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
+        """Объединённый словарь тулов с учётом TTL и кэша, без потока.
+
+        Основная реализация; синхронный ``get_tools`` — шим через портал.
+        Попадание в кэш вообще не трогает сеть, поэтому дешёвый путь остаётся
+        дешёвым в обеих формах.
         """
         servers_cfg = self._config.get("mcp-servers") or {}
         ttl = self._get_ttl()
@@ -503,7 +614,7 @@ class ToolsCache:
             return self._data or {}
 
         # Кэш пустой или протух — перестраиваем реестр тулов.
-        fresh_tools, status = _build_tools_registry(
+        fresh_tools, status = await _abuild_tools_registry(
             servers_cfg,
             discovery_timeout_sec=self._discovery_timeout(),
             on_progress=on_progress,
@@ -516,6 +627,14 @@ class ToolsCache:
             self._cache_key = cache_key
 
         return fresh_tools
+
+    def get_tools(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
+        """Синхронный двойник. Реализация одна — асинхронная.
+
+        ``run_coro_blocking``, а не портал: сюда законно приходят
+        вызывающие с уже работающим loop, а портал на это отвечает отказом.
+        """
+        return run_coro_blocking(self.aget_tools(on_progress=on_progress))
 
 
 def get_all_tools(

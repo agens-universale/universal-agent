@@ -1,6 +1,7 @@
 """child_run_id в output meta (без path к логу)."""
 from __future__ import annotations
 
+from gc_testkit import as_coro
 import json
 from types import SimpleNamespace
 
@@ -28,14 +29,16 @@ def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", lambda role: child)
+    monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
     monkeypatch.setattr(
         runner,
         "_build_child_ctx",
-        lambda tool_name: SimpleNamespace(
-            logger=None,
-            run_id=run_id,
-            logging_path="/tmp/should-not-leak/agent_subagent_worker_run-abc.log",
+        as_coro(
+            lambda tool_name: SimpleNamespace(
+                logger=None,
+                run_id=run_id,
+                logging_path="/tmp/should-not-leak/agent_subagent_worker_run-abc.log",
+            )
         ),
     )
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])

@@ -21,14 +21,36 @@ _MAX_STALL_SEC = 0.15
 
 @pytest.fixture()
 def blocking_ctx(monkeypatch):
-    """Подменить сборку контекста синхронной и медленной, как MCP-дискавери."""
+    """Подменить дискавери — самую долгую часть сборки — медленной.
+
+    Подменяем именно её, а не ``create_run_context`` целиком: с тех пор как
+    ``acreate_run_context`` стала настоящей корутиной, синхронную сборку она не
+    зовёт вовсе. Дискавери и есть 99.7% времени (866–1405 мс против 2.4–6.9 мс
+    на всё остальное), так что мерить надо её.
+
+    Заглушка СИНХРОННАЯ и блокирующая — специально: она изображает легаси-
+    транспорт, который остаётся в потоке. Если такой транспорт когда-нибудь
+    начнут звать прямо на loop, тест это увидит.
+    """
+    import gc_core.tools as tools_pkg
+
+    def _slow(config_dict, on_progress=None, **kwargs):
+        time.sleep(_BUILD_SEC)
+        return {}, {}
+
+    monkeypatch.setattr(tools_pkg, "get_mcp_tools_data", _slow)
+
+    async def _aslow(config_dict, on_progress=None, **kwargs):
+        import asyncio as _a
+
+        return await _a.to_thread(_slow, config_dict, on_progress, **kwargs)
+
+    import gc_core.tools.connect_mcp.agent_tools as agent_tools
+
+    monkeypatch.setattr(agent_tools, "aget_mcp_tools_data_for_config", _aslow)
+
     import gc_core.run_context as rc
 
-    def _slow(config_dict, **kwargs):
-        time.sleep(_BUILD_SEC)
-        return object()
-
-    monkeypatch.setattr(rc, "create_run_context", _slow)
     return rc
 
 
@@ -59,7 +81,7 @@ async def test_context_build_leaves_the_loop_free(blocking_ctx):
     assert gaps, "хартбит не тикал вовсе"
     assert max(gaps) < _MAX_STALL_SEC, (
         f"loop залипал на {max(gaps):.3f}с при сборке контекста — "
-        f"похоже, вернулся синхронный create_run_context"
+        f"похоже, дискавери зовётся прямо на loop"
     )
 
 
