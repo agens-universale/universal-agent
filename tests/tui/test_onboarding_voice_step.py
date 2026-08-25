@@ -1797,7 +1797,11 @@ async def test_commit_cloud_empty_token_keeps_saved_secret(tmp_path, monkeypatch
         assert screen._commit_config()
         text = Path(cfg_path).read_text(encoding="utf-8")
         assert "sk-real-secret-value" in text
-        assert 'token: ""' not in text
+        # Проверяем ЗНАЧЕНИЕ в секции, а не подстроку по файлу: шаблон несёт
+        # закомментированный пример `models:` со строкой `token: ""`, и поиск по тексту
+        # спотыкался бы о комментарий (поймано синком с профилями).
+        import yaml
+        assert yaml.safe_load(text)["voice"]["token"] == "sk-real-secret-value"
 
 
 @pytest.mark.asyncio
@@ -1904,7 +1908,10 @@ async def test_voice_cloud_draft_token_does_not_leak_saved_secret(tmp_path, monk
         assert screen._commit_config()                    # запись всё равно идёт с фолбэком
         text = Path(cfg_path).read_text(encoding="utf-8")
         assert "sk-real-secret-value" in text
-        assert 'token: ""' not in text
+        # Значение секции, а не подстрока файла: в шаблоне есть закомментированный
+        # пример `models:` со строкой `token: ""` (см. соседний тест выше).
+        import yaml
+        assert yaml.safe_load(text)["voice"]["token"] == "sk-real-secret-value"
 
 
 @pytest.mark.asyncio

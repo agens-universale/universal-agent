@@ -202,6 +202,9 @@ def test_main_voice_autostart_does_not_block_startup(monkeypatch, tmp_path):
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
+
         def run(self):
             return None
 

@@ -173,11 +173,15 @@ async def test_paste_chip_survives_enter_stop_of_recording(monkeypatch, tmp_path
 
 @pytest.mark.asyncio
 async def test_footer_right_width_accounts_for_voice_pill(monkeypatch):
-    """Во время записи footer-left = пилюля + хвост клавиш; доступная ширина
-    footer-right обязана считаться от ФАКТИЧЕСКОГО рендера пилюли, а не от
-    статичной строки команд — иначе правый край выдавливает подсказки.
-    (Сравнения с idle-шириной нет: после F-клавишной полосы develop idle-футер
-    может быть и шире, и уже пилюли — это не контракт.)"""
+    """Во время записи левая колонка футера — пилюля, и лесенка правой обязана мерить
+    ИМЕННО ЕЁ, а не строку команд, которой в этот момент на экране нет.
+
+    Модель ширины сменилась вместе с профилями (develop, Task 17): правая колонка
+    больше не «остаток от левой» — она заявляет свой потолок, а сколько останется
+    левой, решает перебор с предикатом «сколько рядов займёт левая». Предикат берёт
+    текст у `_footer_left_commands()`, поэтому проверяем именно его: там должна быть
+    пилюля целиком, с таймером и лентой эквалайзера, иначе правая колонка посчитает
+    место по F-подсказкам и выдавит пилюлю на второй ряд."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
 
@@ -187,16 +191,15 @@ async def test_footer_right_width_accounts_for_voice_pill(monkeypatch):
         screen = pilot.app.screen
         rec = FakeRecorder()
         _wire_fake_voice(screen, rec, lambda pcm, cfg: "x")
+        idle_commands = screen._footer_left_commands()
         await pilot.press("ctrl+t")
         await pilot.pause()
         assert screen._voice.state == "recording"
-        left_cells = screen._voice_footer_render().cell_len
-        assert left_cells > 0
-        avail = screen._footer_right_available_width()
-        # −5 = хром футера (2 + 1) плюс зазор между колонками 2 (padding-right у
-        # #footer-left). Было −4 с зазором в один столбец, пока правая часть не
-        # упиралась в левую вплотную.
-        assert avail == max(10, pilot.app.size.width - left_cells - 5)
+        pill = screen._voice_footer_render().plain
+        assert pill.strip()
+        measured = screen._footer_left_commands()
+        assert measured == pill                   # мерим пилюлю, а не команды
+        assert measured != idle_commands
 
 
 @pytest.mark.asyncio
