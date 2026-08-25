@@ -180,6 +180,18 @@ class _RunContextPrep:
     logging_path: str
     summary_trace_path: str
     mcp_session_owner: str
+    #: Вызывающий передал СВОЙ бэкенд (а не положился на фабрику).
+    #:
+    #: Нужен на шаге досборки: TUI оборачивает локальный бэкенд в
+    #: ``TrackingFsBackend`` (diff-журнал) только тогда, когда бэкенд собрали
+    #: мы сами. Чужой не трогаем — вызывающий знает, что подсунул.
+    #:
+    #: Флагом, а не самим бэкендом: после ``resolve_os_backend`` отличить
+    #: «передали свой» от «собрали дефолтный» уже нечем, и в первой редакции
+    #: разделения это привело к тому, что ``os_backend is None`` в досборке
+    #: сравнивалось с локальной переменной, всегда не-None. Условие стало
+    #: вечно ложным, а обёртка — мёртвым кодом.
+    backend_was_overridden: bool
 
 
 def _prepare_run_context(
@@ -221,6 +233,7 @@ def _prepare_run_context(
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
         mcp_session_owner=new_owner_token(),
+        backend_was_overridden=os_backend is not None,
     )
 
 
@@ -326,7 +339,7 @@ def _finish_run_context(
     )
     ctx.is_tui = bool(is_tui)
 
-    if is_tui and os_backend is None:
+    if is_tui and not prep.backend_was_overridden:
         # diff_tui едет вместе с extra [tui]: в headless-профиле пакета нет.
         # Ядро обязано это пережить — без diff-журнала прогон полностью
         # работоспособен, поэтому деградируем в no-op, а не роняем сборку

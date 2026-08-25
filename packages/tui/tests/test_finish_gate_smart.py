@@ -179,7 +179,12 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
         }], "r2"
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
-    monkeypatch.setattr(pr, "aapply_tool", lambda **_kw: "ok")
+    # Заглушка обязана быть КОРУТИННОЙ: ядро ждёт aapply_tool нативно, и
+    # синхронная лямбда даёт "object str can't be used in 'await' expression".
+    async def _ok_tool(**_kw):
+        return "ok"
+
+    monkeypatch.setattr(pr, "aapply_tool", _ok_tool)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
 
