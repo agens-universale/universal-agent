@@ -38,6 +38,7 @@ def judge_text_answer(ctx: Any, state: Any, assistant_text: str) -> ValidationRe
             current_user_requests=current,
             context_user_messages=context_log,
             finish_handoff_arguments=assistant_text,
+            consumer="text_answer_judge",
         )
     except Exception:
         return None

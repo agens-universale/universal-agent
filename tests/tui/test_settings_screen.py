@@ -147,7 +147,7 @@ async def test_settings_ctrl_pgup_pgdn_switch_sections():
         app.push_screen(_mk_screen())
         await pilot.pause()
         scr = app.screen
-        await pilot.press("down", "down", "enter")   # секция MCP
+        await pilot.press("down", "down", "down", "enter")   # секция MCP
         assert scr._view == _MCP
         await pilot.press("ctrl+pagedown")                   # → Голосовой ввод
         assert scr._view == _VOICE
@@ -177,7 +177,7 @@ async def test_ctrl_pgdn_works_with_focus_in_input():
         await pilot.pause()
         assert scr._view == 1
         assert app.screen is scr                        # приложение живо
-        await pilot.press("ctrl+pagedown")               # секция 1 → 2 (MCP)
+        await pilot.press("ctrl+pagedown")               # секция 1 → 2 (Профили)
         await pilot.pause()
         assert scr._view == 2
         assert app.screen is scr
@@ -796,7 +796,7 @@ async def test_mcp_section_mounts_editor(tmp_path, monkeypatch):
                              on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
         app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("down", "down", "enter")   # секция MCP (idx=2)
+        await pilot.press("down", "down", "down", "enter")   # секция MCP (idx=3)
         await pilot.pause()
         assert scr.query(McpSectionEditor)
 
@@ -820,7 +820,7 @@ async def test_mcp_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
                              on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
         app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("down", "down", "enter")   # секция MCP (idx=2)
+        await pilot.press("down", "down", "down", "enter")   # секция MCP (idx=3)
         await pilot.pause()
         ed = scr.query_one(McpSectionEditor)
         assert ed.request_install(["office"], verb="Обновить") is True   # поднять confirm-баннер
@@ -828,13 +828,13 @@ async def test_mcp_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
         assert ed.awaiting_confirm is True
         await pilot.press("pagedown")                        # попытка листнуть секцию
         await pilot.pause()
-        assert scr._view == 2                                # секция НЕ сменилась
+        assert scr._view == 3                                # секция НЕ сменилась
         assert ed.awaiting_confirm is True                   # баннер на месте
         assert list(ed.query(".mcp-confirm"))                # виджет баннера жив
         await pilot.press("escape")                          # отмена confirm
         await pilot.pause()
         assert ed.awaiting_confirm is False
-        assert scr._view == 2                                # escape отменил confirm, не секцию
+        assert scr._view == 3                                # escape отменил confirm, не секцию
 
 
 async def test_apply_endpoint_oserror_shows_notice(tmp_path, monkeypatch):
@@ -1902,7 +1902,7 @@ async def test_delete_key_in_mcp_section_reaches_screen(tmp_path, monkeypatch):
                              on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
         app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("down", "down", "enter")   # секция MCP (idx=2)
+        await pilot.press("down", "down", "down", "enter")   # секция MCP (idx=3)
         await pilot.pause()
         ed = scr.query_one(McpSectionEditor)
         for _ in range(50):                                  # статусы пакетов грузит фоновый воркер
@@ -2389,21 +2389,22 @@ async def test_save_without_session_does_not_warn_about_counters(tmp_path):
 
 
 def test_sections_composition_merged():
-    """6 секций, «Подключение» первая, «Голосовой ввод» между MCP и «Режимы работы»,
-    «Режимы работы» между MCP-группой и Обновлением; редакторные {conn,model}, probe {conn}."""
+    """7 секций: «Подключение» первая, «Профили» сразу за «Модель», «Голосовой ввод»
+    между MCP и «Режимы работы», «Режимы работы» перед «Обновлением»; редакторные
+    {conn,model}, probe {conn}."""
     from tui.screens import settings as s
-    assert s.SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Голосовой ввод",
-                          "Режимы работы", "Обновление")
-    assert (s._CONNECTION == 0 and s._MODEL == 1 and s._MCP == 2 and s._VOICE == 3
-            and s._MODES == 4 and s._UPDATE == 5)
+    assert s.SECTIONS == ("Подключение", "Модель", "Профили", "MCP-серверы",
+                          "Голосовой ввод", "Режимы работы", "Обновление")
+    assert (s._CONNECTION == 0 and s._MODEL == 1 and s._PROFILES == 2 and s._MCP == 3
+            and s._VOICE == 4 and s._MODES == 5 and s._UPDATE == 6)
     assert s._EDITOR_SECTIONS == {s._CONNECTION, s._MODEL}
     assert s._PROBE_SECTIONS == {s._CONNECTION}
 
 
 def test_sections_order_contains_modes():
     from tui.screens.settings import SECTIONS
-    assert SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Голосовой ввод",
-                        "Режимы работы", "Обновление")
+    assert SECTIONS == ("Подключение", "Модель", "Профили", "MCP-серверы",
+                        "Голосовой ввод", "Режимы работы", "Обновление")
 
 
 def test_fit_mode_pairs_whole_pairs_only():
@@ -2743,7 +2744,7 @@ async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(tmp_
         open_settings_section(scr, "Режимы работы")
         await pilot.pause()
         assert scr._view == settings_section_index("Режимы работы")
-        names = list(tg.TOGGLES.keys())
+        names = tg.group_toggle_names("rigor")   # fake — default group="rigor"
         fake_idx = names.index("fake")
         row_texts = [str(w.render()) for w in scr.query(".set-row")]
         assert any("фиктивный режим" in r and "f0" in r for r in row_texts)
@@ -2906,7 +2907,7 @@ async def test_modes_row_shows_session_override_note(tmp_path):
     показывают ГЛОБАЛ (секция правит его), не эффективное. Терминал шире (200
     колонок) — общие колонки секции выросли (глиф дерева + возможная 4-я позиция
     трека /rigor), хвост оверрайда проверяется независимо от ширины."""
-    from tui.toggles import TOGGLES
+    from tui.toggles import group_toggle_names
     app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
     async with app.run_test(size=(200, 24)) as pilot:
         scr = await _open_modes_section(pilot)
@@ -2918,7 +2919,7 @@ async def test_modes_row_shows_session_override_note(tmp_path):
         await pilot.pause(0.1)
 
         rows = [str(w.render()) for w in scr.query(".set-row")]
-        assert len(rows) == len(TOGGLES)                     # пометка не добавляет строк
+        assert len(rows) == len(group_toggle_names("rigor"))   # пометка не добавляет строк
 
         gate_row = next(r for r in rows if "самопроверка" in r)
         answers_row = next(r for r in rows if "формат ответа" in r)

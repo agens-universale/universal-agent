@@ -20,11 +20,28 @@ from typing import Any, Dict, Iterable, Optional
 import config_raw
 from config_modules.merge import deep_merge
 
-# Подписи слоёв для UI (значение — то, что видит пользователь).
+# Подписи слоёв для UI (значение — то, что видит пользователь). Профильные подписи —
+# шаблоны с `{name}` (имя профиля = стем пути файла, см. overlay_label ниже): одно
+# имя-кандидат на корень (`profile:project`/`profile:base`), а не занятое статикой
+# «имя из шаблона» — иначе KeyError на любом активном профиле (спека §12.3).
 OVERLAY_LABELS: Dict[str, str] = {
     "managed": "~/.gc/config.local.yml",
     "project": ".gc/config.yml в проекте",
+    "profile:project": "профилем {name} (проектным)",
+    "profile:base": "профилем {name} (глобальным)",
 }
+
+
+def overlay_label(origin: "Origin") -> str:
+    """Человекочитаемая подпись перекрывшего слоя. Профильные подписи (`profile:*`)
+    подставляют имя профиля из пути перекрывшего файла (`overlay_path`) — оно не
+    хранится отдельно в `Origin`, но однозначно восстанавливается как имя файла
+    без расширения (правило именования профилей, спека §1)."""
+    label = OVERLAY_LABELS[origin.overlay_kind]
+    if origin.overlay_kind.startswith("profile:") and origin.overlay_path:
+        from pathlib import Path
+        label = label.format(name=Path(origin.overlay_path).stem)
+    return label
 
 
 @dataclass(frozen=True)
@@ -42,22 +59,39 @@ class Origin:
 
 
 def _overlay_paths(base_path: str) -> list[tuple[str, str]]:
-    """[(kind, path)] в порядке приоритета load_config: managed, затем project.
+    """[(kind, path)] в порядке приоритета load_config: managed, project, затем
+    (спека §2, ось 2 — контент профиля ложится ПОВЕРХ всех файловых слоёв) активный
+    профиль, если указатель резолвится. Указатель читаем из того же мержа
+    base+managed+project, которым его резолвит `load_config_ex` (ось 1) — не из
+    `self._config`: у origins() своя копия мержа, отдельная от вызывающего экрана.
 
     Совпадающий с базовым файл пропускаем — ровно как load_config."""
+    from pathlib import Path as _Path
     from config import _project_local_config_path
+    from config_modules.profiles import discover_profiles, profile_roots
     from mcp_runtime.paths import managed_config_path
 
     base_abs = os.path.abspath(base_path)
     out: list[tuple[str, str]] = []
+    merged = config_raw.read_document(base_path)
 
     managed = managed_config_path()
     if managed.is_file() and os.path.abspath(str(managed)) != base_abs:
         out.append(("managed", str(managed)))
+        merged = deep_merge(merged, config_raw.read_document(str(managed)))
 
     project = _project_local_config_path()
     if project is not None and os.path.abspath(project) != base_abs:
         out.append(("project", project))
+        merged = deep_merge(merged, config_raw.read_document(project))
+
+    pointer = str(merged.get("profile") or "").strip()
+    if pointer:
+        roots = profile_roots(_Path(os.getcwd()), _Path(base_path))
+        ref = discover_profiles(roots).get(pointer)
+        if ref is not None:
+            kind = "profile:project" if ref.root_kind == "project" else "profile:base"
+            out.append((kind, str(ref.path)))
 
     return out
 

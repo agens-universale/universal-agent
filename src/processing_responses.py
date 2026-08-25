@@ -41,11 +41,21 @@ from tools.subagents.progress import (
     todo_items_from_arguments,
 )
 from tools.subagents.sidecar import persist_subagent_trace
-from utils.connect_backend import create_call_headers
+from model_router import AliasCircuitOpenError
+from runtime_notices import maybe_push_llm_failure_notice
+from utils.connect_backend import (
+    NO_BACKEND_OVERRIDE,
+    backend_override_value,
+    create_call_headers,
+    resolve_network_params,
+)
 from utils.connect_backend import request_backend_responses as request_backend
-from utils.ssl_config import get_backend_client_cert
 from utils.logging_module import human_console_enabled
-from utils.backend_errors import is_auth_error, is_context_overflow_error
+from utils.backend_errors import (
+    is_auth_error,
+    is_context_overflow_error,
+    is_model_unavailable_error,
+)
 
 # Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
 # когда даже после сжатия история всё ещё не влезает (единичное огромное сообщение).
@@ -60,6 +70,7 @@ from utils.format_messages import format_message_responses
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from states import State
+from turn_boundary import begin_turn
 from usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from usage.account import UsageAccount
 from usage.context import usage_scope
@@ -222,6 +233,101 @@ def _mode_requires_backend_call(mode: str) -> bool:
     return mode in {"user_ask", "function_call_output"}
 
 
+def _raise_honest_main_unavailable(
+    ctx: Any, resolved: Any, reason: str, source_exc: BaseException
+) -> None:
+    """Класс 2 фоллбэков недоступности (спека §8): исчерпаны существующие ретраи
+    (transport/adaptive max_tokens/401-refresh) для активной модели main-трейса.
+    Никаких тихих подмен — честная ошибка хода с моделью/endpoint/причиной и
+    подсказкой спасения; ставит per-alias предохранитель + notice."""
+    router = getattr(ctx, "model_router", None)
+    if router is not None and resolved.alias is not None:
+        router.breaker.trip(resolved.alias, reason)
+    maybe_push_llm_failure_notice(
+        source_exc,
+        request_label="main_agent",
+        url=resolved.url,
+        enabled=bool(getattr(ctx, "is_tui", False)),
+    )
+    message = (
+        f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
+        f"{resolved.url}: {reason}. Переключите уровень /level или профиль /profiles."
+    )
+    logger = getattr(ctx, "logger", None) or _fallback_logger
+    logger.error(message)
+    raise RuntimeError(message) from source_exc
+
+
+def _resolve_main_for_turn(state: State, ctx: Any) -> Optional[Any]:
+    """Резолв `main` по уровню, ЗАФИКСИРОВАННОМУ на ход (`turn_boundary.begin_turn`).
+
+    Контракт §6.4 — «внутри хода модель не перечитывается» — держится не на
+    `state.default_model` (воронка берёт модель из `ResolvedModel`, а не оттуда), а
+    на пине уровня: `/level` меняется без пересборки executor, и живой резолв уводил
+    бы url/токен/модель на другой слот прямо посреди цикла tool-call'ов.
+
+    Предохранитель проверяется КАЖДЫЙ раз (алиас мог открыться посреди хода) —
+    `resolve_level` идёт тем же путём `_resolve_alias`, что и `resolve("main")`.
+    Пина нет (ход не начинали через `begin_turn` — легаси/тестовые двойники) или
+    Router дочерний (у субагента уровень уже заморожен в самом Router'е) — обычный
+    резолв. Без `ctx.model_router` — `None`, воронки читают cfg напрямую как раньше."""
+    router = getattr(ctx, "model_router", None)
+    if router is None:
+        return None
+    level = getattr(state, "turn_level", None)
+    if not level or router.is_subagent_child:
+        return router.resolve("main")
+    return router.resolve_level(level)
+
+
+def _maybe_trip_and_raise_main_unavailable(state: State, ctx: Any, exc: Exception) -> None:
+    """Классифицирует `exc` (спека §8) и, если это подтверждённая недоступность
+    активной модели main-трейса, поднимает честную ошибку (см. выше). Иначе —
+    no-op, вызывающий код должен `raise` исходное исключение без изменений.
+
+    Резолв — по модели ХОДА (`_resolve_main_for_turn`), не по живому уровню: и
+    предохранитель, и текст ошибки обязаны назвать тот алиас, которым запрос
+    реально шёл, иначе `/level` посреди хода закрыл бы живую модель вместо мёртвой.
+
+    Пропускает ЛЮБОГО ребёнка-субагента (`router.is_subagent_child`, пинованного
+    или нет): его class-1 рестарт/деградацию ведёт `SubagentRunner`, а не главный
+    трейс — осознанно, не только для явно пинованных."""
+    if is_context_overflow_error(exc):
+        return
+    if not is_model_unavailable_error(exc):
+        return
+    router = getattr(ctx, "model_router", None)
+    if router is None or getattr(router, "is_subagent_child", False):
+        return
+    try:
+        resolved = _resolve_main_for_turn(state, ctx)
+    except AliasCircuitOpenError as open_exc:
+        resolved = open_exc.resolved
+    if resolved.alias is None:
+        return  # легаси — предохранитель не ведётся
+    reason = str(exc).strip()[:300] or exc.__class__.__name__
+    _raise_honest_main_unavailable(ctx, resolved, reason, exc)
+
+
+def begin_turn_main_trace(state: State, ctx: Any) -> None:
+    """Начало хода ГЛАВНОГО трейса (спека §6.4/§8): фиксирует модель хода
+    (`turn_boundary.begin_turn`) и, если активный алиас уже в предохранителе
+    (trip прошлого хода / персистированный breaker при attach), поднимает честную
+    ошибку класса 2 ДО похода в транспорт — с той же моделью/endpoint/причиной и
+    подсказкой /level //profiles, что и `_request_backend_canonical`.
+
+    `begin_turn` резолвит `main` без `check_breaker=False`, поэтому открытый алиас
+    прилетает сюда сырым `AliasCircuitOpenError`; переводим его в тот же честный
+    класс 2 через `_maybe_trip_and_raise_main_unavailable` (единый текст, без
+    дублирования). Субагентские `begin_turn` идут мимо — их class-1 ведёт
+    `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы."""
+    try:
+        begin_turn(state, ctx)
+    except AliasCircuitOpenError as exc:
+        _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
+        raise
+
+
 def _request_backend_canonical(
     messages: List[Dict],
     state: State,
@@ -232,23 +338,39 @@ def _request_backend_canonical(
     """Обёртка над одиночной попыткой: на 401 (истёкший токен доступа) пере-выпускает
     токен (`auth_connector.get_token(force=True)`) и повторяет запрос РОВНО один раз.
     Повторный 401 после свежего токена — настоящий auth-fail, уходит наверх внятно.
-    Прочие ошибки — наверх без изменений. Все call-site получают это единообразно."""
+    Прочие ошибки — наверх без изменений. Все call-site получают это единообразно.
+
+    Класс 2 фоллбэков недоступности (спека §8): открытый алиас активной модели —
+    мгновенный отказ до похода в транспорт; подтверждённая недоступность после
+    исчерпания ретраев — честная ошибка + предохранитель (см. `_raise_honest_main_unavailable`)."""
     auth_connector = getattr(ctx, "auth_connector", None)
+    router = getattr(ctx, "model_router", None)
+    if router is not None and not getattr(router, "is_subagent_child", False):
+        try:
+            _resolve_main_for_turn(state, ctx)
+        except AliasCircuitOpenError as exc:
+            _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
+
     try:
         return _request_backend_canonical_once(
             messages, state, ctx, set_previous_response_id=set_previous_response_id
         )
     except Exception as exc:
-        if auth_connector is None or not is_auth_error(exc):
-            raise
-        run_logger = getattr(ctx, "logger", None) or _fallback_logger
-        run_logger.warning(
-            "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
-        )
-        auth_connector.get_token(force=True)
-        return _request_backend_canonical_once(
-            messages, state, ctx, set_previous_response_id=set_previous_response_id
-        )
+        if auth_connector is not None and is_auth_error(exc):
+            run_logger = getattr(ctx, "logger", None) or _fallback_logger
+            run_logger.warning(
+                "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
+            )
+            auth_connector.get_token(force=True)
+            try:
+                return _request_backend_canonical_once(
+                    messages, state, ctx, set_previous_response_id=set_previous_response_id
+                )
+            except Exception as retry_exc:
+                _maybe_trip_and_raise_main_unavailable(state, ctx, retry_exc)
+                raise
+        _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
+        raise
 
 
 def _request_backend_canonical_once(
@@ -266,20 +388,30 @@ def _request_backend_canonical_once(
     - backend response id,
     - backend response headers (может быть пустым dict).
     """
-    call_headers = create_call_headers(state, ctx)
+    # Main-трейс: воронка получает весь ResolvedModel (url/authorization/
+    # backend_overrides), не только id модели (спека §6/§7) — поэтому и резолв идёт
+    # по уровню, зафиксированному на ход (`_resolve_main_for_turn`), а не по живому:
+    # иначе /level посреди хода уводил бы запрос на другой слот. Без ctx.model_router
+    # (легаси/тестовые двойники) — resolved=None, воронки читают cfg напрямую как раньше.
+    resolved = _resolve_main_for_turn(state, ctx)
+    call_headers = create_call_headers(state, ctx, resolved=resolved)
     cfg = getattr(ctx, "config_dict", {}) or {}
-    verify = cfg.get("use_ssl", True)
-    cert = get_backend_client_cert(cfg)
-    use_retry = cfg.get("use_retry", False)
-    request_timeout_sec = float(cfg["backend_request_timeout_sec"])
     backend_mode = _get_backend_api_mode(ctx)
+    # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
+    # из ResolvedModel действует только id модели, сетевые параметры — легаси cfg.
+    resolved_for_network = resolved if backend_mode == "chat_completions" else None
+    (verify, cert, use_retry, request_timeout_sec, config_proxy,
+     retry_embedded_choice_errors) = resolve_network_params(cfg, resolved_for_network)
 
     if backend_mode == "responses":
+        # Responses-режим: из ResolvedModel действует только id модели (спека §4) —
+        # url остаётся легаси-ключом agent_url.
         url = cfg["agent_url"]
         call_data = create_call_data(
             messages,
             state,
             set_previous_response_id=set_previous_response_id,
+            resolved=resolved,
         )
         with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
             res, res_headers = request_backend(
@@ -291,13 +423,13 @@ def _request_backend_canonical_once(
                 use_retry=use_retry,
                 logger=getattr(ctx, "logger", None),
                 timeout=request_timeout_sec,
-                config_proxy=cfg.get("proxy"),
+                config_proxy=config_proxy,
             )
         resp_messages = res["output"]
         response_id = str(res["id"])
         return resp_messages, response_id, res_headers
 
-    url = cfg["completions_url"]
+    url = resolved.url if resolved is not None else cfg["completions_url"]
     sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
         invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
@@ -311,11 +443,26 @@ def _request_backend_canonical_once(
         tools=getattr(state, "tools", []),
         default_model=getattr(state, "default_model", None),
     )
+    # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
+    # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
+    # долбил бы её от чужого потолка к чужому полу. Тот же приём, что в служебной
+    # воронке (`utils/llm_chat_client._send_chat_completion_text`).
+    _max_tokens_override = backend_override_value(
+        resolved_for_network, "chat_completions_max_tokens"
+    )
     completions_max_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_max_tokens", 8096), default=8096
+        cfg.get("chat_completions_max_tokens", 8096)
+        if _max_tokens_override is NO_BACKEND_OVERRIDE
+        else _max_tokens_override,
+        default=8096,
+    )
+    _min_tokens_override = backend_override_value(
+        resolved_for_network, "chat_completions_min_response_tokens"
     )
     min_response_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_min_response_tokens", 1024),
+        cfg.get("chat_completions_min_response_tokens", 1024)
+        if _min_tokens_override is NO_BACKEND_OVERRIDE
+        else _min_tokens_override,
         default=1024,
     )
 
@@ -324,6 +471,7 @@ def _request_backend_canonical_once(
             sanitized_messages,
             chat_state,
             max_tokens=max_tokens,
+            resolved=resolved,
         )
 
     _stream_on = resolve_tui_stream_enabled(cfg)
@@ -339,14 +487,14 @@ def _request_backend_canonical_once(
             verify=verify,
             cert=cert,
             use_retry=use_retry,
-            retry_embedded_choice_errors=cfg.get("retry_embedded_choice_errors", True),
+            retry_embedded_choice_errors=retry_embedded_choice_errors,
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,
             request_label="main_agent",
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
             notice_url=url,
             timeout=request_timeout_sec,
-            config_proxy=cfg.get("proxy"),
+            config_proxy=config_proxy,
         )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")
@@ -800,6 +948,36 @@ def process_tool_outputs(messages, state: State, ctx: Any):
     return resp_messages, response_id
 
 
+def _pickup_pending_as_new_turn(
+    get_pending_messages: Optional[Callable[[], List[Dict]]],
+    state: State,
+    ctx: Any,
+) -> Optional[List[Dict]]:
+    """Ход закончен (finish-gate accept / text-response accept, спека §6.4): очередь
+    непуста → фиксируем модель нового хода (``begin_turn``) и возвращаем сообщения,
+    которыми продолжится цикл вместо возврата из ``run_agent``. ``None`` — очередь
+    пуста, ход завершается как обычно."""
+    if get_pending_messages is None:
+        return None
+    pending = get_pending_messages()
+    if not pending:
+        return None
+    try:
+        begin_turn_main_trace(state, ctx)
+    except Exception as exc:
+        # Очередь УЖЕ слита (`get_pending_messages` — drain, не peek): уронив ход
+        # здесь, мы потеряли бы набранное пользователем сообщение бесследно —
+        # вернуть его в очередь некуда. Поэтому ход продолжаем на модели прошлого
+        # хода: тот же честный отказ придёт из `_request_backend_canonical` (единая
+        # точка текста), но сообщение к тому моменту уже в трейсе и в логе.
+        logger = getattr(ctx, "logger", None) or _fallback_logger
+        logger.warning(
+            "фиксация модели нового хода не удалась (%s) — подхваченное сообщение "
+            "не теряем, ход продолжается на прежней модели", exc,
+        )
+    return pending
+
+
 def run_agent(
     messages,
     state: State,
@@ -1116,11 +1294,12 @@ def run_agent(
                                     turn_end_compaction_hook()
                                 # Сообщение, пришедшее во время (блокирующей) компакции, не
                                 # теряем: продолжаем новым ходом на уже сжатом контексте.
-                                if get_pending_messages is not None:
-                                    pending = get_pending_messages()
-                                    if pending:
-                                        messages = pending
-                                        continue
+                                new_turn_messages = _pickup_pending_as_new_turn(
+                                    get_pending_messages, state, ctx
+                                )
+                                if new_turn_messages is not None:
+                                    messages = new_turn_messages
+                                    continue
                                 return finish_arguments
                         else:
                             state.current_user_intent = []
@@ -1177,11 +1356,12 @@ def run_agent(
                                 mark_finalizing(False)
                         if turn_end_compaction_hook is not None:
                             turn_end_compaction_hook()
-                        if get_pending_messages is not None:
-                            pending = get_pending_messages()
-                            if pending:
-                                messages = pending
-                                continue
+                        new_turn_messages = _pickup_pending_as_new_turn(
+                            get_pending_messages, state, ctx
+                        )
+                        if new_turn_messages is not None:
+                            messages = new_turn_messages
+                            continue
                         return assistant_text
                     # === reject ===
                     tool_error_cnt += 1

@@ -568,6 +568,7 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
             messages=messages,
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
+            consumer="command_judge",
             payload_overrides=auxiliary_llm_completion_kwargs(ctx),
         )
         return _parse_judge_json(

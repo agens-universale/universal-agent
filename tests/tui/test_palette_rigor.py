@@ -121,19 +121,24 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
         await pilot.pause(0.1)
         palette = pilot.app.query_one(".palette")
 
-        # Ревизия 7: подвал уже показывает все три строки, до всякой навигации.
+        # Ревизия 7: подвал уже показывает все строки, до всякой навигации.
+        # level/profiles — группа «чем работаем» перед rigor (спека §12.1).
         rows_outside = [row.render().plain for row in palette.query(".palette-toggle-row")]
-        assert [r.split()[0] for r in rows_outside] == ["/rigor", "/gate", "/answers"]
+        assert [r.split()[0] for r in rows_outside] == [
+            "/level", "/profiles", "/rigor", "/gate", "/answers",
+        ]
 
-        # Спускаемся до /gate (позиция та же, что при развёрнутой группе раньше).
+        # Спускаемся до /gate (level, profiles, rigor — впереди, +2 шага).
         regular_count = len(palette._visible_rows())
-        for _ in range(regular_count + 1):     # /rigor -> /gate
+        for _ in range(regular_count + 3):     # /level -> /profiles -> /rigor -> /gate
             await pilot.press("down")
         await pilot.pause(0.05)
         assert palette.selected_command().name == "gate"
 
         rows_before = [row.render().plain for row in palette.query(".palette-toggle-row")]
-        assert [r.split()[0] for r in rows_before] == ["/rigor", "/gate", "/answers"]
+        assert [r.split()[0] for r in rows_before] == [
+            "/level", "/profiles", "/rigor", "/gate", "/answers",
+        ]
         columns_before = palette._toggle_columns()
 
         await pilot.press("right")     # gate: smart -> on (single-key цикл на месте)
@@ -154,7 +159,9 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
         # (c) состав и геометрия подвала не изменились — состав статичен,
         # не зависит от выделения (ревизия 7).
         rows_after = [row.render().plain for row in palette.query(".palette-toggle-row")]
-        assert [r.split()[0] for r in rows_after] == ["/rigor", "/gate", "/answers"]
+        assert [r.split()[0] for r in rows_after] == [
+            "/level", "/profiles", "/rigor", "/gate", "/answers",
+        ]
         assert len(rows_after) == len(rows_before)
         assert palette._toggle_columns() == columns_before
 
@@ -173,7 +180,9 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
 
         # Состав по-прежнему статичен — дети видны, как и всегда.
         rows_final = [row.render().plain for row in palette.query(".palette-toggle-row")]
-        assert [r.split()[0] for r in rows_final] == ["/rigor", "/gate", "/answers"]
+        assert [r.split()[0] for r in rows_final] == [
+            "/level", "/profiles", "/rigor", "/gate", "/answers",
+        ]
 
 
 def test_filtered_gate_row_is_dimmed_child_flat():
@@ -200,7 +209,9 @@ def test_filtered_gate_row_is_dimmed_child_flat():
     assert any(p.DIM.lower() in str(s.style).lower() for s in gate_row.spans)   # но серый (ревизия 7)
 
     pal.set_filter("")   # фильтр очищен -> /rigor снова в базе, дети видны всегда
-    assert [c.name for c in pal._visible_toggle_rows()] == ["rigor", "gate", "answers"]
+    assert [c.name for c in pal._visible_toggle_rows()] == [
+        "level", "profiles", "rigor", "gate", "answers",
+    ]
     gate_row_expanded = pal._format_toggle_row(reg.lookup("gate"))
     assert gate_row_expanded.plain.startswith(" /gate") and not gate_row_expanded.plain.startswith("  /gate")
     assert any(p.DIM.lower() in str(s.style).lower() for s in gate_row_expanded.spans)

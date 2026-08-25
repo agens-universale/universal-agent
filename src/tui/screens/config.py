@@ -42,7 +42,8 @@ def _filter_config_by_key(obj, q: str):
 
 
 def _paths_block(config: dict, config_path: str | None,
-                 project_local: str | None) -> Text:
+                 project_local: str | None,
+                 profile_path: str | None = None) -> Text:
     """Строки путей: метка (dim) + значение (ink); '(не задано)' — muted.
     Заголовок блока живёт в border_title панели, не в тексте."""
     from project_memory import resolve_project_memory_path
@@ -54,6 +55,8 @@ def _paths_block(config: dict, config_path: str | None,
     rows = [("config.yml:", config_path or "(не определён)")]
     if project_local:
         rows.append(("  + project-local:", str(project_local)))
+    if profile_path:
+        rows.append(("  + профиль:", profile_path))
     rows += [
         ("agent.md:", path_or_unset("agent_md_path")),
         ("project_memory.md:", str(resolve_project_memory_path())),
@@ -71,16 +74,47 @@ def _paths_block(config: dict, config_path: str | None,
     return t
 
 
+def _profile_header_text(config: dict, profile_source: str | None) -> Text:
+    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local».
+
+    Шаблонный сентинел `agent.model` (Task 14) — не имя модели, показываем «—»."""
+    from onboarding import MODEL_SENTINEL
+    profile = config.get("profile") or None
+    level = config.get("level") or "default"
+    raw_model = config.get("model")
+    model = raw_model if raw_model and raw_model != MODEL_SENTINEL else "—"
+    t = Text()
+    t.append("профиль: ", style=DIM)
+    if profile:
+        t.append(profile, style=MUTED)
+        if profile_source:
+            t.append(f" ({profile_source})", style=DIM)
+    else:
+        t.append("—", style=DIM)
+    t.append("  ·  уровень: ", style=DIM)
+    t.append(str(level), style=MUTED)
+    t.append("  ·  модель: ", style=DIM)
+    t.append(str(model), style=MUTED)
+    return t
+
+
 class ConfigScreen(Screen):
     def __init__(self, *, config: dict | None = None,
                  config_path: str | None = None,
-                 project_local: str | None = None) -> None:
+                 project_local: str | None = None,
+                 profile_source: str | None = None,
+                 profile_path: str | None = None) -> None:
         super().__init__()
         self._config = config or {}
         self._config_path = config_path
         self._project_local = project_local
+        self._profile_source = profile_source
+        self._profile_path = profile_path
         self._filter = ""
         self._yaml_w: Static | None = None
+
+    def _profile_header(self) -> Text:
+        return _profile_header_text(self._config, self._profile_source)
 
     def _yaml_text(self) -> str:
         return safe_yaml_dump(redact_secrets(self._config))
@@ -96,10 +130,11 @@ class ConfigScreen(Screen):
         return safe_yaml_dump(filtered) if filtered else _NO_MATCH
 
     def rendered_text(self) -> str:
-        """Для тестов: подсказка + пути + YAML одной строкой."""
-        return (_SNAPSHOT_HINT + "\n"
+        """Для тестов: заголовок профиля/уровня/модели + подсказка + пути + YAML одной строкой."""
+        return (self._profile_header().plain + "\n"
+                + _SNAPSHOT_HINT + "\n"
                 + _paths_block(self._config, self._config_path,
-                               self._project_local).plain
+                               self._project_local, self._profile_path).plain
                 + "\n" + self._yaml_text())
 
     def compose(self) -> ComposeResult:
@@ -107,9 +142,11 @@ class ConfigScreen(Screen):
             with Horizontal(id="header"):
                 yield Static("config · снимок сессии", id="header-left", markup=False)
             with VerticalScroll(id="trace", classes="quiet-focus"):
+                yield Static(self._profile_header(), classes="config-caption")
                 yield Static(_SNAPSHOT_HINT, classes="config-caption", markup=False)
                 paths = Static(
-                    _paths_block(self._config, self._config_path, self._project_local),
+                    _paths_block(self._config, self._config_path, self._project_local,
+                                self._profile_path),
                 )
                 paths.add_class("config-panel")
                 paths.border_title = "пути"

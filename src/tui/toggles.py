@@ -77,7 +77,29 @@ class ToggleSpec:
     preset-тогглов); `state` — читатель эффективного значения; `palette_default` —
     показывать ли в пустом фильтре палитры (спека §4.1: /gate,/answers — False);
     `preset_keys` — непусто ⇔ тоггл-пресет над этими ключами (значение = имя пресета
-    от резолвера, применение раскладывается в пару; спека §6)."""
+    от резолвера, применение раскладывается в пару; спека §6).
+
+    Профили v2 (спека §12.1, group «чем работаем» — `/level`, `/profiles`):
+    `group` — семья тоггла для потребителей, которым нужна ТОЛЬКО «rigor»-семья
+    (Settings «Режимы работы» — секция про самопроверку/формат ответа, не про
+    модели; см. `group_toggle_names`); дефолт `"rigor"` — существующие
+    gate/answers/rigor ничего не меняют, только новые `models`-тогглы указывают
+    свой. `show_track` — False у trackless-тоггла (`/profiles`: произвольное
+    число профилей, шкала не имеет смысла — сразу значение-имя, спека §12.1).
+    `values_provider(app) -> значения` — динамический набор значений вместо
+    статического `values` (профили из файлов, а не фиксированный список);
+    `hint_provider(app, value) -> текст` — динамический hint вместо статического
+    `ToggleValue.hint` (модель, резолвнутая Router'ом для `/level`; состав
+    профиля для `/profiles`) — оба переносятся с прототипа `feat/model-profiles`
+    (адаптация под flat-группы ревизий 5-7: без `group`-based разделителей —
+    граница «models»→«rigor» уже покрыта существующим правилом «черта перед
+    preset-родителем, который не первый», т.к. `/rigor` сам такой родитель).
+    `session_switch_profile` — True у `/profiles`: применение идёт через
+    `app.switch_session_profile` (пересборка + notice + предохранитель,
+    спека §9.1), не generic `apply_session_override`. `rebuild_on_apply` —
+    False у `/level`: единственный тоггл, переключаемый БЕЗ `invalidate_runner`
+    (спека §6.4 — уровень фиксируется на ход инжектируемым провайдером, не
+    снимком executor)."""
 
     values: Tuple[ToggleValue, ...]
     state: Callable[[Dict[str, Any]], str]
@@ -86,13 +108,266 @@ class ToggleSpec:
     dotted: str = ""
     palette_default: bool = True
     preset_keys: Tuple[str, ...] = ()
+    group: str = "rigor"
+    show_track: bool = True
+    # Trackless: чем показать пустое значение (у /profiles «без профиля» —
+    # осмысленное состояние, не «не задано», ревизия 2026-07-28).
+    empty_value_text: str = "—"
+    values_provider: Optional[Callable[[Any], Tuple[ToggleValue, ...]]] = None
+    hint_provider: Optional[Callable[[Any, str], str]] = None
+    session_switch_profile: bool = False
+    rebuild_on_apply: bool = True
 
     @property
     def names(self) -> Tuple[str, ...]:
         return tuple(v.value for v in self.values)
 
 
+# --- /level: трек уровней, хинты из Router (спека §12.1) --------------------
+_LEVEL_ROLE_TEXT: Dict[str, str] = {
+    "light": "быстрая и дешёвая: простые задачи",
+    "default": "основная рабочая: повседневные задачи",
+    "max": "самая сильная: сложные задачи",
+}
+
+
+def level_value_hint(app: Any, value: str) -> str:
+    """Динамический hint позиции `/level` (спека §12.1, копирайт §1): модель,
+    резолвнутая Router'ом ДЛЯ ЭТОГО уровня (не обязательно активного —
+    `ModelRouter.resolve_level`), + роль уровня. Легаси/легаси-форс — честные
+    пометки вместо модели+роли (канон §12.1); фоллбэк уровня — честная стрелка
+    «light → default» вместо модели притворного light-слота."""
+    from model_router import AliasCircuitOpenError
+    router = app.display_router()
+    try:
+        resolved = router.resolve_level(value)
+    except AliasCircuitOpenError as exc:
+        return f"{exc.alias} недоступна (предохранитель) · переключите /profiles"
+    except ValueError:
+        return f'уровень "{value}" не резолвится · настройте slots в config.yml'
+    if router.force_legacy:
+        return f"{resolved.model} · --model: уровни отключены на этот запуск"
+    if router.registry_empty():
+        return f"{resolved.model} · легаси: уровни появятся с реестром моделей"
+    role = _LEVEL_ROLE_TEXT.get(value, "")
+    if resolved.source.startswith("фоллбэк "):
+        chain = resolved.source[len("фоллбэк "):]
+        return f"{resolved.alias} ({chain}) · {role}"
+    return f"{resolved.alias} · {role}"
+
+
+# --- /profiles: trackless-строка, циклический выбор файла-профиля -----------
+_PROFILE_EMPTY_HINT = (
+    "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · "
+    "пример — в /settings → Профили"
+)
+_LEVEL_ORDER = {"light": 0, "default": 1, "max": 2}
+
+
+def _profile_roots(app: Any) -> list:
+    from pathlib import Path
+    import os
+
+    from config import resolve_config_path
+    from config_modules.profiles import profile_roots
+
+    config_path = getattr(app, "_config_path", None)
+    base_path = Path(resolve_config_path(config_path))
+    return profile_roots(Path(os.getcwd()), base_path)
+
+
+def _discovered_profiles(app: Any) -> Dict[str, Any]:
+    from config_modules.profiles import discover_profiles
+
+    return discover_profiles(_profile_roots(app))
+
+
+def profile_values(app: Any) -> Tuple[ToggleValue, ...]:
+    """Алфавитный объединённый список профилей (спека §3.1/§12.1): тёзка — одна
+    позиция (`discover_profiles` уже разрешает коллизию в пользу проектного).
+    Цвет/hint не несут смысла здесь — trackless, `hint_provider` динамический."""
+    return tuple(ToggleValue(name, "", _pal.INK) for name in sorted(_discovered_profiles(app)))
+
+
+def _profile_slots_summary(cfg: Dict[str, Any]) -> str:
+    slots = cfg.get("slots") or {}
+    models = cfg.get("models") or {}
+    pairs = []
+    for level, alias in slots.items():
+        entry = models.get(alias)
+        if entry is None:
+            continue
+        pairs.append((level, f"{level} {entry.get('model') or alias}"))
+    pairs.sort(key=lambda pair: _LEVEL_ORDER.get(pair[0], 99))
+    return " · ".join(text for _, text in pairs)
+
+
+def _profile_mcp_rebuild_note(app: Any, value: str) -> str:
+    ref = _discovered_profiles(app).get(value)
+    if ref is None:
+        return ""
+    try:
+        import yaml
+        raw = yaml.safe_load(ref.path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        # Битый профиль-файл (юзер правит руками, волна A) не должен ронять
+        # рендер hint'а /profiles — предупреждение о MCP просто не покажется.
+        return ""
+    # Во ВХОДНОМ документе секция называется `mcp: servers:` — плоский `mcp-servers`
+    # существует только в снимке flatten_app_config (config.py), а литеральный
+    # верхнеуровневый `mcp-servers:` схема профиля отвергает (docs/configuration.md).
+    mcp = raw.get("mcp") if isinstance(raw, dict) else None
+    servers = mcp.get("servers") if isinstance(mcp, dict) else None
+    if not servers:
+        return ""
+    return f"переключение пересоберёт MCP: {len(servers)} серверов"
+
+
+def profile_value_hint(app: Any, value: str) -> str:
+    """Динамический hint `/profiles` (спека §12.1): состав слотов + источник
+    (проектный/глобальный) +, если целевой профиль переопределяет `mcp.servers`,
+    предупреждение цены переключения. Пустое состояние — текст спеки дословно."""
+    if not value:
+        # Критерий пустого состояния — СУЩЕСТВОВАНИЕ профилей, не «не выбран»
+        # (ревизия 2026-07-28: хинт «не настроены» при живом smoke.yml — баг смока).
+        names = sorted(_discovered_profiles(app))
+        if not names:
+            return _PROFILE_EMPTY_HINT
+        return f"не выбран · доступно: {', '.join(names)} · Enter — открыть список"
+    cfg = _effective_cfg(app)
+    ref = _discovered_profiles(app).get(value)
+    parts = []
+    summary = _profile_slots_summary(cfg)
+    if summary:
+        parts.append(summary)
+    if ref is not None:
+        parts.append("проектный" if ref.root_kind == "project" else "глобальный")
+    note = _profile_mcp_rebuild_note(app, value)
+    if note:
+        parts.append(note)
+    parts.append("Enter — открыть список")
+    return " · ".join(parts)
+
+
+PROFILE_NONE_VALUE = "без профиля"
+_PROFILE_NONE_HINT = "настройки берутся только из config.yml — файл профиля не подмешивается"
+# Тот же литерал, что и активный маркер секции «Профили» /settings
+# (`_profile_row_text`/`_none_row_text` в tui/screens/settings.py) — статус
+# пикера красится тем же цветом (OK), правая колонка ArgPicker (задача 10,
+# решение смока 2026-08-10).
+_PROFILE_ACTIVE_STATUS = "● активен"
+
+
+def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
+    """Опции пикера `/profiles` (спека §12.1, ревизия 2026-07-28; статус-колонка —
+    задача 10, решение смока 2026-08-10): первым — «— без профиля» (сессионное
+    снятие, §9.1), затем профили по алфавиту объединённого списка. 3-tuple
+    (value, описание, статус): описание — источник + «(как в конфиге)» у
+    профиля конфиг-указателя; статус — «● активен» ОТДЕЛЬНЫМ элементом (не
+    частью описания) у ровно одной строки — той, что действует сейчас
+    (`ArgPicker` красит его правой колонкой, см. `arg_picker.py`)."""
+    refs = _discovered_profiles(app)
+    effective = str(_effective_cfg(app).get("profile") or "")
+    base_pointer = str((getattr(app, "_config", None) or {}).get("profile") or "")
+    none_status = _PROFILE_ACTIVE_STATUS if not effective else ""
+    options = [(PROFILE_NONE_VALUE, "работать чистым конфигом", none_status)]
+    for name in sorted(refs):
+        ref = refs[name]
+        desc = "проектный" if ref.root_kind == "project" else "глобальный"
+        if name == base_pointer:
+            desc += " (как в конфиге)"
+        status = _PROFILE_ACTIVE_STATUS if name == effective else ""
+        options.append((name, desc, status))
+    return tuple(options)
+
+
+def _profile_file_doc(app: Any, name: str) -> Dict[str, Any]:
+    """Сырой документ файла профиля (для хинтов ЦЕЛЕВОГО, ещё не применённого
+    профиля — эффективный конфиг тут не годится: выбор применяется только по
+    Enter). Битый файл → {} (хинт без состава, не краш)."""
+    ref = _discovered_profiles(app).get(name)
+    if ref is None:
+        return {}
+    try:
+        import yaml
+        raw = yaml.safe_load(ref.path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def profile_picker_hint(app: Any, value: Any) -> str:
+    """Хинт подвала пикера для подсвеченного пункта (спека §12.1): состав слотов
+    ЦЕЛЕВОГО профиля из его файла + источник + MCP-предупреждение; для пункта
+    снятия — честное пояснение."""
+    if value in (None, "", PROFILE_NONE_VALUE):
+        return _PROFILE_NONE_HINT
+    name = str(value)
+    ref = _discovered_profiles(app).get(name)
+    doc = _profile_file_doc(app, name)
+    # Модели для подписи слота: из файла профиля, с фоллбэком на эффективный
+    # реестр (профиль может ссылаться на алиасы нижних слоёв).
+    effective_models = _effective_cfg(app).get("models") or {}
+    merged_models = {**effective_models, **(doc.get("models") or {})}
+    parts = []
+    summary = _profile_slots_summary({"slots": doc.get("slots") or {},
+                                      "models": merged_models})
+    if summary:
+        parts.append(summary)
+    if ref is not None:
+        parts.append("проектный" if ref.root_kind == "project" else "глобальный")
+    note = _profile_mcp_rebuild_note(app, name)
+    if note:
+        parts.append(note)
+    return " · ".join(parts) if parts else "—"
+
+
+def group_toggle_names(group: str) -> list:
+    """Имена тогглов данной группы, в порядке реестра `TOGGLES` (Settings
+    «Режимы работы» рендерит ТОЛЬКО `"rigor"` — модели живут в отдельных
+    секциях «Профили»/«Модели», не здесь, спека §12.1/§12.3b)."""
+    return [n for n, s in TOGGLES.items() if s.group == group]
+
+
+def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
+    """Набор значений тоггла для текущего состояния: динамический
+    (`values_provider(app)`, `/profiles`) либо статический (`spec.names`)."""
+    spec = TOGGLES[name]
+    if spec.values_provider is not None:
+        return tuple(v.value for v in spec.values_provider(app))
+    return spec.names
+
+
 TOGGLES: Dict[str, ToggleSpec] = {
+    "level": ToggleSpec(
+        dotted="level",
+        values=(
+            ToggleValue("light", "", _pal.INK),
+            ToggleValue("default", "", _pal.RUN_COLOR),
+            ToggleValue("max", "", _pal.ACCENT),
+        ),
+        state=lambda cfg: str(cfg.get("level") or "default"),
+        label="уровень модели",
+        summary="от лёгкой до максимальной сложности задачи",
+        group="models",
+        hint_provider=level_value_hint,
+        rebuild_on_apply=False,
+        palette_default=True,
+    ),
+    "profiles": ToggleSpec(
+        dotted="profile",
+        values=(),
+        values_provider=profile_values,
+        state=lambda cfg: str(cfg.get("profile") or ""),
+        label="профили",
+        summary="переключаемые наборы настроек",
+        group="models",
+        show_track=False,
+        empty_value_text=PROFILE_NONE_VALUE,
+        hint_provider=profile_value_hint,
+        session_switch_profile=True,
+        palette_default=True,
+    ),
     "rigor": ToggleSpec(
         values=(
             ToggleValue(
@@ -325,7 +600,14 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
     позиция трека (ревизия 4, custom только отображается), `next_toggle_value`
     её никогда не вернёт; вызов с ней напрямую — ValueError, ничего в сессию
     не пишется. single-key — прежняя запись одного ключа (apply_session_override).
-    Откатывается целиком при OSError; вызывающий показывает «✗ не сохранено»."""
+    Откатывается целиком при OSError; вызывающий показывает «✗ не сохранено».
+
+    `/profiles` (`session_switch_profile`, спека §9.1) — применяет через
+    `app.switch_session_profile` (пересборка + notice + сброс предохранителя —
+    отдельная семантика, не generic single-key путь). `/level`
+    (`rebuild_on_apply=False`, спека §6.4) — пишет сессионный оверрайд, но
+    единственный НЕ зовёт `invalidate_runner`: уровень читается инжектируемым
+    провайдером на старте хода, пересборка executor ему не нужна."""
     spec = TOGGLES[name]
     if spec.preset_keys:
         if value not in PRESETS:
@@ -336,12 +618,17 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
         app.apply_session_overrides(PRESETS[value])
         app.invalidate_runner()
         return toggle_state(app, name)
-    if value not in spec.names:
+    names = effective_toggle_names(app, name)
+    if value not in names:
         raise ValueError(
-            f"invalid value {value!r} for toggle {name!r}, expected one of {spec.names}"
+            f"invalid value {value!r} for toggle {name!r}, expected one of {names}"
         )
+    if spec.session_switch_profile:
+        app.switch_session_profile(value)
+        return toggle_state(app, name)
     app.apply_session_override(spec.dotted, value)
-    app.invalidate_runner()
+    if spec.rebuild_on_apply:
+        app.invalidate_runner()
     return toggle_state(app, name)
 
 
@@ -361,9 +648,16 @@ def next_toggle_value(app: Any, name: str, direction: int) -> str:
     нужен резолв пары через конфиг приложения, single-key — просто текущее
     значение. Custom НЕ позиция трека (ревизия 4) — эффективное значение вне
     `spec.names` (отображаемый custom) трактуется как idx 0, шаг с него по
-    кругу уводит на пресет; custom этой функцией никогда не возвращается."""
-    names = TOGGLES[name].names
+    кругу уводит на пресет; custom этой функцией никогда не возвращается.
+
+    `/profiles` (спека §12.1) — набор значений динамический
+    (`effective_toggle_names`, а не статический `TOGGLES[name].names`); пустой
+    набор (профили не настроены) — цикл no-op, возвращает текущее значение
+    (пустую строку)."""
+    names = effective_toggle_names(app, name)
     current = toggle_state(app, name)
+    if not names:
+        return current
     idx = names.index(current) if current in names else 0
     return names[(idx + direction) % len(names)]
 
@@ -406,3 +700,13 @@ def preset_custom_hint(app: Any, name: str, *, scope: str = "effective") -> str:
                 "шаг на пресет заменит пару · закрепить — в /settings"
             )
     return f"ваш дефолт: самопроверка {x}, формат {y} · менять в /settings"
+
+
+def dynamic_toggle_hint(app: Any, name: str, value: str) -> str:
+    """Инъекция для `CommandPalette(toggle_dynamic_hint=...)` (спека §12.1):
+    зовёт `TOGGLES[name].hint_provider(app, value)`. Пустая строка — тоггл без
+    `hint_provider` (палитра тогда берёт статический `ToggleValue.hint`)."""
+    spec = TOGGLES[name]
+    if spec.hint_provider is None:
+        return ""
+    return spec.hint_provider(app, value)

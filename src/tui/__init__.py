@@ -87,7 +87,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ensure_project_gc_dir()
 
     from config import (
-        load_config,
+        load_config_ex,
         apply_cli_overrides,
         resolve_config_path,
         _project_local_config_path,
@@ -101,14 +101,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if getattr(args, "init_config", False):
         just_created = _bootstrap_user_config()
-        config_dict = load_config(None)
+        config_dict, profile_meta = load_config_ex(None)
         if not _interactive():
             print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
             return 0
         onboarding_mode = "review"
     else:
         just_created = _bootstrap_user_config() if args.config is None else False
-        config_dict = load_config(args.config)
+        config_dict, profile_meta = load_config_ex(args.config)
         apply_cli_overrides(config_dict)
 
         if args.config is None and onboarding.is_unconfigured(config_dict):
@@ -153,6 +153,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # перед `app.run()` весь бюджет ожидания (было 15 с, стало 90 — живая приёмка
     # поймала «программа зависла»).
     app._voice_autostart_pending = voice_expected
+    # Спека §3.5: холодный старт с проектным профилем, выбранным самим config.yml
+    # (не сессионным переключением) — тот же notice, что и сессионный путь
+    # (`TuiApp._profile_remerge`), но здесь ProfileMeta есть только на этом
+    # единственном старте загрузки, до создания app/треда.
+    app._maybe_notice_profile_activation(profile_meta.active_name or "", profile_meta, config_dict)
     app._onboarding_mode = onboarding_mode
     app._onboarding_config_path = onb_write_path
     import upgrade_gate

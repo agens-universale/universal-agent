@@ -103,6 +103,34 @@ class AgentRunner:
             t = self._thread
         return t is not None and t.is_alive()
 
+    def pinned_level(self) -> Optional[str]:
+        """Read-only: уровень активного хода, зафиксированный `turn_boundary.begin_turn`
+        (`state.turn_level`) — не живой уровень сессии (тот меняется мгновенно на
+        /level; посреди хода запросы всё ещё идут на прежнем, спека Task 15).
+
+        None — executor ещё не построен / state нет / ход не начинали через
+        begin_turn (легаси/тестовые двойники). Не мутирует state."""
+        ex = self._executor
+        if ex is None or not hasattr(ex, "get_state"):
+            return None
+        state = ex.get_state()
+        if state is None:
+            return None
+        return getattr(state, "turn_level", None)
+
+    def pinned_router(self) -> Any:
+        """Read-only: Router, зафиксированный при сборке ЭТОГО executor'а
+        (`AgentExecutor.get_model_router`) — не живой `app.display_router()` TUI,
+        который отражает /profiles мгновенно. Футер (Task 15) резолвит
+        `pinned_level()` этим Router'ом, чтобы «факт» посреди хода не
+        подменился моделью уже переключившегося профиля.
+
+        None — executor ещё не построен / у него нет Router'а (легаси)."""
+        ex = self._executor
+        if ex is None or not hasattr(ex, "get_model_router"):
+            return None
+        return ex.get_model_router()
+
     def usage_snapshot(self) -> Optional[tuple]:
         """Снимок usage от executor'а для футера: ``(session_meta, last_run_meta|None)``
         или None. Не строит executor (снапшот нужен и до первого прогона — тогда None)."""

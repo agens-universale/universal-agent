@@ -75,6 +75,47 @@ def test_uncomment_template_block_shape():
     assert "  provider: openai" in block           # поле — с отступом канона
 
 
+_TEMPLATE_WITH_COMMENTED_SECTION = (
+    'agent:\n  model: "m"\n\n'
+    "# Сборка мусора — намеренно выключена из коробки\n"
+    "#gc:\n"
+    "#  enabled: true\n"
+)
+
+
+def test_write_values_expands_commented_block_for_key_it_contains(tmp_path):
+    """Охранный: рабочий путь §6.4 — ключ ЕСТЬ в блоке шаблона, блок
+    разворачивается и значение пишется."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text('agent:\n  model: "m"\n', encoding="utf-8")
+    tpl = tmp_path / "config.default.yml"
+    tpl.write_text(_TEMPLATE_WITH_COMMENTED_SECTION, encoding="utf-8")
+
+    missing = w.write_values(cfg, {"gc.enabled": "false"}, template_path=tpl)
+
+    out = cfg.read_text(encoding="utf-8")
+    assert missing == []
+    assert "gc:" in out
+    assert "enabled:" in out
+
+
+def test_write_values_rolls_back_expanded_block_when_key_still_missing(tmp_path):
+    """Ключа нет и в блоке шаблона: `setter` падает KeyError уже ПОСЛЕ того, как
+    блок дописан в текст. Ключ уходит в missing — значит и раскомментированная
+    секция не должна попасть в файл, иначе юзер молча получает включённой
+    секцию, которую сознательно держал выключенной."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text('agent:\n  model: "m"\n', encoding="utf-8")
+    before = cfg.read_text(encoding="utf-8")
+    tpl = tmp_path / "config.default.yml"
+    tpl.write_text(_TEMPLATE_WITH_COMMENTED_SECTION, encoding="utf-8")
+
+    missing = w.write_values(cfg, {"gc.threshold": "10"}, template_path=tpl)
+
+    assert missing == ["gc.threshold"]
+    assert cfg.read_text(encoding="utf-8") == before
+
+
 def test_uncomment_template_block_reads_the_tight_comment_form_too():
     """Форма без пробела после решётки тоже понимается — шаблоны бывают и такие."""
     tpl = "#gizmo:\n#  provider: openai\n"
