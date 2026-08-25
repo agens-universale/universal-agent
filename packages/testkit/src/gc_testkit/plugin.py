@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import os
 import sys
 import types
 from pathlib import Path
@@ -25,7 +26,7 @@ from pathlib import Path
 import pytest
 
 # Исходники разъехались по пакетам — раскладку знает gc_testkit.paths.
-from .paths import module_dir, package_dir  # noqa: E402
+from .paths import REPO, module_dir, package_dir  # noqa: E402
 from .sources import ensure_sources_on_path  # noqa: E402
 
 # Набор может гоняться из корня репозитория или из каталога одного пакета;
@@ -36,6 +37,37 @@ ensure_sources_on_path()
 _CORE_SRC = package_dir("gc_core")
 _TOOLS_DIR = module_dir("tools")
 _MINIMAL_PRELOADED = False
+
+
+def _isolate_user_config() -> None:
+    """Увести конфиг-каталог в репозиторный, чтобы прогон не зависел от машины.
+
+    Тесты, зовущие ``load_config()`` без явного пути, читали ЛИЧНЫЙ каталог
+    разработчика (``~/.config/gc/``) со всеми оверлеями. Прогон переставал быть
+    свойством репозитория.
+
+    Сломалось это ровно так, как и должно было: в чужом ``config.local.yml``
+    появилась секция ``voice:``, схема ``AppConfig`` её не знает, а лишние ключи
+    запрещает (``extra_forbidden``). Один неизвестный ключ в файле, к
+    репозиторию отношения не имеющем, уронил 51 тест.
+
+    Почему здесь, а не в корневом ``conftest.py``: у каждого пакета свой
+    ``pyproject.toml``, и при запуске подмножества (``pytest packages/core/tests``)
+    pytest берёт rootdir там, а корневой conftest не грузит вовсе. Плагин
+    тест-кита подключён через entry point ``pytest11`` и попадает в любой набор.
+
+    ``setdefault``: явно заданный снаружи ``GC_CONFIG_DIR`` уважаем — это
+    осознанное действие вызывающего.
+    """
+    fixture_dir = REPO / "tests" / "fixtures" / "gc-config"
+    if fixture_dir.is_dir():
+        os.environ.setdefault("GC_CONFIG_DIR", str(fixture_dir.resolve()))
+
+
+# Вызов на импорте модуля: ``env_vars`` строит синглтон ``env = EnvVars()``
+# при своём импорте, читая os.environ ровно один раз. Любая фикстура — даже
+# session-scoped — отработает уже после и опоздает.
+_isolate_user_config()
 
 
 def _mcp_runtime_available() -> bool:
