@@ -1,0 +1,4957 @@
+[
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "baseline",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "baseline/default",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": "дефолтный конфиг"
+ },
+ {
+  "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (1/1).\", \"raw_trace_summary\": \"\"}",
+  "area": "limits",
+  "backend_calls": 2,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/max_steps_1",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 3,
+   "runtime": {
+    "live_history_chars": 161,
+    "live_msg_count": 3
+   },
+   "user_turn_seq": 0
+  },
+  "note": "лимит меньше числа ходов — прогон обязан закрыться лимитом"
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/max_steps_100",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"ok\": false, \"status\": \"tool_call_limit\", \"message\": \"Agent stopped: tool-call limit (1/1).\", \"raw_trace_summary\": \"\"}",
+  "area": "limits",
+  "backend_calls": 2,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/max_tool_calls_1",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 3,
+   "runtime": {
+    "live_history_chars": 161,
+    "live_msg_count": 3
+   },
+   "user_turn_seq": 0
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"ok\": false, \"status\": \"token_limit\", \"message\": \"Agent stopped: token limit (15/10).\", \"raw_trace_summary\": \"\"}",
+  "area": "limits",
+  "backend_calls": 2,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/session_token_limit",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 3,
+   "runtime": {
+    "live_history_chars": 161,
+    "live_msg_count": 3
+   },
+   "user_turn_seq": 0
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/no_tool_call_max_1",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/unknown_tool_repeats_1",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/exec_timeout_1",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/exec_capture_50",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/subagent_max_steps_1",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/subagents_max_count_0",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 2,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"runtime_outcome\": \"skipped\"}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/strict_turn_finish_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 480,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "limits/strict_turn_finish_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/trigger_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": "0 выключает компакцию по порогу, но НЕ force-compact и не /compact"
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 6,
+  "dump": [
+   {
+    "payload": {
+     "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context></task_and_context>\n  <open_tasks></open_tasks>\n  <do_not_redo></do_not_redo>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<user_intent_log total_chars=\"115\" total_records=\"1\" offset=\"0\" limit=\"1\" truncated=\"false\">\n{\"turn\": 1, \"ts\": \"2026-08-25T20:39:25Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</user_intent_log>\n\n<last_dialog_steps>\n<step 1>\n[user] сделай что-нибудь\n</step 1>\n\n<step 2>\n[function_call] exec_calculator\n{\"expression\": \"2+2\"}\n[function_call_output]\n{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}\n</step 2>\n\n<step 3>\n[function_call] turn_finish\n{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}\n[function_call_output]\n{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}\n</step 3>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/trigger_tiny",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 5,
+   "messages_count": 1,
+   "runtime": {
+    "live_history_chars": 1957,
+    "live_msg_count": 1
+   },
+   "user_turn_seq": 1
+  },
+  "note": "порог заведомо перешагивается — компакция обязана сработать"
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/turn_end_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/batch_chars_tiny",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": "многобатчевая сводка: memory-patch пропускается"
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/max_accumulated_tiny",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/max_message_tiny",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/max_dialogue_tiny",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/last_steps_1",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/last_step_msg_chars",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "summary/intent_preview_chars",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/write_guard_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/write_guard_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/write_guard_strict",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/read_guard_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/read_guard_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/read_guard_strict",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/read_denied_ext",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/url_policy_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/url_policy_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/url_schemes_https",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/url_blacklist",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/download_max_bytes",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/moderation_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/stop_tools_finish",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "guards/stop_tools_empty",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/save_logs_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/save_logs_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/console_trace_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/log_level_debug",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/log_level_error",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/format_json",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/redact_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/redact_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/redact_extra_keys",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/trace_header_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/trace_header_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/trace_id_set",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5,
+    "trace_ids": [
+     "trace-матрица"
+    ]
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/pricing_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/pricing_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/verbose_on",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "logging/limit_trace_summary_off",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 6,
+  "dump": [
+   {
+    "payload": {
+     "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context></task_and_context>\n  <open_tasks></open_tasks>\n  <do_not_redo></do_not_redo>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<user_intent_log total_chars=\"115\" total_records=\"1\" offset=\"0\" limit=\"1\" truncated=\"false\">\n{\"turn\": 1, \"ts\": \"2026-08-25T20:39:27Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</user_intent_log>\n\n<last_dialog_steps>\n<step 1>\n[user] сделай что-нибудь\n</step 1>\n\n<step 2>\n[function_call] exec_calculator\n{\"expression\": \"2+2\"}\n[function_call_output]\n{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}\n</step 2>\n\n<step 3>\n[function_call] turn_finish\n{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}\n[function_call_output]\n{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}\n</step 3>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/trigger_x_turn_end",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 5,
+   "messages_count": 1,
+   "runtime": {
+    "live_history_chars": 1957,
+    "live_msg_count": 1
+   },
+   "user_turn_seq": 1
+  },
+  "note": "run_summary_coordinator: pre_run/pre_backend против turn_end"
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/trigger_x_max_steps",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": "компакция внутри лимита шагов"
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/batch_x_accumulated",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": "сжатие сводки внутри многобатча"
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "summary",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/msg_x_last_step_msg",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": "min() на thread_summarizer: какой потолок победил"
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/save_logs_x_redact",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/write_guard_x_download",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/read_guard_x_skills",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/stop_tools_x_subagents",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/trace_x_pricing",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/tool_calls_x_no_tool_call",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/exec_timeout_x_capture",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "logging",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/console_trace_x_level",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/max_steps_x_strict_finish",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "limits",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/pricing_x_token_limit",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ },
+ {
+  "answer": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+  "area": "guards",
+  "backend_calls": 3,
+  "dump": [
+   {
+    "payload": {
+     "content": "сделай что-нибудь",
+     "role": "user"
+    },
+    "seq": 1,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"expression\": \"2+2\"}",
+     "name": "exec_calculator",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 2,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+     "type": "function_call_output"
+    },
+    "seq": 3,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+     "name": "turn_finish",
+     "status": "completed",
+     "type": "function_call"
+    },
+    "seq": 4,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   },
+   {
+    "payload": {
+     "output": "{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"message\": \"Task outcome submitted.\", \"error\": null, \"solution_type\": \"direct_answer\", \"handoff\": {}, \"task_report\": \"готово\", \"finish_gate\": {\"action\": \"accept\", \"ok\": true, \"trace_ok\": true, \"report_ok\": true, \"is_question\": false, \"trace_gaps\": [], \"report_mismatches\": [], \"missing_requirements\": [], \"conflicts\": [], \"coverage_score\": 0.0}}",
+     "type": "function_call_output"
+    },
+    "seq": 5,
+    "system": "cli",
+    "thread_id": "t-matrix",
+    "type": "message"
+   }
+  ],
+  "error": null,
+  "id": "pair/url_x_download_dir",
+  "meta": {
+   "backend_api_mode": "chat_completions",
+   "dialog_steps_offset": 0,
+   "messages_count": 5,
+   "runtime": {
+    "live_history_chars": 652,
+    "live_msg_count": 5
+   },
+   "user_turn_seq": 1
+  },
+  "note": ""
+ }
+]
