@@ -11,8 +11,13 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Set
 
+from gc_core.thread_store_protocol import (
+    MessageKey,
+    SubagentTraceRecord,
+    ThreadState,
+)
 from gc_core.thread_store import (
     append_new_thread_messages,
     append_subagent_trace_record,
@@ -51,12 +56,21 @@ class FileThreadStore:
         messages, _keys, _count = load_thread_messages(self._dir, system_id, thread_id)
         return messages or []
 
-    def load_thread_state(self, system_id: str, thread_id: str):
-        """``(сообщения, ключи, счётчик)`` — ровно то, что отдаёт файловый слой."""
-        messages, keys, count = load_thread_messages(self._dir, system_id, thread_id)
-        return (messages or []), (keys or set()), int(count or 0)
+    def load_thread_state(self, system_id: str, thread_id: str) -> ThreadState:
+        """История со служебным. Третий элемент — НОМЕР последнего ``seq``.
 
-    def _known_keys(self, system_id: str, thread_id: str) -> set:
+        Файловый слой берёт его как ``max`` по оставшимся записям, поэтому после
+        ``discard_message`` номер проседает и переиспользуется. Это и есть
+        контрактное поведение: держат НЕУБЫВАНИЕ, а не уникальность.
+        """
+        messages, keys, max_seq = load_thread_messages(self._dir, system_id, thread_id)
+        return ThreadState(
+            messages=(messages or []),
+            known_keys=(keys or set()),
+            max_seq=int(max_seq or 0),
+        )
+
+    def _known_keys(self, system_id: str, thread_id: str) -> Set[MessageKey]:
         _messages, keys, _count = load_thread_messages(self._dir, system_id, thread_id)
         return keys or set()
 
@@ -71,7 +85,7 @@ class FileThreadStore:
         thread_id: str,
         messages: Sequence[Dict[str, Any]],
         *,
-        known_keys: Optional[set] = None,
+        known_keys: Optional[Set[MessageKey]] = None,
         start_seq: int = 0,
     ) -> int:
         # Ключи не передали — читаем с диска сами. Идемпотентность обещана
@@ -128,7 +142,7 @@ class FileThreadStore:
         child_run_id: str,
         kind: str,
         payload: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+    ) -> SubagentTraceRecord:
         return append_subagent_trace_record(
             self._dir, system_id, thread_id,
             parent_call_id=parent_call_id, child_run_id=child_run_id,
@@ -137,7 +151,7 @@ class FileThreadStore:
 
     def read_subagent_trace(
         self, system_id: str, thread_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> List[SubagentTraceRecord]:
         return read_subagent_trace(self._dir, system_id, thread_id) or []
 
 

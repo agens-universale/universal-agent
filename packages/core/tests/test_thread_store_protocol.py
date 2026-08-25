@@ -8,27 +8,55 @@
 там, где их проверяют по-разному. У ``TaskStore`` в TUI второй реализации нет
 вовсе — и протокол за полгода отстал от факта на восемь методов.
 
-Здесь же закреплены свойства, которые чужой реализации придётся соблюдать:
-идемпотентность дописывания, пустота вместо ошибки на отсутствующем треде,
-точечность ``patch_runtime_flag``.
+Сам набор свойств переехал в ``gc_testkit.thread_store_conformance``, и это не
+перекладывание файлов. Реализацию пишет ВСТРАИВАЮЩИЙ — у себя, поверх своей
+базы. Проверить её нашей меркой он должен одной строкой
+(``assert_conforms(factory)``), не переписывая наши тесты. Здесь остаётся то,
+что к чужой реализации отношения не имеет: сквозная проводка через ядро и
+AST-гейт на прямые вызовы файлового слоя.
+
+История, из-за которой набор свойств вырос вдвое. Первая редакция описывала
+методы, но не свойства — и две НАШИ СОБСТВЕННЫЕ реализации разошлись в четырёх
+местах, оставаясь зелёными на всех 23 тестах: третий элемент
+``load_thread_state`` (количество против номера ``seq``), пополнение
+``known_keys``, шесть полей записи трассы против четырёх и ``id`` на чтении.
+Каждое из четырёх теперь проверяется.
 """
 from typing import Any
 
 import pytest
 
 from gc_core.thread_store_file import FileThreadStore
-from gc_core.thread_store_protocol import ThreadStore
+from gc_core.thread_store_protocol import (
+    SubagentTraceRecord,
+    ThreadState,
+    ThreadStore,
+)
 from gc_testkit.memory_thread_store import MemoryThreadStore
+from gc_testkit.thread_store_conformance import (
+    BEHAVIOUR_CHECKS,
+    CONTRACT_METHODS,
+    STRUCTURE_CHECKS,
+    ThreadStoreContractError,
+    assert_conforms,
+)
 
 
 @pytest.fixture(params=["file", "memory"])
-def store(request, tmp_path) -> Any:
-    """Один набор проверок на обе реализации."""
+def store_factory(request, tmp_path):
+    """Фабрика хранилища: конформансу нужно свежее на каждую проверку."""
     if request.param == "file":
-        s = FileThreadStore(str(tmp_path))
-        s.ensure_ready()
-        return s
-    return MemoryThreadStore()
+        def make() -> Any:
+            s = FileThreadStore(str(tmp_path / request.node.name[:40]))
+            s.ensure_ready()
+            return s
+        return make
+    return MemoryThreadStore
+
+
+@pytest.fixture
+def store(store_factory) -> Any:
+    return store_factory()
 
 
 SYS, TID = "cli", "t-1"
@@ -40,9 +68,15 @@ def _msg(mid: str, text: str) -> dict:
 
 # --- сам контракт ----------------------------------------------------------
 
-def test_both_satisfy_the_protocol(store):
-    """Структурная типизация: наследовать ничего не нужно, достаточно совпасть."""
-    assert isinstance(store, ThreadStore)
+def test_both_pass_the_conformance_suite(store_factory):
+    """Обе реализации проходят полный набор — тот же, что запустит чужая.
+
+    Заменяет прежний ``isinstance``-тест, который был БЕСПОЛЕЗЕН: у класса,
+    где все одиннадцать методов ``async def``, ``isinstance`` истинно, этот
+    тест зелёный, а восемь поведенческих красные (проверено запуском).
+    """
+    passed = assert_conforms(store_factory)
+    assert len(passed) == len(STRUCTURE_CHECKS) + len(BEHAVIOUR_CHECKS)
 
 
 def test_implementations_inherit_nothing():
@@ -57,108 +91,79 @@ def test_implementations_inherit_nothing():
         )
 
 
-# --- поведение, обязательное для любой реализации --------------------------
+def test_isinstance_is_not_a_gate():
+    """``isinstance`` пропускает асинхронную реализацию — зафиксировано намеренно.
 
-def test_missing_thread_reads_empty_not_raises(store):
-    """Нет треда — пустота, а не исключение."""
-    assert store.load_messages(SYS, "no-such-thread") == []
-    assert store.load_meta(SYS, "no-such-thread") == {}
-
-
-def test_append_then_read_roundtrip(store):
-    written = store.append_messages(SYS, TID, [_msg("m1", "раз"), _msg("m2", "два")])
-    assert written == 2
-    got = store.load_messages(SYS, TID)
-    assert [m["content"] for m in got] == ["раз", "два"]
-
-
-def test_append_is_idempotent(store):
-    """Батч персистится ДВАЖДЫ — сразу после тулов и на выходе цикла.
-
-    Повтор не должен задваивать записи, иначе история треда растёт вдвое на
-    каждом ходу. Это свойство ядра, а не файлов, поэтому и в контракте.
+    Тест закрепляет ФАКТ, а не желаемое: ``runtime_checkable`` сверяет только
+    наличие атрибутов. Пока это так, единственным гейтом остаётся конформанс.
+    Если однажды поведение ``Protocol`` изменится — тест покраснеет, и это
+    будет поводом упростить проверку, а не молча полагаться на неё сегодня.
     """
-    batch = [_msg("m1", "раз"), _msg("m2", "два")]
-    assert store.append_messages(SYS, TID, batch) == 2
-    assert store.append_messages(SYS, TID, batch) == 0
-    assert len(store.load_messages(SYS, TID)) == 2
+    class AllAsync:
+        pass
 
+    for name in CONTRACT_METHODS:
+        async def method(self, *args, **kwargs):
+            return None
+        setattr(AllAsync, name, method)
 
-def test_meta_roundtrip(store):
-    store.save_meta(SYS, TID, {"token_usage": {"total": 7}})
-    assert store.load_meta(SYS, TID)["token_usage"]["total"] == 7
-
-
-def test_patch_runtime_flag_is_pointwise(store):
-    """Флаг рантайма не должен затирать остальной meta.
-
-    Сюда пишут ВО ВРЕМЯ работы (``summarizing``), параллельно с самим прогоном,
-    и read-modify-write целого meta потерял бы то, что записал прогон.
-    """
-    store.save_meta(SYS, TID, {"token_usage": {"total": 7}, "runtime": {}})
-    store.patch_runtime_flag(SYS, TID, "summarizing", active=True)
-
-    meta = store.load_meta(SYS, TID)
-    assert meta["runtime"].get("summarizing") is True
-    assert meta["token_usage"]["total"] == 7, "патч флага затёр чужие секции meta"
-
-    store.patch_runtime_flag(SYS, TID, "summarizing", active=False)
-    # Секции может не быть вовсе: снятие последнего флага убирает её целиком.
-    assert not store.load_meta(SYS, TID).get("runtime", {}).get("summarizing")
-    assert "runtime" not in store.load_meta(SYS, TID), (
-        "пустая секция runtime осталась — реализации разошлись по форме meta"
+    store = AllAsync()
+    assert isinstance(store, ThreadStore), (
+        "isinstance начал проверять корутинность — конформанс можно упростить"
     )
+    with pytest.raises(ThreadStoreContractError, match="async def"):
+        assert_conforms(AllAsync)
 
 
-def test_discard_message(store):
+def test_a_prefixed_names_are_rejected_with_a_hint():
+    """Имена ``aload_meta`` — частая ошибка; отказ обязан её назвать.
+
+    Так называет методы тот, кто прочитал документацию про async и решил, что
+    ядро ждёт их. Без подсказки он получит ``AttributeError`` глубоко внутри
+    чтения треда, где причина уже не видна.
+    """
+    class ANamed:
+        pass
+
+    for name in CONTRACT_METHODS:
+        async def method(self, *args, **kwargs):
+            return None
+        setattr(ANamed, f"a{name}", method)
+
+    with pytest.raises(ThreadStoreContractError) as err:
+        assert_conforms(ANamed)
+    assert "AsyncThreadStore" in str(err.value), "отказ не подсказал асинхронный контракт"
+
+
+# --- типы контракта --------------------------------------------------------
+
+def test_thread_state_is_named_but_still_unpacks(store):
+    """``ThreadState`` — именованный кортеж: старая распаковка работает.
+
+    Имена нужны из-за третьего элемента: он ``int``, и подмену «номер seq» на
+    «количество записей» не поймает ни одна проверка типов. Наши реализации
+    разошлись именно здесь.
+    """
     store.append_messages(SYS, TID, [_msg("m1", "раз"), _msg("m2", "два")])
-    assert store.discard_message(SYS, TID, "m1") is True
-    assert [m["id"] for m in store.load_messages(SYS, TID)] == ["m2"]
-    assert store.discard_message(SYS, TID, "no-such-thread") is False
+
+    state = store.load_thread_state(SYS, TID)
+    assert isinstance(state, ThreadState)
+
+    messages, keys, max_seq = state          # позиционная распаковка — как раньше
+    assert messages == state.messages
+    assert keys == state.known_keys
+    assert max_seq == state.max_seq == 2
 
 
-def test_reset_clears_the_thread(store):
-    store.append_messages(SYS, TID, [_msg("m1", "раз")])
-    store.save_meta(SYS, TID, {"x": 1})
-    store.reset(SYS, TID)
-    assert store.load_messages(SYS, TID) == []
-    assert store.load_meta(SYS, TID) == {}
-
-
-def test_subagent_trace_roundtrip(store):
-    store.append_subagent_trace(
+def test_trace_record_has_all_six_fields(store):
+    """Запись трассы — замкнутая форма, шесть полей."""
+    record = store.append_subagent_trace(
         SYS, TID,
         parent_call_id="call-1", child_run_id="run-1",
         kind="call", payload={"name": "fs_read_file"},
     )
-    trace = store.read_subagent_trace(SYS, TID)
-    assert len(trace) == 1
-    assert trace[0]["kind"] == "call"
-
-
-# --- то, ради чего всё затевалось ------------------------------------------
-
-def test_memory_store_touches_no_disk(tmp_path, monkeypatch):
-    """In-memory реализация не создаёт ни одного файла.
-
-    Это и есть гейт, отсутствие которого сгноило ``TaskStore``: он краснеет
-    ровно в тот день, когда кто-то допишет прямой ``open()`` мимо контракта.
-    """
-    monkeypatch.chdir(tmp_path)
-    store = MemoryThreadStore()
-
-    store.append_messages(SYS, TID, [_msg("m1", "раз")])
-    store.save_meta(SYS, TID, {"x": 1})
-    store.patch_runtime_flag(SYS, TID, "summarizing", active=True)
-    store.append_subagent_trace(
-        SYS, TID, parent_call_id="c", child_run_id="r", kind="call", payload={},
-    )
-    store.load_messages(SYS, TID)
-    store.read_subagent_trace(SYS, TID)
-
-    created = list(tmp_path.rglob("*"))
-    assert created == [], f"in-memory store создал файлы: {created}"
-    assert store.calls["append_messages"] == 1, "обращения шли мимо store"
+    assert set(record) == set(SubagentTraceRecord.__annotations__)
+    assert record["seq"] == 1 and isinstance(record["ts"], str)
 
 
 # --- сквозная проводка -----------------------------------------------------
@@ -210,6 +215,29 @@ def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
     assert store.load_messages(SYS, TID), "сообщение не сохранилось"
     created = [p for p in tmp_path.rglob("*") if p.is_file()]
     assert created == [], f"сессия создала файлы вопреки in-memory хранилищу: {created}"
+
+
+def test_memory_store_touches_no_disk(tmp_path, monkeypatch):
+    """In-memory реализация не создаёт ни одного файла.
+
+    Это и есть гейт, отсутствие которого сгноило ``TaskStore``: он краснеет
+    ровно в тот день, когда кто-то допишет прямой ``open()`` мимо контракта.
+    """
+    monkeypatch.chdir(tmp_path)
+    store = MemoryThreadStore()
+
+    store.append_messages(SYS, TID, [_msg("m1", "раз")])
+    store.save_meta(SYS, TID, {"x": 1})
+    store.patch_runtime_flag(SYS, TID, "summarizing", active=True)
+    store.append_subagent_trace(
+        SYS, TID, parent_call_id="c", child_run_id="r", kind="call", payload={},
+    )
+    store.load_messages(SYS, TID)
+    store.read_subagent_trace(SYS, TID)
+
+    created = list(tmp_path.rglob("*"))
+    assert created == [], f"in-memory store создал файлы: {created}"
+    assert store.calls["append_messages"] == 1, "обращения шли мимо store"
 
 
 def test_no_direct_file_calls_left_in_core():

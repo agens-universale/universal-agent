@@ -1,0 +1,434 @@
+"""Конформанс ``ThreadStore``: проверка чужой реализации одной функцией.
+
+Зачем отдельный модуль, а не тесты в ядре. Реализацию хранилища пишет
+ВСТРАИВАЮЩИЙ — у себя, поверх своей базы, в своём репозитории. Ему нужно уметь
+проверить её нашей меркой, не переписывая наши тесты. Отсюда публичный вход::
+
+    from gc_testkit.thread_store_conformance import assert_conforms
+
+    def test_my_postgres_store():
+        assert_conforms(lambda: PostgresThreadStore(dsn=TEST_DSN))
+
+Почему не ``isinstance``. ``ThreadStore`` — ``runtime_checkable`` ``Protocol``,
+а он сверяет ТОЛЬКО наличие атрибутов: ни сигнатур, ни корутинности, ни форм.
+Проверено запуском — у класса, где все одиннадцать методов ``async def``,
+``isinstance`` истинно, структурный тест зелёный, а восемь поведенческих
+красные. Ошибка симметрична: законное прокси-хранилище на ``__getattr__``
+``isinstance`` НЕ пройдёт, потому что в 3.12 проверка идёт через
+``getattr_static``. Опираться на него нельзя ни в ту, ни в другую сторону.
+
+Почему проверок больше, чем было. Первая редакция контракта описывала методы,
+но не свойства — и две НАШИ СОБСТВЕННЫЕ реализации разошлись в четырёх местах,
+оставаясь зелёными на всём наборе:
+
+* третий элемент ``load_thread_state`` — количество против номера ``seq``;
+* ``known_keys`` пополнялся всем содержимым вместо записанного;
+* запись трассы — четыре поля против шести;
+* ``id`` на чтении проставляла только одна из двух.
+
+Каждое из четырёх теперь здесь. Правило простое: расходятся реализации ровно
+там, где их проверяют по-разному, поэтому проверка одна на всех.
+"""
+from __future__ import annotations
+
+import inspect
+from typing import Any, Callable, Dict, List
+
+SYS = "cli"
+
+#: Одиннадцать методов контракта. Список ведётся здесь, а не выводится из
+#: протокола: набор должен краснеть и в том случае, если метод пропал из
+#: протокола по недосмотру.
+CONTRACT_METHODS = (
+    "load_messages",
+    "load_thread_state",
+    "load_meta",
+    "append_messages",
+    "save_meta",
+    "patch_runtime_flag",
+    "update_runtime_meta",
+    "discard_message",
+    "reset",
+    "append_subagent_trace",
+    "read_subagent_trace",
+)
+
+#: Шесть полей записи трассы. Форма замкнутая: её пишет и читает только ядро.
+TRACE_FIELDS = frozenset(
+    {"ts", "seq", "parent_call_id", "child_run_id", "kind", "payload"}
+)
+
+
+class ThreadStoreContractError(AssertionError):
+    """Реализация не удовлетворяет контракту. Текст называет, чем именно."""
+
+
+def _msg(mid: str, text: str = "текст") -> Dict[str, Any]:
+    return {"id": mid, "role": "user", "content": text}
+
+
+def _fail(what: str, detail: str) -> None:
+    raise ThreadStoreContractError(f"{what}\n  {detail}")
+
+
+# --- структура -------------------------------------------------------------
+
+def check_methods_present(store: Any) -> None:
+    """Все одиннадцать методов есть и вызываемы.
+
+    Ловит естественную ошибку встраивающего, которую ``isinstance`` пропускает
+    молча: имена с приставкой ``a`` (``aload_meta``, ``aappend_messages``) —
+    так называет методы тот, кто прочитал документацию про async и решил, что
+    ядро ждёт их. Такой store падает ``AttributeError`` глубоко внутри чтения
+    треда, где причина уже не видна.
+    """
+    missing = [m for m in CONTRACT_METHODS if not callable(getattr(store, m, None))]
+    if not missing:
+        return
+    hint = ""
+    a_named = [m for m in missing if callable(getattr(store, f"a{m}", None))]
+    if a_named:
+        hint = (
+            f"\n  У вас есть {', '.join('a' + m for m in a_named)} — это имена"
+            "\n  АСИНХРОННОГО контракта (gc_core.thread_store_async.AsyncThreadStore)."
+            "\n  Синхронный ThreadStore ждёт имена без приставки."
+        )
+    _fail(
+        f"{type(store).__name__}: нет методов контракта: {', '.join(missing)}",
+        f"нужны все {len(CONTRACT_METHODS)}: {', '.join(CONTRACT_METHODS)}{hint}",
+    )
+
+
+def check_methods_are_sync(store: Any) -> None:
+    """Ни один метод не объявлен ``async def``.
+
+    Главная проверка набора. Асинхронную реализацию ядро вызвать не может:
+    двенадцать из шестнадцати обращений лежат в обычных ``def``, где корутина
+    молча отбрасывается — без ошибки, без лога, с потерей записи. Падает при
+    этом лишь часть путей, поэтому без гейта поломка выглядит как работающий
+    агент с пустой трассой субагентов и незагорающимися индикаторами.
+    """
+    # inspect, а не asyncio: asyncio.iscoroutinefunction объявлена устаревшей
+    # (удаление в 3.16), ответы на всех значимых случаях совпадают.
+    bad = [m for m in CONTRACT_METHODS if inspect.iscoroutinefunction(getattr(store, m, None))]
+    if not bad:
+        return
+    _fail(
+        f"{type(store).__name__}: методы объявлены async def: {', '.join(bad)}",
+        "Синхронный ThreadStore обязан быть синхронным: ядро зовёт его из"
+        "\n  обычных def, и корутина там отбрасывается БЕЗ ОШИБКИ — запись"
+        "\n  теряется молча."
+        "\n  Асинхронному клиенту (redis.asyncio, asyncpg) предназначен"
+        "\n  gc_core.thread_store_async.AsyncThreadStore — ядро ждёт его нативно.",
+    )
+
+
+def check_signatures(store: Any) -> None:
+    """Имена и вид параметров совпадают с протоколом.
+
+    Сверяем с самим ``ThreadStore``, а не со списком в прозе: разъехаться
+    прозе и коду проще, чем коду и коду.
+    """
+    from gc_core.thread_store_protocol import ThreadStore
+
+    for name in CONTRACT_METHODS:
+        want = inspect.signature(getattr(ThreadStore, name))
+        got = inspect.signature(getattr(store, name))
+        want_p = [p for p in want.parameters.values() if p.name != "self"]
+        got_p = list(got.parameters.values())
+        if [(p.name, p.kind) for p in want_p] != [(p.name, p.kind) for p in got_p]:
+            _fail(
+                f"{type(store).__name__}.{name}: сигнатура разошлась с контрактом",
+                f"контракт: ({', '.join(str(p) for p in want_p)})"
+                f"\n  у вас:    ({', '.join(str(p) for p in got_p)})",
+            )
+
+
+# --- поведение -------------------------------------------------------------
+
+def check_missing_thread_is_empty(store: Any) -> None:
+    """Нет треда — пустота, а не исключение."""
+    if store.load_messages(SYS, "no-such-thread") != []:
+        _fail("load_messages на отсутствующем треде", "ожидался пустой список")
+    if store.load_meta(SYS, "no-such-thread") != {}:
+        _fail("load_meta на отсутствующем треде", "ожидался пустой словарь")
+
+
+def check_roundtrip(store: Any) -> None:
+    """Записали — прочитали, в порядке записи."""
+    written = store.append_messages(SYS, "t-round", [_msg("m1", "раз"), _msg("m2", "два")])
+    if written != 2:
+        _fail("append_messages вернул не число записанных", f"вернул {written!r}, ждали 2")
+    got = [m["content"] for m in store.load_messages(SYS, "t-round")]
+    if got != ["раз", "два"]:
+        _fail("история вернулась не в порядке записи", f"вернулось {got!r}")
+
+
+def check_idempotent(store: Any) -> None:
+    """Повтор батча не задваивает историю.
+
+    Не теоретическое требование: батч персистится ДВАЖДЫ — сразу после
+    исполнения тулов и ещё раз на выходе цикла. Реализация без дедупликации
+    удваивает историю треда на каждом ходу.
+    """
+    batch = [_msg("m1", "раз"), _msg("m2", "два")]
+    store.append_messages(SYS, "t-idem", batch)
+    again = store.append_messages(SYS, "t-idem", batch)
+    if again != 0:
+        _fail("повтор батча записал снова", f"вернул {again!r}, ждали 0")
+    n = len(store.load_messages(SYS, "t-idem"))
+    if n != 2:
+        _fail("повтор батча задвоил историю", f"в треде {n} сообщений, ждали 2")
+
+
+def check_known_keys_mutated_in_place(store: Any) -> None:
+    """``known_keys`` мутируется на месте и ТОЛЬКО записанным.
+
+    Оба свойства нужны вызывающему: он держит тот же объект и снимает снимок
+    ДО вызова, чтобы по разнице понять, что дописать в свою историю.
+    Защитная копия — естественное решение реализатора — задваивает историю;
+    досыпанные «заодно» ключи ломают ту же разницу с другой стороны.
+    """
+    keys: set = set()
+    store.append_messages(SYS, "t-keys", [_msg("k1")], known_keys=keys)
+    if not keys:
+        _fail(
+            "known_keys не пополнился после записи",
+            "набор обязан мутироваться НА МЕСТЕ: вызывающий держит тот же объект"
+            "\n  и по его приросту понимает, что было записано. Защитная копия"
+            "\n  молча задваивает историю на следующем батче.",
+        )
+    store.append_messages(SYS, "t-keys", [_msg("k2")], known_keys=keys)
+    if len(keys) != 2:
+        _fail(
+            "known_keys пополнился не только записанным",
+            f"после двух батчей по одному сообщению в наборе {len(keys)} ключей,"
+            "\n  ждали 2. Досыпать туда всё содержимое хранилища нельзя.",
+        )
+
+
+def check_seq_is_a_number_not_a_count(store: Any) -> None:
+    """Третий элемент ``load_thread_state`` — НОМЕР, а не количество.
+
+    Расходятся они после ``discard_message``: количество падает вместе с
+    удалением, номер остаётся номером последнего выданного. Проверка стоит
+    отдельно, потому что оба значения — ``int``, и ни одна проверка типов
+    подмену не увидит. Наши собственные реализации разошлись именно здесь.
+    """
+    store.append_messages(SYS, "t-seq", [_msg("s1"), _msg("s2"), _msg("s3")])
+    state = store.load_thread_state(SYS, "t-seq")
+    if int(state[2]) != 3:
+        _fail("номер seq после трёх записей", f"вернулось {state[2]!r}, ждали 3")
+
+    store.discard_message(SYS, "t-seq", "s2")
+    after = store.load_thread_state(SYS, "t-seq")
+    if len(after[0]) != 2:
+        _fail("discard не убрал сообщение", f"в треде {len(after[0])} сообщений")
+    if int(after[2]) != 3:
+        _fail(
+            "третий элемент load_thread_state оказался КОЛИЧЕСТВОМ, а не НОМЕРОМ",
+            f"после удаления среднего из трёх вернулось {after[2]!r}, ждали 3."
+            "\n  Это номер последнего выданного seq: append выдаёт start_seq + 1."
+            "\n  seq — ordering key хвостового читателя TUI, и на записи с"
+            "\n  меньшим номером тот перестраивает живой трейс.",
+        )
+
+
+def check_message_id_guaranteed_on_read(store: Any) -> None:
+    """У сообщения на чтении есть ``id``, даже если писали без него.
+
+    Без ``id`` ключ идемпотентности уходит в ветку ``payload:<json>``,
+    нестабильную к любому изменению словаря: добавили ключ — и то же самое
+    сообщение считается новым.
+    """
+    store.append_messages(SYS, "t-noid", [{"role": "user", "content": "без id"}])
+    got = store.load_messages(SYS, "t-noid")
+    if not got:
+        _fail("сообщение без id не сохранилось", "ждали одно сообщение")
+    mid = got[0].get("id")
+    if not isinstance(mid, str) or not mid:
+        _fail(
+            "у прочитанного сообщения нет id",
+            "реализация обязана проставить его на чтении (см. ensure_message_id):"
+            "\n  иначе ключ идемпотентности уедет в ветку payload:<json>,"
+            "\n  нестабильную к любому изменению формы сообщения.",
+        )
+
+
+def check_meta_roundtrip(store: Any) -> None:
+    """Meta записалась и прочиталась, незнакомые секции целы."""
+    store.save_meta(SYS, "t-meta", {"token_usage": {"total": 7}, "чужое": {"x": 1}})
+    meta = store.load_meta(SYS, "t-meta")
+    if meta.get("token_usage", {}).get("total") != 7:
+        _fail("meta не сохранилась", f"прочиталось {meta!r}")
+    if meta.get("чужое") != {"x": 1}:
+        _fail(
+            "незнакомая секция meta потерялась",
+            "форма meta ОТКРЫТАЯ: секцией tui владеет другой процесс, а сервер"
+            "\n  отдаёт meta наружу дословно. Незнакомые ключи хранятся как есть.",
+        )
+
+
+def check_runtime_flag_is_pointwise(store: Any) -> None:
+    """Флаг рантайма не затирает чужие секции, а снятие последнего убирает секцию."""
+    store.save_meta(SYS, "t-flag", {"token_usage": {"total": 7}, "runtime": {}})
+    store.patch_runtime_flag(SYS, "t-flag", "summarizing", active=True)
+
+    meta = store.load_meta(SYS, "t-flag")
+    if meta.get("runtime", {}).get("summarizing") is not True:
+        _fail("флаг не взвёлся", f"runtime={meta.get('runtime')!r}")
+    if meta.get("token_usage", {}).get("total") != 7:
+        _fail(
+            "патч флага затёр чужие секции meta",
+            "сюда пишут ВО ВРЕМЯ работы, параллельно с самим прогоном:"
+            "\n  read-modify-write целого meta потеряет то, что записал прогон.",
+        )
+
+    store.patch_runtime_flag(SYS, "t-flag", "summarizing", active=False)
+    meta = store.load_meta(SYS, "t-flag")
+    if "runtime" in meta:
+        _fail(
+            "пустая секция runtime осталась в meta",
+            "снятие последнего флага убирает секцию ЦЕЛИКОМ: «нет флагов» и"
+            "\n  «пустой словарь» обязаны читаться одинаково, иначе переезд на"
+            "\n  другое хранилище меняет форму meta — а её читают TUI и сервер.",
+        )
+
+
+def check_update_runtime_meta(store: Any) -> None:
+    """Произвольные значения в ``runtime`` не трогают остальное."""
+    store.save_meta(SYS, "t-rt", {"token_usage": {"total": 3}})
+    store.update_runtime_meta(SYS, "t-rt", {"trace_ids": ["a", "b"]})
+    meta = store.load_meta(SYS, "t-rt")
+    if meta.get("runtime", {}).get("trace_ids") != ["a", "b"]:
+        _fail("update_runtime_meta не записал", f"runtime={meta.get('runtime')!r}")
+    if meta.get("token_usage", {}).get("total") != 3:
+        _fail("update_runtime_meta затёр чужую секцию", f"meta={meta!r}")
+
+
+def check_discard(store: Any) -> None:
+    """Удаление по id, ``False`` на несуществующем."""
+    store.append_messages(SYS, "t-disc", [_msg("d1"), _msg("d2")])
+    if store.discard_message(SYS, "t-disc", "d1") is not True:
+        _fail("discard_message не вернул True на существующем сообщении", "")
+    left = [m["id"] for m in store.load_messages(SYS, "t-disc")]
+    if left != ["d2"]:
+        _fail("discard убрал не то сообщение", f"осталось {left!r}")
+    if store.discard_message(SYS, "t-disc", "нет-такого") is not False:
+        _fail("discard_message не вернул False на отсутствующем сообщении", "")
+
+
+def check_reset(store: Any) -> None:
+    """Сброс чистит и историю, и meta. Возврат — свободный текст."""
+    store.append_messages(SYS, "t-reset", [_msg("r1")])
+    store.save_meta(SYS, "t-reset", {"x": 1})
+    out = store.reset(SYS, "t-reset")
+    if not isinstance(out, list):
+        _fail("reset вернул не список", f"вернул {type(out).__name__}")
+    if store.load_messages(SYS, "t-reset") != []:
+        _fail("reset не очистил историю", "")
+    if store.load_meta(SYS, "t-reset") != {}:
+        _fail("reset не очистил meta", "")
+
+
+def check_subagent_trace(store: Any) -> None:
+    """Запись трассы содержит все шесть полей, включая ``ts`` и ``seq``.
+
+    Наши реализации разошлись здесь: файловая писала шесть полей, in-memory
+    четыре, а проверка смотрела только на ``kind`` и оставалась зелёной.
+    """
+    rec = store.append_subagent_trace(
+        SYS, "t-trace",
+        parent_call_id="call-1", child_run_id="run-1",
+        kind="call", payload={"name": "fs_read_file"},
+    )
+    if not isinstance(rec, dict):
+        _fail(
+            "append_subagent_trace вернул не запись",
+            f"вернул {type(rec).__name__}. Возвращается САМА записанная запись"
+            "\n  с проставленными хранилищем ts и seq; None не возвращается никогда.",
+        )
+    missing = TRACE_FIELDS - set(rec)
+    if missing:
+        _fail(
+            f"в записи трассы нет полей: {', '.join(sorted(missing))}",
+            f"форма замкнута, обязательны все шесть: {', '.join(sorted(TRACE_FIELDS))}."
+            "\n  ts и seq проставляет ХРАНИЛИЩЕ, а не вызывающий.",
+        )
+    if not isinstance(rec.get("seq"), int):
+        _fail("seq трассы не целое", f"seq={rec.get('seq')!r}")
+
+    store.append_subagent_trace(
+        SYS, "t-trace",
+        parent_call_id="call-2", child_run_id="run-2",
+        kind="finished", payload={},
+    )
+    trace = store.read_subagent_trace(SYS, "t-trace")
+    if [r.get("kind") for r in trace] != ["call", "finished"]:
+        _fail("трасса вернулась не в порядке записи", f"вернулось {trace!r}")
+    if [r.get("seq") for r in trace] != [1, 2]:
+        _fail(
+            "seq трассы не монотонен с единицы",
+            f"вернулось {[r.get('seq') for r in trace]!r}, ждали [1, 2]",
+        )
+
+
+#: Поведенческие проверки. Каждой — свежее хранилище: общее состояние между
+#: проверками пряталo бы поломки за порядком запуска.
+BEHAVIOUR_CHECKS: tuple = (
+    check_missing_thread_is_empty,
+    check_roundtrip,
+    check_idempotent,
+    check_known_keys_mutated_in_place,
+    check_seq_is_a_number_not_a_count,
+    check_message_id_guaranteed_on_read,
+    check_meta_roundtrip,
+    check_runtime_flag_is_pointwise,
+    check_update_runtime_meta,
+    check_discard,
+    check_reset,
+    check_subagent_trace,
+)
+
+STRUCTURE_CHECKS: tuple = (
+    check_methods_present,
+    check_methods_are_sync,
+    check_signatures,
+)
+
+
+def assert_conforms(store_factory: Callable[[], Any]) -> List[str]:
+    """Проверить реализацию ``ThreadStore`` целиком.
+
+    ``store_factory`` вызывается заново перед каждой поведенческой проверкой —
+    состояние между ними не переезжает.
+
+    Поднимает :class:`ThreadStoreContractError` с объяснением на первом
+    расхождении. Возвращает список пройденных проверок — тесту удобно
+    утверждать, что их столько, сколько ожидалось.
+    """
+    passed: List[str] = []
+
+    store = store_factory()
+    for check in STRUCTURE_CHECKS:
+        check(store)
+        passed.append(check.__name__)
+
+    for check in BEHAVIOUR_CHECKS:
+        fresh = store_factory()
+        if hasattr(fresh, "ensure_ready"):
+            fresh.ensure_ready()
+        check(fresh)
+        passed.append(check.__name__)
+
+    return passed
+
+
+__all__ = [
+    "BEHAVIOUR_CHECKS",
+    "CONTRACT_METHODS",
+    "STRUCTURE_CHECKS",
+    "TRACE_FIELDS",
+    "ThreadStoreContractError",
+    "assert_conforms",
+]
