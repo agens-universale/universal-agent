@@ -37,7 +37,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
         trace = {"memory_patch": {"executed": True}, "final_output": {}}
         seen: dict = {}
 
-        def fake_summarize(**_kwargs):
+        async def fake_summarize(**_kwargs):
             return {
                 "raw_summary": full_xml,
                 "num_batches": 1,
@@ -114,7 +114,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
         }
         seen: dict = {}
 
-        def fake_summarize(**_kwargs):
+        async def fake_summarize(**_kwargs):
             return {
                 "raw_summary": full_xml,
                 "num_batches": 2,

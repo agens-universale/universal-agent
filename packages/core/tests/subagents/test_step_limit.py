@@ -70,7 +70,7 @@ def test_step_limit_returns_ok_false_not_completed(monkeypatch):
     child = _FakeChildState(steps=5, max_steps=5, terminal_outcome="step_limit")
     subagent_cls = _wire_runner(monkeypatch, runner, child)
 
-    def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         child_state.terminal_outcome = "step_limit"
         child_state.steps = 5
         # Child run_agent returns a limit envelope (build_limit_envelope).
@@ -98,7 +98,7 @@ def test_normal_complete_still_ok_true(monkeypatch):
     child = _FakeChildState(steps=2, max_steps=50, terminal_outcome=None)
     subagent_cls = _wire_runner(monkeypatch, runner, child)
 
-    def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         return "done"
 
     out = runner._run_internal(

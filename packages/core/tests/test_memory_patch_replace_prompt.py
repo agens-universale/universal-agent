@@ -52,7 +52,7 @@ def test_patch_replace_prompt_injects_subagent_guidance_when_flagged():
 def test_request_patch_replace_injects_subagent_guidance_in_system_only(monkeypatch):
     captured: dict = {}
 
-    def _fake_summary_text(*, ctx, state, messages, request_label, logger=None, **kwargs):
+    async def _fake_summary_text(*, ctx, state, messages, request_label, logger=None, **kwargs):
         captured["messages"] = messages
         captured["label"] = request_label
         return "<goal>keep</goal>"

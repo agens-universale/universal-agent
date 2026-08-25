@@ -93,14 +93,19 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state.user_turn_seq = 1
 
         monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-        _patch_chat_completion(
-            monkeypatch,
-            lambda **_kwargs: _valid_summary("s"),
-        )
+
+        async def _fake_summary(**_kwargs):
+            return _valid_summary("s")
+
+        _patch_chat_completion(monkeypatch, _fake_summary)
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+
+        async def _fake_patch_replace(**_k):
+            return empty_patch
+
         monkeypatch.setattr(
             "gc_core.summarize.memory_suggestions.arequest_patch_replace",
-            lambda **_k: empty_patch,
+            _fake_patch_replace,
         )
 
         assert maybe_run_summary_compaction(
@@ -217,14 +222,19 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         state.user_turn_seq = 1
 
         monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-        _patch_chat_completion(
-            monkeypatch,
-            lambda **_kwargs: _valid_summary("s-tech"),
-        )
+
+        async def _fake_summary(**_kwargs):
+            return _valid_summary("s-tech")
+
+        _patch_chat_completion(monkeypatch, _fake_summary)
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+
+        async def _fake_patch_replace(**_k):
+            return empty_patch
+
         monkeypatch.setattr(
             "gc_core.summarize.memory_suggestions.arequest_patch_replace",
-            lambda **_k: empty_patch,
+            _fake_patch_replace,
         )
 
         assert maybe_run_summary_compaction(

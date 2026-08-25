@@ -133,11 +133,10 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     )
     state = SimpleNamespace()
 
-    monkeypatch.setattr(
-        summary_llm,
-        "arequest_chat_completion_text",
-        lambda **kwargs: _DIRTY_EXTRA + "one-line summary",
-    )
+    async def _fake_summary(**kwargs):
+        return _DIRTY_EXTRA + "one-line summary"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_summary)
     assert (
         summary_llm.request_summary_text(
             ctx=ctx,
@@ -148,11 +147,10 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         == "one-line summary"
     )
 
-    monkeypatch.setattr(
-        summary_llm,
-        "arequest_chat_completion_text",
-        lambda **kwargs: _DIRTY_EXTRA + "compressed",
-    )
+    async def _fake_compressed(**kwargs):
+        return _DIRTY_EXTRA + "compressed"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_compressed)
     compact_res = compaction.compact_text("long memory", ctx, state)
     assert compact_res.ok is True
     assert compact_res.text == "compressed"
@@ -166,11 +164,11 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         "report_mismatches": [],
         "coverage_score": 1.0,
     }
-    monkeypatch.setattr(
-        summary_llm,
-        "arequest_chat_completion_text",
-        lambda **kwargs: _DIRTY_EXTRA + json.dumps(finish_payload),
-    )
+
+    async def _fake_finish(**kwargs):
+        return _DIRTY_EXTRA + json.dumps(finish_payload)
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_finish)
     projected_finish = summary_llm.request_auxiliary_completion_text(
         ctx=ctx,
         state=state,

@@ -19,13 +19,6 @@ from gc_core.intent_guard.feedback import build_text_answer_reject_feedback
 from gc_core.intent_guard.validation_result import ValidationResult
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 @dataclass(frozen=True)
@@ -43,13 +36,13 @@ async def ajudge_text_answer(ctx: Any, state: Any, assistant_text: str) -> Valid
         context_log = records_to_jsonl_lines(
             deserialize_list(getattr(state, "user_intent_log", []) or [])
         )
-        return await _maybe_await(avalidate_final_report_vs_user_intent(
+        return await avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=current,
             context_user_messages=context_log,
             finish_handoff_arguments=assistant_text,
-        ))
+        )
     except Exception:
         return None
 
@@ -71,7 +64,7 @@ async def ashould_return_text_answer(ctx: Any, state: Any, assistant_text: str) 
     if mode == "judge":
         if not judge_available(cfg):
             return TextAnswerDecision(False)
-        result = await _maybe_await(ajudge_text_answer(ctx, state, assistant_text))
+        result = await ajudge_text_answer(ctx, state, assistant_text)
         if result is None:
             return TextAnswerDecision(False)
         if getattr(result, "action", "") == "accept":

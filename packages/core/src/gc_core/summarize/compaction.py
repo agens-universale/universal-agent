@@ -13,13 +13,6 @@ from gc_core.message_policy.todo_context import render_todo_for_persistent_state
 from gc_core.summarize.working_memory_gateway import REGISTER_ORDER, WorkingMemoryDeltas, apply_memory_patch, apply_summary_memory_patch, coerce_working_memory_deltas, read_session_todo_from_state, read_snapshot_from_state, render_persistent_state_for_prompt, render_session_memory_for_summary_message
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:
@@ -215,7 +208,7 @@ async def arun_summary_compaction(
     source_user_log = list(getattr(state, "user_intent_log", []) or [])
     source_current_intent = list(getattr(state, "current_user_intent", []) or [])
     memory_snapshot = read_snapshot_from_state(state)
-    summary_result = await _maybe_await(asummarize_dialog_via_chat_completions(
+    summary_result = await asummarize_dialog_via_chat_completions(
         ctx=ctx,
         state=state,
         full_history_messages=full_messages,
@@ -226,7 +219,7 @@ async def arun_summary_compaction(
         user_intent_log=source_user_log,
         current_user_intent=source_current_intent,
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
-    ))
+    )
     raw_summary = str(summary_result.get("raw_summary") or "")
     num_batches = int(summary_result.get("num_batches") or 0)
     trace = summary_result.get("trace")

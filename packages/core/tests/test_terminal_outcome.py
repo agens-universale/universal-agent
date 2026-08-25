@@ -272,7 +272,11 @@ def test_tool_call_limit_sets_terminal_outcome(monkeypatch):
         return _function_call_batch(2, 1), "resp_stub"
 
     monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
-    monkeypatch.setattr(processing_module, "aapply_tool", lambda **_kw: "ok")
+
+    async def _apply_tool(**_kw):
+        return "ok"
+
+    monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=10)
     result = run_agent(
@@ -302,7 +306,11 @@ def test_tool_calls_counter_counts_batch_none_limit(monkeypatch):
 
     monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
     monkeypatch.setattr(processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs)
-    monkeypatch.setattr(processing_module, "aapply_tool", lambda **_kw: "ok")
+
+    async def _apply_tool(**_kw):
+        return "ok"
+
+    monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=2)
     run_agent(

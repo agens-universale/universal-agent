@@ -82,10 +82,8 @@ def test_is_unknown_tool_output_legacy_substring():
 def test_process_tool_calls_updates_unknown_streak(monkeypatch):
     from gc_core import processing_responses as pr
 
-    monkeypatch.setattr(
-        pr,
-        "aapply_tool",
-        lambda **kw: json.dumps(
+    async def fake_apply(**kw):
+        return json.dumps(
             {
                 "ok": False,
                 "error": {
@@ -96,8 +94,9 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
                 },
                 "message": "Unknown tool 'phase1'. Use only tools from the provided tool list.",
             }
-        ),
-    )
+        )
+
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
@@ -176,7 +175,11 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
             "message": "Unknown tool 'phase1'. Use only tools from the provided tool list.",
         }
     )
-    monkeypatch.setattr(pr, "aapply_tool", lambda **_kw: unknown_payload)
+
+    async def fake_apply(**_kw):
+        return unknown_payload
+
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
 
@@ -240,7 +243,11 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
             "message": "Unknown tool 'phase1'. Use only tools from the provided tool list.",
         }
     )
-    monkeypatch.setattr(pr, "aapply_tool", lambda **_kw: unknown_payload)
+
+    async def fake_apply(**_kw):
+        return unknown_payload
+
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
 

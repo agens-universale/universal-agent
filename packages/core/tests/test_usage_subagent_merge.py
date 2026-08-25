@@ -60,7 +60,7 @@ def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
 
     subagent_cls = SimpleNamespace(create_instance=_create)
 
-    def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         return "done"
 
     out = runner._run_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)

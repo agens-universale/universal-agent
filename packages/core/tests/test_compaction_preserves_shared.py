@@ -35,7 +35,7 @@ def _state_with_full_shared():
     )
 
 
-def _fake_summarize(**_kwargs):
+async def _fake_summarize(**_kwargs):
     return {
         "raw_summary": "<summary>ok</summary>",
         "num_batches": 1,

@@ -37,7 +37,10 @@ def _coord(monkeypatch, calls, gc_calls, backend="chat_completions",
         is_cli_mode=True,
         pre_backend_trigger_reason="pre_backend", logger=None,
     )
-    monkeypatch.setattr(rsc, "arun_summary_compaction", lambda **kw: calls.append(kw))
+    async def _fake_compaction(**kw):
+        calls.append(kw)
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _fake_compaction)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger",
                         lambda **kw: threshold_exceeded)
     monkeypatch.setattr(rsc, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
@@ -154,7 +157,10 @@ class TestC2AgentExecutorFinally:
         monkeypatch.setattr(ae, "gc",
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
         # run_agent — немедленный выход без HTTP/MCP.
-        monkeypatch.setattr(ae, "arun_agent", lambda *a, **kw: {"finished": True})
+        async def _arun_agent_stub(*a, **kw):
+            return {"finished": True}
+
+        monkeypatch.setattr(ae, "arun_agent", _arun_agent_stub)
         ctx = create_run_context(self._make_cfg(tmp_path), auth_connector=None)
         ex = ae.AgentExecutor(ctx)
         ex.run([{"role": "user", "content": "x"}],
@@ -168,10 +174,10 @@ class TestC2AgentExecutorFinally:
         gc_calls = []
         monkeypatch.setattr(ae, "gc",
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
-        monkeypatch.setattr(
-            ae, "arun_agent",
-            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
-        )
+        async def _arun_agent_boom(*a, **kw):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(ae, "arun_agent", _arun_agent_boom)
         ctx = create_run_context(self._make_cfg(tmp_path), auth_connector=None)
         ex = ae.AgentExecutor(ctx)
         with pytest.raises(RuntimeError):
@@ -196,11 +202,10 @@ class TestC3ProcessingResponses:
         monkeypatch.setattr(pr, "gc",
                             types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
         # Замокаем _request_backend_canonical, чтобы не делать реальных запросов.
-        monkeypatch.setattr(
-            pr, "_arequest_backend_canonical",
-            lambda messages, state, ctx: ([{"role": "assistant", "content": "ok"}],
-                                          "rid", {}),
-        )
+        async def _abackend_stub(messages, state, ctx):
+            return [{"role": "assistant", "content": "ok"}], "rid", {}
+
+        monkeypatch.setattr(pr, "_arequest_backend_canonical", _abackend_stub)
         ctx = types.SimpleNamespace(
             config_dict=config_dict, is_tui=is_tui, is_cli_mode=is_cli_mode,
         )
@@ -214,7 +219,11 @@ class TestC3ProcessingResponses:
         # Пустой батч tool_calls → цикл не выполняется, session_compact нет →
         # доходит до C3 gc.collect перед return tools_outputs.
         messages = []
-        pr.process_tool_calls(messages, state, ctx, run_agent_func=lambda *a, **kw: None)
+
+        async def _run_agent_func(*a, **kw):
+            return None
+
+        pr.process_tool_calls(messages, state, ctx, run_agent_func=_run_agent_func)
         return gc_calls
 
     def test_collect_default_on_for_cli(self, monkeypatch):

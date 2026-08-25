@@ -48,7 +48,10 @@ def _fc(name: str, call_id: str, arguments: str = "{}"):
 def _patch_process(monkeypatch, *, apply_return):
     from gc_core import processing_responses as pr
 
-    monkeypatch.setattr(pr, "aapply_tool", lambda **kw: apply_return)
+    async def _fake_aapply_tool(**kw):
+        return apply_return
+
+    monkeypatch.setattr(pr, "aapply_tool", _fake_aapply_tool)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
@@ -144,7 +147,7 @@ class TestSidecarFinished:
         )
         runner = SubagentRunner(parent, _orch_state(), cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.steps = 3
             return "done"
 
@@ -188,7 +191,7 @@ class TestSidecarFinished:
         )
         runner = SubagentRunner(parent, _orch_state(), cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.steps = 1
             return None
 

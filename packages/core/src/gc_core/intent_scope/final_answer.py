@@ -14,13 +14,6 @@ _logger = logging.getLogger(__name__)
 _LABEL = "final_answer"
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. summarizer._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _append(state: Any, content: str, log: Any) -> None:
@@ -58,9 +51,9 @@ async def amaybe_record_final_answer_intent(*, assistant_text: str, state: Any, 
         _append(state, text, log)
         return
 
-    summary = await _maybe_await(asummarize_final_answer_line(
+    summary = await asummarize_final_answer_line(
         ctx=ctx, state=state, assistant_text=text, logger=log
-    ))
+    )
     if summary:
         _append(state, summary, log)
         return

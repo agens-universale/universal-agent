@@ -37,15 +37,6 @@ _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. compaction._maybe_await.
-
-    ``arun_summary_compaction`` вызывающие и тесты штатно подменяют; форма
-    заглушки (обычная функция или корутинная) — дело подменяющего.
-    """
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _set_runtime_flag(thread_session, flag: str, active: bool) -> None:
@@ -337,14 +328,14 @@ class RunSummaryCoordinator:
                     )
                     break
                 with _summarizing_flag(self._thread_session):
-                    await _maybe_await(arun_summary_compaction(
+                    await arun_summary_compaction(
                         ctx=self._ctx,
                         state=state,
                         trigger_reason=trigger_reason,
                         is_cli_mode=self._is_cli_mode,
                         on_summary_applied=self.on_summary_applied,
                         trigger_threshold_chars=self._summary_trigger_chars,
-                    ))
+                    )
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             if rounds > 0:
                 gc.collect()
@@ -376,14 +367,14 @@ class RunSummaryCoordinator:
         if state.backend_api_mode != "chat_completions":
             return
         with _summarizing_flag(self._thread_session):
-            await _maybe_await(arun_summary_compaction(
+            await arun_summary_compaction(
                 ctx=self._ctx,
                 state=state,
                 trigger_reason=trigger_reason,
                 is_cli_mode=self._is_cli_mode,
                 on_summary_applied=self.on_summary_applied,
                 trigger_threshold_chars=self._summary_trigger_chars,
-            ))
+            )
         # C1: старая история отцеплена компакцией — собираем циклический мусор.
         gc.collect()
 
@@ -437,14 +428,14 @@ class RunSummaryCoordinator:
         # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
         # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
         with _summarizing_flag(self._thread_session):
-            await _maybe_await(arun_summary_compaction(
+            await arun_summary_compaction(
                 ctx=self._ctx,
                 state=state,
                 trigger_reason=self._pre_backend_trigger_reason,
                 is_cli_mode=self._is_cli_mode,
                 on_summary_applied=self.on_summary_applied,
                 trigger_threshold_chars=self._summary_trigger_chars,
-            ))
+            )
         msgs = getattr(state, "messages", None)
         if isinstance(msgs, list):
             msgs.extend(preserved_batch)
@@ -487,14 +478,14 @@ class RunSummaryCoordinator:
         logger = self._logger
         try:
             with _summarizing_flag(self._thread_session):
-                await _maybe_await(arun_summary_compaction(
+                await arun_summary_compaction(
                     ctx=self._ctx,
                     state=state,
                     trigger_reason="turn_end",
                     is_cli_mode=self._is_cli_mode,
                     on_summary_applied=self.on_summary_applied,
                     trigger_threshold_chars=self._turn_end_trigger_chars,
-                ))
+                )
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             gc.collect()
         except Exception as summarize_exc:

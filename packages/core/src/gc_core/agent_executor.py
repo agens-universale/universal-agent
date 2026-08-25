@@ -94,13 +94,6 @@ def _append_trace_id_to_meta(
         return
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 class AgentExecutor:
@@ -498,7 +491,7 @@ class AgentExecutor:
         # ровно своё, не тронув сессии параллельных агентов на том же loop.
         _owner_reset = set_owner(getattr(self._ctx, "mcp_session_owner", "") or None)
         try:
-            response = await _maybe_await(arun_agent(
+            response = await arun_agent(
                 messages,
                 state,
                 self._ctx,
@@ -525,7 +518,7 @@ class AgentExecutor:
                 mark_finish_gate_checking=(
                     lambda active: set_tui_finish_gate_checking(thread_session, active)
                 ),
-            ))
+            )
             self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
             if thread_session is not None and not (
                 state.discard_writes_after_stop and state.stop_requested

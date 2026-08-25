@@ -11,13 +11,6 @@ from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas, parse_
 from gc_core.utils.llm_chat_client import shorten_for_log
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 async def asummarize_dialog_via_chat_completions(
@@ -260,14 +253,14 @@ async def asummarize_dialog_via_chat_completions(
                 len(batches),
                 request_messages,
             )
-        text = await _maybe_await(arequest_summary_text(
+        text = await arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             request_label=f"summary_batch_{batch_index}",
             max_tokens=max_tokens,
             logger=logger,
-        ))
+        )
         trace_batch["output_summary_text"] = text
         if logger is not None:
             logger.info(
@@ -297,7 +290,7 @@ async def asummarize_dialog_via_chat_completions(
                     len(text or ""),
                 )
             missing_tags = missing_section_tags(text)
-            repaired = await _maybe_await(summary_llm_steps.arepair_summary_text(
+            repaired = await summary_llm_steps.arepair_summary_text(
                 ctx=ctx,
                 state=state,
                 history_text=batch_history_text,
@@ -307,7 +300,7 @@ async def asummarize_dialog_via_chat_completions(
                 reason=reason,
                 missing_tags=missing_tags,
                 max_tokens=max_tokens,
-            ))
+            )
             merged = merge_repaired_summary(invalid_text=text, repaired_text=repaired)
             merged_valid, _ = validate_summary_text(merged)
             repaired_valid, _ = validate_summary_text(repaired)
@@ -356,13 +349,13 @@ async def asummarize_dialog_via_chat_completions(
                     len(accumulated_summary),
                     max_accumulated_summary_chars,
                 )
-            accumulated_summary = await _maybe_await(summary_llm_steps.acompress_summary_text(
+            accumulated_summary = await summary_llm_steps.acompress_summary_text(
                 ctx=ctx,
                 state=state,
                 summary_text=accumulated_summary,
                 max_chars=max_accumulated_summary_chars,
                 max_tokens=max_tokens,
-            ))
+            )
     text = accumulated_summary or FALLBACK_SUMMARY
 
     memory_append_deltas = WorkingMemoryDeltas()
@@ -377,13 +370,13 @@ async def asummarize_dialog_via_chat_completions(
         видно только внутри этой функции, а портал изнутри работающего loop
         всё равно поднял бы SyncApiInsideEventLoopError.
         """
-        return await _maybe_await(memory_suggestions.arequest_memory_deltas_format_repair(
+        return await memory_suggestions.arequest_memory_deltas_format_repair(
             ctx=ctx,
             state=state,
             raw_output=raw,
             max_tokens=max_tokens,
             full_replace=True,
-        ))
+        )
 
     async def _arun_patch_step(
         llm_result: Any,
@@ -411,13 +404,13 @@ async def asummarize_dialog_via_chat_completions(
         return deltas, touched, repair_attempted, repair_success, raw_used
 
     if len(batches) <= 1:
-        replace_result = await _maybe_await(memory_suggestions.arequest_patch_replace(
+        replace_result = await memory_suggestions.arequest_patch_replace(
             ctx=ctx,
             state=state,
             history_text=full_history_text,
             summary_text=text,
             persistent_state_block=persistent_state_block,
-        ))
+        )
         (
             memory_replace_deltas,
             replace_touched,

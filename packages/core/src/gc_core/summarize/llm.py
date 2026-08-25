@@ -7,13 +7,6 @@ from gc_core.message_projection import project_text_for_model
 from gc_core.utils.llm_chat_client import arequest_chat_completion_text, log_llm_prompt_and_result
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _require_chat_completions_llm(ctx: Any) -> Any:
@@ -69,14 +62,14 @@ async def arequest_auxiliary_completion_text(
 
     Main agent ``request_chat_completion_text`` stays dirty (canonical persist).
     """
-    raw = await _maybe_await(arequest_chat_completion_text(
+    raw = await arequest_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=messages,
         max_tokens=max_tokens,
         request_label=request_label,
         payload_overrides=payload_overrides,
-    ))
+    )
     if log_prompt:
         active_logger = logger if logger is not None else getattr(ctx, "logger", None)
         log_llm_prompt_and_result(

@@ -38,7 +38,7 @@ def _state(**kw):
 def _patch_process_tool_calls(monkeypatch, pr, *, apply=None):
     applied: list[str] = []
 
-    def _default_apply(**kw):
+    async def _default_apply(**kw):
         applied.append(kw["tool_name"])
         return '{"ok": true}'
 
@@ -102,7 +102,7 @@ def test_stop_after_first_tool_a_then_b_for_rest(monkeypatch):
     state = _state()
     applied: list[str] = []
 
-    def apply_and_stop(**kw):
+    async def apply_and_stop(**kw):
         applied.append(kw["tool_name"])
         state.stop_requested = True
         return _cancelled_json(kw["tool_name"])
@@ -134,7 +134,7 @@ def test_successful_first_then_stop_before_second_gives_ok_then_b(monkeypatch):
     state = _state()
     applied: list[str] = []
 
-    def apply_ok_then_arm_stop(**kw):
+    async def apply_ok_then_arm_stop(**kw):
         applied.append(kw["tool_name"])
         state.stop_requested = True
         return '{"ok": true, "tool": "%s"}' % kw["tool_name"]
@@ -162,7 +162,7 @@ def test_single_tool_batch_stop_only_a_no_b(monkeypatch):
 
     state = _state()
 
-    def apply_stop(**kw):
+    async def apply_stop(**kw):
         state.stop_requested = True
         return _cancelled_json(kw["tool_name"])
 
@@ -188,7 +188,7 @@ def test_stop_does_not_apply_remaining_even_if_names_differ(monkeypatch):
     state = _state()
     applied = []
 
-    def apply_and_stop(**kw):
+    async def apply_and_stop(**kw):
         applied.append(kw["tool_name"])
         state.stop_requested = True
         return _cancelled_json(kw["tool_name"])
@@ -242,7 +242,7 @@ def test_pairing_persist_despite_discard_writes(monkeypatch):
     persisted: list = []
     state = _state(discard_writes_after_stop=True)
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         state.stop_requested = True
         return _cancelled_json("subagent_worker")
 
@@ -346,7 +346,7 @@ def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
     }
     state = _state(discard_writes_after_stop=True, messages=[existing])
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         state.stop_requested = True
         return _cancelled_json("subagent_worker")
 

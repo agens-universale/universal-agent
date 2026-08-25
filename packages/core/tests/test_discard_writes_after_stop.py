@@ -99,8 +99,12 @@ def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
     from gc_core.agent_executor import AgentExecutor
 
     cfg = _make_executor_cfg(tmp_path)
+
     # Monkey-patch run_agent to immediately exit без HTTP
-    monkeypatch.setattr("gc_core.agent_executor.arun_agent", lambda *a, **kw: {"finished": True})
+    async def _fake_arun_agent(*a, **kw):
+        return {"finished": True}
+
+    monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
     ctx = create_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
     ex.run([{"role": "user", "content": "x"}],
@@ -115,7 +119,11 @@ def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     from gc_core.agent_executor import AgentExecutor
 
     cfg = _make_executor_cfg(tmp_path)
-    monkeypatch.setattr("gc_core.agent_executor.arun_agent", lambda *a, **kw: {"finished": True})
+
+    async def _fake_arun_agent(*a, **kw):
+        return {"finished": True}
+
+    monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
     ctx = create_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
     ex.run([{"role": "user", "content": "x"}],

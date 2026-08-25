@@ -62,7 +62,7 @@ class TestStopRequestedPropagation:
         ctx = _make_ctx(cfg)
         captured = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["kwargs"] = kwargs
             return "done"
 
@@ -81,7 +81,7 @@ class TestStopRequestedPropagation:
         ctx = _make_ctx(cfg)
         captured = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["check_stop"] = kwargs["check_stop"]
             return "done"
 
@@ -102,7 +102,7 @@ class TestStopRequestedPropagation:
         cfg = _make_config()
         ctx = _make_ctx(cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             check_stop = kwargs.get("check_stop")
             orch.stop_requested = True
             if check_stop and check_stop():
@@ -125,7 +125,7 @@ class TestStopRequestedPropagation:
         cfg = _make_config()
         ctx = _make_ctx(cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             return None
 
         runner = SubagentRunner(ctx, orch, cfg)
@@ -145,7 +145,7 @@ class TestStopRequestedPropagation:
         ctx = _make_ctx(cfg)
         stop_values = []
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             stop_values.append(kwargs["check_stop"]())
             return "ok"
 

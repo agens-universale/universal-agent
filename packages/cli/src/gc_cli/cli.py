@@ -17,7 +17,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
 )
-from gc_core.run_context import RunContext, create_run_context
+from gc_core.run_context import RunContext, acreate_run_context
 from gc_core.mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
@@ -249,7 +249,11 @@ async def _run_init_agents_md() -> int:
 
     config_dict = load_config(arg_parser.run_args.config)
     auth_connector = build_auth_connector(config_dict)
-    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+    # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
+    # create_run_context морозил бы его на всё MCP-дискавери — замер на
+    # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
+    # против 0.01 с и 365 тиков у асинхронного двойника.
+    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
 
     prompt = build_init_prompt(cwd=os.getcwd(), can_ask=confirm_available(ctx))
     await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам (write_to_file)
@@ -320,7 +324,10 @@ async def amain() -> int:
     auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
     if auto_mcp:
         ensure_mcp_daemons(config_dict)
-    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+    # Асинхронная сборка: мы внутри asyncio.run(amain()), и синхронный
+    # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
+    # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
+    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
 
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
     from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli

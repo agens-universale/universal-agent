@@ -74,11 +74,14 @@ def test_success_meta_includes_child_run_id_not_path(monkeypatch):
     child = _FakeChildState()
     cls = _wire(monkeypatch, runner, child, run_id="child-guid-1")
 
+    async def _fake_run_agent(*a, **k):
+        return "done"
+
     out = runner._run_internal(
         "subagent_worker",
         cls,
         {"task": "t"},
-        lambda *a, **k: "done",
+        _fake_run_agent,
     )
     payload = json.loads(out)
     assert payload["ok"] is True
@@ -95,7 +98,7 @@ def test_run_failed_error_includes_child_run_id(monkeypatch):
     child = _FakeChildState()
     cls = _wire(monkeypatch, runner, child, run_id="child-guid-err")
 
-    def boom(*a, **k):
+    async def boom(*a, **k):
         raise RuntimeError("boom")
 
     out = runner._run_internal("subagent_worker", cls, {"task": "t"}, boom)
@@ -116,7 +119,11 @@ def test_early_error_without_ctx_has_no_child_run_id():
     )
     ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None, is_tui=False)
     runner = SubagentRunner(ctx, orch, {"use_local_subagents": True})
-    out = runner.run("subagent_no_such", {"task": "t"}, lambda *a, **k: None)
+
+    async def _fake_run_agent(*a, **k):
+        return None
+
+    out = runner.run("subagent_no_such", {"task": "t"}, _fake_run_agent)
     payload = json.loads(out)
     assert payload["ok"] is False
     assert "child_run_id" not in payload["meta"]

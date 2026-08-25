@@ -57,17 +57,6 @@ _fallback_logger = logging.getLogger(__name__)
 
 
 
-async def _maybe_await(value: Any):
-    """Дождаться значения, если это корутина.
-
-    Ставится на швах, которые вызывающие и тесты штатно подменяют: диспетчер
-    тулов, судьи, ступени цикла. Форма заглушки (обычная функция или
-    корутинная) — дело подменяющего, а не цикла: требовать от каждой заглушки
-    корутинности значило бы менять контракт внедрения заодно с переездом.
-    """
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 async def _acall_blocking_hook(fn, *args: Any, **kwargs: Any):
@@ -617,14 +606,14 @@ async def aprocess_tool_calls(
             # call_id для субагента: чтобы вложенные строки в TUI знали,
             # под какой корневой subagent_* они относятся.
             state.tool_calls += 1
-            tool_res_raw = await _maybe_await(aapply_tool(
+            tool_res_raw = await aapply_tool(
                 tool_name=tool_name,
                 arguments=tool_arguments,
                 ctx=ctx,
                 state=state,
                 run_agent_func=run_agent_func,
                 call_id=tool_call_id,
-            ))
+            )
         except WrongFunctionArgumentsException as exc:
             if getattr(exc, "call_id", None) is None:
                 exc.call_id = tool_call_id
@@ -1077,9 +1066,9 @@ async def arun_agent(
                             if checking:
                                 mark_finish_gate_checking(True)
                             try:
-                                decision = await _maybe_await(gate.aevaluate_turn_finish(
+                                decision = await gate.aevaluate_turn_finish(
                                     finish_handoff_arguments=finish_arguments,
-                                ))
+                                )
                             finally:
                                 if checking:
                                     mark_finish_gate_checking(False)
@@ -1168,9 +1157,8 @@ async def arun_agent(
                     # Half-turn: как user_ask — ждём разбора ответа модели.
                 elif mode == "text_response":
                     assistant_text = extract_last_assistant_text(messages)
-                    decision = await _maybe_await(
-                        ashould_return_text_answer(ctx, state, assistant_text)
-                    )
+                    decision = await ashould_return_text_answer(ctx, state, assistant_text)
+                    
                     if decision.accept:
                         # Финальная проза принята → TUI-индикатор «✓ завершаю…»
                         # на время записи/саммари/flush (mark_finalizing пишет

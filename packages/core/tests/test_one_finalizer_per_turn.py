@@ -36,8 +36,12 @@ def test_process_tool_calls_skips_second_finalizer(monkeypatch):
     from gc_core import processing_responses as pr
 
     calls = []
-    monkeypatch.setattr(pr, "aapply_tool",
-                        lambda **kw: calls.append(kw["tool_name"]) or '{"ok": true}')
+
+    async def fake_apply(**kw):
+        calls.append(kw["tool_name"])
+        return '{"ok": true}'
+
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output",
                         lambda res, **kw: res)
     monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)

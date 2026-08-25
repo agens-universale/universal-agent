@@ -16,13 +16,6 @@ DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
 )
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 @dataclass
@@ -66,13 +59,13 @@ async def _arequest_patch(
         {"role": "user", "content": user_prompt},
     ]
     # Dirty logged inside arequest_summary_text / aux choke; return is projected.
-    projected = await _maybe_await(arequest_summary_text(
+    projected = await arequest_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         request_label=request_label,
         logger=logger,
-    ))
+    )
     return MemoryPatchLlmResult(
         request_messages=request_messages,
         raw_response=projected,
@@ -138,13 +131,13 @@ async def arequest_memory_deltas_format_repair(
     request_messages = build_memory_deltas_format_repair_messages(
         raw_output, full_replace=full_replace
     )
-    return await _maybe_await(arequest_summary_text(
+    return await arequest_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         request_label=MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
         max_tokens=max_tokens,
-    ))
+    )
 
 
 # --- синхронные двойники ---------------------------------------------------

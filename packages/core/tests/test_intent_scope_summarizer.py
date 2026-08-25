@@ -26,7 +26,7 @@ def test_auxiliary_llm_completion_kwargs_from_chat_completions_llm():
 def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(monkeypatch):
     captured = {}
 
-    def _fake_request_summary_text(*, payload_overrides=None, **kwargs):
+    async def _fake_request_summary_text(*, payload_overrides=None, **kwargs):
         captured["payload_overrides"] = payload_overrides
         captured["label"] = kwargs.get("request_label")
         return "User wants a README section on install."
@@ -76,11 +76,10 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
 
 
 def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
-    monkeypatch.setattr(
-        summarizer,
-        "arequest_summary_text",
-        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
+    async def _boom(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(summarizer, "arequest_summary_text", _boom)
 
     from gc_core.config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
 

@@ -7,13 +7,6 @@ from gc_core.trace_id import trace_id_from_config, trace_header_name, model_trac
 from gc_core.utils.ssl_config import get_backend_client_cert
 
 
-async def _maybe_await(value):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 _ROLE_GENERATION_MAX_TOKENS = 4096
@@ -262,7 +255,7 @@ class SpecialAgent(AbstractSubagent):
         )
         # create_instance и так корутина: генерация роли идёт асинхронно,
         # синхронный шим тут упёрся бы в портал изнутри его же loop.
-        res_data, _call_data = await _maybe_await(arequest_chat_completions_with_policy(
+        res_data, _call_data = await arequest_chat_completions_with_policy(
             payload_factory=payload_factory,
             initial_max_tokens=_ROLE_GENERATION_MAX_TOKENS,
             min_response_tokens=min_response_tokens,
@@ -279,7 +272,7 @@ class SpecialAgent(AbstractSubagent):
             notice_url=url,
             timeout=float(self.config_dict["backend_request_timeout_sec"]),
             config_proxy=self.config_dict.get("proxy"),
-        ))
+        )
         return res_data["choices"][0]["message"]["content"]
 
     def get_initial_data(self):

@@ -3,7 +3,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 
@@ -240,7 +240,7 @@ class TestSpecialAgentWithRunner:
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value="Special agent done")
+        run_agent_func = AsyncMock(return_value="Special agent done")
 
         runner = SubagentRunner(ctx, orch, cfg)
 

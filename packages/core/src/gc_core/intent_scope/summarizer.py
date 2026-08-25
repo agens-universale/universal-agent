@@ -24,13 +24,6 @@ _DEFAULT_FINAL_ANSWER_PROMPT_PATH = os.path.join(
 )
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _resolve_final_answer_prompt_path(ctx: Any) -> str:
@@ -150,13 +143,13 @@ async def asummarize_tool_intent_line(
     ]
     request_label = f"intent_scope:{tool_name}"
     try:
-        line = await _maybe_await(arequest_summary_text(
+        line = await arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             request_label=request_label,
             logger=log,
-        ))
+        )
     except Exception as exc:
         log.warning(
             "intent_scope summary_failed tool=%s error=%s",
@@ -239,13 +232,13 @@ async def asummarize_final_answer_line(
                 ),
             },
         ]
-        line = await _maybe_await(arequest_summary_text(
+        line = await arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             request_label=request_label,
             logger=log,
-        ))
+        )
     except Exception as exc:
         log.warning(
             "intent_scope summary_failed tool=final_answer error=%s", exc, exc_info=True

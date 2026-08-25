@@ -112,14 +112,19 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         )
 
         monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-        _patch_chat_completion(
-            monkeypatch,
-            lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
-        )
+
+        async def _fake_summary(**_kwargs):
+            return valid_summary_xml_for_tests(seed="context")
+
+        _patch_chat_completion(monkeypatch, _fake_summary)
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+
+        async def _fake_patch_replace(**_k):
+            return empty_patch
+
         monkeypatch.setattr(
             "gc_core.summarize.memory_suggestions.arequest_patch_replace",
-            lambda **_k: empty_patch,
+            _fake_patch_replace,
         )
 
         state = _state()
@@ -204,14 +209,19 @@ def test_persist_batch_writes_user_intent_log_to_meta():
 
 def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    _patch_chat_completion(
-        monkeypatch,
-        lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
-    )
+
+    async def _fake_summary(**_kwargs):
+        return valid_summary_xml_for_tests(seed="context")
+
+    _patch_chat_completion(monkeypatch, _fake_summary)
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+
+    async def _fake_patch_replace(**_k):
+        return empty_patch
+
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",
-        lambda **_k: empty_patch,
+        _fake_patch_replace,
     )
 
     state = _state()
@@ -238,14 +248,19 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
 
 def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkeypatch):
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    _patch_chat_completion(
-        monkeypatch,
-        lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
-    )
+
+    async def _fake_summary(**_kwargs):
+        return valid_summary_xml_for_tests(seed="context")
+
+    _patch_chat_completion(monkeypatch, _fake_summary)
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+
+    async def _fake_patch_replace(**_k):
+        return empty_patch
+
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",
-        lambda **_k: empty_patch,
+        _fake_patch_replace,
     )
 
     state = _state()

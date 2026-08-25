@@ -51,7 +51,7 @@ def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub)
     state = _minimal_state(messages=[sys_m, u1, u2])
     captured: dict = {}
 
-    def capture(**kwargs):
+    async def capture(**kwargs):
         from gc_core.summarize.compaction import without_system_messages
 
         st = kwargs["state"]
@@ -81,7 +81,7 @@ def test_suffix_mismatch_returns_without_changing_state(monkeypatch, ctx_stub):
     msgs = [sys_m, stale]
     state = _minimal_state(messages=list(msgs))
 
-    def boom(**_kwargs):
+    async def boom(**_kwargs):
         raise AssertionError("compaction must not run")
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
@@ -108,7 +108,7 @@ def test_suffix_match_runs_and_restores_even_if_compaction_raises(monkeypatch, c
     u2 = {"role": "user", "content": "b", "id": "2"}
     state = _minimal_state(messages=[sys_m, u1, u2])
 
-    def fail(**_kwargs):
+    async def fail(**_kwargs):
         raise RuntimeError("compaction simulated failure")
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", fail)
@@ -135,7 +135,7 @@ def test_current_messages_inplace_replaced_after_hook(monkeypatch, ctx_stub):
     u1 = {"role": "user", "content": "a", "id": "1"}
     state = _minimal_state(messages=[sys_m, u1])
 
-    def mock_compact(**kwargs):
+    async def mock_compact(**kwargs):
         st = kwargs["state"]
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
@@ -164,7 +164,7 @@ def test_no_orphan_outputs_in_current_after_function_call_output(monkeypatch, ct
     batch = [out_bad, call, out_ok]
     state = _minimal_state(messages=[sys_m, *batch])
 
-    def mock_compact(**kwargs):
+    async def mock_compact(**kwargs):
         st = kwargs["state"]
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
@@ -193,7 +193,7 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
     u1 = {"role": "user", "content": "a", "id": "1"}
     state = _minimal_state(messages=[sys_m, u1])
 
-    def mock_compact(**kwargs):
+    async def mock_compact(**kwargs):
         st = kwargs["state"]
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
@@ -218,7 +218,10 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
 
 
 def test_persist_skipped_when_preserved_batch_empty(monkeypatch, ctx_stub):
-    monkeypatch.setattr(rsc, "arun_summary_compaction", lambda **_k: None)
+    async def _noop_compact(**_k):
+        return None
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _noop_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
     _patch_save_thread_meta(monkeypatch)
 
@@ -244,7 +247,7 @@ def test_function_call_output_clears_current_when_preservation_empty(monkeypatch
     orphan = {"type": "function_call_output", "call_id": "solo", "output": "", "id": "o"}
     state = _minimal_state(messages=[sys_m, orphan])
 
-    def mock_compact(**kwargs):
+    async def mock_compact(**kwargs):
         st = kwargs["state"]
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 

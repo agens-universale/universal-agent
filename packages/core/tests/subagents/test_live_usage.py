@@ -67,7 +67,7 @@ def test_live_delta_then_finally_no_double_count(monkeypatch):
     child = _FakeChildState()
     subagent_cls = _wire_runner(monkeypatch, runner, child)
 
-    def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         persist = kwargs.get("persist_messages_callback")
         # step 1
         child_state.usage.add(CATEGORY_MAIN, 100, 20)
@@ -100,7 +100,7 @@ def test_finally_pushes_residual_if_no_mid_run_persist(monkeypatch):
     child = _FakeChildState()
     subagent_cls = _wire_runner(monkeypatch, runner, child)
 
-    def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         child_state.usage.add(CATEGORY_MAIN, 50, 5)
         return "done"
 
@@ -117,7 +117,7 @@ def test_parent_messages_untouched_by_usage_push(monkeypatch):
     child.messages = [{"role": "user", "content": "huge " * 5000}]
     subagent_cls = _wire_runner(monkeypatch, runner, child)
 
-    def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         child_state.usage.add(CATEGORY_MAIN, 1, 1)
         persist = kwargs.get("persist_messages_callback")
         if persist:

@@ -23,8 +23,10 @@ def _ctx(mode=None, backend="chat_completions", strict=True):
 def test_allow_returns_true_without_judge(monkeypatch):
     from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return True
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("allow"), _S(), "привет").accept is True
     assert judged["n"] == 0                              # allow → судья не зван
 
@@ -32,7 +34,9 @@ def test_allow_returns_true_without_judge(monkeypatch):
 def test_judge_accept_returns_true(monkeypatch):
     from types import SimpleNamespace
     from gc_core.intent_guard import text_answer_judge as taj
-    monkeypatch.setattr(taj, "ajudge_text_answer", lambda ctx, state, text: SimpleNamespace(action="accept"))
+    async def _judge(ctx, state, text):
+        return SimpleNamespace(action="accept")
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("judge"), _S(), "привет").accept is True
 
 
@@ -42,15 +46,19 @@ def test_judge_reject_returns_false(monkeypatch):
     _rej = ValidationResult(ok=False, action="continue_work", trace_ok=False, report_ok=True,
                             trace_gaps=["more work needed"], missing_requirements=[],
                             report_mismatches=[], conflicts=[], feedback_for_agent="", coverage_score=0.0)
-    monkeypatch.setattr(taj, "ajudge_text_answer", lambda ctx, state, text: _rej)
+    async def _judge(ctx, state, text):
+        return _rej
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("judge"), _S(), "сделай отчёт").accept is False
 
 
 def test_deny_returns_false_without_judge(monkeypatch):
     from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return True
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("deny"), _S(), "привет").accept is False
     assert judged["n"] == 0
 
@@ -59,8 +67,10 @@ def test_no_key_returns_false_without_judge(monkeypatch):
     """Автономка (CLI/server/swarm): нет ключа → строго, судья не зван."""
     from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return True
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx(None), _S(), "привет").accept is False
     assert judged["n"] == 0
 
@@ -73,9 +83,10 @@ def test_judge_gate_on_calls_judge(monkeypatch):
     from gc_core.intent_guard import text_answer_judge as taj
     from types import SimpleNamespace
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1)
-                        or SimpleNamespace(action="accept"))
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return SimpleNamespace(action="accept")
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     d = should_return_text_answer(_ctx("judge", strict=True), _S(), "привет")
     assert judged["n"] == 1 and d.accept is True
 
@@ -87,9 +98,10 @@ def test_judge_gate_off_still_calls_judge(monkeypatch):
     from gc_core.intent_guard import text_answer_judge as taj
     from types import SimpleNamespace
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1)
-                        or SimpleNamespace(action="accept"))
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return SimpleNamespace(action="accept")
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     d = should_return_text_answer(_ctx("judge", strict=False), _S(), "привет")
     assert judged["n"] == 1 and d.accept is True
 
@@ -98,8 +110,10 @@ def test_judge_without_chat_completions_is_strict(monkeypatch):
     """(e) backend != chat_completions + judge → deny без судьи, при gate=on."""
     from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return True
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("judge", backend="responses", strict=True), _S(), "привет").accept is False
     assert judged["n"] == 0
 
@@ -109,8 +123,10 @@ def test_judge_without_chat_completions_is_strict_even_with_gate_off(monkeypatch
     (инфраструктурное условие не подменяется пользовательской ручкой)."""
     from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return True
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("judge", backend="responses", strict=False), _S(), "привет").accept is False
     assert judged["n"] == 0
 
@@ -119,8 +135,10 @@ def test_allow_accepts_without_judge_regardless_of_gate(monkeypatch):
     """(c) allow → accept без судьи при любом gate."""
     from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return True
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("allow", strict=True), _S(), "привет").accept is True
     assert should_return_text_answer(_ctx("allow", strict=False), _S(), "привет").accept is True
     assert judged["n"] == 0
@@ -130,8 +148,10 @@ def test_deny_rejects_regardless_of_gate(monkeypatch):
     """(d) deny/нет ключа → reject при любом gate."""
     from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return True
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("deny", strict=True), _S(), "привет").accept is False
     assert should_return_text_answer(_ctx("deny", strict=False), _S(), "привет").accept is False
     assert should_return_text_answer(_ctx(None, strict=True), _S(), "привет").accept is False
@@ -143,8 +163,10 @@ def test_empty_text_bounces_in_all_modes(monkeypatch):
     """Пустой/пробельный текст — не ответ хода: bounce даже в always; судья не зван."""
     from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
-    monkeypatch.setattr(taj, "ajudge_text_answer",
-                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    async def _judge(ctx, state, text):
+        judged["n"] += 1
+        return True
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert should_return_text_answer(_ctx("allow"), _S(), "   ").accept is False
     assert should_return_text_answer(_ctx("judge"), _S(), "").accept is False
     assert judged["n"] == 0
@@ -187,6 +209,8 @@ def test_run_agent_judge_accept_returns_text(monkeypatch):
     from types import SimpleNamespace
     from gc_core import processing_responses as pr
     from gc_core.intent_guard import text_answer_judge as taj
-    monkeypatch.setattr(taj, "ajudge_text_answer", lambda ctx, state, text: SimpleNamespace(action="accept"))
+    async def _judge(ctx, state, text):
+        return SimpleNamespace(action="accept")
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     result = pr.run_agent(_text_msgs(), _state(), _run_ctx("judge"))
     assert result == "Привет! Чем помочь?"

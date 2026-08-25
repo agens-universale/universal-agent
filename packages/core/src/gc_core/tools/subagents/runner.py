@@ -59,11 +59,6 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
     return ""
 
 
-async def _maybe_await(value: Any) -> Any:
-    """Дождаться значения, если это корутина."""
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 class SubagentRunner:
@@ -158,15 +153,14 @@ class SubagentRunner:
                 # всё время LLM-вызова генерации роли, а заодно теряет
                 # contextvars — usage_scope выше не доходил до вызова, и токены
                 # роли уходили в uncategorized.
-                instance = await _maybe_await(
-                    subagent_cls.create_instance(
+                instance = await subagent_cls.create_instance(
                         task=task,
                         model=model,
                         config_dict=self._config,
                         runtime_notices_enabled=bool(getattr(self._ctx, "is_tui", False)),
                         **extra,
                     )
-                )
+                
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -298,9 +292,13 @@ class SubagentRunner:
                     )
 
                 scope.set_on_enqueue(_on_child_user_enqueue)
-                # run_agent_func — arun_agent (корутинная) в обычном пути и
-                # синхронная заглушка в тестах: принимаем обе формы.
-                result = await _maybe_await(run_agent_func(
+                # run_agent_func обязана быть корутинной — это arun_agent.
+                # Раньше здесь стоял _maybe_await «на случай синхронной
+                # заглушки»; он же и прятал поломку: TypeError от await над
+                # обычной функцией ловил except ниже и превращал в конверт
+                # subagent_run_failed, а тесты, не проверяющие результат,
+                # оставались зелёными, ничего не проверяя.
+                result = await run_agent_func(
                     messages,
                     child_state,
                     child_ctx,
@@ -309,7 +307,7 @@ class SubagentRunner:
                     pre_backend_compaction_hook=pre_backend_compaction_hook,
                     session_meta=child_meta,
                     get_pending_messages=scope.drain,
-                ))
+                )
         except Exception as exc:
             self._log_lifecycle(
                 event="subagent_error",

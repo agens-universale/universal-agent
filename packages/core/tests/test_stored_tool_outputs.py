@@ -306,7 +306,7 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
         }
     )
 
-    def _fake_apply_tool(**kwargs):
+    async def _fake_apply_tool(**kwargs):
         return "abcdefghij"
 
     monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)

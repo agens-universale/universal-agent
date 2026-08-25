@@ -42,7 +42,7 @@ def test_session_compact_calls_arun_summary_compaction(monkeypatch):
     )
     captured = {}
 
-    def fake_compact(**kwargs):
+    async def fake_compact(**kwargs):
         captured.update(kwargs)
         state.messages = [
             {"role": "system", "content": "sys"},
@@ -90,7 +90,7 @@ def test_session_compact_reports_compaction_failure(monkeypatch):
     state = _state()
     ctx = types.SimpleNamespace(config_dict={}, logger=None)
 
-    def boom(**_kwargs):
+    async def boom(**_kwargs):
         raise RuntimeError("llm down")
 
     monkeypatch.setattr(session_compact_module, "arun_summary_compaction", boom)
@@ -129,7 +129,7 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
     state.messages = [sys_m, {"role": "user", "content": "long history", "id": "u0"}]
     state.session_compact_applied = False
 
-    def fake_apply_tool(**kwargs):
+    async def fake_apply_tool(**kwargs):
         if kwargs["tool_name"] == "session_compact":
             state.messages = [sys_m, {"role": "user", "content": "summary", "id": "sum"}]
             state.session_compact_applied = True
@@ -189,7 +189,7 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
     state.messages = [sys_m, {"role": "user", "content": "history", "id": "u0"}]
     state.session_compact_applied = False
 
-    def fake_apply_tool(**kwargs):
+    async def fake_apply_tool(**kwargs):
         if kwargs["tool_name"] == "session_compact":
             state.messages = [sys_m, {"role": "user", "content": "summary", "id": "sum"}]
             state.session_compact_applied = True

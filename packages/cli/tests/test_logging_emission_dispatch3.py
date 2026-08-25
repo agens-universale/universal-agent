@@ -15,7 +15,7 @@ import json
 import sys
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 # `import cli` (below, inside the final_answer test) parses sys.argv at
 # import time (--query is required); pin a valid argv up front so this file
@@ -219,7 +219,7 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
         )), \
         patch.object(cli_module, "_resolve_forced_skill", return_value=None), \
         patch.object(cli_module, "build_auth_connector", return_value=None), \
-        patch.object(cli_module, "create_run_context", return_value=ctx), \
+        patch.object(cli_module, "acreate_run_context", new=AsyncMock(return_value=ctx)), \
         patch.object(cli_module, "AgentExecutor") as mock_executor_cls:
         # Точка входа CLI асинхронная (Задача 23 async-переезда): прогон идёт
         # через arun, и заглушка обязана быть корутинной.

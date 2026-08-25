@@ -10,13 +10,6 @@ from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_t
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 
-async def _maybe_await(value):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 
@@ -32,13 +25,13 @@ async def _resolve_finish_turn_output_on_cycle_stop(
     if isinstance(candidate, str) and candidate.strip():
         return candidate
     try:
-        applied = await _maybe_await(aapply_tool(
+        applied = await aapply_tool(
             tool_name=FINISH_TOOL_NAME,
             arguments=tool_arguments,
             ctx=ctx,
             state=state,
             run_agent_func=run_agent_func,
-        ))
+        )
         if isinstance(applied, str) and applied.strip():
             return applied
     except Exception:

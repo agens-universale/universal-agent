@@ -59,13 +59,6 @@ def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
     return value
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 @dataclass(frozen=True)
@@ -190,13 +183,13 @@ class FinishGateGuard:
         )
 
         try:
-            validation = await _maybe_await(avalidate_final_report_vs_user_intent(
+            validation = await avalidate_final_report_vs_user_intent(
                 ctx=self._ctx,
                 state=self._state,
                 current_user_requests=current_user_intent,
                 context_user_messages=user_intent_log,
                 finish_handoff_arguments=finish_handoff_arguments,
-            ))
+            )
         except Exception as exc:
             self._logger.warning(
                 "finish_gate validator error; fail-open accept so pending finish handoff "

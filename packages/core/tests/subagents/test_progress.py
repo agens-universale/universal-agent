@@ -218,7 +218,7 @@ class TestProcessToolCallsForwardsCallId:
         ctx = SimpleNamespace(config_dict={})
         seen: dict = {}
 
-        def _fake_apply_tool(**kwargs):
+        async def _fake_apply_tool(**kwargs):
             seen.update(kwargs)
             return '{"ok": true}'
 
@@ -260,7 +260,7 @@ class TestRunnerWiresSinkOntoChildCtx:
         runner = SubagentRunner(parent_ctx, orch, cfg)
         captured: dict = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["child_ctx"] = child_ctx
             return "done"
 
@@ -293,7 +293,7 @@ class TestRunnerWiresSinkOntoChildCtx:
         runner = SubagentRunner(parent_ctx, orch, cfg)
         captured: dict = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["child_ctx"] = child_ctx
             return "done"
 

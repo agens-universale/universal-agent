@@ -85,9 +85,12 @@ def test_hook_skipped_when_tools_empty():
 
 
 def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
+    async def _fake_summary(**kwargs):
+        return "User confirmed option B."
+
     monkeypatch.setattr(
         "gc_core.intent_scope.hook.asummarize_tool_intent_line",
-        lambda **kwargs: "User confirmed option B.",
+        _fake_summary,
     )
     state = _make_state()
     maybe_update_intent_scope_from_tool(
@@ -105,9 +108,12 @@ def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
 
 
 def test_hook_raw_truncates_oversized_output(monkeypatch):
+    async def _no_llm(**kwargs):
+        raise AssertionError("LLM must not run for raw")
+
     monkeypatch.setattr(
         "gc_core.intent_scope.hook.asummarize_tool_intent_line",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
+        _no_llm,
     )
     state = _make_state()
     huge = "z" * 20_000
@@ -227,9 +233,12 @@ def test_finish_gate_reject_submit_in_current_without_flush():
 
 
 def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
+    async def _no_llm(**kwargs):
+        raise AssertionError("LLM must not run for raw")
+
     monkeypatch.setattr(
         "gc_core.intent_scope.hook.asummarize_tool_intent_line",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
+        _no_llm,
     )
     state = _make_state()
     reject_output = (
@@ -252,9 +261,12 @@ def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
 
 
 def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
+    async def _no_llm(**kwargs):
+        raise AssertionError("LLM must not run for raw")
+
     monkeypatch.setattr(
         "gc_core.intent_scope.hook.asummarize_tool_intent_line",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
+        _no_llm,
     )
     state = _make_state()
     maybe_update_intent_scope_from_tool(
@@ -281,9 +293,12 @@ def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
 
 
 def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch):
+    async def _empty_summary(**kwargs):
+        return ""
+
     monkeypatch.setattr(
         "gc_core.intent_scope.hook.asummarize_tool_intent_line",
-        lambda **kwargs: "",
+        _empty_summary,
     )
     state = _make_state()
     raw = '{"ok":false,"error":"validation"}'
@@ -305,9 +320,12 @@ def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch
 
 
 def test_hook_dedup_within_current(monkeypatch):
+    async def _fake_summary(**kwargs):
+        return "same line"
+
     monkeypatch.setattr(
         "gc_core.intent_scope.hook.asummarize_tool_intent_line",
-        lambda **kwargs: "same line",
+        _fake_summary,
     )
     state = _make_state()
     ctx = _ctx(backend="chat_completions", tools=_tool("turn_ask_human"))

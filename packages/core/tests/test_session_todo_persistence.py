@@ -102,7 +102,7 @@ def test_session_todo_survives_compaction_payload():
     ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
     captured: dict = {}
 
-    def _fake_summarize(**_kw):
+    async def _fake_summarize(**_kw):
         return {"raw_summary": "<summary>ok</summary>", "num_batches": 1,
                 "last_dialog_steps": "", "memory_append_deltas": WorkingMemoryDeltas(),
                 "memory_replace_deltas": WorkingMemoryDeltas(), "memory_append_touched": [],

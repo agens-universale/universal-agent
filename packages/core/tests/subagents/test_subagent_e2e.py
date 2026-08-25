@@ -61,7 +61,7 @@ class TestSubagentRunnerRun:
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value="done")
+        run_agent_func = AsyncMock(return_value="done")
 
         runner = SubagentRunner(ctx, orch, cfg)
 
@@ -87,7 +87,7 @@ class TestSubagentRunnerRun:
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value="Task completed successfully")
+        run_agent_func = AsyncMock(return_value="Task completed successfully")
 
         runner = SubagentRunner(ctx, orch, cfg)
 
@@ -103,7 +103,7 @@ class TestSubagentRunnerRun:
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value=None)
+        run_agent_func = AsyncMock(return_value=None)
 
         runner = SubagentRunner(ctx, orch, cfg)
 
@@ -123,7 +123,7 @@ class TestSubagentRunnerRun:
         cfg = _make_config()
         ctx = _make_ctx(cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.shared.working_memory["state"] = "updated by subagent"
             child_state.shared.working_memory["knowledge"] = "created"
             return "Subagent done"
@@ -143,7 +143,7 @@ class TestSubagentRunnerRun:
         ctx = _make_ctx(cfg)
         captured_child = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured_child["state"] = child_state
             return "ok"
 
@@ -161,7 +161,7 @@ class TestSubagentRunnerRun:
         ctx = _make_ctx(cfg)
         captured_child = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured_child["state"] = child_state
             return "ok"
 
@@ -179,7 +179,7 @@ class TestSubagentRunnerRun:
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock()
+        run_agent_func = AsyncMock()
 
         runner = SubagentRunner(ctx, orch, cfg)
         result = runner.run("nonexistent_agent", {"task": "test"}, run_agent_func)
@@ -194,7 +194,7 @@ class TestSubagentRunnerRun:
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value="ok")
+        run_agent_func = AsyncMock(return_value="ok")
 
         runner = SubagentRunner(ctx, orch, cfg)
 

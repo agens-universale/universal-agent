@@ -14,13 +14,6 @@ from gc_core.utils.aio_compat import run_coro_blocking
 TRIGGER_REASON = "session_compact"
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 class SessionCompact(AbstractSimpleTool):
@@ -164,14 +157,14 @@ Return format (JSON string):
         logger = logger_from_ctx(ctx)
 
         try:
-            await _maybe_await(arun_summary_compaction(
+            await arun_summary_compaction(
                 ctx=ctx,
                 state=state,
                 trigger_reason=TRIGGER_REASON,
                 is_cli_mode=is_cli_mode,
                 on_summary_applied=on_summary_applied,
                 trigger_threshold_chars=None,
-            ))
+            )
         except Exception as exc:
             log_compaction_failed(
                 logger,

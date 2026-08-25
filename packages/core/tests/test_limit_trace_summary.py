@@ -43,10 +43,10 @@ def _make_ctx(**overrides):
 # ---------------------------------------------------------------------------
 
 def test_step_limit_envelope_shape(monkeypatch):
-    monkeypatch.setattr(
-        summary_llm, "arequest_chat_completion_text",
-        lambda **kw: "## Intent\n\nDid stuff.",
-    )
+    async def _fake_llm(**kw):
+        return "## Intent\n\nDid stuff."
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -63,10 +63,10 @@ def test_step_limit_envelope_shape(monkeypatch):
 
 
 def test_tool_call_limit_envelope_shape(monkeypatch):
-    monkeypatch.setattr(
-        summary_llm, "arequest_chat_completion_text",
-        lambda **kw: "summary text",
-    )
+    async def _fake_llm(**kw):
+        return "summary text"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=10)
     state.tool_calls = 5
     state.messages = [{"role": "user", "content": "hi"}]
@@ -79,10 +79,10 @@ def test_tool_call_limit_envelope_shape(monkeypatch):
 
 
 def test_token_limit_envelope_shape(monkeypatch):
-    monkeypatch.setattr(
-        summary_llm, "arequest_chat_completion_text",
-        lambda **kw: "token summary",
-    )
+    async def _fake_llm(**kw):
+        return "token summary"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=10)
     state.messages = [{"role": "user", "content": "hi"}]
     result = lts.build_limit_envelope(state, "token_limit", _make_ctx(session_token_limit=100))
@@ -119,10 +119,10 @@ def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_raw_non_markdown_text_still_in_summary(monkeypatch):
-    monkeypatch.setattr(
-        summary_llm, "arequest_chat_completion_text",
-        lambda **kw: "not json, just plain text",
-    )
+    async def _fake_llm(**kw):
+        return "not json, just plain text"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]

@@ -14,13 +14,6 @@ from gc_core.intent_scope.summarizer import asummarize_tool_intent_line, build_f
 _logger = logging.getLogger(__name__)
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. summarizer._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _parse_tool_arguments(raw: str) -> dict[str, Any]:
@@ -63,14 +56,14 @@ async def _aappend_aggregated_tool_intent(
     корутину напрямую. Синхронное имя ниже — шим поверх неё.
     """
     scope_cfg = getattr(ctx, "intent_scope", None)
-    summary_line = await _maybe_await(asummarize_tool_intent_line(
+    summary_line = await asummarize_tool_intent_line(
         ctx=ctx,
         state=state,
         tool_name=tool_name,
         tool_arguments=tool_arguments,
         tool_output_raw=tool_output_raw,
         logger=log,
-    ))
+    )
     used_fallback = False
     if not summary_line and scope_cfg is not None and scope_cfg.fallback_raw_on_llm_error:
         summary_line = build_fallback_aggregated_content(

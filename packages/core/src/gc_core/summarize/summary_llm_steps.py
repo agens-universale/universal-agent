@@ -7,13 +7,6 @@ from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.summary_spec import render_output_shape_for_prompt, render_tag_roles_for_prompt
 
 
-async def _maybe_await(value: Any):
-    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
-    import inspect
-
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 async def acompress_summary_text(
@@ -47,13 +40,13 @@ async def acompress_summary_text(
             ),
         },
     ]
-    text = await _maybe_await(arequest_summary_text(
+    text = await arequest_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         request_label="summary_compress",
         max_tokens=max_tokens,
-    ))
+    )
     if not text:
         return summary_text[:max_chars]
     if len(text) > max_chars:
@@ -111,13 +104,13 @@ async def arepair_summary_text(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    return await _maybe_await(arequest_summary_text(
+    return await arequest_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         request_label="summary_repair",
         max_tokens=max_tokens,
-    ))
+    )
 
 
 # --- синхронные двойники ---------------------------------------------------
