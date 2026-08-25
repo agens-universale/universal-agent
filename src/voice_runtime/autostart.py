@@ -13,7 +13,7 @@ from recommended_mcp.process_supervisor import (
 )
 
 from voice_runtime.leases import (
-    acquire, clear_agent_owned, is_agent_owned, mark_agent_owned, release,
+    acquire, clear_agent_owned, is_agent_owned, live_leases, mark_agent_owned, release,
 )
 from voice_runtime.paths import voice_pids_dir
 from voice_runtime.service import build_run_spec, port_alive, preheat, service_url
@@ -98,13 +98,22 @@ def release_voice_service() -> None:
     из `finally` в tui/__init__ БЕЗУСЛОВНО, в том числе у TUI, который голоса не
     касался и lease не клал. `release` у такого возвращает True («живых клиентов
     нет») — и без проверки он убил бы форграундный `gc-voice serve` человека,
-    запущенный в соседнем окне. Пометки нет → сервис не наш → уходим молча."""
+    запущенный в соседнем окне. Пометки нет → сервис не наш → уходим молча.
+
+    Каталог lease перечитывается ЕЩЁ РАЗ перед самым гашением: между решением «я
+    последний» и `terminate_pid` успевает вклиниться стартующее окно — оно видит живой
+    порт, подъём пропускает и кладёт свой lease, а мы гасим сервис у него под руками
+    (находка ревью коллеги). Повторная сверка сужает окно до пары инструкций; убрать
+    его совсем без файловой блокировки нельзя, а она на трёх платформах дороже, чем
+    цена промаха: в худшем случае сервис переживёт выход и погаснет со следующим."""
     if not release(os.getpid()):
         return
     if not is_agent_owned(SERVICE_NAME):
         return
     pid = read_pid(SERVICE_NAME, voice_pids_dir())
     if pid is not None and is_pid_alive(pid):
+        if live_leases():
+            return          # кто-то стартовал, пока мы шли гасить, — сервис ему нужен
         terminate_pid(pid)
         remove_pid(SERVICE_NAME, voice_pids_dir())
     clear_agent_owned(SERVICE_NAME)

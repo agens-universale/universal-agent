@@ -209,6 +209,30 @@ def test_release_never_kills_foreign_service(monkeypatch):
     assert killed == []
 
 
+def test_release_rereads_leases_right_before_killing(monkeypatch):
+    """Между «я последний» и гашением успел стартовать другой TUI — сервис не трогаем.
+
+    Находка ревью коллеги: выходящий снимал свой lease, пересканировал каталог и шёл
+    гасить; параллельно стартующее окно видело живой порт, подъём пропускало и клало
+    свой lease — и оставалось с мёртвым сервисом. Перечитываем каталог перед самым
+    `terminate_pid`: окно сужается до пары инструкций (полностью убрать его без
+    файловой блокировки нельзя)."""
+    monkeypatch.setattr(auto, "release", lambda pid, **kw: True)    # на момент решения — последние
+    monkeypatch.setattr(auto, "is_agent_owned", lambda name: True)
+    monkeypatch.setattr(auto, "read_pid", lambda name, pids_dir=None: 4242)
+    monkeypatch.setattr(auto, "is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(auto, "live_leases", lambda: [777])          # новичок успел
+    killed, cleared = [], []
+    monkeypatch.setattr(auto, "terminate_pid", lambda pid, **kw: killed.append(pid))
+    monkeypatch.setattr(auto, "remove_pid", lambda name, pids_dir=None: None)
+    monkeypatch.setattr(auto, "clear_agent_owned", lambda name: cleared.append(name))
+
+    auto.release_voice_service()
+
+    assert killed == [], "сервис погашен под живым клиентом"
+    assert cleared == [], "пометка владельца снята — сервис перестал быть нашим"
+
+
 def test_release_not_last_keeps_service(monkeypatch):
     monkeypatch.setattr(auto, "release", lambda pid, **kw: False)  # есть ещё живые
     killed = []
