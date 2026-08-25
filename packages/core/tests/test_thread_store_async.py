@@ -360,15 +360,53 @@ async def test_adapter_warns_on_slow_sync_store():
             time.sleep(SLOW_CALL_WARN_SEC * 3)
             return super().load_meta(system_id, thread_id)
 
+    from gc_core.thread_store_async import SLOW_CALL_PROBE_COUNT
+
     warnings: list = []
     port = athread_store(SlowStore(), warn=warnings.append)
-    await port.aload_meta(SYS, TID)
-    await port.aload_meta(SYS, TID)
+    # Суждение выносится по МЕДИАНЕ окна замеров, а не по отдельному вызову:
+    # иначе единичный всплеск на обычных файлах советовал бы их владельцу
+    # переписать хранилище на асинхронное (поймано на живом стенде).
+    for _ in range(SLOW_CALL_PROBE_COUNT + 2):
+        await port.aload_meta(SYS, TID)
 
     assert len(warnings) == 1, "предупреждение должно быть однократным"
     assert "thread_store_blocking_loop" in warnings[0]
     assert "load_meta" in warnings[0]
     assert "AsyncThreadStore" in warnings[0], "не подсказан асинхронный контракт"
+
+
+async def test_adapter_is_quiet_when_only_one_call_spikes():
+    """Единичный всплеск на быстром хранилище не поднимает тревогу.
+
+    Ровно этот случай поймал живой стенд: ``FileThreadStore`` с медианой
+    0,29 мс дал отдельные вызовы по 2,5–2,8 мс (запись меты, конкуренция за
+    диск между агентами), и порог по одному вызову советовал владельцу ОБЫЧНЫХ
+    ФАЙЛОВ переписать хранилище на асинхронное. Шумное предупреждение
+    перестают читать.
+    """
+    from gc_core.thread_store_async import SLOW_CALL_PROBE_COUNT
+
+    class SpikyStore(MemoryThreadStore):
+        def __init__(self):
+            super().__init__()
+            self.calls_made = 0
+
+        def load_meta(self, system_id, thread_id):
+            import time
+            self.calls_made += 1
+            if self.calls_made == 1:          # один медленный вызов из всех
+                time.sleep(SLOW_CALL_WARN_SEC * 4)
+            return super().load_meta(system_id, thread_id)
+
+    warnings: list = []
+    port = athread_store(SpikyStore(), warn=warnings.append)
+    for _ in range(SLOW_CALL_PROBE_COUNT + 2):
+        await port.aload_meta(SYS, TID)
+
+    assert warnings == [], (
+        f"единичный всплеск поднял тревогу: {warnings}"
+    )
 
 
 async def test_adapter_is_quiet_on_fast_stores():

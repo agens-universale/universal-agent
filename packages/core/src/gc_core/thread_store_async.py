@@ -63,14 +63,25 @@ from gc_core.thread_store_protocol import (
 #: Имена асинхронного контракта — синхронные с приставкой ``a``.
 ASYNC_CONTRACT_METHODS = tuple(f"a{name}" for name in CONTRACT_METHODS_HINT)
 
-#: Дольше этого один синхронный вызов хранилища держит цикл заметно: одиннадцать
+#: Дольше этого МЕДИАННЫЙ вызов хранилища держит цикл заметно: одиннадцать
 #: подряд съедают треть бюджета приёмки. Порог предупреждения, не отказа —
 #: медленное хранилище остаётся рабочим.
+#:
+#: Смотрим медиану окна, а не отдельный вызов, и это не перестраховка: на живом
+#: стенде ``FileThreadStore`` даёт медиану 0,29 мс при отдельных всплесках до
+#: 2,8 мс (запись меты, конкуренция за диск между агентами). Порог по одному
+#: вызову ловил такой всплеск и советовал владельцу ОБЫЧНЫХ ФАЙЛОВ переписать
+#: хранилище на асинхронное. Шумное предупреждение перестают читать.
 SLOW_CALL_WARN_SEC = 0.002
 
-#: Сколько первых вызовов мерить. Дальше замер выключается: он сам стоит денег
-#: на горячем шве (``persist_batch`` — раз за итерацию цикла и раз за тул-колл).
-SLOW_CALL_PROBE_COUNT = 24
+#: Сколько первых вызовов мерить, прежде чем судить по медиане. Дальше замер
+#: выключается: он сам стоит денег на горячем шве (``persist_batch`` — раз за
+#: итерацию цикла и раз за тул-колл).
+#:
+#: Восемь, а не больше: окно должно закрыться в ЛЮБОМ реальном прогоне. Обычный
+#: делает 25 обращений, но короткий — меньше, и при широком окне он не
+#: предупредил бы никогда. Восьми хватает на устойчивую медиану.
+SLOW_CALL_PROBE_COUNT = 8
 
 
 class ThreadStoreContractError(TypeError):
@@ -170,6 +181,7 @@ class SyncThreadStoreAdapter:
         self._probes_left = SLOW_CALL_PROBE_COUNT
         self._warned = False
         self._warn = warn
+        self._samples: list = []
 
     @property
     def store(self) -> Any:
@@ -186,16 +198,29 @@ class SyncThreadStoreAdapter:
         try:
             return method(*args, **kwargs)
         finally:
-            spent = time.perf_counter() - started
-            if spent > SLOW_CALL_WARN_SEC and not self._warned:
+            self._samples.append((time.perf_counter() - started, name))
+            if self._probes_left == 0 and not self._warned:
                 self._warned = True
-                self._report_slow(name, spent)
+                self._judge_samples()
 
-    def _report_slow(self, name: str, spent: float) -> None:
+    def _judge_samples(self) -> None:
+        """Медленно ли хранилище В ЦЕЛОМ — по медиане окна, а не по всплеску."""
+        import statistics
+
+        if not self._samples:
+            return
+        median = statistics.median(spent for spent, _ in self._samples)
+        if median <= SLOW_CALL_WARN_SEC:
+            return
+        worst_name = max(self._samples)[1]
+        self._report_slow(worst_name, median)
+
+    def _report_slow(self, name: str, median: float) -> None:
         text = (
             f"thread_store_blocking_loop store={type(self._store).__name__} "
-            f"method={name} spent_ms={spent * 1000:.1f} "
+            f"slowest_method={name} median_ms={median * 1000:.1f} "
             f"threshold_ms={SLOW_CALL_WARN_SEC * 1000:.0f} "
+            f"samples={len(self._samples)} "
             "hint=implement_AsyncThreadStore_for_network_backed_storage"
         )
         if self._warn is not None:
