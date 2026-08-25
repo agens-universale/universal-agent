@@ -4,11 +4,21 @@ from gc_core.run_summary_coordinator import reset_stale_summarizing_flag
 
 
 class _StubSession:
+    """Похожа на ThreadSession — с полем ``store``.
+
+    Флаг ``summarizing`` пишется через хранилище сессии, а не через модульную
+    функцию: иначе у встраивающего с базой он уходил бы на диск мимо всего
+    остального треда.
+    """
+
     def __init__(self, threads_dir, meta):
+        from gc_core.thread_store_file import FileThreadStore
+
         self.threads_dir = threads_dir
         self.system_id = "cli"
         self.thread_id = "t1"
         self.meta = meta
+        self.store = FileThreadStore(str(threads_dir))
 
 
 def test_reset_clears_stale_flag_on_disk_and_in_memory(tmp_path):

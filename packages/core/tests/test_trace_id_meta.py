@@ -3,10 +3,20 @@ from gc_core.thread_store import load_thread_meta, save_thread_meta
 
 
 class _SessionStub:
+    """Похожа на настоящую ThreadSession — в том числе полем ``store``.
+
+    Оно появилось здесь не для галочки: запись trace_id идёт через хранилище
+    сессии, а не через модульные функции, иначе у встраивающего с базой эти
+    записи молча уходили бы на диск мимо всего остального.
+    """
+
     def __init__(self, threads_dir):
+        from gc_core.thread_store_file import FileThreadStore
+
         self.threads_dir = str(threads_dir)
         self.system_id = "cli"
         self.thread_id = "t1"
+        self.store = FileThreadStore(self.threads_dir)
 
 
 def test_appends_first_trace(tmp_path):

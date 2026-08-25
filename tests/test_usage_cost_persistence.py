@@ -2,6 +2,8 @@
 import threading
 import types
 
+from gc_core.thread_store_file import FileThreadStore
+
 import gc_core.agent_executor as ae
 import gc_core.manual_compaction as mc
 from gc_core.thread_store import load_thread_meta
@@ -69,6 +71,8 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
             meta={"token_usage": baseline.to_meta()}, thread_id="t1", system_id="cli",
             threads_dir=str(tmp_path),
+            # Ручная компакция пишет token_usage через хранилище сессии.
+            store=FileThreadStore(str(tmp_path)),
         )),
     )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)

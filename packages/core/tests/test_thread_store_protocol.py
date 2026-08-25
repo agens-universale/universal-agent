@@ -210,3 +210,52 @@ def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
     assert store.load_messages(SYS, TID), "сообщение не сохранилось"
     created = [p for p in tmp_path.rglob("*") if p.is_file()]
     assert created == [], f"сессия создала файлы вопреки in-memory хранилищу: {created}"
+
+
+def test_no_direct_file_calls_left_in_core():
+    """В ядре не осталось прямых вызовов файлового слоя мимо хранилища.
+
+    Главный гейт задачи. До него девять вызовов в четырёх файлах
+    (``agent_executor``, ``run_summary_coordinator``, ``manual_compaction``,
+    ``subagents/sidecar``) работали с тредом, у которого store УЖЕ есть, но
+    звали модульные функции по старой памяти.
+
+    Встраивающий с базой получил бы расщепление: история и meta от сессии — в
+    базу, а вот эти девять записей — в файлы. Молча, без ошибки. Хуже, чем
+    явный отказ.
+
+    Считаем ТОЛЬКО голые имена: ``store.update_runtime_meta(...)`` — это уже
+    метод хранилища, а не модульная функция, и различие здесь всё.
+    """
+    import ast
+
+    from gc_testkit.paths import REPO
+
+    module_fns = {
+        "load_thread_messages", "load_thread_meta", "save_thread_meta",
+        "append_new_thread_messages", "patch_runtime_flag", "update_runtime_meta",
+        "update_tui_meta", "discard_message_by_id", "reset_thread_files",
+        "delete_thread", "append_subagent_trace_record", "read_subagent_trace",
+    }
+    core = REPO / "packages" / "core" / "src" / "gc_core"
+    # Сам слой и его реализации зовут модульные функции законно — это их работа.
+    own_files = {"thread_store.py", "thread_store_file.py", "thread_store_protocol.py"}
+    offenders = []
+    for path in core.rglob("*.py"):
+        if path.name in own_files:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in module_fns
+            ):
+                offenders.append(
+                    f"{path.relative_to(core)}:{node.lineno} {node.func.id}"
+                )
+
+    assert offenders == [], (
+        "прямые вызовы файлового слоя мимо ThreadStore:\n  "
+        + "\n  ".join(sorted(offenders))
+        + "\nу встраивающего с базой эти записи молча уйдут на диск"
+    )

@@ -40,10 +40,14 @@ _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
 def _set_runtime_flag(thread_session, flag: str, active: bool) -> None:
-    """Прокси в thread_store.patch_runtime_flag (I1: не clobber tui)."""
+    """Прокси в хранилище сессии (I1: не clobber tui).
+
+    Через ``ts.store``, а не через модульную функцию: у сессии хранилище своё —
+    файловое по умолчанию или переданное встраивающим. Прямой вызов уводил бы
+    флаг на диск даже тогда, когда весь остальной тред лежит в базе.
+    """
     ts = thread_session
-    patch_runtime_flag(
-        ts.threads_dir,
+    ts.store.patch_runtime_flag(
         ts.system_id,
         ts.thread_id,
         flag,
@@ -84,7 +88,7 @@ def reset_stale_summarizing_flag(thread_session) -> None:
     if thread_session is None:
         return
     ts = thread_session
-    disk = load_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id) or {}
+    disk = ts.store.load_meta(ts.system_id, ts.thread_id) or {}
     rt = (ts.meta.get("runtime") or {}) if isinstance(ts.meta.get("runtime"), dict) else {}
     disk_rt = disk.get("runtime") if isinstance(disk.get("runtime"), dict) else {}
     if rt.get("summarizing") or disk_rt.get("summarizing"):

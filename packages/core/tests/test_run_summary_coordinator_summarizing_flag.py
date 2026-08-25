@@ -6,9 +6,18 @@ from gc_core import thread_store
 
 
 class _FakeTS:
+    """Похожа на ThreadSession — с полем ``store``.
+
+    Флаг ``summarizing`` пишется через хранилище сессии; файловое хранилище
+    здесь как раз и делегирует в модульные функции, которые тест подменяет.
+    """
+
     def __init__(self):
+        from gc_core.thread_store_file import FileThreadStore
+
         self.threads_dir = "/tmp/x"; self.system_id = "cli"; self.thread_id = "t1"
         self.meta = {}
+        self.store = FileThreadStore(self.threads_dir)
         self.flushed_states = []  # снимки наличия флага при каждом flush
 
 

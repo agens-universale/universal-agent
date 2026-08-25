@@ -80,8 +80,15 @@ def persist_subagent_trace(
     ident = resolve_sidecar_identity(ctx)
     if ident is None:
         return None
-    return append_subagent_trace_record(
-        ident.threads_dir,
+    # Хранилище контекста, если встраивающий его передал; нет — файловое по
+    # ``threads_dir``, ровно как раньше. Прямой вызов модульной функции уводил
+    # бы трассу субагента на диск даже тогда, когда весь тред лежит в базе.
+    store = getattr(ctx, "thread_store", None)
+    if store is None:
+        from gc_core.thread_store_file import FileThreadStore
+
+        store = FileThreadStore(ident.threads_dir)
+    return store.append_subagent_trace(
         ident.system_id,
         ident.thread_id,
         parent_call_id=ident.parent_call_id,

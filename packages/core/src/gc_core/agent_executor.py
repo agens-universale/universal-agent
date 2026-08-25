@@ -69,22 +69,25 @@ def _append_trace_id_to_meta(
     вызывающих сторон).
     """
     from gc_core.persistence.meta_ownership import runtime_section
-    from gc_core.thread_store import load_thread_meta, sanitize_system_id, update_runtime_meta
+    from gc_core.thread_store import sanitize_system_id
 
-    threads_dir = getattr(thread_session, "threads_dir", None)
+    # Хранилище берём у самой сессии: у неё оно уже своё — файловое по
+    # умолчанию или переданное встраивающим. Прямой вызов модульных функций
+    # уводил бы записи на диск даже тогда, когда история лежит в базе.
+    store = getattr(thread_session, "store", None)
     system_id = getattr(thread_session, "system_id", None)
     thread_id = getattr(thread_session, "thread_id", None)
-    if not threads_dir or not system_id or not thread_id:
+    if store is None or not system_id or not thread_id:
         return
     try:
         sys_norm = sanitize_system_id(system_id)
-        meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+        meta = store.load_meta(sys_norm, thread_id) or {}
         existing = runtime_section(meta).get("trace_ids")
         ids = [str(x) for x in existing] if isinstance(existing, list) else []
         if trace_id in ids:
             return
         ids.append(trace_id)
-        update_runtime_meta(threads_dir, sys_norm, thread_id, {"trace_ids": ids})
+        store.update_runtime_meta(sys_norm, thread_id, {"trace_ids": ids})
     except Exception as exc:
         if logger is not None:
             try:
@@ -147,8 +150,14 @@ class AgentExecutor:
         if thread_id is not None:
             system_id = system or "cli"
             if start_new_thread:
-                threads_dir = resolve_threads_dir(config_dict)
-                reset_thread_files(threads_dir, system_id=system_id, thread_id=thread_id)
+                # Сессии ещё нет, поэтому хранилище берём из контекста; нет и
+                # там — файловое, как раньше.
+                _reset_store = getattr(self._ctx, "thread_store", None)
+                if _reset_store is None:
+                    from gc_core.thread_store_file import FileThreadStore
+
+                    _reset_store = FileThreadStore(resolve_threads_dir(config_dict))
+                _reset_store.reset(system_id, thread_id)
             thread_session = ThreadSession.from_config(
                 config_dict=config_dict,
                 system_id=system_id,
@@ -211,9 +220,8 @@ class AgentExecutor:
             try:
                 from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
                 snap = build_mcp_tools_snapshot(config_dict, self._ctx.tools_data, self._ctx.mcp_status)
-                update_runtime_meta(
-                    resolve_threads_dir(config_dict), system_id, thread_id,
-                    {"mcp_tools": snap},
+                thread_session.store.update_runtime_meta(
+                    system_id, thread_id, {"mcp_tools": snap},
                 )
             except Exception:
                 pass

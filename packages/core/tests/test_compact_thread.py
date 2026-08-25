@@ -1,6 +1,8 @@
 """compact_thread: грузит тред + форс-сжатие через координатор."""
 import types
 
+from gc_core.thread_store_file import FileThreadStore
+
 from gc_core import agent_executor as ae
 from gc_core import manual_compaction as mc
 
@@ -70,6 +72,10 @@ def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, s
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
             meta=baseline_meta, thread_id="t1", system_id="cli",
             threads_dir=str(tmp_path),
+            # Хранилище: ручная компакция пишет token_usage через него, а не
+            # через модульные функции — иначе у встраивающего с базой эта
+            # запись уходила бы на диск мимо остального треда.
+            store=FileThreadStore(str(tmp_path)),
         )),
     )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)

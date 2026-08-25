@@ -24,6 +24,7 @@ from gc_core.thread_store import (
     read_subagent_trace,
     reset_thread_files,
     save_thread_meta,
+    update_runtime_meta,
 )
 
 
@@ -104,6 +105,11 @@ class FileThreadStore:
             self._dir, system_id, thread_id, flag,
             active=active, session_meta=session_meta,
         )
+
+    def update_runtime_meta(
+        self, system_id: str, thread_id: str, patch: Dict[str, Any]
+    ) -> None:
+        update_runtime_meta(self._dir, system_id, thread_id, patch)
 
     def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
         return bool(discard_message_by_id(self._dir, system_id, thread_id, message_id))

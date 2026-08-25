@@ -111,6 +111,16 @@ class MemoryThreadStore:
         if not runtime:
             meta.pop("runtime", None)
 
+    def update_runtime_meta(
+        self, system_id: str, thread_id: str, patch: Dict[str, Any]
+    ) -> None:
+        self._hit("update_runtime_meta")
+        meta = self._meta.setdefault(self._key(system_id, thread_id), {})
+        runtime = meta.setdefault("runtime", {})
+        runtime.update(copy.deepcopy(patch))
+        if not runtime:
+            meta.pop("runtime", None)
+
     def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
         self._hit("discard_message")
         bucket = self._messages.get(self._key(system_id, thread_id), [])
