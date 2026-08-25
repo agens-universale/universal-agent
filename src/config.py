@@ -366,20 +366,29 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             managed_raw = yaml.safe_load(file) or {}
         raw_config = deep_merge(raw_config, managed_raw)
 
-    # Перекрыт ли юзерский voice managed-слоем (gc-voice install) — для notices. Правило
-    # общее с установкой: она предупреждает о том же факте, и вердикт обязан совпадать.
-    _voice_overridden: Optional[str] = None
-    _mv = managed_raw.get("voice") or {}
-    if _mv:
-        from voice_runtime.wire import overridden_user_voice
-        _voice_overridden = overridden_user_voice(_base_voice, str(_mv.get("url") or ""))
-
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     project_path = _project_local_config_path()
     if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
         with open(project_path, "r", encoding="utf-8") as file:
             project_raw = yaml.safe_load(file) or {}
         raw_config = deep_merge(raw_config, project_raw)
+
+    # Перекрыт ли юзерский voice managed-слоем (gc-voice install) — для notices. Правило
+    # общее с установкой: она предупреждает о том же факте, и вердикт обязан совпадать.
+    #
+    # Считаем ПОСЛЕ project-слоя и только когда адрес батарейки реально победил: поверх
+    # managed ложится project, и вычисление в промежутке предупреждало «managed перекрыл
+    # ваш voice» там, где работал адрес из <cwd>/.gc/config.yml (находка ревью коллеги).
+    _voice_overridden: Optional[str] = None
+    _mv = managed_raw.get("voice") or {}
+    if _mv:
+        from voice_runtime.wire import overridden_user_voice
+        _managed_url = str(_mv.get("url") or "")
+        _merged_voice = raw_config.get("voice")
+        _effective_url = str((_merged_voice or {}).get("url") or "") \
+            if isinstance(_merged_voice, dict) else ""
+        if _effective_url == _managed_url:
+            _voice_overridden = overridden_user_voice(_base_voice, _managed_url)
 
     # Compat-слой (A4): rename/remove устаревших ключей in-memory, файл не трогаем.
     _compat_notices = apply_compat(raw_config)

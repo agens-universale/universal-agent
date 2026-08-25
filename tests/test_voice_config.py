@@ -84,6 +84,66 @@ def test_voice_overridden_fact_computed(tmp_path, monkeypatch):
     assert cfg["voice"]["url"].endswith(":8735/v1/audio/transcriptions")
 
 
+def test_voice_override_notice_is_silent_when_the_project_layer_wins(tmp_path, monkeypatch):
+    """Project-слой поверх managed: адрес батарейки уже не действует — и notice молчит.
+
+    Находка ревью коллеги: факт перекрытия считался МЕЖДУ managed и project-слоями,
+    поэтому агент на старте предупреждал «managed перекрыл ваш voice», хотя реально
+    работал адрес из <cwd>/.gc/config.yml, а managed не решал ничего."""
+    import config as config_mod
+
+    base = tmp_path / "config.yml"
+    base.write_text(
+        "voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n"
+        "  token: gsk\n",
+        encoding="utf-8",
+    )
+    managed = tmp_path / "config.local.yml"
+    managed.write_text(
+        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n"
+        "  token: local\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project.yml"
+    project.write_text(
+        "voice:\n  url: https://project.example/v1/audio/transcriptions\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("config.managed_config_path", lambda: managed)
+    monkeypatch.setattr("config._project_local_config_path", lambda: str(project))
+
+    cfg = config_mod.load_config(str(base))
+    assert cfg["voice"]["url"] == "https://project.example/v1/audio/transcriptions"
+    assert cfg["voice_overridden_by_managed"] is None
+
+
+def test_voice_override_notice_survives_a_project_layer_about_other_keys(tmp_path, monkeypatch):
+    """Project трогает не адрес, а язык — адрес батарейки действует, и notice остаётся."""
+    import config as config_mod
+
+    base = tmp_path / "config.yml"
+    base.write_text(
+        "voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n"
+        "  token: gsk\n",
+        encoding="utf-8",
+    )
+    managed = tmp_path / "config.local.yml"
+    managed.write_text(
+        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n"
+        "  token: local\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project.yml"
+    project.write_text("voice:\n  language: en\n", encoding="utf-8")
+    monkeypatch.setattr("config.managed_config_path", lambda: managed)
+    monkeypatch.setattr("config._project_local_config_path", lambda: str(project))
+
+    cfg = config_mod.load_config(str(base))
+    assert cfg["voice"]["language"] == "en"
+    assert cfg["voice_overridden_by_managed"] == \
+        "https://api.groq.com/openai/v1/audio/transcriptions"
+
+
 def test_voice_overridden_fact_ignores_the_address_form(tmp_path, monkeypatch):
     """Человек вписал адрес батарейки как localhost, батарейка пишет 127.0.0.1: сервис
     один, перекрывать нечего. Установка это уже понимает (user_voice_conflict) — старт
