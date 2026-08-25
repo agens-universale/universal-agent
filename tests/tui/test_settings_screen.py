@@ -63,6 +63,17 @@ def _loaded(cfg_file):
     return resolve_env_placeholders(flat)
 
 
+async def _to_update_section(pilot):
+    """Меню → секция «Обновление» стрелками, как это делает человек.
+
+    Число нажатий берём из индекса секции, а не из литерала: состав меню растёт
+    («Профили» из develop, «Голосовой ввод» из этой ветки), и захардкоженные пять
+    «down» после каждой новой секции молча открывали бы соседнюю."""
+    from tui.screens.settings import _UPDATE
+    await pilot.press(*(["down"] * _UPDATE), "enter")
+    await pilot.pause()
+
+
 def _menu_lines(screen):
     """Текст строк меню: каждая строка — Horizontal(.set-menurow) с двумя Static
     (.set-rowtext + .set-glyph); собираем их рендер вместе."""
@@ -80,8 +91,9 @@ async def test_settings_menu_lists_sections_with_values(tmp_path):
     async with app.run_test() as pilot:
         app.push_screen(_mk_screen(config_path=str(cfg_file)))
         await pilot.pause()
+        from tui.screens.settings import SECTIONS
         rows = _menu_lines(app.screen)
-        assert len(rows) == 6
+        assert len(rows) == len(SECTIONS)      # 7: + «Профили» (develop) и «Голосовой ввод»
         assert any("Подключение" in r and "http://host" in r and "Bearer" in r for r in rows)
         assert not any("secret-token" in r for r in rows)  # маска!
         assert any("Модель" in r and "test-model" in r for r in rows)
@@ -436,7 +448,7 @@ async def test_update_section_shows_version_and_sync_row(tmp_path, monkeypatch):
                                        on_apply=lambda: None,
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "down", "enter")   # меню → Обновление (6/6)
+        await _to_update_section(pilot)                                      # меню → «Обновление»
         await pilot.pause()
         body = " ".join(str(w.render()) for w in app.screen.query(".set-dyn"))
         assert "v0.3.0" in body and "master" in body
@@ -471,7 +483,8 @@ async def test_update_section_sync_runs_and_reports(tmp_path, monkeypatch):
                                        on_apply=lambda: applied.append(1),
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "down", "enter", "enter")  # секция → выполнить sync
+        await _to_update_section(pilot)
+        await pilot.press("enter")                     # секция → выполнить sync
         await pilot.pause()
         assert called["path"] == str(cfg_file)
         assert applied == [1]                          # конфиг перечитан после sync
@@ -511,7 +524,7 @@ async def test_update_section_dev_install_hides_source(monkeypatch, tmp_path):
                                        on_apply=lambda: None,
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "down", "enter")
+        await _to_update_section(pilot)
         body = " ".join(str(w.render()) for w in app.screen.query(".set-dyn"))
         assert "установка из исходников" in body
         assert "Обновить config.yml" in body           # sync доступен и для dev
@@ -1046,7 +1059,8 @@ async def test_run_sync_on_apply_error_shows_notice(tmp_path, monkeypatch):
             probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        await pilot.press("down", "down", "down", "down", "down", "enter", "enter")
+        await _to_update_section(pilot)
+        await pilot.press("enter")
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "не перечитан" in body and "reload failed" in body
@@ -1074,7 +1088,8 @@ async def test_esc_from_editor_section_clears_editor_and_restores_menu(tmp_path)
         await pilot.press("escape")                    # назад в меню
         await pilot.pause()
         assert not scr.query(ConnectionEditor)         # редактор удалён (баг 2)
-        assert len(scr.query(".set-menurow")) == 6         # меню восстановлено во фрейме
+        from tui.screens.settings import SECTIONS
+        assert len(scr.query(".set-menurow")) == len(SECTIONS)   # меню восстановлено во фрейме
         # мусор редактора (hint/input) не остался
         from textual.widgets import Input
         assert not scr.query(Input)
@@ -1874,7 +1889,8 @@ async def test_update_menu_glyph_arrow_when_available(tmp_path, monkeypatch):
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
         app._update_available = True
-        glyph, _ = scr._menu_glyph(5)
+        from tui.screens.settings import _UPDATE
+        glyph, _ = scr._menu_glyph(_UPDATE)      # индекс секции, а не литерал: состав меню растёт
         assert glyph == "↑"
 
 
