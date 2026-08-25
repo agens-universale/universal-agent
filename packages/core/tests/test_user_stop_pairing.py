@@ -308,14 +308,14 @@ def test_pairing_persist_clears_allow_flag_after(monkeypatch):
     assert state.allow_pairing_persist is False
 
 
-def test_maybe_persist_blocks_non_pairing_when_discard_stop():
+async def test_maybe_persist_blocks_non_pairing_when_discard_stop():
     from gc_core.processing_responses import _maybe_persist
 
     state = _state(discard_writes_after_stop=True, stop_requested=True)
     called = []
-    _maybe_persist(lambda m: called.append(m), [{"id": "1"}], state)
+    await _maybe_persist(lambda m: called.append(m), [{"id": "1"}], state)
     assert called == []
-    _maybe_persist(lambda m: called.append(m), [{"id": "2"}], state, pairing=True)
+    await _maybe_persist(lambda m: called.append(m), [{"id": "2"}], state, pairing=True)
     assert called == [[{"id": "2"}]]
     assert state.allow_pairing_persist is False
 

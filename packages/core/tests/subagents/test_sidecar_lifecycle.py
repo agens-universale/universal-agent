@@ -233,10 +233,14 @@ class TestSidecarChildSummary:
         )
         runner = SubagentRunner(parent, _orch_state(), cfg)
 
-        def fake_run_summary_compaction(**kwargs):
+        async def fake_run_summary_compaction(**kwargs):
+            # Двойник обязан вести себя как настоящий шов: колбэк по контракту
+            # возвращает None ЛИБО awaitable, и ждать его — часть контракта.
+            from gc_core.utils.aio_compat import await_callback
+
             on_applied = kwargs.get("on_summary_applied")
             assert on_applied is not None
-            on_applied(
+            await await_callback(on_applied(
                 {
                     "trigger_reason": "subagent_pre_backend",
                     "summary_payload": {
@@ -247,7 +251,7 @@ class TestSidecarChildSummary:
                     },
                     "newly_summarized_message_id": "m1",
                 }
-            )
+            ))
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.messages = [

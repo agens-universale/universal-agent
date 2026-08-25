@@ -1,5 +1,6 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from gc_core.utils.aio_compat import await_callback
 from gc_core.intent_log import serialize, serialize_for_meta, tail_preview
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
@@ -303,7 +304,7 @@ async def arun_summary_compaction(
         ),
     }
     if on_summary_applied is not None:
-        on_summary_applied(summary_event)
+        await await_callback(on_summary_applied(summary_event))
 
     archive_suffix = summary_event.get("archive_suffix")
     if isinstance(archive_suffix, str):

@@ -56,6 +56,65 @@ def _set_runtime_flag(thread_session, flag: str, active: bool) -> None:
     )
 
 
+async def _aset_runtime_flag(thread_session, flag: str, active: bool) -> None:
+    """То же, что ``_set_runtime_flag``, но не блокируя цикл.
+
+    Через этот шов идут ТРИ индикатора TUI — ``summarizing``, ``finalizing`` и
+    ``finish_gate_checking``, — и возврат у него не используется вовсе. Для
+    асинхронного хранилища это самый тихий из отказов: корутина создаётся и
+    выбрасывается, исключения нет, в базу не уходит ничего. Индикаторы просто
+    никогда не загораются.
+    """
+    ts = thread_session
+    await ts.port.apatch_runtime_flag(
+        ts.system_id,
+        ts.thread_id,
+        flag,
+        active=active,
+        session_meta=ts.meta,
+    )
+
+
+@contextlib.asynccontextmanager
+async def _asummarizing_flag(thread_session):
+    """Асинхронный двойник ``_summarizing_flag``."""
+    if thread_session is None:
+        yield
+        return
+    ts = thread_session
+    try:
+        await _aset_runtime_flag(ts, "summarizing", True)
+        yield
+    finally:
+        await _aset_runtime_flag(ts, "summarizing", False)
+
+
+async def areset_stale_summarizing_flag(thread_session) -> None:
+    """Асинхронный двойник ``reset_stale_summarizing_flag``."""
+    if thread_session is None:
+        return
+    ts = thread_session
+    disk = await ts.port.aload_meta(ts.system_id, ts.thread_id) or {}
+    rt = (ts.meta.get("runtime") or {}) if isinstance(ts.meta.get("runtime"), dict) else {}
+    disk_rt = disk.get("runtime") if isinstance(disk.get("runtime"), dict) else {}
+    if rt.get("summarizing") or disk_rt.get("summarizing"):
+        await _aset_runtime_flag(ts, "summarizing", False)
+
+
+async def aset_tui_finalizing(thread_session, active: bool) -> None:
+    """Асинхронный двойник ``set_tui_finalizing``."""
+    if thread_session is None:
+        return
+    await _aset_runtime_flag(thread_session, "finalizing", active)
+
+
+async def aset_tui_finish_gate_checking(thread_session, active: bool) -> None:
+    """Асинхронный двойник ``set_tui_finish_gate_checking``."""
+    if thread_session is None:
+        return
+    await _aset_runtime_flag(thread_session, "finish_gate_checking", active)
+
+
 @contextlib.contextmanager
 def _summarizing_flag(thread_session):
     """Помечает тред как «идёт суммаризация» для TUI-индикатора.
@@ -288,9 +347,9 @@ class RunSummaryCoordinator:
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
 
-    def on_summary_applied(self, event: dict[str, Any]) -> None:
+    async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
-            archive_result = self._thread_session.archive_and_compact_summary_payload(
+            archive_result = await self._thread_session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             )
             suffix = archive_result.get("archive_suffix")
@@ -331,7 +390,7 @@ class RunSummaryCoordinator:
                         max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
                     )
                     break
-                with _summarizing_flag(self._thread_session):
+                async with _asummarizing_flag(self._thread_session):
                     await arun_summary_compaction(
                         ctx=self._ctx,
                         state=state,
@@ -370,7 +429,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
-        with _summarizing_flag(self._thread_session):
+        async with _asummarizing_flag(self._thread_session):
             await arun_summary_compaction(
                 ctx=self._ctx,
                 state=state,
@@ -431,7 +490,7 @@ class RunSummaryCoordinator:
 
         # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
         # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
-        with _summarizing_flag(self._thread_session):
+        async with _asummarizing_flag(self._thread_session):
             await arun_summary_compaction(
                 ctx=self._ctx,
                 state=state,
@@ -445,7 +504,7 @@ class RunSummaryCoordinator:
             msgs.extend(preserved_batch)
 
         if self._thread_session is not None and preserved_batch:
-            self._thread_session.persist_batch(
+            await self._thread_session.apersist_batch(
                 preserved_batch,
                 previous_response_id=state.previous_response_id,
             )
@@ -481,7 +540,7 @@ class RunSummaryCoordinator:
 
         logger = self._logger
         try:
-            with _summarizing_flag(self._thread_session):
+            async with _asummarizing_flag(self._thread_session):
                 await arun_summary_compaction(
                     ctx=self._ctx,
                     state=state,

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import inspect
 from typing import Any, Coroutine
 
 
@@ -36,4 +37,23 @@ def run_coro_blocking(coro: Coroutine[Any, Any, Any]) -> Any:
         return ex.submit(asyncio.run, coro).result()
 
 
-__all__ = ["run_coro_blocking"]
+async def await_callback(result: Any) -> Any:
+    """Дождаться результата КОЛБЭКА, если он корутинный.
+
+    Узкое и оговорённое место, а не общее «подождём, если вдруг корутина». У
+    двух колбэков ядра — персиста батча и записи трассы субагента —
+    контрактом объявлено: возвращают ``None`` ЛИБО awaitable. Ядро передаёт
+    асинхронные (тред может лежать в базе), внешние вызывающие и тесты —
+    синхронные, и ломать их не за что. Тот же приём, что у ASGI-приложений.
+
+    Не путать с удалённым ``_maybe_await``: тот стоял на ЗНАЧЕНИЯХ по всему
+    ядру и молча проглатывал забытый ``await`` у наших собственных функций.
+    Здесь ждут ровно то, чему разрешено быть корутиной, и только на шве, где
+    колбэк вызывают.
+    """
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+__all__ = ["await_callback", "run_coro_blocking"]

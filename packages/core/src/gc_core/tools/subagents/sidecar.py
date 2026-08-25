@@ -88,7 +88,57 @@ def persist_subagent_trace(
         from gc_core.thread_store_file import FileThreadStore
 
         store = FileThreadStore(ident.threads_dir)
+
+    # Этот путь СИНХРОННЫЙ и остаётся таким намеренно: сюда приходит сообщение
+    # живому субагенту из чужого потока (``ActiveChildScope.enqueue``), и
+    # ждать там нечем. С асинхронным хранилищем записать трассу отсюда нельзя —
+    # но молчать об этом хуже всего: корутина просто выбрасывалась бы, а
+    # встраивающий видел бы работающих субагентов с пустой историей вызовов.
+    import inspect
+
+    if inspect.iscoroutinefunction(getattr(store, "append_subagent_trace", None)):
+        import logging
+
+        logging.getLogger("gc_core.thread_store").warning(
+            "subagent_trace_skipped_async_store store=%s kind=%s "
+            "reason=sync_enqueue_path_cannot_await",
+            type(store).__name__, kind,
+        )
+        return None
     return store.append_subagent_trace(
+        ident.system_id,
+        ident.thread_id,
+        parent_call_id=ident.parent_call_id,
+        child_run_id=ident.child_run_id,
+        kind=kind,
+        payload=payload,
+    )
+
+
+async def apersist_subagent_trace(
+    ctx: Any, *, kind: str, payload: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """То же, что ``persist_subagent_trace``, но не блокируя цикл.
+
+    Самый тихий шов контракта: возврат отбрасывают ВСЕ семь вызывающих
+    (``processing_responses`` ×4, ``subagents/runner`` ×3). С асинхронным
+    хранилищем на синхронном пути корутина здесь просто выбрасывалась бы —
+    ни ошибки, ни лога, а трасса субагентов не писалась бы ни разу. Субагенты
+    при этом работают нормально, поэтому заметить нечего.
+    """
+    ident = resolve_sidecar_identity(ctx)
+    if ident is None:
+        return None
+    store = getattr(ctx, "thread_store", None)
+    if store is None:
+        from gc_core.thread_store_file import FileThreadStore
+
+        store = FileThreadStore(ident.threads_dir)
+
+    from gc_core.thread_store_async import athread_store
+
+    port = athread_store(store)
+    return await port.aappend_subagent_trace(
         ident.system_id,
         ident.thread_id,
         parent_call_id=ident.parent_call_id,
@@ -100,6 +150,7 @@ def persist_subagent_trace(
 
 __all__ = [
     "SidecarIdentity",
+    "apersist_subagent_trace",
     "bind_thread_identity",
     "clear_thread_identity",
     "persist_subagent_trace",

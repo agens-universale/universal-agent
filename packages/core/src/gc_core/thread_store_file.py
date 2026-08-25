@@ -20,6 +20,7 @@ from gc_core.thread_store_protocol import (
 )
 from gc_core.thread_store import (
     append_new_thread_messages,
+    archive_and_replace_thread_files,
     append_subagent_trace_record,
     discard_message_by_id,
     ensure_threads_dir,
@@ -153,6 +154,32 @@ class FileThreadStore:
         self, system_id: str, thread_id: str
     ) -> List[SubagentTraceRecord]:
         return read_subagent_trace(self._dir, system_id, thread_id) or []
+
+    # --- необязательная способность: архив перед компакцией ------------------
+
+    def archive_and_replace(
+        self, system_id: str, thread_id: str, messages: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Отложить историю в архив и заменить её на ``messages``.
+
+        НЕ входит в одиннадцать методов контракта — это необязательная
+        способность. Хранилище, которое её не объявляет, получает от сессии
+        ``reset`` + ``append_messages``: то же замещение, но без архива. Так и
+        должно быть — «отложить прежнюю историю рядом» осмысленно для файлов,
+        а у базы это либо отдельная таблица, либо не нужно вовсе.
+
+        Метод появился, когда выяснилось, что компакция писала в файлы НАПРЯМУЮ
+        мимо контракта: ``_thread_paths(self.threads_dir, ...)`` плюс голый
+        ``open(data_path, "w")`` в ``ThreadSession``. У хранилища без файлов
+        ``threads_dir`` — пустая строка, и запись уходила в относительный путь
+        от текущего каталога. Молча.
+
+        Возвращает ``{"archive_suffix", "archive_data_path", "archive_meta_path"}``;
+        пути — ``None``, если архивировать было нечего.
+        """
+        return archive_and_replace_thread_files(
+            self._dir, system_id, thread_id, messages
+        )
 
 
 __all__ = ["FileThreadStore"]

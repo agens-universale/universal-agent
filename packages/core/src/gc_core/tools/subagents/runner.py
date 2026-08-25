@@ -36,7 +36,12 @@ from gc_core.message_policy.user_message_policy import extract_real_user_message
 from gc_core.message_policy.user_stop import cancelled_by_user_output
 from gc_core.tools.subagents.active_scope import activate_child_input
 from gc_core.tools.subagents.progress import emit_progress
-from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity, persist_subagent_trace
+from gc_core.tools.subagents.sidecar import (
+    apersist_subagent_trace,
+    bind_thread_identity,
+    clear_thread_identity,
+    persist_subagent_trace,
+)
 from gc_core.utils.aio_compat import run_coro_blocking
 
 _log = logging.getLogger(__name__)
@@ -248,10 +253,10 @@ class SubagentRunner:
             # Sidecar marker when child compaction applies (append-only; no rewrite).
             _orig_on_summary = summary.on_summary_applied
 
-            def _on_summary_applied_with_sidecar(event: Dict[str, Any]) -> None:
+            async def _on_summary_applied_with_sidecar(event: Dict[str, Any]) -> None:
                 _orig_on_summary(event)
                 synthesis = _synthesis_from_summary_event(event)
-                persist_subagent_trace(
+                await apersist_subagent_trace(
                     child_ctx,
                     kind="child_summary",
                     payload={"synthesis": synthesis},
@@ -319,7 +324,7 @@ class SubagentRunner:
                     "error_code": "subagent_run_failed",
                 },
             )
-            self._persist_finished(
+            await self._persist_finished(
                 child_ctx,
                 child_state,
                 ok=False,
@@ -354,7 +359,7 @@ class SubagentRunner:
                 ok=False,
                 error_brief="stopped by user",
             )
-            self._persist_finished(
+            await self._persist_finished(
                 child_ctx,
                 child_state,
                 ok=False,
@@ -382,7 +387,7 @@ class SubagentRunner:
                 ok=False,
                 error_brief=_limit_outcome.replace("_", " "),
             )
-            self._persist_finished(
+            await self._persist_finished(
                 child_ctx,
                 child_state,
                 ok=False,
@@ -401,7 +406,7 @@ class SubagentRunner:
             child_ctx=child_ctx,
             extra={"steps": child_state.steps, "finish_reason": "completed"},
         )
-        self._persist_finished(
+        await self._persist_finished(
             child_ctx,
             child_state,
             ok=True,
@@ -419,7 +424,7 @@ class SubagentRunner:
     def _check_stop_requested(self) -> bool:
         return self._orchestrator_state.stop_requested
 
-    def _persist_finished(
+    async def _persist_finished(
         self,
         child_ctx: Any,
         child_state: State,
@@ -427,7 +432,7 @@ class SubagentRunner:
         ok: bool,
         finish_reason: str,
     ) -> None:
-        persist_subagent_trace(
+        await apersist_subagent_trace(
             child_ctx,
             kind="finished",
             payload={

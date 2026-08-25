@@ -238,6 +238,16 @@ def _finish_run_context(
     thread_store: Any = None,
 ) -> RunContext:
     """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
+    # Хранилище встраивающего проверяем ЗДЕСЬ — это и есть точка проводки.
+    # Раньше негодный объект принимался молча, а падал на 630-й строке
+    # thread_store.py с «TypeError: cannot unpack non-iterable coroutine
+    # object»: сообщение верное, но указывает не туда, и половина обращений
+    # при этом вообще не падала, а теряла запись без ошибки и без лога.
+    if thread_store is not None:
+        from gc_core.thread_store_async import athread_store
+
+        athread_store(thread_store)
+
     tools_data, tools_spec, tools_description, mcp_status = tools
     effective_run_id = prep.run_id
     backend = prep.backend

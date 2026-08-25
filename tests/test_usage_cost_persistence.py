@@ -2,6 +2,7 @@
 import threading
 import types
 
+from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_file import FileThreadStore
 
 import gc_core.agent_executor as ae
@@ -65,15 +66,21 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     baseline = UsageAccount()
     baseline.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$")
 
-    monkeypatch.setattr(
-        mc, "ThreadSession",
-        types.SimpleNamespace(from_config=lambda **kw: types.SimpleNamespace(
+    _store = FileThreadStore(str(tmp_path))
+
+    async def _afrom_config(**kw):
+        return types.SimpleNamespace(
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
             meta={"token_usage": baseline.to_meta()}, thread_id="t1", system_id="cli",
             threads_dir=str(tmp_path),
-            # Ручная компакция пишет token_usage через хранилище сессии.
-            store=FileThreadStore(str(tmp_path)),
-        )),
+            # Ручная компакция пишет token_usage через хранилище сессии — и
+            # ходит туда через асинхронный порт: тред может лежать в базе.
+            store=_store,
+            port=athread_store(_store),
+        )
+
+    monkeypatch.setattr(
+        mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom_config),
     )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)

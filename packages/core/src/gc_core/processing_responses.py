@@ -24,11 +24,12 @@ from gc_core.request_backend_policy import arequest_chat_completions_with_policy
 from gc_core.tools import aapply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from gc_core.tools.subagents.progress import brief_args_summary, emit_progress, extract_intermediate_prose, parse_tool_result_status, todo_items_from_arguments
-from gc_core.tools.subagents.sidecar import persist_subagent_trace
+from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.utils.connect_backend import create_call_headers
 from gc_core.utils.connect_backend import arequest_backend_responses as arequest_backend
 from gc_core.utils.ssl_config import get_backend_client_cert
 from gc_core.utils.logging_module import human_console_enabled
+from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.backend_errors import is_auth_error, is_context_overflow_error
 
 # Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
@@ -80,7 +81,7 @@ async def _acall_blocking_hook(fn, *args: Any, **kwargs: Any):
     return await asyncio.to_thread(lambda: fn(*args, **kwargs))
 
 
-def _maybe_persist(
+async def _maybe_persist(
     callback,
     messages: list,
     state,
@@ -91,6 +92,10 @@ def _maybe_persist(
 
     ``pairing=True`` — technical closing A/B при user-stop пишем всегда
     (иначе orphan function_call в jsonl).
+
+    Колбэк по контракту возвращает ``None`` либо awaitable: ядро передаёт сюда
+    асинхронный (история треда может лежать в базе, и ждать её надо нативно),
+    а внешние вызывающие и тесты — обычный синхронный.
     """
     if callback is None:
         return
@@ -101,7 +106,7 @@ def _maybe_persist(
         token = True
         state.allow_pairing_persist = True
     try:
-        callback(messages)
+        await await_callback(callback(messages))
     except Exception as persist_exc:
         _fallback_logger.warning(
             "Thread messages persist warning: %s",
@@ -122,7 +127,7 @@ def _function_call_output_message(call_id: Any, output: str) -> Dict:
     }
 
 
-def _commit_user_stop_pairing(
+async def _commit_user_stop_pairing(
     state: State,
     outputs: List[Dict],
     persist_messages_callback: Optional[Callable[[List[Dict]], None]],
@@ -136,7 +141,7 @@ def _commit_user_stop_pairing(
     )
     if to_append:
         state.messages.extend(to_append)
-    _maybe_persist(
+    await _maybe_persist(
         persist_messages_callback,
         to_append or list(outputs),
         state,
@@ -569,7 +574,7 @@ async def aprocess_tool_calls(
             state.turn_tool_calls += 1
         prior = list(tools_outputs) + skip_outputs
         if prior and (i > 0 or tool_name == ASK_HUMAN_TOOL_NAME):
-            _maybe_persist(persist_messages_callback, prior, state)
+            await _maybe_persist(persist_messages_callback, prior, state)
         tool_arguments = str(m.get("arguments", ""))
         tool_call_id = m.get("call_id")
         call_id_str = str(tool_call_id) if tool_call_id is not None else None
@@ -601,7 +606,7 @@ async def aprocess_tool_calls(
                 todo_items=_todo_items,
             )
         if persist_tool_trace:
-            persist_subagent_trace(ctx, kind="call", payload=dict(m))
+            await apersist_subagent_trace(ctx, kind="call", payload=dict(m))
         try:
             # call_id для субагента: чтобы вложенные строки в TUI знали,
             # под какой корневой subagent_* они относятся.
@@ -631,7 +636,7 @@ async def aprocess_tool_calls(
                     error_brief=str(exc),
                 )
             if persist_tool_trace:
-                persist_subagent_trace(
+                await apersist_subagent_trace(
                     ctx,
                     kind="error",
                     payload={
@@ -661,7 +666,7 @@ async def aprocess_tool_calls(
             ir_payload: Dict[str, Any] = {"prose": prose or ""}
             if call_id_str:
                 ir_payload["call_id"] = call_id_str
-            persist_subagent_trace(
+            await apersist_subagent_trace(
                 ctx, kind="intermediate_reply", payload=ir_payload
             )
         else:
@@ -682,7 +687,7 @@ async def aprocess_tool_calls(
                     if isinstance(tool_res_raw, str)
                     else json.dumps(tool_res_raw, ensure_ascii=False)
                 )
-                persist_subagent_trace(
+                await apersist_subagent_trace(
                     ctx,
                     kind="error" if ok is False else "result",
                     payload={
@@ -753,7 +758,7 @@ async def aprocess_tool_calls(
     if aborted_by_user_stop:
         # run_agent после stop часто выходит на check_stop до обычного persist —
         # закрывающие A/B пишем сразу (исключение discard_writes).
-        _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
+        await _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
 
     # Если внутри batch сработал session_compact — вместо сырых output'ов
     # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
@@ -904,7 +909,7 @@ async def arun_agent(
             )
             if new_state_messages:
                 state.messages += new_state_messages
-            _maybe_persist(persist_messages_callback, messages, state)
+            await _maybe_persist(persist_messages_callback, messages, state)
 
             # Лимиты (step / tool_calls / tokens) — только когда нет pending
             # function_call: сначала дожимаем весь батч tools от модели, иначе
@@ -976,7 +981,9 @@ async def arun_agent(
                             state.messages += to_append
                         if persist_messages_callback is not None:
                             try:
-                                persist_messages_callback(notice_messages)
+                                await await_callback(
+                                    persist_messages_callback(notice_messages)
+                                )
                             except Exception as persist_exc:
                                 run_logger.warning(
                                     "Thread notice messages persist warning: %s",
@@ -1064,15 +1071,17 @@ async def arun_agent(
                                 mark_finish_gate_checking is not None and gate.enabled
                             )
                             if checking:
-                                mark_finish_gate_checking(True)
+                                await await_callback(mark_finish_gate_checking(True))
                             try:
                                 decision = await gate.aevaluate_turn_finish(
                                     finish_handoff_arguments=finish_arguments,
                                 )
                             finally:
                                 if checking:
-                                    mark_finish_gate_checking(False)
-                            apply_finish_gate_to_turn_finish_output_in_state(
+                                    await await_callback(
+                                        mark_finish_gate_checking(False)
+                                    )
+                            await apply_finish_gate_to_turn_finish_output_in_state(
                                 state=state,
                                 finish_call_id=finish_call_id,
                                 decision=decision,
@@ -1165,7 +1174,7 @@ async def arun_agent(
                         # runtime.finalizing в meta; снимаем строго в finally).
                         state.steps += 1
                         if mark_finalizing is not None:
-                            mark_finalizing(True)
+                            await await_callback(mark_finalizing(True))
                         try:
                             # В поток, как соседние intent-scope хуки: внутри
                             # синхронный aux-LLM, и прямой вызов из корутины
@@ -1178,7 +1187,7 @@ async def arun_agent(
                             state.flush_current_user_intent()
                         finally:
                             if mark_finalizing is not None:
-                                mark_finalizing(False)
+                                await await_callback(mark_finalizing(False))
                         if turn_end_compaction_hook is not None:
                             await _acall_blocking_hook(turn_end_compaction_hook)
                         if get_pending_messages is not None:

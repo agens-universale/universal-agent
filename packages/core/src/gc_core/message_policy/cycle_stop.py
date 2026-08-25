@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
+from gc_core.utils.aio_compat import await_callback
 from gc_core.tools import aapply_tool
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
@@ -129,7 +130,7 @@ async def aappend_cycle_stop_tool_outputs_for_batch(
         return
     state.messages.extend(synthetic_messages)
     if persist_messages_callback is not None and immediate_persist:
-        persist_messages_callback(immediate_persist)
+        await await_callback(persist_messages_callback(immediate_persist))
 
 
 def append_cycle_stop_tool_outputs_for_batch(*args, **kwargs):

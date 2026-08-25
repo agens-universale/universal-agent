@@ -125,7 +125,18 @@ class MemoryThreadStore:
 
     def save_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
         self._hit("save_meta")
-        self._meta[self._key(system_id, thread_id)] = copy.deepcopy(meta)
+        from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+
+        # Штамп записи — обязанность ХРАНИЛИЩА, а не вызывающего. Без
+        # ``state_schema_version`` следующий прогон откажется читать тред
+        # (``StateSchemaError``), и проявится это только на ВТОРОМ прогоне:
+        # первый проходит нормально. Файловый слой делает то же самое в
+        # ``save_thread_meta``.
+        stamped = ThreadMetaMapper.ensure_v2_meta(copy.deepcopy(meta))
+        stamped["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if not stamped.get("created_at"):
+            stamped["created_at"] = stamped["updated_at"]
+        self._meta[self._key(system_id, thread_id)] = stamped
 
     def patch_runtime_flag(
         self,

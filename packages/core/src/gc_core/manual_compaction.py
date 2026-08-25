@@ -40,8 +40,10 @@ async def acompact_thread(
     if backend_api_mode != "chat_completions" or not thread_id:
         return False
     system_id = system or "cli"
-    thread_session = ThreadSession.from_config(
+    thread_session = await ThreadSession.afrom_config(
         config_dict=config_dict, system_id=system_id, thread_id=thread_id,
+        # Хранилище встраивающего, если он его передал.
+        store=getattr(ctx, "thread_store", None),
     )
     thread_session.history_messages = repair_tool_call_pairing(
         thread_session.history_messages, keep_latest_unanswered=False,
@@ -92,10 +94,10 @@ async def acompact_thread(
     # update_tui_meta — тот кладёт под вложенный meta["tui"], откуда run() не читает
     # → на следующем прогоне summary «пропадал» (откат кумулятива).
     try:
-        store = thread_session.store
-        persisted_meta = store.load_meta(system_id, thread_id) or {}
+        port = thread_session.port
+        persisted_meta = await port.aload_meta(system_id, thread_id) or {}
         persisted_meta["token_usage"] = state.usage.to_meta()
-        store.save_meta(system_id, thread_id, persisted_meta)
+        await port.asave_meta(system_id, thread_id, persisted_meta)
     except Exception:
         pass
     # Обновляем live-state (что читает TUI-футер) только когда он передан и это тот

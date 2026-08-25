@@ -6,7 +6,10 @@ import pytest
 from gc_core.config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
 from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, append_user_ask
 from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
-from gc_core.intent_scope.hook import maybe_update_intent_scope_from_tool
+from gc_core.intent_scope.hook import (
+    amaybe_update_intent_scope_from_tool,
+    maybe_update_intent_scope_from_tool,
+)
 from gc_core.states import State
 
 
@@ -134,7 +137,7 @@ def test_hook_raw_truncates_oversized_output(monkeypatch):
     assert len(json.dumps(record.content, ensure_ascii=False)) <= 5200
 
 
-def test_finish_gate_reject_submit_in_current_without_flush():
+async def test_finish_gate_reject_submit_in_current_without_flush():
     """Ветка processing_responses после reject: patch output + hook, без flush."""
     from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
     from gc_core.intent_guard.guard import FinishGateDecision
@@ -195,13 +198,13 @@ def test_finish_gate_reject_submit_in_current_without_flush():
         validation=validation,
         feedback_text="Finish gate: fix report.",
     )
-    apply_finish_gate_to_turn_finish_output_in_state(
+    await apply_finish_gate_to_turn_finish_output_in_state(
         state=state,
         finish_call_id="call_finish",
         decision=decision,
     )
     final_output = get_function_call_output_text(state.messages, "call_finish") or ""
-    maybe_update_intent_scope_from_tool(
+    await amaybe_update_intent_scope_from_tool(
         tool_name="turn_finish",
         tool_output_raw=final_output,
         tool_arguments=args,

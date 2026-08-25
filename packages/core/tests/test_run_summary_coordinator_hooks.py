@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -40,6 +40,11 @@ def _thread_session_mock() -> MagicMock:
     thread.threads_dir = "/tmp/x"
     thread.system_id = "cli"
     thread.thread_id = "t1"
+    # Ядро ходит в хранилище через асинхронный порт: флаги, персист и архив
+    # ждутся нативно, поэтому двойники обязаны быть корутинными.
+    thread.port = AsyncMock()
+    thread.apersist_batch = AsyncMock()
+    thread.aarchive_and_compact_summary_payload = AsyncMock(return_value={})
     return thread
 
 
@@ -213,8 +218,8 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
     current = [u1]
     coord.pre_backend_compaction_hook(current, "user_ask")
 
-    thread.persist_batch.assert_called_once()
-    assert thread.persist_batch.call_args[0][0]
+    thread.apersist_batch.assert_awaited_once()
+    assert thread.apersist_batch.await_args[0][0]
 
 
 def test_persist_skipped_when_preserved_batch_empty(monkeypatch, ctx_stub):
@@ -239,7 +244,7 @@ def test_persist_skipped_when_preserved_batch_empty(monkeypatch, ctx_stub):
 
     coord.pre_backend_compaction_hook([orphan], "function_call_output")
 
-    thread.persist_batch.assert_not_called()
+    thread.apersist_batch.assert_not_awaited()
 
 
 def test_function_call_output_clears_current_when_preservation_empty(monkeypatch, ctx_stub):

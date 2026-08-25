@@ -141,6 +141,24 @@ class SubagentTraceRecord(TypedDict):
     payload: Dict[str, Any]
 
 
+#: Имена одиннадцати методов контракта. Ведётся явным списком, а не выводится
+#: из ``ThreadStore``: набор проверок должен краснеть и в том случае, если метод
+#: пропал из протокола по недосмотру, а не только когда он пропал у реализации.
+CONTRACT_METHODS_HINT = (
+    "load_messages",
+    "load_thread_state",
+    "load_meta",
+    "append_messages",
+    "save_meta",
+    "patch_runtime_flag",
+    "update_runtime_meta",
+    "discard_message",
+    "reset",
+    "append_subagent_trace",
+    "read_subagent_trace",
+)
+
+
 @runtime_checkable
 class ThreadStore(Protocol):
     """Что ядру нужно от хранилища одного треда.
@@ -249,6 +267,23 @@ class ThreadStore(Protocol):
         """Записать метаданные целиком.
 
         Незнакомые секции сохраняются как есть — см. ``load_meta``.
+
+        ПРИ ЗАПИСИ хранилище обязано проставить три поля, если их нет:
+
+        * ``state_schema_version`` — иначе следующий прогон ОТКАЖЕТСЯ читать
+          тред: ``validate_thread_meta_for_load`` поднимает ``StateSchemaError``
+          на meta, где есть состояние агента, но нет версии схемы;
+        * ``created_at`` — момент рождения треда, НЕ сбрасывается никогда, в том
+          числе компакцией;
+        * ``updated_at`` — момент этой записи.
+
+        Готовые значения: ``ThreadMetaMapper.ensure_v2_meta(meta)`` проставляет
+        версию схемы.
+
+        Требование появилось пятым заходом и было НЕСУЩИМ: файловый слой делал
+        это в ``save_thread_meta``, in-memory не делала ничего, и расхождение
+        проявлялось только на ВТОРОМ прогоне того же треда — первый проходил
+        нормально. Ни один тест первого прогона такое не ловит.
         """
         ...
 
@@ -349,6 +384,7 @@ class ThreadStore(Protocol):
 
 
 __all__ = [
+    "CONTRACT_METHODS_HINT",
     "MessageKey",
     "SubagentTraceRecord",
     "ThreadState",

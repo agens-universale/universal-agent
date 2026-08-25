@@ -1,6 +1,7 @@
 """compact_thread: грузит тред + форс-сжатие через координатор."""
 import types
 
+from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_file import FileThreadStore
 
 from gc_core import agent_executor as ae
@@ -39,7 +40,10 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
         def init_user_turn_seq(self, v): pass
         def infer_user_turn_seq_if_missing(self): pass
 
-    monkeypatch.setattr(mc, "ThreadSession", types.SimpleNamespace(from_config=lambda **kw: _TS()))
+    async def _afrom(**kw):
+        return _TS()
+
+    monkeypatch.setattr(mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom))
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
     monkeypatch.setattr(mc, "parse_summary_trigger_chars", lambda c: 5000)
@@ -66,17 +70,24 @@ def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, s
     import threading
     # Логика compact_thread живёт в manual_compaction (mc) — патчим ЕГО namespace,
     # а не agent_executor (тот лишь делегирует).
-    monkeypatch.setattr(
-        mc, "ThreadSession",
-        types.SimpleNamespace(from_config=lambda **kw: types.SimpleNamespace(
+    _store = FileThreadStore(str(tmp_path))
+
+    async def _afrom_config(**kw):
+        return types.SimpleNamespace(
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
             meta=baseline_meta, thread_id="t1", system_id="cli",
             threads_dir=str(tmp_path),
             # Хранилище: ручная компакция пишет token_usage через него, а не
             # через модульные функции — иначе у встраивающего с базой эта
             # запись уходила бы на диск мимо остального треда.
-            store=FileThreadStore(str(tmp_path)),
-        )),
+            store=_store,
+            # ...и ходит она туда через асинхронный порт: тред может лежать в
+            # базе, и ждать её надо нативно.
+            port=athread_store(_store),
+        )
+
+    monkeypatch.setattr(
+        mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom_config),
     )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", coord_cls)

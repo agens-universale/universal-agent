@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from gc_core.intent_guard.guard import FinishGateDecision
 from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state
 from gc_core.intent_guard.validation_result import ValidationResult
-from gc_core.message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
+from gc_core.message_policy.cycle_stop import aappend_cycle_stop_tool_outputs_for_batch
 from gc_core.states import State
 from gc_core.thread_store import make_message_key
 from gc_core.tools.turn.submit_solution import SubmitSolution
@@ -44,7 +44,7 @@ def test_apply_finish_gate_skipped_sets_runtime_outcome():
     assert payload["finish_gate"]["runtime_outcome"] == "skipped"
 
 
-def test_finish_gate_persisted_once_after_apply_not_before():
+async def test_finish_gate_persisted_once_after_apply_not_before():
     """cycle_stop кладёт output в state без flush; после apply — один persist с gate."""
     state = _make_state()
     arguments = json.dumps(
@@ -70,7 +70,7 @@ def test_finish_gate_persisted_once_after_apply_not_before():
         if batch:
             persisted.append(batch)
 
-    append_cycle_stop_tool_outputs_for_batch(
+    await aappend_cycle_stop_tool_outputs_for_batch(
         state=state,
         ctx=SimpleNamespace(config_dict={}, logger=None, tools_data={}),
         tool_calls=[
@@ -100,7 +100,7 @@ def test_finish_gate_persisted_once_after_apply_not_before():
         coverage_score=1.0,
         feedback_for_agent="",
     )
-    ok = apply_finish_gate_to_turn_finish_output_in_state(
+    ok = await apply_finish_gate_to_turn_finish_output_in_state(
         state=state,
         finish_call_id=call_id,
         decision=FinishGateDecision(outcome="accept", validation=validation),

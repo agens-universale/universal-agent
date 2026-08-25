@@ -34,24 +34,12 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, Dict, List
 
+from gc_core.thread_store_protocol import CONTRACT_METHODS_HINT
+
 SYS = "cli"
 
-#: Одиннадцать методов контракта. Список ведётся здесь, а не выводится из
-#: протокола: набор должен краснеть и в том случае, если метод пропал из
-#: протокола по недосмотру.
-CONTRACT_METHODS = (
-    "load_messages",
-    "load_thread_state",
-    "load_meta",
-    "append_messages",
-    "save_meta",
-    "patch_runtime_flag",
-    "update_runtime_meta",
-    "discard_message",
-    "reset",
-    "append_subagent_trace",
-    "read_subagent_trace",
-)
+#: Одиннадцать методов контракта.
+CONTRACT_METHODS = CONTRACT_METHODS_HINT
 
 #: Шесть полей записи трассы. Форма замкнутая: её пишет и читает только ядро.
 TRACE_FIELDS = frozenset(
@@ -269,6 +257,43 @@ def check_meta_roundtrip(store: Any) -> None:
         )
 
 
+def check_meta_is_stamped_on_write(store: Any) -> None:
+    """Хранилище штампует meta при записи: версия схемы и метки времени.
+
+    НЕСУЩЕЕ требование, и ловится оно только вторым прогоном: без
+    ``state_schema_version`` загрузка треда падает ``StateSchemaError``, но
+    ПЕРВЫЙ прогон проходит нормально — проверять просто нечего, пока в meta нет
+    состояния агента. Наши реализации разошлись здесь пятыми, и обнаружилось
+    это на сквозной приёмке SDK, а не в юнит-тестах.
+    """
+    store.save_meta(SYS, "t-stamp", {"shared": {"working_memory": "wm"}})
+    meta = store.load_meta(SYS, "t-stamp")
+
+    if not meta.get("state_schema_version"):
+        _fail(
+            "хранилище не проставило state_schema_version при записи",
+            "без него следующий прогон ОТКАЖЕТСЯ читать тред:"
+            "\n  validate_thread_meta_for_load поднимет StateSchemaError."
+            "\n  Готовое значение даёт ThreadMetaMapper.ensure_v2_meta(meta).",
+        )
+    for field in ("created_at", "updated_at"):
+        if not meta.get(field):
+            _fail(
+                f"хранилище не проставило {field} при записи",
+                "created_at — момент рождения треда (не сбрасывается никогда,"
+                "\n  в том числе компакцией), updated_at — момент этой записи.",
+            )
+
+    # created_at не переписывается повторной записью.
+    born = meta["created_at"]
+    store.save_meta(SYS, "t-stamp", {**meta, "x": 1})
+    if store.load_meta(SYS, "t-stamp").get("created_at") != born:
+        _fail(
+            "повторная запись сбросила created_at",
+            "это момент рождения треда, он не меняется никогда",
+        )
+
+
 def check_runtime_flag_is_pointwise(store: Any) -> None:
     """Флаг рантайма не затирает чужие секции, а снятие последнего убирает секцию."""
     store.save_meta(SYS, "t-flag", {"token_usage": {"total": 7}, "runtime": {}})
@@ -383,6 +408,7 @@ BEHAVIOUR_CHECKS: tuple = (
     check_seq_is_a_number_not_a_count,
     check_message_id_guaranteed_on_read,
     check_meta_roundtrip,
+    check_meta_is_stamped_on_write,
     check_runtime_flag_is_pointwise,
     check_update_runtime_meta,
     check_discard,
@@ -424,11 +450,112 @@ def assert_conforms(store_factory: Callable[[], Any]) -> List[str]:
     return passed
 
 
+# --- асинхронные реализации ------------------------------------------------
+
+class _AwaitingFacade:
+    """Синхронный вид асинхронного хранилища — чтобы проверки были ТЕ ЖЕ.
+
+    Двенадцать поведенческих свойств не зависят от того, корутинный метод или
+    нет: идемпотентность, мутация ``known_keys``, ``max_seq`` как номер, шесть
+    полей трассы. Дублировать их асинхронными копиями значило бы завести второй
+    набор, который разойдётся с первым — ровно та беда, из-за которой этот
+    модуль и появился.
+
+    Корутины исполняются на ОДНОМ loop, а не через ``asyncio.run`` на каждый
+    вызов: клиент вроде ``redis.asyncio`` держит соединение между вызовами, и
+    новый loop на каждое обращение убил бы его вторым же (проверено:
+    ``RuntimeError: Event loop is closed``).
+    """
+
+    def __init__(self, store: Any, loop: Any) -> None:
+        self._store = store
+        self._loop = loop
+
+    def __getattr__(self, name: str) -> Any:
+        target = getattr(self._store, f"a{name}")
+
+        def run(*args: Any, **kwargs: Any) -> Any:
+            return self._loop.run_until_complete(target(*args, **kwargs))
+
+        return run
+
+
+def check_async_methods_present(store: Any) -> None:
+    """Все одиннадцать ``a``-методов есть и корутинны."""
+    from gc_core.thread_store_async import ASYNC_CONTRACT_METHODS
+
+    missing = [
+        m for m in ASYNC_CONTRACT_METHODS
+        if not inspect.iscoroutinefunction(getattr(store, m, None))
+    ]
+    if not missing:
+        return
+    present_sync = [m for m in missing if callable(getattr(store, m, None))]
+    hint = (
+        f"\n  Есть, но не корутинны: {', '.join(present_sync)}."
+        "\n  Половинчатая реализация опаснее полного отсутствия: часть записей"
+        "\n  уйдёт в базу, часть потеряется молча."
+        if present_sync else ""
+    )
+    _fail(
+        f"{type(store).__name__}: нет корутинных методов: {', '.join(missing)}",
+        f"AsyncThreadStore ждёт все {len(ASYNC_CONTRACT_METHODS)}: "
+        f"{', '.join(ASYNC_CONTRACT_METHODS)}{hint}",
+    )
+
+
+def check_accepted_by_the_port(store: Any) -> None:
+    """Фабрика ``athread_store`` принимает реализацию и не заворачивает в адаптер."""
+    from gc_core.thread_store_async import athread_store
+
+    port = athread_store(store)
+    if port is not store:
+        _fail(
+            f"{type(store).__name__}: порт завернул реализацию в адаптер",
+            f"вместо неё используется {type(port).__name__} — значит ядро сочло "
+            "хранилище\n  синхронным, и нативного ожидания не будет.",
+        )
+
+
+ASYNC_STRUCTURE_CHECKS: tuple = (
+    check_async_methods_present,
+    check_accepted_by_the_port,
+)
+
+
+def assert_conforms_async(store_factory: Callable[[], Any]) -> List[str]:
+    """Проверить реализацию ``AsyncThreadStore`` — тем же набором свойств.
+
+    Синхронная функция: её зовут из обычного теста, loop создаётся внутри::
+
+        def test_my_redis_store():
+            assert_conforms_async(lambda: RedisThreadStore(url=TEST_URL))
+    """
+    import asyncio
+
+    passed: List[str] = []
+    store = store_factory()
+    for check in ASYNC_STRUCTURE_CHECKS:
+        check(store)
+        passed.append(check.__name__)
+
+    loop = asyncio.new_event_loop()
+    try:
+        for check in BEHAVIOUR_CHECKS:
+            check(_AwaitingFacade(store_factory(), loop))
+            passed.append(check.__name__)
+    finally:
+        loop.close()
+    return passed
+
+
 __all__ = [
+    "ASYNC_STRUCTURE_CHECKS",
     "BEHAVIOUR_CHECKS",
     "CONTRACT_METHODS",
     "STRUCTURE_CHECKS",
     "TRACE_FIELDS",
     "ThreadStoreContractError",
     "assert_conforms",
+    "assert_conforms_async",
 ]

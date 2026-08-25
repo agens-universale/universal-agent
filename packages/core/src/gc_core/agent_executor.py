@@ -18,7 +18,15 @@ from gc_core.run_context import RunContext
 from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
 from gc_core.message_policy.stop_persist import is_persist_discarded
-from gc_core.run_summary_coordinator import RunSummaryCoordinator, reset_stale_summarizing_flag, set_tui_finalizing, set_tui_finish_gate_checking
+from gc_core.run_summary_coordinator import (
+    RunSummaryCoordinator,
+    areset_stale_summarizing_flag,
+    aset_tui_finalizing,
+    aset_tui_finish_gate_checking,
+    reset_stale_summarizing_flag,
+    set_tui_finalizing,
+    set_tui_finish_gate_checking,
+)
 from gc_core.summarize.config import parse_summary_trigger_chars, parse_summary_turn_end_trigger_chars
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
@@ -97,6 +105,52 @@ def _append_trace_id_to_meta(
         return
 
 
+async def _aappend_trace_id_to_meta(
+    thread_session: Any, trace_id: str, logger: Any | None = None
+) -> None:
+    """Дописать trace_id в ``meta.runtime.trace_ids`` (append + дедуп).
+
+    Через ``update_runtime_meta`` (read-merge-write по диску), а НЕ через
+    ``thread_session.meta``: ``persist_batch`` пересобирает base_meta с диска и
+    переносит из ``self.meta`` только whitelist ключей, в который ``runtime`` не
+    входит — запись в память была бы потеряна.
+
+    Отвечает на вопрос аудита «какие шаги оркестратора трогали этот тред».
+    Ошибки бухгалтерии меты не должны ронять ран, но раз это единственный путь
+    записи trace_id в мету — молчаливый swallow оставляем, а факт и причину
+    ошибки пишем в debug (``logger`` опционален, чтобы не менять контракт
+    вызывающих сторон).
+    """
+    from gc_core.persistence.meta_ownership import runtime_section
+    from gc_core.thread_store import sanitize_system_id
+
+    # Хранилище берём у самой сессии: у неё оно уже своё — файловое по
+    # умолчанию или переданное встраивающим. Прямой вызов модульных функций
+    # уводил бы записи на диск даже тогда, когда история лежит в базе.
+    store = getattr(thread_session, "store", None)
+    port = getattr(thread_session, "port", None)
+    system_id = getattr(thread_session, "system_id", None)
+    thread_id = getattr(thread_session, "thread_id", None)
+    if store is None or port is None or not system_id or not thread_id:
+        return
+    try:
+        sys_norm = sanitize_system_id(system_id)
+        meta = await port.aload_meta(sys_norm, thread_id) or {}
+        existing = runtime_section(meta).get("trace_ids")
+        ids = [str(x) for x in existing] if isinstance(existing, list) else []
+        if trace_id in ids:
+            return
+        ids.append(trace_id)
+        await port.aupdate_runtime_meta(sys_norm, thread_id, {"trace_ids": ids})
+    except Exception as exc:
+        if logger is not None:
+            try:
+                logger.debug("trace_id_meta_write_failed error=%s", exc, exc_info=True)
+            except Exception:
+                pass
+        return
+
+
 
 
 class AgentExecutor:
@@ -157,8 +211,10 @@ class AgentExecutor:
                     from gc_core.thread_store_file import FileThreadStore
 
                     _reset_store = FileThreadStore(resolve_threads_dir(config_dict))
-                _reset_store.reset(system_id, thread_id)
-            thread_session = ThreadSession.from_config(
+                from gc_core.thread_store_async import athread_store
+
+                await athread_store(_reset_store).areset(system_id, thread_id)
+            thread_session = await ThreadSession.afrom_config(
                 config_dict=config_dict,
                 system_id=system_id,
                 thread_id=thread_id,
@@ -209,18 +265,18 @@ class AgentExecutor:
 
         # Снять протухший флаг компакции от прерванного прошлого run'а: на старте
         # компакция не идёт, иначе TUI вечно показывает «сжимаю контекст».
-        reset_stale_summarizing_flag(thread_session)
+        await areset_stale_summarizing_flag(thread_session)
         # Снять протухший флаг финализации от прерванного прошлого run'а.
-        set_tui_finalizing(thread_session, False)
+        await aset_tui_finalizing(thread_session, False)
         # Снять протухший флаг «судья работает» от прерванного прошлого run'а.
-        set_tui_finish_gate_checking(thread_session, False)
+        await aset_tui_finish_gate_checking(thread_session, False)
 
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
         if thread_id is not None and config_dict.get("mcp-servers"):
             try:
                 from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
                 snap = build_mcp_tools_snapshot(config_dict, self._ctx.tools_data, self._ctx.mcp_status)
-                thread_session.store.update_runtime_meta(
+                await thread_session.port.aupdate_runtime_meta(
                     system_id, thread_id, {"mcp_tools": snap},
                 )
             except Exception:
@@ -425,7 +481,7 @@ class AgentExecutor:
                 state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
                 messages = [*base_messages, *new_user_messages]
 
-            def _persist_thread_batch(step_messages: list[dict]) -> None:
+            async def _persist_thread_batch(step_messages: list[dict]) -> None:
                 if is_persist_discarded(state):
                     return
                 # Persist notes from in-memory state into thread meta.
@@ -466,7 +522,7 @@ class AgentExecutor:
                     thread_session.meta["last_backend_response_id"] = (
                         last_backend_response_id
                     )
-                thread_session.persist_batch(
+                await thread_session.apersist_batch(
                     step_messages, previous_response_id=state.previous_response_id
                 )
 
@@ -526,10 +582,10 @@ class AgentExecutor:
                     else None
                 ),
                 mark_finalizing=(
-                    lambda active: set_tui_finalizing(thread_session, active)
+                    lambda active: aset_tui_finalizing(thread_session, active)
                 ),
                 mark_finish_gate_checking=(
-                    lambda active: set_tui_finish_gate_checking(thread_session, active)
+                    lambda active: aset_tui_finish_gate_checking(thread_session, active)
                 ),
             )
             self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
@@ -541,14 +597,14 @@ class AgentExecutor:
                 )
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 persist_tool_usage_notice_state(state, thread_session.meta)
-                thread_session.persist_batch(
+                await thread_session.apersist_batch(
                     [], previous_response_id=state.previous_response_id
                 )
                 _run_trace_id = trace_id_from_config(config_dict)
                 if _run_trace_id:
                     # После persist_batch: он пересобирает мету с диска, поэтому
                     # запись должна быть последней, иначе её затрёт.
-                    _append_trace_id_to_meta(thread_session, _run_trace_id, logger)
+                    await _aappend_trace_id_to_meta(thread_session, _run_trace_id, logger)
         finally:
             # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.

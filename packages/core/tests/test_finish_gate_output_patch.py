@@ -59,7 +59,7 @@ def test_apply_finish_gate_decision_reject_marks_output_not_ok():
     assert "Dialog turn finished" not in patched
 
 
-def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
+async def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
     state = _make_state()
     call_id = "call_finish"
     raw = SubmitSolution.output_from_cycle_stop_arguments(
@@ -93,7 +93,7 @@ def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
         feedback_for_agent="",
     )
     decision = FinishGateDecision(outcome="accept", validation=validation)
-    ok = apply_finish_gate_to_turn_finish_output_in_state(
+    ok = await apply_finish_gate_to_turn_finish_output_in_state(
         state=state,
         finish_call_id=call_id,
         decision=decision,
