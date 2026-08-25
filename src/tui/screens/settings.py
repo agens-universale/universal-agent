@@ -50,7 +50,7 @@ _FOOTERS = {
     _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · PgUp/PgDn — секции · Esc",
     _MODES: "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню",
     _UPDATE: "↑/↓ · Enter — выполнить · PgUp/PgDn — секции · Esc — меню",
-    _PROFILES: "↑/↓ — выбор  ·  Enter — активировать  ·  PgUp/PgDn — секции  ·  Esc — меню",
+    _PROFILES: "↑/↓ — выбор  ·  Space — активировать  ·  PgUp/PgDn — секции  ·  Esc — меню",
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
 # Раскрытый пресет-лист адреса забирает клавиши себе — футер на это время становится
@@ -81,6 +81,16 @@ _FOOTER_CONNECTION_FIELD = ("Enter — сохранить  ·  "
 # «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Enter —
 # активировать» там, где Enter (и ←/→) на самом деле переключают уровень —
 # ложь того же рода, что нашёл финальный обзор 2026-08-06, D.
+# Строка «— без профиля» — не объект, а действие «снять текущий выбор», и глагол
+# у неё СВОЙ. Общий футер секции обещал здесь «активировать», пока подсказка под
+# списком в том же кадре говорила «деактивировать»; курсор при входе в секцию
+# стоит ровно на этой строке, так что противоречие было первым, что видит глаз.
+# Тот же позиционный приём, что у «Подключения» (_FOOTER_CONNECTION_FIELD).
+_FOOTER_PROFILES_NONE = ("↑/↓ — выбор  ·  Space — деактивировать  ·  "
+                         "PgUp/PgDn — секции  ·  Esc — меню")
+# Профиль не выбран — снимать нечего, и футер молчит о действии вовсе: обещать
+# «деактивировать» там, где деактивировать некого, — та же ложь другим глаголом.
+_FOOTER_PROFILES_NONE_EMPTY = "↑/↓ — выбор  ·  PgUp/PgDn — секции  ·  Esc — меню"
 _FOOTER_PROFILES_LEVEL = ("↑/↓ — выбор  ·  ←/→/Enter — переключить  ·  "
                           "PgUp/PgDn — секции  ·  Esc — меню")
 # Курсор на токене и есть что стирать. Сегмент занимает место «Alt+↓ — показать
@@ -225,7 +235,12 @@ class SettingsScreen(Screen):
             return (_FOOTER_CONNECTION_TOKEN if self._connection_can_clear_token()
                     else _FOOTER_CONNECTION_FIELD)
         if self._view == _PROFILES:
-            return _FOOTER_PROFILES_LEVEL if self._profiles_on_level_row() else _FOOTERS[_PROFILES]
+            if self._profiles_on_level_row():
+                return _FOOTER_PROFILES_LEVEL
+            if self._profiles_on_none_row():
+                return (_FOOTER_PROFILES_NONE if (self._config.get("profile") or None)
+                        else _FOOTER_PROFILES_NONE_EMPTY)
+            return _FOOTERS[_PROFILES]
         return _FOOTERS.get(self._view, _FOOTER_READONLY)
 
     def _connection_editor(self):
@@ -1306,6 +1321,15 @@ class SettingsScreen(Screen):
         rows = self._profiles_rows()
         return bool(rows) and self._profiles_idx == len(rows) - 1
 
+    def _profiles_on_none_row(self) -> bool:
+        """Курсор — на строке «— без профиля». У неё свой глагол (снять выбор) и
+        своё пустое состояние (снимать нечего), поэтому футер тоже свой."""
+        rows = self._profiles_rows()
+        if not rows:
+            return False
+        idx = min(self._profiles_idx, len(rows) - 1)
+        return rows[idx]["kind"] == "none"
+
     def _project_config_candidate_path(self):
         from config_modules.env_vars import project_gc_dir
         return project_gc_dir() / "config.yml"
@@ -1644,11 +1668,11 @@ class SettingsScreen(Screen):
         if row["kind"] == "none":
             if (self._config.get("profile") or None) is None:
                 return "профиль не выбран — действует чистый конфиг"
-            return f"Enter — деактивировать (запись: {self._deactivation_target()})"
+            return f"Space — деактивировать (запись: {self._deactivation_target()})"
         name, ref = row["name"], row["ref"]
         lines = [str(ref.path)]
         target = self._profile_activation_target(ref)
-        lines.append(f"Enter — активировать (запись: {target})")
+        lines.append(f"Space — активировать (запись: {target})")
         if row.get("shadow") is not None:
             lines.append(f"тёзка перекрыта: {row['shadow'].path}")
         if self._project_sets_profile_pointer() and (self._config.get("profile") or None) == name \
@@ -2608,10 +2632,16 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._level_apply(-1 if event.key == "left" else 1)
                 return
-            if event.key == "enter":
+            # Space — канон базы для смены состояния (MCP «вкл/выкл», отметка в
+            # post-update), и активация профиля именно она. Enter остаётся тихим
+            # алиасом: пока в волне A внутрь профиля входить некуда, отнимать
+            # привычную клавишу не за что — но и обещать её футером нельзя, иначе
+            # закрепим расклад, который сменится вместе с редактором профиля.
+            if event.key in ("space", "enter"):
                 event.stop()
                 if row["kind"] == "level":
-                    self._level_apply(1)
+                    if event.key == "enter":
+                        self._level_apply(1)
                 elif row["kind"] == "profile":
                     self._activate_profile(row["name"], row["ref"])
                 elif row["kind"] == "none":

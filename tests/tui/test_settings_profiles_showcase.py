@@ -385,7 +385,7 @@ async def test_profiles_hint_shows_path_and_activation_target(tmp_path, monkeypa
             i for i, r in enumerate(rows) if r["kind"] == "profile")
         hint = scr._profiles_hint_text(rows)
         assert str(profile_path) in hint
-        assert f"Enter — активировать (запись: {base_cfg})" in hint
+        assert f"Space — активировать (запись: {base_cfg})" in hint
 
 
 # --- shadow-hint в «Подключение»/«Модель» ---
@@ -718,7 +718,7 @@ async def test_deactivate_writes_empty_pointer_to_base_config(tmp_path, monkeypa
         rows = scr._profiles_rows()
         assert rows[0]["kind"] == "none"
         hint_before = scr._profiles_hint_text(rows)
-        assert f"Enter — деактивировать (запись: {base_cfg}" in hint_before
+        assert f"Space — деактивировать (запись: {base_cfg}" in hint_before
         scr._deactivate_profile()
         import yaml
         saved = yaml.safe_load(base_cfg.read_text(encoding="utf-8"))
@@ -1227,7 +1227,7 @@ async def test_level_row_matches_mode_row_grammar(tmp_path, monkeypatch):
 
 async def test_profiles_footer_is_positional_toggle_hint_on_level_row(tmp_path, monkeypatch):
     """Футер секции — позиционный (канон `_CONNECTION`): на строке профиля/«без
-    профиля» — прежний «Enter — активировать», на строке уровня — вариант с
+    профиля» — глагол активации, на строке уровня — вариант с
     «←/→/Enter — переключить»."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
@@ -1247,7 +1247,7 @@ async def test_profiles_footer_is_positional_toggle_hint_on_level_row(tmp_path, 
         scr._render_view()
         await pilot.pause()
         footer_on_profile = str(scr.query_one("#set-footer", Static).render())
-        assert "Enter — активировать" in footer_on_profile
+        assert "Space — активировать" in footer_on_profile
         assert "←/→/Enter — переключить" not in footer_on_profile
 
         scr._profiles_idx = len(rows) - 1
@@ -1255,4 +1255,135 @@ async def test_profiles_footer_is_positional_toggle_hint_on_level_row(tmp_path, 
         await pilot.pause()
         footer_on_level = str(scr.query_one("#set-footer", Static).render())
         assert "←/→/Enter — переключить" in footer_on_level
-        assert "Enter — активировать" not in footer_on_level
+        assert "Space — активировать" not in footer_on_level
+
+
+# --- Клавиша активации: Space (канон базы), Enter — тихий алиас -----------------
+
+async def _cursor_to(scr, kind, name=None):
+    """Курсор на строку нужного вида, с перерисовкой."""
+    rows = scr._profiles_rows()
+    scr._profiles_idx = next(
+        i for i, r in enumerate(rows)
+        if r["kind"] == kind and (name is None or r.get("name") == name))
+    scr._render_view()
+
+
+async def test_profiles_footer_promises_space_not_enter(tmp_path, monkeypatch):
+    """Активация профиля — смена состояния, и по канону базы это Space (так же
+    у MCP «вкл/выкл» и у отметки в post-update). Enter в базе значит «войти
+    внутрь», поэтому глаголом активации футер его больше не называет."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "profile")
+        await pilot.pause()
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert "Space — активировать" in footer
+        assert "Enter — активировать" not in footer
+
+
+async def test_profiles_footer_on_none_row_names_deactivation(tmp_path, monkeypatch):
+    """Строка «— без профиля» при АКТИВНОМ профиле снимает его — футер обязан
+    называть это своим глаголом. Раньше он обещал «активировать», а подсказка в
+    том же кадре говорила «деактивировать»: курсор при входе в секцию стоит
+    ровно здесь, так что первое, что видел пользователь, было противоречие."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    cfg = _base_dict()
+    cfg["profile"] = "home"
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=cfg, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "none")
+        await pilot.pause()
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert "Space — деактивировать" in footer
+        assert "активировать  " not in footer.replace("деактивировать", "")
+
+
+async def test_profiles_footer_on_none_row_is_silent_with_nothing_to_undo(tmp_path, monkeypatch):
+    """Профиль не выбран — на этой строке делать нечего, и футер молчит о
+    действии вовсе. Обещать «деактивировать» там, где деактивировать некого, —
+    та же ложь, только с другим глаголом."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "none")
+        await pilot.pause()
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert "активировать" not in footer          # ни с приставкой, ни без
+        assert "↑/↓ — выбор" in footer and "Esc — меню" in footer
+
+
+async def test_space_activates_profile(tmp_path, monkeypatch):
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "profile", "home")
+        await pilot.pause()
+        await pilot.press("space")
+        await pilot.pause(0.1)
+        assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_enter_still_activates_as_quiet_alias(tmp_path, monkeypatch):
+    """Enter продолжает активировать, но футер о нём молчит: пока волна B не
+    привезла «вход в профиль», отнимать привычную клавишу не за что, а обещать
+    её — значит закреплять расклад, который вот-вот сменится."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "profile", "home")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
