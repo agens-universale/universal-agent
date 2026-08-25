@@ -350,6 +350,9 @@ class TraceScreen(Screen):
         # Конфиг перечитали посреди записи: рвать её нельзя, а кэш flow уже протух —
         # снимем его, когда запись кончится (см. config_reloaded / _on_voice_state).
         self._voice_flow_stale: bool = False
+        # Идёт проверка живости батарейки или её подъём (воркеры Ctrl+T): второй такой
+        # же по повторному нажатию не заводим.
+        self._voice_service_pending: bool = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -758,7 +761,78 @@ class TraceScreen(Screen):
                 severity="warning",
             )
             return
+        if self._voice_local_mode():
+            # Локальный сервис мог умереть после старта TUI: OOM, `gc-voice stop` из
+            # соседнего окна, ручной kill, гонка light-switch. `ensure_voice_service`
+            # зовут только при старте и из экранов настройки, поэтому выхода из этого
+            # состояния не было вовсе — Ctrl+T записывал в пустоту и терял надиктованное
+            # на распознавании (находка ревью коллеги). Проверяем ПЕРЕД записью.
+            self._start_recording_after_service_check()
+            return
         self._ensure_voice_flow().toggle()
+
+    def _voice_local_mode(self) -> bool:
+        """Голос настроен на нашу батарейку (а не на облачный endpoint).
+
+        Дёшево и без сети: `status_cheap` смотрит state.json и конфиг."""
+        try:
+            from tui.services.voice_setup import status_cheap
+            cfg = getattr(self.app, "_config", None) or {}
+            return status_cheap(cfg).mode == "local"
+        except Exception:
+            return False
+
+    def _start_recording_after_service_check(self) -> None:
+        """Померить порт ФОНОМ и по результату начать запись либо поднять сервис.
+
+        Проверка дешёвая (TCP-connect на loopback), но на мёртвом порту сгорает полным
+        таймаутом — в UI-потоке это заметный фриз, поэтому воркер (канон живости
+        `/settings`). Подъём тем более: холодный старт — до полутора минут."""
+        if self._voice_service_pending:
+            return                      # проверка/подъём уже идут — второй не заводим
+        self._voice_service_pending = True
+
+        def _work() -> None:
+            from tui.services.voice_setup import probe_alive
+            try:
+                alive = probe_alive()
+            except Exception:
+                alive = None
+            self.app.call_from_thread(self._on_voice_service_checked, alive)
+
+        self.run_worker(_work, thread=True, name="voice-service-check")
+
+    def _on_voice_service_checked(self, alive) -> None:
+        self._voice_service_pending = False
+        if alive:
+            self._ensure_voice_flow().toggle()
+            return
+        self.notify("голосовой сервис не отвечает — поднимаю…", severity="warning")
+        self._raise_voice_service()
+
+    def _raise_voice_service(self) -> None:
+        """Поднять батарейку фоном. Запись не начинаем сами: холодный старт долгий, и
+        человек за это время успевает уйти — зовём его обратно тостом."""
+        self._voice_service_pending = True
+        cfg = getattr(self.app, "_config", None) or {}
+
+        def _work() -> None:
+            from voice_runtime.autostart import ensure_voice_service
+            try:
+                ok = ensure_voice_service(cfg)
+            except Exception:
+                ok = False
+            self.app.call_from_thread(self._on_voice_service_raised, ok)
+
+        self.run_worker(_work, thread=True, name="voice-service-raise")
+
+    def _on_voice_service_raised(self, ok: bool) -> None:
+        self._voice_service_pending = False
+        if ok:
+            self.notify("голосовой сервис поднят — можно диктовать", severity="information")
+        else:
+            self.notify("не удалось поднять голосовой сервис — `gc-voice status` покажет,"
+                        " что с ним", severity="warning")
 
     def _voice_footer_render(self):
         """Пилюля + dim-хвост клавиш (хвост — только на записи)."""
