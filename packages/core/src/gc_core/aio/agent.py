@@ -39,6 +39,16 @@ class AsyncAgent:
         ``on_stream_delta`` — необязательный «второй слушатель»: дельты и так
         уходят в очередь для ``stream()``, но приложению бывает нужен ещё и
         свой sink (лог, метрика).
+
+        ``tools_cache`` (через ``context_kwargs``) — ``ToolsCache``, которым
+        владеет приложение. Самая дорогая часть старта — MCP-дискавери
+        (866–1405 мс на реальном конфиге); один агент платит её один раз, но
+        приложение, поднимающее агентов пачками, заплатит за каждого. Общий
+        кэш снимает это, и он же достаётся субагентам через ``ctx``::
+
+            cache = ToolsCache(config_dict)
+            a1 = await AsyncAgent.create(cfg, tools_cache=cache)
+            a2 = await AsyncAgent.create(cfg, tools_cache=cache)   # уже бесплатно
         """
         queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()

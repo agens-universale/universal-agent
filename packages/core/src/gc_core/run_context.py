@@ -64,6 +64,10 @@ class RunContext:
     ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    # ToolsCache этого контекста, если владелец его передал. Лежит здесь, чтобы
+    # субагенты (они пересобирают tools_data на каждый спавн) брали готовое, а не
+    # ходили в дискавери заново.
+    tools_cache: Any = None
     # Владелец живых MCP-сессий этого контекста (см. gc_core.mcp_session_owner).
     # По нему ``arun`` понимает, ЧТО ему закрывать на выходе, и не сносит
     # сессии параллельных агентов. Пустая строка — контекст собран в обход
@@ -83,13 +87,16 @@ def create_run_context(
     on_stream_delta=None,
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
     is_tui: bool = False,
+    tools_cache: Any = None,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
 
-    - Тулы (tools_data, tools_spec, tools_description) кэшируются по ключу
-      от config_dict, чтобы не пересобирать реестры при каждом запуске
-      с одним и тем же конфигом.
+    - Тулы (tools_data, tools_spec, tools_description) собираются заново на
+      каждый вызов. Кэш MCP-дискавери есть, но им ВЛАДЕЕТ ВЫЗЫВАЮЩИЙ: передайте
+      ``tools_cache=ToolsCache(...)``, и повторные сборки с тем же набором
+      ``mcp-servers`` перестанут ходить в сеть (866–1405 мс на реальном
+      конфиге). Не передали — поведение прежнее, каждая сборка платит полностью.
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
@@ -122,6 +129,7 @@ def create_run_context(
             os_backend=backend,
             skills_registry=skills_registry,
             logger=run_logger,
+            tools_cache=tools_cache,
         )
 
     run_logger.info(
@@ -186,6 +194,7 @@ def create_run_context(
         on_stream_delta=on_stream_delta,
         on_messages_evicted=on_messages_evicted,
         mcp_session_owner=mcp_session_owner,
+        tools_cache=tools_cache,
     )
     ctx.is_tui = bool(is_tui)
 
@@ -223,10 +232,16 @@ async def acreate_run_context(config_dict: Dict[str, Any], **kwargs: Any) -> Run
     дедлайном. Именно её TUI прячет в фоновый поток (``AgentRunner.warm``), а
     асинхронному вызывающему достаточно ``await``.
 
-    Пока это ``to_thread`` над синхронной сборкой: MCP-клиент внутри всё ещё
-    синхронный (его переезд — отдельная задача плана). Для вызывающего разницы
-    нет — loop свободен; когда клиент станет асинхронным, тело поменяется, а
-    контракт останется.
+    Пока это ``to_thread`` над синхронной сборкой — но НЕ потому, что MCP-клиент
+    синхронный: SDK-транспорты (``stream_*``) и одноразовый stdio давно нативно
+    асинхронны. Синхронными остались только легаси ``http``/``sse`` (sync
+    ``httpx.Client``) и persistent stdio (``Popen``, осознанно — сессия делится
+    между loop'ами). Их и ждёт ``to_thread``.
+
+    Цена нынешней формы измерена: 8 event loop'ов и пик в 10 потоков на одну
+    сборку против 1 loop и 5 потоков у прототипа с нативным await, при той же
+    латентности. Для вызывающего разницы нет — loop свободен; когда дискавери
+    станет асинхронной насквозь, тело поменяется, а контракт останется.
     """
     import asyncio
 

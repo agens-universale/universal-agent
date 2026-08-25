@@ -4,7 +4,7 @@
 """
 import copy
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from gc_core.tools.connect_mcp.api import acall_mcp_tool, call_mcp_tool
 from gc_core.tools.connect_mcp.registry import ToolsCache
@@ -426,12 +426,26 @@ def _servers_cfg_with_trace(
 def get_mcp_tools_data_for_config(
     config_dict: Dict[str, Any],
     on_progress=None,
+    *,
+    tools_cache: Optional[ToolsCache] = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """
     Собрать словарь MCP-инструментов в формате tools_data для заданного config_dict.
 
     Возвращает `(tools_data, status_map)`, где `status_map` — per-server статус
     дискавери из `ToolsCache.get_status()`.
+
+    ``tools_cache`` — кэш, которым владеет ВЫЗЫВАЮЩИЙ. Не передан — заводится
+    свой, одноразовый: ровно прежнее поведение, каждая сборка платит полную
+    дискавери (866–1405 мс на реальном конфиге). Передан — попадания считаются
+    по ``mcp-servers`` и TTL, и повторные сборки уже бесплатны.
+
+    Кэш прокидывается, а не сделан процессным синглтоном, намеренно. Такой
+    синглтон мы только что лечили в другом месте: ``PersistentStdioRegistry``
+    был общим на процесс, и первый доигравший агент закрывал сессии остальных.
+    У глобального кэша те же три беды — скрытое время жизни (никто не владеет,
+    некому чистить), протечка между арендаторами сервера с разными наборами
+    серверов, и переживание между тестами.
     """
     servers_cfg = config_dict.get("mcp-servers") or {}
     if not servers_cfg:
@@ -447,7 +461,14 @@ def get_mcp_tools_data_for_config(
         "use_retry": bool(config_dict.get("use_retry", False)),
     }
 
-    tools_cache = ToolsCache(cfg)
+    if tools_cache is None:
+        tools_cache = ToolsCache(cfg)
+    else:
+        # Чужой кэш адресуется по СОДЕРЖИМОМУ mcp-servers (_make_cache_key), а
+        # cfg здесь пересобран из config_dict — поэтому обновляем ссылку, чтобы
+        # ключ считался от актуального набора серверов, а не от того, с которым
+        # кэш когда-то создали.
+        tools_cache.rebind(cfg)
 
     try:
         mcp_registry = tools_cache.get_tools(on_progress=on_progress)

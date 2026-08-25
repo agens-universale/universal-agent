@@ -174,10 +174,19 @@ def build_tools_data(
     os_backend: FsBackend | None = None,
     skills_registry: SkillsRegistry | None = None,
     logger: Any = None,
+    tools_cache: Any = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """
     Собрать единый словарь tools_data и производные списки spec/description
     на основе config_dict.
+
+    ``tools_cache`` — ``ToolsCache`` вызывающего. Не передан — MCP-дискавери
+    выполняется заново (866–1405 мс на реальном конфиге). Передан — второй и
+    последующие вызовы с тем же набором ``mcp-servers`` берут готовое.
+
+    Кому это важно на практике: сервер собирает контекст НА КАЖДЫЙ POST, а
+    субагент — НА КАЖДЫЙ СПАВН, причём прямо на event loop (замер: 993 мс
+    заморозки). Обоим достаточно передать сюда один кэш.
     """
     tools_data: Dict[str, Dict[str, Any]] = {}
 
@@ -190,7 +199,9 @@ def build_tools_data(
     for k, v in skills_tools_data.items():
         tools_data[k] = v
 
-    mcp_tools_data, mcp_status = get_mcp_tools_data(config_dict, on_progress=on_progress)
+    mcp_tools_data, mcp_status = get_mcp_tools_data(
+        config_dict, on_progress=on_progress, tools_cache=tools_cache
+    )
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 

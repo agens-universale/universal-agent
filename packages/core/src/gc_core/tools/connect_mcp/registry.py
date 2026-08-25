@@ -437,6 +437,20 @@ class ToolsCache:
         self._cache_key: Optional[str] = None
         self._status: Dict[str, Dict[str, Any]] = {}
 
+    def rebind(self, cfg: Dict[str, Any]) -> None:
+        """Переключить кэш на новый config-словарь, СОХРАНИВ содержимое.
+
+        Нужно, когда кэшем владеет вызывающий (см. ``get_mcp_tools_data_for_config``):
+        каждая сборка контекста пересобирает ``cfg`` заново, и без этого кэш
+        считал бы TTL и таймаут по словарю, с которым его когда-то создали.
+
+        Данные НЕ сбрасываем: попадание определяется ключом от содержимого
+        ``mcp-servers`` (``_make_cache_key``), а не тождеством словаря. Набор
+        серверов не поменялся — кэш валиден; поменялся — ``_is_valid`` увидит
+        расхождение ключа и сходит в дискавери сам.
+        """
+        self._config = cfg
+
     def _discovery_timeout(self) -> int:
         meta = self._config.get("mcp-meta")
         v = meta.get("discovery_timeout_sec") if isinstance(meta, dict) else None

@@ -15,7 +15,7 @@ def test_get_mcp_tools_data_returns_status(monkeypatch):
 
 
 def test_build_tools_data_returns_mcp_status(monkeypatch):
-    def fake_mcp(config_dict, on_progress=None):
+    def fake_mcp(config_dict, on_progress=None, **_kw):
         return ({}, {"x": {"status": "connected", "reason": None, "tool_count": 0, "elapsed_ms": 1}})
     monkeypatch.setattr(tools_pkg, "get_mcp_tools_data", fake_mcp)
     result = tools_pkg.build_tools_data({"mcp-servers": {"x": {"transport": "stdio", "command": "x"}}})

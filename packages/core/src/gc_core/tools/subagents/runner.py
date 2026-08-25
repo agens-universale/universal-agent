@@ -528,6 +528,11 @@ class SubagentRunner:
             child_config,
             os_backend=parent_backend,
             logger=getattr(self._ctx, "logger", None),
+            # Кэш родителя: без него КАЖДЫЙ спавн субагента заново гонит
+            # MCP-дискавери, и делает это прямо на event loop (замер: 993 мс
+            # заморозки, ~2 с на спавн). Набор mcp-servers у ребёнка тот же —
+            # ключ кэша совпадает, попадание гарантировано.
+            tools_cache=getattr(self._ctx, "tools_cache", None),
         )
         child_system_prompt = self._resolve_subagent_system_prompt()
 
@@ -657,6 +662,9 @@ class SubagentRunner:
             os_backend=parent_backend,
             skills_registry=child_skills_registry,
             logger=child_logger,
+            # Кэш родителя — см. соседний вызов выше: иначе дискавери на каждый
+            # спавн, и прямо на event loop.
+            tools_cache=getattr(self._ctx, "tools_cache", None),
         )
 
         child_ctx = RunContext(
@@ -680,6 +688,9 @@ class SubagentRunner:
             workspace=parent_workspace,
             environment=getattr(self._ctx, "environment", None),
             project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),
+            # Кэш едет дальше вниз: иначе внуки (субагент субагента) снова
+            # платили бы полную дискавери на каждый спавн.
+            tools_cache=getattr(self._ctx, "tools_cache", None),
         )
         # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
         # иначе child process_tool_calls видит оба флага False и collect выключается.

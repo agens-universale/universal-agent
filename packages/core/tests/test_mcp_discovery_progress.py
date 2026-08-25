@@ -38,7 +38,7 @@ def test_on_progress_threads_through_build_tools_data(monkeypatch):
     from gc_core import tools as tools_pkg
     captured = {}
 
-    def fake_get_mcp(config_dict, on_progress=None):
+    def fake_get_mcp(config_dict, on_progress=None, **_kw):
         if on_progress:
             on_progress("srv", {"status": "connected"})
         return ({}, {})
