@@ -37,6 +37,7 @@ _LOGGING_SYNC_KEYS = (
     "console_trace",
     "save_logs",
     "logging_format",
+    "logging_propagate",
     "log_level",
 )
 
@@ -307,6 +308,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "console_trace": app_cfg.logging.console_trace,
         "save_logs": app_cfg.logging.save_logs,
         "logging_format": app_cfg.logging.format,
+        "logging_propagate": app_cfg.logging.propagate,
         "log_level": app_cfg.logging.log_level,
         "redact_secrets": app_cfg.logging.redact_secrets.model_dump(),
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,

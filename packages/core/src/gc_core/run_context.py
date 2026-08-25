@@ -88,6 +88,7 @@ def create_run_context(
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
     is_tui: bool = False,
     tools_cache: Any = None,
+    log_handlers: Any = None,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -104,7 +105,7 @@ def create_run_context(
     """
     prep = _prepare_run_context(
         config_dict, run_id=run_id, environment=environment, loop=loop,
-        os_backend=os_backend,
+        os_backend=os_backend, log_handlers=log_handlers,
     )
     with use_owner(prep.mcp_session_owner):
         tools = build_tools_data(
@@ -136,13 +137,14 @@ async def _acreate_run_context_impl(
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
     is_tui: bool = False,
     tools_cache: Any = None,
+    log_handlers: Any = None,
 ) -> RunContext:
     """Тело асинхронной сборки: то же, что синхронное, но дискавери — await."""
     from gc_core.tools import abuild_tools_data
 
     prep = _prepare_run_context(
         config_dict, run_id=run_id, environment=environment, loop=loop,
-        os_backend=os_backend,
+        os_backend=os_backend, log_handlers=log_handlers,
     )
     with use_owner(prep.mcp_session_owner):
         tools = await abuild_tools_data(
@@ -181,6 +183,7 @@ def _prepare_run_context(
     environment: Optional[Any],
     loop: Optional[Any],
     os_backend: Optional[FsBackend],
+    log_handlers: Any = None,
 ) -> _RunContextPrep:
     """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
 
@@ -197,7 +200,8 @@ def _prepare_run_context(
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
     # зависит лишь от config_dict и run_id, поэтому порядок безопасен.
     run_logger, logging_path, summary_trace_path = create_run_logger(
-        config_dict, run_id=effective_run_id, agent_kind="main"
+        config_dict, run_id=effective_run_id, agent_kind="main",
+        log_handlers=log_handlers,
     )
     # Токен владельца MCP-сессий рождается здесь и живёт столько же, сколько
     # контекст. Дискавери поднимает сессии прямо сейчас, поэтому она обязана
