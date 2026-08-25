@@ -58,7 +58,7 @@ def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub)
         captured["non_system"] = without_system_messages(list(st.messages))
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", capture)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", capture)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
@@ -84,7 +84,7 @@ def test_suffix_mismatch_returns_without_changing_state(monkeypatch, ctx_stub):
     def boom(**_kwargs):
         raise AssertionError("compaction must not run")
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", boom)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -111,7 +111,7 @@ def test_suffix_match_runs_and_restores_even_if_compaction_raises(monkeypatch, c
     def fail(**_kwargs):
         raise RuntimeError("compaction simulated failure")
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", fail)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", fail)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
@@ -139,7 +139,7 @@ def test_current_messages_inplace_replaced_after_hook(monkeypatch, ctx_stub):
         st = kwargs["state"]
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
@@ -168,7 +168,7 @@ def test_no_orphan_outputs_in_current_after_function_call_output(monkeypatch, ct
         st = kwargs["state"]
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
@@ -197,7 +197,7 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
         st = kwargs["state"]
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
     _patch_save_thread_meta(monkeypatch)
 
@@ -218,7 +218,7 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
 
 
 def test_persist_skipped_when_preserved_batch_empty(monkeypatch, ctx_stub):
-    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **_k: None)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", lambda **_k: None)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
     _patch_save_thread_meta(monkeypatch)
 
@@ -248,7 +248,7 @@ def test_function_call_output_clears_current_when_preservation_empty(monkeypatch
         st = kwargs["state"]
         st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     coord = RunSummaryCoordinator(

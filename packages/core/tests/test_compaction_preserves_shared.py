@@ -59,7 +59,7 @@ class CompactionPreservesSharedTest(unittest.TestCase):
         captured: dict = {}
 
         with patch(
-            "gc_core.summarize.compaction.summarize_dialog_via_chat_completions", _fake_summarize
+            "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions", _fake_summarize
         ), patch(
             "gc_core.summarize.compaction.apply_summary_state_patch",
             lambda **_kw: "dialog-body",

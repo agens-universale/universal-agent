@@ -18,7 +18,7 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     class _Coord:
         def __init__(self, **kw):
             captured["coord_state"] = kw["state"]
-        def force_compact_once(self, **kw):
+        async def aforce_compact_once(self, **kw):
             captured["forced"] = True
         def on_summary_applied(self, ev):
             pass
@@ -114,7 +114,7 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
 
     class _Coord:
         def __init__(self, **kw): self.state = kw["state"]
-        def force_compact_once(self, **kw):
+        async def aforce_compact_once(self, **kw):
             # имитируем summary LLM-вызов внутри компакции
             self.state.usage.add("summary", 30000, 500)
         def on_summary_applied(self, ev): pass
@@ -142,7 +142,7 @@ def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
 
     class _Coord:
         def __init__(self, **kw): self.state = kw["state"]
-        def force_compact_once(self, **kw):
+        async def aforce_compact_once(self, **kw):
             self.state.usage.add("summary", 30000, 500)
         def on_summary_applied(self, ev): pass
 

@@ -56,7 +56,7 @@ def test_short_prose_recorded_raw_as_is():
 
 
 def test_long_prose_recorded_as_summary(monkeypatch):
-    monkeypatch.setattr(fa, "summarize_final_answer_line", lambda **kw: "SUMMARY LINE")
+    monkeypatch.setattr(fa, "asummarize_final_answer_line", lambda **kw: "SUMMARY LINE")
     state = _FakeState()
     long_text = "x" * 50
     maybe_record_final_answer_intent(
@@ -67,7 +67,7 @@ def test_long_prose_recorded_as_summary(monkeypatch):
 
 
 def test_long_prose_summary_fails_fallback_raw_truncated(monkeypatch):
-    monkeypatch.setattr(fa, "summarize_final_answer_line", lambda **kw: "")
+    monkeypatch.setattr(fa, "asummarize_final_answer_line", lambda **kw: "")
     state = _FakeState()
     long_text = "y" * 50
     maybe_record_final_answer_intent(
@@ -80,7 +80,7 @@ def test_long_prose_summary_fails_fallback_raw_truncated(monkeypatch):
 
 
 def test_long_prose_summary_fails_no_fallback_skips(monkeypatch):
-    monkeypatch.setattr(fa, "summarize_final_answer_line", lambda **kw: "")
+    monkeypatch.setattr(fa, "asummarize_final_answer_line", lambda **kw: "")
     state = _FakeState()
     maybe_record_final_answer_intent(
         assistant_text="z" * 50,
@@ -113,7 +113,7 @@ def test_dedup_same_short_prose_once():
 
 
 def test_threshold_zero_routes_to_summary(monkeypatch):
-    monkeypatch.setattr(fa, "summarize_final_answer_line", lambda **kw: "S")
+    monkeypatch.setattr(fa, "asummarize_final_answer_line", lambda **kw: "S")
     state = _FakeState()
     maybe_record_final_answer_intent(
         assistant_text="hi", state=state, ctx=_FakeCtx(_FakeScope(threshold=0))

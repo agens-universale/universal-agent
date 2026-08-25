@@ -86,7 +86,7 @@ def test_hook_skipped_when_tools_empty():
 
 def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
         lambda **kwargs: "User confirmed option B.",
     )
     state = _make_state()
@@ -106,7 +106,7 @@ def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
 
 def test_hook_raw_truncates_oversized_output(monkeypatch):
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
     )
     state = _make_state()
@@ -228,7 +228,7 @@ def test_finish_gate_reject_submit_in_current_without_flush():
 
 def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
     )
     state = _make_state()
@@ -253,7 +253,7 @@ def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
 
 def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
     )
     state = _make_state()
@@ -282,7 +282,7 @@ def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
 
 def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch):
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
         lambda **kwargs: "",
     )
     state = _make_state()
@@ -306,7 +306,7 @@ def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch
 
 def test_hook_dedup_within_current(monkeypatch):
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
         lambda **kwargs: "same line",
     )
     state = _make_state()

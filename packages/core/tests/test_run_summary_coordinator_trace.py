@@ -84,7 +84,7 @@ def test_pre_run_compact_swallows_exceptions(monkeypatch, coordinator_ctx):
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
     monkeypatch.setattr(
         rsc,
-        "run_summary_compaction",
+        "arun_summary_compaction",
         lambda **_k: (_ for _ in ()).throw(RuntimeError("summary boom")),
     )
 

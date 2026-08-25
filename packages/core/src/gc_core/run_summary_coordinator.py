@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import inspect
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
 from gc_core.summarize.compaction import (
+    arun_summary_compaction,
     history_exceeds_summary_trigger,
-    run_summary_compaction,
 )
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
@@ -34,6 +35,17 @@ _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 
 # Страховка pre_run: в штате хватает 1 прохода; лимит на случай «лапши», которая после сжатия всё ещё выше порога.
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
+
+
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. compaction._maybe_await.
+
+    ``arun_summary_compaction`` вызывающие и тесты штатно подменяют; форма
+    заглушки (обычная функция или корутинная) — дело подменяющего.
+    """
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def _set_runtime_flag(thread_session, flag: str, active: bool) -> None:
@@ -298,7 +310,14 @@ class RunSummaryCoordinator:
             ),
         )
 
-    def pre_run_compact_if_needed(self, *, trigger_reason: str = "pre_run") -> None:
+    async def apre_run_compact_if_needed(self, *, trigger_reason: str = "pre_run") -> None:
+        """Догнать историю до порога перед стартом run'а.
+
+        Основная и единственная реализация: сетевой шаг внутри
+        ``arun_summary_compaction`` ждётся нативно, поэтому компакция не
+        занимает поток из пула на всё время суммаризации. Синхронное имя
+        ``pre_run_compact_if_needed`` ниже — шим через портал.
+        """
         logger = self._logger
         state = self._state
         if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
@@ -318,14 +337,14 @@ class RunSummaryCoordinator:
                     )
                     break
                 with _summarizing_flag(self._thread_session):
-                    run_summary_compaction(
+                    await _maybe_await(arun_summary_compaction(
                         ctx=self._ctx,
                         state=state,
                         trigger_reason=trigger_reason,
                         is_cli_mode=self._is_cli_mode,
                         on_summary_applied=self.on_summary_applied,
                         trigger_threshold_chars=self._summary_trigger_chars,
-                    )
+                    ))
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             if rounds > 0:
                 gc.collect()
@@ -341,29 +360,50 @@ class RunSummaryCoordinator:
                 summarize_exc,
             )
 
-    def force_compact_once(self, *, trigger_reason: str = "manual") -> None:
+    def pre_run_compact_if_needed(self, *args: Any, **kwargs: Any) -> None:
+        """Синхронный двойник. Реализация одна — асинхронная."""
+        from gc_core.utils.portal import get_portal
+
+        return get_portal().run(self.apre_run_compact_if_needed(*args, **kwargs))
+
+    async def aforce_compact_once(self, *, trigger_reason: str = "manual") -> None:
         """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
-        Та же машинерия, что и автосжатие; персист через on_summary_applied."""
+        Та же машинерия, что и автосжатие; персист через on_summary_applied.
+
+        Основная и единственная реализация; синхронное имя ``force_compact_once``
+        ниже — шим через портал."""
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
         with _summarizing_flag(self._thread_session):
-            run_summary_compaction(
+            await _maybe_await(arun_summary_compaction(
                 ctx=self._ctx,
                 state=state,
                 trigger_reason=trigger_reason,
                 is_cli_mode=self._is_cli_mode,
                 on_summary_applied=self.on_summary_applied,
                 trigger_threshold_chars=self._summary_trigger_chars,
-            )
+            ))
         # C1: старая история отцеплена компакцией — собираем циклический мусор.
         gc.collect()
 
-    def pre_backend_compaction_hook(
+    def force_compact_once(self, *args: Any, **kwargs: Any) -> None:
+        """Синхронный двойник. Реализация одна — асинхронная."""
+        from gc_core.utils.portal import get_portal
+
+        return get_portal().run(self.aforce_compact_once(*args, **kwargs))
+
+    async def apre_backend_compaction_hook(
         self,
         current_messages: list[dict],
         mode: str,
     ) -> None:
+        """Компакция прямо перед вызовом backend'а (основная реализация).
+
+        Уезжает в ``arun_agent`` аргументом ``pre_backend_compaction_hook``:
+        корутинную функцию цикл ждёт нативно, без потока из пула. Синхронное имя
+        ``pre_backend_compaction_hook`` ниже — шим через портал.
+        """
         state = self._state
         if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
             return
@@ -397,14 +437,14 @@ class RunSummaryCoordinator:
         # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
         # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
         with _summarizing_flag(self._thread_session):
-            run_summary_compaction(
+            await _maybe_await(arun_summary_compaction(
                 ctx=self._ctx,
                 state=state,
                 trigger_reason=self._pre_backend_trigger_reason,
                 is_cli_mode=self._is_cli_mode,
                 on_summary_applied=self.on_summary_applied,
                 trigger_threshold_chars=self._summary_trigger_chars,
-            )
+            ))
         msgs = getattr(state, "messages", None)
         if isinstance(msgs, list):
             msgs.extend(preserved_batch)
@@ -420,8 +460,19 @@ class RunSummaryCoordinator:
         # C1: старый хвост current_messages отцеплен — собираем циклический мусор.
         gc.collect()
 
-    def turn_end_compact_if_needed(self) -> None:
-        """Compaction после accept ``turn_finish`` (turn-end trigger)."""
+    def pre_backend_compaction_hook(self, *args: Any, **kwargs: Any) -> None:
+        """Синхронный двойник. Реализация одна — асинхронная."""
+        from gc_core.utils.portal import get_portal
+
+        return get_portal().run(self.apre_backend_compaction_hook(*args, **kwargs))
+
+    async def aturn_end_compact_if_needed(self) -> None:
+        """Compaction после accept ``turn_finish`` (turn-end trigger).
+
+        Основная и единственная реализация; в ``arun_agent`` уезжает аргументом
+        ``turn_end_compaction_hook`` и ждётся нативно. Синхронное имя
+        ``turn_end_compact_if_needed`` ниже — шим через портал.
+        """
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
@@ -436,14 +487,14 @@ class RunSummaryCoordinator:
         logger = self._logger
         try:
             with _summarizing_flag(self._thread_session):
-                run_summary_compaction(
+                await _maybe_await(arun_summary_compaction(
                     ctx=self._ctx,
                     state=state,
                     trigger_reason="turn_end",
                     is_cli_mode=self._is_cli_mode,
                     on_summary_applied=self.on_summary_applied,
                     trigger_threshold_chars=self._turn_end_trigger_chars,
-                )
+                ))
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             gc.collect()
         except Exception as summarize_exc:
@@ -457,3 +508,9 @@ class RunSummaryCoordinator:
                 ),
                 summarize_exc,
             )
+
+    def turn_end_compact_if_needed(self, *args: Any, **kwargs: Any) -> None:
+        """Синхронный двойник. Реализация одна — асинхронная."""
+        from gc_core.utils.portal import get_portal
+
+        return get_portal().run(self.aturn_end_compact_if_needed(*args, **kwargs))

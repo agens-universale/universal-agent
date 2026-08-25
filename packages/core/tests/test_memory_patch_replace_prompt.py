@@ -58,7 +58,7 @@ def test_request_patch_replace_injects_subagent_guidance_in_system_only(monkeypa
         return "<goal>keep</goal>"
 
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_summary_text",
+        "gc_core.summarize.memory_suggestions.arequest_summary_text",
         _fake_summary_text,
     )
     ctx = SimpleNamespace(config_dict={}, logger=None)

@@ -11,8 +11,8 @@ TS = "2026-05-30T11:35:08Z"
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.request_summary_text", fake)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", fake)
 
 
 def _ctx(trigger_chars: int = 1):
@@ -118,7 +118,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         )
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
         monkeypatch.setattr(
-            "gc_core.summarize.memory_suggestions.request_patch_replace",
+            "gc_core.summarize.memory_suggestions.arequest_patch_replace",
             lambda **_k: empty_patch,
         )
 
@@ -210,7 +210,7 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     )
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
         lambda **_k: empty_patch,
     )
 
@@ -244,7 +244,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     )
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
         lambda **_k: empty_patch,
     )
 

@@ -11,14 +11,14 @@ from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 def _patch_chat_completion(monkeypatch, fake):
     """Патчит имя там, где оно связано после `from ... import ...`."""
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.request_summary_text", fake)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", fake)
 
 
 def _patch_memory_patch_empty(monkeypatch):
     empty = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
         lambda **_k: empty,
     )
 
@@ -130,7 +130,7 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
         _fake_replace,
     )
 
@@ -184,7 +184,7 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
 
     state = types.SimpleNamespace(
         default_model="test-model",
@@ -272,7 +272,7 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=4500),
@@ -686,9 +686,9 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(m
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_summary)
     _patch_memory_patch_empty(monkeypatch)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_memory_deltas_format_repair",
+        "gc_core.summarize.memory_suggestions.arequest_memory_deltas_format_repair",
         _fake_repair,
     )
 

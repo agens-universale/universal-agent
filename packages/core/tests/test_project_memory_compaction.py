@@ -92,7 +92,7 @@ def test_compact_text_empty_response():
 def test_compact_text_backend_exception_caught():
     ctx = _make_ctx()
     with patch(
-        "gc_core.project_memory.compaction.request_auxiliary_completion_text",
+        "gc_core.project_memory.compaction.arequest_auxiliary_completion_text",
         side_effect=RuntimeError("network down"),
     ):
         res = compaction.compact_text("text", ctx)

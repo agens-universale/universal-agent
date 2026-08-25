@@ -246,7 +246,7 @@ class TestSidecarChildSummary:
                 }
             )
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.messages = [
                 {"role": "user", "content": "old"},
                 {"role": "user", "content": "new"},
@@ -262,7 +262,8 @@ class TestSidecarChildSummary:
                     "arguments": "{}",
                 },
             )
-            kwargs["pre_backend_compaction_hook"](
+            # Хук корутинный (см. runner.py) — ждём его.
+            await kwargs["pre_backend_compaction_hook"](
                 [{"role": "user", "content": "new"}],
                 "user_ask",
             )
@@ -271,7 +272,7 @@ class TestSidecarChildSummary:
         with (
             patch.object(rsc, "history_exceeds_summary_trigger", return_value=True),
             patch.object(
-                rsc, "run_summary_compaction", side_effect=fake_run_summary_compaction
+                rsc, "arun_summary_compaction", side_effect=fake_run_summary_compaction
             ),
         ):
             runner.run(

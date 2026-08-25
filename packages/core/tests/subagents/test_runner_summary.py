@@ -90,12 +90,13 @@ class TestRunnerSummary:
         def fake_run_summary_compaction(**kwargs):
             calls.append(kwargs.get("trigger_reason"))
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.messages = [
                 {"role": "user", "content": "old"},
                 {"role": "user", "content": "new"},
             ]
-            kwargs["pre_backend_compaction_hook"](
+            # Хук стал корутинным (см. runner.py) — зовём его как корутину.
+            await kwargs["pre_backend_compaction_hook"](
                 [{"role": "user", "content": "new"}],
                 "user_ask",
             )
@@ -110,7 +111,7 @@ class TestRunnerSummary:
             ),
             patch.object(
                 run_summary_coordinator_module,
-                "run_summary_compaction",
+                "arun_summary_compaction",
                 side_effect=fake_run_summary_compaction,
             ),
         ):

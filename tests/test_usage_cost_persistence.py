@@ -38,10 +38,18 @@ class _UsageState:
 
 
 class _Coord:
-    """Координатор-заглушка: force_compact_once — no-op, кумулятив не трогаем."""
+    """Координатор-заглушка: компакция — no-op, кумулятив не трогаем.
+
+    Двойник нужен асинхронный: ``manual_compaction.acompact_thread`` зовёт
+    ``aforce_compact_once``. Синхронное имя оставлено — на нём сидят прямые
+    вызывающие вне цикла.
+    """
 
     def __init__(self, **kw):
         self.state = kw["state"]
+
+    async def aforce_compact_once(self, **kw):
+        pass
 
     def force_compact_once(self, **kw):
         pass

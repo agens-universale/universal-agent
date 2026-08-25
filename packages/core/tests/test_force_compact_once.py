@@ -16,7 +16,7 @@ def _coord(monkeypatch, calls, backend="chat_completions"):
         summary_trigger_chars=10_000, is_cli_mode=True,
         pre_backend_trigger_reason="pre_backend", logger=None,
     )
-    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(rsc, "arun_summary_compaction", lambda **kw: calls.append(kw))
     return coord
 
 

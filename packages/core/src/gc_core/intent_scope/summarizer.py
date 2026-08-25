@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from typing import Any, List
@@ -8,7 +9,7 @@ from gc_core.intent_scope.agent_logging import log_intent_scope_summary_done, lo
 from gc_core.config_modules.intent_scope import IntentScopeConfig
 from gc_core.intent_log.serialize import deserialize_list, records_to_jsonl_lines
 from gc_core.message_format.dialog_history import truncate_text
-from gc_core.summarize.llm import request_summary_text
+from gc_core.summarize.llm import arequest_summary_text
 from gc_core.bundled_assets import bundled_root
 
 _logger = logging.getLogger(__name__)
@@ -21,6 +22,15 @@ _DEFAULT_PROMPT_PATH = os.path.join(
 _DEFAULT_FINAL_ANSWER_PROMPT_PATH = os.path.join(
     _PROJECT_ROOT, "prompts", "intent_scope_final_answer_summary_prompt.md"
 )
+
+
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def _resolve_final_answer_prompt_path(ctx: Any) -> str:
@@ -98,7 +108,7 @@ def _build_user_prompt(
     )
 
 
-def summarize_tool_intent_line(
+async def asummarize_tool_intent_line(
     *,
     ctx: Any,
     state: Any,
@@ -109,6 +119,10 @@ def summarize_tool_intent_line(
 ) -> str:
     """
     LLM extraction of one intent line from raw tool output. Fail-open: returns '' on error.
+
+    Основная (и единственная) реализация. Суммаризация — сетевой вызов на
+    десятки секунд; держать ради него поток из пула незачем, поэтому цикл
+    агента зовёт эту корутину напрямую. Синхронное имя ниже — шим поверх неё.
     """
     log = logger if logger is not None else _logger
     scope_cfg = _scope_cfg(ctx)
@@ -136,13 +150,13 @@ def summarize_tool_intent_line(
     ]
     request_label = f"intent_scope:{tool_name}"
     try:
-        line = request_summary_text(
+        line = await _maybe_await(arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             request_label=request_label,
             logger=log,
-        )
+        ))
     except Exception as exc:
         log.warning(
             "intent_scope summary_failed tool=%s error=%s",
@@ -161,6 +175,14 @@ def summarize_tool_intent_line(
         log, tool_name=tool_name, summary_chars=len(line)
     )
     return line
+
+
+@functools.wraps(asummarize_tool_intent_line)
+def summarize_tool_intent_line(*args: Any, **kwargs: Any) -> str:
+    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(asummarize_tool_intent_line(*args, **kwargs))
 
 
 def build_fallback_aggregated_content(
@@ -183,14 +205,18 @@ def build_fallback_aggregated_content(
     return body
 
 
-def summarize_final_answer_line(
+async def asummarize_final_answer_line(
     *,
     ctx: Any,
     state: Any,
     assistant_text: str,
     logger: Any | None = None,
 ) -> str:
-    """LLM compression of a long final prose answer into 1–3 sentences. Fail-open: '' on error."""
+    """LLM compression of a long final prose answer into 1–3 sentences. Fail-open: '' on error.
+
+    Основная (и единственная) реализация — по тем же причинам, что и у
+    ``asummarize_tool_intent_line``. Синхронное имя ниже — шим поверх неё.
+    """
     log = logger if logger is not None else _logger
     scope_cfg = _scope_cfg(ctx)
     text = str(assistant_text or "").strip()
@@ -213,13 +239,13 @@ def summarize_final_answer_line(
                 ),
             },
         ]
-        line = request_summary_text(
+        line = await _maybe_await(arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             request_label=request_label,
             logger=log,
-        )
+        ))
     except Exception as exc:
         log.warning(
             "intent_scope summary_failed tool=final_answer error=%s", exc, exc_info=True
@@ -233,3 +259,11 @@ def summarize_final_answer_line(
         line = truncate_text(line, scope_cfg.max_summary_chars)
     log_intent_scope_summary_done(log, tool_name="final_answer", summary_chars=len(line))
     return line
+
+
+@functools.wraps(asummarize_final_answer_line)
+def summarize_final_answer_line(*args: Any, **kwargs: Any) -> str:
+    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(asummarize_final_answer_line(*args, **kwargs))

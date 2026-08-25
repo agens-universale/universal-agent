@@ -11,8 +11,8 @@ from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.request_summary_text", fake)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", fake)
 
 
 def _ctx():
@@ -99,7 +99,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         )
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
         monkeypatch.setattr(
-            "gc_core.summarize.memory_suggestions.request_patch_replace",
+            "gc_core.summarize.memory_suggestions.arequest_patch_replace",
             lambda **_k: empty_patch,
         )
 
@@ -223,7 +223,7 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         )
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
         monkeypatch.setattr(
-            "gc_core.summarize.memory_suggestions.request_patch_replace",
+            "gc_core.summarize.memory_suggestions.arequest_patch_replace",
             lambda **_k: empty_patch,
         )
 

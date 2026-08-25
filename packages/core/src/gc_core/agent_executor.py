@@ -367,7 +367,7 @@ class AgentExecutor:
         # (SyncApiInsideEventLoopError), который собственный fail-open
         # компакции молча глотает — компакция выключалась целиком.
         await _acall_blocking_hook(
-            summary.pre_run_compact_if_needed, trigger_reason="pre_run"
+            summary.apre_run_compact_if_needed, trigger_reason="pre_run"
         )
 
         if not messages:
@@ -504,9 +504,14 @@ class AgentExecutor:
                 self._ctx,
                 get_full_history_messages=get_full_history_messages,
                 persist_messages_callback=persist_messages_callback,
-                pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
-                turn_end_compaction_hook=summary.turn_end_compact_if_needed,
-                force_compact_hook=summary.force_compact_once,
+                # Корутинные двойники, а не синхронные имена — и это несущая
+                # деталь, а не стиль. _acall_blocking_hook корутинную функцию
+                # ждёт НАТИВНО, а обычную уводит в asyncio.to_thread. Передать
+                # сюда синхронное имя значит вернуть поток из пула, занятый на
+                # всё время суммаризации, ради которого всё и переводилось.
+                pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
+                turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
+                force_compact_hook=summary.aforce_compact_once,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
                 session_meta=(
@@ -706,6 +711,18 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+
+    async def acompact_thread(self, thread_id: str, system: str | None = None) -> bool:
+        """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
+        (оркестрация суммаризации, вне run-loop). Основная реализация."""
+        from gc_core.manual_compaction import acompact_thread as _acompact_thread
+        return await _acompact_thread(
+            ctx=self._ctx,
+            _lock=self._lock,
+            self_state=self._state,
+            thread_id=thread_id,
+            system=system
+        )
 
     def compact_thread(self, thread_id: str, system: str | None = None) -> bool:
         """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction

@@ -8,9 +8,18 @@ from gc_core.message_format.serialization import calc_history_chars_for_trigger,
 from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_completed, log_compaction_precheck, log_compaction_started, log_summary_message_body, log_summary_raw_text, log_summary_slice_fallback, logger_from_ctx
 from gc_core.summarize.summary_message_body import build_dialog_summary_content, resolve_intent_log_preview_chars
 from gc_core.summarize.summary_spec import agent_summary_slice_mode, slice_summary
-from gc_core.summarize.thread_summarizer import summarize_dialog_via_chat_completions
+from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
 from gc_core.message_policy.todo_context import render_todo_for_persistent_state
 from gc_core.summarize.working_memory_gateway import REGISTER_ORDER, WorkingMemoryDeltas, apply_memory_patch, apply_summary_memory_patch, coerce_working_memory_deltas, read_session_todo_from_state, read_snapshot_from_state, render_persistent_state_for_prompt, render_session_memory_for_summary_message
+
+
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:
@@ -167,7 +176,7 @@ def history_exceeds_summary_trigger(
     return calc_history_chars_for_trigger(full_messages) > summary_trigger_chars
 
 
-def run_summary_compaction(
+async def arun_summary_compaction(
     *,
     ctx: Any,
     state: Any,
@@ -176,6 +185,14 @@ def run_summary_compaction(
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
     trigger_threshold_chars: int | None = None,
 ) -> None:
+    """Сжать историю треда: суммаризация, патч состояния, событие хосту.
+
+    Основная и единственная реализация: синхронное имя ``run_summary_compaction``
+    ниже лишь заводит эту корутину на портальном loop. Сетевой шаг один —
+    ``asummarize_dialog_via_chat_completions``; всё остальное здесь — чистые
+    вычисления над state и логи, поэтому поток на время суммаризации больше
+    не занимается.
+    """
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
     full_messages = without_system_messages(getattr(state, "messages", []))
@@ -198,7 +215,7 @@ def run_summary_compaction(
     source_user_log = list(getattr(state, "user_intent_log", []) or [])
     source_current_intent = list(getattr(state, "current_user_intent", []) or [])
     memory_snapshot = read_snapshot_from_state(state)
-    summary_result = summarize_dialog_via_chat_completions(
+    summary_result = await _maybe_await(asummarize_dialog_via_chat_completions(
         ctx=ctx,
         state=state,
         full_history_messages=full_messages,
@@ -209,7 +226,7 @@ def run_summary_compaction(
         user_intent_log=source_user_log,
         current_user_intent=source_current_intent,
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
-    )
+    ))
     raw_summary = str(summary_result.get("raw_summary") or "")
     num_batches = int(summary_result.get("num_batches") or 0)
     trace = summary_result.get("trace")
@@ -322,7 +339,7 @@ def run_summary_compaction(
     )
 
 
-def maybe_run_summary_compaction(
+async def amaybe_run_summary_compaction(
     *,
     ctx: Any,
     state: Any,
@@ -331,6 +348,10 @@ def maybe_run_summary_compaction(
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> bool:
+    """Проверка порога плюс запуск сжатия. Основная реализация — эта.
+
+    Синхронное имя ``maybe_run_summary_compaction`` ниже — шим через портал.
+    """
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
     if summary_trigger_chars <= 0:
@@ -350,7 +371,7 @@ def maybe_run_summary_compaction(
     if trigger_volume <= summary_trigger_chars:
         return False
 
-    run_summary_compaction(
+    await arun_summary_compaction(
         ctx=ctx,
         state=state,
         trigger_reason=trigger_reason,
@@ -359,3 +380,26 @@ def maybe_run_summary_compaction(
         trigger_threshold_chars=summary_trigger_chars,
     )
     return True
+
+
+# --- синхронные двойники ---------------------------------------------------
+#
+# Имена сохранены для вызывающих вне цикла агента (ручной /compact через
+# session_compact, координатор прогона, тесты). Портал, а не run_coro_blocking:
+# он переиспользует один фоновый loop, а с ним httpx-клиент и его пул
+# соединений. Изнутри работающего loop эти имена звать нельзя — портал поднимет
+# SyncApiInsideEventLoopError и укажет на асинхронный двойник.
+
+
+def run_summary_compaction(*args: Any, **kwargs: Any) -> None:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(arun_summary_compaction(*args, **kwargs))
+
+
+def maybe_run_summary_compaction(*args: Any, **kwargs: Any) -> bool:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(amaybe_run_summary_compaction(*args, **kwargs))

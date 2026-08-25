@@ -150,7 +150,8 @@ class SummaryTriggersTest(unittest.TestCase):
                 state.messages += list(messages)
                 pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
                 if pre_backend_hook is not None:
-                    pre_backend_hook(messages, "user_ask")
+                    # Хук корутинный (agent_executor передаёт a-двойник) — ждём.
+                    await pre_backend_hook(messages, "user_ask")
                 return "ok"
 
             def _record_summary_call(**kwargs):
@@ -178,7 +179,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 side_effect=_hist_exceeds,
             ), patch.object(
                 run_summary_coordinator_module,
-                "run_summary_compaction",
+                "arun_summary_compaction",
                 side_effect=_record_summary_call,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
@@ -202,7 +203,8 @@ class SummaryTriggersTest(unittest.TestCase):
                 state.messages += list(messages)
                 pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
                 if pre_backend_hook is not None:
-                    pre_backend_hook(messages, "user_ask")
+                    # Хук корутинный (agent_executor передаёт a-двойник) — ждём.
+                    await pre_backend_hook(messages, "user_ask")
                 return "ok"
 
             def _record(**kwargs):
@@ -229,7 +231,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 side_effect=_hist_exceeds,
             ), patch.object(
                 run_summary_coordinator_module,
-                "run_summary_compaction",
+                "arun_summary_compaction",
                 side_effect=_record,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
@@ -245,7 +247,7 @@ class SummaryTriggersTest(unittest.TestCase):
             with patch.object(
                 agent_executor_module, "arun_agent", return_value="ok"
             ), patch.object(
-                run_summary_coordinator_module, "run_summary_compaction"
+                run_summary_coordinator_module, "arun_summary_compaction"
             ) as compaction_mock:
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = executor.run(["hello"], thread_id="thr1", system="cli", verbose=False)

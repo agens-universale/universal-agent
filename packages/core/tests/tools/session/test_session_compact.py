@@ -32,7 +32,7 @@ def test_registered_only_for_chat_completions():
     assert tools["session_compact"]["tool_fabric"] is SessionCompact
 
 
-def test_session_compact_calls_run_summary_compaction(monkeypatch):
+def test_session_compact_calls_arun_summary_compaction(monkeypatch):
     state = _state()
     ctx = types.SimpleNamespace(
         config_dict={},
@@ -49,7 +49,7 @@ def test_session_compact_calls_run_summary_compaction(monkeypatch):
             {"role": "user", "content": "summary body", "id": "sum"},
         ]
 
-    monkeypatch.setattr(session_compact_module, "run_summary_compaction", fake_compact)
+    monkeypatch.setattr(session_compact_module, "arun_summary_compaction", fake_compact)
 
     tool = SessionCompact(ctx=ctx, state=state)
     res = json.loads(tool(reason="phase done"))
@@ -93,7 +93,7 @@ def test_session_compact_reports_compaction_failure(monkeypatch):
     def boom(**_kwargs):
         raise RuntimeError("llm down")
 
-    monkeypatch.setattr(session_compact_module, "run_summary_compaction", boom)
+    monkeypatch.setattr(session_compact_module, "arun_summary_compaction", boom)
 
     res = json.loads(SessionCompact(ctx=ctx, state=state)(reason="retry"))
     assert res["ok"] is False

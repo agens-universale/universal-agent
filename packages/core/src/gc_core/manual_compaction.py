@@ -1,8 +1,11 @@
 """Форс-сжатие персистентного треда вне run-loop (ручной /compact).
 
 Оркестрация суммаризации (не исполнения): грузит тред, строит минимальный
-state под компакцию, зовёт RunSummaryCoordinator.force_compact_once.
+state под компакцию, зовёт RunSummaryCoordinator.aforce_compact_once.
 Сосед run_summary_coordinator.py; из контроллера AgentExecutor вынесено.
+
+Реализация одна — асинхронная (``acompact_thread``); синхронное имя
+``compact_thread`` сохранено как шим через портал.
 """
 from __future__ import annotations
 
@@ -19,14 +22,19 @@ from gc_core.thread_store import ThreadSession, save_thread_meta, load_thread_me
 from gc_core.usage.account import UsageAccount
 
 
-def compact_thread(
+async def acompact_thread(
     ctx: Any,
     thread_id: str,
     _lock: Lock | None = None,
     self_state: State | None = None,
     system: str | None = None,
 ) -> bool:
-    """chat_completions + непустой thread_id → сжатие выполнено (True); иначе False."""
+    """chat_completions + непустой thread_id → сжатие выполнено (True); иначе False.
+
+    Основная реализация: суммаризация уезжает в координатор нативно
+    (``aforce_compact_once``), без потока из пула на всё время LLM-вызова.
+    Синхронный двойник — ``compact_thread`` ниже.
+    """
     config_dict = ctx.config_dict
     backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
     if backend_api_mode != "chat_completions" or not thread_id:
@@ -74,7 +82,7 @@ def compact_thread(
         pre_backend_trigger_reason="pre_backend", logger=getattr(ctx, "logger", None),
     )
     setattr(ctx, "on_summary_applied", coord.on_summary_applied)
-    coord.force_compact_once(trigger_reason="manual")
+    await coord.aforce_compact_once(trigger_reason="manual")
 
 
     # Компакция сохраняет thread meta из ts.meta (старый token_usage переносится
@@ -101,3 +109,10 @@ def compact_thread(
         with _lock:
             self_state.usage = UsageAccount.from_meta(state.usage.to_meta())
     return True
+
+
+def compact_thread(*args: Any, **kwargs: Any) -> bool:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(acompact_thread(*args, **kwargs))

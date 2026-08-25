@@ -152,7 +152,7 @@ def test_turn_end_below_threshold_does_not_compact(monkeypatch):
     def record(**kwargs):
         recorded.append(str(kwargs.get("trigger_reason")))
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", record)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", record)
     coord = _coordinator(state, turn_end_trigger_chars=10_000)
 
     result = pr.run_agent(
@@ -197,7 +197,7 @@ def test_turn_end_above_threshold_replaces_trace(monkeypatch):
             }
         ]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
     result = pr.run_agent(
@@ -226,7 +226,7 @@ def test_turn_end_reject_skips_compaction(monkeypatch):
 
     monkeypatch.setattr(
         rsc,
-        "run_summary_compaction",
+        "arun_summary_compaction",
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
 
@@ -273,7 +273,7 @@ def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
 
     monkeypatch.setattr(
         rsc,
-        "run_summary_compaction",
+        "arun_summary_compaction",
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
     coord = _coordinator(state, turn_end_trigger_chars=1)
@@ -306,7 +306,7 @@ def test_turn_end_flush_moves_intent_before_compact(monkeypatch):
         )
         st.messages = [sys_m, {"role": "user", "content": "summary", "id": "s"}] if sys_m else []
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
     pr.run_agent(
@@ -326,7 +326,7 @@ def test_turn_end_compaction_failure_still_returns_submit_payload(monkeypatch):
     def boom(**_kwargs):
         raise RuntimeError("summary backend down")
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", boom)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
     result = pr.run_agent(
@@ -365,7 +365,7 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
             summarized_messages_count=2,
         )
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
     pr.run_agent(
@@ -438,7 +438,7 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
         lambda **_k: True,
     )
     monkeypatch.setattr(
-        "gc_core.run_summary_coordinator.run_summary_compaction",
+        "gc_core.run_summary_coordinator.arun_summary_compaction",
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
 

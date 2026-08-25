@@ -6,11 +6,21 @@ import json
 from typing import Any
 
 from gc_core.constants.tool_names import SESSION_COMPACT_TOOL_NAME
-from gc_core.summarize.compaction import run_summary_compaction, without_system_messages
+from gc_core.summarize.compaction import arun_summary_compaction, without_system_messages
 from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_failed, logger_from_ctx
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.aio_compat import run_coro_blocking
 
 TRIGGER_REASON = "session_compact"
+
+
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 class SessionCompact(AbstractSimpleTool):
@@ -82,7 +92,24 @@ Return format (JSON string):
 {"tool":"session_compact","ok":true,"error":null|{"type":"...","message":"..."},"message":"...","compacted":true}
 """
 
-    def __call__(self, reason: str, **kwargs: Any) -> str:
+    def __call__(self, *args: Any, **kwargs: Any) -> str:
+        """Синхронный двойник: прямые вызовы ``apply_tool`` и тесты.
+
+        Реализация одна — ``acall``; здесь только способ её дождаться.
+        Без этого синхронный ``apply_tool`` вернул бы строку «tool is async»,
+        и агентское сжатие молча перестало бы работать через публичную
+        синхронную точку SDK.
+        """
+        return run_coro_blocking(self.acall(*args, **kwargs))
+
+    async def acall(self, reason: str, **kwargs: Any) -> str:
+        """Основная реализация: сжать трассу текущего хода по просьбе агента.
+
+        Диспетчер тулов видит ``acall`` и зовёт его напрямую, без
+        ``asyncio.to_thread``: цепочка суммаризации асинхронна до самого
+        сетевого листа, поэтому поток пула на десятки секунд больше не
+        занимается.
+        """
         if not isinstance(reason, str):
             return self._result(
                 ok=False,
@@ -137,14 +164,14 @@ Return format (JSON string):
         logger = logger_from_ctx(ctx)
 
         try:
-            run_summary_compaction(
+            await _maybe_await(arun_summary_compaction(
                 ctx=ctx,
                 state=state,
                 trigger_reason=TRIGGER_REASON,
                 is_cli_mode=is_cli_mode,
                 on_summary_applied=on_summary_applied,
                 trigger_threshold_chars=None,
-            )
+            ))
         except Exception as exc:
             log_compaction_failed(
                 logger,

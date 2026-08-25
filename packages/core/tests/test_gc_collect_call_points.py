@@ -37,7 +37,7 @@ def _coord(monkeypatch, calls, gc_calls, backend="chat_completions",
         is_cli_mode=True,
         pre_backend_trigger_reason="pre_backend", logger=None,
     )
-    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(rsc, "arun_summary_compaction", lambda **kw: calls.append(kw))
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger",
                         lambda **kw: threshold_exceeded)
     monkeypatch.setattr(rsc, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1)))

@@ -12,7 +12,7 @@ import os
 from typing import Any
 
 from gc_core.bundled_assets import bundled_root
-from gc_core.summarize.llm import request_auxiliary_completion_text
+from gc_core.summarize.llm import arequest_auxiliary_completion_text
 from gc_core.usage.account import UsageAccount
 
 _PROMPT_PATH = os.path.join(str(bundled_root()), "prompts", "limit_trace_summary.md")
@@ -130,8 +130,11 @@ def _should_enable(config_dict: dict[str, Any]) -> bool:
     return str(raw).strip().lower() in ("true", "1", "yes", "on")
 
 
-def build_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
+async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     """Возвращает JSON-строку envelope для limit-path.
+
+    Основная (и единственная) реализация: aux LLM-вызов уходит на тот же loop,
+    что и цикл агента, — поток из пула на время суммаризации не занимается.
 
     Args:
         state: State с .messages, .steps, .tool_calls, .max_steps.
@@ -158,7 +161,7 @@ def build_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
                 {"role": "system", "content": "You are a trace summarizer."},
                 {"role": "user", "content": user_content},
             ]
-            raw_summary = request_auxiliary_completion_text(
+            raw_summary = await arequest_auxiliary_completion_text(
                 ctx=ctx,
                 state=state,
                 messages=messages,
@@ -184,3 +187,14 @@ def build_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
         "raw_trace_summary": raw_summary,
     }
     return json.dumps(envelope, ensure_ascii=False)
+
+
+def build_limit_envelope(*args: Any, **kwargs: Any) -> str:
+    """Синхронный двойник. Реализация одна — асинхронная.
+
+    Портал переиспользует общий loop (а с ним и пул соединений httpx), так что
+    поведение совпадает с прямым await из цикла.
+    """
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(abuild_limit_envelope(*args, **kwargs))

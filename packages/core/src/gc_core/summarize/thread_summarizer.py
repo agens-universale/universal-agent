@@ -5,13 +5,22 @@ from gc_core.message_format import dialog_history as dialog_history
 from gc_core.intent_log import IntentRecord, serialize_for_meta
 from gc_core.summarize import memory_suggestions, prompt_loading, summary_llm_steps, summary_message_body
 from gc_core.summarize.summary_validation import FALLBACK_SUMMARY, merge_repaired_summary, missing_section_tags, resolve_after_repair_failure, validate_summary_text
-from gc_core.summarize.llm import request_summary_text
+from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.summary_logging import log_memory_patch_skipped_multi_batch, log_memory_patch_wm_unchanged
-from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas, parse_memory_deltas_with_repair, resolve_persistent_state_block
+from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas, parse_memory_deltas, resolve_persistent_state_block, should_attempt_memory_deltas_repair
 from gc_core.utils.llm_chat_client import shorten_for_log
 
 
-def summarize_dialog_via_chat_completions(
+async def _maybe_await(value: Any):
+    """Шов подмены терпит обе формы заглушки — см. processing_responses._maybe_await."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def asummarize_dialog_via_chat_completions(
     *,
     ctx: Any,
     state: Any,
@@ -23,6 +32,11 @@ def summarize_dialog_via_chat_completions(
     steps_offset: int = 0,
 ) -> Dict[str, Any]:
     """Строит структурированную сводку диалога через chat completions (в т.ч. батчами).
+
+    Основная (и единственная) реализация оркестрации; синхронный
+    ``summarize_dialog_via_chat_completions`` — шим над ней через портал.
+    Все LLM-шаги ждутся нативно, поэтому компакция больше не держит поток
+    из пула на всё время суммаризации.
 
     Назначение: основной оркестратор слоя суммаризации — подготовить текст для
     сообщения-резюме треда, опционально получить дельты working_memory через LLM,
@@ -37,10 +51,10 @@ def summarize_dialog_via_chat_completions(
         - Группирует сообщения в ходы и делит на батчи по `incremental_batch_chars`.
         - Для каждого батча вызывает LLM: первый батч — «с нуля», следующие —
           обновление `previous_summary`; валидирует ответ, при провале —
-          `summary_llm_steps.repair_summary_text` (без intent-блоков; multi-batch repair с `<previous_summary>`),
+          `summary_llm_steps.arepair_summary_text` (без intent-блоков; multi-batch repair с `<previous_summary>`),
           иначе partial merge / предыдущий батч / `FALLBACK_SUMMARY`.
-        - По необходимости сжимает накопленную сводку через `summary_llm_steps.compress_summary_text`.
-        - Шаг `memory_suggestions.request_patch_replace` (полная перезапись всех регистров WM)
+        - По необходимости сжимает накопленную сводку через `summary_llm_steps.acompress_summary_text`.
+        - Шаг `memory_suggestions.arequest_patch_replace` (полная перезапись всех регистров WM)
           выполняется только если весь диалог уложился в один батч (мультибатч:
           `memory_patch.executed = false`, reason `skipped_multi_batch`).
         - Форматирует `last_dialog_steps` через `dialog_history.format_last_dialog_steps`.
@@ -246,14 +260,14 @@ def summarize_dialog_via_chat_completions(
                 len(batches),
                 request_messages,
             )
-        text = request_summary_text(
+        text = await _maybe_await(arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             request_label=f"summary_batch_{batch_index}",
             max_tokens=max_tokens,
             logger=logger,
-        )
+        ))
         trace_batch["output_summary_text"] = text
         if logger is not None:
             logger.info(
@@ -283,7 +297,7 @@ def summarize_dialog_via_chat_completions(
                     len(text or ""),
                 )
             missing_tags = missing_section_tags(text)
-            repaired = summary_llm_steps.repair_summary_text(
+            repaired = await _maybe_await(summary_llm_steps.arepair_summary_text(
                 ctx=ctx,
                 state=state,
                 history_text=batch_history_text,
@@ -293,7 +307,7 @@ def summarize_dialog_via_chat_completions(
                 reason=reason,
                 missing_tags=missing_tags,
                 max_tokens=max_tokens,
-            )
+            ))
             merged = merge_repaired_summary(invalid_text=text, repaired_text=repaired)
             merged_valid, _ = validate_summary_text(merged)
             repaired_valid, _ = validate_summary_text(repaired)
@@ -342,13 +356,13 @@ def summarize_dialog_via_chat_completions(
                     len(accumulated_summary),
                     max_accumulated_summary_chars,
                 )
-            accumulated_summary = summary_llm_steps.compress_summary_text(
+            accumulated_summary = await _maybe_await(summary_llm_steps.acompress_summary_text(
                 ctx=ctx,
                 state=state,
                 summary_text=accumulated_summary,
                 max_chars=max_accumulated_summary_chars,
                 max_tokens=max_tokens,
-            )
+            ))
     text = accumulated_summary or FALLBACK_SUMMARY
 
     memory_append_deltas = WorkingMemoryDeltas()
@@ -356,42 +370,61 @@ def summarize_dialog_via_chat_completions(
     append_touched: frozenset[str] = frozenset()
     replace_touched: frozenset[str] = frozenset()
 
-    def _repair_fn(raw: str) -> str:
-        return memory_suggestions.request_memory_deltas_format_repair(
+    async def _arepair_fn(raw: str) -> str:
+        """Починка формата дельт вторым вызовом LLM — колбэк шага разбора.
+
+        Асинхронна, потому что зовёт LLM. Синхронного двойника нет: замыкание
+        видно только внутри этой функции, а портал изнутри работающего loop
+        всё равно поднял бы SyncApiInsideEventLoopError.
+        """
+        return await _maybe_await(memory_suggestions.arequest_memory_deltas_format_repair(
             ctx=ctx,
             state=state,
             raw_output=raw,
             max_tokens=max_tokens,
             full_replace=True,
-        )
+        ))
 
-    def _run_patch_step(
+    async def _arun_patch_step(
         llm_result: Any,
     ) -> tuple[WorkingMemoryDeltas, frozenset[str], bool, bool, str]:
-        deltas, touched, repair_attempted, raw_used = parse_memory_deltas_with_repair(
-            llm_result.raw_response,
-            repair_fn=_repair_fn,
+        """Разбор дельт WM с одной попыткой починки формата.
+
+        Шаг в шаг повторяет ``working_memory_gateway.parse_memory_deltas_with_repair``
+        (те же ветки, тот же порядок, тот же кортеж). Позвать его самого
+        нельзя: он ждёт синхронный ``repair_fn``, а починка теперь корутина —
+        синхронный колбэк на loop её не дождётся.
+        """
+        raw_output = llm_result.raw_response
+        deltas, touched = parse_memory_deltas(raw_output, full_replace=True)
+        repair_attempted = False
+        raw_used = str(raw_output or "")
+        if should_attempt_memory_deltas_repair(
+            raw_output,
+            deltas,
             min_chars_for_repair=100,
-            full_replace=True,
-        )
+        ):
+            raw_used = str(await _arepair_fn(str(raw_output or "")) or "")
+            deltas, touched = parse_memory_deltas(raw_used, full_replace=True)
+            repair_attempted = True
         repair_success = repair_attempted and (bool(touched) or not deltas.is_empty())
         return deltas, touched, repair_attempted, repair_success, raw_used
 
     if len(batches) <= 1:
-        replace_result = memory_suggestions.request_patch_replace(
+        replace_result = await _maybe_await(memory_suggestions.arequest_patch_replace(
             ctx=ctx,
             state=state,
             history_text=full_history_text,
             summary_text=text,
             persistent_state_block=persistent_state_block,
-        )
+        ))
         (
             memory_replace_deltas,
             replace_touched,
             replace_repair,
             replace_repair_ok,
             replace_raw,
-        ) = _run_patch_step(replace_result)
+        ) = await _arun_patch_step(replace_result)
         trace["memory_patch"] = {
             "executed": True,
             "mode": "full_replace_all_registers",
@@ -473,3 +506,18 @@ def summarize_dialog_via_chat_completions(
         "trace": trace,
     }
 
+
+# --- синхронный двойник ----------------------------------------------------
+#
+# Имя сохранено для вызывающих вне цикла агента (ручной /compact, тесты,
+# синхронный ``compaction.run_summary_compaction``). Портал (а не
+# run_coro_blocking) — он переиспользует один фоновый loop, а с ним httpx-клиент
+# и его пул соединений; изнутри работающего цикла звать это имя нельзя:
+# портал поднимет SyncApiInsideEventLoopError.
+
+
+def summarize_dialog_via_chat_completions(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+    """Синхронный двойник. Реализация одна — асинхронная."""
+    from gc_core.utils.portal import get_portal
+
+    return get_portal().run(asummarize_dialog_via_chat_completions(*args, **kwargs))

@@ -32,7 +32,7 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
         return "User wants a README section on install."
 
     monkeypatch.setattr(
-        summarizer, "request_summary_text", _fake_request_summary_text
+        summarizer, "arequest_summary_text", _fake_request_summary_text
     )
 
     from gc_core.config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
@@ -78,7 +78,7 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
 def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
     monkeypatch.setattr(
         summarizer,
-        "request_summary_text",
+        "arequest_summary_text",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
