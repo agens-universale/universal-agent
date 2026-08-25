@@ -64,6 +64,10 @@ class RunContext:
     ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    # Хранилище тредов. None — файловое по умолчанию (прежнее поведение).
+    # Передав своё (например поверх базы), встраивающий уводит туда всю историю:
+    # ни ThreadSession, ни ядро больше диска не касаются.
+    thread_store: Any = None
     # ToolsCache этого контекста, если владелец его передал. Лежит здесь, чтобы
     # субагенты (они пересобирают tools_data на каждый спавн) брали готовое, а не
     # ходили в дискавери заново.
@@ -89,6 +93,7 @@ def create_run_context(
     is_tui: bool = False,
     tools_cache: Any = None,
     log_handlers: Any = None,
+    thread_store: Any = None,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -120,7 +125,7 @@ def create_run_context(
         config_dict, prep, tools,
         auth_connector=auth_connector, environment=environment,
         on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
-        is_tui=is_tui, tools_cache=tools_cache,
+        is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
     )
 
 
@@ -138,6 +143,7 @@ async def _acreate_run_context_impl(
     is_tui: bool = False,
     tools_cache: Any = None,
     log_handlers: Any = None,
+    thread_store: Any = None,
 ) -> RunContext:
     """Тело асинхронной сборки: то же, что синхронное, но дискавери — await."""
     from gc_core.tools import abuild_tools_data
@@ -159,7 +165,7 @@ async def _acreate_run_context_impl(
         config_dict, prep, tools,
         auth_connector=auth_connector, environment=environment,
         on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
-        is_tui=is_tui, tools_cache=tools_cache,
+        is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
     )
 
 
@@ -229,6 +235,7 @@ def _finish_run_context(
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]],
     is_tui: bool,
     tools_cache: Any,
+    thread_store: Any = None,
 ) -> RunContext:
     """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
     tools_data, tools_spec, tools_description, mcp_status = tools
@@ -305,6 +312,7 @@ def _finish_run_context(
         on_messages_evicted=on_messages_evicted,
         mcp_session_owner=mcp_session_owner,
         tools_cache=tools_cache,
+        thread_store=thread_store,
     )
     ctx.is_tui = bool(is_tui)
 

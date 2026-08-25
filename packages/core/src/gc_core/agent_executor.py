@@ -150,7 +150,12 @@ class AgentExecutor:
                 threads_dir = resolve_threads_dir(config_dict)
                 reset_thread_files(threads_dir, system_id=system_id, thread_id=thread_id)
             thread_session = ThreadSession.from_config(
-                config_dict=config_dict, system_id=system_id, thread_id=thread_id
+                config_dict=config_dict,
+                system_id=system_id,
+                thread_id=thread_id,
+                # Хранилище встраивающего, если он его передал. None — файловое
+                # по умолчанию, ровно прежнее поведение.
+                store=getattr(self._ctx, "thread_store", None),
             )
             if logger is not None:
                 # Единственная связка «этот лог-файл ↔ этот тред»: на момент

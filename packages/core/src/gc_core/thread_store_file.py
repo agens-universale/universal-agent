@@ -50,6 +50,11 @@ class FileThreadStore:
         messages, _keys, _count = load_thread_messages(self._dir, system_id, thread_id)
         return messages or []
 
+    def load_thread_state(self, system_id: str, thread_id: str):
+        """``(сообщения, ключи, счётчик)`` — ровно то, что отдаёт файловый слой."""
+        messages, keys, count = load_thread_messages(self._dir, system_id, thread_id)
+        return (messages or []), (keys or set()), int(count or 0)
+
     def _known_keys(self, system_id: str, thread_id: str) -> set:
         _messages, keys, _count = load_thread_messages(self._dir, system_id, thread_id)
         return keys or set()
@@ -66,16 +71,21 @@ class FileThreadStore:
         messages: Sequence[Dict[str, Any]],
         *,
         known_keys: Optional[set] = None,
+        start_seq: int = 0,
     ) -> int:
         # Ключи не передали — читаем с диска сами. Идемпотентность обещана
         # КОНТРАКТОМ, значит держать её должно хранилище: батч персистится
         # дважды (после тулов и на выходе цикла), и вызывающий не обязан
         # помнить, что он уже записал.
+        # НЕ копируем: append_new_thread_messages дописывает в этот же набор,
+        # и вызывающий (ThreadSession.known_message_keys) рассчитывает увидеть
+        # обновление у себя. Копия молча сломала бы дедупликацию на след. батче.
         keys = known_keys if known_keys is not None else self._known_keys(
             system_id, thread_id
         )
         return append_new_thread_messages(
-            self._dir, system_id, thread_id, list(messages), set(keys)
+            self._dir, system_id, thread_id, list(messages), keys,
+            start_seq=start_seq,
         )
 
     def save_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:

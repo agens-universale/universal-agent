@@ -566,6 +566,7 @@ class ThreadSession:
         *,
         threads_dir: str,
         system_id: str,
+        store: Any = None,
         thread_id: str,
         history_messages: List[Dict[str, Any]],
         known_message_keys: Set[str],
@@ -575,6 +576,13 @@ class ThreadSession:
         backend_api_mode: str,
     ):
         self.threads_dir = threads_dir
+        # Хранилище сессии. None — файловое по умолчанию: сессию собирают и
+        # напрямую (тесты, ручные сценарии), и ломать их не за что.
+        if store is None:
+            from gc_core.thread_store_file import FileThreadStore
+
+            store = FileThreadStore(threads_dir)
+        self.store = store
         self.system_id = sanitize_system_id(system_id)
         self.thread_id = thread_id
         self.history_messages = history_messages
@@ -589,16 +597,38 @@ class ThreadSession:
 
     @classmethod
     def from_config(
-        cls, *, config_dict: Dict[str, Any], system_id: str, thread_id: str
+        cls,
+        *,
+        config_dict: Dict[str, Any],
+        system_id: str,
+        thread_id: str,
+        store: Any = None,
     ) -> "ThreadSession":
+        """Загрузить тред. ``store`` не передан — файловое хранилище, как раньше.
+
+        Параметр — точка подмены для встраивающего: своя реализация
+        ``ThreadStore`` (например поверх базы) передаётся сюда, и сессия больше
+        нигде диска не касается. Дефолт сохраняет прежнее поведение полностью.
+        """
         sys_norm = sanitize_system_id(system_id)
         normalized_thread_id = validate_thread_id(thread_id)
-        threads_dir = resolve_threads_dir(config_dict)
-        ensure_threads_dir(threads_dir)
 
-        meta = load_thread_meta(threads_dir, sys_norm, normalized_thread_id)
-        history_messages, known_message_keys, max_seq = load_thread_messages(
-            threads_dir, sys_norm, normalized_thread_id
+        if store is None:
+            # Путь к каталогу нужен ТОЛЬКО файловому хранилищу. Резолвить его
+            # безусловно значило бы требовать `threads_data_path` от того, кто
+            # держит историю в базе и файлов не заводит вовсе — а он и не
+            # обязан его настраивать. Поймано гейтом на in-memory хранилище.
+            from gc_core.thread_store_file import FileThreadStore
+
+            threads_dir = resolve_threads_dir(config_dict)
+            store = FileThreadStore(threads_dir)
+            store.ensure_ready()
+        else:
+            threads_dir = getattr(store, "threads_dir", "")
+
+        meta = store.load_meta(sys_norm, normalized_thread_id)
+        history_messages, known_message_keys, max_seq = store.load_thread_state(
+            sys_norm, normalized_thread_id
         )
         previous_response_id = meta.get("previous_response_id")
         if not isinstance(previous_response_id, str) or len(previous_response_id) == 0:
@@ -610,6 +640,7 @@ class ThreadSession:
 
         return cls(
             threads_dir=threads_dir,
+            store=store,
             system_id=sys_norm,
             thread_id=normalized_thread_id,
             history_messages=history_messages,
@@ -643,12 +674,11 @@ class ThreadSession:
     ) -> None:
         known_before = set(self.known_message_keys)
         self.known_keys_snapshot_before_last_batch = frozenset(known_before)
-        written = append_new_thread_messages(
-            self.threads_dir,
+        written = self.store.append_messages(
             self.system_id,
             self.thread_id,
             step_messages,
-            self.known_message_keys,
+            known_keys=self.known_message_keys,
             start_seq=self.persisted_messages_count,
         )
         self.persisted_messages_count += written
@@ -663,7 +693,7 @@ class ThreadSession:
         # Preserve arbitrary meta fields (e.g. shared.working_memory), otherwise tools that
         # update meta would get their data wiped on the next persist_batch().
         base_meta = (
-            load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
+            self.store.load_meta(self.system_id, self.thread_id) or {}
         )
         base_meta["created_at"] = self.meta.get("created_at") or base_meta.get("created_at")
         base_meta["previous_response_id"] = self.previous_response_id
@@ -697,7 +727,7 @@ class ThreadSession:
         else:
             base_meta.pop("chat_completions_system_prompt_rendered", None)
         merge_tool_usage_notice_meta_to_base(base_meta, self.meta)
-        save_thread_meta(self.threads_dir, self.system_id, self.thread_id, base_meta)
+        self.store.save_meta(self.system_id, self.thread_id, base_meta)
 
     def archive_and_compact_summary_payload(
         self,
@@ -710,7 +740,7 @@ class ThreadSession:
         # Diff touched-journal не трогаем: это operational state сессии (как
         # data_subagents_*), не история диалога. Удаляется только с тредом.
         # До переноса meta в архив: снимок disk tui/runtime (TUI-ключи не клобберить).
-        disk_meta = load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
+        disk_meta = self.store.load_meta(self.system_id, self.thread_id) or {}
         disk_tui = dict(disk_meta.get("tui") or {})
         disk_runtime = dict(disk_meta.get("runtime") or {})
         ts_suffix = _utc_now_suffix()
@@ -825,7 +855,7 @@ class ThreadSession:
         merged_runtime = {**session_runtime, **disk_runtime}
         merged_runtime.update(live_volume_from_messages(compact_messages))
         new_meta["runtime"] = merged_runtime
-        save_thread_meta(self.threads_dir, self.system_id, self.thread_id, new_meta)
+        self.store.save_meta(self.system_id, self.thread_id, new_meta)
 
         self.history_messages = compact_messages
         self.runtime_messages = []

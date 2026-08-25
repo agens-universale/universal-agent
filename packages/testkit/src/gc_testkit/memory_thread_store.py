@@ -37,6 +37,17 @@ class MemoryThreadStore:
         self._hit("load_messages")
         return copy.deepcopy(self._messages.get(self._key(system_id, thread_id), []))
 
+    def load_thread_state(self, system_id: str, thread_id: str):
+        self._hit("load_thread_state")
+        from gc_core.thread_store import make_message_key
+
+        bucket = self._messages.get(self._key(system_id, thread_id), [])
+        return (
+            copy.deepcopy(bucket),
+            {make_message_key(m) for m in bucket},
+            len(bucket),
+        )
+
     def load_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]:
         self._hit("load_meta")
         return copy.deepcopy(self._meta.get(self._key(system_id, thread_id), {}))
@@ -50,12 +61,16 @@ class MemoryThreadStore:
         messages: Sequence[Dict[str, Any]],
         *,
         known_keys: Optional[set] = None,
+        start_seq: int = 0,
     ) -> int:
         self._hit("append_messages")
         from gc_core.thread_store import make_message_key
 
         bucket = self._messages.setdefault(self._key(system_id, thread_id), [])
-        seen = set(known_keys or ()) | {make_message_key(m) for m in bucket}
+        # Работаем с ТЕМ ЖЕ набором, что передал вызывающий: он ждёт, что новые
+        # ключи появятся у него (симметрия с файловой реализацией).
+        seen = known_keys if known_keys is not None else set()
+        seen |= {make_message_key(m) for m in bucket}
         written = 0
         for message in messages:
             key = make_message_key(message)

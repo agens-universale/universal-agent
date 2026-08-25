@@ -159,3 +159,54 @@ def test_memory_store_touches_no_disk(tmp_path, monkeypatch):
     created = list(tmp_path.rglob("*"))
     assert created == [], f"in-memory store создал файлы: {created}"
     assert store.calls["append_messages"] == 1, "обращения шли мимо store"
+
+
+# --- сквозная проводка -----------------------------------------------------
+
+def test_store_reaches_the_context_and_session(tmp_path):
+    """Хранилище доезжает от вызывающего до ``ThreadSession``.
+
+    Проверяем всю цепочку разом: ``create_run_context(thread_store=…)`` →
+    ``ctx.thread_store`` → ``ThreadSession.from_config(store=…)``. Разрыв в
+    любом звене означал бы, что параметр принят и молча проигнорирован — самый
+    неприятный вид поломки, потому что выглядит как работающая фича.
+    """
+    from gc_core.run_context import create_run_context
+    from gc_core.thread_store import ThreadSession
+
+    store = MemoryThreadStore()
+    ctx = create_run_context(
+        {"stop_tools": [], "backend_api_mode": "chat_completions", "save_logs": False},
+        thread_store=store,
+    )
+    assert ctx.thread_store is store, "контекст не донёс хранилище"
+
+    session = ThreadSession.from_config(
+        config_dict=ctx.config_dict, system_id=SYS, thread_id=TID,
+        store=getattr(ctx, "thread_store", None),
+    )
+    assert session.store is store, "сессия собралась со своим хранилищем"
+    assert store.calls.get("load_thread_state"), "сессия читала мимо хранилища"
+
+
+def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
+    """Запись сессии идёт в хранилище, а не на диск.
+
+    Гейт, ради которого задача и делалась: с in-memory хранилищем прогон не
+    создаёт НИ ОДНОГО файла. Он краснеет в тот день, когда кто-то допишет
+    прямой ``open()`` мимо контракта — именно этого не хватало ``TaskStore``.
+    """
+    monkeypatch.chdir(tmp_path)
+    from gc_core.thread_store import ThreadSession
+
+    store = MemoryThreadStore()
+    session = ThreadSession.from_config(
+        config_dict={"threads_dump_dir": str(tmp_path / "threads")},
+        system_id=SYS, thread_id=TID, store=store,
+    )
+    session.persist_batch([_msg("m1", "раз")], previous_response_id=None)
+
+    assert store.calls.get("append_messages"), "запись прошла мимо хранилища"
+    assert store.load_messages(SYS, TID), "сообщение не сохранилось"
+    created = [p for p in tmp_path.rglob("*") if p.is_file()]
+    assert created == [], f"сессия создала файлы вопреки in-memory хранилищу: {created}"
