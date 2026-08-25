@@ -22,6 +22,9 @@ uv run --directory external/computer-mcp pytest -m "not windows"
 
 Папка или файл: `uv run pytest packages/core/tests/security/ -q`
 
+Живые MCP-серверы, настоящий браузер и реальная модель автоматическим набором
+не покрываются — для них есть [ручные тесты](manual-tests.md).
+
 ## Наборы живут при пакетах
 
 Каждый дистрибутив держит свои тесты рядом с исходниками:
