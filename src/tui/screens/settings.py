@@ -1858,21 +1858,30 @@ class SettingsScreen(Screen):
     def _suspended(self, do, banner: str) -> bool:
         """Действие с выводом CLI в обычный терминал: под `app.suspend()` TUI уходит
         с alt-screen, и прогресс `gc-voice …` видно как в терминале (канон установки
-        MCP в мастере). Драйвер может suspend не поддерживать — тогда ОДИН fallback:
-        флаг `done` не даёт прогнать уже выполненную операцию второй раз (исключение
-        из `__exit__` прилетает уже ПОСЛЕ неё), а второе исключение гасится в «не вышло»."""
-        done = False
+        MCP в мастере). Драйвер может suspend не поддерживать — тогда ОДИН fallback,
+        мимо alt-screen.
+
+        Три исхода разведены намеренно (находка ревью коллеги: прежний код различал
+        только «успели ли доделать», и упавшее ДЕЙСТВИЕ запускалось вторично — для
+        установки это второй clone/uv sync/download):
+        * не вышло войти в suspend — действие ещё не начинали, повторяем без него;
+        * упало само действие — повтор запрещён, отвечаем «не вышло»;
+        * упал выход из suspend уже ПОСЛЕ действия — отдаём его результат."""
+        started = finished = False
         ok = False
         try:
             with self.app.suspend():
                 print(banner)
+                started = True
                 ok = do()
-                done = True
+                finished = True
         except Exception:
-            if done:
-                return ok
+            if finished:
+                return ok               # операция сделана, споткнулся только выход
+            if started:
+                return False            # упало действие — второй раз не заводим
             try:
-                ok = do()
+                ok = do()               # suspend недоступен: тот же вызов, без экрана
             except Exception:
                 return False
         return ok

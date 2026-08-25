@@ -4375,6 +4375,62 @@ async def test_leaving_to_the_menu_and_coming_back_opens_no_list(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_suspended_never_repeats_a_failed_action(tmp_path, monkeypatch):
+    """Упало САМО действие — второй раз его не заводим.
+
+    Находка ревью коллеги: `_suspended` различал только «успели ли доделать», и на
+    исключении из `do()` прогонял его повторно — для установки это второй clone,
+    uv sync и скачивание модели.
+
+    `suspend` подменяем рабочей заглушкой: headless-драйвер тестов его не умеет и
+    бросает на входе, а тогда проверялся бы fallback-путь, а не этот."""
+    from tui.app import TuiApp
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr, _ = _mk_screen(tmp_path, OFF)
+        await _open_voice(app, scr, pilot)
+
+        class _Suspend:
+            def __enter__(self):
+                return None
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(pilot.app, "suspend", lambda: _Suspend())
+        calls = []
+
+        def _boom():
+            calls.append(1)
+            raise OSError("каталог занят")
+
+        assert scr._suspended(_boom, "\nставлю…\n") is False
+        assert calls == [1], "упавшее действие запущено повторно"
+
+
+@pytest.mark.asyncio
+async def test_suspended_falls_back_when_the_driver_cannot_suspend(tmp_path, monkeypatch):
+    """Драйвер не умеет suspend — действие всё равно выполняется, ровно один раз."""
+    from tui.app import TuiApp
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr, _ = _mk_screen(tmp_path, OFF)
+        await _open_voice(app, scr, pilot)
+
+        class _NoSuspend:
+            def __enter__(self):
+                raise RuntimeError("драйвер не умеет suspend")
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(pilot.app, "suspend", lambda: _NoSuspend())
+        calls = []
+        assert scr._suspended(lambda: calls.append(1) or True, "\nставлю…\n") is True
+        assert calls == [1]
+
+
+@pytest.mark.asyncio
 async def test_list_hints_stand_under_every_field_from_the_first_frame(tmp_path):
     """Строка «чем раскрыть список» стоит под КАЖДЫМ полем со списком сразу.
 
