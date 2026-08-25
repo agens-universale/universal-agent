@@ -1605,8 +1605,13 @@ async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monke
         await app.push_screen(screen)
         await _goto_voice_step(pilot, screen)
         await pilot.pause()
-        screen.query_one("#voice-token", Input).focus()
+        # Ходим КЛАВИШАМИ, как человек: программный focus() обходит реальный маршрут
+        # события, и живой дефект (Ctrl+U на шаге голоса не срабатывал) так не виден.
+        await pilot.press("tab")                        # из строк режима — в поля, на «URL»
         await pilot.pause()
+        await pilot.press("down")                       # на «Токен»
+        await pilot.pause()
+        assert screen.focused is not None and screen.focused.id == "voice-token"
         ed = _voice_editor(screen)
 
         await pilot.press("ctrl+u")

@@ -887,13 +887,18 @@ async def test_footer_turns_tab_around_when_the_cursor_enters_a_field(tmp_path):
 
     Поле — «Токен», не «URL»: у адреса теперь свой список пресетов (спека 2026-08-05
     §3), и его футер — про клавиши списка (`_VOICE_FOOTER_CLOUD_LIST`), а не про Tab;
-    «Токен» списка не несёт и остаётся чистым примером обычного поля панели."""
+    «Токен» списка не несёт и остаётся чистым примером обычного поля панели.
+
+    Конфиг здесь БЕЗ сохранённого токена: с ним футер обещал бы ещё и `Ctrl+U`
+    (`_VOICE_FOOTER_CLOUD_TOKEN`), а тест — про разворот Tab, не про очистку."""
     from tui.app import TuiApp
     from tui.screens.settings import (_TAB_TO_FIELDS, _TAB_TO_VARIANTS,
                                       _VOICE_FOOTER_CLOUD_FIELD)
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, _ = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
+        scr, _ = _mk_screen(tmp_path, CLOUD, config_text=(
+            "model: m\nvoice:\n  url: https://old.x/v1/audio/transcriptions\n"
+            "  model: whisper-old\n"))
         await _open_cloud(app, scr, pilot)
         assert _TAB_TO_FIELDS in _footer(scr)
         await _to_field(pilot, 1)                        # Tab → «URL», ↓ → «Токен»

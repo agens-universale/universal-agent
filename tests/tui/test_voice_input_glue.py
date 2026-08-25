@@ -313,6 +313,87 @@ async def test_voice_flow_cache_kept_while_recording(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_ctrl_t_raises_a_dead_local_service_instead_of_recording(monkeypatch):
+    """Батарейка умерла после старта TUI — Ctrl+T поднимает её, а не пишет в пустоту.
+
+    Находка ревью коллеги: `ensure_voice_service` зовут только при старте агента и из
+    экранов настройки, а в пути записи проверок не было вовсе — после смерти сервиса
+    (OOM, `gc-voice stop`, ручной kill, гонка light-switch) диктовка уходила в мёртвый
+    порт и терялась на распознавании, и выхода из этого состояния без перезапуска окна
+    не существовало."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    monkeypatch.setattr("voice.recorder.available", lambda: True)
+    monkeypatch.setattr("tui.services.voice_setup.probe_alive", lambda: False)
+    raised = []
+    monkeypatch.setattr("voice_runtime.autostart.ensure_voice_service",
+                        lambda cfg: raised.append(cfg) or True)
+    app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
+    async with app.run_test() as pilot:
+        screen = pilot.app.screen
+        monkeypatch.setattr(screen, "_voice_local_mode", lambda: True)
+        rec = FakeRecorder()
+        _wire_fake_voice(screen, rec, lambda pcm, cfg: "текст")
+        flow = screen._voice
+
+        await pilot.press("ctrl+t")
+        for _ in range(50):
+            await pilot.pause()
+            if raised:
+                break
+        assert raised, "мёртвый сервис не стали поднимать"
+        assert flow.state == "idle", "запись пошла в мёртвый порт"
+
+
+@pytest.mark.asyncio
+async def test_ctrl_t_records_when_the_local_service_answers(monkeypatch):
+    """Живая батарейка — проверка не мешает: запись начинается как обычно."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    monkeypatch.setattr("voice.recorder.available", lambda: True)
+    monkeypatch.setattr("tui.services.voice_setup.probe_alive", lambda: True)
+    monkeypatch.setattr("voice_runtime.autostart.ensure_voice_service",
+                        lambda cfg: pytest.fail("живой сервис поднимать незачем"))
+    app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
+    async with app.run_test() as pilot:
+        screen = pilot.app.screen
+        monkeypatch.setattr(screen, "_voice_local_mode", lambda: True)
+        rec = FakeRecorder()
+        _wire_fake_voice(screen, rec, lambda pcm, cfg: "текст")
+        flow = screen._voice
+
+        await pilot.press("ctrl+t")
+        for _ in range(50):
+            await pilot.pause()
+            if flow.state == "recording":
+                break
+        assert flow.state == "recording"
+
+
+@pytest.mark.asyncio
+async def test_cloud_endpoint_is_not_probed_before_recording(monkeypatch):
+    """Свой endpoint проверять перед записью нечем и незачем: он не наш и в сеть за
+    ним мы не ходим — Ctrl+T начинает запись сразу."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    monkeypatch.setattr("voice.recorder.available", lambda: True)
+    monkeypatch.setattr("tui.services.voice_setup.probe_alive",
+                        lambda: pytest.fail("облачный режим порт не меряет"))
+    app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
+    async with app.run_test() as pilot:
+        screen = pilot.app.screen
+        monkeypatch.setattr(screen, "_voice_local_mode", lambda: False)
+        rec = FakeRecorder()
+        _wire_fake_voice(screen, rec, lambda pcm, cfg: "текст")
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        assert screen._voice.state == "recording"
+
+
+@pytest.mark.asyncio
 async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(
         monkeypatch, tmp_path):
     """…а как только запись кончилась — кэш всё-таки сбрасывается: следующая диктовка

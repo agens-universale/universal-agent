@@ -37,6 +37,57 @@ def test_garbage_files_ignored(monkeypatch, tmp_path):
     assert leases.live_leases(alive=lambda pid: False) == []
 
 
+def test_start_key_is_taken_from_a_real_process():
+    """Отпечаток снимается с ЖИВОГО процесса и повторяется между вызовами.
+
+    Проверяем на настоящем pid, а не на подмене: механика платформенная (ctypes на
+    Windows, /proc на Linux), и молчаливый None превратил бы защиту в фикцию —
+    lease писался бы без отпечатка, а `_lease_is_ours` верил бы каждому тёзке."""
+    import os
+
+    key = leases.process_start_key(os.getpid())
+    assert key and key == leases.process_start_key(os.getpid())
+    assert leases.process_start_key(0) is None      # заведомо не наш процесс
+
+
+def test_reused_pid_does_not_keep_the_light_on(monkeypatch, tmp_path):
+    """Номер PID достался ПОСТОРОННЕМУ процессу — lease всё равно мёртвый.
+
+    Находка ревью коллеги: живость клиента определялась по имени файла плюс
+    `is_pid_alive`, а содержимое lease не читалось вовсе. TUI, убитый жёстко (kill -9,
+    падение, ребут), оставлял файл на диске; система со временем выдавала тот же номер
+    чужому процессу — и с этого момента `release` никогда не возвращал True: speaches
+    не гас даже при всех закрытых окнах агента, держа в памяти whisper-модель."""
+    _patch_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-A")
+    leases.acquire(100)                                  # lease нашего TUI
+    monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-B")   # чужой процесс
+
+    assert leases.live_leases(alive=lambda pid: True) == []
+    assert not (tmp_path / "100.lease").exists()          # прибран как мёртвый
+    assert leases.release(999, alive=lambda pid: True) is True   # свет можно гасить
+
+
+def test_same_process_keeps_its_lease(monkeypatch, tmp_path):
+    """Тот же процесс — тот же отпечаток: lease живой, гасить нельзя."""
+    _patch_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-A")
+    leases.acquire(100)
+    assert leases.live_leases(alive=lambda pid: True) == [100]
+    assert leases.release(999, alive=lambda pid: True) is False
+
+
+def test_lease_without_a_start_key_is_trusted(monkeypatch, tmp_path):
+    """Старый формат (или система, где время старта не узнать) — верим как раньше.
+
+    Иначе обновление агента погасило бы сервис под живыми окнами: их lease написан
+    прежней версией и отпечатка не содержит."""
+    _patch_dir(monkeypatch, tmp_path)
+    (tmp_path / "100.lease").write_text("100", encoding="utf-8")
+    monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-A")
+    assert leases.live_leases(alive=lambda pid: True) == [100]
+
+
 def _patch_pids(monkeypatch, tmp_path):
     monkeypatch.setattr("voice_runtime.leases.voice_pids_dir", lambda: tmp_path)
 
