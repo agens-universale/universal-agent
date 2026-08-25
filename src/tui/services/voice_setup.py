@@ -144,18 +144,24 @@ def update_local(config: dict, echo=print) -> bool:
     was_running = _stop_service()
     if was_running:
         echo("[voice] сервис остановлен на время обновления")
+    updated = True
     try:
         install(port=state.port, model=state.model,
                 base_raw=base_config_raw(), echo=echo)
     except VoiceInstallError as exc:
         echo(f"[voice] ошибка обновления: {exc}")
-        return False
-    if was_running:
-        # Сессия у человека уже открыта, и без этого голос молчал бы до перезапуска.
-        echo("[voice] поднимаю сервис заново (холодный старт — до полутора минут)")
-        if not ensure_voice_service(config):
-            echo("[voice] сервис не поднялся — запустится при следующем старте gc-ua")
-    return True
+        updated = False
+    finally:
+        if was_running:
+            # Сервис гасили МЫ и только ради обновления — вернуть его обязаны в ЛЮБОМ
+            # исходе (находка ревью коллеги): прежний ранний `return False` оставлял
+            # человека без голоса до перезапуска gc-ua, хотя рабочая версия никуда не
+            # девалась. Сессия у него уже открыта — поднимаем сами. Про установку и
+            # про подъём говорим порознь: это разные новости.
+            echo("[voice] поднимаю сервис заново (холодный старт — до полутора минут)")
+            if not ensure_voice_service(config):
+                echo("[voice] сервис не поднялся — запустится при следующем старте gc-ua")
+    return updated
 
 
 def remove_local() -> bool:

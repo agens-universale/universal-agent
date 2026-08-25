@@ -348,3 +348,52 @@ def test_probe_alive_is_the_only_socket_path(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: state)
     monkeypatch.setattr(vs, "_port_alive", lambda st: calls.append(st) or True)
     assert vs.probe_alive() is True and calls == [state]
+
+
+def _update_stubs(monkeypatch, *, install_raises=None):
+    """Общая обвязка `update_local`: состояние, гашение, установка, подъём.
+
+    Возвращает журнал — по нему видно, чем кончилось обновление и подняли ли сервис."""
+    log = {"stopped": 0, "installed": 0, "ensured": 0}
+
+    def _stop():
+        log["stopped"] += 1
+        return True                     # сервис РАБОТАЛ — его гасят на время обновления
+
+    def _install(**kw):
+        log["installed"] += 1
+        if install_raises is not None:
+            raise install_raises
+
+    def _ensure(_config):
+        log["ensured"] += 1
+        return True
+
+    monkeypatch.setattr(vs, "_load_state", lambda: ST_OLD)
+    monkeypatch.setattr(vs, "base_config_raw", lambda: "")
+    monkeypatch.setattr("voice_runtime.cli._stop_service", _stop)
+    monkeypatch.setattr("voice_runtime.install.install", _install)
+    monkeypatch.setattr("voice_runtime.autostart.ensure_voice_service", _ensure)
+    return log
+
+
+def test_failed_update_puts_the_service_back(monkeypatch):
+    """Установка упала — сервис, погашенный ради обновления, обязан вернуться.
+
+    Находка ревью коллеги: `update_local` гасит работающий сервис, а на
+    `VoiceInstallError` возвращает False сразу — и голос молчал до перезапуска gc-ua,
+    хотя человек всего лишь не смог обновиться."""
+    from voice_runtime.install import VoiceInstallError
+
+    said = []
+    log = _update_stubs(monkeypatch, install_raises=VoiceInstallError("сеть недоступна"))
+    assert vs.update_local(_cfg(), echo=said.append) is False
+    assert log == {"stopped": 1, "installed": 1, "ensured": 1}
+    assert any("сеть недоступна" in s for s in said), "причину провала обязаны назвать"
+
+
+def test_successful_update_starts_the_service_once(monkeypatch):
+    """Успешный путь не изменился: гашение, установка и ровно один подъём."""
+    log = _update_stubs(monkeypatch)
+    assert vs.update_local(_cfg(), echo=lambda _s: None) is True
+    assert log == {"stopped": 1, "installed": 1, "ensured": 1}
