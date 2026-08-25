@@ -347,6 +347,9 @@ class TraceScreen(Screen):
         self._voice = None            # type: Optional["VoiceInputFlow"]
         self._voice_timer = None      # textual.Timer | None
         self._voice_frame: int = 0
+        # Конфиг перечитали посреди записи: рвать её нельзя, а кэш flow уже протух —
+        # снимем его, когда запись кончится (см. config_reloaded / _on_voice_state).
+        self._voice_flow_stale: bool = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -708,11 +711,24 @@ class TraceScreen(Screen):
     def config_reloaded(self) -> None:
         """Hot-reload конфига (app.reload_config): сбросить кэш voice-flow — он держит
         voice-секцию, снятую при сборке, и без сброса смена endpoint'а в /settings
-        не подействовала бы до перезапуска. Живую запись не рвём: пересоберётся на
-        следующем Ctrl+T, когда flow вернётся в idle."""
-        if self._voice is None or self._voice.state != "idle":
+        не подействовала бы до перезапуска.
+
+        Живую запись не рвём — сброс кэша под работающим рекордером осиротил бы поток
+        транскрибации. Но и не забываем: помечаем flow устаревшим, и он уйдёт, как
+        только вернётся в idle (`_on_voice_state`). Раньше здесь стоял голый `return`,
+        и обещание докстринга «пересоберётся на следующем Ctrl+T» не исполнял никто —
+        диктовки до конца сессии шли на прежний адрес (находка ревью коллеги)."""
+        if self._voice is None:
             return
+        if self._voice.state != "idle":
+            self._voice_flow_stale = True
+            return
+        self._drop_voice_flow()
+
+    def _drop_voice_flow(self) -> None:
+        """Снять кэш flow и его тик: следующая диктовка соберёт его на свежем конфиге."""
         self._voice = None
+        self._voice_flow_stale = False
         if self._voice_timer is not None:
             self._voice_timer.stop()
             self._voice_timer = None
@@ -768,6 +784,10 @@ class TraceScreen(Screen):
             if self._voice_timer is not None:
                 self._voice_timer.stop()
                 self._voice_timer = None
+            if self._voice_flow_stale:
+                # Конфиг перечитали, пока шла запись: рвать её было нельзя, а теперь
+                # можно — следующая диктовка соберётся на свежей voice-секции.
+                self._drop_voice_flow()
         elif self._voice_timer is None:
             self._voice_frame = 0
             # 0.08 с (было 0.15): эквалайзер обязан успевать за голосом, а звук теперь

@@ -310,3 +310,47 @@ async def test_voice_flow_cache_kept_while_recording(monkeypatch, tmp_path):
         app.reload_config()
         await pilot.pause()
         assert screen._voice is flow                # запись не осиротела
+
+
+@pytest.mark.asyncio
+async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(
+        monkeypatch, tmp_path):
+    """…а как только запись кончилась — кэш всё-таки сбрасывается: следующая диктовка
+    идёт на НОВЫЙ endpoint.
+
+    Находка ревью коллеги: `config_reloaded` при живой записи просто выходил и следа
+    не оставлял, поэтому все диктовки до перезапуска TUI продолжали стучаться на старый
+    адрес — хотя докстринг обещал пересборку «на следующем Ctrl+T»."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    monkeypatch.setattr("voice.recorder.available", lambda: True)
+    monkeypatch.setattr("config.managed_config_path", lambda: tmp_path / "no-managed.yml")
+    monkeypatch.setattr("config._project_local_config_path", lambda: None)
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        "voice:\n  url: https://new.x/v1/audio/transcriptions\n  token: t2\n",
+        encoding="utf-8")
+    app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
+    app._config_path = str(cfg_file)
+    async with app.run_test() as pilot:
+        screen = pilot.app.screen
+        rec = FakeRecorder()
+        _wire_fake_voice(screen, rec, lambda pcm, cfg: "текст")
+        flow = screen._voice
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        assert flow.state == "recording"
+
+        app.reload_config()                         # смена endpoint посреди записи
+        await pilot.pause()
+        assert screen._voice is flow                # её не рвём
+
+        rec.elapsed = 2.0
+        await pilot.press("enter")                  # стоп → распознавание → idle
+        await pilot.pause()
+        assert flow.state == "idle"
+
+        new = screen._ensure_voice_flow()
+        assert new is not flow, "устаревший flow пережил запись"
+        assert new._cfg["url"] == "https://new.x/v1/audio/transcriptions"
