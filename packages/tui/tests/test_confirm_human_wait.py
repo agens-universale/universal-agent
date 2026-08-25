@@ -8,6 +8,14 @@ import types
 import pytest
 
 
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
+
+
 def test_present_confirm_targets_trace_screen_and_returns_ack(monkeypatch):
     """_present_confirm ищет TraceScreen в стеке и возвращает mounted ack."""
     pytest.importorskip("textual")
@@ -178,7 +186,7 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     class _State:

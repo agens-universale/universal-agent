@@ -3,6 +3,14 @@
 from gc_core.processing_responses import split_at_first_finalizer
 
 
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
+
+
 def test_split_stops_after_first_finalizer():
     calls = [{"name": "read_file"}, {"name": "turn_ask_human"}, {"name": "turn_ask_human"}]
     executed, skipped = split_at_first_finalizer(calls)
@@ -44,7 +52,7 @@ def test_process_tool_calls_skips_second_finalizer(monkeypatch):
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output",
                         lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     class _State:
@@ -82,7 +90,7 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     class _State:
@@ -123,7 +131,7 @@ def test_flush_skipped_outputs_before_ask_human(monkeypatch):
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     class _State:

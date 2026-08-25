@@ -8,6 +8,14 @@ from types import SimpleNamespace
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
 
 
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
+
+
 def test_tool_start_for_session_todo_carries_items():
     """processing_responses кладёт разобранные items в событие."""
     ev = SubagentProgressEvent(
@@ -72,7 +80,7 @@ def _patch_process(monkeypatch, *, apply_return='{"ok": true}'):
 
     monkeypatch.setattr(pr, "aapply_tool", _fake_aapply_tool)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
     return pr
 
@@ -208,7 +216,7 @@ class TestEmitToolStartEnd:
 
         monkeypatch.setattr(pr, "aapply_tool", _boom)
         monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-        monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+        monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
         monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
         sink = QueueSubagentProgressSink()

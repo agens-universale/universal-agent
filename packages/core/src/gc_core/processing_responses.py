@@ -14,12 +14,12 @@ from gc_core.run_summary_coordinator import build_preserved_batch, filter_messag
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, get_function_call_output_text
-from gc_core.intent_scope.hook import maybe_update_intent_scope_from_tool
+from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
 from gc_core.intent_scope.final_answer import maybe_record_final_answer_intent
 from gc_core.message_policy.cycle_stop import aappend_cycle_stop_tool_outputs_for_batch
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
-from gc_core.summarize.limit_trace_summary import build_limit_envelope
+from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.request_backend_policy import arequest_chat_completions_with_policy
 from gc_core.tools import aapply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
@@ -720,7 +720,7 @@ async def aprocess_tool_calls(
             logger=getattr(ctx, "logger", None),
         )
         if tool_name != FINISH_TOOL_NAME:
-            await _acall_blocking_hook(maybe_update_intent_scope_from_tool,
+            await _acall_blocking_hook(amaybe_update_intent_scope_from_tool,
                 tool_name=tool_name,
                 tool_output_raw=tool_res_raw,
                 tool_arguments=tool_arguments,
@@ -919,14 +919,14 @@ async def arun_agent(
             if not pending_tool_exec:
                 if state.steps >= state.max_steps:
                     state.terminal_outcome = "step_limit"
-                    return await _acall_blocking_hook(build_limit_envelope, state, "step_limit", ctx)
+                    return await _acall_blocking_hook(abuild_limit_envelope, state, "step_limit", ctx)
 
                 if (
                     max_tool_calls_limit is not None
                     and state.tool_calls >= max_tool_calls_limit
                 ):
                     state.terminal_outcome = "tool_call_limit"
-                    return await _acall_blocking_hook(build_limit_envelope, state, "tool_call_limit", ctx)
+                    return await _acall_blocking_hook(abuild_limit_envelope, state, "tool_call_limit", ctx)
 
                 if session_token_limit is not None:
                     _baseline = UsageAccount.from_meta(
@@ -935,7 +935,7 @@ async def arun_agent(
                     _spent = state.usage.delta_from(_baseline).totals()["total"]
                     if _spent >= session_token_limit:
                         state.terminal_outcome = "token_limit"
-                        return await _acall_blocking_hook(build_limit_envelope, state, "token_limit", ctx)
+                        return await _acall_blocking_hook(abuild_limit_envelope, state, "token_limit", ctx)
 
             if tool_error_cnt > max_tool_errors:
                 state.terminal_outcome = "tool_errors"
@@ -1091,7 +1091,7 @@ async def arun_agent(
                             final_submit_output = get_function_call_output_text(
                                 state.messages, finish_call_id
                             )
-                            await _acall_blocking_hook(maybe_update_intent_scope_from_tool,
+                            await _acall_blocking_hook(amaybe_update_intent_scope_from_tool,
                                 tool_name=FINISH_TOOL_NAME,
                                 tool_output_raw=final_submit_output or "",
                                 tool_arguments=finish_arguments or "",

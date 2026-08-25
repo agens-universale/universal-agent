@@ -5,6 +5,14 @@ import pytest
 from types import SimpleNamespace
 
 
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
+
+
 def test_schema_default_is_smart():
     from gc_core.config_modules.tui import TuiConfig
     cfg = TuiConfig()
@@ -173,7 +181,7 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
     monkeypatch.setattr(pr, "aapply_tool", lambda **_kw: "ok")
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
 
     state = State(
         verbose=False,

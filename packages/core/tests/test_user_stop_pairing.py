@@ -7,6 +7,14 @@ from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
+
+
 def _unique_id_factory():
     n = {"i": 0}
 
@@ -44,7 +52,7 @@ def _patch_process_tool_calls(monkeypatch, pr, *, apply=None):
 
     monkeypatch.setattr(pr, "aapply_tool", apply or _default_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", _unique_id_factory())
     return applied
 

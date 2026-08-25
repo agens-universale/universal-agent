@@ -11,6 +11,14 @@ from gc_core.thread_store import read_subagent_trace
 from gc_core.tools.subagents.sidecar import persist_subagent_trace
 
 
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
+
+
 def _state():
     return SimpleNamespace(
         messages=[],
@@ -53,7 +61,7 @@ def _patch_process(monkeypatch, *, apply_return):
 
     monkeypatch.setattr(pr, "aapply_tool", _fake_aapply_tool)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
     return pr
 

@@ -10,6 +10,14 @@ from gc_core.states import State
 from gc_core.tools import apply_tool, is_unknown_tool_output
 
 
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
+
+
 def _make_state(**overrides):
     state = State(
         verbose=False,
@@ -98,7 +106,7 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     state = _make_state()
@@ -140,7 +148,7 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     state = _make_state()
@@ -181,7 +189,7 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
 
     round_id = {"n": 0}
 
@@ -249,7 +257,7 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
 
     round_id = {"n": 0}
 

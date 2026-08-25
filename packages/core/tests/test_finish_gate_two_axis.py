@@ -70,6 +70,11 @@ def _stub_tools_modules() -> None:
     tools_pkg.aapply_tool = _apply_tool
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    # Заглушка обязана покрывать ВСЁ, что импортирует processing_responses:
+    # иначе файл падает ImportError при изолированном прогоне и проходит
+    # только в компании соседей, успевших импортировать настоящий модуль.
+    from gc_core.tools import is_unknown_tool_output as _is_unknown
+    tools_pkg.is_unknown_tool_output = _is_unknown
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
@@ -553,10 +558,13 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
         "avalidate_final_report_vs_user_intent",
         _validate,
     )
+    async def _noop_intent_scope(**_kwargs):
+        return None
+
     monkeypatch.setattr(
         processing_module,
-        "maybe_update_intent_scope_from_tool",
-        lambda **_kwargs: None,
+        "amaybe_update_intent_scope_from_tool",
+        _noop_intent_scope,
     )
 
     user_ask_batches: list[list] = []
