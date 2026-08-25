@@ -351,8 +351,11 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
 
-    # Сохранить base-voice для дефекта перекрытия (до мержа managed).
-    _base_voice = dict(raw_config.get("voice") or {})
+    # Сохранить base-voice для дефекта перекрытия (до мержа managed). Тип НЕ приводим:
+    # секция ещё не проходила схему, и `dict()` над «voice: строка» падал бы технической
+    # ошибкой про sequence element вместо внятного вердикта валидатора (находка ревью).
+    _raw_voice = raw_config.get("voice")
+    _base_voice = dict(_raw_voice) if isinstance(_raw_voice, dict) else {}
 
     # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
     # Мёржится поверх base, под project-local. mcp.servers аккумулируются.

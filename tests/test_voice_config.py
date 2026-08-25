@@ -128,3 +128,21 @@ def test_voice_overridden_fact_token_only(tmp_path, monkeypatch):
     monkeypatch.setattr("config.managed_config_path", lambda: managed)
     cfg = config_mod.load_config(str(base))
     assert cfg["voice_overridden_by_managed"] == "<без url>"
+
+
+def test_broken_voice_section_fails_validation_not_arithmetic(tmp_path):
+    """`voice: строка` — ошибка СХЕМЫ с именем ключа, а не техническая из `dict()`.
+
+    Находка ревью коллеги: снимок базовой секции снимался ДО валидации
+    (`dict(raw_config.get("voice"))`), и на не-словаре человек получал
+    «dictionary update sequence element #0 has length 1» — про собственный конфиг он
+    из такого сообщения не узнавал ничего."""
+    import config as config_mod
+    from pydantic import ValidationError
+
+    base = tmp_path / "config.yml"
+    base.write_text("voice: broken\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError) as exc:
+        config_mod.load_config(str(base))
+    assert "voice" in str(exc.value)
