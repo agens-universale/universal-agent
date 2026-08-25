@@ -390,6 +390,50 @@ async def _aspawn_stdio_process(server_cfg: Dict[str, Any]):
     )
 
 
+async def _aread_response(proc, timeout: float, want_id: Any) -> Dict[str, Any]:
+    """Прочитать ответ С НУЖНЫМ id, пропуская всё остальное.
+
+    Раньше здесь читалась ОДНА строка и считалась ответом — что бы в ней ни
+    лежало. Докстрока ``_INIT_PAYLOAD`` рядом утверждала обратное («читает
+    ответ с нужным id, всё остальное пропускает»), и это расхождение было не
+    теоретическим:
+
+    * серверы шлют ``notifications/message`` (логи) НЕЗАПРОШЕННО, и такая
+      строка становилась «ответом», а настоящий ответ оставался непрочитанным;
+    * сервер, поверивший объявленной способности, шлёт встречный запрос
+      (``roots/list``) — он тоже принимался за ответ.
+
+    Пропускаем: уведомления (нет ``id``), встречные запросы сервера (есть
+    ``method``) и ответы с чужим ``id``. Таймаут — общий на ожидание, а не на
+    строку: болтливый сервер иначе растягивал бы его без предела.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return {}
+        try:
+            raw = await asyncio.wait_for(proc.stdout.readline(), left)
+        except (asyncio.TimeoutError, TimeoutError):
+            return {}
+        if not raw:
+            return {}                     # EOF: процесс закрыл вывод
+        line_in = raw.decode("utf-8", "replace").strip()
+        if not line_in:
+            continue
+        try:
+            message = json.loads(line_in)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(message, dict):
+            continue
+        if message.get("method") is not None:
+            continue                      # встречный запрос или уведомление
+        if want_id is not None and message.get("id") != want_id:
+            continue                      # ответ на чужой запрос
+        return message
+
+
 async def _astdio_exchange(
     server_cfg: Dict[str, Any],
     timeout: float,
@@ -412,16 +456,9 @@ async def _astdio_exchange(
             if not expect_response:
                 results.append({})
                 continue
-            try:
-                raw = await asyncio.wait_for(proc.stdout.readline(), timeout)
-            except (asyncio.TimeoutError, TimeoutError):
-                results.append({})
-                continue
-            line_in = raw.decode("utf-8", "replace").strip()
-            try:
-                results.append(json.loads(line_in) if line_in else {})
-            except json.JSONDecodeError:
-                results.append({})
+            results.append(
+                await _aread_response(proc, timeout, payload.get("id"))
+            )
     finally:
         await _akill_process(proc)
     return results
