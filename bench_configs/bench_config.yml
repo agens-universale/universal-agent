@@ -78,11 +78,11 @@ agent_kwargs:
 
     # --- summary ---
     summary_params:                      # компакция истории (работает только в chat_completions-режиме)
-      chat_completions_summary_trigger_chars: 200000   # объём диалога (символы), после которого запускается суммаризация
-      chat_completions_summary_turn_end_trigger_chars: 150000  # порог компакции на границе хода (turn end)
-      incremental_batch_chars: 280000    # сколько истории сжимается за одну инкрементальную суммаризацию
+      chat_completions_summary_trigger_chars: 400000   # объём диалога (символы), после которого запускается суммаризация
+      chat_completions_summary_turn_end_trigger_chars: 350000  # порог компакции на границе хода (turn end)
+      incremental_batch_chars: 480000    # сколько истории сжимается за одну инкрементальную суммаризацию
       max_message_chars: 16000           # сообщение длиннее этого урезается перед подачей в суммаризатор
-      max_dialogue_chars: 400000         # жёсткий потолок хвоста диалога
+      max_dialogue_chars: 800000         # жёсткий потолок хвоста диалога
       last_dialog_steps_count: 3         # столько последних шагов держим несжатыми (свежий контекст)
       last_dialog_step_message_max_chars: 4000  # лимит символов на сообщение в этих последних шагах
       max_accumulated_summary_chars: 20000
