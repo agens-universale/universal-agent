@@ -310,7 +310,8 @@ class ConnectionEditor(Vertical):
         Через write_field, как и все прочие записи в поля этого редактора: обычное
         присваивание постит Input.Changed «как будто печатал человек». Сейчас это
         безвредно (список к моменту вызова уже свёрнут, и фильтр на событие не
-        реагирует), но ровно от таких обходов и заводили общий шов."""
+        реагирует), но ровно от таких обходов и заводили общий шов — сосед
+        (VoiceEndpointEditor._apply_url_preset) пишет пресет так же."""
         write_field(self.query_one("#conn-url", Input), preset.url)
 
     def enter_presets(self) -> bool:

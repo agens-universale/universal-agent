@@ -223,7 +223,7 @@ def uncomment_template_block(template_text: str, top_key: str) -> str:
     `#<indent>k: v` — без ведущего '#'.
 
     Для опциональных секций, которые шаблон несёт ЗАКОММЕНТИРОВАННЫМИ (пример:
-    gc — сборка мусора не настраивается «из коробки»). KeyError, если блока нет.
+    voice — фича не включена «из коробки»). KeyError, если блока нет.
     """
     lines = template_text.splitlines(keepends=True)
     head_re = re.compile(_COMMENTED_TOP_KEY_RE_TMPL.format(key=re.escape(top_key)))
@@ -300,7 +300,26 @@ def write_values(path, values: dict, *, template_path=None, validate=None) -> li
                     continue
                 except KeyError:
                     pass
+            else:
+                # Секция ЖИВАЯ, но этого под-ключа в ней нет. `insert_missing` выше не
+                # нашёл его и в шаблоне — потому что шаблон несёт такие секции
+                # закомментированными (voice). Разворачиваем блок шаблона во временный
+                # текст и берём строку оттуда: дописать под-ключ в живую секцию можно,
+                # а дублировать саму секцию нельзя (см. ветку выше). Находка ревью:
+                # раньше здесь сдавались, и ключ уходил в `missing`.
+                try:
+                    unfolded = uncomment_template_block(template_text, key.split(".")[0])
+                    text = insert_missing(text, key, unfolded)
+                    text = setter(text, key, value)
+                    continue
+                except KeyError:
+                    pass
         missing.append(key)
+    if missing:
+        # Всё или ничего: записать половину значений хуже, чем не записать ничего.
+        # Прежде соседи по вызову ложились в файл, а про несохранённые человек узнавал
+        # (в /settings) или не узнавал (в мастере) — и на диске оставалось ни то ни сё.
+        return missing
     if validate is not None:
         validate(text)  # ValueError → наружу, файл не тронут
     tmp = path.with_suffix(path.suffix + ".tmp")

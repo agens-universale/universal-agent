@@ -6,8 +6,8 @@
 
 Детерминизм — условие работоспособности эталона: сети, реального конфига машины
 и времени в кадре быть не должно. Поэтому мастер и /settings монтируются с
-инъекцией (список моделей, проба подключения, MCP), а состояние воспроизводится
-теми же приёмами, что в обычных тестах соседних файлов.
+инъекцией (список моделей, проба подключения, MCP, голосовой фасад), а состояние
+воспроизводится теми же приёмами, что в обычных тестах соседних файлов.
 """
 import pytest
 
@@ -16,8 +16,11 @@ pytest.importorskip("pytest_textual_snapshot")
 
 from tests.tui.conftest import open_settings_section, wait_until
 from tests.tui.test_onboarding_screen import _screen as _wizard_screen
+from tests.tui.test_onboarding_voice_step import FakeVoice
 from tests.tui.test_settings_screen import _cfg, _write_cfg
 from tests.tui.test_settings_screen import _mk_screen as _mk_settings
+from tests.tui.test_settings_voice import CLOUD, CLOUD_CONFIG
+from tests.tui.test_settings_voice import _mk_screen as _mk_voice_settings
 
 _SIZE = (120, 40)
 # Шаги мастера длиннее одного экрана: над формой стоят лого, тэглайн, степпер и
@@ -51,6 +54,15 @@ def _wizard(tmp_path, **over):
     kw = dict(config_path=str(tmp_path / "config.yml"), probe=_ok_probe)
     kw.update(over)
     return _wizard_screen(**kw)
+
+
+def _isolate_voice_state(monkeypatch, tmp_path):
+    """Батарейка голоса — на tmp: `_voice_installed`/`current_model_short` читают
+    реальный каталог данных агента, и кадр зависел бы от машины разработчика."""
+    from voice_runtime import paths as vpaths
+    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
+    monkeypatch.setattr("voice_runtime.state.voice_state_path",
+                        lambda: tmp_path / "voice_data" / "state.json")
 
 
 async def _freeze_cursors(pilot):
@@ -94,7 +106,8 @@ async def _wait_probe_settled(pilot, scr):
 
 
 def _isolate_config_layers(monkeypatch, tmp_path):
-    """Слои поверх базового config.yml — на tmp. Нужны ВСЕМ секциям /settings:
+    """Слои поверх базового config.yml — на tmp (тот же приём, что автофикстура
+    test_settings_voice). Нужны ВСЕМ секциям /settings, не только голосу:
     `SettingsScreen.__init__` → `_read_origins()` → `config_origin._overlay_paths`
     читает настоящие `~/.gc/config.local.yml` и `<cwd>/.gc/config.yml`, и стоит
     любому из них перекрыть адрес, токен, модель или прокси — в кадр домонтируется
@@ -153,6 +166,33 @@ def test_wizard_model_snapshot(snap_compare, tmp_path):
     assert snap_compare(app, terminal_size=_WIZARD_SIZE, run_before=setup)
 
 
+def test_wizard_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
+    """Шаг «Голосовой ввод» мастера: выбран «Свой endpoint», под ним — его поля."""
+    from tui.screens.onboarding import _VOICE_STEP
+    _isolate_voice_state(monkeypatch, tmp_path)
+    app = _app(tmp_path)
+
+    async def setup(pilot):
+        await pilot.pause()
+        scr = _wizard(tmp_path, voice=FakeVoice())
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        # Шаги 0–2 требуют валидного ввода; сюда важен вид шага голоса, поэтому
+        # доводим состояние напрямую — тем же приёмом, что _to_voice_step соседей.
+        scr._values["completions_url"] = "https://h/v1/chat/completions"
+        scr._values["Authorization"] = ""
+        scr._values["model"] = "test-model"
+        scr._step = _VOICE_STEP
+        scr._render_step()
+        await pilot.pause()
+        await pilot.press("down")               # курсор → «Свой endpoint»
+        await pilot.press("space")              # …и пометка на нём
+        await pilot.pause()
+        await _freeze_cursors(pilot)
+
+    assert snap_compare(app, terminal_size=_WIZARD_SIZE, run_before=setup)
+
+
 # --- /settings ---
 
 def test_settings_connection_snapshot(snap_compare, tmp_path, monkeypatch):
@@ -196,6 +236,55 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
         open_settings_section(scr, "Модель")
         await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
                          and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await _freeze_cursors(pilot)
+
+    assert snap_compare(app, terminal_size=_SIZE, run_before=setup)
+
+
+def test_settings_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
+    """/settings → «Голос»: курсор на «Свой endpoint», под ним — четыре поля."""
+    _isolate_config_layers(monkeypatch, tmp_path)
+    _isolate_voice_state(monkeypatch, tmp_path)
+    app = _app(tmp_path, {"voice": {}})
+
+    async def setup(pilot):
+        await pilot.pause()
+        scr, _fake = _mk_voice_settings(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Голосовой ввод")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=_SIZE, run_before=setup)
+
+
+# Адрес совпадает с пресетом Groq (спека 2026-08-05 §3): раскрытый список тогда
+# подсвечивает СВОЙ пресет, а не первую строку. Раскрываем `Alt+↓` — поверх
+# заполненного поля список сам не раскрывается (канон форм 2026-08-17, `can_open`);
+# гейт стережёт юнит-тест `test_preset_url_opens_only_on_alt_down_and_highlights_the_match`
+# в test_settings_voice.py, а этот эталон — вид самого раскрытого списка.
+_URL_PRESET_CONFIG = ("model: m\nvoice:\n"
+                      "  url: https://api.groq.com/openai/v1/audio/transcriptions\n"
+                      "  token: old-token\n  model: whisper-1\n")
+
+
+def test_settings_voice_url_presets_snapshot(snap_compare, tmp_path, monkeypatch):
+    """/settings → «Голос»: курсор на поле «URL» — раскрыт пресет-лист адреса,
+    подсвечена строка действующего провайдера (Groq)."""
+    _isolate_voice_state(monkeypatch, tmp_path)
+    app = _app(tmp_path, {"voice": {}})
+
+    async def setup(pilot):
+        await pilot.pause()
+        scr, _fake = _mk_voice_settings(tmp_path, CLOUD, config_text=_URL_PRESET_CONFIG)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Голосовой ввод")
+        await pilot.pause()
+        await pilot.press("tab")        # строка режима → группа полей, первое поле — «URL»
+        await pilot.pause()
+        await pilot.press("alt+down")   # адрес задан — список раскрывает явная клавиша
+        await pilot.pause()
         await _freeze_cursors(pilot)
 
     assert snap_compare(app, terminal_size=_SIZE, run_before=setup)

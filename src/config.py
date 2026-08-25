@@ -278,7 +278,18 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "update": app_cfg.update.model_dump(),  # спека D: check/extra_args
         "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
         "tui_file_view": app_cfg.tui.file_view.model_dump(),
+        "voice": {
+            "provider": app_cfg.voice.provider,
+            "url": app_cfg.voice.url,
+            "token": app_cfg.voice.token,
+            "model": app_cfg.voice.model,
+            "language": app_cfg.voice.language,
+            "max_seconds": app_cfg.voice.max_seconds,
+            "timeout_seconds": app_cfg.voice.timeout_seconds,
+            "verify_ssl": app_cfg.voice.verify_ssl,
+        },
         "endpoint_presets": [p.model_dump() for p in app_cfg.endpoint_presets],
+        "voice_endpoint_presets": [p.model_dump() for p in app_cfg.voice_endpoint_presets],
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
@@ -454,9 +465,16 @@ def load_config_ex(
     raw_config = resolve_env_placeholders(raw_config)
     validate_registry_pairs(raw_config, source=str(base_path))
 
+    # Сохранить base-voice для дефекта перекрытия (до мержа managed). Тип НЕ приводим:
+    # секция ещё не проходила схему, и `dict()` над «voice: строка» падал бы технической
+    # ошибкой про sequence element вместо внятного вердикта валидатора (находка ревью).
+    _raw_voice = raw_config.get("voice")
+    _base_voice = dict(_raw_voice) if isinstance(_raw_voice, dict) else {}
+
     # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
     # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
     managed_path = managed_config_path()
+    managed_raw: Dict[str, Any] = {}
     if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
         with open(managed_path, "r", encoding="utf-8") as file:
             managed_raw = yaml.safe_load(file) or {}
@@ -496,6 +514,25 @@ def load_config_ex(
 
     mtime_set = _build_mtime_set(base_path, managed_path, project_path, active_name, roots)
 
+    # Перекрыт ли юзерский voice managed-слоем (gc-voice install) — для notices. Правило
+    # общее с установкой: она предупреждает о том же факте, и вердикт обязан совпадать.
+    #
+    # Считаем ПОСЛЕ ВСЕХ слоёв и только когда адрес батарейки реально победил. Сперва
+    # расчёт стоял между managed и project — и агент предупреждал «managed перекрыл ваш
+    # voice» там, где работал адрес из <cwd>/.gc/config.yml (находка ревью коллеги).
+    # Профиль — такой же слой поверх: если voice.url задан в нём, батарейка тоже ничего
+    # не решает, поэтому место расчёта — ниже профильного мержа, а не выше.
+    _voice_overridden: Optional[str] = None
+    _mv = managed_raw.get("voice") or {}
+    if _mv:
+        from voice_runtime.wire import overridden_user_voice
+        _managed_url = str(_mv.get("url") or "")
+        _merged_voice = raw_config.get("voice")
+        _effective_url = str((_merged_voice or {}).get("url") or "") \
+            if isinstance(_merged_voice, dict) else ""
+        if _effective_url == _managed_url:
+            _voice_overridden = overridden_user_voice(_base_voice, _managed_url)
+
     # Compat-слой (A4): rename/remove устаревших ключей in-memory, файл не трогаем.
     # Применяется к итоговому мержу — профильный слой проходит его так же, как
     # остальные (единый вызов после всех merge-слоёв, включая профиль).
@@ -518,6 +555,8 @@ def load_config_ex(
     # Фаза 2 секций моделей (ссылочная целостность на merged-реестре) и лоадер
     # профилей (зарезервированные имена, секрет-политика) — тот же канал notices.
     config_dict["compat_notices"] = _compat_notices + _model_section_notices + notices
+    # Не поле схемы: факт перекрытия юзерского voice managed-слоем — знает только загрузчик.
+    config_dict["voice_overridden_by_managed"] = _voice_overridden
 
     apply_swarm_env_overrides(config_dict, config_dir)
 

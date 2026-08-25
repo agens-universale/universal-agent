@@ -18,13 +18,61 @@ import onboarding
 from tui import branding
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 
-_STEP_TITLES = ("Подключение", "Модель", "MCP-серверы", "Подтверждение")
-_STEP_STEPS = ("Подключение", "Модель", "MCP")   # короткие имена для степпера
-_LAST_STEP = 3   # final/confirm
-_MARK_STEPS = (1,)   # шаги с отдельной от курсора пометкой ● (двухролевой Enter)
+_STEP_TITLES = ("Подключение", "Модель", "MCP-серверы", "Голосовой ввод", "Подтверждение")
+_STEP_STEPS = ("Подключение", "Модель", "MCP", "Голосовой ввод")   # короткие имена для степпера
+_LAST_STEP = 4   # final/confirm
+_VOICE_STEP = 3
 
+_VOICE_OPTIONS = (
+    ("local", "Локальный сервис (рекомендуется)", "распознаёт офлайн, на вашем компьютере"),
+    ("cloud", "Свой endpoint", "любой OpenAI-совместимый STT-сервис"),
+    ("skip", "Без голосового ввода", ""),
+)
+# Место на диске: пока сервиса нет — это будущая цена установки, после неё — факт.
+# 0.9 ГБ — замер штатной установки: окружение сервиса 390 МБ + модель 486 МБ = 876 МБ.
+# Считаем десятичными (как трафик и как продают диски); в двоичных это 0.82 ГиБ, но
+# на диске с учётом кластеров выходит даже больше — округляем вверх, не вниз.
+_VOICE_LOCAL_DISK = {False: "скачает ~0.9 ГБ", True: "занимает ~0.9 ГБ на диске"}
+_VOICE_SUMMARY_LABELS = {"local": "локальный сервис", "cloud": "свой endpoint", "skip": "нет"}
+# Цена локального сервиса в ресурсах (замер на faster-whisper-small): модель висит в
+# памяти постоянно — так задано WHISPER__TTL=-1, иначе каждая фраза начиналась бы с
+# её загрузки. 4 потока — дефолт cpu_threads движка, а не свойство конкретной машины.
+_VOICE_LOCAL_COST = "~1 ГБ RAM · CPU до 4 потоков"
+_MARK_STEPS = (1, _VOICE_STEP)   # шаги с отдельной от курсора пометкой ● (двухролевой Enter)
+
+# Группы курсора шага голоса (спека §4.1): стрелки двигают курсор ВНУТРИ группы,
+# Tab переносит его МЕЖДУ группами.
+_VOICE_GROUP_VARIANTS = "variants"
+_VOICE_GROUP_FIELDS = "fields"
+# Обещание Tab в футере: честный глагол зависит от группы под курсором. Тот же словарь
+# в `/settings` (`settings._TAB_TO_*`) — одна клавиша не может называться на двух
+# экранах по-разному; сторож — test_footer_contract.
+_TAB_TO_FIELDS = "Tab — вниз к настройкам"
+_TAB_TO_VARIANTS = "Tab — вверх к выбору"
 # Раскрытый список забирает клавиши себе — футер на это время становится его: обещать
 # «Enter — далее», когда Enter подставляет строку списка, значит врать (спека §6.4).
+# Списков в мастере три: пресет-лист адреса «Подключения», пресет-лист адреса «Своего
+# endpoint» и список моделей самого endpoint'а. Когда какой раскрывается — канон
+# 2026-08-17, он описан у `_FOOTER_PRESET_LIST` ниже.
+_FOOTER_MODEL_LIST = ("↑↓ — выбор модели  ·  Enter — подставить  ·  Esc — свернуть"
+                      "  ·  PgUp — назад  ·  PgDn — далее")
+# Фильтр не оставил строк (человек печатает свой id): стрелки список съедает, никуда
+# не двигая, а `pick_in` возвращает False — подставлять нечего. Говорим теми же словами,
+# что хинт под рамкой (`_MODEL_HINT_NO_MATCH`), иначе одна клавиша на одном экране
+# зовётся двумя разными глаголами.
+_FOOTER_MODEL_LIST_NO_MATCH = ("Enter — сохранить как есть  ·  Esc — свернуть"
+                               "  ·  PgUp — назад  ·  PgDn — далее")
+# Пресет-лист адреса «Своего endpoint» на шаге «Голосовой ввод» (спека 2026-08-05 §3) —
+# то же поле группы «поля», тот же приоритет списка над лентой, но глагол — «подставить»,
+# БЕЗ «и сохранить»: ЧУЖОЙ пресет тем же Enter'ом стирает поле «Модель» (§4.1 плана), и
+# подстановка не доводит форму до конца шага. Канон — тот же текст, что у пресет-листа
+# шага «Подключение» (`_FOOTER_PRESET_LIST` ниже), который по той же причине не обещает
+# «далее».
+_FOOTER_URL_LIST = ("↑↓ — выбор адреса  ·  Enter — подставить  ·  Esc — свернуть"
+                    "  ·  PgUp — назад  ·  PgDn — далее")
+# Свой адрес выбил из списка все строки — тот же случай, что у модели чуть выше.
+_FOOTER_URL_LIST_NO_MATCH = ("Enter — оставить свой адрес  ·  Esc — свернуть"
+                             "  ·  PgUp — назад  ·  PgDn — далее")
 # Пресет-лист адреса на шаге «Подключение» раскрывается САМ, пока поле пусто (канон
 # 2026-08-17) — то есть на первом запуске человек застаёт это состояние по умолчанию,
 # а не ищет его: Enter подставляет провайдера и возвращается, Esc сворачивает список,
@@ -38,6 +86,10 @@ _FOOTER_PRESET_LIST = ("↑↓ — выбор провайдера  ·  Enter �
 # сворачивает список, оставляя набранное.
 _FOOTER_PRESET_LIST_NO_MATCH = ("Enter — оставить свой адрес  ·  Esc — свернуть"
                                 "  ·  Ctrl+Space — проверить связь  ·  PgDn — далее")
+# Поля «Своего endpoint», по которым ходит курсор группы полей. Мастер спрашивает три
+# (язык — только в /settings, спека §10); тем же набором монтируется и сам редактор,
+# чтобы лента и поля не разъехались.
+_VOICE_FIELD_KEYS = ("url", "token", "model")
 
 
 class OnboardingScreen(Screen):
@@ -47,14 +99,14 @@ class OnboardingScreen(Screen):
     BLOCKS_GLOBAL_NAV = True
 
     # priority=True — перехватывает PgUp/PgDn раньше фокусированного Input (иначе поля
-    # #conn-url/#conn-token/#onb-model не отдали бы клавишу навигации).
+    # #conn-url/#conn-token/#onb-model/#voice-* не отдали бы клавишу навигации).
     BINDINGS = [
         Binding("pageup", "go_back", "назад", show=False, priority=True),
         Binding("pagedown", "go_next", "далее", show=False, priority=True),
     ]
 
     def __init__(self, config, config_path, *, review_all, on_commit,
-                 fetch=None, mcp=None, probe=None) -> None:
+                 fetch=None, mcp=None, voice=None, probe=None) -> None:
         super().__init__()
         self._config = config
         self._config_path = config_path
@@ -72,11 +124,24 @@ class OnboardingScreen(Screen):
             self._mcp = mcp_mod
         else:
             self._mcp = mcp
+        if voice is None:
+            import tui.services.voice_setup as voice_mod
+            self._voice_setup = voice_mod
+        else:
+            self._voice_setup = voice
         # Вердикт шага «Подключение» — только по chat/completions: models-цепочка
         # у публичного /models (OpenRouter) отвечает без токена и сказала бы
         # «доступен» про маршрут, который токен как раз требует.
         from tui.services.settings_probe import probe_auth as _default_probe
         self._probe_fn = probe or _default_probe
+        self._voice_choice = ""            # "" | "local" | "cloud" | "skip"
+        self._voice_group = _VOICE_GROUP_VARIANTS   # группа под курсором (спека §4.1)
+        self._voice_field_idx = 0          # позиция в группе полей — своя у каждой группы
+        self._voice_cloud: dict = {}       # url/token/model (выбор cloud)
+        # Ctrl+U на «Токене» голосового шага: пустое поле теперь значит «стереть
+        # сохранённый», а не «оставить как было» (флаг переживает пересборку полей).
+        self._voice_token_cleared: bool = False
+        self._voice_prefilled = False      # status_cheap на шаге голоса — не чаще раза
         self._step = 0
         self._values: dict = {}
         self._idx: dict = {}
@@ -109,7 +174,7 @@ class OnboardingScreen(Screen):
     def _title_text(self) -> str:
         if self._step == _LAST_STEP:
             return "Настройка · подтверждение"
-        return f"Настройка · {self._step + 1}/3"
+        return f"Настройка · {self._step + 1}/4"
 
     def _stepper_text(self) -> Text:
         t = Text()
@@ -150,24 +215,50 @@ class OnboardingScreen(Screen):
             auth=auth,
             model=model,
             mcp_count=len(self._mcp_selected),
+            voice=_VOICE_SUMMARY_LABELS.get(self._voice_choice, ""),
         )
 
     def _footer_text(self) -> str:
         if self._step == _LAST_STEP:
             return "Enter — подтвердить и завершить настройку  ·  PgUp — назад  ·  Esc — выход"
+        ctrl = self._voice_focused_list()
+        if ctrl is not None and ctrl.is_open:
+            # Раскрытым может быть список URL или список модели (оба живут в группе
+            # «поля» шага голоса, оба забирают клавиши себе) — глагол Enter у них
+            # разный (см. константы), и футер обязан назвать ИМЕННО тот список.
+            if self._voice_focused_field_key() == "url":
+                return (_FOOTER_URL_LIST if ctrl.has_selection
+                        else _FOOTER_URL_LIST_NO_MATCH)
+            return (_FOOTER_MODEL_LIST if ctrl.has_selection
+                    else _FOOTER_MODEL_LIST_NO_MATCH)
         if self._step == 0 and self._presets_open():
             return (_FOOTER_PRESET_LIST if self._presets_have_selection()
                     else _FOOTER_PRESET_LIST_NO_MATCH)
+        # Курсор в полях меняет не только Tab: Space там печатает пробел (Input съедает
+        # клавишу раньше шага) и пометки не ставит — обещать им выбор нельзя (§6.4).
+        in_fields = (self._step == _VOICE_STEP
+                     and self._voice_cursor_group() == _VOICE_GROUP_FIELDS)
         parts = ["↑↓ навигация", "Enter — далее", "Esc — выход"]
         if self._step in _MARK_STEPS and not self._step_marked():
             # Пометки под курсором нет: Enter её ПОСТАВИТ, «далее» в этот момент — PgDn.
-            parts[1:2] = ["Enter — выбрать", "PgDn — далее"]
+            # На шаге голоса ту же пометку ставит Space, и назвать его обязательно:
+            # поля endpoint показаны уже под курсором, но клавиши до выбора принадлежат
+            # шагу. Клавиши названы вместе — отдельным пунктом строка уходит за 100 колонок.
+            choose = ("Space/Enter — выбрать"
+                      if self._step == _VOICE_STEP and not in_fields else "Enter — выбрать")
+            parts[1:2] = [choose, "PgDn — далее"]
+        elif self._step == _VOICE_STEP and not in_fields:
+            # Выбор уже стоит: Enter ведёт дальше, а Space остаётся тем, чем переставляют
+            # его на другой вариант.
+            parts.insert(1, "Space — выбрать")
         # Развод §2 спеки 2026-08-06: раскрытие/перечитывание списка ушло на Alt+↓,
         # Ctrl+Space осталась только там, где есть проба (карта §2.5) — на шаге
-        # «Подключение» она проверяет связь, на «Модели» пробы нет вовсе и клавиша в
-        # футере не обещается (§5.1 спеки). На шаге «Подключение» список свёрнут ровно
-        # в этой ветке (раскрытый уходит футером выше) — тогда футер обязан назвать
-        # способ его вернуть, иначе `Esc` увёл бы список без пути назад.
+        # «Подключение» она проверяет связь, на «Модели» и «Голосовом вводе» пробы нет
+        # вовсе и клавиша в футере не обещается (§5.1 спеки). На шаге «Подключение»
+        # список свёрнут ровно в этой ветке (раскрытый уходит футером выше) — тогда
+        # футер обязан назвать способ его вернуть, иначе `Esc` увёл бы список без пути
+        # назад. На шаге голоса Alt+↓ называет подсказка под рамкой самого списка, а из
+        # футера она выпадает: там уже сказано, где клавиша и работает.
         if self._step == 0:
             parts.insert(1, "Ctrl+Space — проверить связь")
             if self._connection_on_url():
@@ -183,6 +274,8 @@ class OnboardingScreen(Screen):
         if self._step == 2:
             # MCP: Space — тумблер чекбоксов, своя роль, и подсказка идёт первой.
             parts.insert(0, "Space — выбрать")
+        if tab := self._voice_tab_hint():
+            parts.insert(1, tab)      # клавиша курсора — рядом с ↑↓, а не в хвосте
         return "  ·  ".join(parts)
 
     def _connection_editor(self):
@@ -207,10 +300,22 @@ class OnboardingScreen(Screen):
         ed = self._connection_editor()
         return ed is None or ed.on_url_field
 
+    def _voice_tab_hint(self) -> str:
+        """Обещание Tab для футера или пустая строка, если переходить некуда (§6.1):
+        на других шагах и на варианте без полей клавиша перехвачена, но молчит (§4.2.6),
+        и называть её значило бы врать."""
+        if self._step != _VOICE_STEP or len(self._voice_groups()) < 2:
+            return ""
+        return (_TAB_TO_VARIANTS if self._voice_cursor_group() == _VOICE_GROUP_FIELDS
+                else _TAB_TO_FIELDS)
+
     def _step_marked(self) -> bool:
         """Помечена ли ● строка под курсором текущего шага. От этого зависит роль Enter
         (выбрать vs далее) и текст футера; шаги без пометки (Подключение, MCP) — False."""
         from textual.css.query import NoMatches
+        if self._step == _VOICE_STEP:
+            cur = self._idx.get(_VOICE_STEP, 0)
+            return self._voice_choice == _VOICE_OPTIONS[cur][0]
         try:
             if self._step == 1:
                 from tui.editors.model import ModelEditor
@@ -315,6 +420,46 @@ class OnboardingScreen(Screen):
             for i, name in enumerate(names):
                 cls = "onb-option onb-dyn set-spaced onb-mcp-row" + (" selected" if i == self._idx[2] else "")
                 body.mount(Static(self._mcp_row_text(i == self._idx[2], name), classes=cls))
+        elif self._step == _VOICE_STEP:
+            self._prefill_voice_from_config()
+            self._idx.setdefault(_VOICE_STEP, 0)
+            # Тело шага пересобрано — курсор в первой группе, и позиция полей вместе с
+            # ним: поля смонтированы заново и фокуса не держат, а курсор, оставшийся в
+            # них с прошлого раза (уход со шага PgUp/PgDn), обещал бы движение по полям
+            # от пустого места. Позиция без группы — половина сброса: первый же Tab
+            # встал бы на «Модель», а вход на это поле сразу идёт на сервер за списком.
+            self._voice_group = _VOICE_GROUP_VARIANTS
+            self._voice_field_idx = 0
+            installed = self._voice_installed()
+            col = self._voice_desc_col(installed)
+            for i, (key, title, desc) in enumerate(_VOICE_OPTIONS):
+                owner = i == self._idx[_VOICE_STEP]
+                # Вторая строка описания: у локального — во что он обходится (всегда,
+                # иначе список дёргается на строку при каждом движении курсора). Про
+                # клавиши здесь не говорим: подсказки про них живут в футере (спека §4.3).
+                second = None
+                if key == "local":
+                    second = self._voice_cost_text()
+                # Свой класс-маркер строкам режима обязателен: `.onb-option` носят и
+                # строки раскрытого списка моделей (они внутри полей этого же шага), и
+                # запрос по нему возвращал бы их вперемешку со строками режима.
+                cls = "onb-option onb-dyn onb-mcp-row onb-voice-row"
+                if second is None:
+                    # Воздух в ДВЕ строки: вариант без второй строки описания добирает
+                    # ею недостающую высоту, и блоки вариантов встают поровну (смок
+                    # владельца 2026-08-05).
+                    cls += " set-spaced-2"
+                # Со второй строкой воздух уходит ПОД неё, иначе она отрывается от своей
+                # опции и прилипает к следующей.
+                if owner and self._voice_highlight_variants():
+                    cls += " selected"
+                body.mount(Static(
+                    self._voice_row_text(owner, key, title, desc,
+                                         installed=installed), classes=cls))
+                if second is not None:
+                    body.mount(self._voice_second_line(second, col))
+            if self._voice_cursor_is_cloud():
+                self._mount_voice_fields(body)
         elif self._step == _LAST_STEP:
             from onboarding import mask_authorization
             addr = self._values.get("completions_url") or self._config.get("completions_url") or "—"
@@ -334,6 +479,16 @@ class OnboardingScreen(Screen):
             mcp_val = (", ".join(sorted(self._mcp_selected)) if self._mcp_selected
                        else "не выбраны — можно добавить позже")
             rows = [("адрес:", addr), ("модель:", model), ("токен:", tok), ("MCP:", mcp_val)]
+            if self._voice_choice == "cloud":
+                host = (self._voice_cloud.get("url", "").split("/")[2]
+                        if "://" in self._voice_cloud.get("url", "") else "—")
+                voice_val = f"endpoint {host}"
+            elif self._voice_choice == "local":
+                from voice_runtime.state import current_model_short
+                voice_val = f"локальный сервис · {current_model_short()}"
+            else:
+                voice_val = "нет"
+            rows.append(("голосовой ввод:", voice_val))
             summary = Text()
             label_width = max(len(label) for label, _ in rows) + 1  # колонка под самую длинную метку
             for n, (label, val) in enumerate(rows):
@@ -345,6 +500,8 @@ class OnboardingScreen(Screen):
             notice_parts = []
             if self._mcp_selected:
                 notice_parts.append(f"MCP ({mcp_val})")
+            if self._voice_choice == "local" and not self._voice_installed():
+                notice_parts.append("локальный голосовой сервис (~0.9 ГБ)")
             if notice_parts:
                 summary.append("\n")                # воздух перед служебной строкой
                 summary.append("Установятся после подтверждения: " + " · ".join(notice_parts),
@@ -495,12 +652,119 @@ class OnboardingScreen(Screen):
         if cur < len(opts):
             opts[cur].update(self._mcp_row_text(True, name))
 
+    def _voice_installed(self) -> bool:
+        try:
+            from voice_runtime.state import load_state
+            return load_state() is not None
+        except Exception:
+            return False
+
+    def _voice_row_left(self, is_cursor: bool, key: str, title: str, *,
+                        installed: bool) -> Text:
+        """Левая часть строки-опции: курсор, кружок, название и статус."""
+        t = Text()
+        t.append("▸ " if is_cursor else "  ", style=ACCENT)
+        t.append("(")
+        t.append("●" if self._voice_choice == key else " ", style=INK)
+        t.append(f") {title}")
+        if key == "local" and installed:
+            t.append(" · установлен", style=DEEP_DIM)
+        return t
+
+    def _voice_desc_col(self, installed: bool) -> int:
+        """Колонка описаний шага — по самой длинной левой части, а не константой:
+        статус «установлен» появляется только у локальной строки и только когда сервис
+        стоит. С фиксированной колонкой описания повисали бы в пустоте, пока его нет."""
+        widest = max(self._voice_row_left(False, key, title, installed=installed).cell_len
+                     for key, title, _ in _VOICE_OPTIONS)
+        return widest + 2
+
+    def _voice_row_text(self, is_cursor: bool, key: str, title: str, desc: str,
+                        *, installed: bool) -> Text:
+        """Строка опции голосового шага — тот же язык, что _mcp_row_text."""
+        t = self._voice_row_left(is_cursor, key, title, installed=installed)
+        if key == "local":
+            desc = f"{desc}; {_VOICE_LOCAL_DISK[installed]}"
+        # Модель — во вторую строку, к остальной цене сервиса: в первой она уводила
+        # строку за 128 колонок, и на узком окне описание обрывалось многоточием.
+        self._append_mcp_desc(t, desc, self._voice_desc_col(installed))
+        return t
+
+    def _voice_second_line(self, text: str, col: int) -> Static:
+        """Вторая строка описания опции.
+
+        Колонка задаётся отступом виджета, а не пробелами в тексте: на узком окне
+        строка переносится, и пробелы удержали бы только первую строку — хвост уезжал
+        бы к левому краю. +1 — собственный отступ строки-опции, чтобы описания встали
+        ровно друг под друга."""
+        w = Static(text, classes="onb-hint set-spaced onb-dyn")
+        w.styles.padding = (0, 0, 0, col + 1)
+        return w
+
+    def _voice_cost_text(self) -> str:
+        """Чем локальный сервис занят и какой моделью."""
+        from voice_runtime.state import current_model_short
+        return f"{current_model_short()} · {_VOICE_LOCAL_COST}"
+
+    def _prefill_voice_from_config(self) -> None:
+        """Шаг голоса открывается на ДЕЙСТВУЮЩЕМ режиме, а не на первом варианте.
+
+        Мастер проходят и на настроенном конфиге (`--init-config`). Без префилла
+        пролистывание шага читалось как выбор «локальный сервис»: _voice_advance
+        берёт вариант под курсором, а тот по умолчанию нулевой. Дальше _commit
+        ставит сервис и прописывает managed-слой, который перекрывает юзерский
+        voice.url — облачный провайдер молча переставал действовать.
+
+        Гейт — «прочитали снимок один раз за экран», а не «выбор ещё не сделан»:
+        тело шага монтируется заново на каждое движение курсора (смена опции меняет
+        _voice_body_shape), и при mode == "off" (или недоступном состоянии) выбор
+        так и остаётся пустым — с гейтом по _voice_choice снимок спрашивался
+        бы на каждую стрелку. Снимок — дешёвый (status_cheap): нужен только mode,
+        а полный ходил бы в порт сервиса прямо с UI-потока.
+        """
+        if self._voice_prefilled:
+            return
+        self._voice_prefilled = True
+        try:
+            snap = self._voice_setup.status_cheap(self._config or {})
+        except Exception:
+            return                      # состояние недоступно — ведём себя как раньше
+        mode = getattr(snap, "mode", "off")
+        if mode not in ("local", "cloud"):
+            return                      # ничего не настроено — первичный сценарий, дефолт
+        self._voice_choice = mode
+        for i, (key, _title, _desc) in enumerate(_VOICE_OPTIONS):
+            if key == mode:
+                self._idx[_VOICE_STEP] = i
+                break
+        if mode == "cloud" and not self._voice_cloud:
+            voice_cfg = self._voice_raw_cloud()
+            self._voice_cloud = {
+                "url": str(voice_cfg.get("url") or ""),
+                # Токен — секрет: в поле не кладём, показывает маской placeholder
+                # (канон «Подключения»: пустое поле = «оставить сохранённый»).
+                "token": "",
+                "model": str(voice_cfg.get("model") or ""),
+                "language": str(voice_cfg.get("language") or "ru"),
+            }
+
+    def _voice_raw_cloud(self) -> dict:
+        """voice-секция СЫРОГО config.yml (канон /settings, `SettingsScreen._voice_raw_cloud`):
+        self._config слит с managed-слоем и с уже раскрытыми ${ENV:...} — для полей
+        «Своего endpoint» не годится. Иначе managed-заглушка локальной батарейки
+        (`voice.token: "local"`, см. voice_runtime.wire) читалась бы как сохранённый
+        облачный секрет, а ${ENV:...}-ссылка на коммите запекалась бы в файл литералом."""
+        if not self._config_path:
+            return {}
+        import config_raw
+        return config_raw.read_document(self._config_path).get("voice") or {}
+
     def _raw_conn(self) -> dict:
         """Сырые (нерезолвнутые) значения полей шага «Подключение» ИЗ ФАЙЛА — тот же
-        приём, что `SettingsScreen._read_raw`: self._config уже резолвнут
-        (${ENV:...}/${FILE:...} подставлены), и показать или записать его значение
-        обратно в файл значит подменить ссылку на переменную её значением — секрет
-        открытым текстом в файле, который коммитят."""
+        приём, что `SettingsScreen._read_raw` / `_voice_raw_cloud` выше: self._config
+        уже резолвнут (${ENV:...}/${FILE:...} подставлены), и показать или записать
+        его значение обратно в файл значит подменить ссылку на переменную её значением —
+        секрет открытым текстом в файле, который коммитят."""
         if not self._config_path:
             return {}
         import config_raw
@@ -508,6 +772,14 @@ class OnboardingScreen(Screen):
         keys = ("completions_url", "Authorization", "proxy")
         values = config_raw.read_values(self._config_path, (FIELD_ANCHOR_PATHS[k] for k in keys))
         return {k: values[FIELD_ANCHOR_PATHS[k]] for k in keys}
+
+    def _voice_verify_ssl(self):
+        """voice.verify_ssl ДЕЙСТВУЮЩЕГО конфига (тот же приём, что
+        `SettingsScreen._voice_verify_ssl`) или True — проверять сертификат по умолчанию."""
+        voice = self._config.get("voice") if isinstance(self._config, dict) else None
+        if not isinstance(voice, dict) or "verify_ssl" not in voice:
+            return True
+        return voice["verify_ssl"]
 
     def _effective_proxy(self):
         """Прокси, известный мастеру ПРЯМО СЕЙЧАС — тот же приём, что праймит поле
@@ -520,6 +792,339 @@ class OnboardingScreen(Screen):
         if proxy is None:
             proxy = (self._config or {}).get("proxy")
         return proxy
+
+    def _mount_voice_fields(self, body) -> None:
+        """Поля «Свой endpoint» — канон-рамки редактора (те же классы, что у шага
+        «Подключение»); фокус в них ставит курсор ленты, а не сам редактор.
+
+        Список моделей берётся с самого endpoint (тем же фасадом, что в /settings):
+        адрес и токен к этому моменту уже набраны полями выше, а пришедший список —
+        заодно и подтверждение, что связка рабочая. `url_presets` — тот же список
+        пресетов СТТ-адресов (спека 2026-08-05 §3), что у /settings: поле «URL»
+        получает свой раскрывающийся список ровно тем же путём, что «Модель»."""
+        from tui.editors.voice_endpoint import VoiceEndpointEditor
+        from onboarding import display_secret
+        from config_modules.voice_endpoint_presets import voice_endpoint_presets_from_config
+        # Сохранённый токен не подставляем (секрет), но и молчать нельзя — маска в
+        # placeholder, пустое поле значит «оставить сохранённый» (канон /settings).
+        raw_token = self._voice_raw_cloud().get("token")
+        placeholders = {"token": display_secret(raw_token)} if raw_token else None
+        # Фокуса на монтировании нет: поля — вторая ГРУППА шага (спека §4.1), и курсор
+        # входит в неё только по Tab. Забрать фокус сразу значило бы вернуть рассинхрон
+        # «фокус в поле, курсор в вариантах» — печать и Space доставались бы полю, а
+        # стрелки при этом двигали бы строки режима.
+        body.mount(VoiceEndpointEditor(values=self._voice_cloud,
+                                       fields=_VOICE_FIELD_KEYS,
+                                       autofocus=False,
+                                       fetch=self._voice_setup.list_models,
+                                       # Пустое поле токена в списке моделей значит
+                                       # «сохранённый» (тот же канон, что при коммите) —
+                                       # без него запрос на рабочем облаке 401-ит.
+                                       saved_token=str(raw_token or ""),
+                                       placeholders=placeholders,
+                                       # TLS/прокси запроса за списком — тот же канон,
+                                       # что /settings (`SettingsScreen._mount_voice_section`):
+                                       # без них список уходит с verify=True мимо
+                                       # backend.proxy, и в корп-сети (self-signed TLS,
+                                       # обязательный прокси) рабочий endpoint выглядит
+                                       # как «не удалось получить список».
+                                       verify_ssl=self._voice_verify_ssl(),
+                                       config_proxy=self._effective_proxy() or None,
+                                       # Пресеты СТТ-адресов (спека 2026-08-05 §3) — тот же
+                                       # источник, что у /settings: дефолты (OpenAI/Groq/
+                                       # Mistral) или кастомизация из config.yml.
+                                       url_presets=voice_endpoint_presets_from_config(
+                                           self._config or {})))
+
+    def _voice_endpoint_editor(self):
+        """Редактор полей «Своего endpoint» или None (не тот шаг / поля свёрнуты).
+
+        ПОСЛЕДНИЙ матч, а не первый: `remove()` в Textual отложенный, и сразу после
+        перерисовки шага старый редактор ещё висит в дереве. `.first()` отдавал бы
+        именно его — обречённый, со значениями прошлого рендера. Канон файла настроек
+        (`settings._voice_editor`), здесь он был нарушён в обе стороны: тут брали
+        первый, а на сабмите — `query_one`, который на двух матчах просто падал."""
+        if self._step != _VOICE_STEP:
+            return None
+        from tui.editors.voice_endpoint import VoiceEndpointEditor
+        eds = list(self.query(VoiceEndpointEditor))
+        return eds[-1] if eds else None
+
+    def _voice_model_list(self):
+        """Контроллер списка моделей шага или None (не тот шаг / полей нет)."""
+        ed = self._voice_endpoint_editor()
+        return ed.model_list if ed is not None else None
+
+    def _voice_clear_token(self) -> bool:
+        """Ctrl+U в полях голосового шага: стереть сохранённый токен. False — клавиша
+        не наша (фокус не на «Токене» либо стирать нечего), и её отдают полю ввода."""
+        ed = self._voice_endpoint_editor()
+        if ed is None:
+            return False
+        return ed.clear_token(self._voice_focused_field_key())
+
+    def _voice_focused_field_key(self) -> str | None:
+        """Ключ поля шага голоса под ФОКУСОМ (url/token/model) или None — фокус не на
+        нём. У «Токена» списка нет (`list_for` отдаёт по нему None) — сверка тут только
+        про то, ЧТО в фокусе, список из неё считает вызывающий сам.
+
+        Раньше здесь был отдельный `_voice_focus_in_model` (сверял id ровно с полем
+        модели): у «URL» теперь свой пресет-лист (спека 2026-08-05 §3), и раскрытый
+        список обязан забирать клавиши себе так же, как у модели — сверка сузилась бы
+        до одного поля и молчала бы про второе. `_key_of_input` — тот же приём, что
+        внутри `VoiceEndpointEditor.on_input_changed`."""
+        from tui.editors.voice_endpoint import _key_of_input
+        return _key_of_input(getattr(self.focused, "id", None))
+
+    def _voice_focused_list(self):
+        """Контроллер списка поля под ФОКУСОМ (модель ИЛИ URL) шага или None — не тот
+        шаг / полей нет / фокус не в списковом поле. Общая точка для `on_key`
+        (Esc/стрелки/Enter раскрытого списка — Ctrl+Space он больше не забирает,
+        спека 2026-08-06 §2.2) и футера — оба обязаны видеть один и тот же список."""
+        ed = self._voice_endpoint_editor()
+        return ed.list_for(self._voice_focused_field_key()) if ed is not None else None
+
+    def on_descendant_focus(self, event) -> None:
+        """Клик мышью по полю — это тоже перемещение курсора (спека §4.3, канон
+        `SettingsScreen.on_descendant_focus`): подтягиваем к нему курсор группы, иначе
+        следующая стрелка пойдёт из «прошлого» места, где он остался.
+
+        Он же раскрывает список поля: фокус приходит и от `focus_field` ленты, и от
+        мыши, и правило у обоих одно — список раскрыт там, где стоит курсор."""
+        from tui.editors.voice_endpoint import _FIELDS
+        keys = self._voice_field_keys()
+        wid = getattr(event.widget, "id", None)
+        key = next((k for k in keys if _FIELDS[k][1] == wid), None)
+        if key is None:
+            return                         # фокус не в полях шага — нам нечего сводить
+        self._voice_group = _VOICE_GROUP_FIELDS
+        self._voice_field_idx = keys.index(key)
+        self._voice_refresh_rows()         # курсор в полях — подсветка строки гаснет
+        self._sync_voice_field_lists()
+        self._refresh_footer()             # мышь сменила группу — клавиши места с ней
+
+    # --- группы курсора шага голоса (спека §4) ---
+    def _voice_groups(self) -> tuple:
+        """Группы шага: строки режима — всегда, поля «Своего endpoint» — пока они
+        показаны (живут под своей опцией, см. `_voice_cursor_is_cloud`)."""
+        if self._voice_cursor_is_cloud() and self._voice_endpoint_editor() is not None:
+            return (_VOICE_GROUP_VARIANTS, _VOICE_GROUP_FIELDS)
+        return (_VOICE_GROUP_VARIANTS,)
+
+    def _voice_field_keys(self) -> tuple:
+        """Поля, по которым ходит курсор группы полей (пусто — полей на экране нет)."""
+        return _VOICE_FIELD_KEYS if self._voice_endpoint_editor() is not None else ()
+
+    def _voice_cursor_group(self) -> str:
+        """Где сейчас курсор: "variants" или "fields". Одно место правды — иначе
+        состояние приходится выводить из побочных признаков (фокус, видимость полей), а
+        они врут при клике мышью и при пустой группе. Хранимая группа сверяется с
+        наличными: поля исчезают вместе с уходом курсора со «Своего endpoint»."""
+        groups = self._voice_groups()
+        return self._voice_group if self._voice_group in groups else _VOICE_GROUP_VARIANTS
+
+    def _voice_field_position(self) -> int:
+        """Позиция в группе полей, зажатая в её границы (спека §4.2.1): набор полей
+        зависит от варианта под курсором, и запомненная позиция может оказаться за краем."""
+        n = len(self._voice_field_keys())
+        return min(max(self._voice_field_idx, 0), n - 1) if n else 0
+
+    def _voice_cursor_position(self) -> int:
+        """Позиция внутри текущей группы (у каждой она своя и помнится отдельно)."""
+        if self._voice_cursor_group() == _VOICE_GROUP_FIELDS:
+            return self._voice_field_position()
+        return self._idx.get(_VOICE_STEP, 0)
+
+    def _voice_cursor_field(self) -> str | None:
+        """Имя поля под курсором или None, если курсор в группе вариантов."""
+        keys = self._voice_field_keys()
+        if not keys or self._voice_cursor_group() != _VOICE_GROUP_FIELDS:
+            return None
+        return keys[self._voice_field_position()]
+
+    def _move_group(self, delta: int) -> None:
+        """Tab/Shift+Tab — курсор в соседнюю группу, по кругу (спека §4.1). Групп меньше
+        двух — переходить некуда, и клавиша просто съедена (§4.2.6). Позиция группы, из
+        которой уходим, остаётся при ней: возврат приводит курсор на прежнюю строку."""
+        groups = self._voice_groups()
+        if len(groups) < 2:
+            return
+        cur = groups.index(self._voice_cursor_group())
+        self._voice_group = groups[(cur + delta) % len(groups)]
+        if self._voice_group == _VOICE_GROUP_FIELDS:
+            self._voice_field_idx = self._voice_field_position()   # запомненную — в границы
+        self._voice_refresh_rows()     # курсор сменил группу — подсветка уходит за ним
+        self._sync_voice_focus()
+
+    def _move_voice_field(self, delta: int) -> None:
+        """↑/↓ внутри группы полей, циклом. Раскрытый список забирает стрелки раньше —
+        он выше по приоритету (спека §4.2.2), см. начало `on_key`."""
+        keys = self._voice_field_keys()
+        if not keys:
+            return
+        self._voice_field_idx = (self._voice_field_position() + delta) % len(keys)
+        self._sync_voice_focus()
+
+    def _sync_voice_field_lists(self) -> None:
+        """Список поля раскрыт ровно тогда, когда курсор стоит на этом поле (канон
+        `SettingsScreen._sync_voice_field_lists`): уход с поля его сворачивает, и
+        соседний список раскрытым остаться не может. Свёрнутый Esc'ом сам не вернётся —
+        курсор всё ещё на поле, второго входа не было (назад ведут печать и Alt+↓,
+        спека 2026-08-06 §2, §4.1).
+
+        Списков теперь три (`url_list` — пресеты адреса, спека 2026-08-05 §3), и все
+        три обязаны попасть в перебор: пропуск `url_list` (как было до этой правки)
+        оставлял его раскрытым, если курсор уходил с «URL» на «Модель» кликом мыши —
+        `on_descendant_focus` меняет группу/поле, но список поля, где курсор БЫЛ,
+        никто не закрывал."""
+        ed = self._voice_endpoint_editor()
+        if ed is None:
+            return
+        active = ed.list_for(self._voice_cursor_field())
+        for ctrl in (ed.lang_list, ed.model_list, ed.url_list):
+            if ctrl is not None and ctrl is not active:
+                # Строку под полем `close()` приводит в согласие сам: с канона
+                # 2026-08-17 она постоянна и называет способ («вот чем раскрыть»),
+                # а не команду момента — снимать её с уходом курсора больше нечем.
+                ctrl.close()
+        if active is not None:
+            active.open()
+
+    def _voice_cursor_is_cloud(self) -> bool:
+        """Курсор стоит на «Своём endpoint» — значит его поля показаны: поля живут под
+        своей опцией, а не под пометкой (иначе они висят под чужой строкой и читаются
+        как её)."""
+        return _VOICE_OPTIONS[self._idx.get(_VOICE_STEP, 0)][0] == "cloud"
+
+    def _voice_highlight_variants(self) -> bool:
+        """Красить ли подложкой строку режима. Курсор один (спека §4.1): ушёл в поля —
+        подсветки нет ни у одной строки, иначе на экране два курсора сразу, строка и
+        фокус-рамка поля. ▸ этому правилу не подчиняется — он маркер ВЛАДЕЛЬЦА
+        показанных полей (канон `SettingsScreen._render_voice`)."""
+        return self._voice_cursor_group() == _VOICE_GROUP_VARIANTS
+
+    def _voice_refresh_rows(self) -> None:
+        """Перерисовать строки опций (▸, подсветка, ●) БЕЗ пересборки тела шага: поля,
+        фокус в них и раскрытый список остаются на месте."""
+        installed = self._voice_installed()
+        cur = self._idx.get(_VOICE_STEP, 0)
+        highlight = self._voice_highlight_variants()
+        for i, w in enumerate(self.query(".onb-voice-row")):
+            key, title, desc = _VOICE_OPTIONS[i]
+            w.update(self._voice_row_text(i == cur, key, title, desc, installed=installed))
+            (w.add_class if i == cur and highlight else w.remove_class)("selected")
+
+    def _voice_body_shape(self) -> tuple:
+        """Что показано под строками опций: поля endpoint и/или цена локального сервиса.
+        Обе добавки принадлежат опции под курсором — сменилась она, меняется и тело."""
+        cur = _VOICE_OPTIONS[self._idx.get(_VOICE_STEP, 0)][0]
+        return (cur == "cloud", cur == "local")
+
+    def _move_voice(self, delta: int) -> None:
+        n = len(_VOICE_OPTIONS)
+        was_shape = self._voice_body_shape()
+        if self._voice_cursor_is_cloud():
+            self._capture_voice_fields()   # набранное — в черновик до того, как поля уйдут
+        self._idx[_VOICE_STEP] = (self._idx.get(_VOICE_STEP, 0) + delta) % n
+        if was_shape != self._voice_body_shape():
+            self._render_step()            # состав тела сменился: добавка пришла/ушла
+            return
+        self._voice_refresh_rows()
+        self._sync_voice_focus()
+        self._refresh_footer()
+
+    def _sync_voice_focus(self) -> None:
+        """Связка «курсор ↔ фокус» (канон `SettingsScreen._sync_voice_focus`): курсор в
+        группе полей — фокус в поле под ним (своего маркера у полей нет, индикатор — их
+        фокус-рамка); курсор в вариантах — фокус снят, иначе Space и печать достаются
+        полю, а не шагу."""
+        ed = self._voice_endpoint_editor()
+        key = self._voice_cursor_field()
+        if ed is not None and key is not None:
+            ed.focus_field(key)
+        else:
+            self.set_focus(None)
+        self._sync_voice_field_lists()
+        self._refresh_footer()   # группа и список меняют клавиши места — футер после них
+
+    def _capture_voice_fields(self) -> None:
+        """Снять набранное из полей endpoint без валидации: перевыбор другой опции
+        сворачивает поля, и вернувшийся на endpoint человек должен увидеть свой URL."""
+        from tui.editors.voice_endpoint import VoiceEndpointEditor
+        for ed in self.query(VoiceEndpointEditor):
+            self._voice_cloud = {**self._voice_cloud, **ed.values()}
+            if ed.token_cleared:
+                # Ctrl+U на «Токене»: пустота в черновике теперь ОСОЗНАННАЯ, и при
+                # записи её нельзя подменить сохранённым секретом (см. _commit_config).
+                self._voice_token_cleared = True
+
+    def _voice_mark(self) -> None:
+        """Пометить опцию под курсором (видимое ●), остаться на шаге (канон MCP-шага).
+        Поля показывает курсор, а не пометка, поэтому тело шага здесь не пересобирается:
+        набранное, фокус и раскрытый список из-за ● терять незачем.
+
+        Курсор пометка не двигает (`Space` — тумблер строки, а не навигация), поэтому и
+        фокус не сводит: сведение раскрыло бы список поля под курсором, и свёрнутый
+        Esc'ом список возвращался бы сам."""
+        if self._voice_cursor_is_cloud():
+            self._capture_voice_fields()      # черновик догоняет набранное
+        self._voice_choice = _VOICE_OPTIONS[self._idx.get(_VOICE_STEP, 0)][0]
+        self._voice_refresh_rows()
+        self._refresh_chrome()
+
+    def _voice_enter(self) -> None:
+        """Enter на шаге голоса — двухролевой: опция под курсором не помечена → Enter
+        её ПОМЕЧАЕТ (шаг тот же), помечена → Enter ведёт дальше. Для «Своего endpoint»
+        это и есть два такта: первый ставит ● (поля показаны курсором и так, войти в них
+        — Tab), второй валидирует их и идёт дальше."""
+        cur = self._idx.get(_VOICE_STEP, 0)
+        if self._voice_choice == _VOICE_OPTIONS[cur][0]:
+            self._voice_advance()
+            return
+        self._voice_mark()
+
+    def _voice_advance(self) -> None:
+        """«Далее» с шага голоса (Enter на помеченной опции или PgDn откуда угодно):
+        выбор сделан — идём по нему, независимо от того, куда ушёл курсор; не сделан —
+        берём вариант под курсором. Cloud без раскрытых полей сначала раскрывает их —
+        в т.ч. когда выбор cloud поставил префилл, а курсор потом увели на другую
+        опцию: поля свёрнуты и не смонтированы, брать из них нечего."""
+        cur = self._idx.get(_VOICE_STEP, 0)
+        key = self._voice_choice or _VOICE_OPTIONS[cur][0]
+        if key == "cloud":
+            if self._voice_choice != "cloud":
+                self._voice_mark()           # первый такт: пометить, поля уже под курсором
+                return
+            if not self._voice_cursor_is_cloud():
+                # Выбор — cloud, но курсор сейчас на другой опции: поля endpoint не
+                # смонтированы (живут под курсором, не под пометкой), query_one ниже
+                # упал бы NoMatches. Тот же первый такт, что и пометка выше: вернуть
+                # курсор на «Свой endpoint» и перерисовать шаг (поля показываются, а
+                # войти в них — Tab), не продвигаясь дальше — новый выбор здесь не нужен.
+                for i, (opt_key, _title, _desc) in enumerate(_VOICE_OPTIONS):
+                    if opt_key == "cloud":
+                        self._idx[_VOICE_STEP] = i
+                        break
+                self._render_step()
+                return
+            editor = self._voice_endpoint_editor()
+            if editor is None:
+                return                          # редактора нет — сабмитить нечего
+            ok, vals = editor.submit()
+            if not ok:
+                return                          # ошибка URL показана внутри редактора
+            # Черновик хранит СЫРОЕ введённое (пусто — значит пусто): токен — секрет,
+            # который поле намеренно не показывает (см. префилл), и подстановка
+            # сохранённого не имеет права осесть здесь — иначе она материализуется в
+            # поле при возврате на шаг. Фолбэк «пустое значит оставить сохранённый»
+            # (канон «Подключения» — /settings._voice_cloud_save) — в _commit_config,
+            # там же, где собирается запись.
+            self._voice_cloud = {"url": vals["url"], "token": vals["token"],
+                                 "model": vals["model"]}
+            self._advance()
+            return
+        self._voice_choice = key
+        self._advance()
 
     def _auto_probe_if_changed(self) -> None:
         """Авто-проба, если с прошлой изменилось хоть что-то из уходящего в запрос.
@@ -621,8 +1226,19 @@ class OnboardingScreen(Screen):
         from config import _default_config_path, validate_config_text
         from onboarding import FIELD_ANCHOR_PATHS
         dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in self._values.items()}
+        if self._voice_choice == "cloud":
+            dotted["voice.url"] = self._voice_cloud["url"]
+            # Пустой черновик токена значит «оставить сохранённый» (канон «Подключения» —
+            # /settings._voice_cloud_save), а не «стереть»: без подстановки запись
+            # стёрла бы рабочий секрет. Фолбэк — только здесь, у самой записи.
+            # Ctrl+U — исключение из фолбэка: там пустота осознанная, и секрет уходит.
+            dotted["voice.token"] = (
+                self._voice_cloud["token"]
+                or ("" if self._voice_token_cleared
+                    else str(self._voice_raw_cloud().get("token") or "")))
+            dotted["voice.model"] = self._voice_cloud["model"]
         try:
-            w.write_values(
+            missing = w.write_values(
                 self._config_path, dotted,
                 template_path=_default_config_path(),
                 validate=validate_config_text,
@@ -630,21 +1246,75 @@ class OnboardingScreen(Screen):
         except ValueError as exc:
             self.query_one("#onb-body", Static).update(f"✗ конфиг не записан: {exc}")
             return False
+        if missing:
+            # Непустой список значит «файл НЕ тронут» (запись идёт «всё или ничего»).
+            # Прежде мы его игнорировали и рапортовали «✓ конфиг записан», хотя часть
+            # полей не сохранилась — находка ревью коллеги.
+            self.query_one("#onb-body", Static).update(
+                f"✗ конфиг не записан: не нашлись поля {', '.join(missing)}")
+            return False
         self.query_one("#onb-body", Static).update("✓ конфиг записан")
         return True
 
     def _commit(self) -> None:
         if not self._commit_config():
             return
+        if self._voice_choice == "cloud":
+            # Батарейка могла быть установлена раньше: managed-слой (config.local.yml)
+            # перекрыл бы только что записанный юзерский voice — снимаем его, как это
+            # делает /settings через voice_setup.wire_cloud (тот же канон).
+            from voice_runtime.wire import unwire_voice
+            try:
+                unwire_voice()
+            except Exception:
+                pass
         self._install_selected()
         self._on_commit()
+        if self._voice_choice == "local":
+            self._start_voice_service()
+
+    def _start_voice_service(self) -> None:
+        """Голос работает сразу после мастера, без перезапуска: `_on_commit` уже
+        перечитал конфиг (app.reload_config) — по нему и поднимаем сервис (установка
+        только что переписала config.local.yml, гейт автостарта смотрит туда).
+
+        Фоном и на воркере ПРИЛОЖЕНИЯ, а не экрана: после свежей установки порт
+        заведомо мёртв, и `ensure_voice_service` блокирующе ждёт готовности (до 90 с —
+        холодный старт грузит окружение и модель) — синхронный вызов заморозил бы финал
+        мастера. Экран мастера в этот момент уже
+        сменяется на TraceScreen (`_on_commit`), поэтому его виджеты трогать нельзя:
+        результат сообщаем toast'ом приложения. Сбой (и погасшее приложение) не валит
+        финал онбординга — как и установки выше."""
+        app = self.app
+        cfg = getattr(app, "_config", None) or {}
+
+        def _work() -> None:
+            from voice_runtime.autostart import ensure_voice_service
+            try:
+                ok = ensure_voice_service(cfg)
+            except Exception:
+                ok = False
+            try:
+                if ok:
+                    app.call_from_thread(app.notify, "голосовой ввод готов — Ctrl+T")
+                else:
+                    app.call_from_thread(
+                        app.notify,
+                        "голосовой сервис не запустился — проверьте gc-voice status",
+                        severity="warning")
+            except Exception:
+                pass          # приложение уже закрылось — некому показывать
+
+        app.run_worker(_work, thread=True, name="onboarding-voice-start")
 
     def _install_selected(self) -> None:
-        """Установки после подтверждения: MCP. Шумные subprocess'ы корёжат alt-screen —
-        app.suspend() (прогресс в обычный терминал, затем TUI возвращается). Per-item
-        try/except: одна упавшая установка не валит остальные и не блокирует переход."""
+        """Установки после подтверждения: MCP + локальный голосовой сервис.
+        Шумные subprocess'ы корёжат alt-screen — app.suspend() (прогресс в обычный
+        терминал, затем TUI возвращается). Per-item try/except: одна упавшая
+        установка не валит остальные и не блокирует переход."""
         names = sorted(self._mcp_selected)
-        if not names:
+        want_voice = self._voice_choice == "local"
+        if not names and not want_voice:
             return
 
         def _do() -> None:
@@ -653,10 +1323,20 @@ class OnboardingScreen(Screen):
                     self._mcp.install(name)
                 except Exception:
                     pass
+            if want_voice:
+                try:
+                    self._voice_setup.switch_to_local()
+                except Exception:
+                    pass
 
         try:
             with self.app.suspend():
-                print("\nУстанавливаю MCP: " + ", ".join(names) + " …\n")
+                parts = []
+                if names:
+                    parts.append("MCP: " + ", ".join(names))
+                if want_voice:
+                    parts.append("локальный голосовой сервис (~0.9 ГБ)")
+                print("\nУстанавливаю " + "; ".join(parts) + " …\n")
                 _do()
         except Exception:
             _do()
@@ -671,6 +1351,7 @@ class OnboardingScreen(Screen):
     def _go_back(self) -> None:
         if self._step > 0:
             self._probe_gen += 1   # уходим со шага — летящая авто-проба (если была) обесценена
+            self._capture_voice_fields()   # черновик endpoint переживает уход назад
             self._step -= 1
             self._render_step()
 
@@ -685,6 +1366,8 @@ class OnboardingScreen(Screen):
             self._submit_connection()
         elif self._step == 1:
             self._advance_model()
+        elif self._step == _VOICE_STEP:
+            self._voice_advance()
         elif self._step != _LAST_STEP:
             self._advance()
 
@@ -723,10 +1406,51 @@ class OnboardingScreen(Screen):
                 event.stop()
                 self._refresh_footer()
             return
+        if event.key == "ctrl+u" and self._voice_clear_token():
+            # Голосовой шаг: та же клавиша и тот же смысл, что на «Подключении» выше.
+            # Гейт («то ли поле, есть ли что стирать») живёт в редакторе — здесь только
+            # маршрут, чтобы условие не разъехалось между двумя экранами.
+            event.prevent_default()
+            event.stop()
+            self._refresh_footer()
+            return
+        # Раскрытый список поля под курсором забирает клавиши себе (канон /settings:
+        # `is_open` проверяется первым) — иначе Esc выкинул бы из мастера, а стрелки
+        # увели курсор с «Своего endpoint» прямо во время выбора. Списков в группе полей
+        # два — модель и URL (спека 2026-08-05 §3) — и у обоих одна и та же механика:
+        # какой из них раскрыт, решает ключ поля под фокусом, а не имя списка.
+        ctrl = self._voice_focused_list()
+        key = self._voice_focused_field_key()
+        if ctrl is not None and ctrl.is_open:
+            if event.key == "escape":
+                event.stop()
+                ctrl.close()               # `close` сам скажет строкой, чем вернуть
+                self._refresh_footer()     # клавиши вернулись полю — футер тоже
+                return
+            if event.key in ("up", "down"):
+                event.stop()
+                ctrl.move(-1 if event.key == "up" else 1)
+                return
+            if event.key == "enter":
+                event.stop()
+                ed = self._voice_endpoint_editor()
+                if ed is not None and key is not None:
+                    ed.pick_in(key)             # подставляет в поле и сворачивает список
+                self._capture_voice_fields()   # выбранное значение — в черновик шага
+                self._refresh_footer()         # список свернулся — футер снова про шаг
+                return
         if event.key in ("alt+down", "ctrl+down"):
             # Развод клавиш (спека 2026-08-06 §2): раскрыть/перечитать список поля под
-            # курсором. Списков в мастере два: пресеты адреса (шаг 0), модели агента
-            # (шаг 1).
+            # курсором — единственная роль этой клавиши теперь, независимо от того,
+            # есть ли на шаге проба вообще (см. ветку Ctrl+Space ниже — она про список
+            # больше не спрашивает). Списков в мастере три: пресеты адреса (шаг 0),
+            # модели агента (шаг 1), модель/URL своего STT-endpoint (шаг 3, спека
+            # 2026-08-05 §3) — какой раскрыт, решает `ctrl` (см. `_voice_focused_list`
+            # выше в теле метода).
+            if ctrl is not None and ctrl.reload():
+                event.stop()
+                self._refresh_footer()     # список раскрылся — клавиши теперь его
+                return
             if self._step == 1:
                 # Шаг «Модель» — поле со списком С СЕРВЕРА (§9.1 канона): свёртывания
                 # нет вовсе, клавиша всегда уходит за списком заново.
@@ -748,9 +1472,9 @@ class OnboardingScreen(Screen):
         if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
             # Развод §2 спеки 2026-08-06: клавиша больше не спрашивает список поля
             # (ушёл на Alt+↓ выше) — она либо проверяет связь (только шаг 0, карта проб
-            # §2.5: на «Модели» пробы нет вовсе), либо съедается молча — не проваливается
-            # в глобальные биндинги, но и не обещает того, чего на этих шагах нет
-            # (§5.1 спеки).
+            # §2.5: на «Модели» и «Голосовом вводе» пробы нет вовсе), либо съедается
+            # молча — не проваливается в глобальные биндинги, но и не обещает того,
+            # чего на этих шагах нет (§5.1 спеки).
             if self._step != 0:
                 event.stop()
                 return
@@ -767,8 +1491,8 @@ class OnboardingScreen(Screen):
                 # _auto_probe на пустом адресе выходит ДО записи любой строки, и
                 # клавиша осталась бы абсолютно немой. На чистой установке шаг
                 # стартует именно с пустым адресом — там новичок и жмёт её первым
-                # делом. Канон донора (`_start_draft_probe`): молчать в ответ на
-                # клавишу нельзя, объясняем, чего не хватает.
+                # делом. Канон обоих доноров (`_start_draft_probe`, `_voice_probe`):
+                # молчать в ответ на клавишу нельзя, объясняем, чего не хватает.
                 # В сам _auto_probe эта строка не идёт: для автопути (уход с поля,
                 # подстановка пресета) молчание правильно.
                 self._set_conn_probe_line(
@@ -798,9 +1522,11 @@ class OnboardingScreen(Screen):
             # Съедаем ВСЕГДА, даже когда переходить некуда (спека §4.2.6): tab/shift+tab —
             # штатные биндинги Textual (focus_next/focus_previous), и в мастере они явно
             # разрешены гейтом check_action в app.py. Оставить клавишу фреймворку значит
-            # вернуть рассинхрон «фокус отдельно, курсор отдельно» — на шагах мастера
-            # клавиша просто молчит.
+            # вернуть рассинхрон «фокус отдельно, курсор отдельно». Групп больше одной
+            # пока только на шаге голоса — на остальных шагах клавиша просто молчит.
             event.stop()
+            if self._step == _VOICE_STEP:
+                self._move_group(1 if event.key == "tab" else -1)
             return
         if event.key == "escape" and self._step == 0:
             # Esc при раскрытом пресет-листе сворачивает ТОЛЬКО его (канон /settings) —
@@ -845,6 +1571,22 @@ class OnboardingScreen(Screen):
             event.stop()
             self._toggle_mcp()
             return
+        if event.key in ("up", "down") and self._step == _VOICE_STEP:
+            # Стрелки двигают курсор ВНУТРИ его группы (спека §4.2.2, приоритет
+            # «раскрытый список → поля → варианты»): список забрал их выше, полям они
+            # достаются, только когда курсор в них, — иначе строки режима переключались
+            # бы прямо из-под набираемого поля.
+            event.stop()
+            delta = -1 if event.key == "up" else 1
+            if self._voice_cursor_group() == _VOICE_GROUP_FIELDS:
+                self._move_voice_field(delta)
+            else:
+                self._move_voice(delta)
+            return
+        if event.key == "space" and self._step == _VOICE_STEP:
+            event.stop()
+            self._voice_mark()
+            return
         if event.key == "enter":
             event.stop()
             if self._step == 0:
@@ -858,6 +1600,8 @@ class OnboardingScreen(Screen):
                 self._submit_connection()
             elif self._step == 1:
                 self._submit_model()
+            elif self._step == _VOICE_STEP:
+                self._voice_enter()
             elif self._step == _LAST_STEP:
                 self._commit()
             else:

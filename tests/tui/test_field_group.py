@@ -124,6 +124,42 @@ async def test_form_hints_are_one_dim_colour(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_voice_saved_token_marked_too(tmp_path):
+    """Голосовой endpoint показывает сохранённый токен той же маской — значит и
+    красится он как значение: иначе тот же экран учит одному, а показывает другое
+    (спека §3.4, «одинаковый $deep-dim для обоих запрещён»)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.editors.voice_endpoint import VoiceEndpointEditor
+    from tui.palette import DEEP_DIM, INK
+    from textual.widgets import Input
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        ed = VoiceEndpointEditor(values={"url": "https://h/v1/audio/transcriptions",
+                                         "token": "", "model": ""},
+                                 autofocus=False,
+                                 placeholders={"token": "sec***"})
+        await pilot.app.screen.mount(ed)
+        await pilot.pause()
+
+        def colour(wid):
+            w = ed.query_one(f"#{wid}", Input)
+            return w.get_component_styles("input--placeholder").color.hex.lower()
+
+        assert ed.query_one("#voice-token", Input).has_class("has-saved")
+        assert colour("voice-token") == INK.lower()
+        assert colour("voice-model") == DEEP_DIM.lower(), "подсказка остаётся подсказкой"
+
+        ed2 = VoiceEndpointEditor(values={"url": "", "token": "", "model": ""},
+                                  autofocus=False)
+        await pilot.app.screen.mount(ed2)
+        await pilot.pause()
+        assert not ed2.query_one("#voice-token", Input).has_class("has-saved"), \
+            "сохранённого токена нет — маркера быть не должно"
+
+
+@pytest.mark.asyncio
 async def test_disabled_field_group_is_dimmed(tmp_path):
     """Поле в группе отключено — приглушается рамка ГРУППЫ (спека §3.3).
 
@@ -139,8 +175,8 @@ async def test_disabled_field_group_is_dimmed(tmp_path):
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        # Поле отключено ещё до монтирования (`PasteInput(disabled=True)` в
-        # конструкторе хоста) — рамка обязана быть приглушённой с первого кадра.
+        # Поле отключено ещё до монтирования (так строит поля-факты голосовой
+        # редактор) — рамка обязана быть приглушённой с первого кадра.
         inp = PasteInput(id="conn-token", classes="group-field", disabled=True)
         group = Vertical(inp, id="conn-token-group", classes="field-group")
         await pilot.app.screen.mount(group)
