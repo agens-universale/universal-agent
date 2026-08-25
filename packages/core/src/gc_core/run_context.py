@@ -9,6 +9,7 @@ from gc_core.utils.prod_auth import AuthConnector
 from gc_core.utils.logging_module import create_run_logger
 from gc_core.utils.logging_module import generate_run_id
 from gc_core.tools import build_tools_data
+from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
 from gc_core.backends.factory import resolve_os_backend
@@ -63,6 +64,11 @@ class RunContext:
     ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    # Владелец живых MCP-сессий этого контекста (см. gc_core.mcp_session_owner).
+    # По нему ``arun`` понимает, ЧТО ему закрывать на выходе, и не сносит
+    # сессии параллельных агентов. Пустая строка — контекст собран в обход
+    # create_run_context (тесты, ручная сборка); тогда владельца нет.
+    mcp_session_owner: str = ""
 
 
 def create_run_context(
@@ -104,13 +110,19 @@ def create_run_context(
     run_logger, logging_path, summary_trace_path = create_run_logger(
         config_dict, run_id=effective_run_id, agent_kind="main"
     )
-    tools_data, tools_spec, tools_description, mcp_status = build_tools_data(
-        config_dict,
-        on_progress=on_progress,
-        os_backend=backend,
-        skills_registry=skills_registry,
-        logger=run_logger,
-    )
+    # Токен владельца MCP-сессий рождается здесь и живёт столько же, сколько
+    # контекст. Дискавери поднимает сессии прямо сейчас, поэтому она обязана
+    # идти уже под ним — иначе поднятое ею оказалось бы ничьим, и ни один
+    # прогон не смог бы это закрыть.
+    mcp_session_owner = new_owner_token()
+    with use_owner(mcp_session_owner):
+        tools_data, tools_spec, tools_description, mcp_status = build_tools_data(
+            config_dict,
+            on_progress=on_progress,
+            os_backend=backend,
+            skills_registry=skills_registry,
+            logger=run_logger,
+        )
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
@@ -173,6 +185,7 @@ def create_run_context(
         workspace=workspace,
         on_stream_delta=on_stream_delta,
         on_messages_evicted=on_messages_evicted,
+        mcp_session_owner=mcp_session_owner,
     )
     ctx.is_tui = bool(is_tui)
 

@@ -54,6 +54,7 @@ import signal
 import subprocess
 import threading
 
+from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, _INITIALIZED_PAYLOAD, _readline_with_timeout, _resolve_command, forget_stdio_reader
 
 
@@ -281,13 +282,22 @@ class PersistentStdioSession:
 
 
 class PersistentStdioRegistry:
-    """Процессный реестр долгоживущих stdio-сессий, ключ — server_key из config.yml."""
+    """Реестр долгоживущих stdio-сессий, ключ — ``(владелец, server_key)``.
+
+    Владелец (см. ``gc_core.mcp_session_owner``) в ключе обязателен. Без него ключом было
+    одно лишь имя сервера, и ``close_all()`` из ``arun`` первого доигравшего
+    агента убивал браузер, в котором в этот момент работали остальные. Симптом
+    был тихим — ``_ensure_started`` молча поднимал процесс заново, — и виден
+    только по времени: в прогоне трёх агентов один занял 44.8 с вместо 18.8 с
+    у соседа на той же задаче, потому что дважды ждал старта Chromium.
+    """
 
     _instance: Optional["PersistentStdioRegistry"] = None
     _instance_lock = threading.Lock()
 
     def __init__(self) -> None:
-        self._sessions: Dict[str, PersistentStdioSession] = {}
+        # (owner, server_key) -> сессия
+        self._sessions: Dict[tuple, PersistentStdioSession] = {}
         self._lock = threading.Lock()
 
     @classmethod
@@ -302,14 +312,33 @@ class PersistentStdioRegistry:
         server_key: str,
         server_cfg: Dict[str, Any],
     ) -> PersistentStdioSession:
+        key = (current_owner(), server_key)
         with self._lock:
-            session = self._sessions.get(server_key)
+            session = self._sessions.get(key)
             if session is None:
                 session = PersistentStdioSession(server_cfg)
-                self._sessions[server_key] = session
+                self._sessions[key] = session
             return session
 
     def close_all(self) -> None:
+        """Закрыть сессии ТЕКУЩЕГО владельца. Чужие работают — их не трогаем."""
+        owner = current_owner()
+        with self._lock:
+            keys = [k for k in self._sessions if k[0] == owner]
+            sessions = [self._sessions.pop(k) for k in keys]
+        for session in sessions:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    def close_everything(self) -> None:
+        """Закрыть ВСЕ сессии, включая чужие. Завершение процесса и тесты.
+
+        Нужен отдельным именем: обычный ``close_all`` теперь намеренно щадит
+        чужих, а на выходе из процесса щадить некого — иначе Chromium
+        переживёт агента, ради чего всё и затевалось.
+        """
         with self._lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()

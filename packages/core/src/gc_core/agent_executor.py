@@ -32,6 +32,7 @@ from gc_core.tools.subagents.active_scope import try_enqueue_user_message
 from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from gc_core.message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
@@ -492,6 +493,10 @@ class AgentExecutor:
         # кладём на state — по нему TUI-футер считает live-«запрос» текущего хода.
         run_start_usage = UsageAccount.from_meta(state.usage.to_meta())
         state.run_start_usage_meta = run_start_usage.to_meta()
+        # Входим во владение MCP-сессиями этого контекста. Всё, что поднимут
+        # тулы внутри прогона, ляжет под этот токен — и на выходе мы закроем
+        # ровно своё, не тронув сессии параллельных агентов на том же loop.
+        _owner_reset = set_owner(getattr(self._ctx, "mcp_session_owner", "") or None)
         try:
             response = await _maybe_await(arun_agent(
                 messages,
@@ -541,13 +546,14 @@ class AgentExecutor:
             # killpg → join потоков). Прямой вызов отсюда морозит loop
             # вызывающего на всё это время — замерено 5с на одну сессию,
             # игнорирующую SIGTERM, и 15с на три.
+            # to_thread копирует contextvars, поэтому владелец доезжает и туда:
+            # закроется только наше, чужой браузер продолжит работать.
             await asyncio.to_thread(PersistentStdioRegistry.instance().close_all)
-            # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http):
-            # закрываем все открытые ClientSession в их фоновом event loop и гасим loop.
+            # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http).
             try:
-                # НЕ через to_thread: сессии теперь ключуются по id(loop) и
-                # живут на ЭТОМ loop — из чужого потока их не видно и закрыть
-                # нечем. Закрытие асинхронное и быстрое (сеть + пайпы).
+                # НЕ через to_thread: сессии ключуются по id(loop) и живут на
+                # ЭТОМ loop — из чужого потока их не видно и закрыть нечем.
+                # Закрытие асинхронное и быстрое (сеть + пайпы).
                 await _STREAM_SESSION_MANAGER.aclose_all()
             except Exception:
                 pass
@@ -555,6 +561,8 @@ class AgentExecutor:
             # (pipes, ClientSession, loop buffers). State здесь не трогаем:
             # ниже usage-отчёт по state.
             gc.collect()
+            # Владение снимаем последним: всё выше в этом finally его требует.
+            reset_owner(_owner_reset)
 
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         try:

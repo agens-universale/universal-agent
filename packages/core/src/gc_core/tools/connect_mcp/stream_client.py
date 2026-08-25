@@ -15,6 +15,7 @@ from mcp.shared.exceptions import McpError
 from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
 from gc_core.mcp_runtime.env import mcp_stdio_env
+from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.transport import _resolve_command
 
 
@@ -36,15 +37,22 @@ class _PersistentSessionManager:
     переиспользованная на loop приложения, дала бы «Event loop is closed» в
     самый неудобный момент — посреди вызова тула.
 
-    Состав кэша остаётся ПРОЦЕССНЫМ: сессии по-прежнему общие для всех
-    RunContext на одном loop. Разделение «сессия на RunContext» — отдельная
-    задача, в этот переезд не входит.
+    Ключ включает и ВЛАДЕЛЬЦА (см. ``gc_core.mcp_session_owner``). Без него сессии были
+    общими для всех прогонов на одном loop, и ``arun`` первого доигравшего
+    агента закрывал живые сессии остальных. Для ``stream_*`` это не просто
+    потеря состояния, а падение: сессии SDK построены на anyio-scope'ах, вошли
+    в них задачи-владельцы, и закрытие из чужой задачи отменяет не ту::
+
+        CancelledError: Cancelled via cancel scope … by <Task pending Task-5>
+
+    Воспроизводилось тремя ``AsyncAgent`` на одном loop, каждый со своим
+    браузерным сервером.
     """
 
     def __init__(self) -> None:
-        # (id(loop), server_key) -> открытая ClientSession
+        # (owner, id(loop), server_key) -> открытая ClientSession
         self._sessions: Dict[tuple, Any] = {}
-        # (id(loop), server_key) -> стек контекст-менеджеров для закрытия
+        # (owner, id(loop), server_key) -> стек контекст-менеджеров для закрытия
         self._cm_stacks: Dict[tuple, Any] = {}
 
     @staticmethod
@@ -52,7 +60,7 @@ class _PersistentSessionManager:
         return id(asyncio.get_running_loop())
 
     def _key(self, server_key: str) -> tuple:
-        return (self._loop_id(), server_key)
+        return (current_owner(), self._loop_id(), server_key)
 
     def get_session(self, server_key: str) -> Optional[Any]:
         try:
@@ -85,12 +93,19 @@ class _PersistentSessionManager:
                 pass
 
     async def aclose_all(self) -> None:
-        """Закрыть сессии ТЕКУЩЕГО loop. Чужие не трогаем — их закроет владелец."""
+        """Закрыть сессии ЭТОГО владельца на ЭТОМ loop.
+
+        Оба условия обязательны. Чужой loop — закрывать нечем (соединения
+        привязаны к своему). Чужой владелец — сессия ещё РАБОТАЕТ: параллельный
+        агент в этот момент внутри вызова тула, и закрытие из нашей задачи
+        отменит его anyio-scope.
+        """
         try:
             loop_id = self._loop_id()
         except RuntimeError:
             return
-        keys = [k for k in self._cm_stacks if k[0] == loop_id]
+        owner = current_owner()
+        keys = [k for k in self._cm_stacks if k[0] == owner and k[1] == loop_id]
         for key in keys:
             cms = self._cm_stacks.pop(key, None)
             self._sessions.pop(key, None)
@@ -98,7 +113,7 @@ class _PersistentSessionManager:
                 await self._aclose_stack(cms)
 
     def close_all(self) -> None:
-        """Синхронный двойник — для вызывающих вне loop и старых call-site.
+        """Отпустить ВСЕ сессии, включая чужие. Для завершения процесса и тестов.
 
         Если loop живёт на этом потоке, звать нельзя: получился бы вложенный
         ``asyncio.run``. Такой вызывающий обязан использовать ``aclose_all``.

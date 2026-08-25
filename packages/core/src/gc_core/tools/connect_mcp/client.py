@@ -5,7 +5,16 @@ from gc_core.tools.connect_mcp.transport import get_transport
 
 # Кэш MCP-сессий в рамках процесса:
 # ключ — имя сервера из конфига (server_name), значение — session_id.
-_MCP_SESSIONS: Dict[str, str] = {}
+#: MCP session-id по ключу ``(владелец, server_key)``.
+#:
+#: Владелец здесь по той же причине, что и в двух других реестрах: session-id
+#: адресует состояние НА СЕРВЕРЕ (для браузерного MCP — конкретный контекст со
+#: своими вкладками и куками). Один id на всех агентов означал бы, что они
+#: молча работают в одной вкладке и сбивают друг другу страницы. Teardown'а
+#: здесь нет, поэтому падения не было — была тихая общая песочница.
+from gc_core.mcp_session_owner import current_owner
+
+_MCP_SESSIONS: Dict[tuple, str] = {}
 
 
 def _merge_mcp_headers(
@@ -209,7 +218,7 @@ def _call_mcp_tool(
     if server_key:
         new_sid = resp_headers.get("mcp-session-id") or resp_headers.get("MCP-Session-Id")
         if new_sid:
-            _MCP_SESSIONS[server_key] = new_sid
+            _MCP_SESSIONS[(current_owner(), server_key)] = new_sid
     return body
 
 
@@ -224,7 +233,7 @@ def _get_or_init_session_id(
     Вернуть session_id для MCP-сервера.
     Если в кэше нет — инициализировать сессию и сохранить.
     """
-    session_id = _MCP_SESSIONS.get(server_key)
+    session_id = _MCP_SESSIONS.get((current_owner(), server_key))
     if session_id:
         return session_id
 
@@ -232,7 +241,7 @@ def _get_or_init_session_id(
         url, server_cfg, token=token, timeout=timeout
     )
     if session_id:
-        _MCP_SESSIONS[server_key] = session_id
+        _MCP_SESSIONS[(current_owner(), server_key)] = session_id
 
     return session_id
 

@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import threading
+
+from gc_core.mcp_session_owner import copy_context_for_thread
 from typing import Any, Callable
 
 #: Одновременных блокирующих дискавери. Больше смысла нет: они ждут сеть, а не
@@ -57,10 +59,15 @@ async def run_abandonable(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) 
         except RuntimeError:
             pass
 
+    # Голый поток контекст НЕ наследует (в отличие от asyncio.to_thread).
+    # Без явного снимка сессия, поднятая дискавери здесь, оказалась бы ничьей,
+    # и её не закрыл бы ни один прогон — Chromium пережил бы агента.
+    ctx_snapshot = copy_context_for_thread()
+
     def _target() -> None:
         with _slots:
             try:
-                result = fn(*args, **kwargs)
+                result = ctx_snapshot.run(fn, *args, **kwargs)
             except BaseException as exc:  # noqa: BLE001 — переносим как есть
                 _deliver(future.set_exception, exc)
             else:
