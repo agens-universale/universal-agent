@@ -74,11 +74,16 @@ class Case:
     """
 
     def __init__(self, cid: str, area: str, overrides: Dict[str, Any],
-                 note: str = "") -> None:
+                 note: str = "", files: Optional[Dict[str, str]] = None) -> None:
         self.id = cid
         self.area = area
         self.overrides = overrides
         self.note = note
+        #: Файлы, создаваемые в рабочем каталоге ДО прогона, — для ключей,
+        #: которые указывают на файл (промпты, скиллы, инструкции). Без них
+        #: такой ключ либо игнорируется, либо роняет прогон, и случай проверял
+        #: бы не то. Путь в ``overrides`` задаётся через ``{work}``.
+        self.files = files or {}
 
 
 def _set_dotted(cfg: Dict[str, Any], path: str, value: Any) -> None:
@@ -196,6 +201,251 @@ SINGLE: List[Case] = [
     Case("logging/limit_trace_summary_off", "logging", {"limit_trace_summary": False}),
 ]
 
+
+# --- срез B, продолжение: остальные области схемы -------------------------
+#
+# Первая редакция матрицы покрывала четыре названные области (суммаризация,
+# лимиты, гварды, логирование) и трогала 46 листов схемы из 163. Обход схемы
+# показал, что за их пределами осталось много живых ключей — они здесь.
+
+SINGLE += [
+    # --- backend: форма запроса и разбор ответа ---
+    Case("backend/stream_off", "backend", {"stream": False}),
+    Case("backend/stream_on", "backend", {"stream": True}),
+    Case("backend/use_retry_on", "backend", {"use_retry": True}),
+    Case("backend/send_tool_strict_off", "backend", {"send_tool_strict": False}),
+    Case("backend/openai_strict_schema", "backend",
+         {"openai_strict_tools_schema": True}),
+    Case("backend/max_tokens_param", "backend", {"use_max_tokens_param": True}),
+    Case("backend/max_tokens_small", "backend", {"chat_completions_max_tokens": 512}),
+    Case("backend/min_response_tokens", "backend",
+         {"chat_completions_min_response_tokens": 64}),
+    Case("backend/retry_embedded_off", "backend",
+         {"retry_embedded_choice_errors": False}),
+    Case("backend/completion_kwargs", "backend",
+         {"chat_completion_kwargs": {"temperature": 0.1}}),
+    Case("backend/extra_headers", "backend",
+         {"chat_completion_headers": {"X-Probe": "matrix"}},
+         "заголовки HTTP — latin-1, кириллица в них невозможна физически"),
+
+    # --- llm: лимиты токенов у вспомогательных вызовов ---
+    Case("llm/max_tokens_small", "backend", {"chat_completions.llm.max_tokens": 256}),
+    Case("llm/judge_max_tokens_small", "backend",
+         {"chat_completions.llm.judge_max_tokens": 256}),
+    Case("llm/completion_kwargs", "backend",
+         {"chat_completions.llm.completion_kwargs": {"top_p": 0.9}}),
+
+    # --- агент: состав тулов и поведение хода ---
+    Case("agent/finish_gate_iters_1", "limits", {"finish_gate_max_iterations": 1}),
+    Case("agent/subagent_finish_gate_1", "limits",
+         {"subagent_finish_gate_max_iterations": 1}),
+    Case("agent/tool_output_inline_small", "limits",
+         {"tool_output_inline_max_chars": 200}),
+    Case("agent/limit_project_metadata", "limits", {"limit_project_metadata": True}),
+    Case("agent/local_subagents_on", "limits", {"use_local_subagents": True}),
+    Case("agent/server_subagents_on", "limits", {"use_server_subagents": True}),
+    Case("agent/disable_skills", "limits", {"disable_skills": ["*"]}),
+    Case("agent/server_tool_prefix", "limits", {"server_tool_prefix": "проба"}),
+    Case("agent/system_prompt_id", "limits", {"system_prompt_id": "v1"}),
+    Case("agent/x_cl_id", "limits", {"x_cl_id": "probe-42"},
+         "уходит в HTTP-заголовок, поэтому только ASCII"),
+    Case("agent/inject_tool_fields", "limits",
+         {"inject_tool_fields": {"exec_calculator": {"reason": "почему"}}}),
+
+    # --- fs_tools: потолки чтения и записи ---
+    Case("fs/max_read_small", "guards", {"fs_tools.max_read_bytes": 1024}),
+    Case("fs/max_mutate_small", "guards", {"fs_tools.max_mutate_bytes": 1024}),
+
+    # --- intent_scope: сжатие следов тулов ---
+    Case("intent/max_summary_small", "logging", {"intent_scope.max_summary_chars": 50}),
+    Case("intent/max_tool_output_small", "logging",
+         {"intent_scope.max_tool_output_chars": 100}),
+    Case("intent/max_raw_record_small", "logging",
+         {"intent_scope.max_raw_record_chars": 100}),
+    Case("intent/max_final_answer_small", "logging",
+         {"intent_scope.max_final_answer_raw_chars": 100}),
+    Case("intent/read_page_limit_1", "logging",
+         {"intent_scope.read_page_record_limit": 1}),
+    Case("intent/fallback_raw_off", "logging",
+         {"intent_scope.fallback_raw_on_llm_error": False}),
+    Case("intent/tools_empty", "logging", {"intent_scope.tools": {}}),
+
+    # --- логирование: оставшиеся ключи ---
+    Case("logging/full_log_backend_on", "logging", {"full_log_backend": True}),
+    Case("logging/format_json_flat", "logging", {"logging_format": "json"}),
+    Case("logging/propagate_on", "logging", {"logging_propagate": True}),
+    Case("logging/redact_extra_patterns", "logging",
+         {"redact_secrets.enabled": True,
+          "redact_secrets.extra_patterns": ["секрет-[0-9]+"]}),
+    Case("logging/trace_id_header_name", "logging",
+         {"trace_header_enabled": True, "trace_id_header_name": "X-Мой-Трейс"}),
+
+    # --- pricing: учёт стоимости ---
+    Case("pricing/currency", "logging", {"pricing.enabled": True, "pricing.currency": "$"}),
+    Case("pricing/per_tokens", "logging", {"pricing.enabled": True, "pricing.per_tokens": 1000}),
+    Case("pricing/rates", "logging",
+         {"pricing.enabled": True, "pricing.input": 1.5, "pricing.output": 3.0,
+          "pricing.cache_read": 0.5}),
+    Case("pricing/per_model", "logging",
+         {"pricing.enabled": True,
+          "pricing.models": {"parity-model": {"input": 2.0, "output": 4.0}}}),
+
+    # --- project_memory ---
+    Case("memory/check_interval_1", "logging",
+         {"project_memory.check_interval_messages": 1}),
+    Case("memory/max_chars_small", "logging", {"project_memory.max_chars": 100}),
+    Case("memory/max_append_small", "logging", {"project_memory.max_append_chars": 50}),
+
+    # --- working_memory: бюджеты регистров ---
+    Case("wm/goal_small", "summary", {"working_memory.max_chars_goal": 100}),
+    Case("wm/constraints_small", "summary",
+         {"working_memory.max_chars_constraints": 100}),
+    Case("wm/state_small", "summary", {"working_memory.max_chars_state": 100}),
+    Case("wm/knowledge_small", "summary", {"working_memory.max_chars_knowledge": 100}),
+    Case("wm/total_budget_small", "summary",
+         {"working_memory.total_budget_chars": 400}),
+
+    # --- гварды: списки путей и примеров ---
+    Case("guards/write_extra_paths", "guards",
+         {"write_guard.enabled": True, "write_guard.extra_paths": ["/нет/такого"]}),
+    Case("guards/read_allowed_roots", "guards",
+         {"read_guard.enabled": True, "read_guard.allowed_read_roots": ["/tmp"]}),
+    Case("guards/read_allowed_paths", "guards",
+         {"read_guard.enabled": True, "read_guard.allowed_read_paths": ["/tmp/да"]}),
+    Case("guards/read_denied_paths", "guards",
+         {"read_guard.enabled": True, "read_guard.denied_read_paths": ["/tmp/нет"]}),
+    Case("guards/read_denied_patterns", "guards",
+         {"read_guard.enabled": True, "read_guard.denied_file_patterns": ["*.секрет"]}),
+    Case("guards/moderation_examples", "guards",
+         {"command_moderation.allowed_command_examples": ["ls"],
+          "command_moderation.denied_command_examples": ["rm -rf /"]}),
+    Case("guards/download_dir", "guards", {"download.download_dir": "загрузки"}),
+    Case("guards/protected_extra", "guards",
+         {"protected_paths.extra": ["/нет/такого/пути"]}),
+
+    # --- прочее ---
+    Case("misc/strip_tags", "logging", {"strip_tags_projection.tags": ["think"]}),
+    Case("misc/tool_usage_notice", "limits", {"tool_usage_notice": []}),
+    Case("misc/mcp_discovery_timeout", "limits",
+         {"mcp-meta.discovery_timeout_sec": 5}),
+    Case("misc/update_check_off", "misc", {"update.check": False}),
+    Case("misc/update_extra_args", "misc", {"update.extra_args": ["--dry-run"]}),
+]
+
+#: Ключи схемы, НЕ включённые в матрицу, и почему. Ведётся явно: «не покрыт»
+#: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
+#: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
+NOT_IN_MATRIX = {
+    # Задаёт сам харнесс: подмена сломала бы маршрутизацию ScriptedBackend.
+    "agent.model": "выставляет parity_config; по нему маршрутизируется сценарий",
+    "backend.completions_url": "то же — адрес, который перехватывает MockTransport",
+    # ScriptedBackend отдаёт ответы формата chat_completions; в responses-режиме
+    # ядро ждёт другую форму и падает на разборе. Это ограничение ХАРНЕССА, а не
+    # пробел покрытия: сам режим проверяют test_responses_* и парити-набор.
+    "backend.api_mode": "харнесс умеет только chat_completions (ScriptedBackend)",
+    # Сеть и TLS: MockTransport до них не доходит.
+    "backend.use_ssl": "TLS не участвует: транспорт подменён",
+    "backend.cert_path": "то же",
+    "backend.key_path": "то же",
+    "backend.proxy": "то же",
+    "backend.request_timeout_sec": "нужен живой медленный бэкенд — L4",
+    "mcp.meta.request_timeout_sec": "нужен живой MCP-сервер — L4",
+    "mcp.servers": "нужны живые серверы — L3/L4",
+    "agent_auth": "внешняя авторизация, нужен живой провайдер",
+    "endpoint_presets": "выбор эндпойнта, нужен живой провайдер",
+    # Требуют файлов, которых на прогоне нет; проверяются своими тестами.
+    "paths.chat_completions_system_prompt_path": "выставляет parity_config",
+    "paths.threads_data_path": "выставляет parity_config — туда пишется тред",
+    "paths.logs_dump_dir": "выставляет parity_config",
+    # Только TUI: матрица гоняет CLI-прогон.
+    "tui.stream": "только TUI",
+    "tui.text_answer_mode": "только TUI",
+    "tui.finish_gate_mode": "только TUI",
+    "tui.agentsmd_override": "только TUI",
+    "tui.bang_shell.timeout_sec": "только TUI",
+    "tui.bang_shell.max_output_bytes": "только TUI",
+    "tui.bang_shell.max_output_lines": "только TUI",
+    "tui.file_view.max_file_bytes": "только TUI",
+    "tui.file_view.page_lines": "только TUI",
+    "diff_tui.cache_max_orig": "только TUI",
+    "diff_tui.preview_context_lines": "только TUI",
+    "diff_tui.full_file_max_lines": "только TUI",
+    "diff_tui.max_diff_chars": "только TUI",
+}
+
+
+
+# --- срез B: скиллы, промпты и инструкции ---------------------------------
+#
+# У них есть свои наборы (test_skill_*, test_*prompt*), но там проверяют сам
+# механизм. Здесь другое: прогон ЦЕЛИКОМ не изменился от того, что скилл
+# подложен, а промпт заменён. Ключ, указывающий на файл, без файла либо
+# игнорируется, либо роняет прогон — поэтому файлы создаются вместе со случаем.
+
+SINGLE += [
+    Case("skills/catalog_present", "skills",
+         {"skills_data_path": "{work}/skills"},
+         "каталог скиллов подложен — состав тулов и промпт обязаны совпасть",
+         files={"skills/проба/SKILL.md":
+                "---\nname: проба\ndescription: пробный скилл матрицы\n---\n\nТело скилла.\n"}),
+    Case("skills/catalog_empty", "skills",
+         {"skills_data_path": "{work}/skills"},
+         "каталог есть, но пуст",
+         files={"skills/.keep": ""}),
+    Case("skills/disabled_all", "skills",
+         {"skills_data_path": "{work}/skills", "disable_skills": ["*"]},
+         files={"skills/проба/SKILL.md":
+                "---\nname: проба\ndescription: пробный скилл матрицы\n---\n\nТело.\n"}),
+    Case("skills/disabled_by_name", "skills",
+         {"skills_data_path": "{work}/skills", "disable_skills": ["проба"]},
+         files={"skills/проба/SKILL.md":
+                "---\nname: проба\ndescription: пробный скилл матрицы\n---\n\nТело.\n"}),
+
+    Case("prompts/system_replaced", "prompts",
+         {"chat_completions_system_prompt_path": "{work}/prompts/sys.md"},
+         "системный промпт заменён — он уезжает в meta и в каждый запрос",
+         files={"prompts/sys.md": "СИСТЕМНЫЙ ПРОМПТ МАТРИЦЫ"}),
+    Case("prompts/special_instructions", "prompts",
+         {"chat_completions_special_instructions_path": "{work}/prompts/special.md"},
+         files={"prompts/special.md": "ОСОБЫЕ УКАЗАНИЯ МАТРИЦЫ"}),
+    Case("prompts/intent_guard", "prompts",
+         {"chat_completions_intent_guard_prompt_path": "{work}/prompts/guard.md"},
+         files={"prompts/guard.md": "ПРОМПТ СУДЬИ МАТРИЦЫ"}),
+    Case("prompts/subagent_system", "prompts",
+         {"chat_completions_custom_subagent_system_prompt_path":
+          "{work}/prompts/sub.md"},
+         files={"prompts/sub.md": "ПРОМПТ СУБАГЕНТА МАТРИЦЫ"}),
+    Case("prompts/summary_prompt", "prompts",
+         {"summary_params.chat_completions_summary_trigger_chars": 200,
+          "summary_params.chat_completions_summary_prompt_path":
+          "{work}/prompts/summary.md"},
+         "промпт сводки заменён и компакция реально идёт",
+         files={"prompts/summary.md": "ПРОМПТ СВОДКИ МАТРИЦЫ"}),
+    Case("prompts/memory_patch_prompt", "prompts",
+         {"summary_params.chat_completions_summary_trigger_chars": 200,
+          "summary_params.chat_completions_memory_patch_replace_prompt_path":
+          "{work}/prompts/mem.md"},
+         files={"prompts/mem.md": "ПРОМПТ ПАМЯТИ МАТРИЦЫ"}),
+    Case("prompts/intent_scope_tool", "prompts",
+         {"intent_scope.intent_scope_tool_summary_prompt_path":
+          "{work}/prompts/is_tool.md"},
+         files={"prompts/is_tool.md": "ПРОМПТ СЖАТИЯ ТУЛА"}),
+    Case("prompts/intent_scope_final", "prompts",
+         {"intent_scope.intent_scope_final_answer_summary_prompt_path":
+          "{work}/prompts/is_final.md"},
+         files={"prompts/is_final.md": "ПРОМПТ СЖАТИЯ ОТВЕТА"}),
+    Case("prompts/agent_md", "prompts",
+         {"agent_md_path": "{work}/AGENTS.md"},
+         "проектные инструкции подложены",
+         files={"AGENTS.md": "# Проектные указания\n\nПравило матрицы.\n"}),
+    Case("prompts/subagents_dir", "prompts",
+         {"subagents_dir": "{work}/subagents", "use_local_subagents": True},
+         "каталог субагентов подложен",
+         files={"subagents/помощник.md":
+                "---\nname: subagent_помощник\ndescription: пробный субагент\n---\n\nТело.\n"}),
+]
+
+
 # --- срез C: пары, у которых есть ОБЩЕЕ место в коде -----------------------
 #
 # Не произвольные сочетания: каждая пара выбрана потому, что оба переключателя
@@ -256,7 +506,15 @@ def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, Any]:
 
     work = tmp_root / case.id.replace("/", "__")
     cfg = parity_config(work, monkeypatch)
+
+    for rel, content in case.files.items():
+        target = work / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
     for path, value in case.overrides.items():
+        if isinstance(value, str) and "{work}" in value:
+            value = value.format(work=work)
         _set_dotted(cfg, path, value)
 
     backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))

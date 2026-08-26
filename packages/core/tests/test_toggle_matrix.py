@@ -2,14 +2,23 @@
 
 Приёмка переезда до сих пор проверяла один конфиг — дефолтный
 (``test_parity_smoke``). Но заявленный критерий шире: «работает как раньше»
-должно держаться при любом положении переключателей, а их 83, и 66 проверяемы
-без живой модели.
+должно держаться при любом положении переключателей. Матрица трогает 124 листа
+схемы из 163; остальные либо мертвы (нет читателя), либо исключены с
+записанной причиной в ``NOT_IN_MATRIX``. Следит за этим
+``test_every_live_schema_key_is_covered_or_explained``.
 
-С чем сравниваем и почему не с master. У master другая раскладка (плоский
-``src/`` против ``packages/*/src/``), 132 коммита отставания и нет
-``gc_core.aio`` вовсе — SDK там сравнивать не с чем. Расхождения были бы в
-подавляющем большинстве «за три недели поменяли фичу», а не «async сломал»:
-шум вместо сигнала.
+С чем сравниваем и почему не с master. Сравнение с master ВОЗМОЖНО и было
+проделано: у него другая раскладка (плоский ``src/``) и в бэкенд он ходит
+через ``requests``, а не httpx, поэтому харнесс нужен свой — но сценарий и
+разбор дампа те же. Итог сверки на дефолтном конфиге: ответ совпал, дамп
+разошёлся в ОДНОМ поле (``finish_gate.coverage_score``: 1.0 против 0.0) и
+master сделал 4 обращения к бэкенду против 3.
+
+Причина расхождения — НЕ переезд, и это установлено, а не предположено:
+до-async эталон ``aa363554`` даёт ровно то же, что наша ветка (0.0 и три
+обращения). Значит разница пришла из 132 коммитов между master и базой
+переезда. Поэтому база сверки — ``aa363554``, а не master: там разница с нашей
+веткой равна ровно переезду и ничему больше.
 
 База — ``aa363554``: первый коммит переезда, где добавлен ТОЛЬКО харнесс, а
 рантайм идентичен до-async ``c96f26ff``. Разница с нашей веткой — ровно переезд
@@ -101,6 +110,54 @@ def test_summary_cases_actually_compact(reference):
     ]
     assert compacted, "ни один случай не довёл дело до компакции"
     assert "summary/trigger_tiny" in compacted
+
+
+def test_every_live_schema_key_is_covered_or_explained(reference):
+    """Каждый живой ключ схемы либо в матрице, либо исключён с причиной.
+
+    Гейт на полноту. Без него матрица выглядит внушительно и незаметно
+    отстаёт: первая редакция трогала 46 листов схемы из 163, и понять это
+    можно было только пересчитав вручную.
+
+    «Не покрыт» и «покрывать нечем» — разные вещи, и различать их обязан
+    ``NOT_IN_MATRIX``, а не память того, кто однажды считал.
+    """
+    from pydantic import BaseModel
+
+    from gc_core.config_modules.root import AppConfig
+    from test_config_toggles_have_readers import KNOWN_UNREAD
+    from toggle_matrix import NOT_IN_MATRIX
+
+    def leaves(model, prefix=""):
+        out = []
+        for name, field in model.model_fields.items():
+            ann, path = field.annotation, f"{prefix}{name}"
+            if isinstance(ann, type) and issubclass(ann, BaseModel):
+                out.extend(leaves(ann, path + "."))
+            else:
+                out.append(path)
+        return out
+
+    # Плоское имя иногда отличается от имени в схеме — проекция переименовывает.
+    ALIAS = {
+        "backend.api_mode": "backend_api_mode",
+        "logging.format": "logging_format",
+        "logging.propagate": "logging_propagate",
+    }
+    touched = {p.split(".")[-1] for case in ALL_CASES for p in case.overrides}
+    gap = [
+        leaf for leaf in leaves(AppConfig)
+        if leaf.split(".")[-1] not in touched
+        and ALIAS.get(leaf, "") not in touched
+        and leaf not in KNOWN_UNREAD
+        and leaf not in NOT_IN_MATRIX
+    ]
+    assert gap == [], (
+        "ключи схемы не покрыты матрицей и не объяснены:\n  "
+        + "\n  ".join(sorted(gap))
+        + "\nЛибо заведите случай в toggle_matrix, либо занесите в NOT_IN_MATRIX "
+        "с причиной."
+    )
 
 
 def test_limit_cases_actually_hit_the_limit(reference):
