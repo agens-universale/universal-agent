@@ -1231,22 +1231,25 @@ class FindInFiles(AbstractSimpleTool):
         assert accepted_excludes is not None
 
         # --- native grep (gates) before Python pipeline ---
-        native_resp = self._try_native_grep_directory(
-            path=path,
-            pattern=pattern,
-            query_mode=query_mode,
-            pattern_mode=pattern_mode,
-            effective_ci=effective_ci,
-            file_pattern=file_pattern,
-            accepted_excludes=accepted_excludes,
-            exclude_soft_errors=exclude_soft_errors,
-            limit_requested=limit_requested,
-            limit_eff=limit_eff,
-            limit_capped=limit_capped,
-            config=config,
-            report_path=report_path,
-            show_excluded_dirs=show_excluded_dirs,
-        )
+        if parse_read_guard_config(cfg_dict).enabled:
+            native_resp = None
+        else:
+            native_resp = self._try_native_grep_directory(
+                path=path,
+                pattern=pattern,
+                query_mode=query_mode,
+                pattern_mode=pattern_mode,
+                effective_ci=effective_ci,
+                file_pattern=file_pattern,
+                accepted_excludes=accepted_excludes,
+                exclude_soft_errors=exclude_soft_errors,
+                limit_requested=limit_requested,
+                limit_eff=limit_eff,
+                limit_capped=limit_capped,
+                config=config,
+                report_path=report_path,
+                show_excluded_dirs=show_excluded_dirs,
+            )
         if native_resp is not None:
             return native_resp
 
@@ -1332,7 +1335,8 @@ class FindInFiles(AbstractSimpleTool):
 
             if glob_matcher is not None and not glob_matcher(relpath):
                 continue
-
+            if not _rg_pass(abs_path):
+                continue
             try:
                 fsize = backend.getsize(abs_path)
             except OSError:
