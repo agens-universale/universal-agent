@@ -39,14 +39,14 @@ def read_snippet(recipe_dir: Path) -> dict[str, Any]:
     return data
 
 
-def _load_managed() -> dict[str, Any]:
+def load_managed() -> dict[str, Any]:
     path = managed_config_path()
     if not path.is_file():
         return {}
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def _save_managed(data: dict[str, Any]) -> None:
+def save_managed(data: dict[str, Any]) -> None:
     path = managed_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -54,7 +54,7 @@ def _save_managed(data: dict[str, Any]) -> None:
 
 def wired_servers() -> dict[str, Any]:
     """mcp.servers из managed-файла (= что подключено через gc-mcp)."""
-    return ((_load_managed().get("mcp") or {}).get("servers") or {})
+    return ((load_managed().get("mcp") or {}).get("servers") or {})
 
 
 def wire_snippet(name: str, recipe_dir: Path, *, npx: str, cache: str) -> list[str]:
@@ -69,9 +69,9 @@ def wire_snippet(name: str, recipe_dir: Path, *, npx: str, cache: str) -> list[s
     config_block = next(iter(snippet.values()))
     resolved = resolve_placeholders(config_block, npx=npx, cache=cache)
 
-    data = _load_managed()
+    data = load_managed()
     data.setdefault("mcp", {}).setdefault("servers", {})[name] = resolved
-    _save_managed(data)
+    save_managed(data)
 
     leftover = sorted({m for v in _iter_strings(resolved) for m in _PLACEHOLDER_RE.findall(v)})
     return leftover
@@ -79,12 +79,12 @@ def wire_snippet(name: str, recipe_dir: Path, *, npx: str, cache: str) -> list[s
 
 def unwire(name: str) -> bool:
     """Убрать mcp.servers.<name> из managed-файла. True если был, False если нет."""
-    data = _load_managed()
+    data = load_managed()
     servers = (data.get("mcp") or {}).get("servers") or {}
     if name not in servers:
         return False
     del servers[name]
-    _save_managed(data)
+    save_managed(data)
     return True
 
 

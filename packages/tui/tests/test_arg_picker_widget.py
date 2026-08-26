@@ -76,6 +76,78 @@ def test_row_without_desc_stays_bare_value():
     assert p._format_row(("txt", "")) == " txt"
 
 
+def test_two_tuple_row_still_plain_str_backward_compat():
+    """2-tuple опции (/export и т.п.) продолжают рендериться простым `str` —
+    3-й элемент (статус) не должен задеть другие пикеры (задача 10)."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    p = ArgPicker([("txt", "вся сессия")], initial_filter="")
+    row = p._format_row(("txt", "вся сессия"))
+    assert isinstance(row, str)
+    assert row == " txt   вся сессия"
+
+
+def test_three_tuple_row_renders_status_column_colored():
+    """3-tuple опции (/profiles) — статус третьим элементом рендерится ЗЕЛЁНЫМ
+    (OK), ровно как активный маркер в /settings (`_profile_row_text`)."""
+    pytest.importorskip("textual")
+    from gc_tui import palette as pal
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    opts = [
+        ("без профиля", "работать чистым конфигом", ""),
+        ("openrouter", "глобальный (как в конфиге)", ""),
+        ("smoke", "глобальный", "● активен"),
+    ]
+    p = ArgPicker(opts, initial_filter="")
+
+    none_row = p._format_row(opts[0])
+    active_row = p._format_row(opts[2])
+
+    # описание начинается в общей колонке, как у 2-tuple опций
+    assert none_row.plain.index("работать") == active_row.plain.index("глобальный")
+    # статус — самая правая часть строки, только у активной
+    assert active_row.plain.rstrip().endswith("● активен")
+    assert "активен" not in none_row.plain
+
+    spans = [s for s in active_row.spans if active_row.plain[s.start:s.end] == "● активен"]
+    assert spans and str(spans[0].style) == pal.OK
+
+
+def test_three_tuple_status_visible_even_with_empty_description():
+    """Ревью-фикс: пустое описание не должно молча ронять статус — 3-tuple с
+    `desc=""` и непустым `status` всё равно рисует статус (контракт для
+    будущих потребителей общего виджета, не только /profiles)."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    p = ArgPicker([("x", "", "● активен")], initial_filter="")
+    row = p._format_row(("x", "", "● активен"))
+    assert "● активен" in row.plain
+
+
+def test_status_column_aligns_to_longest_visible_description():
+    """Колонка статуса выровнена по самому длинному ОПИСАНИЮ среди видимых
+    строк — тот же принцип, каким уже паддится value-колонка (_value_col_w)."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    short_opts = [("smoke", "глобальный", "● активен")]
+    long_opts = [
+        ("openrouter", "глобальный (как в конфиге)", ""),
+        ("smoke", "глобальный", "● активен"),
+    ]
+    p_short = ArgPicker(short_opts, initial_filter="")
+    p_long = ArgPicker(long_opts, initial_filter="")
+
+    idx_short = p_short._format_row(short_opts[0]).plain.index("● активен")
+    idx_long = p_long._format_row(long_opts[1]).plain.index("● активен")
+    # более длинное описание в списке сдвигает статус правее — колонка
+    # считается по самой длинной видимой строке, не по своей
+    assert idx_long > idx_short
+
+
 def test_set_filter_resets_selection_to_zero():
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker

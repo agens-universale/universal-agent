@@ -159,7 +159,7 @@ def test_cli_wheel_contents(wheels):
 #: ТОЛЬКО запрошенного дистрибутива, поэтому свою команду объявляет он сам.
 OWN_COMMANDS = {
     "gc_cli": {"gc-cli"},
-    "gc_tui": {"gc-ua"},
+    "gc_tui": {"gc-ua", "gc-voice"},
     "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
 }

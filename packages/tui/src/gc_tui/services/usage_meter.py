@@ -24,7 +24,7 @@ from gc_tui.palette import DIM, INK
 _LABEL = DIM
 _VALUE = INK
 # Разделитель сегментов футера (тот же, что у модель/контекст).
-_SEP = "  ·  "
+_SEP = " · "
 
 
 def _cost_display(report: CostReport, *, compact: bool) -> Optional[str]:
@@ -150,7 +150,8 @@ def compose_adaptive_footer_right(
     sep: str = _SEP,
 ) -> Text:
     """head (модель[· контекст]) + usage-сегменты в одну строку; если по ширине
-    не влезает — «сессия» уезжает на 2-ю строку под «запрос» (футер height:2).
+    не влезает — токен-блок («запрос · сессия») уезжает на 2-ю строку целиком
+    (футер height:2), 1-я строка остаётся без дыры между left и head.
 
     Стекуем только когда есть ОБА сегмента (иначе стекать нечего). ДальшеL1 не
     деградируем — по решению вёрстки."""
@@ -158,11 +159,10 @@ def compose_adaptive_footer_right(
     single = _join([head, *usage], sep)
     if single.cell_len <= available_width or request_seg is None or session_seg is None:
         return single
-    line1 = _join([head, request_seg], sep)
     out = Text()
-    out.append_text(line1)
+    out.append_text(head)
     out.append("\n")
-    out.append_text(session_seg)
+    out.append_text(_join(usage, sep))
     return out
 
 

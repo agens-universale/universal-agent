@@ -4,6 +4,7 @@ from __future__ import annotations
 import requests
 from typing import NamedTuple
 
+from gc_core.model_router import AliasCircuitOpenError
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 _HTTP_RETRY_SKIP_STATUSES = {401, 403, 404}
@@ -23,6 +24,28 @@ _CONTEXT_OVERFLOW_MARKERS = (
 )
 
 
+class EmbeddedChoiceError(Exception):
+    """Ошибка, зашитая провайдером-прокси внутрь HTTP-200 ответа
+    (choices[0].error = {code, message, metadata}; стиль OpenRouter).
+
+    Поверхностно запрос «успешен», поэтому транспорт её не ретраит, а фаталит
+    она позже — в конвертации ответа, уже за границей retry-политики.
+    Несём status_code (числовой из error.code), чтобы is_retriable_backend_error
+    классифицировал её как обычную HTTP-ошибку бэкенда.
+
+    raw_code — исходный error.code как есть (до попытки int()). Нужен, чтобы
+    отличить нечисловой код (insufficient_quota/invalid_api_key: ошибка не
+    HTTP-таймаута, повтором не чинится → НЕ ретраить) от отсутствия кода вовсе
+    (finish_reason='error' с пустым выбором: транзиентный сбой → ретраить).
+    Оба дают status_code=None, но раскладываются по-разному."""
+
+    def __init__(self, message, *, status_code=None, metadata=None, raw_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.metadata = metadata
+        self.raw_code = raw_code
+
+
 def is_auth_error(exc: BaseException) -> bool:
     """401 от бэкенда — истёкший/невалидный токен доступа. Лечится пере-выпуском
     токена (`auth_connector.get_token(force=True)`) + повтор запроса один раз
@@ -31,6 +54,11 @@ def is_auth_error(exc: BaseException) -> bool:
     if isinstance(exc, requests.exceptions.HTTPError):
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
     elif isinstance(exc, BackendStreamError):
+        status_code = exc.status_code
+    elif isinstance(exc, EmbeddedChoiceError):
+        # Прокси завернул 401 в HTTP-200 (choices[0].error.code == 401):
+        # это тот же истёкший токен — путь перевыпуска токена + один повтор,
+        # а не адаптивный ретрай (401 в _HTTP_RETRY_SKIP_STATUSES).
         status_code = exc.status_code
     else:
         return False
@@ -46,6 +74,15 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
     if isinstance(exc, requests.exceptions.HTTPError):
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
     elif isinstance(exc, BackendStreamError):
+        status_code = exc.status_code
+    elif isinstance(exc, EmbeddedChoiceError):
+        # Embedded с ПРИСУТСТВУЮЩИМ нечисловым error.code (insufficient_quota,
+        # invalid_api_key) — не HTTP-таймаут, повтором не чинится: 4 пере-отправки
+        # промпта со сном и двойным списанием токенов бессмысленны → не ретраим.
+        # Отсутствие кода вовсе (raw_code is None: finish_reason='error' с пустым
+        # выбором) — транзиентный сбой, ретрай оправдан → пропускаем на общий путь.
+        if exc.status_code is None and exc.raw_code is not None:
+            return False
         status_code = exc.status_code
     else:
         return False
@@ -100,6 +137,56 @@ def normalize_finish_reason(finish_reason, *, has_content: bool, has_tool_calls:
     if has_content or has_tool_calls:
         return FinishDecision(accept=True, unknown=True)
     return FinishDecision(accept=False, unknown=True)
+
+
+def is_model_unavailable_error(exc: BaseException) -> bool:
+    """«Недоступна» модель (спека §8): сетевые ошибки, 5xx, 401/403, 404 —
+    после исчерпания существующих ретраев (transport + adaptive max_tokens +
+    401-refresh) — либо алиас уже открыт в предохранителе (`AliasCircuitOpenError`,
+    та же недоступность, просто уже подтверждённая другим вызовом этой сессии).
+    Решает, ставить ли алиас в `model_router.CircuitBreaker` — не путать с
+    `is_retriable_backend_error` (годится ли ошибка для повторной попытки ВНУТРИ
+    текущего запроса, до исчерпания ретраев).
+
+    Сетевые — именно `Timeout`/`ConnectionError` (со всеми их подклассами: SSLError,
+    ProxyError, ConnectTimeout, ReadTimeout), а НЕ общий `RequestException`: тот
+    накрывает и битый ответ живого провайдера (`JSONDecodeError`), и кривой
+    url/прокси (`MissingSchema`, `InvalidURL`, `TooManyRedirects`) — от таких
+    предохранитель гасил бы алиас на всю сессию, хотя модель жива."""
+    if isinstance(exc, AliasCircuitOpenError):
+        return True
+    if is_context_overflow_error(exc):
+        return False
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    elif isinstance(exc, BackendStreamError):
+        status_code = exc.status_code
+    elif isinstance(exc, EmbeddedChoiceError):
+        # Прокси кладёт отказ ВНУТРЬ HTTP-200 (choices[0].error / top-level error):
+        # снаружи запрос «успешен», и без этой ветки тот же самый отказ модели —
+        # 5xx, 401, 404 — не считался бы недоступностью только из-за обёртки.
+        # status_code=None (нечисловой код вроде insufficient_quota либо код
+        # отсутствует вовсе) уходит на общий путь ниже и даёт False: гасить алиас
+        # на всю сессию по неизвестной причине нельзя.
+        status_code = exc.status_code
+    elif isinstance(
+        exc,
+        (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ),
+    ):
+        return True
+    else:
+        return False
+    if status_code is None:
+        return False
+    if status_code in (401, 403, 404):
+        return True
+    try:
+        return int(status_code) >= 500
+    except (TypeError, ValueError):
+        return False
 
 
 def is_context_overflow_error(exc: BaseException) -> bool:

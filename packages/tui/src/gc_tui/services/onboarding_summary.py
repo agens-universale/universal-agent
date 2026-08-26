@@ -1,5 +1,10 @@
-"""Короткая строка-сводка онбординга: «сервер X · токен Y · модель Z · MCP N».
-Самоподписанные поля, короткие формы, усечение — одна строка без переноса."""
+"""Короткая строка-сводка онбординга: «сервер: X · токен: Y · модель: Z · MCP: N».
+Самоподписанные поля, короткие формы, усечение — одна строка без переноса.
+
+Ритм разделителя — `  ·  `, тот же, что у футера шага (`OnboardingScreen._footer_text`):
+обе строки-ленты видны одновременно, сверху и снизу тела, и разный шаг между ними
+читался бы случайностью. Прежние три пробела были единственным таким местом в проекте
+(смок владельца 2026-08-06)."""
 from __future__ import annotations
 
 from typing import Optional
@@ -28,9 +33,13 @@ def _token(auth: Optional[str]) -> str:
     return "Bearer"          # никогда не литерал
 
 
-def summary_line(*, url: str, auth: Optional[str], model: str, mcp_count: int) -> str:
+def summary_line(*, url: str, auth: Optional[str], model: str, mcp_count: int,
+                 voice: str = "") -> str:
     server = _host_port(url)
     tok = _token(auth)
     mdl = _clip(model) if model else "—"
     mcp = str(mcp_count) if mcp_count else "—"
-    return f"сервер {server}   ·   токен {tok}   ·   модель {mdl}   ·   MCP {mcp}"
+    line = f"сервер: {server}  ·  токен: {tok}  ·  модель: {mdl}  ·  MCP: {mcp}"
+    if voice:
+        line += f"  ·  голосовой ввод: {voice}"
+    return line

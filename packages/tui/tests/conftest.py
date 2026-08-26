@@ -44,6 +44,22 @@ def _isolate_agent_state(tmp_path, monkeypatch):
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_model_list_cache():
+    """ModelEditor ходит за списком моделей через session-кэш
+    (`gc_tui.services.model_list_cache`) — модуль-уровневый dict переживает между
+    тестами. Разные тесты часто бьют по одному и тому же (url, auth, verify,
+    proxy) — например, общий дефолт `_cfg()`/`_write_cfg()` в test_settings_screen —
+    с разными монки-патченными/инжектированными списками моделей: без сброса
+    первый тест в порядке прогона молча кэширует свой список для соседей.
+    Автосброс до и после каждого теста (после — на случай, если тест сам не
+    дошёл до конца)."""
+    from gc_tui.services.model_list_cache import clear_cache
+    clear_cache()
+    yield
+    clear_cache()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _copy_raw_snapshots_to_svg():
     """After tests, copy every __snapshots__/**/*.raw to a sibling .svg.

@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 import yaml
 
-from gc_core.config import load_config, sync_logging_flat_and_params
+from gc_core.config import apply_cli_overrides, load_config, sync_logging_flat_and_params
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.bundled_assets import bundled_root, repo_root
 
@@ -121,8 +121,10 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     - Если в server_cfg.agent задан server_agentmd_path:
         - резолвим путь относительно PROJECT_ROOT (если он относительный);
         - перезаписываем cfg["agent_md_path"] значением server_agentmd_path.
-    - Применяем перекрытия из server_cfg.agent_overrides:
-        - cfg.update(agent_overrides), как CLI-аргументы перекрывают config.yml.
+    - Применяем перекрытия из server_cfg.agent_overrides через apply_cli_overrides
+      (тот же путь, что CLI-аргументы) — так agent_overrides.model/completions_url
+      тоже попадают в cli_explicit_keys и детектируются cli_forces_legacy_model
+      (легаси-форс §2: перекрытие модели поверх непустого реестра моделей).
     """
     cfg = load_config()
 
@@ -148,7 +150,7 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     overrides = server_cfg.get("agent_overrides") or {}
     if isinstance(overrides, dict) and overrides:
-        cfg.update(overrides)
+        apply_cli_overrides(cfg, extra_overrides=overrides)
 
     sync_logging_flat_and_params(cfg)
 

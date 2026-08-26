@@ -36,6 +36,7 @@ from harbor.models.trajectories import (
 from harbor.utils.trajectory_utils import format_trajectory_json
 
 from adapters.gc_cli_config import build_gc_cli_config
+from adapters.step_timings import StepTimings
 
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-ua`), so it imports directly — no source-dir / PYTHONPATH.
@@ -448,6 +449,8 @@ class GcCliExternal(BaseAgent):
 
         executor = None
         self._evicted_messages: list = []
+        # Wall-clock split per step: LLM wait vs tool exec.
+        timings = StepTimings(self.logs_dir / "timings.jsonl")
 
         def _on_messages_evicted(dropped: list) -> None:
             # Host-side archive for ATIF dump; core State does not retain these.
@@ -455,6 +458,7 @@ class GcCliExternal(BaseAgent):
 
         def _run_loop():
             nonlocal executor
+            timings.attach()  # sink routing is per thread — bind inside the worker
             ctx = create_run_context(
                 config_dict,
                 environment=environment,
@@ -468,19 +472,46 @@ class GcCliExternal(BaseAgent):
 
         # Run the synchronous gc-cli loop off the event loop so backend bridging works,
         # then dump the final message history as ATIF trajectory.json.
+        #
+        # asyncio.to_thread's future can't be cancelled: on a Harbor timeout,
+        # asyncio.wait_for(...) raises CancelledError here but the worker thread keeps
+        # running unattended (up to the pod's infra time limit) since nothing tells the
+        # executor to stop. Use run_in_executor instead so we hold the underlying future
+        # and, on cancellation, call executor.stop_run() (cooperative flag checked by the
+        # step loop) and give the thread a grace period to exit before re-raising.
         state = None
+        fut = loop.run_in_executor(None, _run_loop)
         try:
-            state = await asyncio.to_thread(_run_loop)
+            state = await fut
+        except asyncio.CancelledError:
+            if executor is not None:
+                executor.stop_run()
+            try:
+                state = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "gc-cli worker thread still running after stop_run(); "
+                    "abandoning it and dumping best-effort partial state"
+                )
+            raise
         finally:
             # On a Harbor agent timeout (CancelledError) or a backend error the worker
-            # thread is abandoned before _run_loop returns, so `state` stays None. Recover
-            # whatever the executor reached (get_state() is lock-guarded) and still dump a
-            # partial ATIF trajectory — otherwise timed-out/errored runs are a black hole
-            # with no trace to debug. The original exception re-raises after this block.
-            # ponytail: the orphaned thread can't be killed; partial state is best-effort.
+            # thread may be abandoned before _run_loop returns, so `state` stays None.
+            # Recover whatever the executor reached (get_state() is lock-guarded) and
+            # still dump a partial ATIF trajectory — otherwise timed-out/errored runs
+            # are a black hole with no trace to debug. The original exception re-raises
+            # after this block.
+            # ponytail: best-effort only — if stop_run() didn't unblock the thread in
+            # time, the thread is still orphaned; raise the grace timeout if this needs
+            # a harder kill later.
             if state is None and executor is not None:
                 state = executor.get_state()
             n_steps = self._write_trajectory(state)
+            # On a timeout the worker is abandoned mid-call: these are the totals
+            # reached so far, and timings.jsonl names the call still running.
+            timing_summary = timings.summary()
+            timings.close()
+            self.logger.info("timings: %s", timing_summary)
 
             # Populate AgentContext so the run isn't a black box. gc-cli does not track
             # token usage in `state`, so token/cost counters stay None (would need core
@@ -490,4 +521,5 @@ class GcCliExternal(BaseAgent):
                     "agent": self.name(),
                     "session_id": self._session_id,
                     "total_steps": n_steps,
+                    "timings": timing_summary,
                 }

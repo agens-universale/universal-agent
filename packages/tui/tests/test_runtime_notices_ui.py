@@ -5,6 +5,7 @@ import pytest
 
 from gc_core.runtime_notices import clear_runtime_notices, push_runtime_notice
 from gc_core.startup_notices import Notice
+from gc_tui.services.notices_ui import WARN_GLYPH   # в значке вариационный селектор
 
 
 @pytest.mark.asyncio
@@ -25,10 +26,10 @@ async def test_runtime_notice_appears_in_card(tmp_path):
         ))
         pilot.app.refresh_notices_indicators()
         card = str(scr._mcp_status_row.render())
-        assert "⚠ 1" in card
+        assert f"{WARN_GLYPH} 1" in card
         assert "F4/notices" in card
         footer = str(scr.query_one("#footer-left").render())
-        assert "⚠ 1" in footer
+        assert f"{WARN_GLYPH} 1" in footer
         assert "F4/notices" in footer
 
         notices = scr._collect_notices()
@@ -49,7 +50,7 @@ async def test_runtime_notice_footer_on_sessions_disappears_after_view(tmp_path)
         await pilot.pause()
         assert isinstance(pilot.app.screen, SessionsScreen)
         footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
-        assert "⚠ 1" in footer_right
+        assert f"{WARN_GLYPH} 1" in footer_right
 
         await pilot.press("f4")
         await pilot.pause()
@@ -65,5 +66,5 @@ async def test_runtime_notice_footer_on_sessions_disappears_after_view(tmp_path)
         push_runtime_notice(Notice("warning", "w2", "тест2"))
         pilot.app.refresh_notices_indicators()
         footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
-        assert "⚠ 1" in footer_right
+        assert f"{WARN_GLYPH} 1" in footer_right
 

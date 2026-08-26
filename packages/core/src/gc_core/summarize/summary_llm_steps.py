@@ -39,6 +39,7 @@ def compress_summary_text(
         state=state,
         messages=request_messages,
         request_label="summary_compress",
+        consumer="summary",
         max_tokens=max_tokens,
     )
     if not text:
@@ -99,5 +100,6 @@ def repair_summary_text(
         state=state,
         messages=request_messages,
         request_label="summary_repair",
+        consumer="summary",
         max_tokens=max_tokens,
     )

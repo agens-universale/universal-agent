@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from gc_core.run_context import create_run_context
 from gc_core.agent_executor import AgentExecutor
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
-from gc_core.config import build_auth_connector
+from gc_core.config import build_auth_connector, cli_forces_legacy_model
 from gc_core.thread_store import load_thread_messages, load_thread_meta, resolve_threads_dir, validate_thread_id
 from gc_server.rest_api.agent_execution_registry import agent_run_registry
 from gc_server.rest_api.server_config import PROJECT_ROOT, build_agent_config_for_server, load_server_config
@@ -346,7 +346,13 @@ async def events_webhook(request: Request):
         # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
         config_dict["trace_id"] = trace_id
     auth_connector = build_auth_connector(config_dict)
-    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+    # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх непустого
+    # реестра моделей — тот же контракт, что CLI --model (agent_overrides перекрывают
+    # config.yml так же, как CLI-аргументы).
+    force_legacy = cli_forces_legacy_model(config_dict)
+    if force_legacy:
+        logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
+    ctx = create_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
 
     agent_run_registry.start_if_absent(
         system=system,

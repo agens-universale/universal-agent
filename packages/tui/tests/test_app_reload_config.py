@@ -91,10 +91,14 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_core import config as cfg_mod
     from gc_core import thread_store as ts_mod
+    from gc_core.config_modules.profiles import ProfileMeta
 
     on_disk = {"completions_url": "https://h/v1/chat/completions",
                "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
-    monkeypatch.setattr(cfg_mod, "load_config", lambda p=None: dict(on_disk))  # файл: без launch_root
+    # файл: без launch_root
+    monkeypatch.setattr(cfg_mod, "load_config_ex", lambda p=None, **kw: (
+        dict(on_disk), ProfileMeta(active_name=None, ref=None, mtime_set={})
+    ))
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t"))
 

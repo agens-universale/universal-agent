@@ -141,6 +141,7 @@ def summarize_tool_intent_line(
             state=state,
             messages=request_messages,
             request_label=request_label,
+            consumer="intent_scope",
             logger=log,
         )
     except Exception as exc:
@@ -218,6 +219,7 @@ def summarize_final_answer_line(
             state=state,
             messages=request_messages,
             request_label=request_label,
+            consumer="intent_scope",
             logger=log,
         )
     except Exception as exc:

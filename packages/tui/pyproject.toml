@@ -15,6 +15,14 @@ dependencies = [
     "textual>=0.55",
     "rich>=13",
     "pygments>=2.13",
+    # Голосовой ввод. Живёт в ядре (gc_core.voice / gc_core.voice_runtime),
+    # но включается ТОЛЬКО в TUI: startup_notices._voice() выходит на
+    # `if not is_tui: return []`, а диктовку зовёт gc_tui.screens.main. Все три
+    # импортируются лениво, поэтому в ядре они не нужны — и headless-профиль
+    # gc-server не тянет за собой PortAudio и веса моделей.
+    "sounddevice>=0.4",
+    "truststore>=0.9",
+    "huggingface_hub>=0.30",
 ]
 
 # Команды объявляет КАЖДЫЙ профиль-приложение: uv tool install экспортирует в
@@ -28,6 +36,8 @@ dependencies = [
 # профиля уносил gc-mcp у другого. Команды MCP объявляет их владелец —
 # дистрибутив gc-mcp, от которого этот профиль зависит жёстко.
 gc-ua = "gc_core.tui_entry:main"
+# Голосовая батарейка — команда профиля TUI: единственного, где голос включён.
+gc-voice = "gc_core.voice_runtime.cli:main"
 
 
 [tool.hatch.build.targets.wheel]

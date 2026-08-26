@@ -12,6 +12,7 @@ from typing import Callable, List, Optional
 import requests
 
 from gc_core.startup_notices import Notice
+from gc_core.utils.backend_errors import EmbeddedChoiceError
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 _MAX_NOTICES = 50
@@ -137,6 +138,9 @@ def _extract_http_detail(exc: BaseException) -> tuple[Optional[int], str]:
     elif isinstance(exc, BackendStreamError):
         status = exc.status_code
         body = str(exc)
+    elif isinstance(exc, EmbeddedChoiceError):
+        status = exc.status_code
+        body = str(exc)
     else:
         body = str(exc)
 
@@ -197,4 +201,39 @@ def maybe_push_llm_failure_notice(
         return
     push_runtime_notice(
         notice_from_llm_failure(exc, request_label=request_label, url=url)
+    )
+
+
+def notice_from_fallback_to_active(
+    *,
+    who: str,
+    failed_alias: str,
+    active_model: str,
+    mode: str = "",
+) -> Notice:
+    """Класс 1 фоллбэков недоступности (спека §8): служебный потребитель или
+    дочерний субагент с пином деградировал на активную модель после отказа
+    модели привязки. ``mode`` — доп. пометка ("рестарт"/"деградация") для
+    субагентов; пусто для служебных потребителей."""
+    suffix = f" ({mode})" if mode else ""
+    message = f"{who}{suffix}: {failed_alias} недоступна — выполнено активной {active_model}"
+    return Notice(
+        "warning", "fallback_to_active", message, (failed_alias, active_model)
+    )
+
+
+def maybe_push_fallback_to_active_notice(
+    *,
+    who: str,
+    failed_alias: str,
+    active_model: str,
+    mode: str = "",
+    enabled: bool = True,
+) -> None:
+    if not enabled:
+        return
+    push_runtime_notice(
+        notice_from_fallback_to_active(
+            who=who, failed_alias=failed_alias, active_model=active_model, mode=mode
+        )
     )

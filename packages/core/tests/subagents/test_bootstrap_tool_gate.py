@@ -44,6 +44,12 @@ def _run_with_tools(monkeypatch, tools):
     child = _FakeChildState(tools)
 
     class _Inst:
+        def finalize_role(self, child_ctx, orchestrator_state):
+            # Волна профилей зовёт её ДО get_initial_data (роль спец-агента может
+            # генерироваться LLM на контексте ребёнка) — фейк обязан её иметь,
+            # иначе рана нет вовсе и гейт bootstrap проверять не на чем.
+            return None
+
         def get_initial_data(self):
             return "role", "assignment"
 

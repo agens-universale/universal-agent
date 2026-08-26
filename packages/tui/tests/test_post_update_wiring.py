@@ -94,7 +94,10 @@ async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
 
     configured = {"completions_url": "https://h/v1/chat/completions",
                   "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
-    monkeypatch.setattr(cfg_mod, "load_config", lambda p=None: dict(configured))
+    from gc_core.config_modules.profiles import ProfileMeta
+    monkeypatch.setattr(cfg_mod, "load_config_ex", lambda p=None, **kw: (
+        dict(configured), ProfileMeta(active_name=None, ref=None, mtime_set={})
+    ))
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t"))
 

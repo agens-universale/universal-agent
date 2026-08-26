@@ -3,11 +3,35 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
 from gc_core.request_backend_policy import request_chat_completions_with_policy
-from gc_core.utils.ssl_config import get_backend_client_cert
-from gc_core.utils.connect_backend import create_call_headers
+from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.utils.backend_errors import is_model_unavailable_error
+from gc_core.utils.connect_backend import (
+    NO_BACKEND_OVERRIDE,
+    backend_override_value,
+    create_call_headers,
+    resolve_network_params,
+)
 from gc_core.usage.account import category_for_request_label
 from gc_core.usage.context import usage_scope
+
+# РУССКИЕ ПОДПИСИ служебных потребителей (спека §5.1/§8) для notice деградации
+# «модель привязки недоступна → повтор активной моделью». `auto_judge` в таблице
+# нет намеренно: его фоллбэк-цель другая ("default", а не "активная" — см.
+# model_router.resolve). Но отсутствие здесь даёт ТОЛЬКО подпись: сама деградация
+# ниже применяется ко всем потребителям без разбора, и вызови её auto_judge
+# сегодня — ушёл бы на активную модель вопреки этой цели. Пока безвредно (вызовов
+# auto_judge ещё нет); каким быть его поведению на мёртвой привязке — решает
+# волна C, вместе с появлением самого вызова.
+_CONSUMER_RU_LABEL = {
+    "finish_gate": "судья finish_gate",
+    "text_answer_judge": "судья text_answer_judge",
+    "command_judge": "судья command_judge",
+    "summary": "суммаризация",
+    "intent_scope": "intent scope",
+    "memory_compaction": "компакция памяти",
+}
 
 _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(
     {
@@ -133,21 +157,32 @@ def _build_chat_completion_payload(
     messages: List[Dict[str, str]],
     max_tokens: int,
     payload_overrides: Optional[Dict[str, Any]] = None,
+    resolved: Optional[ResolvedModel] = None,
 ) -> Dict[str, Any]:
     cfg = getattr(ctx, "config_dict", {}) or {}
     # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
     # finish-gate, компакция памяти) — инструменты не использует. Пустой
     # "tools": [] — бессмысленный шум; для plain-completion ключ опускаем.
+    model = (
+        resolved.model
+        if resolved is not None
+        else (getattr(state, "default_model", None) or cfg.get("model"))
+    )
     payload: Dict[str, Any] = {
-        "model": getattr(state, "default_model", None) or cfg.get("model"),
+        "model": model,
         "messages": messages,
     }
-    if bool(cfg.get("use_max_tokens_param", False)):
+    use_max_tokens_param = backend_override_value(resolved, "use_max_tokens_param")
+    if use_max_tokens_param is NO_BACKEND_OVERRIDE:
+        use_max_tokens_param = cfg.get("use_max_tokens_param", False)
+    if bool(use_max_tokens_param):
         payload["max_tokens"] = max_tokens
     else:
         payload["max_completion_tokens"] = max_tokens
 
-    extra = cfg.get("chat_completion_kwargs")
+    extra = backend_override_value(resolved, "chat_completion_kwargs")
+    if extra is NO_BACKEND_OVERRIDE:
+        extra = cfg.get("chat_completion_kwargs")
     if isinstance(extra, dict) and extra:
         for key, value in extra.items():
             if key in _PROTECTED_CHAT_COMPLETION_KEYS:
@@ -158,14 +193,15 @@ def _build_chat_completion_payload(
     return payload
 
 
-def request_chat_completion_text(
+def _send_chat_completion_text(
     *,
     ctx: Any,
     state: Any,
     messages: List[Dict[str, str]],
     max_tokens: int,
-    request_label: str = "chat_completion",
-    payload_overrides: Optional[Dict[str, Any]] = None,
+    request_label: str,
+    payload_overrides: Optional[Dict[str, Any]],
+    resolved: Optional[ResolvedModel],
 ) -> str:
     cfg = getattr(ctx, "config_dict", {}) or {}
     log_params = cfg.get("logging_params")
@@ -174,8 +210,6 @@ def request_chat_completion_text(
         if isinstance(log_params, dict)
         else False
     )
-    if max_tokens < 1:
-        raise ValueError("max_tokens must be >= 1")
 
     def _payload_factory(requested_max_tokens: int) -> Dict[str, Any]:
         return _build_chat_completion_payload(
@@ -184,13 +218,23 @@ def request_chat_completion_text(
             messages=messages,
             max_tokens=requested_max_tokens,
             payload_overrides=payload_overrides,
+            resolved=resolved,
         )
 
+    _min_response_tokens_override = backend_override_value(
+        resolved, "chat_completions_min_response_tokens"
+    )
     min_response_tokens = _positive_int(
-        cfg.get("chat_completions_min_response_tokens"),
+        cfg.get("chat_completions_min_response_tokens")
+        if _min_response_tokens_override is NO_BACKEND_OVERRIDE
+        else _min_response_tokens_override,
         default=1024,
     )
-    headers = create_call_headers(state, ctx)
+    headers = create_call_headers(state, ctx, resolved=resolved)
+    url = resolved.url if resolved is not None else cfg["completions_url"]
+    (verify, cert, use_retry, timeout, config_proxy,
+     retry_embedded_choice_errors) = resolve_network_params(cfg, resolved)
+
     usage_category = category_for_request_label(request_label)
     with usage_scope(getattr(state, "usage", None), usage_category, "chat_completions"):
         res, _call_data = request_chat_completions_with_policy(
@@ -198,16 +242,17 @@ def request_chat_completion_text(
             initial_max_tokens=max_tokens,
             min_response_tokens=min_response_tokens,
             headers=headers,
-            url=cfg["completions_url"],
-            verify=cfg.get("use_ssl", True),
-            cert=get_backend_client_cert(cfg),
-            use_retry=cfg.get("use_retry", False),
+            url=url,
+            verify=verify,
+            cert=cert,
+            use_retry=use_retry,
+            retry_embedded_choice_errors=retry_embedded_choice_errors,
             logger=getattr(ctx, "logger", None),
             request_label=request_label,
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
-            notice_url=cfg.get("completions_url"),
-            timeout=float(cfg["backend_request_timeout_sec"]),
-            config_proxy=cfg.get("proxy"),
+            notice_url=url,
+            timeout=timeout,
+            config_proxy=config_proxy,
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:
@@ -218,3 +263,111 @@ def request_chat_completion_text(
         else ""
     )
     return (text or "").strip()
+
+
+def request_chat_completion_text(
+    *,
+    ctx: Any,
+    state: Any,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    consumer: str,
+    request_label: str = "chat_completion",
+    payload_overrides: Optional[Dict[str, Any]] = None,
+) -> str:
+    """``consumer`` — canonical id из ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
+    заново на каждый вызов из ``ctx.model_router`` (снимок хода) — не глобально/один раз.
+
+    Класс 1 фоллбэков недоступности (спека §8): если консьюмер резолвится через
+    привязку (``assign``) и эта модель недоступна (сетевые/5xx/401/403/404 после
+    исчерпания существующих ретраев, или алиас уже открыт в предохранителе), вызов
+    повторяется ОДИН РАЗ активной моделью + notice. Если и деградированный вызов
+    падает — исключение уходит наверх без изменений (существующая per-consumer
+    fail-семантика: finish_gate/text_answer_judge fail-open, summary — пропуск
+    цикла, command_judge — fail-closed)."""
+    if max_tokens < 1:
+        raise ValueError("max_tokens must be >= 1")
+
+    router = getattr(ctx, "model_router", None)
+    if router is None:
+        return _send_chat_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=messages,
+            max_tokens=max_tokens,
+            request_label=request_label,
+            payload_overrides=payload_overrides,
+            resolved=None,
+        )
+
+    failed_alias: Optional[str] = None
+    primary_exc: Optional[Exception] = None
+    newly_failed_alias: Optional[str] = None
+    try:
+        resolved = router.resolve(consumer)
+    except AliasCircuitOpenError as exc:
+        # Алиас уже известен как мёртвый — сразу к деградации, 0 обращений в транспорт.
+        failed_alias = exc.alias
+        primary_exc = exc
+    else:
+        try:
+            return _send_chat_completion_text(
+                ctx=ctx,
+                state=state,
+                messages=messages,
+                max_tokens=max_tokens,
+                request_label=request_label,
+                payload_overrides=payload_overrides,
+                resolved=resolved,
+            )
+        except Exception as exc:
+            if resolved.alias is None or not is_model_unavailable_error(exc):
+                raise
+            failed_alias = resolved.alias
+            newly_failed_alias = resolved.alias  # трипнем ПОСЛЕ резолва активной ниже
+            primary_exc = exc
+
+    # Определяем активную модель ДО trip() свежего провала: иначе, если консьюмер
+    # без привязки уже резолвился в ту же самую активную модель, резолв "main" для
+    # сравнения ниже упал бы AliasCircuitOpenError раньше времени.
+    try:
+        active_resolved = router.resolve("main")
+    except AliasCircuitOpenError as open_exc:
+        active_resolved = open_exc.resolved
+    if newly_failed_alias is not None:
+        router.breaker.trip(
+            newly_failed_alias, str(primary_exc).strip()[:300] or primary_exc.__class__.__name__
+        )
+
+    if active_resolved.alias == failed_alias:
+        # Деградировать некуда: привязка и есть активная модель — то же самое
+        # упадёт снова. Существующая per-consumer fail-семантика без изменений.
+        raise primary_exc
+
+    logger = getattr(ctx, "logger", None)
+    who = _CONSUMER_RU_LABEL.get(consumer, consumer)
+    message = f"{who}: {failed_alias} недоступна — выполнено активной {active_resolved.model}"
+    if logger is not None:
+        logger.warning(message)
+    maybe_push_fallback_to_active_notice(
+        who=who,
+        failed_alias=failed_alias,
+        active_model=active_resolved.model,
+        enabled=bool(getattr(ctx, "is_tui", False)),
+    )
+    try:
+        return _send_chat_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=messages,
+            max_tokens=max_tokens,
+            request_label=request_label,
+            payload_overrides=payload_overrides,
+            resolved=active_resolved,
+        )
+    except Exception as exc:
+        if active_resolved.alias is not None and is_model_unavailable_error(exc):
+            router.breaker.trip(
+                active_resolved.alias, str(exc).strip()[:300] or exc.__class__.__name__
+            )
+        raise

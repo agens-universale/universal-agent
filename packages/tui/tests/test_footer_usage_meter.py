@@ -101,7 +101,7 @@ async def test_no_usage_segment_when_runner_lacks_method(tmp_path):
         scr._active_task_id = "t1"
         app.active_runner = _Bare()
         right = scr._compose_footer_right().plain      # не должно кинуть
-        assert right == "m"
+        assert right == "● m"
 
 
 @pytest.mark.asyncio
@@ -121,8 +121,8 @@ async def test_no_usage_segment_without_runner(tmp_path):
 
 @pytest.mark.asyncio
 async def test_footer_stacks_session_on_narrow_width(tmp_path):
-    """Узкий экран: «сессия» уезжает на 2-ю строку под «запрос» (команды слева
-    не вытесняются). Широкий: одна строка."""
+    """Узкий экран: «запрос» и «сессия» уезжают на 2-ю строку вместе (команды
+    слева не вытесняются, в 1-й строке нет дыры). Широкий: одна строка."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -135,8 +135,26 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
         plain = scr._compose_footer_right().plain
         lines = plain.split("\n")
         assert len(lines) == 2                       # застекано
-        assert "запрос" in lines[0] and "сессия" not in lines[0]
-        assert "сессия" in lines[1]
+        assert "запрос" not in lines[0] and "сессия" not in lines[0]
+        assert "запрос" in lines[1] and "сессия" in lines[1]
+
+
+@pytest.mark.asyncio
+async def test_footer_never_flush_against_left(tmp_path):
+    """Граничная ширина: right-блок влезает ровно впритык к footer-left
+    (хром футера съедает весь резерв) → должен уйти в стек, а не клеиться.
+    W=67: left=25 (_FOOTER_LEFT), right=39, хром=3 → зазор был бы 0."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(threads_dir=str(tmp_path / "threads"))
+    async with app.run_test(size=(67, 24)) as pilot:
+        scr = pilot.app.screen
+        app._config = {"model": "m", "pricing": _PRICING}
+        scr._active_task_id = "t1"
+        app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
+        plain = scr._compose_footer_right().plain
+        assert "\n" in plain                        # впритык → стек, не склейка
 
 
 @pytest.mark.asyncio

@@ -8,11 +8,19 @@ from textual.widgets import Static
 
 from gc_tui.commands import build_default_registry
 
+# Ширины боковых колонок строки справки — те же, что в styles.tcss
+# (`.help-row-cmd`, `.help-row-key`): по ним считается, сколько остаётся описанию.
+_CMD_COL_W = 18
+_KEY_COL_W = 13
+# Отступы вокруг колонок: padding строки (`.help-row` 0 1) и контейнера (`#trace` 0 1).
+_ROW_CHROME_W = 4
+
 # Мини-туториал сверху Help (канон: docs_md/tui/mini-tutorial/SPEC.md).
 # (команда/клавиша, пояснение) — две колонки рядом.
 _QUICKSTART_HELP: tuple[tuple[str, str], ...] = (
     ("F6", "Настройки - URL, токен, модель — /settings (MCP при необходимости)"),
     ("Enter", "Работа - опишите задачу в поле ввода и начните сессию (Enter) — сессия создастся сама"),
+    ("Ctrl+T", "Голосовой ввод - надиктуйте сообщение вместо набора; сервис настраивается в /settings"),
     ("F2", "Список диалогов. Выберите диалог через ↑ / ↓ и продолжите сессию (Enter)"),
     ("/new или Ctrl+N", "Начать новый диалог"),
     ("F3", "Диффы правок агента — принять или оменить"),
@@ -36,6 +44,7 @@ _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
     ("Enter", "Отправить сообщение"),
     ("Esc", "Назад / отмена / выход — зависит от контекста"),
     ("Ctrl+J", "Перенос строки"),
+    ("Ctrl+T", "Голосовой ввод — надиктовать сообщение"),
     ("Ctrl+A", "Выделить всё в поле ввода"),
     ("Ctrl+V", "Вставка: 1× — плашка со счётчиком строк/символов; 2× тем же — развернуть целиком"),
     ("мышь", "В трейсе: выделил — сразу в буфер обмена"),
@@ -116,8 +125,8 @@ class HelpScreen(Screen):
         from gc_tui.toggles import owning_preset_name
 
         row_i = self._mount_section(trace, "команды", row_i)
+        rows = []
         for cmd in reg.list_commands():
-            label = f"/{cmd.name}"
             parts: list[str] = []
             if cmd.args:
                 parts.append(cmd.args.strip())
@@ -127,9 +136,28 @@ class HelpScreen(Screen):
             owner = owning_preset_name(cmd.name)
             if owner is not None:
                 parts.append(f"настройка /{owner}")
-            if cmd.hotkey:
-                parts.append(cmd.hotkey)
-            self._mount_row(trace, row_i, label, "  ·  ".join(parts))
+            # Хоткей — НЕ в описание: он идёт своей колонкой (см. ниже).
+            rows.append((f"/{cmd.name}", "  ·  ".join(parts), cmd.hotkey or ""))
+        # Колонка хоткеев прижата к описаниям, а не к правому краю: через пол-экрана
+        # пустоты строку глазами уже не собрать. Ширина — по самому длинному описанию
+        # ЛЮБОЙ строки. Раньше считалось только по строкам С ХОТКЕЕМ, чтобы не раздувать
+        # строку до 104 колонок; расчёт был на то, что длинное описание без клавиши
+        # «просто заедет в пустую колонку». Живая проверка показала, что это неправда:
+        # колонка описаний фиксированной ширины, и такие строки (/rigor, /gate,
+        # /answers — их хвост «настройка /rigor» доходит до 69 знаков) ЛОМАЮТСЯ ПОПОЛАМ,
+        # занимая по две строки. Узкий терминал прикрыт потолком `room` ниже — там
+        # ограничение и так срабатывало раньше этого максимума.
+        # +4, а не +3: Textual считает width ВМЕСТЕ с padding колонки (0 1), и одна
+        # колонка уходит на правый отступ — на экране остаются 3 символа, столько же,
+        # сколько перед колонкой описаний.
+        desc_w = max((len(desc) for _, desc, _ in rows), default=0) + 4
+        # И потолок по реальной ширине окна: на узком терминале даже эта колонка
+        # выталкивает хоткеи за экран. Вычитаем колонку имени, колонку хоткея и
+        # отступы строки; ниже 20 не опускаемся — описание должно оставаться читаемым.
+        room = self.size.width - _CMD_COL_W - _KEY_COL_W - _ROW_CHROME_W
+        desc_w = max(20, min(desc_w, room))
+        for label, desc, hotkey in rows:
+            self._mount_row(trace, row_i, label, desc, hotkey, desc_w=desc_w)
             row_i += 1
 
         row_i = self._mount_section(trace, "Shell (!)", row_i)
@@ -171,6 +199,8 @@ class HelpScreen(Screen):
         index: int,
         cmd: str,
         desc: str,
+        hotkey: str = "",
+        desc_w: int | None = None,
     ) -> None:
         # зебра: нечётные строки — с чуть более светлым фоном (читаемость)
         classes = "help-row help-row-alt" if index % 2 else "help-row"
@@ -178,4 +208,10 @@ class HelpScreen(Screen):
         trace.mount(row)
         # слева команда/клавиша, сразу справа пояснение (не через весь экран)
         row.mount(Static(cmd, classes="help-row-cmd", markup=False))
-        row.mount(Static(desc, classes="help-row-desc", markup=False))
+        desc_w_widget = Static(desc, classes="help-row-desc", markup=False)
+        if desc_w is not None:
+            desc_w_widget.styles.width = desc_w   # фиксируем — иначе 1fr уводит хоткей вправо
+        row.mount(desc_w_widget)
+        # Хоткей — своей колонкой: в хвосте описаний разной длины он выстраивался
+        # лесенкой, и глазами его было не собрать.
+        row.mount(Static(hotkey, classes="help-row-key", markup=False))

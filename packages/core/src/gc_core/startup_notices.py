@@ -99,6 +99,64 @@ def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
     return []
 
 
+def _voice_extras(config_dict: Dict[str, Any]) -> List[Notice]:
+    """Доп. замечания о voice: перекрытие managed, битая установка. Вызывается в конце _voice."""
+    overridden = config_dict.get("voice_overridden_by_managed")
+    extra: List[Notice] = []
+    if overridden:
+        extra.append(Notice(
+            "info", "voice_overridden",
+            f"voice: настройки из config.yml ({overridden}) перекрыты локальным "
+            "сервисом (config.local.yml). Вернуть — gc-voice remove.",
+            highlights=("voice", "config.local.yml", "gc-voice remove"),
+        ))
+    # Битая установка: state есть, а окружение снесено/повреждено.
+    from gc_core.voice_runtime.state import load_state  # ленивый: не тянуть при импорте
+    from pathlib import Path
+
+    st = load_state()
+    if st is not None and not Path(st.root).is_dir():
+        extra.append(Notice(
+            "warning", "voice_install_broken",
+            "voice: локальная установка повреждена (нет каталога сервиса) — "
+            "выполните gc-voice install заново.",
+            highlights=("voice", "gc-voice install"),
+        ))
+    return extra
+
+
+def _voice(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
+    """Конфиг-проблемы голосового ввода (TUI-only). Пустая секция — не замечание."""
+    if not is_tui:
+        return []
+    from gc_core.config_modules.voice import voice_enabled, voice_section_filled
+    voice = config_dict.get("voice") or {}
+    if not voice_section_filled(voice):
+        return []
+    if not voice_enabled(voice):
+        # Токен опционален (voice_enabled) — не обещаем юзеру лишнего
+        return [Notice(
+            "warning", "voice_incomplete",
+            "voice: секция заполнена не до конца — нужен url; "
+            "голосовой ввод неактивен.",
+            highlights=("voice",),
+        )]
+    from gc_core.voice.recorder import available  # ленивый: аудио-стек может отсутствовать
+    notices: List[Notice] = []
+    if not available():
+        notices.append(Notice(
+            "warning", "voice_no_sounddevice",
+            "voice: настроен, но аудио-стек sounddevice недоступен — голосовой "
+            "ввод неактивен (Linux: установите libportaudio2).",
+            highlights=("voice", "sounddevice", "libportaudio2"),
+        ))
+    # Доп. замечания (перекрытие, битая установка) собираем ВСЕГДА, а не только когда
+    # аудио-стек на месте: раньше отсутствие sounddevice возвращало свой Notice и
+    # перекрывало их: машина без libportaudio2 — ровно та, где полусломанная локальная
+    # установка вероятнее всего, а человек о ней не узнавал.
+    return notices + _voice_extras(config_dict)
+
+
 def _compat(compat_notices: Optional[List[str]]) -> List[Notice]:
     return [Notice("warning", "config_compat", msg) for msg in compat_notices or []]
 
@@ -215,6 +273,7 @@ def collect_startup_notices(
         + _subagent_definitions(config_dict)
         + _mcp_failed(mcp_status)
         + _agentsmd(config_dict, is_tui=is_tui)
+        + _voice(config_dict, is_tui=is_tui)
         + _compat(compat_notices)
         + _pricing_no_rates(config_dict)
         + _deprecated(deprecated_keys_used)

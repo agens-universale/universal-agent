@@ -131,7 +131,7 @@
     <li class="step">
       <div class="step-h"><span class="num">3</span><h3>Запустить и настроить</h3></div>
       <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">gc-ua</span></div>
-      <p>Первый запуск открывает <b style="color:#cfd6e2">мастер настройки</b>: адрес сервера → токен → модель → MCP-серверы. Впишите адрес и токен, полученные у команды GigaCode; модель предложится списком с сервера. После подтверждения настройки сохранятся в файл <span data-os="win"><span class="inl">~/.gc/config.yml</span> (<span class="inl">C:\Users\$USER\.gc\config.yml</span>)</span><span data-os="nix"><span class="inl">~/.config/gc/config.yml</span></span>, и агент откроется.</p>
+      <p>Первый запуск открывает <b style="color:#cfd6e2">мастер настройки</b>: адрес сервера → токен → модель → MCP-серверы → голосовой ввод. Впишите адрес и токен, полученные у команды GigaCode; модель предложится списком с сервера. После подтверждения настройки сохранятся в файл <span data-os="win"><span class="inl">~/.gc/config.yml</span> (<span class="inl">C:\Users\$USER\.gc\config.yml</span>)</span><span data-os="nix"><span class="inl">~/.config/gc/config.yml</span></span>, и агент откроется.</p>
       <p class="dim">Мастеру нужен интерактивный терминал. Если запускаете без него (SSH без tty, CI) — агент подскажет, что вписать в <span class="inl">config.yml</span> вручную.</p>
       <div class="demo">
         <div class="bar"><i style="background:#f2685a"></i><i style="background:#e6c14f"></i><i style="background:#7ed957"></i></div>
@@ -165,7 +165,13 @@
     </li>
 
     <li class="step">
-      <div class="step-h"><span class="num">6</span><h3>Обновление и удаление <span style="color:var(--mut2);font-weight:400;font-size:14px">— когда понадобится</span></h3></div>
+      <div class="step-h"><span class="num">6</span><h3>Голосовой ввод <span style="color:var(--mut2);font-weight:400;font-size:14px">— опционально</span></h3></div>
+      <p><b style="color:#cfd6e2">Диктовка в TUI:</b> <span class="inl">Ctrl+T</span> или команда <span class="inl">/voice</span> — запись, <span class="inl">Enter</span> — распознать и вставить в поле ввода.<br>Подключается в <b>мастере первого запуска</b> или в <span class="inl">/settings → Голосовой ввод</span>: локальный приватный сервис (~0.9 ГБ, без ключей) — или любой OpenAI-совместимый STT (свой endpoint).</p>
+      <p class="dim">Ручной путь и отладка: <span class="inl">gc-voice install</span> / <span class="inl">status</span> / <span class="inl">stop</span> / <span class="inl">remove</span>.</p>
+    </li>
+
+    <li class="step">
+      <div class="step-h"><span class="num">7</span><h3>Обновление и удаление <span style="color:var(--mut2);font-weight:400;font-size:14px">— когда понадобится</span></h3></div>
       <p>Агент сам проверяет новую версию при запуске и показывает уведомление.<br><b style="color:#cfd6e2">Обновить</b> — в интерфейсе: <span class="inl">/settings → Обновление</span>, или командой:</p>
       <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">gc-ua</span> --update</div>
       <div class="note warn"><span class="ic">!</span><div>В <b>корпоративной сети Сбера</b> один раз пропишите в конфиг <span class="inl">update.extra_args: ["--system-certs"]</span> — агент подставит флаг при каждом обновлении, иначе оно прервётся на сертификатах.</div></div>

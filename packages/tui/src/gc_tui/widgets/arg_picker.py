@@ -1,17 +1,22 @@
-"""ArgPicker — overlay-список значений аргумента команды (value + описание).
+"""ArgPicker — overlay-список значений аргумента команды (value + описание [+ статус]).
 
 Зеркало `SkillPicker`/`CommandPalette`: те же CSS-классы (.palette / .palette-row /
 .palette-hint) и модель состояния (filter + selected index). Опции приходят готовым
-`list[tuple[str, str]]` (value, description) из `Command.arg_options` — открывает
-вызывающий код (TraceScreen) для любой команды с непустым arg_options.
-"""
+`list[tuple[str, str] | tuple[str, str, str]]` (value, description[, status]) из
+`Command.arg_options` — открывает вызывающий код (TraceScreen) для любой команды с
+непустым arg_options. 2-tuple — простое value+описание (`/export` и т.п.); 3-tuple
+добавляет status-колонку справа, цветом OK (`/profiles`, задача 10 — активный
+профиль)."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
+
+from gc_tui import palette as _pal
 
 
 _HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
@@ -25,13 +30,17 @@ class ArgPicker(VerticalScroll):
 
     def __init__(
         self,
-        options: list[tuple[str, str]],
+        options: "list[tuple[str, str] | tuple[str, str, str]]",
         initial_filter: str = "",
+        hint_provider: Optional[Callable[[Optional[str]], str]] = None,
     ) -> None:
         super().__init__(classes="palette")
         self._options = options
         self._filter = initial_filter
         self._selected = 0
+        # Динамический хинт подсвеченного пункта (спека §12.1, /profiles: состав
+        # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
+        self._hint_provider = hint_provider
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
     def compose(self) -> ComposeResult:
@@ -49,8 +58,14 @@ class ArgPicker(VerticalScroll):
         FLOW-ребёнок в старой раскладке упирался в max-height-клэмп длинного списка
         и прятался за скроллом (регрессия воздуха .palette-keys, коммит c0622c9a).
         Докнутый контейнер вне скролла держит hint видимым при открытии всегда."""
-        return Vertical(Static(_HINT, classes="palette-hint palette-keys", markup=False),
-                         classes="palette-footer")
+        children = []
+        if self._hint_provider is not None:
+            # palette-keys и у динамического хинта: воздух над ним, отделяющий
+            # хинт от строк списка (ревизия 2026-07-28 по живому смоку).
+            children.append(Static(self._hint_provider(self.selected_value()),
+                                   classes="palette-hint palette-keys", markup=False))
+        children.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
+        return Vertical(*children, classes="palette-footer")
 
     def _value_col_w(self) -> int:
         """Ширина value-колонки: value паддируется до самого длинного value
@@ -59,15 +74,38 @@ class ArgPicker(VerticalScroll):
         rows = self._visible_rows()
         if not rows:
             return 0
-        return max(len(v) for v, _ in rows) + 3
+        return max(len(opt[0]) for opt in rows) + 3
 
-    def _format_row(self, opt: tuple[str, str]) -> str:
+    def _desc_col_w(self) -> int:
+        """Ширина description-колонки для опций СО статусом (3-tuple, `/profiles`,
+        задача 10): описание паддится до самого длинного описания среди ВИДИМЫХ
+        строк + 3 пробела — тот же принцип, что у `_value_col_w`, чтобы статус
+        (правая колонка) стартовал в одном месте у всех строк."""
+        descs = [opt[1] for opt in self._visible_rows() if len(opt) == 3]
+        if not descs:
+            return 0
+        return max(len(d) for d in descs) + 3
+
+    def _format_row(self, opt: tuple) -> "str | Text":
+        """Строка списка: `(value, desc)` — как раньше, простой `str` (другие
+        пикеры — /export и т.п. — не должны заметить правку). `(value, desc,
+        status)` — опции со статус-колонкой (`/profiles`, задача 10): `Text` с
+        правым статусом цветом OK, ровно как активный маркер в /settings
+        (`_profile_row_text`); статус пуст у неактивных строк."""
+        if len(opt) == 3:
+            value, desc, status = opt
+            if not desc and not status:
+                return Text(f" {value}")
+            t = Text(f" {value.ljust(self._value_col_w())}{desc.ljust(self._desc_col_w())}")
+            if status:
+                t.append(status, style=_pal.OK)
+            return t
         value, desc = opt
         if not desc:
             return f" {value}"
         return f" {value.ljust(self._value_col_w())}{desc}"
 
-    def _visible_rows(self) -> list[tuple[str, str]]:
+    def _visible_rows(self) -> "list[tuple[str, str] | tuple[str, str, str]]":
         f = self._filter.strip().lower()
         if not f:
             return list(self._options)
@@ -89,7 +127,9 @@ class ArgPicker(VerticalScroll):
         выдавливал бы нижнюю рамку пикера за экран."""
         rows = self._visible_rows()
         flow = len(rows) if rows else 1
-        return flow + 2 + 2
+        # динамический хинт = строка + свой margin-top (palette-keys)
+        extra = 2 if self._hint_provider is not None else 0
+        return flow + 2 + 2 + extra
 
     def set_filter(self, prefix: str) -> None:
         self._filter = prefix

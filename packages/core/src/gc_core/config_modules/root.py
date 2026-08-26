@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
@@ -23,11 +23,34 @@ from gc_core.config_modules.project_memory import ProjectMemoryConfig, normalize
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
 from gc_core.config_modules.pricing import PricingConfig
 from gc_core.config_modules.tui import TuiConfig
+from gc_core.config_modules.voice import VoiceConfig
+from gc_core.config_modules.endpoint_presets import EndpointPreset, default_endpoint_presets
+from gc_core.config_modules.voice_endpoint_presets import default_voice_endpoint_presets
 from gc_core.config_modules.update import UpdateConfig
 from gc_core.config_modules.diff_tui import DiffTuiConfig
 from gc_core.config_modules.fs_tools import FsToolsConfig
-from gc_core.config_modules.summary import DEFAULT_INCREMENTAL_BATCH_MULTIPLIER, DEFAULT_INTENT_LOG_PREVIEW_CHARS, DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS, DEFAULT_LAST_DIALOG_STEPS_COUNT, DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS, DEFAULT_MAX_DIALOGUE_CHARS, DEFAULT_MAX_MESSAGE_CHARS, DEFAULT_TURN_END_TRIGGER_RATIO, SummaryConfig
-from gc_core.config_modules.strip_tags_projection import StripTagsProjectionConfig, normalize_strip_tags_projection_config
+from gc_core.config_modules.summary import (
+    DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
+    DEFAULT_INTENT_LOG_PREVIEW_CHARS,
+    DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+    DEFAULT_LAST_DIALOG_STEPS_COUNT,
+    DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
+    DEFAULT_MAX_DIALOGUE_CHARS,
+    DEFAULT_MAX_MESSAGE_CHARS,
+    DEFAULT_TURN_END_TRIGGER_RATIO,
+    SummaryConfig,
+)
+from gc_core.config_modules.strip_tags_projection import (
+    StripTagsProjectionConfig,
+    normalize_strip_tags_projection_config,
+)
+from gc_core.config_modules.model_registry import (
+    AssignConfig,
+    ModelEntry,
+    SlotsConfig,
+    validate_level_value,
+    validate_model_alias,
+)
 
 
 class AgentAuthConfig(BaseModel):
@@ -53,6 +76,9 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)
+    endpoint_presets: list[EndpointPreset] = Field(default_factory=default_endpoint_presets)
+    voice_endpoint_presets: list[EndpointPreset] = Field(default_factory=default_voice_endpoint_presets)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
@@ -60,6 +86,28 @@ class AppConfig(BaseModel):
         default_factory=StripTagsProjectionConfig
     )
     agent_auth: AgentAuthConfig | None = None
+
+    # Профили v2 (волна A, фаза 1): реестр моделей + уровни + привязки + указатели.
+    # Ссылочная целостность (слоты/привязки против merged-реестра) — фаза 2.
+    profile: str = ""
+    level: str = "default"
+    models: dict[str, ModelEntry] = Field(default_factory=dict)
+    slots: SlotsConfig = Field(default_factory=SlotsConfig)
+    assign: AssignConfig = Field(default_factory=AssignConfig)
+
+    @field_validator("level")
+    @classmethod
+    def _validate_level(cls, value: str) -> str:
+        return validate_level_value(value)
+
+    @field_validator("models")
+    @classmethod
+    def _validate_model_aliases(
+        cls, value: dict[str, ModelEntry]
+    ) -> dict[str, ModelEntry]:
+        for alias in value:
+            validate_model_alias(alias)
+        return value
 
 
 def _prompt_default(config_dir: str, name: str) -> str:

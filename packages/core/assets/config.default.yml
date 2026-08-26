@@ -9,6 +9,23 @@
 #   2) backend.chat_completion_headers.Authorization — токен доступа.
 # =============================================================================
 
+# Профили и уровни моделей: указатели на активный профиль/уровень. "" = профиль не выбран.
+# Секции models/slots/assign (реестр моделей, уровни, привязки) — опциональны.
+profile: ""
+level: default
+
+# Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
+# раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
+# симметричный пример как обычных секций config.yml — demo_config.yml):
+# models:
+#   glm-local:
+#     url: http://127.0.0.1:8014/v1/chat/completions
+#     token: ""                # адрес и токен задаются вместе; "" = «без авторизации»
+# slots:
+#   default: glm-local
+# assign:
+#   finish_gate: light
+
 backend:
   api_mode: chat_completions
   # Впишите endpoint (OpenAI-совместимый chat/completions), напр.:
@@ -37,7 +54,7 @@ backend:
     # Или из файла (chmod 600): Authorization: "Bearer ${FILE:~/.secrets/gc_api_key}"
 
 agent:
-  model: "gigacode_agent_v1.6_rc"
+  model: "<ВПИШИТЕ_МОДЕЛЬ>"
   system_prompt_id: v1
   use_server_subagents: false
   use_local_subagents: true
@@ -251,6 +268,30 @@ pricing:
   output: 0
   # cache_read: 0              # опц.; нет → кэш биллится как input
 
+# Пресеты выпадающего списка в полях «Адрес API-сервера» (можно дополнять своими).
+# Пресеты адресов провайдеров — выпадающий список под полем «Адрес API-сервера».
+# Закомментировано намеренно: пока ключа тут нет, работает список из кода, и он
+# обновляется вместе с версией агента. Раскомментируете — ваш список перекроет
+# кодовый и с обновлениями меняться уже не будет.
+# endpoint_presets:
+#   - name: OpenRouter
+#     url: https://openrouter.ai/api/v1/chat/completions
+#   - name: GigaCode
+#     url: https://litellm-proxy.sberai-rnd.ru/v1/chat/completions
+#   - name: Cloud.ru
+#     url: https://foundation-models.api.cloud.ru/v1/chat/completions
+#   - name: RouterAI
+#     url: https://routerai.ru/api/v1/chat/completions
+
+# Пресеты выпадающего списка в поле «URL» голосового ввода (можно дополнять своими).
+voice_endpoint_presets:
+  - name: OpenAI
+    url: https://api.openai.com/v1/audio/transcriptions
+  - name: Groq
+    url: https://api.groq.com/openai/v1/audio/transcriptions
+  - name: Mistral
+    url: https://api.mistral.ai/v1/audio/transcriptions
+
 # -----------------------------------------------------------------------------
 # Сборка мусора (gc.collect) — точки C1/C2/C3.
 # C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
@@ -259,3 +300,17 @@ pricing:
 # Явное значение перекрывает режимный default.
 # gc:
 #   force_collect: false
+
+# Голосовой ввод в TUI (Ctrl+T). Зависимости ставятся вместе с агентом
+# (Linux дополнительно: системный libportaudio2).
+# Подходит любой /v1/audio/transcriptions-совместимый сервис.
+# Локальный приватный сервис одной командой: gc-voice install (см. инструкцию).
+# voice:
+#   provider: openai
+#   url: https://stt.example.com/v1/audio/transcriptions
+#   token: "sk-..."
+#   model: whisper-1
+#   language: ru
+#   max_seconds: 120
+#   timeout_seconds: 60
+#   verify-ssl: true

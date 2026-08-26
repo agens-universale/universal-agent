@@ -24,6 +24,10 @@ from gc_core.onboarding_config_writer import find_anchor, insert_missing, sectio
 from gc_core.utils.atomic_io import atomic_replace
 
 
+class ResetReport(NamedTuple):
+    backup_path: str        # старый файл, в бэкап
+
+
 class SyncReport(NamedTuple):
     transferred: int        # перенесено значений/блоков юзера
     renamed: int            # из них — под новым именем (RENAMES)
@@ -150,6 +154,34 @@ def _prune_backups(backup_dir: Path, name: str, *, keep: int) -> None:
             old.unlink()
         except OSError:
             pass
+
+
+def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -> ResetReport:
+    """«Сбросить к умолчанию» (спека §11): подменить `path` актуальным пакетным
+    `config.default.yml` целиком (не line-copy, как `sync_config`) — старый файл
+    уходит в бэкап той же конвенцией (`backups/<name>.bak-<ts>`, prune keep=10).
+
+    Файлы профилей и сессионные оверрайды это действие не трогает — оно
+    заменяет ровно один файл (`path`)."""
+    path = Path(path)
+    template_path = Path(template_path or _default_config_path())
+    template_text = template_path.read_text(encoding="utf-8")
+    validate_config_text(template_text)
+
+    ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
+    backup_dir = path.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup = backup_dir / (path.name + f".bak-{ts}")
+    shutil.copyfile(path, backup)
+    _prune_backups(backup_dir, path.name, keep=10)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(template_text, encoding="utf-8")
+        atomic_replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+    return ResetReport(str(backup))
 
 
 def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) -> SyncReport:

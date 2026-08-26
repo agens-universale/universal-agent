@@ -30,12 +30,16 @@ def test_overrides_survive_config_reload(tmp_path, monkeypatch):
     app = _app(tmp_path)
     app.set_session_override("tui.text_answer_mode", "allow")
 
-    fresh = {"model": "M", "tui_finish_gate_mode": "on", "tui_text_answer_mode": "judge",
-             "threads_data_path": str(tmp_path / "threads")}
-    monkeypatch.setattr("gc_core.config.load_config", lambda *_a, **_k: dict(fresh))
+    fresh = {"model": "fresh-model", "tui_finish_gate_mode": "on", "tui_text_answer_mode": "judge",
+             "threads_data_path": str(tmp_path / "threads"), "profile": ""}
+    from gc_core.config_modules.profiles import ProfileMeta
+    monkeypatch.setattr("gc_core.config.load_config_ex", lambda *_a, **_k: (
+        dict(fresh), ProfileMeta(active_name=None, ref=None, mtime_set={})
+    ))
     monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda *_a, **_k: None)
     app.reload_config()
 
+    assert app._config["model"] == "fresh-model"     # база реально перечиталась мокнутым load_config_ex
     assert app.effective_config()["tui_text_answer_mode"] == "allow"
 
 

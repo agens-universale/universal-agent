@@ -355,3 +355,133 @@ async def test_update_confirm_warns_when_agent_running(tmp_path, monkeypatch):
 
         app.active_runner = None            # раннера нет вовсе — тоже «агент закроется»
         assert "Агент закроется" in scr._update_confirm_text()
+
+
+# --- Task 14: «Сбросить конфиг к умолчанию» (спека §11) ---
+
+async def test_reset_action_present_next_to_sync(tmp_path, monkeypatch):
+    from gc_core import app_version; from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)   # dev, без сети
+    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
+                             probe_fn=lambda *a, **k: None)
+        app.push_screen(scr); await pilot.pause()
+        open_settings_section(scr, "Обновление"); await pilot.pause()
+        assert scr._update_actions == [scr._UPDATE_ACTION_SYNC, scr._UPDATE_ACTION_RESET]
+        body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
+        assert "Сбросить конфиг к умолчанию" in body
+
+
+async def test_reset_confirm_banner_then_reset_reloads_and_notices_backup(tmp_path, monkeypatch):
+    from gc_core import app_version; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
+    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    called = {}
+
+    def _fake_reset(path, **k):
+        called["path"] = str(path)
+        return config_sync.ResetReport(str(cfg_file) + ".bak-x")
+
+    monkeypatch.setattr(config_sync, "reset_config", _fake_reset)
+    applied = []
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config={}, config_path=str(cfg_file),
+                             on_apply=lambda: applied.append(1), probe_fn=lambda *a, **k: None)
+        app.push_screen(scr); await pilot.pause()
+        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr._request_reset()
+        assert scr._reset_awaiting_confirm is True
+        confirm_body = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
+        assert "Enter — сбросить" in confirm_body
+        scr._confirm_reset()
+        await pilot.pause()                                # notice-виджет монтируется асинхронно
+        assert called["path"] == str(cfg_file)
+        assert applied == [1]                              # конфиг перечитан после сброса
+        assert scr._reset_awaiting_confirm is False
+        notice = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
+        assert "сброшен к умолчанию" in notice and ".bak-x" in notice
+
+
+async def test_reset_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
+    """Тот же Critical-гейт, что у confirm обновления/MCP: пока висит confirm сброса,
+    PgUp/PgDn не листает секцию и не уничтожает баннер; escape отменяет confirm."""
+    from gc_core import app_version; from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    from gc_testkit.tui_support import settings_section_index
+    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
+    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
+                             probe_fn=lambda *a, **k: None)
+        app.push_screen(scr); await pilot.pause()
+        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr._request_reset()
+        await pilot.pause()
+        assert scr._reset_awaiting_confirm is True
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert scr._view == settings_section_index("Обновление")
+        assert scr._reset_awaiting_confirm is True
+        assert list(scr.query(".set-confirm"))
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr._reset_awaiting_confirm is False
+        assert scr._view == settings_section_index("Обновление")
+
+
+async def test_reset_action_blocked_when_not_writable(tmp_path, monkeypatch):
+    from gc_core import app_version; from gc_core import config as config_mod; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
+    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    monkeypatch.setattr(config_mod, "_default_config_path", lambda: str(cfg_file))
+    called = []
+    monkeypatch.setattr(config_sync, "reset_config", lambda *a, **k: called.append(1))
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
+                             probe_fn=lambda *a, **k: None)
+        app.push_screen(scr); await pilot.pause()
+        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr._request_reset()
+        scr._confirm_reset()
+        await pilot.pause()                                # notice-виджет монтируется асинхронно
+        assert called == []
+        body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
+        assert "не сбрасывается" in body
+
+
+async def test_reset_notice_mentions_session_profile_and_onboarding_suggestion(tmp_path, monkeypatch):
+    """После сброса: если в сессии активен профиль-оверрайд — notice об этом (сброс базы
+    его не снимает, §2 позиционность); если детект «не настроен» сработал — предложение
+    настройки (существующий `onboarding.setup_guide`-канон текста)."""
+    from gc_core import app_version; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
+    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    monkeypatch.setattr(config_sync, "reset_config",
+                        lambda path, **k: config_sync.ResetReport(str(cfg_file) + ".bak-x"))
+    app = app_mod.TuiApp(config={})
+    app._session_overrides = {"profile": "work"}
+
+    def _apply() -> None:
+        app._config = {}          # эмулируем реальный reload_config на плейсхолдерах
+
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=_apply,
+                             probe_fn=lambda *a, **k: None)
+        app.push_screen(scr); await pilot.pause()
+        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr._request_reset()
+        scr._confirm_reset()
+        await pilot.pause()                                # notice-виджет монтируется асинхронно
+        notice = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
+        assert 'профиле "work"' in notice
+        assert "настройка не завершена" in notice
+        assert app._session_overrides == {"profile": "work"}   # сброс базы сессию не трогает

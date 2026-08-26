@@ -78,14 +78,15 @@ def highlight_code(content: str, lang: str | None) -> Text:
     if not lang:
         return Text(code, style=CODE_BLOCK)
 
-    from pygments.util import ClassNotFound
     from rich.syntax import Syntax
 
-    try:
-        syntax = Syntax(code, lexer=lang, theme=_trace_theme(), word_wrap=False)
-        text = syntax.highlight(code)
-    except ClassNotFound:
+    syntax = Syntax(code, lexer=lang, theme=_trace_theme(), word_wrap=False)
+    if syntax.lexer is None:
+        # Неизвестный язык: `Syntax` ничего не бросает — он молча оставляет текст как
+        # есть и красит его цветом темы. Прежняя ловля `ClassNotFound` была
+        # недостижима, и fence с mermaid выходил белым из monokai вместо $code-block.
         return Text(code, style=CODE_BLOCK)
+    text = syntax.highlight(code)
 
     # Срезать ровно один хвостовой \n, добавленный лексером (ensurenl=True).
     # Важно: не использовать text.rstrip(), он съест любые пробельные символы,

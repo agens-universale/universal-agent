@@ -48,9 +48,10 @@ def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "_interactive", lambda: True)
     monkeypatch.setattr(cli.arg_parser, "run_args", type("A", (), {"init_config": False, "init": False, "config": None,
         "write_guard": None, "no_write_guard": False, "command_moderation": None, "read_guard": None,
-        "no_read_guard": False, "read_guard_mode": None, "agentsmd_override": False, "skill": None})())
-    monkeypatch.setattr(cli, "load_config", lambda _=None: {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions"})
+        "no_read_guard": False, "read_guard_mode": None, "agentsmd_override": False, "skill": None,
+        "profile": None})())
+    monkeypatch.setattr(cli, "load_config_ex", lambda *a, **k: (
+        {"completions_url": "http://your-backend:PORT/v1/chat/completions"}, None))
     monkeypatch.setattr(cli, "apply_cli_overrides", lambda *a, **k: None)
     monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)

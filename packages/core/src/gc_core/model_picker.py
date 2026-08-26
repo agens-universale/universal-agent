@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Callable, Optional
+from functools import lru_cache
+from typing import Any, Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -67,11 +68,46 @@ def parse_models_list(payload: dict) -> list:
 
 
 def api_base(completions_url: str) -> str:
+    """Корень API по адресу конкретного метода. Аудио-методы (STT-endpoint голосового
+    ввода — тот же OpenAI-совместимый `/v1`) режутся так же, как chat: без них
+    `fetch_models` стучался бы в `…/audio/transcriptions/models` — мёртвый путь."""
     u = (completions_url or "").rstrip("/")
-    for suffix in ("/chat/completions", "/completions"):
+    for suffix in ("/chat/completions", "/completions",
+                   "/audio/transcriptions", "/audio/translations"):
         if u.endswith(suffix):
             return u[: -len(suffix)]
     return u
+
+
+@lru_cache(maxsize=1)
+def _user_agent() -> str:
+    """Визитка продукта из метаданных пакета — имя и версия не задаются здесь."""
+    from gc_core import app_version
+    return f"{app_version.DIST_NAME}/{app_version.agent_version()}"
+
+
+def _request(url: str, headers: dict, *, data=None, method=None):
+    """urllib-запрос, представленный по имени. Без User-Agent Python шлёт
+    `Python-urllib/X.Y`, и щит провайдера (Cloudflare у Groq — проверено живьём)
+    отвечает 403 ещё ДО проверки токена: с рабочим ключом список моделей молчал бы.
+    Дефолт идёт первым — заголовок вызывающего его перекрывает."""
+    import urllib.request
+    return urllib.request.Request(
+        url, data=data, method=method,
+        headers={"User-Agent": _user_agent(), **headers})
+
+def _headers(auth_header: Optional[str]) -> dict:
+    """Заголовки запроса: тип, визитка продукта, авторизация.
+
+    Визитка обязательна и ставится здесь, а не в транспорте: транспортов теперь два
+    (requests-сессия backend'а и urllib-фолбэк), и без User-Agent библиотека шлёт свой
+    дефолт («python-requests/X.Y», «Python-urllib/X.Y») — щит провайдера (Cloudflare у
+    Groq, проверено живьём) отвечает 403 ещё ДО проверки токена, и список моделей
+    молчит на рабочем ключе."""
+    headers = {"Content-Type": "application/json", "User-Agent": _user_agent()}
+    if auth_header:
+        headers["Authorization"] = auth_header
+    return headers
 
 
 def _payload_dict(raw) -> Optional[dict]:
@@ -100,7 +136,10 @@ def _requests_get_ex(
         except ValueError:
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
-    except requests.exceptions.RequestException as exc:
+    # UnicodeEncodeError — не сеть: заголовки кодируются в latin-1, и токен с
+    # кириллицей рвёт запрос в клиенте. Это ValueError, мимо RequestException, —
+    # без перехвата исключение уходит наверх и там читается как «сервер недоступен».
+    except (requests.exceptions.RequestException, UnicodeEncodeError) as exc:
         return HttpReply(
             status=None,
             payload=None,
@@ -131,7 +170,8 @@ def _requests_post_ex(
         except ValueError:
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
-    except requests.exceptions.RequestException as exc:
+    # см. комментарий в _requests_get_ex: кириллица в токене — ValueError, не сеть
+    except (requests.exceptions.RequestException, UnicodeEncodeError) as exc:
         return HttpReply(
             status=None,
             payload=None,
@@ -146,7 +186,7 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
     import urllib.error
     import urllib.request
     ctx = None if verify else ssl._create_unverified_context()
-    req = urllib.request.Request(url, headers=headers)
+    req = _request(url, headers)
     try:
         with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
             try:
@@ -160,7 +200,6 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
         return HttpReply(status=None, payload=None, network_error=str(exc) or exc.__class__.__name__)
 
 
-
 def probe_fetch(completions_url: str, auth_header: Optional[str], *,
                 verify: bool = True, config_proxy: Optional[str] = None,
                 http_get_ex: Optional[Callable] = None) -> FetchOutcome:
@@ -172,9 +211,7 @@ def probe_fetch(completions_url: str, auth_header: Optional[str], *,
     else:
         get_ex = http_get_ex
     base = api_base(completions_url)
-    headers = {"Content-Type": "application/json"}
-    if auth_header:
-        headers["Authorization"] = auth_header
+    headers = _headers(auth_header)
     t0 = time.monotonic()
     if not base:
         return FetchOutcome(None, None, "пустой адрес", 0)
@@ -204,26 +241,26 @@ def probe_fetch(completions_url: str, auth_header: Optional[str], *,
 
 def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
                verify: bool = True, config_proxy: Optional[str] = None,
-               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int, bool]:
+               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int, Any]:
     """Минимальный POST в сам chat/completions (ступень 2 probe).
-    → (status, net_err, latency_ms, json_body); json_body — тело ответа было JSON
-    (ответило приложение), а не HTML/текст 404-страницы гейтвея/Express."""
+    → (status, net_err, latency_ms, payload); payload — разобранное JSON-тело или
+    None, если ответ не JSON (HTML/текст 404-страницы гейтвея/Express).
+
+    Отдаём тело, а не флаг «оно было JSON»: по нему проба отличает ответ на наш
+    токен от ответа на заведомо мусорный, когда статус у обоих одинаковый."""
     import time
     if http_post_ex is None:
         def post_ex(url, headers, body, verify):
             return _requests_post_ex(url, headers, body, verify, config_proxy=config_proxy)
     else:
         post_ex = http_post_ex
-    headers = {"Content-Type": "application/json"}
-    if auth_header:
-        headers["Authorization"] = auth_header
+    headers = _headers(auth_header)
     body = {"model": model, "messages": [{"role": "user", "content": "ping"}],
             "max_tokens": 1, "stream": False}
     t0 = time.monotonic()
     reply = post_ex(completions_url, headers, body, verify)
     return (reply.status, reply.network_error, int((time.monotonic() - t0) * 1000),
-            reply.payload is not None)
-
+            reply.payload)
 
 
 def fetch_models(completions_url: str, auth_header: Optional[str], *,
@@ -242,9 +279,7 @@ def fetch_models(completions_url: str, auth_header: Optional[str], *,
     base = api_base(completions_url)
     if not base:
         return None
-    headers = {"Content-Type": "application/json"}
-    if auth_header:
-        headers["Authorization"] = auth_header
+    headers = _headers(auth_header)
     try:
         cfg = get(base + "/config", headers, verify)
         parsed = parse_config_models(cfg)

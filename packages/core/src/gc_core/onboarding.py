@@ -8,7 +8,7 @@
 (сертификатная авторизация — без статического токена). Подсказка перечисляет только
 реально незаполненное; если всё покрыто — позитивное «настроен».
 """
-from typing import Any, Callable, Dict, List, NamedTuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 from urllib.parse import urlparse
 
 from gc_core import config_raw
@@ -57,6 +57,22 @@ def mask_authorization(header: str) -> str:
     return "***"
 
 
+def mask_secret(raw: str) -> str:
+    """Mask a bare secret (a key with no scheme: `gsk_…`, `sk-…`): first 4 chars + … + last 4.
+
+    mask_authorization masks a HEADER — it shows the scheme, and for a bare key
+    (no space) degrades to '***', which no longer identifies anything. Here the
+    recognisable edges stay visible instead. Short secrets are not cut at all:
+    what remains would exceed what is hidden.
+
+    Threshold is 16, not 10: the visible edges take 8 characters, so anything
+    shorter shows more than it hides — a 10-character key rendered 8 of its 10
+    on screen, exactly the case this rule exists to exclude.
+    """
+    s = str(raw)
+    return f"{s[:4]}…{s[-4:]}" if len(s) >= 16 else "***"
+
+
 ENV_REF_RESOLVED = "переменная подставилась"
 ENV_REF_MISSING = "переменной нет"
 
@@ -76,8 +92,14 @@ def display_value(raw: Any) -> str:
 
 def display_secret(raw: Any) -> str:
     """То же для секрета: литерал — под маской. Ссылка секретом не является и
-    показывается как есть: маска выдавала бы «токен задан» там, где его нет."""
-    return display_value(raw) if env_ref_status(raw) else mask_authorization(raw)
+    показывается как есть: маска выдавала бы «токен задан» там, где его нет.
+
+    Маску выбираем по форме значения: заголовок «схема секрет» прячем
+    mask_authorization (схему показать осмысленно — Bearer/Basic), голый ключ —
+    mask_secret (у него схемы нет, и заголовочная маска вырождалась в «***»)."""
+    if env_ref_status(raw):
+        return display_value(raw)
+    return mask_authorization(raw) if " " in str(raw) else mask_secret(raw)
 
 
 def _valid_endpoint_url(raw: str) -> bool:
@@ -176,8 +198,33 @@ def pending_requirements(config: Dict[str, Any]) -> List[_Requirement]:
 
 
 def is_unconfigured(config: Dict[str, Any]) -> bool:
-    """True, если конфиг ещё не готов к запуску (есть незакрытое требование)."""
+    """True, если конфиг ещё не готов к запуску (есть незакрытое требование).
+
+    Спека §11: заполненный merged-реестр моделей (`models` непуст, любой источник —
+    базовый конфиг, профиль, проектный слой) закрывает требование самостоятельно —
+    легаси-плейсхолдеры (`backend.completions_url`/`agent.model`) тогда не блокируют,
+    они лишь база наследования (`active_profile_or_registry_note`)."""
+    if config.get("models"):
+        return False
     return bool(pending_requirements(config))
+
+
+def active_profile_or_registry_note(config: Dict[str, Any]) -> Optional[str]:
+    """Спека §11: активный merged-реестр моделей ИЛИ выбранный профиль (любой
+    источник — базовый указатель, проектный, CLI) — мастер онбординга пишет
+    плоские легаси-поля (`backend.completions_url`/`agent.model`), но при живом
+    реестре/профиле они станут только БАЗОЙ НАСЛЕДОВАНИЯ для незаданного, а не
+    рабочей моделью (Router решает резолв через слоты/привязки, §6). Профиль —
+    более конкретная причина, чем голый реестр (частный случай §1), поэтому
+    проверяется первым."""
+    profile = config.get("profile") or None
+    if profile:
+        return (f'действует профиль "{profile}" — эти поля станут базой наследования, '
+                'а не рабочей моделью')
+    if config.get("models"):
+        return ("действует реестр моделей — эти поля станут базой наследования, "
+                "а не рабочей моделью")
+    return None
 
 
 def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli",
@@ -189,9 +236,11 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     just_created=True → конфиг создан этим запуском (иначе уже существовал).
     Если модель уже задана (а адрес/токен — нет), добавляем ремарку: эти поля
     нужны для preset-модели; либо укажи свою модель и адрес/токен под неё."""
+    profile_note = active_profile_or_registry_note(config)
     pending = pending_requirements(config)
     if not pending:
-        return f"[gc] Конфиг настроен: {config_path} — можно запускать."
+        base = f"[gc] Конфиг настроен: {config_path} — можно запускать."
+        return f"{base}\n[gc] {profile_note}." if profile_note else base
     fields = "\n".join(f"    • {r.hint}" for r in pending)
     note = ""
     if _model_set(config):
@@ -206,6 +255,8 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     else:
         header = "  GigaCode — настройка не завершена\n\n"
         location = f"  Конфигурация:\n    {config_path}\n\n"
+    if profile_note:
+        note += f"\n  {profile_note}.\n"
     return (
         f"\n{header}{location}"
         f"  Не заполнены обязательные поля:\n{fields}\n"

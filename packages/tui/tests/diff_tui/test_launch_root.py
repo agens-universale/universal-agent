@@ -22,18 +22,26 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
+        def _maybe_notice_profile_activation(self, *args, **kwargs):   # заглушка §3.5-нотиса
+            return None
+
         def run(self):
             return None
 
     fake_mod = MagicMock()
     fake_mod.TuiApp = FakeApp
 
+    from gc_core.config_modules.profiles import ProfileMeta
+
     monkeypatch.setattr(
         tui_pkg.importlib, "import_module", lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock()
     )
     monkeypatch.setattr(
-        "gc_core.config.load_config",
-        lambda _path=None: {"threads_data_path": str(tmp_path / "threads")},
+        "gc_core.config.load_config_ex",
+        lambda _path=None, **_kw: (
+            {"threads_data_path": str(tmp_path / "threads")},
+            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
     monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda _cfg: None)
     monkeypatch.setattr("gc_core.onboarding.is_unconfigured", lambda _cfg: False)
@@ -76,18 +84,26 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
+        def _maybe_notice_profile_activation(self, *args, **kwargs):   # заглушка §3.5-нотиса
+            return None
+
         def run(self):
             return None
 
     fake_mod = MagicMock()
     fake_mod.TuiApp = FakeApp
 
+    from gc_core.config_modules.profiles import ProfileMeta
+
     monkeypatch.setattr(
         tui_pkg.importlib, "import_module", lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock()
     )
     monkeypatch.setattr(
-        "gc_core.config.load_config",
-        lambda _path=None: {"threads_data_path": str(tmp_path / "threads")},
+        "gc_core.config.load_config_ex",
+        lambda _path=None, **_kw: (
+            {"threads_data_path": str(tmp_path / "threads")},
+            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
     monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda _cfg: None)
     monkeypatch.setattr("gc_core.onboarding.is_unconfigured", lambda _cfg: False)

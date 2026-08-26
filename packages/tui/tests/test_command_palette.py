@@ -264,6 +264,59 @@ def test_descriptions_align_to_common_name_column():
     assert long_row == " /verylongname   длинное"
 
 
+def test_hotkeys_align_to_a_common_column():
+    """Хоткеи строк — ровной колонкой, как и описания: в хвосте описаний разной длины
+    они вставали лесенкой, и клавишу приходилось выискивать глазами."""
+    pytest.importorskip("textual")
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = CommandRegistry()
+    reg.register(Command("a", (), "", "короткое", hotkey="F1"))
+    reg.register(Command("b", (), "", "описание подлиннее", hotkey="Ctrl+T"))
+    reg.register(Command("c", (), "", "без клавиши"))
+    palette = CommandPalette(reg, initial_filter="")
+
+    rows = {n: palette._format_row(reg.lookup(n)) for n in ("a", "b", "c")}
+    assert rows["a"].index("F1") == rows["b"].index("Ctrl+T")
+    assert rows["c"] == rows["c"].rstrip()          # без хоткея — без пустого хвоста
+    # Ровно 3 пробела после самого длинного описания — столько же, сколько после самого
+    # длинного имени. Было 2, и на одной строке рядом оказывались разные зазоры.
+    assert rows["b"] == rows["b"].split("описание подлиннее")[0] + "описание подлиннее   Ctrl+T"
+
+
+def test_hotkey_column_counts_rows_without_hotkeys_too():
+    """Колонка считается по самому длинному описанию ЛЮБОЙ строки, а не только той,
+    у которой есть клавиша: иначе у длинного описания без хоткея зазора не остаётся."""
+    pytest.importorskip("textual")
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = CommandRegistry()
+    reg.register(Command("a", (), "", "короткое", hotkey="F1"))
+    reg.register(Command("b", (), "", "описание намного длиннее и БЕЗ клавиши"))
+    palette = CommandPalette(reg, initial_filter="")
+
+    row_a = palette._format_row(reg.lookup("a"))
+    row_b = palette._format_row(reg.lookup("b"))
+    assert row_a.index("F1") == len(row_b) + 3      # хоткей правее длинной строки, зазор 3
+
+
+def test_palette_has_no_hotkey_column_when_nobody_has_one():
+    """Колонку заводим по факту: если у видимых строк клавиш нет, лишних пробелов тоже
+    нет (палитра фильтруется, и на одной строке колонка была бы пустой тратой места)."""
+    pytest.importorskip("textual")
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = CommandRegistry()
+    reg.register(Command("a", (), "", "первое"))
+    reg.register(Command("b", (), "", "второе"))
+    palette = CommandPalette(reg, initial_filter="")
+    assert palette._hotkey_col_w() == 0
+    assert palette._format_row(reg.lookup("a")) == " /a   первое"
+
+
 def test_registry_does_not_contain_main():
     pytest.importorskip("textual")
     from gc_tui.commands import build_default_registry
@@ -311,3 +364,33 @@ async def test_palette_keys_hint_has_air_above(tmp_path):
         assert keys.styles.margin.top == 1
         rows = list(pal.query(".palette-row"))
         assert rows and rows[-1].styles.margin.top == 0     # у команд воздуха нет
+
+
+@pytest.mark.asyncio
+async def test_long_description_row_stays_one_line(tmp_path):
+    """Геометрия палитры держится на «одна команда — одна строка»: `desired_height`
+    (строки + подвал + рамка) отдаётся в main.py::_sync_trace_max_height, и трейс
+    получает ровно остаток экрана. Описание, не влезающее в ширину терминала,
+    переносилось на вторую строку — фактическая высота палитры оказывалась больше
+    заявленной, и нижняя рамка/футер уезжали за край экрана (тем сильнее, чем
+    длиннее описания и чем больше команд). Лекарство — канон `.onb-mcp-row` /
+    `.set-rowtext`: строка не переносится, хвост срезается многоточием."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = CommandRegistry()
+    reg.register(Command("short", (), "", "Короткое описание"))
+    reg.register(Command("long", (), "", "Очень длинное описание команды, которое "
+                                         "заведомо не влезает в ширину терминала и "
+                                         "раньше переносилось на вторую строку"))
+
+    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    async with app.run_test(size=(80, 40)) as pilot:
+        pal = CommandPalette(reg, initial_filter="")
+        await app.screen.mount(pal)
+        await pilot.pause()
+        for row in pal.query(".palette-row"):
+            assert row.region.height == 1, "строка палитры не должна переноситься"
+        assert pal.region.height == pal.desired_height

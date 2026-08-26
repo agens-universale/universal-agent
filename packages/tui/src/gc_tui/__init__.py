@@ -94,7 +94,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_core.config_modules.env_vars import ensure_project_gc_dir
     ensure_project_gc_dir()
 
-    from gc_core.config import load_config, apply_cli_overrides, resolve_config_path, _project_local_config_path, user_config_path, _bootstrap_user_config
+    from gc_core.config import (
+        load_config_ex,
+        apply_cli_overrides,
+        resolve_config_path,
+        _project_local_config_path,
+        user_config_path,
+        _bootstrap_user_config,
+    )
     from gc_core import onboarding
 
     onb_write_path = user_config_path()
@@ -102,14 +109,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if getattr(args, "init_config", False):
         just_created = _bootstrap_user_config()
-        config_dict = load_config(None)
+        config_dict, profile_meta = load_config_ex(None)
         if not _interactive():
             print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
             return 0
         onboarding_mode = "review"
     else:
         just_created = _bootstrap_user_config() if args.config is None else False
-        config_dict = load_config(args.config)
+        config_dict, profile_meta = load_config_ex(args.config)
         apply_cli_overrides(config_dict)
 
         if args.config is None and onboarding.is_unconfigured(config_dict):
@@ -132,9 +139,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if auto_mcp:
         ensure_mcp_daemons(config_dict)
 
+    voice_expected = False
+    _release_voice = None
+    try:
+        from gc_core.voice_runtime.autostart import release_voice_service, url_is_ours
+        from gc_core.voice_runtime.state import load_state as _voice_state
+
+        _release_voice = release_voice_service
+        _vs = _voice_state()
+        voice_expected = _vs is not None and url_is_ours(config_dict, _vs.port)
+    except Exception:
+        voice_expected = False
+
     app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict)
     app.set_config_path(onb_write_path if onboarding_mode else resolve_config_path(args.config))
     app._config_project_local = _project_local_config_path()  # str | None
+    # Подъём (`ensure_voice_service`: spawn + ожидание готовности, до 90 с на холодном
+    # старте) идёт ЦЕЛИКОМ фоном: TuiApp запускает его после первого кадра
+    # (on_mount → _start_voice_autostart), а main() только считает флаг ожидания —
+    # спавна здесь нет вовсе. Раньше вызов стоял тут СИНХРОННО и держал пустой терминал
+    # перед `app.run()` весь бюджет ожидания (было 15 с, стало 90 — живая приёмка
+    # поймала «программа зависла»).
+    app._voice_autostart_pending = voice_expected
+    # Спека §3.5: холодный старт с проектным профилем, выбранным самим config.yml
+    # (не сессионным переключением) — тот же notice, что и сессионный путь
+    # (`TuiApp._profile_remerge`), но здесь ProfileMeta есть только на этом
+    # единственном старте загрузки, до создания app/треда.
+    app._maybe_notice_profile_activation(profile_meta.active_name or "", profile_meta, config_dict)
     app._onboarding_mode = onboarding_mode
     app._onboarding_config_path = onb_write_path
     from gc_core import upgrade_gate
@@ -149,6 +180,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         app.run()
     finally:
+        # Осознанно две РАЗНЫЕ модели гашения демонов: voice — light-switch
+        # (lease-файлы, гасит последний живой клиент, безопасно при N TUI);
+        # MCP — per-process («гашу только то, что сам поднял»). Не унифицировано:
+        # lease-модель для MCP — кандидат в апстрим (develop).
+        # release всегда (не только при voice_ok): прибирает «опоздавший» сервис,
+        # поднявшийся после таймаута, и мёртвые lease прошлых запусков. Безусловность
+        # безопасна ровно потому, что гасит он только ПОМЕЧЕННЫЙ агентский сервис
+        # (`leases.is_agent_owned`): форграундный `gc-voice serve` человека переживёт
+        # выход из TUI, который голоса и не касался.
+        if _release_voice is not None:
+            try:
+                _release_voice()
+            except Exception:
+                pass
         if auto_mcp:
             shutdown_mcp_daemons()
     return 0

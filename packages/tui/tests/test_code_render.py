@@ -114,3 +114,15 @@ def test_other_tokens_keep_monokai():
     colors = {span.style.color.triplet.hex for span in text.spans}
     assert "#66d9ef" in colors        # def
     assert "#ae81ff" in colors        # число
+
+
+def test_unknown_language_stays_plain_code_block():
+    """Докстринг обещает: неизвестный язык — ровный текст цветом $code-block.
+    `except ClassNotFound` этого не давал — `Syntax(...)` на неизвестном лексере
+    ничего не бросает, а отдаёт `lexer=None`, и fence с mermaid красился белым
+    из темы monokai."""
+    from gc_tui.palette import CODE_BLOCK
+    for lang in ("mermaid", "plaintext", "jsonc"):
+        t = highlight_code("graph TD;\n  A-->B;", lang)
+        assert t.style == CODE_BLOCK, lang
+        assert t.spans == [], lang

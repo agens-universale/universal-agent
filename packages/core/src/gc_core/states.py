@@ -115,6 +115,11 @@ class State:
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
         self.turn_tool_calls: int = 0   # вызовов инструментов за текущий ход (smart-гейт, спека §3)
+        # Уровень моделей, зафиксированный на текущий ход (`turn_boundary.begin_turn`).
+        # None — ход ещё не начинали; транспорт тогда резолвит живой уровень. Объявлено
+        # здесь, а не заводится на лету: читатели берут поле через getattr, и без
+        # объявления «не начинали» было бы неотличимо от «поля нет».
+        self.turn_level: Optional[str] = None
         self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors"
         self.last_unknown_tool_name: Optional[str] = None
         self.unknown_tool_repeat_count: int = 0

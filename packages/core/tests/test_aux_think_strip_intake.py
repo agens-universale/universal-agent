@@ -57,6 +57,7 @@ def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
         state=SimpleNamespace(),
         messages=[{"role": "user", "content": "hi"}],
         request_label="intent_scope:exec_command",
+        consumer="intent_scope",
     )
     assert out == "one-line summary"
     assert logged["output_text"] == "<think>r</think>one-line summary"
@@ -144,6 +145,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
             state=state,
             messages=[{"role": "user", "content": "hi"}],
             request_label="intent_scope:exec_command",
+            consumer="intent_scope",
         )
         == "one-line summary"
     )
@@ -177,6 +179,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         messages=[{"role": "user", "content": "validate"}],
         max_tokens=100,
         request_label="intent_guard_finish_gate",
+        consumer="finish_gate",
         log_prompt=False,
     )
     assert projected_finish == json.dumps(finish_payload)

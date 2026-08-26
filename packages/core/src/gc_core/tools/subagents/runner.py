@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -12,6 +13,8 @@ from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_en
 from gc_core.config_modules.chat_completions import chat_completions_llm_from_config_dict
 from gc_core.config_modules.intent_scope import intent_scope_from_config_dict
 from gc_core.execution_workspace import ExecutionWorkspace
+from gc_core.model_router import AliasCircuitOpenError, ModelRouter, SUBAGENT_CONSUMER_PREFIX
+from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.summarize.config import parse_summary_trigger_chars
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
@@ -24,10 +27,12 @@ from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.states import State
 from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, build_tools_data
 from gc_core.tools.subagents.registry import get_subagent_class, resolve_subagent_definitions
+from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
 from gc_core.config_modules.agent import merge_special_instructions_with_model_steering
+from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.utils.local_render_system_prompt import render_system_prompt
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
@@ -55,6 +60,19 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
         if isinstance(content, str):
             return content
     return ""
+
+
+# Вложенные узлы config_dict, передаваемые по ссылке при сборке дочернего конфига
+# (спека §7 п.4): заголовки/kwargs backend + реестр моделей Router (models/slots/
+# assign — Router их не мутирует, но `{**self._config}` расшарил бы эти dict'ы с
+# родителем; deepcopy только их, не всего конфига — остальные секции read-only).
+_CHILD_CONFIG_DEEP_COPY_KEYS = (
+    "chat_completion_headers",
+    "chat_completion_kwargs",
+    "models",
+    "slots",
+    "assign",
+)
 
 
 class SubagentRunner:
@@ -114,23 +132,43 @@ class SubagentRunner:
         model = self._orchestrator_state.default_model
 
         try:
-            # create_instance некоторых субагентов (special_agent) делает LLM-вызов
-            # генерации роли — относим его токены к категории subagent родителя.
-            with usage_scope(self._orchestrator_state.usage, USAGE_CATEGORY_SUBAGENT):
-                instance = asyncio.run(
-                    subagent_cls.create_instance(
-                        task=task,
-                        model=model,
-                        config_dict=self._config,
-                        runtime_notices_enabled=bool(getattr(self._ctx, "is_tui", False)),
-                        **extra,
-                    )
+            instance = asyncio.run(
+                subagent_cls.create_instance(
+                    task=task,
+                    model=model,
+                    config_dict=self._config,
+                    runtime_notices_enabled=bool(getattr(self._ctx, "is_tui", False)),
+                    **extra,
                 )
+            )
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
                 code="subagent_create_failed",
                 message=f"Subagent {tool_name} create_instance failed: {exc}",
+                retryable=True,
+            )
+
+        try:
+            child_ctx = self._build_child_ctx(tool_name=tool_name)
+        except Exception as exc:
+            return self._error_response(
+                tool_name=tool_name,
+                code="subagent_ctx_build_failed",
+                message=f"Subagent {tool_name} child context build failed: {exc}",
+                retryable=True,
+            )
+
+        try:
+            # finalize_role некоторых субагентов (special_agent) делает LLM-вызов
+            # генерации роли — относим его токены к категории subagent родителя.
+            with usage_scope(self._orchestrator_state.usage, USAGE_CATEGORY_SUBAGENT):
+                instance.finalize_role(child_ctx, self._orchestrator_state)
+        except Exception as exc:
+            return self._error_response(
+                tool_name=tool_name,
+                code="subagent_role_generation_failed",
+                message=f"Subagent {tool_name} role generation failed: {exc}",
                 retryable=True,
             )
         agent_role, initial_message = instance.get_initial_data()
@@ -144,6 +182,12 @@ class SubagentRunner:
                 message=f"Subagent {tool_name} child state build failed: {exc}",
                 retryable=False,
             )
+        # child_ctx.model_router — свой Router ребёнка (спека §7 п.4): фиксирует
+        # default_model на модель субагента, как begin_turn фиксирует его на
+        # активную модель в обычном ходе (turn_boundary.begin_turn).
+        begin_turn(child_state, child_ctx)
+
+
         user_message = {
             "role": "user",
             "content": initial_message,
@@ -173,16 +217,6 @@ class SubagentRunner:
             )
             child_state.messages = messages.copy()
 
-        try:
-            child_ctx = self._build_child_ctx(tool_name=tool_name)
-        except Exception as exc:
-            return self._error_response(
-                tool_name=tool_name,
-                code="subagent_ctx_build_failed",
-                message=f"Subagent {tool_name} child context build failed: {exc}",
-                retryable=True,
-                steps=child_state.steps,
-            )
         self._log_lifecycle(
             event="subagent_start",
             tool_name=tool_name,
@@ -228,65 +262,86 @@ class SubagentRunner:
         self._usage_pushed = UsageAccount()
         self._tool_calls_pushed = 0
         try:
-            with activate_child_input(parent_call_id=self._parent_call_id) as scope:
-
-                def _on_child_user_enqueue(message: Dict[str, Any]) -> None:
-                    prose = extract_real_user_message_text(message)
-                    if not prose:
-                        return
-                    emit_progress(
-                        child_ctx,
-                        child_state,
-                        "user_message",
-                        prose=prose,
-                    )
-                    payload: Dict[str, Any] = {
-                        "role": "user",
-                        "content": prose,
-                    }
-                    msg_id = message.get("id")
-                    if isinstance(msg_id, str) and msg_id:
-                        payload["id"] = msg_id
-                    persist_subagent_trace(
-                        child_ctx, kind="user", payload=payload
-                    )
-
-                scope.set_on_enqueue(_on_child_user_enqueue)
-                result = run_agent_func(
-                    messages,
-                    child_state,
-                    child_ctx,
-                    check_stop=self._check_stop_requested,
-                    persist_messages_callback=persist_messages_callback,
-                    pre_backend_compaction_hook=pre_backend_compaction_hook,
-                    session_meta=child_meta,
-                    get_pending_messages=scope.drain,
-                )
-        except Exception as exc:
-            self._log_lifecycle(
-                event="subagent_error",
-                tool_name=tool_name,
+            result = self._run_child_loop(
+                messages=messages,
                 child_state=child_state,
                 child_ctx=child_ctx,
-                extra={
-                    "steps": child_state.steps,
-                    "error_code": "subagent_run_failed",
-                },
+                run_agent_func=run_agent_func,
+                persist_messages_callback=persist_messages_callback,
+                pre_backend_compaction_hook=pre_backend_compaction_hook,
+                child_meta=child_meta,
             )
-            self._persist_finished(
-                child_ctx,
-                child_state,
-                ok=False,
-                finish_reason="error",
+        except Exception as exc:
+            fallback_ctx = self._maybe_pin_fallback(
+                child_ctx=child_ctx, child_state=child_state, exc=exc, tool_name=tool_name
             )
-            return self._error_response(
-                tool_name=tool_name,
-                code="subagent_run_failed",
-                message=f"Subagent {tool_name} run failed: {exc}",
-                retryable=True,
-                steps=child_state.steps,
-                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
-            )
+            if fallback_ctx is None:
+                self._log_lifecycle(
+                    event="subagent_error",
+                    tool_name=tool_name,
+                    child_state=child_state,
+                    child_ctx=child_ctx,
+                    extra={
+                        "steps": child_state.steps,
+                        "error_code": "subagent_run_failed",
+                    },
+                )
+                self._persist_finished(
+                    child_ctx,
+                    child_state,
+                    ok=False,
+                    finish_reason="error",
+                )
+                return self._error_response(
+                    tool_name=tool_name,
+                    code="subagent_run_failed",
+                    message=f"Subagent {tool_name} run failed: {exc}",
+                    retryable=True,
+                    steps=child_state.steps,
+                    child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
+                )
+            # Класс 1 — субагент с пином (спека §8): фейл на первом вызове ребёнка →
+            # рестарт с исходных сообщений (трейс пуст, ничего не потеряно); фейл не
+            # на первом — деградация с текущего шага (child_state.messages уже несёт
+            # батч, на котором упал вызов). Повторный фейл — честная ошибка тула,
+            # без ещё одного фоллбэка (fallback_ctx строится максимум один раз).
+            child_ctx = fallback_ctx
+            retry_messages = messages if child_state.steps == 0 else child_state.messages
+            try:
+                result = self._run_child_loop(
+                    messages=retry_messages,
+                    child_state=child_state,
+                    child_ctx=child_ctx,
+                    run_agent_func=run_agent_func,
+                    persist_messages_callback=persist_messages_callback,
+                    pre_backend_compaction_hook=pre_backend_compaction_hook,
+                    child_meta=child_meta,
+                )
+            except Exception as retry_exc:
+                self._log_lifecycle(
+                    event="subagent_error",
+                    tool_name=tool_name,
+                    child_state=child_state,
+                    child_ctx=child_ctx,
+                    extra={
+                        "steps": child_state.steps,
+                        "error_code": "subagent_run_failed",
+                    },
+                )
+                self._persist_finished(
+                    child_ctx,
+                    child_state,
+                    ok=False,
+                    finish_reason="error",
+                )
+                return self._error_response(
+                    tool_name=tool_name,
+                    code="subagent_run_failed",
+                    message=f"Subagent {tool_name} run failed: {retry_exc}",
+                    retryable=True,
+                    steps=child_state.steps,
+                    child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
+                )
         finally:
             # Только residual delta с последнего live-tick — не полный merge
             # (иначе double-count уже запушенных токенов).
@@ -369,6 +424,136 @@ class SubagentRunner:
             usage=child_state.usage.to_meta(),
             child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
         )
+
+    def _run_child_loop(
+        self,
+        *,
+        messages: List[Dict[str, Any]],
+        child_state: State,
+        child_ctx: Any,
+        run_agent_func: Callable,
+        persist_messages_callback: Callable,
+        pre_backend_compaction_hook: Optional[Callable],
+        child_meta: Dict[str, Any],
+    ) -> Any:
+        """Один прогон дочернего цикла внутри своего ``activate_child_input`` scope.
+        Вынесено отдельно, чтобы класс-1 фоллбэк (спека §8, ``_maybe_pin_fallback``)
+        мог вызвать его повторно (рестарт/деградация) со свежим scope — переиспользовать
+        уже закрытый ``scope`` первой попытки небезопасно (его `__exit__` уже отработал)."""
+        with activate_child_input(parent_call_id=self._parent_call_id) as scope:
+
+            def _on_child_user_enqueue(message: Dict[str, Any]) -> None:
+                prose = extract_real_user_message_text(message)
+                if not prose:
+                    return
+                emit_progress(
+                    child_ctx,
+                    child_state,
+                    "user_message",
+                    prose=prose,
+                )
+                payload: Dict[str, Any] = {
+                    "role": "user",
+                    "content": prose,
+                }
+                msg_id = message.get("id")
+                if isinstance(msg_id, str) and msg_id:
+                    payload["id"] = msg_id
+                persist_subagent_trace(child_ctx, kind="user", payload=payload)
+
+            scope.set_on_enqueue(_on_child_user_enqueue)
+            return run_agent_func(
+                messages,
+                child_state,
+                child_ctx,
+                check_stop=self._check_stop_requested,
+                persist_messages_callback=persist_messages_callback,
+                pre_backend_compaction_hook=pre_backend_compaction_hook,
+                session_meta=child_meta,
+                get_pending_messages=scope.drain,
+            )
+
+    def _maybe_pin_fallback(
+        self,
+        *,
+        child_ctx: Any,
+        child_state: State,
+        exc: Exception,
+        tool_name: str,
+    ) -> Optional[Any]:
+        """Класс 1 — субагент (пинованный или нет, спека §8): фейл подтверждённо
+        недоступной модели → пере-резолв ребёнка на активную модель. Возвращает
+        деградированный ``child_ctx`` (клон Router'а с ``unbound_override`` =
+        активная модель) — вызывающий код решает сам, рестартовать (steps == 0)
+        или продолжить с текущего шага. ``None`` — фейл не по этой ветке (не
+        недоступность модели / ребёнок не субагент / деградировать некуда) —
+        вызывающий код идёт в честную ошибку тула как раньше.
+
+        Предохранитель ставится на упавший алиас ВСЕГДА при подтверждённой
+        недоступности — включая случай «деградировать некуда» (пин совпадает с
+        активной моделью, или это вовсе непинованный субагент): иначе ни один
+        trip-путь не срабатывает для непинованных субагентов, и повторные вызовы
+        продолжают платить полный backoff (регресс §8: «не долбим мёртвый
+        endpoint», «ВСЕ резолвы мгновенно»)."""
+        router = getattr(child_ctx, "model_router", None)
+        if router is None or not getattr(router, "is_subagent_child", False):
+            return None
+        if not is_model_unavailable_error(exc):
+            return None
+        parent_router = getattr(self._ctx, "model_router", None)
+        if parent_router is None:
+            return None
+
+        try:
+            failed_resolved = router.resolve("main")
+        except AliasCircuitOpenError as open_exc:
+            failed_resolved = open_exc.resolved
+        if failed_resolved.alias is None:
+            return None
+
+        # Активную модель резолвим ДО trip() ниже: иначе, если это непинованный
+        # субагент (override == активная модель), повторный резолв "main" на тот
+        # же алиас упал бы AliasCircuitOpenError раньше сравнения.
+        active_already_open = False
+        try:
+            active_resolved = parent_router.resolve("main")
+        except AliasCircuitOpenError as open_exc:
+            active_resolved = open_exc.resolved
+            active_already_open = True
+
+        # Фейл подтверждён — предохранитель встаёт независимо от того, есть ли
+        # куда деградировать (см. докстроку выше).
+        router.breaker.trip(
+            failed_resolved.alias, str(exc).strip()[:300] or exc.__class__.__name__
+        )
+
+        if active_already_open or active_resolved.alias == failed_resolved.alias:
+            # Деградировать некуда: активная модель уже сама в предохранителе,
+            # либо она и есть упавшая (пин == активная / субагент без пина
+            # резолвился в активную) — то же самое упадёт снова. Честная ошибка
+            # тула ниже; предохранитель уже открыт — следующий вызов (этого
+            # субагента или main) отвалится мгновенно.
+            return None
+
+        kind = "рестарт" if child_state.steps == 0 else "деградация"
+        who = f"субагент {tool_name}"
+        logger = getattr(self._ctx, "logger", None)
+        message = (
+            f"{who} ({kind}): {failed_resolved.alias} недоступна — "
+            f"выполнено активной {active_resolved.model}"
+        )
+        if logger is not None:
+            logger.warning(message)
+        maybe_push_fallback_to_active_notice(
+            who=who,
+            failed_alias=failed_resolved.alias,
+            active_model=active_resolved.model,
+            mode=kind,
+            enabled=bool(getattr(self._ctx, "is_tui", False)),
+        )
+        child_ctx.model_router = router.with_override(active_resolved)
+        begin_turn(child_state, child_ctx)
+        return child_ctx
 
     def _check_stop_requested(self) -> bool:
         return self._orchestrator_state.stop_requested
@@ -462,8 +647,17 @@ class SubagentRunner:
         заменяет: глобальный уже вычтен внутри get_builtin_tools_data, а этот
         список применяется поверх, к полному набору (включая mcp_*). Снять
         глобальный запрет из файла сабагента нельзя.
+
+        Узлы из ``_CHILD_CONFIG_DEEP_COPY_KEYS`` (заголовки/kwargs backend +
+        реестр моделей Router — models/slots/assign) копируются deepcopy, а не
+        по ссылке: иначе мутация ребёнка (например, override child-слота в
+        ``_build_child_model_router``) утекла бы в ``self._config`` и оттуда —
+        во все последующие ходы/субагентов сессии.
         """
         child_config = {**self._config, "use_local_subagents": False}
+        for key in _CHILD_CONFIG_DEEP_COPY_KEYS:
+            if key in child_config:
+                child_config[key] = copy.deepcopy(child_config[key])
         definition = resolve_subagent_definitions(self._config).get(
             self._active_tool_name
         )
@@ -473,6 +667,72 @@ class SubagentRunner:
             )
             child_config[SUBAGENT_TOOLS_STOP_KEY] = list(definition.stop_tools)
         return child_config
+
+    def _build_child_model_router(
+        self, tool_name: str, child_config: Dict[str, Any]
+    ) -> Optional[ModelRouter]:
+        """Свой Router ребёнка (спека §7 п.4): `subagent:<tool_name>` родительского
+        Router становится «main» ребёнка и наследуется любым служебным вызовом БЕЗ
+        более точной assign-привязки — через `unbound_override` (спека §5.2:
+        явные привязки, и уровнем, и алиасом, продолжают резолвиться по
+        нетронутым слотам/реестру ребёнка — override их не перекрывает).
+
+        `level_provider` ребёнка — константа (уровень хода родителя на момент
+        вызова), не живой TUI-провайдер: используется Router'ом только если
+        `unbound_override` не задан (сюда с непустым родительским Router'ом не
+        доходим — оставлено для полноты resolve-логики).
+
+        None, если у родителя нет Router (легаси тестовые двойники ctx) — вызывающий
+        код и так устойчив к `model_router=None` (turn_boundary/воронки не падают).
+
+        Класс 1 фоллбэков недоступности (спека §8): если пин этого субагента уже
+        открыт в предохранителе (прошлый вызов этой же сессии его уронил) — ребёнок
+        сразу собирается на активной модели + notice, без повторной попытки на
+        заведомо мёртвом пине.
+
+        `force_legacy` родителя (CLI `--model`/`--completions_url` поверх непустого
+        реестра, спека §2) наследуется ребёнком (Task 10) — иначе собственная
+        assign-привязка ребёнка (например, `finish_gate`) резолвилась бы через
+        реальный реестр вместо форс-легаси, расходясь с родителем.
+        """
+        parent_router = getattr(self._ctx, "model_router", None)
+        if parent_router is None:
+            return None
+        try:
+            resolved = parent_router.resolve(f"{SUBAGENT_CONSUMER_PREFIX}{tool_name}")
+        except AliasCircuitOpenError as exc:
+            try:
+                resolved = parent_router.resolve("main")
+            except AliasCircuitOpenError as active_exc:
+                # И пин субагента, и активная модель в предохранителе — деградировать
+                # некуда (симметрично `_maybe_pin_fallback` active_already_open).
+                # Честная ошибка тула с внятным сообщением, а не сырой
+                # AliasCircuitOpenError, который наверху стал бы subagent_ctx_build_failed
+                # с невнятным str.
+                raise RuntimeError(
+                    f"субагент {tool_name}: пин {exc.alias} и активная модель "
+                    f"{active_exc.resolved.model} (алиас {active_exc.alias}) недоступны "
+                    f"(предохранитель). Переключите уровень /level или профиль /profiles."
+                ) from active_exc
+            who = f"субагент {tool_name}"
+            logger = getattr(self._ctx, "logger", None)
+            message = f"{who}: {exc.alias} недоступна — выполнено активной {resolved.model}"
+            if logger is not None:
+                logger.warning(message)
+            maybe_push_fallback_to_active_notice(
+                who=who,
+                failed_alias=exc.alias,
+                active_model=resolved.model,
+                enabled=bool(getattr(self._ctx, "is_tui", False)),
+            )
+        frozen_level = parent_router.active_level()
+        return ModelRouter(
+            child_config,
+            level_provider=lambda: frozen_level,
+            breaker=parent_router.breaker,
+            force_legacy=parent_router.force_legacy,
+            unbound_override=resolved,
+        )
 
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
@@ -590,6 +850,7 @@ class SubagentRunner:
     def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
         child_config = self._build_child_config()
+        child_router = self._build_child_model_router(tool_name, child_config)
         child_run_id = generate_run_id()
         child_agent_kind = tool_name
         child_logger, child_log_path, child_summary_trace_path = create_run_logger(
@@ -632,6 +893,7 @@ class SubagentRunner:
             os_backend=parent_backend,
             skills_registry=child_skills_registry,
             workspace=parent_workspace,
+            model_router=child_router,
             environment=getattr(self._ctx, "environment", None),
             project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),
         )

@@ -104,7 +104,7 @@ def test_sanitize_messages_for_chat_completions_replaces_invalid_tool_call():
 def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(monkeypatch):
     captured = {}
 
-    def _fake_create_call_headers(_state, _ctx):
+    def _fake_create_call_headers(_state, _ctx, resolved=None):
         return {"Authorization": "Bearer fake"}
 
     def _fake_request_backend_chat_completions(data, *_args, **_kwargs):
