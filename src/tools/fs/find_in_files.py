@@ -16,7 +16,7 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from config_modules.fs_tools import FsFindInFilesConfig
 from utils.find_in_files_scan_mode import (
@@ -1093,6 +1093,7 @@ class FindInFiles(AbstractSimpleTool):
         config: FsFindInFilesConfig,
         report_path: str,
         show_excluded_dirs: bool,
+        rg_pass: Callable[[str], bool],
     ) -> Optional[str]:
         """Attempt native grep. None → continue Python path."""
         from utils.native_fs_search import (
@@ -1138,9 +1139,6 @@ class FindInFiles(AbstractSimpleTool):
             # Fall through to Python so refuse envelope/breakdown stay identical.
             return None
 
-        def _rp(p: str) -> str:
-            return tool_report_abspath(p, workspace=self._workspace)
-
         result = run_native_grep(
             self._backend,
             path,
@@ -1149,32 +1147,47 @@ class FindInFiles(AbstractSimpleTool):
             exclude_nested_dot_dirs=exclude_dot,
             file_pattern=file_pattern,
             max_matches=limit_eff,
-            report_path=_rp,
+            report_path=lambda p: p,
             is_dir_target=True,
         )
         if result is None:
             return None
 
-        count = len(result.matches)
+        raw = result.matches
+        allowed_cache: Dict[str, bool] = {}
+
+        def _hit_allowed(real_abs: str) -> bool:
+            cached = allowed_cache.get(real_abs)
+            if cached is None:
+                cached = rg_pass(real_abs)
+                allowed_cache[real_abs] = cached
+            return cached
+
+        filtered = [m for m in raw if _hit_allowed(m["file"])]
+        shown = filtered[:limit_eff]
+        for m in shown:
+            m["file"] = tool_report_abspath(m["file"], workspace=self._workspace)
+
+        count = len(shown)
+        hit_raw_limit = bool(result.truncated) or len(raw) >= limit_eff
+        hit_shown_limit = count >= limit_eff
+        scan_complete = not hit_raw_limit and not hit_shown_limit
+        more = hit_raw_limit or hit_shown_limit
+
         stop_reason: Optional[str] = None
         guidance: Optional[str] = None
-        # Parity with Python path: count >= limit_eff → match_limit (A boundary).
-        hit_limit = bool(result.truncated) or count >= limit_eff
-        scan_complete = not hit_limit
-        more = hit_limit
-        if hit_limit:
+        if hit_shown_limit:
             stop_reason = "match_limit"
             guidance = self._match_limit_guidance(
                 limit_eff, limit_capped=limit_capped, limit_requested=limit_requested
             )
-            scan_complete = False
         elif limit_capped:
             stop_reason, guidance = self._cap_stop_info(
                 True, limit_requested, limit_eff, count=count
             )
 
         return self._build_response(
-            matches=result.matches,
+            matches=shown,
             count=count,
             stop_reason=stop_reason,
             guidance=guidance,
@@ -1230,29 +1243,6 @@ class FindInFiles(AbstractSimpleTool):
             return self._error("invalid_argument", "exclude_dirs", excl_err)
         assert accepted_excludes is not None
 
-        # --- native grep (gates) before Python pipeline ---
-        if parse_read_guard_config(cfg_dict).enabled:
-            native_resp = None
-        else:
-            native_resp = self._try_native_grep_directory(
-                path=path,
-                pattern=pattern,
-                query_mode=query_mode,
-                pattern_mode=pattern_mode,
-                effective_ci=effective_ci,
-                file_pattern=file_pattern,
-                accepted_excludes=accepted_excludes,
-                exclude_soft_errors=exclude_soft_errors,
-                limit_requested=limit_requested,
-                limit_eff=limit_eff,
-                limit_capped=limit_capped,
-                config=config,
-                report_path=report_path,
-                show_excluded_dirs=show_excluded_dirs,
-            )
-        if native_resp is not None:
-            return native_resp
-
         rg_cfg = parse_read_guard_config(cfg_dict)
         rg_root = rg_context.launch_root if rg_cfg.enabled else None
         rg_active = rg_cfg.enabled
@@ -1277,6 +1267,27 @@ class FindInFiles(AbstractSimpleTool):
             except (ReadGuardViolation, ValueError):
                 return False
             return True
+
+        # --- native grep (gates) before Python pipeline ---
+        native_resp = self._try_native_grep_directory(
+            path=path,
+            pattern=pattern,
+            query_mode=query_mode,
+            pattern_mode=pattern_mode,
+            effective_ci=effective_ci,
+            file_pattern=file_pattern,
+            accepted_excludes=accepted_excludes,
+            exclude_soft_errors=exclude_soft_errors,
+            limit_requested=limit_requested,
+            limit_eff=limit_eff,
+            limit_capped=limit_capped,
+            config=config,
+            report_path=report_path,
+            show_excluded_dirs=show_excluded_dirs,
+            rg_pass=_rg_pass,
+        )
+        if native_resp is not None:
+            return native_resp
 
         # Hard floor always on; config may only add basenames. Nested dot-dirs
         # stay hard-on even if exclude_dot_dirs is set false in YAML.
