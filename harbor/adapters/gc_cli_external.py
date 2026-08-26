@@ -324,16 +324,38 @@ class GcCliExternal(BaseAgent):
 
         # Run the synchronous gc-cli loop off the event loop so backend bridging works,
         # then dump the final message history as ATIF trajectory.json.
+        #
+        # asyncio.to_thread's future can't be cancelled: on a Harbor timeout,
+        # asyncio.wait_for(...) raises CancelledError here but the worker thread keeps
+        # running unattended (up to the pod's infra time limit) since nothing tells the
+        # executor to stop. Use run_in_executor instead so we hold the underlying future
+        # and, on cancellation, call executor.stop_run() (cooperative flag checked by the
+        # step loop) and give the thread a grace period to exit before re-raising.
         state = None
+        fut = loop.run_in_executor(None, _run_loop)
         try:
-            state = await asyncio.to_thread(_run_loop)
+            state = await fut
+        except asyncio.CancelledError:
+            if executor is not None:
+                executor.stop_run()
+            try:
+                state = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "gc-cli worker thread still running after stop_run(); "
+                    "abandoning it and dumping best-effort partial state"
+                )
+            raise
         finally:
             # On a Harbor agent timeout (CancelledError) or a backend error the worker
-            # thread is abandoned before _run_loop returns, so `state` stays None. Recover
-            # whatever the executor reached (get_state() is lock-guarded) and still dump a
-            # partial ATIF trajectory — otherwise timed-out/errored runs are a black hole
-            # with no trace to debug. The original exception re-raises after this block.
-            # ponytail: the orphaned thread can't be killed; partial state is best-effort.
+            # thread may be abandoned before _run_loop returns, so `state` stays None.
+            # Recover whatever the executor reached (get_state() is lock-guarded) and
+            # still dump a partial ATIF trajectory — otherwise timed-out/errored runs
+            # are a black hole with no trace to debug. The original exception re-raises
+            # after this block.
+            # ponytail: best-effort only — if stop_run() didn't unblock the thread in
+            # time, the thread is still orphaned; raise the grace timeout if this needs
+            # a harder kill later.
             if state is None and executor is not None:
                 state = executor.get_state()
             n_steps = self._write_trajectory(state)
