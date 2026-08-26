@@ -25,6 +25,9 @@ class _FakeChildState:
 
 def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
     class _Inst:
+        def finalize_role(self, ctx, state):
+            return None
+
         def get_initial_data(self):
             return "role", "assignment"
 

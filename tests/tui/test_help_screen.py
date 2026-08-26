@@ -33,6 +33,7 @@ async def test_help_header_and_hotkeys():
         assert "Ctrl+C" in cmds and "Esc" in descs
         assert "Ctrl+A" in cmds
         assert "Ctrl+N" in keys and "Ctrl+S" in keys
+        assert "Ctrl+T" in keys and "Ctrl+T" in cmds   # голос: и у команды, и в хоткеях
         assert "Ctrl+D" in keys and "Ctrl+O" in keys and "Ctrl+G" in keys
         assert "Ctrl+/" in keys
         assert "Ctrl+E" not in body.split()
@@ -184,8 +185,8 @@ async def test_hotkey_column_does_not_drift_with_the_window_width():
             def _row(name: str) -> str:
                 return next(r for r in rows if r[:20].strip() == name)
 
-            line, other = _row("/settings"), _row("/buffer")
-            assert other.index("F7") == line.index("F6")   # колонка общая
+            line, voice = _row("/settings"), _row("/voice")
+            assert voice.index("Ctrl+T") == line.index("F6")   # колонка общая
             return line.index("F6")
 
     assert await _hotkey_col(120) == await _hotkey_col(170)
@@ -227,3 +228,26 @@ def test_zebra_stripe_is_lighter_than_the_background():
     to_rgb = lambda h: tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
     delta = sum(abs(a - b) for a, b in zip(to_rgb(stripe), to_rgb(bg)))
     assert delta >= 45, f"{stripe} слишком близок к фону ({delta})"
+
+
+@pytest.mark.asyncio
+async def test_quickstart_mentions_voice_input():
+    """Блок «как работать» — сценарий, а не справочник (F6, F2, F3, /new, Esc там уже
+    повторяются): голос в нём нужен рядом с Enter, как альтернатива набору."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.help import HelpScreen
+
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test(size=(170, 60)) as pilot:
+        await app.push_screen(HelpScreen())
+        await pilot.pause()
+        rows = ["".join(seg.text for seg in strip).rstrip()
+                for strip in app.screen._compositor.render_strips()]
+        top = next(i for i, r in enumerate(rows) if "как работать" in r)
+        block = rows[top:top + 6]
+        voice = next(r for r in block if r[:20].strip() == "Ctrl+T")
+        assert "надиктуйте сообщение вместо набора" in voice
+        assert "/settings" in voice                     # без сервиса клавиша молчит
+        enter = next(i for i, r in enumerate(block) if r[:20].strip() == "Enter")
+        assert block.index(voice) == enter + 1          # сразу за строкой про набор

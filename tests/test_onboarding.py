@@ -153,8 +153,7 @@ def test_sentinels_match_default_yaml():
         raw["backend"]["chat_completion_headers"]["Authorization"]
         == onboarding.TOKEN_SENTINEL
     )
-    assert raw["agent"]["model"]
-    assert raw["agent"]["model"] != onboarding.MODEL_SENTINEL
+    assert raw["agent"]["model"] == onboarding.MODEL_SENTINEL
 
 
 def test_setup_guide_lists_pending_fields_and_path(tmp_path, monkeypatch):
@@ -163,7 +162,7 @@ def test_setup_guide_lists_pending_fields_and_path(tmp_path, monkeypatch):
     assert "/home/u/.gc/config.yml" in text
     assert "backend.completions_url" in text
     assert "Authorization" in text
-    assert "имя модели" not in text   # модель задана в дефолте → не в списке полей
+    assert "имя модели" in text   # модель тоже не задана в дефолте → выбирается в мастере
 
 
 def test_setup_guide_offers_init_config_helper_with_program():

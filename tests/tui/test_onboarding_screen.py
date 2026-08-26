@@ -22,8 +22,9 @@ class _FakeMcp:
 
 def _write_conn_cfg(tmp_path, *, url=None, auth=None, proxy=None, model=None):
     """Настоящий config.yml из шаблона (гарантированно валиден) + write_values по
-    dotted-путям. Шаг «Подключение» берёт поля ИЗ ФАЙЛА (сырыми, без резолва
-    ${ENV:...}) — на мок-пути ссылку было бы не увидеть."""
+    dotted-путям — тот же приём, что _write_cloud_config в test_onboarding_voice_step.py.
+    Шаг «Подключение» берёт поля ИЗ ФАЙЛА (сырыми, без резолва ${ENV:...}) — на
+    мок-пути ссылку было бы не увидеть."""
     from pathlib import Path
     import onboarding_config_writer as w
     from config import _default_config_path, validate_config_text
@@ -59,11 +60,13 @@ def _resolved_conn_cfg(cfg_path):
     })
 
 
-def test_wizard_has_four_steps_starting_with_connection():
-    """«Адрес» и «Авторизация» слиты в «Подключение»: четыре шага вместо пяти."""
-    from tui.screens.onboarding import _STEP_TITLES, _LAST_STEP
-    assert _STEP_TITLES == ("Подключение", "Модель", "MCP-серверы", "Подтверждение")
-    assert _LAST_STEP == 3
+def test_wizard_has_five_steps_starting_with_connection():
+    """«Адрес» и «Авторизация» слиты в «Подключение»: пять шагов вместо шести."""
+    from tui.screens.onboarding import _STEP_TITLES, _LAST_STEP, _VOICE_STEP
+    assert _STEP_TITLES == ("Подключение", "Модель", "MCP-серверы",
+                            "Голосовой ввод", "Подтверждение")
+    assert _LAST_STEP == 4
+    assert _VOICE_STEP == 3
 
 
 @pytest.mark.asyncio
@@ -115,6 +118,19 @@ def test_summary_hides_template_sentinels():
     line = scr._summary_text()
     assert "your-backend" not in line and "ВПИШИТЕ" not in line
     assert "сервер: —" in line and "модель: —" in line
+
+
+def test_summary_includes_voice_segment_once_chosen():
+    """Верхняя сводка добавляет сегмент «голосовой ввод: …» по мере выбора на шаге
+    голоса; пока выбора нет — сегмента нет вовсе (не «голосовой ввод: —»)."""
+    scr = _screen()
+    assert "голосовой ввод" not in scr._summary_text()
+    scr._voice_choice = "local"
+    assert "голосовой ввод: локальный сервис" in scr._summary_text()
+    scr._voice_choice = "cloud"
+    assert "голосовой ввод: свой endpoint" in scr._summary_text()
+    scr._voice_choice = "skip"
+    assert "голосовой ввод: нет" in scr._summary_text()
 
 
 @pytest.mark.asyncio
@@ -212,7 +228,7 @@ async def test_connection_token_not_cleared_on_revisit_without_retyping(tmp_path
 async def _final_blob(pilot, scr, *, mcp):
     scr._values = {"completions_url": "https://h/v1", "Authorization": "Bearer sk", "model": "m"}
     scr._mcp_selected = set(mcp)
-    scr._step = 3
+    scr._step = 4
     scr._render_step()
     await pilot.pause()
     return " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
@@ -245,6 +261,46 @@ async def test_final_summary_shows_mcp_when_selected(tmp_path):
         blob = await _final_blob(pilot, scr, mcp=["office"])
         assert "office" in blob
         assert "Установятся после подтверждения: MCP (office)" in blob
+
+
+@pytest.mark.asyncio
+async def test_final_summary_notice_combines_mcp_and_voice(tmp_path, monkeypatch):
+    """Одна служебная строка без скобок объединяет обе части (какие применимы),
+    воздух — одна пустая строка после строк сводки."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from voice_runtime import paths as vpaths
+    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
+    monkeypatch.setattr("voice_runtime.state.voice_state_path",
+                        lambda: tmp_path / "voice_data" / "state.json")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._voice_choice = "local"
+        blob = await _final_blob(pilot, scr, mcp=["office", "ddgs"])
+        assert ("Установятся после подтверждения: MCP (ddgs, office) · "
+                "локальный голосовой сервис (~0.9 ГБ)") in blob
+
+
+@pytest.mark.asyncio
+async def test_final_summary_notice_voice_only(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from voice_runtime import paths as vpaths
+    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
+    monkeypatch.setattr("voice_runtime.state.voice_state_path",
+                        lambda: tmp_path / "voice_data" / "state.json")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._voice_choice = "local"
+        blob = await _final_blob(pilot, scr, mcp=[])
+        assert "Установятся после подтверждения: локальный голосовой сервис (~0.9 ГБ)" in blob
+        assert "MCP (" not in blob
 
 
 @pytest.mark.asyncio
@@ -311,7 +367,7 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
 @pytest.mark.asyncio
 async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     """Свернув пресет-лист адреса `Esc`, человек должен видеть, чем его вернуть
-    (спека 2026-08-06 §4.4) — общий хинт-механизм списков (`show_closed_hint`,
+    (спека 2026-08-06 §4.4) — тот же хинт, что у голосовых списков (`show_closed_hint`,
     дословно `LIST_CLOSED_HINT`). До правки `escape_presets` сворачивал список молча.
 
     Канон 2026-08-17: строка под адресом ПОСТОЯННА — уход курсора её не снимает.
@@ -987,10 +1043,25 @@ async def test_pagedown_keeps_validation_of_connection_step(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_pagedown_advances_from_mcp_step(tmp_path):
-    """PgDn работает и на шагах без пометки (MCP) — зеркало PgUp. MCP → «Подтверждение»."""
+async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
+    """PgDn работает и на шагах без пометки (MCP) — зеркало PgUp.
+
+    MCP → «Голосовой ввод»: тело шага голоса зовёт voice_setup.status_cheap, а
+    _screen() не инжектит voice= — без изоляции тест стучался бы в РЕАЛЬНЫЙ каталог
+    данных агента (voice_runtime.state.load_state); в сеть снимок не ходит
+    (канон дешёвых снимков) — тот же приём, что у соседних тестов файла
+    (test_final_summary_notice_*). Список вызовов подтверждает, что подмена
+    реально сработала на этом прогоне, а не осталась мёртвым кодом."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
+    from voice_runtime import paths as vpaths
+    calls = []
+
+    def _fake_state_path():
+        calls.append(1)
+        return tmp_path / "voice_data" / "state.json"
+    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
+    monkeypatch.setattr("voice_runtime.state.voice_state_path", _fake_state_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -999,6 +1070,7 @@ async def test_pagedown_advances_from_mcp_step(tmp_path):
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._step == 3
+        assert calls, "изоляция не сработала — voice_runtime.state обошёл подмену"
 
 
 @pytest.mark.asyncio
@@ -1013,10 +1085,10 @@ async def test_pagedown_does_not_commit_on_confirm_step(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr); await pilot.pause()
-        scr._step = 3; scr._render_step(); await pilot.pause()
+        scr._step = 4; scr._render_step(); await pilot.pause()
         await pilot.press("pagedown")
         await pilot.pause()
-        assert scr._step == 3 and written == []
+        assert scr._step == 4 and written == []
 
 
 @pytest.mark.asyncio
@@ -1234,7 +1306,7 @@ async def test_final_commit_writes_and_calls_on_commit(tmp_path, monkeypatch):
         await pilot.app.push_screen(scr); await pilot.pause()
         scr._values = {"completions_url": "https://h/v1", "Authorization": "Bearer sk", "model": "m"}
         scr._mcp_selected = {"office"}
-        scr._step = 3; scr._render_step(); await pilot.pause()
+        scr._step = 4; scr._render_step(); await pilot.pause()
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
         assert written == {

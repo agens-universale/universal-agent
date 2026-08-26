@@ -153,6 +153,55 @@ def insert_missing(text: str, dotted_key: str, template_text: str) -> str:
     return text[:insert_at] + block + text[insert_at:]
 
 
+def create_pointer_file(path, name: str) -> None:
+    """Создать НОВЫЙ config.yml с единственной строкой `profile: "<name>"`.
+
+    Единственный случай, когда writer сам создаёт файл (спека §11/§12.3 — активация
+    профиля из проекта, где `.gc/config.yml` ещё не существует); `write_values`
+    по контракту требует существующего файла."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = f"profile: {_quote(name)}\n"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        atomic_replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def ensure_pointer_anchor(path, template_path, key: str = "profile") -> None:
+    """Гарантировать топ-уровневый якорь `key:` (`profile:`/`level:`) в СУЩЕСТВУЮЩЕМ
+    config.yml.
+
+    Якорь уже есть (любое значение) — идемпотентный no-op. Иначе вставляет блок
+    `<key>: <умолчание>` (с прикреплёнными комментами) из шаблона (`template_path`,
+    обычно `config.default.yml`) в конец файла — тем же приёмом, что
+    `insert_missing`. После вставки `write_values`/`set_scalar_at_path` находят
+    якорь и правят значение обычным путём.
+
+    Нужен именно топ-уровневым скалярам: их `write_values` сам дописать не может —
+    его фоллбэк на шаблон работает только для dotted-ключей (`секция.поле`), а
+    конфиги, созданные до появления ключа, этой строки просто не содержат."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    try:
+        find_anchor(text, key)
+        return
+    except KeyError:
+        pass
+    template_text = Path(template_path).read_text(encoding="utf-8")
+    new_text = insert_missing(text, key, template_text)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(new_text, encoding="utf-8")
+        atomic_replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
 # Живые шаблоны пишут закомментированную секцию как «# key:» — с пробелом после
 # решётки; синтетическая форма «#key:» тоже встречается. Понимаем обе.
 _COMMENTED_TOP_KEY_RE_TMPL = r"^#[ \t]?(?P<key>{key}):[ \t]*.*$"
@@ -174,7 +223,7 @@ def uncomment_template_block(template_text: str, top_key: str) -> str:
     `#<indent>k: v` — без ведущего '#'.
 
     Для опциональных секций, которые шаблон несёт ЗАКОММЕНТИРОВАННЫМИ (пример:
-    gc — сборка мусора не настраивается «из коробки»). KeyError, если блока нет.
+    voice — фича не включена «из коробки»). KeyError, если блока нет.
     """
     lines = template_text.splitlines(keepends=True)
     head_re = re.compile(_COMMENTED_TOP_KEY_RE_TMPL.format(key=re.escape(top_key)))
@@ -238,15 +287,39 @@ def write_values(path, values: dict, *, template_path=None, validate=None) -> li
                 # (юзер завёл её сам, частично) — трогать текст нельзя: второй
                 # top-level блок задублировал бы ключ, а PyYAML на дублях не
                 # ругается и молча берёт последний, затирая юзерские значения.
+                # Разворот — в отдельную переменную, а не в `text`: если ключа нет
+                # и в блоке шаблона, setter упадёт KeyError уже ПОСЛЕ разворота, и
+                # присвоенный `text` дошёл бы до записи. Юзер получил бы включённой
+                # секцию, которую сознательно держал закомментированной, — при том
+                # что ключ честно отчитан как не записанный.
                 try:
                     block = uncomment_template_block(template_text, key.split(".")[0])
                     sep = "" if text.endswith("\n") else "\n"
-                    text = text + sep + "\n" + block
+                    expanded = text + sep + "\n" + block
+                    text = setter(expanded, key, value)
+                    continue
+                except KeyError:
+                    pass
+            else:
+                # Секция ЖИВАЯ, но этого под-ключа в ней нет. `insert_missing` выше не
+                # нашёл его и в шаблоне — потому что шаблон несёт такие секции
+                # закомментированными (voice). Разворачиваем блок шаблона во временный
+                # текст и берём строку оттуда: дописать под-ключ в живую секцию можно,
+                # а дублировать саму секцию нельзя (см. ветку выше). Находка ревью:
+                # раньше здесь сдавались, и ключ уходил в `missing`.
+                try:
+                    unfolded = uncomment_template_block(template_text, key.split(".")[0])
+                    text = insert_missing(text, key, unfolded)
                     text = setter(text, key, value)
                     continue
                 except KeyError:
                     pass
         missing.append(key)
+    if missing:
+        # Всё или ничего: записать половину значений хуже, чем не записать ничего.
+        # Прежде соседи по вызову ложились в файл, а про несохранённые человек узнавал
+        # (в /settings) или не узнавал (в мастере) — и на диске оставалось ни то ни сё.
+        return missing
     if validate is not None:
         validate(text)  # ValueError → наружу, файл не тронут
     tmp = path.with_suffix(path.suffix + ".tmp")

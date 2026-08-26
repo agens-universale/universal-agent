@@ -54,8 +54,8 @@ def test_default_registry_is_exactly_keep_set():
     names = sorted(c.name for c in reg.list_commands())
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
-        "status", "config", "settings", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
-        "buffer", "rigor", "gate", "answers",
+        "status", "config", "settings", "voice", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
+        "buffer", "level", "profiles", "rigor", "gate", "answers",
     ])
 
 
@@ -120,8 +120,8 @@ def test_default_registry_frequency_order():
     names = [c.name for c in build_default_registry().list_commands()]
     assert names == [
         "help", "sessions", "diff", "view", "notices", "new", "config", "settings",
-        "export", "compact", "init", "skills", "skill", "status",
-        "stop", "mcp", "buffer", "quit", "rigor", "gate", "answers",
+        "voice", "export", "compact", "init", "skills", "skill", "status",
+        "stop", "mcp", "buffer", "quit", "level", "profiles", "rigor", "gate", "answers",
     ]
 
 
@@ -129,6 +129,10 @@ def test_hotkeys_match_app_bindings():
     """Каждый токен hotkey имеет совпадающую привязку в app.BINDINGS."""
     from tui.app import TuiApp
     binding_keys = {b.key for b in TuiApp.BINDINGS}
+    # Ctrl+T (/voice) гейтится вручную в TraceScreen.on_key (disabled input /
+    # открытый пикер / transcribing-игнор) — не декларативный Binding.
+    # Хоткей реально работает: см. test_voice_input_glue.py (test_ctrl_t_*).
+    binding_keys.add("ctrl+t")
 
     def normalize(display: str) -> str:
         k = display.lower().replace(" ", "")
@@ -149,9 +153,17 @@ def test_hotkeys_match_app_bindings():
             assert normalize(token) in binding_keys, f"{cmd.name}: {token}"
 
 
-def test_settings_command_description_mentions_server_address():
-    reg = build_default_registry()
-    assert reg.lookup("settings").description == "Настройки: подключение, модель, MCP, обновление"
+def test_settings_command_description_lists_all_sections():
+    """Описание /settings перечисляет секции экрана. Строку видно при каждом
+    открытии палитры, и не названная в ней секция читается как несуществующая —
+    сторож ловит расхождение с `SECTIONS`, а не конкретную формулировку
+    (проверка по литералу уже проморгала «Режимы работы» и «Профили»)."""
+    from tui.screens.settings import SECTIONS
+
+    description = build_default_registry().lookup("settings").description.lower()
+    for section in SECTIONS:
+        head = section.lower().split()[0].split("-")[0]
+        assert head in description, f"секция «{section}» не названа в: {description}"
 
 
 def test_compact_command_registered_with_alias():
@@ -211,3 +223,11 @@ async def test_f6_opens_settings_with_input_focused():
         await pilot.press("f6")
         await pilot.pause()
         assert isinstance(app.screen, SettingsScreen)
+
+
+def test_voice_command_registered_with_hotkey():
+    reg = build_default_registry()
+    cmd = reg.lookup("voice")
+    assert cmd is not None
+    assert cmd.hotkey == "Ctrl+T"          # F1-справка генерится из реестра
+    assert not cmd.is_toggle and not cmd.requires_args

@@ -27,6 +27,8 @@ def test_main_assembles_stack_dry_run(monkeypatch, tmp_path):
             called.update(kw)
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
         def run(self):
             return None
 
@@ -73,6 +75,9 @@ def test_main_auto_mcp_default_starts_and_stops_daemons(monkeypatch, tmp_path):
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
+
         def run(self):
             return None
 
@@ -107,6 +112,9 @@ def test_main_no_auto_mcp_skips_daemons(monkeypatch, tmp_path):
 
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
+
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
 
         def run(self):
             return None
@@ -144,6 +152,9 @@ def test_main_auto_mcp_flag_still_works(monkeypatch, tmp_path):
         def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
+
         def run(self):
             return None
 
@@ -165,3 +176,54 @@ def test_main_auto_mcp_flag_still_works(monkeypatch, tmp_path):
     rc = main(argv=["--config", str(cfg_path), "-a"])
     assert rc == 0
     assert calls == ["ensure", "shutdown"]
+
+
+def test_main_voice_autostart_does_not_block_startup(monkeypatch, tmp_path):
+    """Регрессия находки ревью (2026-08-06): раньше main() ждал
+    `ensure_voice_service` СИНХРОННО перед `app.run()` — на холодном старте
+    speaches это до 90 с пустого терминала, пользователь решал, что программа
+    зависла. Теперь main() только выставляет флаг ожидания на app — сам подъём
+    и его вердикт (тост «не запустился» или тишина) уходят в TuiApp.on_mount,
+    фоном, уже после первого кадра."""
+    pytest.importorskip("textual")
+
+    from tui import app as tui_app
+    import voice_runtime.autostart as autostart
+    import voice_runtime.state as voice_state
+    from voice_runtime.state import VoiceState
+
+    created: list = []
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            self._voice_autostart_pending = False   # как у настоящего TuiApp.__init__
+            created.append(self)
+
+        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+            self._config_path = path
+
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+    monkeypatch.setattr("mcp_daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
+    monkeypatch.setattr("mcp_daemon_autostart.shutdown_mcp_daemons", lambda: None)
+
+    state = VoiceState(version="v1", root="/data/voice/speaches", port=8735, model="m")
+    monkeypatch.setattr(voice_state, "load_state", lambda: state)
+    monkeypatch.setattr(autostart, "url_is_ours", lambda cfg, port: True)
+
+    def _must_not_be_called(*a, **kw):
+        raise AssertionError("main() не должен звать ensure_voice_service синхронно")
+    monkeypatch.setattr(autostart, "ensure_voice_service", _must_not_be_called)
+
+    from tui import main
+
+    cfg_path = _cfg_for_main(tmp_path)
+    rc = main(argv=["--config", str(cfg_path)])
+    assert rc == 0
+    assert len(created) == 1
+    assert created[0]._voice_autostart_pending is True   # гейт прошёл — вердикт ждёт TuiApp

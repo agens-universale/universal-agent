@@ -9,7 +9,9 @@ from agent_executor import AgentExecutor
 from config import (
     apply_cli_overrides,
     build_auth_connector,
+    cli_forces_legacy_model,
     load_config,
+    load_config_ex,
     user_config_path,
     _bootstrap_user_config,
 )
@@ -185,6 +187,73 @@ def _run_sync_config() -> int:
     return 0
 
 
+def _run_reset_config() -> int:
+    """`gc-cli --reset-config`: подменить config.yml пакетным умолчанием (спека §11).
+
+    Файлы профилей (`~/.gc/profiles/*`) и сессионные оверрайды не трогает — заменяет
+    ровно тот файл, что был бы базой запуска (вместе с его указателем `profile:`:
+    выбранный профиль после сброса деактивирован). Интерактивное y/N-подтверждение;
+    без TTY — честный отказ (не молчаливое да и не молчаливый отказ)."""
+    from pathlib import Path
+    from config import _default_config_path, _project_local_config_path
+
+    config_arg = arg_parser.run_args.config
+    target = Path(config_arg) if config_arg else user_config_path()
+    bundled = Path(_default_config_path()).resolve()
+
+    project_local = _project_local_config_path()
+    if project_local and Path(project_local).resolve() == target.resolve():
+        print(
+            "[gc] project-local .gc/config.yml — частичный overlay, сброс к пакетному "
+            "умолчанию к нему неприменим (сбрасывайте глобальный config.yml).",
+            file=sys.stderr,
+        )
+        return 1
+    if not target.is_file():
+        print(
+            f"[gc] config.yml не найден (ещё не создан) — {target}.\n"
+            f"     Сначала настройте агента: gc-cli --init-config",
+            file=sys.stderr,
+        )
+        return 1
+    if target.resolve() == bundled:
+        print(
+            "[gc] нечего сбрасывать: target — пакетный шаблон config.default.yml, его не правим.",
+            file=sys.stderr,
+        )
+        return 1
+    if not _interactive():
+        print(
+            "[gc] --reset-config требует интерактивного подтверждения (TTY) — "
+            "запустите в терминале и подтвердите y/N.",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"[gc] Сбросить {target} к пакетному умолчанию? Текущий файл уйдёт в бэкап. [y/N]: ",
+        file=sys.stderr, end="",
+    )
+    sys.stderr.flush()
+    try:
+        answer = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = "n"
+    if answer not in ("y", "yes"):
+        print("[gc] отменено", file=sys.stderr)
+        return 0
+    try:
+        report = config_sync.reset_config(target)
+    except (ValueError, OSError) as exc:
+        print(f"[gc] config.yml НЕ сброшен: {exc}", file=sys.stderr)
+        return 1
+    print(
+        f"[gc] ✓ config.yml сброшен к пакетному умолчанию: {target}\n"
+        f"     бэкап: {report.backup_path}",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _run_check_update() -> int:
     """`gc-cli --check-update`: разовая проверка обновлений и выход.
 
@@ -269,6 +338,9 @@ def main() -> int:
     if getattr(arg_parser.run_args, "sync_config", False):
         return _run_sync_config()
 
+    if getattr(arg_parser.run_args, "reset_config", False):
+        return _run_reset_config()
+
     if getattr(arg_parser.run_args, "check_update", False):
         return _run_check_update()
 
@@ -280,7 +352,9 @@ def main() -> int:
 
     config_arg = arg_parser.run_args.config
     just_created = _bootstrap_user_config() if config_arg is None else False
-    config_dict = load_config(config_arg)
+    config_dict, _profile_meta = load_config_ex(
+        config_arg, profile_override=getattr(arg_parser.run_args, "profile", None)
+    )
 
     # Единая точка применения CLI-override поверх config.yml.
     apply_cli_overrides(
@@ -295,6 +369,13 @@ def main() -> int:
         agentsmd_override=getattr(arg_parser.run_args, "agentsmd_override", False),
         trace_id=getattr(arg_parser.run_args, "trace_id", None),
     )
+    # Легаси-форс (спека §2): --model/--completions_url поверх непустого реестра
+    # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
+    force_legacy = cli_forces_legacy_model(config_dict)
+    if force_legacy:
+        config_dict.setdefault("compat_notices", []).append(
+            "--model: уровни отключены на этот запуск (легаси-форс)"
+        )
     import upgrade_gate
     _upgrade_info = upgrade_gate.detect_upgrade()
 
@@ -315,7 +396,7 @@ def main() -> int:
     auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
     if auto_mcp:
         ensure_mcp_daemons(config_dict)
-    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+    ctx = create_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
 
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
     from startup_notices import collect_startup_notices, render_notices_for_cli

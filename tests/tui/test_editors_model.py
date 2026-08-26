@@ -608,7 +608,8 @@ async def test_reload_keeps_the_mark(tmp_path):
 
 async def test_reload_keeps_the_typed_filter(tmp_path):
     """Набранное в поле — фильтр (§3.2.6), и перечитывание его не теряет: список и
-    поле обязаны показывать одно и то же."""
+    поле обязаны показывать одно и то же (канон `voice_endpoint.ModelListController.
+    reload`)."""
     from tests.tui.conftest import mounted_model_editor, wait_until
     models = [_M("a/one"), _M("b/two")]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):

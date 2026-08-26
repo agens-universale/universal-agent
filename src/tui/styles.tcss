@@ -82,6 +82,11 @@ TraceScreen #trace { height: auto; }
     border-top: solid $deep-dim;
     border-bottom: solid $deep-dim;
 }
+/* Запись голосом: оливковый бордер = «микрофон активен» (гаснет на стопе). */
+#input-row.recording {
+    border-top: solid $olive;
+    border-bottom: solid $olive;
+}
 #input-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left top; padding: 0; }
 #cmdinput {
     height: auto;                       /* растёт со строками */
@@ -466,14 +471,17 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-summary { height: 1; margin-bottom: 1; }   /* строка сводки — клип по краю, без переноса; воздух перед заголовком шага */
 #onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
 /* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
-#onb-model, #conn-url, #conn-token, #conn-proxy { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
-#onb-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus { border: none; background: $band-bg; }
+#onb-model, #conn-url, #conn-token, #conn-proxy, #voice-url, #voice-token, #voice-model, #voice-lang { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#onb-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus, #voice-url:focus, #voice-token:focus, #voice-model:focus, #voice-lang:focus { border: none; background: $band-bg; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
 /* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
    отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
 .onb-option.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
 .onb-mcp-row { text-wrap: nowrap; text-overflow: ellipsis; }
 .set-spaced { margin-bottom: 1; }   /* воздух между строками-опциями в /settings-секциях */
+/* Вариант БЕЗ второй строки описания в списке, где у соседа она есть: воздух добирает
+   недостающую строку, и блоки вариантов встают одинаковой высоты (голосовой шаг мастера). */
+.set-spaced-2 { margin-bottom: 2; }
 /* Первая строка-действие: зазор сверху (от инфо-строк) И снизу (между действиями) одним
    shorthand — раздельные longhand'ы .set-gap+.set-spaced на одном элементе Textual перетирает
    (последний .set-gap обнулял margin-bottom → пропадал воздух под первым действием). */
@@ -530,11 +538,14 @@ TextArea.ask-human-mode { border: solid $run-color; }
 /* Поле ввода в /settings — скруглённая amber-рамка (id+class специфичнее flat
    #onb-* → онбординг остаётся без рамки, как принят). */
 #onb-model.set-framed,
-#conn-url.set-framed, #conn-token.set-framed, #conn-proxy.set-framed {
+#conn-url.set-framed, #conn-token.set-framed, #conn-proxy.set-framed,
+#voice-url.set-framed, #voice-token.set-framed, #voice-model.set-framed, #voice-lang.set-framed {
     border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg;
 }
 #onb-model.set-framed:focus,
-#conn-url.set-framed:focus, #conn-token.set-framed:focus, #conn-proxy.set-framed:focus {
+#conn-url.set-framed:focus, #conn-token.set-framed:focus, #conn-proxy.set-framed:focus,
+#voice-url.set-framed:focus, #voice-token.set-framed:focus, #voice-model.set-framed:focus,
+#voice-lang.set-framed:focus {
     border: round $run-color; background: $band-bg;
 }
 /* Замороженное поле токена при «● без авторизации»: поле на месте, но disabled —
@@ -590,6 +601,11 @@ PasteInput > .input--placeholder { color: $deep-dim; }
    не 14: рамка уехала на группу, height больше не border-box списка (спека §3.3). */
 .field-group > .dropdown-scroll { border: none; max-height: 12; }
 
+/* Поле-факт (локальный режим: адрес/токен/модель сервиса) — не правится и выглядит
+   приглушённо. Через id: цвет поля задан id-селектором выше, класс его не перебил бы. */
+#voice-url.set-readonly, #voice-token.set-readonly,
+#voice-model.set-readonly, #voice-lang.set-readonly { color: $deep-dim; }
+
 /* Редакторы полей — Vertical по дефолту height:1fr и растягивают рамку;
    принудительно height:auto, чтобы рамка (#onb-frame/#set-frame) обнимала контент. */
-ModelEditor, McpSectionEditor, ConnectionEditor { height: auto; }
+ModelEditor, McpSectionEditor, ConnectionEditor, VoiceEndpointEditor { height: auto; }

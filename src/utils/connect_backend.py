@@ -10,11 +10,13 @@ from typing import List, Dict, Optional, Tuple
 
 from config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from message_policy.chat_completions import prepare_chat_completion_messages_for_api
+from model_router import ResolvedModel
 from utils.schema_markers import schema_without_internal_markers
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.http_proxy import resolve_proxies
 from utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION
 from utils.retry import retry_with_backoff
+from utils.ssl_config import get_backend_client_cert
 from usage.context import record_usage
 from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
 from utils.backend_errors import is_empty_completion
@@ -26,6 +28,93 @@ from trace_id import (
 
 
 logger = logging.getLogger(__name__)
+
+# Сентинел «оверрайда нет» — отличим от легального override-значения None/"" в
+# ResolvedModel.backend_overrides (см. backend_override_value).
+NO_BACKEND_OVERRIDE = object()
+
+
+def backend_override_value(resolved: Optional[ResolvedModel], backend_key: str):
+    """Значение поля BackendConfig из ``resolved.backend_overrides``, если задано.
+
+    ``backend_key`` — имя поля BackendConfig (не обязательно совпадает с плоским
+    ключом config_dict, см. src/config.py::flatten_app_config, напр.
+    ``request_timeout_sec`` -> плоский ``backend_request_timeout_sec``).
+    Возвращает ``NO_BACKEND_OVERRIDE``, если оверрайда нет (``resolved`` — None или
+    ключ не задан явно на модели) — вызывающий код сам решает выражение дефолта для
+    соответствующего плоского ключа config_dict, не теряя строгость (KeyError и т.п.).
+    """
+    if resolved is None:
+        return NO_BACKEND_OVERRIDE
+    overrides = resolved.backend_overrides or {}
+    if backend_key in overrides:
+        return overrides[backend_key]
+    return NO_BACKEND_OVERRIDE
+
+
+def effective_cert_config(config_dict: Dict, resolved: Optional[ResolvedModel]) -> Dict:
+    """``config_dict`` с наложенными ``cert_path``/``key_path`` из backend_overrides.
+
+    Отдельная функция, а не ``backend_override_value`` по ключу: ``get_backend_client_cert``
+    читает оба ключа разом из одного словаря (см. utils/ssl_config.py)."""
+    if resolved is None:
+        return config_dict
+    overrides = resolved.backend_overrides or {}
+    cert_overrides = {k: overrides[k] for k in ("cert_path", "key_path") if k in overrides}
+    if not cert_overrides:
+        return config_dict
+    merged = dict(config_dict)
+    merged.update(cert_overrides)
+    return merged
+
+
+def resolve_network_params(
+    config_dict: Dict, resolved: Optional[ResolvedModel]
+) -> Tuple[bool, Optional[Tuple[str, str]], bool, float, Optional[str], bool]:
+    """``(verify, cert, use_retry, timeout_sec, proxy, retry_embedded_choice_errors)`` — эффективные сетевые параметры
+    backend-запроса: ``config_dict`` с наложенным ``resolved.backend_overrides`` поверх
+    (``use_ssl``/``cert_path``+``key_path``/``use_retry``/``request_timeout_sec``/``proxy``).
+
+    Единая точка маппинга для обеих воронок (``request_chat_completion_text`` и main-трейс
+    в ``processing_responses.py``) — вызывающий код сам решает, когда ``resolved`` уместен
+    (например, в responses-режиме per-model сетевые квирки не применяются, спека §4, — тогда
+    вызывающий передаёт ``resolved=None``). ``resolved=None`` → байт-в-байт из ``config_dict``,
+    как до появления ResolvedModel.
+    """
+    verify_override = backend_override_value(resolved, "use_ssl")
+    verify = (
+        config_dict.get("use_ssl", True)
+        if verify_override is NO_BACKEND_OVERRIDE
+        else verify_override
+    )
+    cert = get_backend_client_cert(effective_cert_config(config_dict, resolved))
+    use_retry_override = backend_override_value(resolved, "use_retry")
+    use_retry = (
+        config_dict.get("use_retry", False)
+        if use_retry_override is NO_BACKEND_OVERRIDE
+        else use_retry_override
+    )
+    timeout_override = backend_override_value(resolved, "request_timeout_sec")
+    timeout_sec = (
+        float(config_dict["backend_request_timeout_sec"])
+        if timeout_override is NO_BACKEND_OVERRIDE
+        else float(timeout_override)
+    )
+    proxy_override = backend_override_value(resolved, "proxy")
+    proxy = (
+        config_dict.get("proxy") if proxy_override is NO_BACKEND_OVERRIDE else proxy_override
+    )
+    # Ретрай ошибки, зашитой прокси в HTTP-200, — параметр той же политики повторов,
+    # что и use_retry, и тюнится он под КОНКРЕТНЫЙ прокси. Поэтому живёт здесь, а не
+    # читается плоско в каждой воронке: иначе `models.<alias>.backend` принимал бы
+    # ключ (BackendConfig целиком), а рантайм молча брал глобальный.
+    retry_embedded_override = backend_override_value(resolved, "retry_embedded_choice_errors")
+    retry_embedded = (
+        config_dict.get("retry_embedded_choice_errors", True)
+        if retry_embedded_override is NO_BACKEND_OVERRIDE
+        else retry_embedded_override
+    )
+    return verify, cert, use_retry, timeout_sec, proxy, bool(retry_embedded)
 
 
 def normalize_chat_completions_tools(
@@ -376,13 +465,19 @@ def request_backend_chat_completions(
     return data
 
 
-def create_call_headers(state, ctx) -> Dict[str, str]:
+def create_call_headers(state, ctx, resolved: Optional[ResolvedModel] = None) -> Dict[str, str]:
     """
     Сформировать заголовки вызова для backend API на основе State и RunContext.
+
+    ``resolved`` — комплект ResolvedModel этого вызова (Router, спека §6/§7). Per-model
+    ``authorization``/``backend.chat_completion_headers`` действуют только в chat_completions —
+    в responses-режиме из ResolvedModel применяется только id модели (спека §4), заголовки
+    собираются как сегодня.
     """
     config_dict = getattr(ctx, "config_dict", {}) or {}
     auth_connector = getattr(ctx, "auth_connector", None)
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    resolved_for_headers = resolved if backend_mode == "chat_completions" else None
 
     call_headers: Dict[str, str] = {
         "x_cl_id": str(config_dict.get("x_cl_id")),
@@ -392,20 +487,46 @@ def create_call_headers(state, ctx) -> Dict[str, str]:
     if state.x_target is not None:
         call_headers["x-target"] = state.x_target
 
-    if auth_connector is not None:
+    # authorization: None=наследовать эффективный заголовок (путь ниже, как раньше),
+    # ""=явно без Authorization, значение=использовать как есть (уже Bearer-нормализовано).
+    authorization_override = (
+        resolved_for_headers.authorization if resolved_for_headers is not None else None
+    )
+    if authorization_override == "":
+        pass
+    elif authorization_override:
+        call_headers["Authorization"] = authorization_override
+    elif auth_connector is not None:
         token = auth_connector.get_token()
         call_headers["Authorization"] = f"Bearer {token}"
 
     # Дополнительные заголовки для chat/completions передаются
     # универсально через backend.chat_completion_headers.
     if backend_mode == "chat_completions":
-        extra_headers = config_dict.get("chat_completion_headers")
+        extra_headers = backend_override_value(resolved_for_headers, "chat_completion_headers")
+        headers_from_model = extra_headers is not NO_BACKEND_OVERRIDE
+        if not headers_from_model:
+            extra_headers = config_dict.get("chat_completion_headers")
         if isinstance(extra_headers, dict):
             for key, raw_val in extra_headers.items():
                 if not isinstance(key, str):
                     continue
                 k = key.strip()
                 if not k:
+                    continue
+                # ОБЩИЙ Authorization не перебивает решение модели: боевой конфиг
+                # держит корп-токен в backend.chat_completion_headers, и без этой
+                # ветки `token: sk-or-...` уехал бы под корп-заголовком на чужой
+                # хост, а `token: ""` («явно без авторизации») воскрес бы. Оверлей
+                # заголовков С ТОЙ ЖЕ модели — тоже per-model решение, и более
+                # конкретное: он уточняет token и проходит дальше. Сравнение
+                # регистронезависимое: иначе `authorization:` строчными не перебивал
+                # бы, а ДОБАВЛЯЛСЯ вторым заголовком к нашему.
+                if (
+                    not headers_from_model
+                    and authorization_override is not None
+                    and k.lower() == "authorization"
+                ):
                     continue
                 if raw_val is None:
                     continue
@@ -446,9 +567,12 @@ def create_call_data_responses(
     state,
     tools: Optional[List] = None,
     set_previous_response_id: bool = True,
+    resolved: Optional[ResolvedModel] = None,
 ) -> Dict:
+    # Responses-режим: из ResolvedModel действует только провайдерский id модели —
+    # url/token/backend-квирки per-model в этом API-режиме не применяются (спека §4).
     call_data = dict()
-    call_data["model"] = state.default_model
+    call_data["model"] = resolved.model if resolved is not None else state.default_model
     call_data["input"] = _responses_input_without_message_call_id(messages)
     call_data["tools"] = tools if tools else state.tools
     call_data["metadata"] = state.call_metadata
@@ -466,6 +590,7 @@ def create_call_data_completions(
     *args,
     max_tokens: Optional[int] = None,
     config_dict: Optional[Dict] = None,
+    resolved: Optional[ResolvedModel] = None,
     **kwargs,
 ) -> Dict:
     def _safe_positive_int(raw: object) -> Optional[int]:
@@ -516,10 +641,18 @@ def create_call_data_completions(
     effective_model = model
     if effective_model is None and state is not None:
         effective_model = state.default_model
+    if resolved is not None:
+        effective_model = resolved.model
 
     cfg = config_dict if isinstance(config_dict, dict) else {}
+
+    _max_tokens_override = backend_override_value(resolved, "chat_completions_max_tokens")
+    configured_max_tokens = _safe_positive_int(
+        cfg.get("chat_completions_max_tokens")
+        if _max_tokens_override is NO_BACKEND_OVERRIDE
+        else _max_tokens_override
+    )
     explicit_max_tokens = _safe_positive_int(max_tokens)
-    configured_max_tokens = _safe_positive_int(cfg.get("chat_completions_max_tokens"))
     effective_max_tokens = explicit_max_tokens or configured_max_tokens or 8096
 
     data = {
@@ -528,13 +661,18 @@ def create_call_data_completions(
         "tools": to_send_tools,
         "tool_choice": "auto",
     }
+    _use_max_tokens_param = backend_override_value(resolved, "use_max_tokens_param")
+    if _use_max_tokens_param is NO_BACKEND_OVERRIDE:
+        _use_max_tokens_param = cfg.get("use_max_tokens_param", False)
     # Key selection is provider-driven; explicit max_tokens only sets the VALUE.
-    if bool(cfg.get("use_max_tokens_param", False)):
+    if bool(_use_max_tokens_param):
         data["max_tokens"] = effective_max_tokens
     else:
         data["max_completion_tokens"] = effective_max_tokens
 
-    extra = cfg.get("chat_completion_kwargs")
+    extra = backend_override_value(resolved, "chat_completion_kwargs")
+    if extra is NO_BACKEND_OVERRIDE:
+        extra = cfg.get("chat_completion_kwargs")
     if isinstance(extra, dict) and extra:
         protected = {
             "model",

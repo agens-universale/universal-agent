@@ -269,6 +269,7 @@ def summarize_dialog_via_chat_completions(
             state=state,
             messages=request_messages,
             request_label=f"summary_batch_{batch_index}",
+            consumer="summary",
             max_tokens=max_tokens,
             logger=logger,
         )

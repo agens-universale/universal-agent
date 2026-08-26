@@ -39,6 +39,17 @@ def _hint_for(cmd: Command | None) -> str:
     return _HINT_NO_ARGS
 
 
+def _matches(cmd: Command, prefix: str) -> bool:
+    """Фильтр строки палитры: имя ИЛИ любой алиас начинается с набранного
+    (спека §12.1 — тихий алиас `models`→`/level`: набравший «/models» находит
+    `/level` уже на этапе фильтрации, не только по прямому вводу полного
+    алиаса). Generic по `Command.aliases` — тот же механизм, что у `/сжать`
+    (`/compact`), просто применённый и к живому фильтру, не только к `lookup`."""
+    if cmd.name.startswith(prefix):
+        return True
+    return any(alias.startswith(prefix) for alias in cmd.aliases)
+
+
 class CommandPalette(VerticalScroll):
     """Filtered overlay-список команд из реестра (§2.7) + toggle-подвал (§4)."""
 
@@ -51,6 +62,7 @@ class CommandPalette(VerticalScroll):
         toggle_state: Optional[Callable[[str], str]] = None,
         toggle_extra: Optional[Callable[[str], Any]] = None,
         toggle_custom_hint: Optional[Callable[[str], str]] = None,
+        toggle_dynamic_hint: Optional[Callable[[str, str], str]] = None,
     ) -> None:
         super().__init__(classes="palette")
         self._registry = registry
@@ -59,6 +71,9 @@ class CommandPalette(VerticalScroll):
         self._toggle_state = toggle_state
         self._toggle_extra = toggle_extra
         self._toggle_custom_hint = toggle_custom_hint
+        # Динамический hint (спека §12.1, /level и /profiles): (name, value) -> текст,
+        # заменяет статический `ToggleValue.hint` для тогглов с `hint_provider`.
+        self._toggle_dynamic_hint = toggle_dynamic_hint
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
     def _toggle_children(self, name: str) -> list[str]:
@@ -206,19 +221,30 @@ class CommandPalette(VerticalScroll):
         мгновенная), приоритетно усечённые под ширину подвала (`_fit_hint`).
         Применённое значение вне `spec.names` (ревизия 4 — отображаемый
         custom, custom сам не выбирается) — хинт берёт динамический провайдер
-        `toggle_custom_hint` (спека §5, два состояния)."""
+        `toggle_custom_hint` (спека §5, два состояния).
+
+        `hint_provider` (спека §12.1, /level и /profiles) — динамический hint
+        вместо статического `ToggleValue.hint`, читается через инъекцию
+        `toggle_dynamic_hint`. Пустое состояние /profiles (`current` пусто,
+        профилей нет) — hint возвращается ЦЕЛИКОМ, без обёртки
+        «значение — …  ·  клавиши»: цикла без позиций нет, обёртка была бы
+        бессмысленной (канон §12.1 — текст пустого состояния дословно)."""
         spec = TOGGLES[cmd.name]
         if self._toggle_state is not None:
             current = self._toggle_state(cmd.name)
         else:
-            current = spec.names[0]
+            current = spec.names[0] if spec.names else ""
         width = self._content_width() - 4 if self._content_width() else 0
-        if current in spec.names:
+        if spec.hint_provider is not None and self._toggle_dynamic_hint is not None:
+            hint = self._toggle_dynamic_hint(cmd.name, current)
+            if not current:
+                return hint
+        elif current in spec.names:
             hint = spec.values[spec.names.index(current)].hint
         elif self._toggle_custom_hint is not None:
             hint = self._toggle_custom_hint(cmd.name)     # /rigor custom, отображаемый (спека §5)
         else:
-            hint = spec.values[0].hint
+            hint = spec.values[0].hint if spec.values else ""
         return _fit_hint(current, hint, _HINT_KEYS_TOGGLE, width)
 
     def _name_col_w(self) -> int:
@@ -264,8 +290,13 @@ class CommandPalette(VerticalScroll):
         return head + " " * (col - len(cmd.description)) + cmd.hotkey
 
     def _my_base_w(self, name: str) -> int:
-        """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва)."""
-        return _slider_width(len(TOGGLES[name].values))
+        """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва).
+        `show_track=False` (спека §12.1, /profiles — trackless) → 0: нет трека,
+        нечего резервировать."""
+        spec = TOGGLES[name]
+        if not spec.show_track:
+            return 0
+        return _slider_width(len(spec.values))
 
     def _my_extra_w(self, name: str) -> int:
         """Собственная ширина extra-зоны тоггла `name`: 0 — extra не
@@ -297,7 +328,7 @@ class CommandPalette(VerticalScroll):
         col = max(len(self._row_head(c, name_w)) for c in toggles) + 3
         base_w = max(self._my_base_w(c.name) for c in toggles)
         extra_w = max(self._my_extra_w(c.name) for c in toggles)
-        label_w = max(len(n) for c in toggles for n in TOGGLES[c.name].names)
+        label_w = max((len(n) for c in toggles for n in TOGGLES[c.name].names), default=0)
         return col, base_w, extra_w, label_w
 
     def _format_toggle_row(self, cmd: Command) -> Text:
@@ -319,12 +350,33 @@ class CommandPalette(VerticalScroll):
         if self._toggle_state is not None:
             current = self._toggle_state(cmd.name)
         else:
-            current = spec.names[0]
+            current = spec.names[0] if spec.names else ""
 
         name_w = self._name_col_w()
         col, base_w, extra_w, label_w = self._toggle_columns()
         is_child = self._owning_preset(cmd.name) is not None
         head = self._row_head(cmd, name_w)
+
+        if not spec.show_track:
+            # Trackless (спека §12.1, /profiles): без шкалы — сразу значение-имя
+            # на месте начала общей колонки трека (`col`), без слайдера/резерва
+            # (произвольное число профилей — шкала не имеет смысла). Пустое
+            # значение — словами спеки («без профиля»), не прочерк.
+            value_text = current or spec.empty_value_text
+            avail = self._content_width() - 2 if self._content_width() else 0
+            need = col + len(value_text)
+            if avail and need > avail:
+                prefix_floor = 1 + name_w + 1
+                head_w = max(prefix_floor, avail - len(value_text) - 3)
+                if len(head) > head_w:
+                    head = head[: head_w - 1] + "…"
+                col = head_w + 3
+            text = Text(head.ljust(col))
+            text.append(value_text)
+            if is_child:
+                text.stylize(_pal.DIM)
+            return text
+
         track_w = base_w + extra_w
 
         # Узкий терминал (§4): слайдер+подпись не жертвуются — усекаем описание.
@@ -369,8 +421,9 @@ class CommandPalette(VerticalScroll):
         f = self._filter.lower()
         cmds = [c for c in self._registry.list_commands() if c.is_toggle == toggle]
         if not toggle:
-            # Обычные команды — фильтр как был: startswith по набранному.
-            return [c for c in cmds if c.name.startswith(f)] if f else cmds
+            # Обычные команды — фильтр как был: startswith по имени ИЛИ алиасу
+            # (§12.1: тихий алиас `models`→`/level` — тот же приём здесь).
+            return [c for c in cmds if _matches(c, f)] if f else cmds
         # Toggle-подвал (ревизия 7, спека §2, §4.1): база — пустой фильтр =
         # `palette_default`-тогглы, непустой = startswith (то же правило, что
         # и раньше). Для КАЖДОГО preset-родителя из базы сразу после него
@@ -392,7 +445,7 @@ class CommandPalette(VerticalScroll):
         # регистрации — он всё равно будет вставлен инъекцией под настоящим
         # родителем. Ребёнок, чей родитель фильтром НЕ пойман (отсутствует в
         # базе), в `owned` не попадает — остаётся обычной строкой на своём месте.
-        base = [c for c in cmds if c.name.startswith(f)] if f else \
+        base = [c for c in cmds if _matches(c, f)] if f else \
             [c for c in cmds if TOGGLES[c.name].palette_default]
         owned: set[str] = set()
         for c in base:
