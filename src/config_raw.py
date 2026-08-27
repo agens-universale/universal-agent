@@ -20,14 +20,29 @@ import yaml
 from config_modules.env_interpolation import _ENV_MARKER
 
 
+def parse_document(text: str) -> Dict[str, Any]:
+    """YAML-документ из УЖЕ прочитанного текста; битый/пустой → {}.
+
+    Отдельно от `read_document` ради тех, кому нужен и текст, и документ (валидация
+    записи спрашивает текст, витрина — документ): второе чтение того же файла ради
+    того же содержимого — лишний поход на диск, а не отдельный факт."""
+    try:
+        document = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
 def read_document(path) -> Dict[str, Any]:
     """YAML-документ файла как есть (без резолва ${ENV:VAR}).
 
-    Нечитаемый/битый/пустой файл → {} (ровно как трактует его load_config).
+    Нечитаемый/битый/пустой файл → {} (ровно как трактует его load_config). Туда же
+    идёт документ, чей верхний уровень не словарь (список, скаляр): конфигом он не
+    является, а вызывающие и `value_at` ждут словарь.
     """
     try:
-        return yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+        return parse_document(Path(path).read_text(encoding="utf-8"))
+    except OSError:
         return {}
 
 

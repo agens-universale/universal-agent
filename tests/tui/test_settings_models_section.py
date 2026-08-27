@@ -1,0 +1,1028 @@
+"""Секция «Модели» хаба /settings — реестр `models` базового config.yml (волна B, Task 3).
+
+Секция ПОГЛОЩАЕТ легаси-«Модель»: пустой реестр = сегодняшний редактор модели
+целиком (`ModelEditor`, правит `agent.model`) плюс вход в реестр; непустой —
+список записей + строка «резервная модель». Запись — немедленно по действию через
+`config_modules/registry_write` (секция вышла из save-машины `_EDITOR_SECTIONS`),
+цель — базовый config.yml, показывается ФАЙЛОВОЕ состояние цели (решение 6 плана).
+"""
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("textual")
+
+import yaml
+from textual.widgets import Input, Static
+
+from tests.tui.conftest import (_isolated_config_layers, open_settings_section,
+                                wait_until)
+from tests.tui.test_settings_screen import _cfg, _loaded, _mk_screen
+
+_SECTION = "Модели"
+
+
+def _flat(model: str = '"test-model"') -> str:
+    return ("backend:\n"
+            '  completions_url: "http://host/v1/chat/completions"\n'
+            "  chat_completion_headers:\n"
+            '    Authorization: "Bearer secret-token"\n'
+            "agent:\n"
+            f"  model: {model}\n")
+
+
+_REGISTRY = (
+    "models:\n"
+    "  flash:\n"
+    '    model: "google/gemini-2.5-flash"\n'
+    "  opus:\n"
+    '    model: "anthropic/claude-opus"\n'
+    "slots:\n"
+    '  default: "flash"\n'
+)
+
+
+def _write_cfg(tmp_path, body: str = "", *, model: str = '"test-model"') -> Path:
+    p = tmp_path / "config.yml"
+    p.write_text(_flat(model) + body, encoding="utf-8")
+    return p
+
+
+def _doc(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _texts(scr) -> str:
+    return " ".join(str(w.render()) for w in scr.query(Static))
+
+
+def _editor(scr):
+    from tui.editors.models_section import ModelsSectionEditor
+    return scr.query(ModelsSectionEditor).last()
+
+
+def _rows(scr) -> list:
+    return [str(w.render()) for w in scr.query(".models-row") if w.display]
+
+
+async def _wait_legacy_list(pilot, scr) -> None:
+    """Дождаться РАСКРЫТОГО списка легаси-редактора.
+
+    `models_loaded` ставится ДО монтажа строк (`_mount_list` ждёт сноса прежнего тела),
+    и ↑/↓, попавшая в этот зазор, уходит в пустоту: список ещё свёрнут, `move` клавишу
+    не берёт, а `submit()` возвращает None — тест зеленел бы на «ничего не изменено»."""
+    from tui.editors.model import ModelEditor
+    await wait_until(
+        pilot,
+        lambda: bool(scr.query(ModelEditor))
+        and scr.query(ModelEditor).last().models_loaded
+        and any(w.display for w in scr.query(".onb-model-row")),
+        "список моделей раскрыт")
+
+
+def _footer(scr) -> str:
+    """Текст ВИДЖЕТА футера, а не пересчитанный `_footer_text()` — только так видно,
+    что экран его действительно обновил (канон `test_footer_contract`)."""
+    return str(scr.query_one("#set-footer", Static).render())
+
+
+@asynccontextmanager
+async def _section(tmp_path, body: str = "", *, models=("test-model",),
+                   model: str = '"test-model"'):
+    """/settings → секция «Модели» на настоящем config.yml во временном каталоге.
+
+    Список моделей легаси-редактора подменён на месте источника (`model_picker.
+    fetch_models`) — инъекции у секции нет, как и у прежней «Модели»."""
+    from unittest import mock
+
+    import model_picker
+    import tui.app as app_mod
+    from model_picker import ModelInfo
+
+    cfg_file = _write_cfg(tmp_path, body, model=model)
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    with _isolated_config_layers(tmp_path), \
+         mock.patch.object(model_picker, "fetch_models",
+                           lambda *a, **k: [ModelInfo(id=i) for i in models]):
+        async with app.run_test() as pilot:
+            scr = _mk_screen(config=cfg, config_path=str(cfg_file))
+            app.push_screen(scr)
+            await pilot.pause()
+            open_settings_section(scr, _SECTION)
+            await pilot.pause()
+            yield pilot, scr, cfg_file
+
+
+# --- состав секций и превью хаба ---------------------------------------------
+
+def test_models_section_replaces_the_legacy_one_and_leaves_the_save_machine():
+    """«Модели» встают на позицию «Модели»-легаси и ВЫХОДЯТ из save-машины:
+    запись идёт немедленно по действию, а не через submit-цикл секции."""
+    from tui.screens import settings as s
+    assert s.SECTIONS[1] == "Модели"
+    assert s._MODELS == 1
+    assert s._EDITOR_SECTIONS == {s._CONNECTION}
+    assert s._PROBE_SECTIONS == {s._CONNECTION}
+
+
+async def test_hub_preview_counts_registry_entries_and_names_the_default(tmp_path):
+    """Превью хаба непустого реестра — «N в реестре · default <алиас>»."""
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        preview = str(scr._row_value(1))
+        assert "2 в реестре" in preview
+        assert "default flash" in preview
+
+
+async def test_hub_preview_does_not_count_the_reserve_model(tmp_path):
+    """Резервная модель (`agent.model`) в счёт реестра НЕ входит (§12.4): реестр из
+    одной записи и заполненный `agent.model` — это «1 в реестре», не 2."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (_pilot, scr, _cfg_file):
+        preview = str(scr._row_value(1))
+        assert "1 в реестре" in preview
+        assert "test-model" not in preview
+
+
+async def test_hub_preview_in_legacy_mode_is_the_model_name(tmp_path):
+    """Реестра нет — превью то же, что и сегодня: имя модели из файла."""
+    async with _section(tmp_path) as (_pilot, scr, _cfg_file):
+        assert "test-model" in str(scr._row_value(1))
+
+
+async def test_hub_glyph_is_ok_when_the_registry_is_filled_and_valid(tmp_path):
+    """Глиф секции — свой вердикт: ✓ = реестр непуст и валиден."""
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        glyph, _style = scr._menu_glyph(1)
+        assert glyph == "✓"
+
+
+async def test_hub_glyph_flags_a_broken_registry(tmp_path):
+    """Реестр непуст, но нерезолвим (2 модели без единого слота) — честное «!»,
+    а не ✓: секция показывает ФАЙЛОВОЕ состояние цели."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n'
+            "  opus:\n"
+            '    model: "anthropic/claude-opus"\n')
+    async with _section(tmp_path, body) as (_pilot, scr, _cfg_file):
+        glyph, _style = scr._menu_glyph(1)
+        assert glyph == "!"
+
+
+async def test_probe_wave_does_not_animate_the_models_row(tmp_path):
+    """Волна загрузки probe — только у секций, чей глиф ждёт пробы. «Модели» из
+    probe-волны вышли: её вердикт про файл, а не про сеть."""
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        scr._probe_in_flight = True
+        assert str(scr._menu_glyph_text(1)) != "···"
+
+
+# --- пустое состояние: легаси-редактор целиком --------------------------------
+
+async def test_empty_state_mounts_the_legacy_model_editor(tmp_path):
+    """Реестра нет → секция = сегодняшний редактор модели плюс вход в реестр."""
+    from tui.editors.model import ModelEditor
+    async with _section(tmp_path) as (pilot, scr, _cfg_file):
+        await _wait_legacy_list(pilot, scr)
+        assert scr.query(ModelEditor)
+        assert "в реестр" in _texts(scr)
+
+
+async def test_escape_from_the_new_entry_form_returns_to_the_empty_state(tmp_path):
+    """Esc из формы возвращает в СВОЁ под-состояние (пустое состояние секции), а не
+    в меню — Esc-вложенность Global Constraints."""
+    from tui.editors.model import ModelEditor
+    from tui.editors.model_entry_form import ModelEntryForm
+    async with _section(tmp_path) as (pilot, scr, _cfg_file):
+        await _wait_legacy_list(pilot, scr)
+        await pilot.press("alt+n")
+        await pilot.pause()
+        assert scr.query(ModelEntryForm)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr._view == 1                     # из секции не вышли
+        assert not scr.query(ModelEntryForm)
+        assert scr.query(ModelEditor)
+
+
+# --- создание записи ----------------------------------------------------------
+
+async def test_creating_the_first_entry_writes_valid_yaml(tmp_path):
+    """`n` → форма → Enter: запись уходит в базовый config.yml немедленно, файл
+    остаётся валидным конфигом."""
+    from config import validate_config_text_with_sections
+    from tui.editors.model_entry_form import ModelEntryForm
+    async with _section(tmp_path) as (pilot, scr, cfg_file):
+        await pilot.press("alt+n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "flash"
+        form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        doc = _doc(cfg_file)
+        assert doc["models"]["flash"]["model"] == "google/gemini-2.5-flash"
+        validate_config_text_with_sections(cfg_file.read_text(encoding="utf-8"))
+        assert not scr.query(ModelEntryForm)      # форма закрылась
+        assert any("flash" in r for r in _rows(scr))
+
+
+async def test_second_entry_is_written_together_with_the_default_slot(tmp_path):
+    """Вторая модель делает реестр неоднозначным (2 записи без слотов нерезолвимы) —
+    форма спрашивает «какая по умолчанию?» инлайн-пикером, и запись уходит ОДНОЙ
+    транзакцией вместе с `slots.default` (иначе валидатор отвергает её, и правильно)."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        await pilot.press("n")
+        await pilot.pause()
+        from tui.editors.model_entry_form import ModelEntryForm
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "opus"
+        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        await pilot.pause()
+        await pilot.press("enter")                # submit → пикер default
+        await pilot.pause()
+        assert _editor(scr).picker_open, "пикер «какая модель по умолчанию» не открылся"
+        assert cfg_file.read_bytes() == before    # до выбора файл не тронут
+        await pilot.press("enter")                # выбрать первую строку пикера
+        await pilot.pause()
+        doc = _doc(cfg_file)
+        assert set(doc["models"]) == {"flash", "opus"}
+        assert doc["slots"]["default"] in ("flash", "opus")
+
+
+async def test_entry_without_any_address_is_shown_as_problematic(tmp_path):
+    """Ни у записи, ни у основного конфига нет адреса — запись нерабочая. Молча
+    создать её нельзя: строка гаснет, секция честно называет причину, и глиф хаба с
+    секцией не спорит — реестр валиден по схеме, но не работает: «—», не «✓»."""
+    from tui.palette import DEEP_DIM
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('agent:\n  model: "test-model"\n'
+                        "models:\n  flash:\n    model: \"m\"\n", encoding="utf-8")
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config={"model": "test-model"})
+    with _isolated_config_layers(tmp_path):
+        async with app.run_test() as pilot:
+            scr = _mk_screen(config={"model": "test-model"}, config_path=str(cfg_file))
+            app.push_screen(scr)
+            await pilot.pause()
+            assert scr._menu_glyph(1) == ("—", DEEP_DIM)
+            open_settings_section(scr, _SECTION)
+            await pilot.pause()
+            assert "адрес" in _texts(scr)
+
+
+async def test_hub_glyph_stays_quiet_about_a_foreign_config_error(tmp_path):
+    """`!` на строке «Модели» — только за реестр. Опечатка в ПОСТОРОННЕЙ секции валит
+    ту же валидацию файла целиком, и красить ею эту строку значит обвинять реестр в
+    чужой ошибке: вердикта нет — «—»."""
+    from tui.palette import DEEP_DIM
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n'
+            "max_steps: не-число\n")
+    async with _section(tmp_path, body) as (_pilot, scr, _cfg_file):
+        assert scr._menu_glyph(1) == ("—", DEEP_DIM)
+
+
+# --- удаление -----------------------------------------------------------------
+
+async def test_delete_asks_first_and_warns_about_references(tmp_path):
+    """Del — confirm-баннер; ссылки из слотов/привязок названы В нём (отчёт
+    `RemovalReport`), а файл до подтверждения не тронут."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        await pilot.press("delete")
+        await pilot.pause()
+        text = _texts(scr)
+        assert "slots.default" in text
+        assert cfg_file.read_bytes() == before
+        await pilot.press("enter")
+        await pilot.pause()
+        doc = _doc(cfg_file)
+        assert "flash" not in (doc.get("models") or {})
+        assert "default" not in (doc.get("slots") or {})   # ссылка снята вместе с записью
+
+
+async def test_deleting_the_last_entry_warns_that_levels_switch_off(tmp_path):
+    """Удаление последней записи опустошает реестр — уровни выключатся; баннер
+    обязан это сказать до нажатия Enter."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        await pilot.press("delete")
+        await pilot.pause()
+        assert "Реестр станет пустым — уровни выключатся" in _texts(scr)
+
+
+# --- резервная модель ---------------------------------------------------------
+
+async def test_new_entry_key_does_not_drop_an_unsaved_reserve_choice(tmp_path):
+    """`Alt+N` в под-форме резервной — no-op: там лежит несохранённый выбор, а футер
+    этой клавиши не обещает. Обещание и поведение обязаны совпадать."""
+    from tui.editors.model import ModelEditor
+    from tui.editors.model_entry_form import ModelEntryForm
+    async with _section(tmp_path, _REGISTRY, models=("test-model", "other-model")) \
+            as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "reserve")
+        await pilot.pause()
+        await pilot.press("enter")                  # открыть под-форму
+        await _wait_legacy_list(pilot, scr)
+        assert "Alt+N" not in scr._footer_text()
+        await pilot.press("alt+n")
+        await pilot.pause()
+        assert not scr.query(ModelEntryForm)        # форма не открылась
+        assert scr.query(ModelEditor)               # выбор резервной на месте
+
+
+async def test_reserve_save_returns_to_the_registry_list(tmp_path):
+    """Под-форма резервной открыта ИЗ списка — сохранение возвращает туда же (Esc
+    поднимает на уровень, Enter не имеет права поднимать на два). Пустое состояние —
+    это сама секция, и запись из неё по-прежнему уводит в хаб."""
+    from tui.editors.model import ModelEditor
+    async with _section(tmp_path, _REGISTRY, models=("test-model", "other-model")) \
+            as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "reserve")
+        await pilot.pause()
+        await pilot.press("enter")
+        await _wait_legacy_list(pilot, scr)
+        await pilot.press("down")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        assert "other-model" in cfg_file.read_text(encoding="utf-8")
+        assert scr._view == 1                       # остались в секции
+        assert any("flash" in r for r in _rows(scr))   # и видим список записей
+
+
+async def test_empty_state_save_returns_to_the_hub(tmp_path):
+    """Прежнее поведение легаси-секции сохранено: запись из пустого состояния
+    завершает работу с секцией (возврат в хаб + флэш)."""
+    from tui.editors.model import ModelEditor
+    async with _section(tmp_path, models=("test-model", "other-model")) as (pilot, scr, cfg_file):
+        await _wait_legacy_list(pilot, scr)
+        await pilot.press("down")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        assert "other-model" in cfg_file.read_text(encoding="utf-8")
+        assert scr._view == "menu"
+
+
+async def test_env_ref_confirm_is_answerable_from_the_models_section(tmp_path):
+    """Плоская запись `agent.model` поверх ссылки ${ENV:VAR} поднимает подтверждение
+    перезаписи. Секция вышла из save-машины, но подтверждение осталось её — иначе
+    баннер висел бы неотвечаемым: Enter не подтверждал бы, Esc уводил бы в меню."""
+    import os
+    from tui.editors.model import ModelEditor
+    os.environ["GC_TEST_MODEL_REF"] = "test-model"
+    try:
+        async with _section(tmp_path, models=("test-model", "other-model"),
+                            model='"${ENV:GC_TEST_MODEL_REF}"') as (pilot, scr, cfg_file):
+            await _wait_legacy_list(pilot, scr)
+            # строки: ссылка (действующая) → test-model → other-model
+            await pilot.press("down")
+            await pilot.press("down")
+            await pilot.press("enter")              # submit → подтверждение перезаписи ссылки
+            await pilot.pause()
+            assert "открытым текстом" in _texts(scr)
+            assert "${ENV:GC_TEST_MODEL_REF}" in cfg_file.read_text(encoding="utf-8")
+            await pilot.press("enter")              # подтвердить
+            await pilot.pause()
+            await pilot.pause()
+            content = cfg_file.read_text(encoding="utf-8")
+            assert "other-model" in content
+            assert "${ENV:GC_TEST_MODEL_REF}" not in content
+    finally:
+        os.environ.pop("GC_TEST_MODEL_REF", None)
+
+
+async def test_arrow_after_env_confirm_cancels_it(tmp_path):
+    """Стрелка после поднятого подтверждения СНИМАЕТ его: `_pending_env_save` держит
+    снимок значений на момент Enter, а курсор уже уехал на другую модель. Иначе
+    следующий Enter молча запишет НЕ ТО, что показано, и затрёт ссылку на переменную
+    окружения литералом чужой модели (паритет с «Подключением», `_cancel_env_confirm`
+    на уходе с поля; в легаси-«Модели» это делал `_reset_draft_state`)."""
+    import os
+    os.environ["GC_TEST_MODEL_REF"] = "test-model"
+    try:
+        async with _section(tmp_path, models=("test-model", "other-model"),
+                            model='"${ENV:GC_TEST_MODEL_REF}"') as (pilot, scr, cfg_file):
+            await _wait_legacy_list(pilot, scr)
+            await pilot.press("down")               # ссылка → test-model
+            await pilot.press("enter")              # submit → подтверждение перезаписи
+            await pilot.pause()
+            assert scr._pending_env_save is not None
+            await pilot.press("down")               # курсор уехал → снимок больше не про то
+            await pilot.pause()
+            assert scr._pending_env_save is None, "снимок пережил уход курсора"
+            assert "открытым текстом" not in _texts(scr), "баннер остался висеть"
+            assert "${ENV:GC_TEST_MODEL_REF}" in cfg_file.read_text(encoding="utf-8")
+    finally:
+        os.environ.pop("GC_TEST_MODEL_REF", None)
+
+
+async def test_new_entry_after_env_confirm_cancels_it(tmp_path):
+    """`Alt+N` поверх поднятого подтверждения — тот же «ухожу отсюда», что и стрелка.
+
+    Иначе Enter в открывшейся форме перехватывается гейтом `_pending_env_save` (он
+    стоит ВЫШЕ блока секции): вместо записи в реестр уходит плоский `_do_save`, ссылка
+    ${ENV:VAR} затирается, черновик формы гибнет, а человека выбрасывает в хаб — и
+    записи реестра не появляется вовсе."""
+    import os
+    from tui.editors.model_entry_form import ModelEntryForm
+    os.environ["GC_TEST_MODEL_REF"] = "test-model"
+    try:
+        async with _section(tmp_path, models=("test-model", "other-model"),
+                            model='"${ENV:GC_TEST_MODEL_REF}"') as (pilot, scr, cfg_file):
+            await _wait_legacy_list(pilot, scr)
+            await pilot.press("down")
+            await pilot.press("enter")              # submit → подтверждение перезаписи
+            await pilot.pause()
+            assert scr._pending_env_save is not None
+            await pilot.press("alt+n")              # уходим в форму записи реестра
+            await pilot.pause()
+            assert scr.query(ModelEntryForm), "форма не открылась"
+            assert scr._pending_env_save is None, "снимок пережил уход в форму"
+            assert "открытым текстом" not in _texts(scr), "баннер остался висеть"
+            form = scr.query(ModelEntryForm).last()
+            form.query_one("#mef-alias", Input).value = "flash"
+            form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            content = cfg_file.read_text(encoding="utf-8")
+            assert _doc(cfg_file)["models"]["flash"]["model"] == "google/gemini-2.5-flash"
+            assert "${ENV:GC_TEST_MODEL_REF}" in content, "ссылка затёрта чужой записью"
+            assert scr._view == 1, "выбросило из секции"
+    finally:
+        os.environ.pop("GC_TEST_MODEL_REF", None)
+
+
+async def test_list_reload_after_env_confirm_cancels_it(tmp_path):
+    """Третья дверь в то же состояние: `Alt+↓` перечитывает список, и выбор при этом
+    НЕ гарантированно остаётся на месте — модель, пропавшая из свежего ответа сервера,
+    роняет курсор на якорь (`ModelEditor._reselect_idx`). Снимок подтверждения тогда
+    снова не про то, что показано, а Enter пишет прежнее значение поверх ссылки."""
+    import os
+    os.environ["GC_TEST_MODEL_REF"] = "test-model"
+    try:
+        async with _section(tmp_path, models=("test-model", "other-model"),
+                            model='"${ENV:GC_TEST_MODEL_REF}"') as (pilot, scr, cfg_file):
+            await _wait_legacy_list(pilot, scr)
+            await pilot.press("down")
+            await pilot.press("enter")              # submit → подтверждение перезаписи
+            await pilot.pause()
+            assert scr._pending_env_save is not None
+            await pilot.press("alt+down")           # перечитать список
+            await pilot.pause()
+            assert scr._pending_env_save is None, "снимок пережил перечитывание списка"
+            assert "${ENV:GC_TEST_MODEL_REF}" in cfg_file.read_text(encoding="utf-8")
+    finally:
+        os.environ.pop("GC_TEST_MODEL_REF", None)
+
+
+async def test_reserve_row_edits_agent_model_through_its_own_subform(tmp_path):
+    """Строка «резервная модель» открывает под-форму `ModelEditor` и правит
+    `agent.model`; хинт — «действует только без реестра», НЕ «база наследования»."""
+    from tui.editors.model import ModelEditor
+    async with _section(tmp_path, _REGISTRY, models=("test-model", "other-model")) \
+            as (pilot, scr, cfg_file):
+        assert "действует только без реестра" in _texts(scr)
+        assert "база для незаданного" not in _texts(scr)
+        ed = _editor(scr)
+        _goto(ed, "reserve")
+        await pilot.pause()
+        await pilot.press("enter")                  # открыть под-форму
+        await _wait_legacy_list(pilot, scr)
+        await pilot.press("down")                   # выбрать другую модель
+        await pilot.press("enter")                  # сохранить
+        await pilot.pause()
+        await pilot.pause()
+        assert "other-model" in cfg_file.read_text(encoding="utf-8")
+
+
+# --- швы экрана ---------------------------------------------------------------
+
+async def test_section_never_shows_the_dirty_marker(tmp_path):
+    """Секция вышла из save-машины: «изменено» у заголовка — обещание submit-цикла,
+    которого здесь нет (пишем немедленно)."""
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        scr._update_dirty()
+        assert "изменено" not in str(scr.query_one("#set-title", Static).render())
+
+
+async def test_read_only_config_refuses_the_section(tmp_path, monkeypatch):
+    """Гейт записи — по ЦЕЛИ (`_target_writable`): запуск на пакетном шаблоне не
+    показывает редактор вовсе."""
+    from config import _default_config_path
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        monkeypatch.setattr("config._default_config_path", lambda: str(cfg_file))
+        open_settings_section(scr, _SECTION)
+        await pilot.pause()
+        assert "недоступен для записи" in _texts(scr)
+        assert scr._footer_text() == "PgUp/PgDn — секции  ·  Esc — меню"
+
+
+async def test_legacy_editor_lookup_takes_the_fresh_one(tmp_path):
+    """Сохранение легаси-поля обязано читать СВЕЖИЙ редактор: секция пересоздаёт его
+    на каждую сборку тела, а `remove()` в Textual отложенный — обречённый ещё в
+    дереве, и `query_one` молча отдал бы ЕГО: в конфиг уехало бы значение прошлого
+    рендера (дословно находка `_connection_editor`, 2026-08-07).
+
+    Живьём, на настоящей пересборке тела секции — том самом действии, которое волна B
+    сделала частым (раньше редактор пересобирался только при входе в секцию)."""
+    from tui.editors.model import ModelEditor
+    async with _section(tmp_path) as (pilot, scr, _cfg_file):
+        await _wait_legacy_list(pilot, scr)
+        first = scr.query(ModelEditor).first()
+        _editor(scr)._rebuild()                      # без pause: обречённый ещё в дереве
+        # Предусловие названо явно: сменится тайминг Textual — страж честно упадёт
+        # здесь, а не станет вакуумно-зелёным на дереве с одним редактором.
+        assert len(scr.query(ModelEditor)) == 2, "обречённый редактор уже снесён"
+        assert scr._legacy_model_editor() is not first
+
+
+def test_legacy_editor_lookup_reports_an_empty_tree():
+    """Редактора нет вовсе (read-only конфиг, первый кадр) — `NoMatches`, как у
+    `_connection_editor`: вызывающие ловят его и трактуют как «спрашивать некого»."""
+    from textual.css.query import NoMatches
+    scr = _mk_screen()
+    scr.query = lambda *_a, **_k: []
+    with pytest.raises(NoMatches):
+        scr._legacy_model_editor()
+
+
+async def test_entry_row_hint_names_the_target_file(tmp_path):
+    """Канон «Профилей»: подсказка строки всегда называет файл-цель — и у записи
+    реестра, и у резервной модели (запись идёт в один и тот же config.yml)."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        assert f"запись: {cfg_file.name}" in _texts(scr)
+        ed = _editor(scr)
+        _goto(ed, "reserve")
+        await pilot.pause()
+        assert f"запись: {cfg_file.name}" in _texts(scr)
+
+
+def test_levels_come_from_the_domain_not_a_local_copy():
+    """Список уровней — доменная константа `model_registry.LEVELS`: своя копия в UI
+    разошлась бы с доменом на первой же правке (сравнение по identity)."""
+    from config_modules.model_registry import LEVELS
+    from tui.editors import models_section
+    assert models_section.LEVELS is LEVELS
+
+
+def test_target_writable_refuses_an_empty_path():
+    """Паритет с `_writable`: пустой путь конфига — не цель записи (дефект волны A)."""
+    scr = _mk_screen(config_path=None)
+    assert scr._target_writable(None) is False
+    assert scr._target_writable("") is False
+
+
+# --- футер --------------------------------------------------------------------
+
+async def test_footer_is_positional_over_the_section_rows(tmp_path):
+    """Enter значит разное на строке записи и на строке резервной модели — футер
+    обязан называть то, что работает здесь и сейчас."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        assert "Del — удалить" in scr._footer_text()
+        ed = _editor(scr)
+        _goto(ed, "reserve")
+        await pilot.pause()
+        footer = scr._footer_text()
+        assert "Del — удалить" not in footer        # резервную запись удалять нечем
+        assert "Enter — изменить" in footer
+
+
+async def test_form_footer_follows_the_filter_of_the_address_list(tmp_path):
+    """Печать в адресе сужает пресет-лист — вместе с ним меняется и обещание Enter
+    (подставить ↔ оставить своё). Футер обязан догонять её тем же событием, иначе
+    он обещает подстановку там, где подставлять уже нечего."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        await pilot.press("n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        await pilot.press("down")                   # алиас → провайдерский id
+        await pilot.press("down")                   # id → адрес (пресет-лист раскрылся)
+        await pilot.pause()
+        assert form.presets_open, "пресет-лист адреса не раскрылся"
+        assert "Enter — подставить" in _footer(scr)
+        form.query_one("#mef-url", Input).value = "https://my-own-host.internal/v1"
+        await pilot.pause()
+        assert "Enter — оставить своё" in _footer(scr)
+
+
+def test_module_footers_and_hints_are_registered_in_the_contract_guard():
+    """Global Constraints: новый модуль регистрируется в стражах футеров/хинтов той
+    задачей, которая его создаёт — иначе подмена клавиши здесь пройдёт незамеченной."""
+    from tests.tui.test_footer_contract import _all_footer_strings, _all_hint_strings
+    names = {*_all_footer_strings(), *_all_hint_strings()}
+    assert any(n.startswith("tui.editors.models_section.") for n in names)
+
+
+# --- слоты и привязки (Task 4) ------------------------------------------------
+#
+# Нижняя половина секции: три строки слотов (уровень → алиас) и блок привязок
+# потребителей (потребитель → уровень или алиас). Значение выбирается СВОИМ
+# пикером-раскрытием (решение 9 плана): `FieldListController` намертво привязан к
+# `Input`, `ArgPicker` — оверлей палитры чата, и под строку-Static не годится ни
+# тот, ни другой.
+
+_ASSIGNED = (
+    "assign:\n"
+    '  finish_gate: "light"\n'
+    '  summary: "opus"\n'
+)
+
+
+def _goto(ed, kind: str, **match) -> int:
+    """Курсор на строку по её РОЛИ, а не по магическому индексу: строк в секции
+    больше двух десятков, и `move(9)` в тесте нечитаем и ломается от любой вставки."""
+    for i, row in enumerate(ed._rows()):
+        if row["kind"] == kind and all(row.get(k) == v for k, v in match.items()):
+            ed._idx = i
+            ed.move(0)          # тот же путь обновления строк, что и у живой стрелки
+            return i
+    raise AssertionError(f"строки {kind} {match} в секции нет")
+
+
+def _picker_rows(ed) -> list:
+    return [str(w.render()) for w in ed.query(".models-picker-row")]
+
+
+def _value_color(text, value: str):
+    """Цвет колонки значения строки — span, начинающийся ровно на значении (канон
+    стража грамматики строки уровня в `test_settings_profiles_showcase.py`).
+
+    Цвет нормализуется до RGB: у СМОНТИРОВАННОГО виджета `render()` отдаёт стиль,
+    уже прошедший через консоль («rgb(122,130,144)»), а константа палитры — «#hex»;
+    сравнение строк развело бы одинаковые цвета."""
+    from rich.style import Style
+    i = text.plain.index(value)
+    span = next(s for s in text.spans if s.start == i)
+    return Style.parse(str(span.style)).color.get_truecolor()
+
+
+def _rgb(token: str):
+    from rich.style import Style
+    return Style.parse(token).color.get_truecolor()
+
+
+async def test_slot_picker_opens_under_the_row_with_unset_first(tmp_path):
+    """Enter на строке слота раскрывает пикер ПОД НЕЙ (решение 9): первый пункт —
+    «не задан» (снятие значения — первая позиция списка, отдельной клавиши снятия
+    нет), дальше алиасы реестра. До выбора файл не тронут."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        ed = _editor(scr)
+        idx = _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert ed.picker_open, "пикер слота не раскрылся"
+        assert ed._picker["items"] == ["не задан", "flash", "opus"]
+        assert "не задан" in _picker_rows(ed)[0]
+        children = list(ed.children)
+        row = list(ed.query(".models-row"))[idx]
+        assert children.index(ed.query_one(".models-picker")) == children.index(row) + 1
+        assert cfg_file.read_bytes() == before
+
+
+async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
+    """Привязка шире слота: значением может быть уровень (индирекция через slots)
+    ИЛИ алиас (жёсткий пин). Первый пункт — «активная» (привязки нет)."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert ed._picker["items"] == ["активная", "light", "default", "max", "flash", "opus"]
+
+
+async def test_alt_down_opens_the_same_picker(tmp_path):
+    """Канон клавиш: `Alt+↓` — раскрыть список. У строки слота список тот же, что и
+    у Enter (решение 9 называет обе клавиши), а не вторая, отдельная механика."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "slot", level="max")
+        await pilot.pause()
+        await pilot.press("alt+down")
+        await pilot.pause()
+        assert ed.picker_open
+
+
+async def test_escape_collapses_the_picker_without_writing(tmp_path):
+    """Esc сворачивает пикер и остаётся В секции (Esc-вложенность Global
+    Constraints): выбор не применяется, файл не трогается."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("down")                   # выбор уехал на алиас
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not ed.picker_open
+        assert scr._view == 1                       # из секции не вышли
+        assert cfg_file.read_bytes() == before
+
+
+async def test_arrows_do_not_page_values_on_a_collapsed_row(tmp_path):
+    """←/→ на свёрнутой строке НЕ листают значения: список произвольный (алиасы
+    реестра), треком он не виден, и вслепую его не листают — та же ревизия §12.1,
+    что перевела `/profiles` с цикла на пикер."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("right")
+        await pilot.press("left")
+        await pilot.pause()
+        assert not ed.picker_open
+        assert cfg_file.read_bytes() == before
+        assert "не задан" in str(list(ed.query(".models-row"))[ed._idx].render())
+
+
+async def test_choosing_an_alias_writes_the_slot(tmp_path):
+    """Выбор алиаса пишется в `slots.<уровень>` немедленно, файл остаётся валидным."""
+    from config import validate_config_text_with_sections
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("down")
+        await pilot.press("down")                   # «не задан» → flash → opus
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _doc(cfg_file)["slots"]["light"] == "opus"
+        validate_config_text_with_sections(cfg_file.read_text(encoding="utf-8"))
+        assert not _editor(scr).picker_open
+        assert "opus" in str(list(_editor(scr).query(".models-row"))[ed._idx].render())
+
+
+async def test_the_first_position_unsets_the_slot(tmp_path):
+    """«не задан» — не значение, а снятие: строка слота уходит из файла целиком,
+    уровень возвращается к фоллбэку матрицы."""
+    body = (_REGISTRY + '  light: "opus"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        assert _doc(cfg_file)["slots"]["light"] == "opus"
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("enter")                  # первая позиция — снять
+        await pilot.pause()
+        assert "light" not in _doc(cfg_file)["slots"]
+        assert _doc(cfg_file)["slots"]["default"] == "flash"   # соседний слот цел
+
+
+async def test_assign_binding_writes_the_consumer_key(tmp_path):
+    """Привязка служебного потребителя пишется в `assign.<потребитель>`."""
+    from config import validate_config_text_with_sections
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("down")                   # «активная» → light
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _doc(cfg_file)["assign"]["finish_gate"] == "light"
+        validate_config_text_with_sections(cfg_file.read_text(encoding="utf-8"))
+
+
+async def test_active_removes_the_assign_key(tmp_path):
+    """«активная» = привязки нет: ключ уходит из файла, потребитель возвращается к
+    активной модели сессии."""
+    async with _section(tmp_path, _REGISTRY + _ASSIGNED) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("enter")                  # первая позиция — снять
+        await pilot.pause()
+        assign = _doc(cfg_file).get("assign") or {}
+        assert "finish_gate" not in assign
+        assert assign.get("summary") == "opus"      # соседняя привязка цела
+
+
+async def test_wildcard_row_writes_the_subagents_star_key(tmp_path):
+    """Wildcard «остальные субагенты» — не выдуманная строка UI, а реальный ключ
+    `assign.subagents."*"` (точный id → wildcard → активная модель)."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="*")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("down")
+        await pilot.press("down")                   # «активная» → light → default
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _doc(cfg_file)["assign"]["subagents"]["*"] == "default"
+
+
+async def test_named_subagent_row_writes_the_nested_key(tmp_path):
+    """Поимённая привязка субагента — вложенный ключ `assign.subagents.<имя>`."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="subagents.subagent_critic")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("down")
+        await pilot.press("down")
+        await pilot.press("down")
+        await pilot.press("down")                   # «активная» → light/default/max → flash
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _doc(cfg_file)["assign"]["subagents"]["subagent_critic"] == "flash"
+
+
+def test_subagent_rows_come_from_the_code_registry():
+    """Список субагентов в секции — канонический реестр кода, а не копия в UI:
+    новый субагент появляется строкой сам (тот же страж, что у `demo_profile.yml`)."""
+    from config_modules.model_sections_validation import SUBAGENT_NAMES
+    from tools.subagents.registry import SUBAGENT_CLASSES
+    from tui.editors import models_section
+    consumers = models_section.assign_consumers()
+    assert set(SUBAGENT_NAMES) == {cls.agent_name for cls in SUBAGENT_CLASSES}
+    assert [c for c in consumers if c.startswith("subagents.")] == \
+        [f"subagents.{name}" for name in SUBAGENT_NAMES]
+    assert consumers[-1] == "*", "wildcard — последней строкой блока привязок"
+
+
+def test_consumer_labels_reuse_the_transport_dictionary():
+    """6 готовых подписей берутся ИЗ транспортного словаря, а не копируются в UI
+    (копия разошлась бы с ним на первой же правке); свой UI-словарь — только для
+    остальных: `auto_judge`, субагенты поимённо, wildcard."""
+    from utils.llm_chat_client import _CONSUMER_RU_LABEL
+    from tui.editors import models_section
+    labels = models_section.consumer_labels()
+    for consumer, label in _CONSUMER_RU_LABEL.items():
+        assert labels[consumer] == label
+    assert not set(models_section._UI_CONSUMER_LABEL) & set(_CONSUMER_RU_LABEL)
+    assert set(labels) == set(models_section.assign_consumers())
+
+
+async def test_auto_judge_row_is_present_and_marked_inert(tmp_path):
+    """`auto_judge` в реестре потребителей есть (строка на месте), но до волны C
+    привязка инертна — hint помечает это словами спеки, а не молчит.
+
+    Что Router его не зовёт и без привязки идёт уровнем default, а не активной
+    моделью, — страж волны A (`tests/router/test_model_router.py::
+    test_auto_judge_without_binding_uses_default_statically_not_active_level`);
+    здесь не дублируется."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="auto_judge")
+        await pilot.pause()
+        assert "активен с функцией авто-выбора" in _texts(scr)
+
+
+async def test_unset_slot_hint_names_the_real_fallback(tmp_path):
+    """Хинт незаданного слота — честный фоллбэк по матрице `LEVEL_FALLBACK`, а не
+    выдуманный текст: light не задан → работает слот default."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        assert "не задан · действует default → flash" in _texts(scr)
+
+
+async def test_invalid_combination_leaves_the_file_untouched(tmp_path):
+    """Снятие единственного слота при двух моделях делает конфиг нерезолвимым —
+    валидация результата отвергает запись: файл байт-в-байт прежний, отказ честный."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        ed = _editor(scr)
+        _goto(ed, "slot", level="default")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("enter")                  # «не задан» — снять последний слот
+        await pilot.pause()
+        assert cfg_file.read_bytes() == before
+        assert "не сохранено" in _texts(scr)
+
+
+async def test_alias_named_like_a_sentinel_is_pinned_not_dropped(tmp_path):
+    """Снятие значения опознаётся ПОЗИЦИЕЙ, а не текстом: алиас «не задан» /
+    «активная» полностью легален (`validate_model_alias` режет только
+    `RESERVED_WORDS`), и выбор такой модели обязан её запинить, а не молча снять
+    слот/привязку. Цвет строки — по тому же признаку: пин есть, значит DIM."""
+    from tui.palette import DIM
+    body = ("models:\n"
+            '  "не задан":\n'
+            '    model: "google/gemini-2.5-flash"\n'
+            '  "активная":\n'
+            '    model: "anthropic/claude-opus"\n'
+            "slots:\n"
+            '  default: "не задан"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        assert _value_color(ed._row_text({"kind": "slot", "level": "default"}, False),
+                            "не задан") == _rgb(DIM), "пин покрашен как пустое значение"
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")
+        assert ed._picker["items"] == ["не задан", "не задан", "активная"]
+        await pilot.press("down")                   # сентинел → одноимённый алиас
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _doc(cfg_file)["slots"]["light"] == "не задан"
+
+        _goto(_editor(scr), "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        for _ in range(5):                          # сентинел → light/default/max → алиасы
+            await pilot.press("down")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _doc(cfg_file)["assign"]["finish_gate"] == "активная"
+
+
+async def test_binding_row_values_carry_the_color_semantics(tmp_path):
+    """§12.4 дословно: значение-уровень — цветом уровня (light=INK, default=RUN_COLOR,
+    max=ACCENT), значение-алиас (пин) — DIM, «активная»/«не задан» — DEEP_DIM."""
+    from tui.palette import ACCENT, DEEP_DIM, DIM, INK, RUN_COLOR
+    body = (_REGISTRY + "assign:\n"
+            '  finish_gate: "light"\n'
+            '  summary: "opus"\n'
+            '  text_answer_judge: "default"\n'
+            '  command_judge: "max"\n')
+    async with _section(tmp_path, body) as (_pilot, scr, _cfg_file):
+        ed = _editor(scr)
+
+        def slot(level):
+            return ed._row_text({"kind": "slot", "level": level}, False)
+
+        def binding(consumer):
+            return ed._row_text({"kind": "assign", "consumer": consumer}, False)
+
+        assert _value_color(slot("default"), "flash") == _rgb(DIM)         # алиас-пин
+        assert _value_color(slot("max"), "не задан") == _rgb(DEEP_DIM)
+        assert _value_color(binding("finish_gate"), "light") == _rgb(INK)  # уровень light
+        assert _value_color(binding("text_answer_judge"), "default") == _rgb(RUN_COLOR)
+        assert _value_color(binding("command_judge"), "max") == _rgb(ACCENT)
+        assert _value_color(binding("summary"), "opus") == _rgb(DIM)
+        assert _value_color(binding("intent_scope"), "активная") == _rgb(DEEP_DIM)
+
+
+async def test_picker_rows_carry_the_same_color_semantics(tmp_path):
+    """Раскрытый список — тот же визуальный язык, что и колонка значения строки
+    (контракт п.3: канон-рендер дропдаунов, семантика значений §12.4)."""
+    from tui.palette import ACCENT, DEEP_DIM, DIM, INK
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        widgets = list(ed.query(".models-picker-row"))
+        texts = [w.render() for w in widgets]
+        assert _value_color(texts[0], "активная") == _rgb(DEEP_DIM)
+        assert _value_color(texts[1], "light") == _rgb(INK)
+        assert _value_color(texts[3], "max") == _rgb(ACCENT)
+        assert _value_color(texts[4], "flash") == _rgb(DIM)
+
+
+async def test_slot_row_head_is_the_canonical_level_copy(tmp_path):
+    """Голова строки слота — канон §1 дословно (тот же источник, что хинты `/level`):
+    «default · основная рабочая: повседневные задачи»."""
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        head = ed._row_text({"kind": "slot", "level": "default"}, False).plain
+        assert "default · основная рабочая: повседневные задачи" in head
+
+
+async def test_footer_is_positional_on_slot_and_assign_rows(tmp_path):
+    """Enter на строке слота/привязки открывает список значений — футер обязан
+    обещать именно это, и не обещать удаление (удалять на этих строках нечего)."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        footer = scr._footer_text()
+        assert "Enter — выбрать модель" in footer
+        assert "Del — удалить" not in footer
+        _goto(ed, "assign", consumer="summary")
+        await pilot.pause()
+        assert "Enter — выбрать уровень или модель" in scr._footer_text()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "Enter — выбрать" in scr._footer_text()   # раскрытый список — свой футер
+        assert "Esc — отмена" in scr._footer_text()

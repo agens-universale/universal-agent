@@ -84,7 +84,7 @@ async def test_settings_menu_lists_sections_with_values(tmp_path):
         assert len(rows) == 6
         assert any("Подключение" in r and "http://host" in r and "Bearer" in r for r in rows)
         assert not any("secret-token" in r for r in rows)  # маска!
-        assert any("Модель" in r and "test-model" in r for r in rows)
+        assert any("Модели" in r and "test-model" in r for r in rows)
 
 
 async def test_connection_editor_lookup_takes_the_fresh_one():
@@ -240,7 +240,7 @@ async def test_open_section_picks_up_default_changed_by_other_window(tmp_path):
         t = time.time() + 5.0
         os.utime(cfg_file, (t, t))
 
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await pilot.pause()
 
         assert scr._raw_value("model") == "new-model"
@@ -273,7 +273,7 @@ async def test_open_section_noop_when_file_unchanged(tmp_path, monkeypatch):
         await pilot.pause()
         scr = app.screen
 
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await pilot.pause()
 
         assert calls == {"load": 0, "invalidate": 0}
@@ -300,7 +300,7 @@ async def test_open_section_noop_when_config_is_empty():
         scr._read_raw = lambda: (calls.__setitem__("raw", calls["raw"] + 1) or orig_raw())
         scr._read_origins = lambda: (calls.__setitem__("origins", calls["origins"] + 1) or orig_origins())
 
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await pilot.pause()
 
         assert calls == {"raw": 0, "origins": 0}
@@ -1006,7 +1006,7 @@ async def test_apply_model_writes_and_returns_to_hub(tmp_path, monkeypatch):
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await pilot.pause()
         assert not scr.query(".set-current")          # v2: строка «Текущая» удалена
         from textual.widgets import Input
@@ -1108,7 +1108,7 @@ async def test_hub_glyphs_ok_after_config_probe():
         await pilot.pause()                           # воркер + call_from_thread
         rows = _menu_lines(app.screen)
         assert any("Подключение" in r and "✓" in r for r in rows)
-        assert any("Модель" in r and "✓" in r for r in rows)       # test-model в списке
+        assert any("Модели" in r and "✓" in r for r in rows)      # test-model в списке
 
 
 async def test_hub_glyphs_bang_on_network_unknown():
@@ -1153,7 +1153,7 @@ async def test_hub_glyph_model_not_in_list_is_dot_not_bang():
         await pilot.pause()
         await pilot.pause()
         rows = _menu_lines(app.screen)
-        model_row = next(r for r in rows if "Модель" in r)
+        model_row = next(r for r in rows if "Модели" in r)
         assert "!" not in model_row                   # не в списке → —, не !
         assert "—" in model_row
 
@@ -1446,8 +1446,15 @@ async def test_dirty_marker_appears_on_edit_and_clears_on_revert(tmp_path):
         assert "изменено" not in str(title.render())
 
 
-async def test_dirty_marker_model_section_toggles_on_move(tmp_path, monkeypatch):
-    """T7: перемещение выбора модели помечает заголовок; возврат к исходной — снимает."""
+async def test_model_dirty_state_toggles_on_move(tmp_path, monkeypatch):
+    """T7 (переписан волной B): перемещение выбора модели делает секцию «изменённой»,
+    возврат к исходной — снимает. Сверка идёт с ФАЙЛОМ и решает, есть ли что писать
+    («ничего не изменено» на Enter) — она и осталась.
+
+    Маркер «изменено» у заголовка исчез сознательно: он — обещание submit-цикла, а
+    секция «Модели» из save-машины вышла (решение 2 волны B) и пишет реестр
+    немедленно. Обещать в одной секции два ритма записи нельзя, поэтому сторож
+    читает состояние, а не заголовок."""
     import model_picker
     from model_picker import ModelInfo
     import tui.app as app_mod
@@ -1462,16 +1469,17 @@ async def test_dirty_marker_model_section_toggles_on_move(tmp_path, monkeypatch)
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await pilot.pause()
         title = scr.query_one("#set-title", Static)
-        assert "изменено" not in str(title.render())    # исходный выбор == модель конфига
+        assert scr._is_dirty(1) is False                # исходный выбор == модель конфига
         await pilot.press("down")                              # → other-model
         await pilot.pause()
-        assert "изменено" in str(title.render())
+        assert scr._is_dirty(1) is True
         await pilot.press("up")                                # обратно → test-model
         await pilot.pause()
-        assert "изменено" not in str(title.render())
+        assert scr._is_dirty(1) is False
+        assert "изменено" not in str(title.render())    # маркер submit-цикла здесь молчит
 
 
 async def test_ctrl_space_in_readonly_section_does_not_crash():
@@ -1503,11 +1511,14 @@ def test_update_dirty_does_not_raise_when_view_is_menu():
     scr._update_dirty()                    # не должно бросать
 
 
-async def test_dirty_marker_model_section_no_false_negative_when_active_not_first(tmp_path, monkeypatch):
+async def test_model_dirty_state_no_false_negative_when_active_not_first(tmp_path, monkeypatch):
     """T9: active-модель конфига НЕ первая в списке с сервера. Initial-курсор встаёт
-    на неё (preselect) → сразу после async-загрузки dirty НЕ появляется (без этого —
-    ложноотрицательный dirty из T7: курсор молча стоял на первой строке). Сдвиг курсора
-    помечает «изменено», возврат на active — снимает."""
+    на неё (preselect) → сразу после async-загрузки «изменено» НЕ появляется (без
+    этого — ложноотрицательный dirty из T7: курсор молча стоял на первой строке).
+    Сдвиг курсора делает секцию изменённой, возврат на active — снимает.
+
+    Читаем состояние, а не заголовок: маркер у секции «Модели» снят вместе с
+    submit-циклом (см. соседний тест)."""
     import model_picker
     from model_picker import ModelInfo
     import tui.app as app_mod
@@ -1522,23 +1533,21 @@ async def test_dirty_marker_model_section_no_false_negative_when_active_not_firs
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await pilot.pause()                                # worker fetch отработал
-        title = scr.query_one("#set-title", Static)
-        assert "изменено" not in str(title.render())        # курсор сразу на active — не dirty
+        assert scr._is_dirty(1) is False                    # курсор сразу на active — не dirty
         await pilot.press("up")                             # → other-model
         await pilot.pause()
-        assert "изменено" in str(title.render())
+        assert scr._is_dirty(1) is True
         await pilot.press("down")                           # обратно → test-model (active)
         await pilot.pause()
-        assert "изменено" not in str(title.render())
+        assert scr._is_dirty(1) is False
 
 
-async def test_dirty_marker_model_section_manual_entry_reacts_to_typing(tmp_path, monkeypatch):
-    """M4: секция «Модель» без сохранённого значения, fetch=[] → нет active-фолбэка,
-    редактор — голый ручной Input. Ввод имени должен помечать заголовок «изменено» —
-    раньше on_input_changed dirty-пересчёт ограничивался секциями (0, 1), секция 2
-    молчала."""
+async def test_model_dirty_state_manual_entry_reacts_to_typing(tmp_path, monkeypatch):
+    """M4: секция «Модели» без сохранённого значения, fetch=[] → нет active-фолбэка,
+    редактор — голый ручной Input. Набранное имя обязано читаться как изменение —
+    иначе Enter ответил бы «ничего не изменено» и не записал ничего."""
     import model_picker
     import tui.app as app_mod
     from tui.screens.settings import SettingsScreen
@@ -1555,13 +1564,12 @@ async def test_dirty_marker_model_section_manual_entry_reacts_to_typing(tmp_path
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await pilot.pause()                                # worker fetch=[] отработал
-        title = scr.query_one("#set-title", Static)
-        assert "изменено" not in str(title.render())
+        assert scr._is_dirty(1) is False
         scr.query_one(Input).value = "new-model"
         await pilot.pause()
-        assert "изменено" in str(title.render())
+        assert scr._is_dirty(1) is True
 
 
 async def test_draft_probe_no_auth_401_shows_requires_auth_hint(tmp_path):
@@ -2098,7 +2106,7 @@ async def _open_model_section(app, pilot, cfg_file, cfg):
     from tests.tui.conftest import wait_until
     from tui.editors.model import ModelEditor
     scr = await _open_settings(app, pilot, cfg_file, cfg)
-    open_settings_section(scr, "Модель")
+    open_settings_section(scr, "Модели")
     await pilot.pause()
     await wait_until(pilot, lambda: scr.query_one(ModelEditor).models_loaded, "models loaded")
     return scr
@@ -2145,7 +2153,7 @@ async def test_saving_overridden_field_warns_it_will_not_apply(tmp_path, monkeyp
         text = _screen_text(scr)
         assert "не действует" in text
         assert "перекрыто" in text
-        assert "Модель" in text          # какое поле перекрыто — флеш виден уже на хабе
+        assert "Модели" in text          # какое поле перекрыто — флеш виден уже на хабе
     assert "other-model" in cfg_file.read_text(encoding="utf-8")   # запись ушла в БАЗОВЫЙ файл
     # оверлей не тронут
     assert "proj-model" in (proj / ".gc" / "config.yml").read_text(encoding="utf-8")
@@ -2331,20 +2339,25 @@ async def test_save_without_session_does_not_warn_about_counters(tmp_path):
 
 
 def test_sections_composition_merged():
-    """6 секций, «Подключение» первая, «Профили» сразу за «Модель», «Режимы
-    работы» между MCP-группой и Обновлением; редакторные {conn,model}, probe {conn}."""
+    """6 секций, «Подключение» первая, «Профили» сразу за «Моделями», «Режимы
+    работы» между MCP-группой и Обновлением.
+
+    Волна B: легаси-«Модель» поглощена секцией «Модели», и та вышла из save-машины
+    — редакторная теперь одна (`{conn}`), probe — тоже (`{conn}`). Гейт записи
+    пакетного шаблона при этом шире редакторных: «Модели» тоже пишут в config.yml."""
     from tui.screens import settings as s
-    assert s.SECTIONS == ("Подключение", "Модель", "Профили", "MCP-серверы",
+    assert s.SECTIONS == ("Подключение", "Модели", "Профили", "MCP-серверы",
                           "Режимы работы", "Обновление")
-    assert (s._CONNECTION == 0 and s._MODEL == 1 and s._PROFILES == 2
+    assert (s._CONNECTION == 0 and s._MODELS == 1 and s._PROFILES == 2
             and s._MCP == 3 and s._MODES == 4 and s._UPDATE == 5)
-    assert s._EDITOR_SECTIONS == {s._CONNECTION, s._MODEL}
+    assert s._EDITOR_SECTIONS == {s._CONNECTION}
     assert s._PROBE_SECTIONS == {s._CONNECTION}
+    assert s._WRITE_GATED_SECTIONS == {s._CONNECTION, s._MODELS}
 
 
 def test_sections_order_contains_modes():
     from tui.screens.settings import SECTIONS
-    assert SECTIONS == ("Подключение", "Модель", "Профили", "MCP-серверы",
+    assert SECTIONS == ("Подключение", "Модели", "Профили", "MCP-серверы",
                         "Режимы работы", "Обновление")
 
 
@@ -2965,7 +2978,7 @@ async def test_settings_model_filter_and_save(tmp_path, monkeypatch):
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await pilot.pause(); await pilot.pause()           # fetch-воркер
         scr.query_one("#onb-model", Input).value = "gpt"   # поле само себе фильтр (§3.2.6)
         await pilot.pause()
@@ -3078,7 +3091,7 @@ async def test_alt_down_on_the_agent_model_field_reloads_the_list(tmp_path, monk
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
                          and scr.query(ModelEditor).first().models_loaded, "models loaded")
         assert not scr.query(".onb-option"), "предусловие: сервер списка не отдал"
@@ -3118,7 +3131,7 @@ async def test_alt_down_on_the_agent_model_field_goes_past_the_session_cache(
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
                          and scr.query(ModelEditor).first().models_loaded, "models loaded")
         rows = lambda: [str(w.render()) for w in scr.query(".onb-option")]
@@ -3152,7 +3165,7 @@ async def test_alt_down_on_the_agent_model_field_keeps_the_chosen_row(tmp_path, 
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
                          and scr.query(ModelEditor).first().models_loaded, "models loaded")
         ed = scr.query_one(ModelEditor)
@@ -3181,7 +3194,7 @@ async def test_ctrl_space_on_the_model_section_does_nothing(tmp_path, monkeypatc
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
                          and scr.query(ModelEditor).first().models_loaded, "models loaded")
         rows_before = [str(w.render()) for w in scr.query(".onb-option")]

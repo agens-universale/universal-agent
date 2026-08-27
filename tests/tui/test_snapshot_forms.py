@@ -192,7 +192,7 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
         scr = _mk_settings(config_path=str(cfg_file))
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
                          and scr.query(ModelEditor).first().models_loaded, "models loaded")
         await _freeze_cursors(pilot)

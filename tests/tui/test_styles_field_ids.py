@@ -5,7 +5,8 @@ from pathlib import Path
 _STYLES = Path(__file__).resolve().parents[2] / "src" / "tui" / "styles.tcss"
 
 # id полей, которые обязаны иметь и плоский, и framed-стиль
-_FRAMED_FIELD_IDS = ("conn-url", "conn-token", "conn-proxy", "onb-model")
+_FRAMED_FIELD_IDS = ("conn-url", "conn-token", "conn-proxy", "onb-model",
+                     "mef-alias", "mef-model", "mef-url", "mef-token")
 
 
 def _css() -> str:
@@ -33,12 +34,17 @@ def test_every_framed_field_has_framed_rule():
 
 def test_disabled_token_border_is_dimmed():
     """«Без авторизации» замораживает поле токена — рамка приглушается до $deep-dim,
-    иначе замороженное поле читается как активное."""
+    иначе замороженное поле читается как активное.
+
+    Полей токена столько же, сколько форм с галкой «без авторизации», и сторож
+    обходит их СПИСКОМ: правило, записанное для «Подключения», молча не
+    распространяется на форму записи реестра — её пропажу прежний сторож не видел."""
     css = _css()
-    line = next((ln for ln in css.splitlines()
-                 if "#conn-token.set-framed:disabled" in ln), None)
-    assert line is not None, "нет правила для замороженного поля токена"
-    assert "$deep-dim" in line, f"рамка не приглушена: {line}"
+    for field in ("conn-token", "mef-token"):
+        line = next((ln for ln in css.splitlines()
+                     if f"#{field}.set-framed:disabled" in ln), None)
+        assert line is not None, f"нет правила для замороженного #{field}"
+        assert "$deep-dim" in line, f"рамка #{field} не приглушена: {line}"
 
 
 def test_dropdown_scroll_rule_exists():

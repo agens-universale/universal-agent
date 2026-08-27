@@ -19,17 +19,21 @@ from config_modules.root import AppConfig
 # config_modules.*, см. runner.py/special_agent.py) и завёл бы конфиг на модуль
 # с побочными эффектами регистрации инструментов ради одного списка строк.
 # Держать в синхроне со SUBAGENT_CLASSES — задача стража (см. план волны A, Task 15).
-_SUBAGENT_NAMES = frozenset(
-    {
-        "subagent_worker",
-        "subagent_code_generator",
-        "subagent_code_planner",
-        "subagent_planner",
-        "subagent_critic",
-        "subagent_code_reviewer",
-        "subagent_special_agent",
-    }
+#
+# Кортеж, а не сразу frozenset: ПОРЯДОК реестра (тот же, что у SUBAGENT_CLASSES) —
+# витрина для UI, перечисляющего субагентов поимённо (секция «Модели», привязки);
+# у множества порядка нет, и строки привязок прыгали бы от запуска к запуску.
+# Проверке ключей порядок не нужен — ей достаётся frozenset ниже.
+SUBAGENT_NAMES = (
+    "subagent_worker",
+    "subagent_code_generator",
+    "subagent_code_planner",
+    "subagent_planner",
+    "subagent_critic",
+    "subagent_code_reviewer",
+    "subagent_special_agent",
 )
+_SUBAGENT_NAMES = frozenset(SUBAGENT_NAMES)
 
 _ASSIGN_SCALAR_FIELDS = (
     "finish_gate",

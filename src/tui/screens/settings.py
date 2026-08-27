@@ -16,11 +16,15 @@ from rich.text import Text
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
-SECTIONS = ("Подключение", "Модель", "Профили", "MCP-серверы", "Режимы работы", "Обновление")
+SECTIONS = ("Подключение", "Модели", "Профили", "MCP-серверы", "Режимы работы", "Обновление")
 
-_CONNECTION, _MODEL, _PROFILES, _MCP, _MODES, _UPDATE = 0, 1, 2, 3, 4, 5
-_EDITOR_SECTIONS = {_CONNECTION, _MODEL}   # редакторные: writable, dirty-tracked, submit
+_CONNECTION, _MODELS, _PROFILES, _MCP, _MODES, _UPDATE = 0, 1, 2, 3, 4, 5
+_EDITOR_SECTIONS = {_CONNECTION}           # редакторные: writable, dirty-tracked, submit
 _PROBE_SECTIONS = {_CONNECTION}            # server-probe: ручная проверка, глиф из config-probe
+# Секции, пишущие в базовый config.yml: гейт пакетного шаблона общий, а вот
+# save-машина — только у редакторных. «Модели» пишут немедленно по действию
+# (решение 2 волны B), но в пакетный шаблон писать по-прежнему нельзя.
+_WRITE_GATED_SECTIONS = _EDITOR_SECTIONS | {_MODELS}
 
 _FOOTERS = {
     "menu": "↑/↓ — выбор  ·  Enter — открыть  ·  Esc — закрыть",
@@ -36,13 +40,9 @@ _FOOTERS = {
     # (не называть клавишу) — до неё дело не дошло, снятого сегмента хватило.
     _CONNECTION: ("Enter — сохранить  ·  Alt+↓ — показать список  ·  "
                   "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню"),
-    # Alt+↓ назван (не Ctrl+Space — та роль ушла клавише проверки связи, спека
-    # 2026-08-06 §2): он перечитывает список моделей и здесь (`ModelEditor.reload`),
-    # а своей строки-подсказки у этого списка нет (`hint=None` — под рамкой рисуется
-    # блок статуса). Молчание о работающей клавише — та же ложь, что обещание
-    # неработающей (§6): при лежавшем сервере секция выглядела бы безнадёжно сломанной.
-    # Ctrl+Space в этой секции пробы не запускает и в футере не обещается (§5.2 спеки).
-    _MODEL: "↑/↓ — выбор  ·  Enter — сохранить  ·  Alt+↓ — перечитать список  ·  PgUp/PgDn — секции  ·  Esc — меню",
+    # Футера секции «Модели» здесь нет: он позиционный и живёт в самой секции
+    # (`tui/editors/models_section.py`) — Enter значит разное на строке записи,
+    # строке резервной модели и в каждой из её под-форм.
     # «Обновить версию», а не просто «обновить»: Ctrl+U ставит пакет заново (меняет
     # систему), а Alt+↓ только перечитывает — одним словом на двоих они неразличимы (§5.4).
     _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · PgUp/PgDn — секции · Esc",
@@ -58,7 +58,7 @@ _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
 # «↑/↓ — выбор», а не «выбор провайдера» (как зовёт то же место мастер): у `#set-footer`
 # ширина минус padding, и полная формулировка давала ровно 120 — на канонных 120
 # колонках хвост «секции» срывался на вторую строку в самом частом состоянии секции.
-# Слово то же, что у списка моделей рядом (`_FOOTERS[_MODEL]`), а что именно выбирают,
+# Слово то же, что у списка моделей рядом (секция «Модели»), а что именно выбирают,
 # видно по строкам под полем.
 _FOOTER_PRESET_LIST = ("↑/↓ — выбор  ·  Enter — подставить  ·  Esc — свернуть"
                        "  ·  Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции")
@@ -143,6 +143,7 @@ class SettingsScreen(Screen):
         self._modes_idx = 0             # курсор строки подэкрана «Режимы работы»
         self._profiles_idx = 0          # курсор строки подэкрана «Профили»
         self._profiles_disk_cache: dict = {}   # дисковые чтения секции «Профили» на один проход UI
+        self._menu_pass_snapshot = None   # (текст, документ) цели записи на один проход меню
         from tui.services.settings_probe import probe as _default_probe
         self._probe_fn = probe_fn or _default_probe
         self._probe_config = None       # ProbeResult сохранённых значений → глифы хаба
@@ -194,8 +195,14 @@ class SettingsScreen(Screen):
     def _footer_text(self) -> str:
         if self._view == "menu":
             return _FOOTERS["menu"]
-        if self._view in _EDITOR_SECTIONS and not self._writable():
+        if self._view in _WRITE_GATED_SECTIONS and not self._writable():
             return _FOOTER_READONLY
+        if self._view == _MODELS:
+            # Футер секции — её собственный и позиционный (Enter значит разное на
+            # строке записи, строке резервной и в под-формах): экран его не считает,
+            # а спрашивает у секции. Редактора ещё нет (первый кадр) — молчим.
+            ed = self._models_editor()
+            return ed.footer_text() if ed is not None else _FOOTER_READONLY
         if self._view == _CONNECTION and self._presets_open():
             return (_FOOTER_PRESET_LIST if self._presets_have_selection()
                     else _FOOTER_PRESET_LIST_NO_MATCH)
@@ -329,9 +336,16 @@ class SettingsScreen(Screen):
             proxy = self._raw_value("proxy")
             proxy_part = f" · прокси" if proxy else ""
             v.append(f"{host} · {mode}{proxy_part}", style=DIM)
-        elif i == _MODEL:
-            model = self._raw_value("model")
-            v.append(display_value(model) if model else "—", style=DIM)
+        elif i == _MODELS:
+            # Реестр есть — превью про него («N в реестре · default …»); реестра нет
+            # — прежнее превью легаси-поля. Оба факта — ФАЙЛОВЫЕ (решение 6).
+            from tui.editors.models_section import registry_preview
+            document = self._target_document()
+            if document.get("models"):
+                v.append(registry_preview(document), style=DIM)
+            else:
+                model = self._raw_value("model")
+                v.append(display_value(model) if model else "—", style=DIM)
         elif i == _PROFILES:
             name = self._config.get("profile") or None
             v.append(name if name else "не выбран", style=DIM)
@@ -439,6 +453,63 @@ class SettingsScreen(Screen):
         if self._view == "menu":
             self._refresh_menu_rows()
 
+    def _target_snapshot(self) -> tuple[str, dict]:
+        """(текст, документ) цели записи за ОДНО чтение на проход отрисовки меню.
+
+        Строку «Модели» спрашивают минимум дважды за кадр (превью и глиф), а глифу
+        нужен ещё и текст — для валидации. Без снимка это четыре чтения файла и
+        разбор YAML заново на каждое ↑/↓ в меню. Кэш прохода — тот же приём, что у
+        `_profiles_disk_cache` секции «Профили», и сбрасывается там же, где рисуется
+        меню: правка файла извне видна с первого же кадра."""
+        if self._menu_pass_snapshot is None:
+            from pathlib import Path
+            import config_raw
+            text = ""
+            if self._config_path:
+                try:
+                    text = Path(self._config_path).read_text(encoding="utf-8")
+                except OSError:
+                    text = ""
+            self._menu_pass_snapshot = (text, config_raw.parse_document(text))
+        return self._menu_pass_snapshot
+
+    def _target_document(self) -> dict:
+        """Сырой документ цели записи (базовый config.yml) — ФАЙЛОВОЕ состояние секции
+        «Модели» (решение 6 волны B): реестр редактируется в файле, а не в резолве."""
+        return self._target_snapshot()[1]
+
+    def _models_glyph(self) -> tuple[str, str]:
+        """Вердикт строки «Модели» — про ФАЙЛ, а не про сеть (потому секция и вышла из
+        probe-волны). Реестр непуст: сломанные ссылки слотов/привязок → `!`; реестр,
+        в котором ни одна запись не резолвит адрес, → `—` (валиден, но не работает —
+        та же дыра схемы, о которой секция говорит строкой); иначе `✓`. Реестра нет —
+        прежний вердикт легаси-поля (модель есть в списке сервера).
+
+        Чужая ошибка конфига (опечатка в посторонней секции) валит фазу 1 и красила бы
+        `!` именно здесь — за неё эта строка не отвечает: `—`, «вердикта нет»."""
+        text, document = self._target_snapshot()
+        if document.get("models"):
+            from config import _app_config_from_text
+            from config_modules.model_sections_validation import validate_model_sections
+            from tui.editors.models_section import registry_resolves_any_address
+            try:
+                cfg = _app_config_from_text(text)
+            except ValueError:
+                return "—", DEEP_DIM         # файл не проходит схему — но не из-за реестра
+            try:
+                validate_model_sections(cfg)
+            except ValueError:
+                return "!", ERR              # ссылки слотов/привязок сломаны — это наше
+            if not registry_resolves_any_address(document, self._probe_args_from_config()[0]):
+                return "—", DEEP_DIM         # адреса нет ни у записей, ни в «Подключении»
+            return "✓", OK
+        r = self._probe_config
+        model = self._config.get("model") or ""
+        if not model or r is None or r.models is None:
+            return "—", DEEP_DIM
+        ids = [m.id for m in r.models]
+        return ("✓", OK) if model in ids else ("—", DEEP_DIM)   # не в списке → —, не !
+
     def _menu_glyph(self, i: int) -> tuple[str, str]:
         """(глиф, style) для строки меню. … в полёте; ✓/!/— по §2 контракта.
         Глиф — вердикт probe о ДЕЙСТВУЮЩИХ (резолвнутых) значениях: он про то, работает
@@ -447,7 +518,6 @@ class SettingsScreen(Screen):
             if self._probe_in_flight:
                 return "…", DEEP_DIM
             r = self._probe_config
-            c = self._config
             if i == _CONNECTION:
                 from onboarding import TOKEN_SENTINEL
                 endpoint, _a, _v, _m, _p = self._probe_args_from_config()
@@ -464,13 +534,8 @@ class SettingsScreen(Screen):
                 if auth == TOKEN_SENTINEL:
                     return "—", DEEP_DIM             # токен не задан (шаблон) — нечем подтвердить
                 return ("✓", OK) if r.auth_ok else ("!", ERR)   # токен принят/отклонён (401)
-            model = c.get("model") or ""
-            if not model or r is None:
-                return "—", DEEP_DIM
-            if r.models is None:
-                return "—", DEEP_DIM
-            ids = [m.id for m in r.models]
-            return ("✓", OK) if model in ids else ("—", DEEP_DIM)   # не в списке → —, не !
+        if i == _MODELS:
+            return self._models_glyph()
         if i == _MCP:
             try:
                 import mcp_runtime.cli as mcp_mod
@@ -497,6 +562,7 @@ class SettingsScreen(Screen):
     # --- рендер (полная замена тела фрейма, кроме персистентного #set-title) ---
     def _render_view(self) -> None:
         self._profiles_disk_cache = {}   # новый кадр — данные секции «Профили» перечитываются
+        self._menu_pass_snapshot = None  # и цель записи секции «Модели» — тоже
         self.query_one("#header-left", Static).update(self._title_text())
         frame = self.query_one("#set-frame", Vertical)
         title = self.query_one("#set-title", Static)
@@ -590,9 +656,13 @@ class SettingsScreen(Screen):
                 return self._connection_editor().is_dirty()
             except NoMatches:
                 return False
-        from tui.editors.model import ModelEditor
+        if section != _MODELS:
+            # Ветка по умолчанию была безусловной и спрашивала ModelEditor у любой
+            # секции — после поглощения легаси-«Модели» это единственный владелец
+            # вопроса, и спрашивать его от чужого имени нельзя.
+            return False
         try:
-            picked = self.query_one(ModelEditor).peek()
+            picked = self._legacy_model_editor().peek()
         except NoMatches:
             return False
         if picked is None:
@@ -647,6 +717,7 @@ class SettingsScreen(Screen):
     def _refresh_menu_rows(self) -> None:
         if self._view != "menu":
             return
+        self._menu_pass_snapshot = None   # новый проход — цель перечитывается один раз
         for i, row in enumerate(self.query(".set-menurow")):
             if i >= len(SECTIONS):
                 # Транзиентный двойной комплект строк: отложенный call_after_refresh
@@ -809,15 +880,7 @@ class SettingsScreen(Screen):
 
     # --- guard записи ---
     def _writable(self) -> bool:
-        from pathlib import Path
-        from config import _default_config_path
-        p = self._config_path
-        if not p:
-            return False
-        try:
-            return Path(p).resolve() != Path(_default_config_path()).resolve()
-        except OSError:
-            return False
+        return self._target_writable(self._config_path)
 
     def _writable_or_mcp(self) -> bool:
         """Секция MCP пишет в config.local.yml (не в user config) — не блокируется
@@ -831,9 +894,15 @@ class SettingsScreen(Screen):
         проектной (`.gc/config.yml`, всегда писуча и создаётся при отсутствии) —
         поэтому проверять надо конкретный файл, а не путь запуска. Без этого
         запуск на пакетном шаблоне (GC_HOME не настроен, `--init-config` не
-        запускали) писал бы `profile:`/`level:` внутрь установленного пакета."""
+        запускали) писал бы `profile:`/`level:` внутрь установленного пакета.
+
+        Пустой путь — не цель записи (паритет с прежним `_writable`, чей гард здесь
+        был потерян: `Path(None)` роняет TypeError, `Path("")` резолвится в cwd и
+        объявлял бы запись разрешённой)."""
         from pathlib import Path
         from config import _default_config_path
+        if not target:
+            return False
         try:
             return Path(target).resolve() != Path(_default_config_path()).resolve()
         except OSError:
@@ -860,29 +929,37 @@ class SettingsScreen(Screen):
         from onboarding import display_secret
         return display_secret(effective if isinstance(effective, str) else str(effective))
 
-    def _mount_field_hints(self, frame: Vertical, key: str) -> None:
-        """Подписи под полем — только когда есть что сказать.
+    def _field_hint_specs(self, key: str) -> list[tuple[str, str]]:
+        """(текст, css-класс) подписей под полем — только когда есть что сказать.
 
         Ссылка ${ENV:VAR} → её статус. Поле перекрыто оверлеем → действующее значение
         и источник. Случаи складываются: в файле ссылка И поле перекрыто → обе строки.
-        Обычное значение из базового файла → подписи нет, экран чист."""
+        Обычное значение из базового файла → подписей нет, экран чист.
+
+        Данными, а не монтированием: те же подписи рисует у себя секция «Модели» —
+        легаси-редактор уехал внутрь её тела, а знание о происхождении полей живёт
+        здесь (`_origins`)."""
         from onboarding import display_value, env_ref_status
+        specs: list[tuple[str, str]] = []
         raw = self._raw_value(key)
         if env_ref_status(raw):
-            frame.mount(Static(display_value(raw), classes="set-hint set-dyn"))
-
+            specs.append((display_value(raw), "set-hint set-dyn"))
         origin = self._origin(key)
         if origin is not None and origin.is_overridden:
             from config_origin import overlay_label
             source = overlay_label(origin)
             shown = self._effective_display(key, origin.effective)
-            frame.mount(Static(
-                f"⚠ действует {shown} — перекрыто {source}",
-                classes="set-hint set-dyn set-warnflash"))
+            specs.append((f"⚠ действует {shown} — перекрыто {source}",
+                          "set-hint set-dyn set-warnflash"))
+        return specs
+
+    def _mount_field_hints(self, frame: Vertical, key: str) -> None:
+        for text, cls in self._field_hint_specs(key):
+            frame.mount(Static(text, classes=cls))
 
     def _mount_section_body(self, frame: Vertical, section: int) -> None:
         from onboarding import TOKEN_SENTINEL
-        if section in _EDITOR_SECTIONS and not self._writable():
+        if section in _WRITE_GATED_SECTIONS and not self._writable():
             frame.mount(Static(
                 "конфиг недоступен для записи: используется пакетный шаблон "
                 "(настройте GC_HOME или запустите gc-ua --init-config)",
@@ -904,24 +981,25 @@ class SettingsScreen(Screen):
             self._mount_shadow_hint(frame)
             frame.mount(Static(self._probe_line_text(self._probe_config, _CONNECTION),
                                classes="set-hint set-dyn set-probe"))
-        elif section == _MODEL:
-            from tui.editors.model import ModelEditor
-            from model_picker import fetch_models
-            from tui.services.model_list_cache import make_cached_fetch
-            # За списком моделей ходим ДЕЙСТВУЮЩИМИ (резолвнутыми) адресом и токеном;
-            # current/active — сырые: именно они пишутся в файл.
+        elif section == _MODELS:
+            from pathlib import Path
+            from config import _default_config_path
+            from config_modules.endpoint_presets import endpoint_presets_from_config
+            from tui.editors.models_section import ModelsSectionEditor
             endpoint, auth, verify, _m, proxy = self._probe_args_from_config()
-            model = self._raw_value("model")
-            origin = self._origin("model")
-            frame.mount(ModelEditor(
-                current=model, endpoint=endpoint, auth=auth, verify=verify,
-                fetch=make_cached_fetch(fetch_models), active=model, on_loaded=self._update_dirty,
+            try:
+                template = Path(_default_config_path()).read_text(encoding="utf-8")
+            except OSError:
+                template = ""       # шаблона нет — якорь секции синтезирует сам writer
+            frame.mount(ModelsSectionEditor(
+                target=self._config_path, template=template,
+                effective_url=endpoint, effective_auth=auth, verify=verify,
                 config_proxy=proxy,
-                # Перекрытую модель в списке нельзя звать «текущей»: действует оверлей,
-                # а подпись ниже говорит именно это — экран не должен спорить сам с собой.
-                active_overridden=bool(origin is not None and origin.is_overridden)))
-            self._mount_field_hints(frame, "model")
-            self._mount_shadow_hint(frame)
+                presets=endpoint_presets_from_config(self._config or {}),
+                legacy_editor_factory=self._make_legacy_model_editor,
+                legacy_hints=self._field_hint_specs("model"),
+                on_change=self._models_changed, on_notice=self._models_notice,
+                on_legacy_save=self._save_legacy_model))
         elif section == _MCP:
             from tui.editors.mcp_section import McpSectionEditor
             from tui.services.mcp_manager import McpManager
@@ -934,11 +1012,98 @@ class SettingsScreen(Screen):
         else:
             self._mount_profiles_section(frame)
 
+    # --- секция «Модели»: швы экрана (монтаж, запись легаси-поля, витрины) ------
+    def _models_editor(self):
+        """Свежесмонтированное тело секции «Модели» либо None (read-only конфиг /
+        первый кадр). ПОСЛЕДНИЙ матч — по той же причине, что у `_connection_editor`:
+        снесённый предыдущим рендером ещё в дереве, а решения принимает живой."""
+        from tui.editors.models_section import ModelsSectionEditor
+        editors = list(self.query(ModelsSectionEditor))
+        return editors[-1] if editors else None
+
+    def _legacy_model_editor(self):
+        """Свежесмонтированный легаси-редактор модели.
+
+        ПОСЛЕДНИЙ матч, а не `query_one`: секция пересоздаёт его на КАЖДУЮ сборку
+        тела, а `remove()` в Textual отложенный — сразу после пересборки в дереве
+        два редактора, и `query_one` молча отдаёт первый, обречённый. Здесь это
+        стоило бы ровно того же, что и у `_connection_editor`: в конфиг уехало бы
+        значение прошлого рендера (находка 2026-08-07)."""
+        from tui.editors.model import ModelEditor
+        editors = list(self.query(ModelEditor))
+        if not editors:
+            raise NoMatches("ModelEditor не смонтирован")
+        return editors[-1]
+
+    def _make_legacy_model_editor(self):
+        """Легаси-редактор модели (`agent.model`) — тот же, что стоял в секции
+        «Модель» до поглощения: в пустом реестре он и есть секция, при живом реестре
+        — под-форма строки «резервная модель»."""
+        from model_picker import fetch_models
+        from tui.editors.model import ModelEditor
+        from tui.services.model_list_cache import make_cached_fetch
+        # За списком моделей ходим ДЕЙСТВУЮЩИМИ (резолвнутыми) адресом и токеном;
+        # current/active — сырые: именно они пишутся в файл.
+        endpoint, auth, verify, _m, proxy = self._probe_args_from_config()
+        model = self._raw_value("model")
+        origin = self._origin("model")
+        return ModelEditor(
+            current=model, endpoint=endpoint, auth=auth, verify=verify,
+            fetch=make_cached_fetch(fetch_models), active=model, config_proxy=proxy,
+            # Перекрытую модель в списке нельзя звать «текущей»: действует оверлей,
+            # а подпись ниже говорит именно это — экран не должен спорить сам с собой.
+            active_overridden=bool(origin is not None and origin.is_overridden))
+
+    def _save_legacy_model(self) -> None:
+        """Enter в легаси-редакторе секции «Модели». Пишем `agent.model` тем же
+        `_do_save`, что и раньше: плоское поле, а не реестр, — значит и подтверждение
+        перезаписи ${ENV:VAR}, и предупреждение о перекрытии те же."""
+        if not self._writable():
+            self._notice("конфиг недоступен для записи")
+            return
+        values = self._collect_values(_MODELS)
+        if values is None:
+            return
+        if not values:
+            self._title_note("ничего не изменено")
+            return
+        # Пустое состояние — это САМА секция, и запись из неё завершает работу с ней
+        # (возврат в хаб, как у прежней «Модели»). Под-форма резервной открыта из
+        # списка записей — ей возвращаться туда же, откуда пришли.
+        editor = self._models_editor()
+        self._do_save(_MODELS, values,
+                      back_to_menu=editor is None or editor.registry_empty)
+
+    def _models_changed(self) -> None:
+        """Секция записала в файл: сырые значения и происхождение перечитать, конфиг
+        приложения пересобрать — витрины (футер, `/config`, превью хаба) обязаны
+        показывать записанное, не прежнее."""
+        self._raw = self._read_raw()
+        self._menu_pass_snapshot = None   # файл изменился — снимок прохода протух
+        try:
+            self._on_apply()
+            self._config = getattr(self.app, "_config", None) or self._config
+        except Exception as exc:
+            self._notice(f"записано, но конфиг не перечитан: {exc}")
+            return
+        self._origins = self._read_origins()
+
+    def _models_notice(self, text: str, *, ok) -> None:
+        """Итог операции секции — тем же каналом, что и у `_do_save`: удача заметной
+        плашкой (✓ ставит сам `_flash`), отказ и предупреждение — строкой-notice,
+        глиф в них уже свой."""
+        if ok:
+            self._flash(text)
+        else:
+            self._notice(text)
+
     def _shadow_hint_text(self) -> str | None:
         """«действует профиль work / реестр моделей — эти поля база для незаданного»
-        в секциях «Подключение»/«Модель» — плоские ключи легаси остаются источником
+        в секции «Подключение» — плоские ключи легаси остаются источником
         наследования, но не действующим резолвом, когда есть merged-реестр (с
-        профилем или без него) или активный профиль.
+        профилем или без него) или активный профиль. В «Моделях» этой подсказки нет
+        (решение 6 волны B): при живом реестре `agent.model` базой наследования не
+        является, и строка резервной модели говорит про это своими словами.
 
         Профиль важнее голого реестра (реестр без профиля — частный случай, но явный
         выбранный профиль — более конкретная причина «эти поля не действуют»).
@@ -2042,9 +2207,8 @@ class SettingsScreen(Screen):
                 values["Authorization"] = header
             if proxy is not None:
                 values["proxy"] = proxy
-        elif section == _MODEL:
-            from tui.editors.model import ModelEditor
-            value = self.query_one(ModelEditor).submit()
+        elif section == _MODELS:
+            value = self._legacy_model_editor().submit()
             if value is not None:
                 values["model"] = value
         return values
@@ -2080,7 +2244,13 @@ class SettingsScreen(Screen):
             w_.remove()
 
     def _do_save(self, section: int, values: dict, *, warn_detail: str = "",
-                 confirmed: bool = False) -> None:
+                 confirmed: bool = False, back_to_menu: bool = True) -> None:
+        """Записать плоские поля секции и отчитаться (контракт §3: возврат в хаб + флэш).
+
+        `back_to_menu=False` — остаться в секции: под-форма «резервной модели» открыта
+        ИЗ списка записей, и уводить с неё в меню значит подниматься на два уровня там,
+        где Esc поднимает на один. Тело секции всё равно пересобирается тем же
+        `_render_view`, поэтому список сам показывает записанное."""
         import onboarding_config_writer as w
         from config import _default_config_path, validate_config_text
         from onboarding import FIELD_ANCHOR_PATHS
@@ -2115,7 +2285,8 @@ class SettingsScreen(Screen):
             self._notice(f"сохранено, но конфиг не перечитан: {exc}")
             return
         # v2: возврат в хаб + флэш (контракт §3); повторный config-probe (секции 0/1)
-        self._view = "menu"
+        if back_to_menu:
+            self._view = "menu"
         self._render_view()
         # Перечитать происхождение: файл изменился, оверлеи могли начать/перестать перекрывать.
         self._origins = self._read_origins()
@@ -2325,7 +2496,11 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._cancel_reset()
                 return
-            if self._view in _EDITOR_SECTIONS and self._pending_env_save is not None:
+            if self._view in _WRITE_GATED_SECTIONS and self._pending_env_save is not None:
+                # Множество ШИРЕ редакторных: подтверждение перезаписи ${ENV:VAR}
+                # висит и над плоской записью секции «Модели» (`agent.model`), а
+                # снять его больше некому — Esc там иначе уводит в меню, оставив
+                # висеть подтверждение.
                 event.stop()
                 self._cancel_env_confirm()     # отмена подтверждения, из секции не выходим
                 return
@@ -2337,6 +2512,12 @@ class SettingsScreen(Screen):
                 if ed is not None and ed.escape_presets():
                     event.stop()                # закрыт только пресет-лист адреса, секция жива
                     self._refresh_footer()      # клавиши вернулись секции — футер за ними
+                    return
+            if self._view == _MODELS:
+                ed = self._models_editor()
+                if ed is not None and ed.escape():
+                    event.stop()                # закрыто под-состояние секции, из неё не выходим
+                    self._refresh_footer()
                     return
             event.stop()
             self._close_or_back()
@@ -2360,7 +2541,8 @@ class SettingsScreen(Screen):
             event.stop()                          # Ctrl+ — тихий алиас для мышечной памяти
             self._switch_section(-1 if event.key in ("pageup", "ctrl+pageup") else 1)
             return
-        if event.key == "enter" and self._view in _EDITOR_SECTIONS and self._pending_env_save is not None:
+        if event.key == "enter" and self._view in _WRITE_GATED_SECTIONS \
+                and self._pending_env_save is not None:
             event.stop()                          # confirm перезаписи ссылки: Enter — подтвердил
             section, values, warn_detail = self._pending_env_save
             self._pending_env_save = None
@@ -2427,25 +2609,73 @@ class SettingsScreen(Screen):
             self._cancel_autoprobe()                  # запускаем СВОЮ пробу — автопроба лишняя
             self._start_draft_probe(self._view)
             return
-        if event.key in ("alt+down", "ctrl+down") and self._view == _MODEL:
-            # Карта проб §2.5: под курсором поле со списком С СЕРВЕРА — клавиша идёт
-            # за списком заново. Раскрытием тут не обойтись: свёртывания у этого
-            # списка нет вовсе (§9.1), рамка стоит всегда — клавиша съедается
-            # безусловно.
-            event.stop()
-            from tui.editors.model import ModelEditor
-            try:
-                self.query_one(ModelEditor).reload()
-            except NoMatches:
-                pass                    # секция ещё собирается — перечитывать нечего
-            return
-        if event.key in ("ctrl+at", "ctrl+space", "ctrl+@") and self._view == _MODEL:
-            # Пробы в «Модели» нет (§2.5, §5.2 спеки 2026-08-06): раскрытие/перечитывание
-            # списка ушло на Alt+↓ выше, а связь проверяют в «Подключении». Клавиша
-            # съедается молча — не проваливается в глобальные биндинги и ничего не
-            # обещает.
-            event.stop()
-            return
+        if self._view == _MODELS:
+            # Секция ведёт СВОИ клавиши целиком (образец — блок MCP ниже): у неё свои
+            # под-состояния (форма записи, под-форма резервной, пикер, confirm), и
+            # экран только роутит. Читается сверху вниз тем же порядком, что и там:
+            # confirm глотает всё → навигация → действия.
+            ed = self._models_editor()
+            if ed is not None:
+                # Подтверждение перезаписи ${ENV:VAR} держит СНИМОК значений на момент
+                # Enter. Свои две клавиши — Enter (подтвердить) и Esc (отменить) — до
+                # сюда не доходят: их перехватывают гейты выше. Значит любая клавиша,
+                # добравшаяся до блока, из этого состояния уводит: двигает курсор,
+                # перечитывает список (выбор падает на якорь, если модель пропала из
+                # ответа), открывает форму записи. Снимок после неё — уже не про то,
+                # что показано, и следующий Enter записал бы ПРЕЖНЮЮ модель поверх
+                # ссылки на переменную окружения.
+                #
+                # Отмена стоит ОДИН раз здесь, а не в каждой ветке: так закрывается
+                # класс дефекта, а не три его экземпляра — следующая клавиша секции
+                # получит правило даром. Спешить с отменой безопасно: она fail-safe
+                # (ссылка остаётся в файле), а следующий Enter поднимет баннер заново.
+                self._cancel_env_confirm()
+                if ed.awaiting_confirm:
+                    event.stop()
+                    if event.key == "enter":
+                        ed.confirm_pending()    # escape снят выше, глобальным гейтом
+                        self._refresh_footer()
+                    return
+                if event.key in ("up", "down"):
+                    event.stop()
+                    ed.move(-1 if event.key == "up" else 1)
+                    self._refresh_footer()
+                    return
+                if event.key in ("alt+down", "ctrl+down"):
+                    # Карта проб §2.5: подбор списка (форма — свой, легаси-редактор —
+                    # свой). Клавиша съедается безусловно: свёртывания у списка
+                    # моделей нет, обещание в футере гейтится позицией курсора.
+                    event.stop()
+                    ed.alt_down()
+                    self._refresh_footer()
+                    return
+                if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
+                    # Проба есть только у формы записи; на списке и в легаси-редакторе
+                    # её нет (§5.2) — клавиша съедается молча, ничего не обещая.
+                    event.stop()
+                    ed.probe()
+                    return
+                if event.key == "enter":
+                    event.stop()
+                    ed.enter()
+                    self._refresh_footer()
+                    return
+                if event.key == "delete" and not isinstance(self.focused, Input):
+                    event.stop()
+                    ed.request_remove()
+                    self._refresh_footer()
+                    return
+                if event.key == "space":
+                    if ed.space():
+                        event.stop()            # галка формы; иначе пробел печатается
+                    return
+                if event.key in ("alt+n", "alt+т", "alt+N", "alt+Т") or (
+                        event.key in ("n", "т", "N", "Т")
+                        and not isinstance(self.focused, Input)):
+                    event.stop()
+                    ed.new_entry()
+                    self._refresh_footer()
+                    return
         if event.key == "enter" and self._view in _PROBE_SECTIONS:
             event.stop()
             section = self._view
@@ -2476,20 +2706,6 @@ class SettingsScreen(Screen):
             self._cancel_autoprobe()                  # запускаем СВОЮ пробу — автопроба лишняя
             self._start_draft_probe(section, on_done=lambda r: self._smart_enter_decide(
                 section, self._collect_values(section) or {}, r))
-            return
-        if event.key == "enter" and self._view == _MODEL:
-            event.stop()
-            section = self._view
-            if not self._writable():
-                self._notice("конфиг недоступен для записи")
-                return
-            values = self._collect_values(section)
-            if values is None:
-                return
-            if not values:
-                self._title_note("ничего не изменено")
-                return
-            self._do_save(section, values)
             return
         if event.key == "enter" and self._view == _UPDATE:
             event.stop()
@@ -2563,41 +2779,24 @@ class SettingsScreen(Screen):
                     event.stop(); ed.begin_update(); return
                 if event.key == "enter":
                     event.stop(); ed.begin_enter(); return
-        if event.key in ("up", "down") and self._view in {_CONNECTION, _MODEL}:
+        if event.key in ("up", "down") and self._view == _CONNECTION:
             event.stop()
-            ed = None
-            if self._view == _CONNECTION:
-                try:
-                    ed = self._connection_editor()
-                except NoMatches:
-                    pass
-            elif self._view == _MODEL:
-                try:
-                    from tui.editors.model import ModelEditor
-                    ed = self.query_one(ModelEditor)
-                    if not (ed.models_loaded and ed.has_models):
-                        ed = None
-                except NoMatches:
-                    pass
+            try:
+                ed = self._connection_editor()
+            except NoMatches:
+                ed = None
             if ed is not None:
                 leaving_id = getattr(self.focused, "id", None)   # с какого поля уходим
                 ed.move(-1 if event.key == "up" else 1)
-                if self._view == _MODEL:
-                    # move() здесь МЕНЯЕТ выбранную модель — вердикт и летящая проба
-                    # были про другое значение.
-                    self._reset_draft_state()
-                else:
-                    # «Подключение»: move() двигает только курсор, значений не трогает
-                    # (их правки ловит on_input_changed) — обесценивать им вердикт и
-                    # летящую пробу нельзя. Иначе вторая стрелка внутри латентности
-                    # роняет пробу первой, повтор не уходит (снимок совпал), и строка
-                    # застревает на «проверяю…»; а стрелка во время пробы Enter молча
-                    # съедает сохранение, висящее у неё в on_done. Ровно поэтому в
-                    # мастере уход с поля поколение не бампает.
-                    self._cancel_env_confirm()   # но подтверждение перезаписи ссылки уход с поля снимает
+                # move() двигает только курсор, значений не трогает (их правки ловит
+                # on_input_changed) — обесценивать им вердикт и летящую пробу нельзя.
+                # Иначе вторая стрелка внутри латентности роняет пробу первой, повтор
+                # не уходит (снимок совпал), и строка застревает на «проверяю…»; а
+                # стрелка во время пробы Enter молча съедает сохранение, висящее у неё
+                # в on_done. Ровно поэтому в мастере уход с поля поколение не бампает.
+                self._cancel_env_confirm()   # но подтверждение перезаписи ссылки уход с поля снимает
                 self._update_dirty()
-                if self._view == _CONNECTION:
-                    self._autoprobe_on_leave(ed, leaving_id)
+                self._autoprobe_on_leave(ed, leaving_id)
                 self._refresh_footer()   # вход на адрес раскрывает список, уход — сворачивает
             return
         if event.key == "space" and self._view == _CONNECTION:
@@ -2625,9 +2824,10 @@ class SettingsScreen(Screen):
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._view in _PROBE_SECTIONS:
             self._reset_draft_state()
-        if self._view == _CONNECTION:
+        if self._view in (_CONNECTION, _MODELS):
             # Печать в адресе меняет фильтр пресет-листа, а с ним и обещания клавиш
             # (подставить ↔ оставить свой адрес) — футер догоняет её же событием.
+            # У формы записи реестра ровно те же два списка и та же развилка.
             self._refresh_footer()
         if self._view in _EDITOR_SECTIONS:
             self._update_dirty()

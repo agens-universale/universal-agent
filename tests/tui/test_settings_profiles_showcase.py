@@ -380,7 +380,12 @@ async def test_profiles_hint_shows_path_and_activation_target(tmp_path, monkeypa
         assert f"Enter — активировать (запись: {base_cfg})" in hint
 
 
-# --- shadow-hint в «Подключение»/«Модель» ---
+# --- shadow-hint в «Подключении» ---
+#
+# Волна B: из секции «Модели» подсказка ушла (решение 6) — при живом реестре
+# `agent.model` базой наследования не является, и строка резервной модели говорит
+# это своими словами («действует только без реестра»). В «Подключении» смысл
+# прежний: плоские поля остаются базой наследования, но не действующим резолвом.
 
 async def test_shadow_hint_shown_when_profile_active(tmp_path, monkeypatch):
     import tui.app as app_mod
@@ -415,7 +420,7 @@ async def test_shadow_hint_shown_for_registry_without_profile(tmp_path, monkeypa
                          config_path=base_cfg)
         app.push_screen(scr)
         await pilot.pause()
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-hint"))
         assert "действует реестр моделей" in body

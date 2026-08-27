@@ -30,10 +30,16 @@ def _all_footer_strings():
     Перебор по `dir()` + `isinstance(str)` пропустил бы главный футер «Подключения»:
     он живёт значением словаря, а не отдельной константой. Мастер перебирается
     наравне с настройками: сторож, знающий один экран, пропустил бы ту же ложь,
-    переехавшую на соседний."""
+    переехавшую на соседний.
+
+    Футеры секций, вынесенных в свои модули-редакторы, перебираются здесь же
+    (Global Constraints волны B): у секции «Модели» футер позиционный и живёт
+    целиком в `models_section` — сторож, смотрящий только в экраны, не увидел бы
+    ни одной её строки."""
+    from tui.editors import models_section
     from tui.screens import onboarding, settings
     out = {}
-    for module in (settings, onboarding):
+    for module in (settings, onboarding, models_section):
         for name in dir(module):
             if not name.startswith("_FOOTER"):
                 continue
@@ -53,10 +59,14 @@ def _all_hint_strings():
     сторож, смотрящий только в экраны (`_all_footer_strings`), пропустил бы подмену
     клавиши здесь (спека 2026-08-06 §4.5, задача 5 бланка).
 
-    Суффикс `_HINT`/`_HINT_NO_MATCH` — не `_HINT_CLASS` (CSS-класс, не текст)."""
-    from tui.editors import field_list, preset_list
+    Суффикс `_HINT`/`_HINT_NO_MATCH` — не `_HINT_CLASS` (CSS-класс, не текст).
+
+    Новый модуль формы регистрируется здесь той задачей, которая его создаёт
+    (Global Constraints волны B): `model_entry_form` называет обе клавиши своих
+    списков, `models_section` — подсказки строк и своего инлайн-пикера."""
+    from tui.editors import field_list, model_entry_form, models_section, preset_list
     out = {}
-    for module in (field_list, preset_list):
+    for module in (field_list, model_entry_form, models_section, preset_list):
         for name in dir(module):
             if not (name.endswith("_HINT") or name.endswith("_HINT_NO_MATCH")):
                 continue
@@ -256,18 +266,24 @@ def test_settings_preset_footers_stay_on_one_line_at_the_canon_width():
         assert len(footer) <= 118, f"{len(footer)} > 118: {footer}"
 
 
-def test_settings_model_footer_promises_alt_down_and_stays_quiet_about_ctrl_space():
-    """Клавиша перечитывает список моделей и в настройках тоже, а секция о ней молчала:
-    ни в футере, ни строкой-подсказкой (у `ModelEditor` списка со своим хинтом нет).
-    При лежавшем сервере секция выглядела безнадёжно сломанной. Молчание о работающей
-    клавише — та же ложь, что обещание неработающей (докстринг файла).
+def test_models_section_footers_split_the_probe_from_the_list():
+    """Пин переехал с `_FOOTERS[_MODEL]` на футеры секции «Модели»: секция поглотила
+    легаси-«Модель», её футер стал позиционным и живёт в своём модуле.
 
-    Роль ушла с `Ctrl+Space` на `Alt+↓` (спека 2026-08-06 §2, §4.2): пробы в «Модели»
-    нет (§5.2 спеки) — обещать `Ctrl+Space` здесь значило бы соврать про несуществующую
-    роль."""
-    from tui.screens.settings import _FOOTERS, _MODEL
-    assert "Alt+↓ — перечитать список" in _FOOTERS[_MODEL]
-    assert "Ctrl+Space" not in _FOOTERS[_MODEL]
+    Развод клавиш (спека 2026-08-06 §2, контракт п.4 волны B) остался тем же, но
+    теперь он ПОЗИЦИОННЫЙ: там, где под курсором список моделей и никакой пробы нет
+    (легаси-редактор, он же под-форма резервной), обещан только `Alt+↓`; проба
+    (`Ctrl+Space`) есть исключительно в форме записи реестра — у неё свои адрес и
+    токен, которые и проверяются."""
+    from tui.editors import models_section as m
+    for footer in (m._FOOTER_EMPTY, m._FOOTER_RESERVE_FORM):
+        assert "Alt+↓ — перечитать список" in footer
+        assert "Ctrl+Space" not in footer
+    assert "Ctrl+Space — проверить связь" in m._FOOTER_FORM_MODEL
+    assert "Alt+↓ — перечитать список" in m._FOOTER_FORM_MODEL
+    assert "Alt+↓ — показать список" in m._FOOTER_FORM_URL
+    for footer in (m._FOOTER_ENTRY, m._FOOTER_RESERVE):
+        assert "Alt+↓" not in footer and "Ctrl+Space" not in footer
 
 
 def test_both_screens_call_ctrl_space_by_the_canon_words():
@@ -321,3 +337,15 @@ def test_network_list_statuses_come_from_one_dictionary():
     from tui.editors import field_list, model
     assert model.LIST_LOADING is field_list.LIST_LOADING
     assert model.LIST_FAILED is field_list.LIST_FAILED
+
+
+def test_url_error_comes_from_one_dictionary():
+    """Отказ структурной проверки адреса — тоже ОДНА константа
+    (`onboarding_fields.URL_ERROR`) на все формы с полем адреса, и по той же причине:
+    списанный заново текст расходится с оригиналом на первой самостоятельной правке
+    одной из форм. Сравнение по IDENTITY — одинаковый текст двух разных констант
+    дыру не закрывает."""
+    from onboarding_fields import URL_ERROR
+    from tui.editors import connection, model_entry_form
+    assert connection._URL_ERROR is URL_ERROR
+    assert model_entry_form._URL_ERROR is URL_ERROR

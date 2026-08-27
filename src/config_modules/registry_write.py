@@ -255,6 +255,16 @@ def upsert_model(target, alias: str, fields: dict, template: str, *,
                        is_profile=is_profile)
 
 
+def references_to(target, alias: str) -> list[str]:
+    """Координаты слотов/привязок, ссылающихся на алиас, БЕЗ всякой записи.
+
+    Нужна подтверждению удаления в UI: `remove_model` отчёт о ссылках отдаёт, но
+    при их отсутствии сразу пишет — спросить «а что сломается?» до confirm-баннера
+    им нельзя. Знание о том, где живут ссылки, остаётся здесь: UI не должен
+    обходить slots/assign сам."""
+    return _references(_document(_read(target)), alias)
+
+
 def remove_model(target, alias: str, *, force: bool = False,
                  is_profile: bool = False) -> RemovalReport:
     """Удалить запись `models.<alias>`.
@@ -294,6 +304,7 @@ __all__ = [
     "RegistryWriteError",
     "RemovalReport",
     "apply_registry_ops",
+    "references_to",
     "upsert_model",
     "remove_model",
     "write_slot",

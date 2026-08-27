@@ -17,13 +17,13 @@ from onboarding_fields import (
     NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
     NO_AUTH_LABEL as _NO_AUTH_LABEL,
     NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
+    URL_ERROR as _URL_ERROR,
 )
 from tui.editors.field_list import write_field
 from tui.editors.preset_list import PRESET_HINT as _PRESET_HINT, preset_list_controller
 from tui.palette import DEEP_DIM
 from tui.widgets.paste_input import PasteInput
 
-_URL_ERROR = "нужны http(s):// и хост"
 _URL_EMPTY = "введите адрес"
 _TOKEN_EMPTY = "введите токен"
 _TOKEN_PH_CREATE = "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"

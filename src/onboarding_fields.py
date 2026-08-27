@@ -4,6 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 ADDRESS_HINT = "напр. https://host/v1/chat/completions"
+# Отказ структурной проверки адреса (`onboarding._valid_endpoint_url`) — один текст на
+# все формы с полем адреса: копия в соседнем редакторе разошлась бы с оригиналом на
+# первой же самостоятельной правке (тот же приём, что у статусов сетевого списка,
+# `field_list.LIST_*`).
+URL_ERROR = "нужны http(s):// и хост"
 AUTH_OPTIONS = ("Bearer-токен", "без авторизации (токен не нужен)", "пропустить")
 TOKEN_HINT = "токен (ввод скрыт)"
 NO_AUTH_NOTE = "без авторизации — заголовок не отправляется"
