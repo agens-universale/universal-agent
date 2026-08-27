@@ -14,7 +14,7 @@ def _states(monkeypatch, updates: dict):
     стенде с отставшей установкой всплыл бы сам — сдвинул бы индексы строк, а на Enter
     запустил бы настоящую переустановку speaches прямо из тестов."""
     from recommended_mcp.runtime import cli as cli
-    from gc_core.voice_runtime import state as voice_state
+    from gc_tui.voice_runtime import state as voice_state
     monkeypatch.setattr(voice_state, "load_state", lambda: None)
     monkeypatch.setattr(cli, "load_manifest_entries", lambda config=None: ([], None))
     monkeypatch.setattr(cli, "installed_state",
@@ -95,7 +95,7 @@ class _VoiceState:
 
 def _voice(monkeypatch, *, installed: str | None, pin: str = "v0.9.0"):
     """Локальный движок версии `installed` (None — не установлен) при пине `pin`."""
-    from gc_core.voice_runtime import state as voice_state
+    from gc_tui.voice_runtime import state as voice_state
     monkeypatch.setattr(voice_state, "SPEACHES_PIN", pin)
     monkeypatch.setattr(voice_state, "load_state",
                         lambda: _VoiceState(installed) if installed else None)

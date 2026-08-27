@@ -52,10 +52,9 @@ def test_load_config_flattens_custom_voice_presets_into_config_dict(tmp_path, mo
     пользовательские пресеты из config.yml до TUI не доезжали, оставался кодовый
     дефолт. У `voice_endpoint_presets` свой ключ схемы — проверяем его отдельно."""
     from gc_core import config as cfgmod
-    from gc_core.mcp_runtime import paths as mpaths
 
     monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
+    monkeypatch.setattr(cfgmod, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(

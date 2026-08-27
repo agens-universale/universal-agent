@@ -83,6 +83,27 @@ def wrap_local_for_tui(inner: Any, ctx: Any) -> Any:
     return TrackingFsBackend(inner, ctx)
 
 
+def attach_to_context(ctx: Any, config_dict: dict) -> None:
+    """Включить diff-журнал на готовом контексте: обернуть backend и пересобрать workspace.
+
+    Живёт здесь, а не в ядре. До 27.08.2026 эти три действия делал сам
+    `gc_core.run_context.create_run_context` под `if is_tui`, и ради них ядро
+    импортировало `gc_tui.diff_tui.tracking` — единственная его зависимость от
+    фронтенда. Знание «обернул backend — пересобери workspace» принадлежит тому, кто
+    оборачивает, поэтому переехало к обёртке; ядро о diff-экране больше не знает.
+
+    Идемпотентна: повторный вызов ничего не меняет (`wrap_local_for_tui` возвращает
+    тот же объект, если он уже Tracking или не Local).
+    """
+    from gc_core.execution_workspace import build_execution_workspace
+
+    wrapped = wrap_local_for_tui(ctx.os_backend, ctx)
+    if wrapped is ctx.os_backend:
+        return
+    ctx.os_backend = wrapped
+    ctx.workspace = build_execution_workspace(wrapped, config_dict)
+
+
 class TrackingFsBackend:
     """Декоратор LocalFsBackend: DiffStore snapshot + TouchedJournal."""
 

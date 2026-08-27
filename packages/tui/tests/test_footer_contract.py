@@ -130,7 +130,7 @@ def test_all_footers_fit_the_two_line_budget():
 async def test_wizard_footer_names_tab_by_the_group(tmp_path):
     """Мастер: на «Своём endpoint» футер зовёт в поля, из полей — обратно к режиму."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     from gc_tui.screens.onboarding import _TAB_TO_FIELDS, _TAB_TO_VARIANTS
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # У «URL» свой пресет-лист (спека 2026-08-05 §3): пустое поле раскрывает его
@@ -148,7 +148,7 @@ async def test_wizard_footer_names_tab_by_the_group(tmp_path):
 @pytest.mark.asyncio
 async def test_wizard_footer_keeps_quiet_about_tab_without_a_second_group(tmp_path):
     """«Без голосового ввода» полей не показывает: переходить некуда — Tab не обещан."""
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="skip") as (_pilot, scr):
         assert "Tab" not in scr._footer_text()
 
@@ -158,7 +158,7 @@ async def test_wizard_footer_does_not_promise_space_from_inside_a_field(tmp_path
     """В поле Space печатает пробел (Input съедает клавишу первым), пометки он там не
     ставит — обещать им выбор значит врать (§6.4)."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам (спека 2026-08-05 §3),
         # и футер на входе в поле — про клавиши списка, а не про «Enter — выбрать».
@@ -177,7 +177,7 @@ async def test_wizard_footer_names_the_right_key_per_step(tmp_path):
     списка ушло на `Alt+↓`. Шаг «Подключение» обещает обе — пробу и `Alt+↓ —
     показать список» (список свёрнут); шаг «Модель» — только `Alt+↓ — перечитать
     список», `Ctrl+Space` там больше не обещана; шаг MCP молчит про обе."""
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (_pilot, scr):
         scr._step = 0
         footer = scr._footer_text()
@@ -209,7 +209,7 @@ async def test_wizard_footer_names_tab_after_a_bare_arrow(tmp_path):
     через пересборку шага, и футер обязан считаться ПОСЛЕ монтажа полей: посчитанный
     раньше, он видит одну группу и молчит — ровно тот блокер, ради которого задача и
     делалась («поля вижу, войти нечем»)."""
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     from gc_tui.screens.onboarding import _TAB_TO_FIELDS
     async with wizard_voice_step(tmp_path, mode="local") as (pilot, scr):
         assert _TAB_TO_FIELDS not in _footer_widget(scr)   # на «Локальном» полей нет
@@ -224,7 +224,7 @@ async def test_wizard_model_list_footer_stops_promising_a_pick_without_matches(t
     подставляет (`pick_in` отдаёт False) — обещать «выбор модели» и «подставить»
     значит врать. Ввод своего id — штатный путь, а не край."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud", models=["whisper-1"]) as (pilot, scr):
         scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
         await pilot.press("tab", "down", "down")           # → поле «Модель», список раскрыт
@@ -246,7 +246,7 @@ async def test_wizard_connection_footer_yields_to_the_open_preset_list(tmp_path)
     """Шаг «Подключение» открывается с РАСКРЫТЫМ пресет-листом: Enter там подставляет
     адрес и возвращается, а Esc сворачивает список. Футер «Enter — далее · Esc — выход»
     врёт на первом же экране мастера."""
-    from gc_testkit.tui_support import wizard_connection_step
+    from form_harness import wizard_connection_step
     async with wizard_connection_step(tmp_path) as (_pilot, scr):
         from gc_tui.editors.connection import ConnectionEditor
         assert scr.query_one(ConnectionEditor).presets_open
@@ -264,7 +264,7 @@ async def test_wizard_connection_footer_when_no_preset_matches(tmp_path):
     2026-08-18), затем сами позвали список `Alt+↓`. Раньше сюда приводила одна печать,
     но раскрытый пустой список забирал ↑/↓ и обещал Enter то, чего тот не делает."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_connection_step
+    from form_harness import wizard_connection_step
     async with wizard_connection_step(tmp_path) as (pilot, scr):
         scr.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
         await pilot.pause()
@@ -286,7 +286,7 @@ async def test_no_live_wizard_footer_tells_an_outdated_story(tmp_path):
     (раскрытый список, пресет-лист), молчат не потому, что состояние проверено, а
     потому что виджетов нет — их строки стережёт перебор констант и живые тесты выше.
     Здесь проверяется ровно словарь безусловных кусков сборки."""
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         seen = []
         for step in (0, 1, 2, 3, 4):
@@ -318,7 +318,7 @@ async def test_settings_connection_footer_yields_to_the_open_preset_list(tmp_pat
     Канон 2026-08-17: заполненный адрес список больше не поднимает, поэтому состояние
     задаётся пустым полем, а не совпадением с пресетом."""
     from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
-    from gc_testkit.tui_support import settings_connection
+    from form_harness import settings_connection
     from gc_tui.editors.connection import ConnectionEditor
     async with settings_connection(tmp_path, url="") as (_pilot, scr):
         assert scr.query_one(ConnectionEditor).presets_open
@@ -336,7 +336,7 @@ async def test_settings_connection_footer_when_no_preset_matches(tmp_path):
     сами через `Alt+↓`. Печать сюда больше не приводит: без совпадений список
     сворачивается (редакция 2026-08-18)."""
     from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
-    from gc_testkit.tui_support import settings_connection
+    from form_harness import settings_connection
     async with settings_connection(tmp_path,
                                    url="https://my-own-host.internal/v1") as (pilot, scr):
         await pilot.press("alt+down")
@@ -351,7 +351,7 @@ async def test_settings_connection_footer_returns_to_the_section_after_esc(tmp_p
     """Esc свернул список — клавиши снова про секцию: Enter сохраняет, Esc уводит
     в меню. Футер, застрявший на обещаниях списка, врал бы теперь в другую сторону."""
     from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
-    from gc_testkit.tui_support import settings_connection
+    from form_harness import settings_connection
     async with settings_connection(tmp_path, url="") as (pilot, scr):
         await pilot.press("escape")
         await pilot.pause()

@@ -133,7 +133,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_core.thread_store import resolve_threads_dir
     threads_dir = resolve_threads_dir(config_dict)
 
-    from gc_core.mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
+    from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 
     auto_mcp = args.auto_mcp
     if auto_mcp:
@@ -142,8 +142,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     voice_expected = False
     _release_voice = None
     try:
-        from gc_core.voice_runtime.autostart import release_voice_service, url_is_ours
-        from gc_core.voice_runtime.state import load_state as _voice_state
+        from gc_tui.voice_runtime.autostart import release_voice_service, url_is_ours
+        from gc_tui.voice_runtime.state import load_state as _voice_state
 
         _release_voice = release_voice_service
         _vs = _voice_state()

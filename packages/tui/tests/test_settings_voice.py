@@ -13,11 +13,9 @@ def _isolate_config_layers(monkeypatch, tmp_path):
     РЕАЛЬНЫЙ ~/.gc/config.local.yml разработчика (voice-секцию туда пишет наш же UI)
     и .gc/config.yml рабочего каталога — вердикт зависел бы от машины."""
     from gc_core import config as config_mod
-    # Подменять надо НАСТОЯЩИЙ дом функции — config_modules.env_vars.
-    # `mcp_runtime.paths.managed_config_path` лишь реэкспорт, и все его
-    # потребители (config.py, wiring) связали объект шима на импорте:
-    # подмена атрибута шима до них уже не доезжает, а config_origin читает
-    # env_vars напрямую. Шим делегирует лениво, поэтому патч дома покрывает всех.
+    # Секции /settings читают перекрытия через config_origin, а он берёт
+    # managed_config_path из config_modules.env_vars ленивым импортом — поэтому
+    # подменяем именно там. Реэкспорта в mcp_runtime.paths больше нет.
     from gc_core.config_modules import env_vars as _env_vars
     monkeypatch.setattr(_env_vars, "managed_config_path",
                         lambda: tmp_path / "config.local.yml")
@@ -125,7 +123,7 @@ CLOUD_CONFIG = ("model: m\nvoice:\n  url: https://old.x/v1/audio/transcriptions\
 
 def _no_state(monkeypatch, tmp_path):
     """Батарейка не установлена → current_model_short() = DEFAULT_MODEL."""
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path",
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path",
                         lambda: tmp_path / "nowhere" / "state.json")
 
 
@@ -435,7 +433,7 @@ async def test_local_pane_fields_are_facts_only_language_editable(tmp_path):
         assert scr.query_one("#voice-url", Input).value == _OURS
         assert scr.query_one("#voice-token", Input).value == "не требуется"
         # адрес не собираем сами — берём у владельца формата (voice_runtime.wire)
-        from gc_core.voice_runtime.wire import voice_wire_section
+        from gc_tui.voice_runtime.wire import voice_wire_section
         assert scr.query_one("#voice-url", Input).value == \
             voice_wire_section(8735, "m")["url"]
         assert scr.query_one("#voice-model", Input).value == "Systran/faster-whisper-small"
@@ -1349,7 +1347,7 @@ async def test_enter_on_local_installs_then_reloads_then_starts_service(tmp_path
     """Батарейки нет: Enter ставит её (под suspend), затем hot-reload и подъём сервиса
     УЖЕ по перечитанному конфигу (гейт автостарта смотрит именно туда)."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         seen = []
@@ -1375,7 +1373,7 @@ async def test_enter_on_local_when_installed_but_cloud_switches_back(tmp_path, m
     """Батарейка есть, режим — свой endpoint: Enter возвращает локальный (wire+reload),
     без второй установки."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     # Конфиг с языком — у ПРИЛОЖЕНИЯ: при входе в секцию экран берёт базу оттуда
     # (`_sync_config_from_app`), как и в проде, где /settings строится из того же
     # объекта. Раньше носителем был конфиг экрана, и тест сверял словари целиком.
@@ -1402,7 +1400,7 @@ async def test_switching_to_installed_local_does_not_leave_the_tui(tmp_path, mon
     мгновенно и молча. Нырять за этим в терминал незачем: на живом смоке каждое
     переключение режима мигало alt-screen'ом и добавляло строку «Включаю…»."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: True)
@@ -1445,7 +1443,7 @@ async def test_enter_on_local_with_dead_service_starts_it(tmp_path, monkeypatch)
     """Режим локальный, а сервис лежит — Enter обязан поднять его: иначе строка тупик
     (переключать нечего, «уже включён» врёт, поднять из UI больше нечем)."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         seen = []
@@ -1483,7 +1481,7 @@ async def test_install_keeps_endpoint_draft(tmp_path, monkeypatch):
     """Набрал endpoint, передумал, поставил локальный сервис — черновик не должен
     исчезнуть: у установки своя панель, а набранное принадлежит человеку."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: True)
@@ -3404,7 +3402,7 @@ async def test_save_flash_visible_after_install_and_mouse_click(tmp_path, monkey
     промежуточной клавиши (мышью в поле) вскрывает это: подтверждение сохранения не видно."""
     from gc_tui.app import TuiApp
     from textual.widgets import Input
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         seen = []
@@ -3588,7 +3586,7 @@ async def test_service_start_does_not_block_ui(tmp_path, monkeypatch):
     import threading
     import time
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         entered = threading.Event()
@@ -3622,7 +3620,7 @@ async def test_service_start_does_not_block_ui(tmp_path, monkeypatch):
 async def test_service_not_started_flashes_hint(tmp_path, monkeypatch):
     """Сервис не поднялся — честная плашка со ссылкой на gc-voice status."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: False)
@@ -3636,7 +3634,7 @@ async def test_service_not_started_flashes_hint(tmp_path, monkeypatch):
 async def _install_with_slow_service(pilot, app, tmp_path, monkeypatch, status=OFF):
     """Секция «Голосовой ввод» с летящим (заблокированным) подъёмом сервиса."""
     import threading
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     entered = threading.Event()
     release = threading.Event()
 
@@ -4122,7 +4120,7 @@ async def test_navigation_cancels_the_install_confirm(tmp_path):
 async def test_tab_moves_between_groups(tmp_path):
     """Tab уводит со строк режима в поля и обратно — на то место, где курсор оставили:
     позиция у каждой группы своя и помнится отдельно (спека §4.2.1)."""
-    from gc_testkit.tui_support import settings_voice_section
+    from form_harness import settings_voice_section
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         assert scr._voice_cursor_group() == "variants"
         row_before = scr._voice_cursor_position()          # строка «Свой endpoint»
@@ -4150,7 +4148,7 @@ async def test_shift_tab_is_symmetric_to_tab(tmp_path):
     """Shift+Tab — предыдущая группа, симметрично Tab, и тоже перехвачен: без явной
     ветки он остался бы живым focus_previous и увёл бы фокус мимо курсора (§4.2.7)."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import settings_voice_section
+    from form_harness import settings_voice_section
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         await pilot.press("shift+tab")
         await pilot.pause()
@@ -4167,7 +4165,7 @@ async def test_arrows_in_fields_do_not_move_the_variant_rows(tmp_path):
     """Стоя в поле, стрелка двигает по полям, а не по строкам режима (спека §4.2.5):
     раньше лента была сквозной, и стрелка из поля переключала режим под собой."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import settings_voice_section
+    from form_harness import settings_voice_section
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         row_before = scr._voice_cursor_position()
         await pilot.press("tab")                           # в поля
@@ -4183,7 +4181,7 @@ async def test_arrows_in_fields_do_not_move_the_variant_rows(tmp_path):
 async def test_tab_is_swallowed_when_there_is_no_second_group(tmp_path):
     """Локальный режим без батарейки: полей нет, группа одна — Tab молчит, но клавишу
     всё равно съедает, иначе её заберёт штатный focus_next Textual (спека §4.2.6)."""
-    from gc_testkit.tui_support import settings_voice_section
+    from form_harness import settings_voice_section
     async with settings_voice_section(tmp_path, mode="local", installed=False) as (pilot, scr):
         focused_before = pilot.app.focused
         await pilot.press("tab")
@@ -4197,7 +4195,7 @@ async def test_tab_is_swallowed_when_there_is_no_second_group(tmp_path):
 async def test_tab_collapses_the_open_list_before_leaving(tmp_path):
     """Tab при раскрытом списке сначала сворачивает его, потом уводит в другую группу —
     чтобы список не остался висеть за спиной (спека §4.2.4)."""
-    from gc_testkit.tui_support import settings_voice_section
+    from form_harness import settings_voice_section
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         scr._set_voice_cursor(group="fields", position=3)  # «Язык» — поле со списком
         await pilot.pause()
@@ -4216,7 +4214,7 @@ async def test_remembered_field_position_is_clamped(tmp_path):
     меньше), Tab обратно в поля — попадаем на существующее поле, а не мимо."""
     # installed=True: у локальной панели поле «Язык» есть только при установленном
     # сервисе, иначе полей там нет вовсе и клэмпать нечего.
-    from gc_testkit.tui_support import settings_voice_section
+    from form_harness import settings_voice_section
     async with settings_voice_section(tmp_path, mode="cloud", installed=True) as (pilot, scr):
         await pilot.press("tab")                      # в поля cloud, курсор на url
         # Дальнее поле ставим напрямую: пройти туда стрелками нельзя — на поле со
@@ -4236,7 +4234,7 @@ async def test_remembered_field_position_is_clamped(tmp_path):
 async def test_mouse_click_moves_the_cursor(tmp_path):
     """Клик по полю переносит туда курсор, а не только фокус (спека §4.3)."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import settings_voice_section
+    from form_harness import settings_voice_section
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         assert scr._voice_cursor_group() == "variants"
         scr.query_one("#voice-model", Input).focus()

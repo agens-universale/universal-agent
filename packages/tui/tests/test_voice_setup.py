@@ -3,7 +3,7 @@
 import pytest
 
 from gc_tui.services import voice_setup as vs
-from gc_core.voice_runtime.state import SPEACHES_PIN, VoiceState
+from gc_tui.voice_runtime.state import SPEACHES_PIN, VoiceState
 
 # Версия — ОТ пина, а не литералом: иначе бамп пина превращал бы «установлен и свеж» в
 # «устарел», и падали бы тесты, к обновлению отношения не имеющие.
@@ -28,7 +28,7 @@ def test_status_local(monkeypatch):
 def test_engine_update_only_when_behind(monkeypatch):
     """Правило сверки версии — одно на продукт: его читают и строка в /settings, и
     клавиша обновления, и экран после апгрейда агента."""
-    from gc_core.voice_runtime import state as state_mod
+    from gc_tui.voice_runtime import state as state_mod
     monkeypatch.setattr(state_mod, "load_state", lambda: ST_OLD)
     assert vs.engine_update() == ("v0.0.1-old", SPEACHES_PIN)
     monkeypatch.setattr(state_mod, "load_state", lambda: ST)
@@ -79,7 +79,7 @@ def test_install_local_feeds_base_config_to_conflict_check(monkeypatch):
         seen["base_raw"] = base_raw
         return None
 
-    monkeypatch.setattr("gc_core.voice_runtime.install.install", fake_install)
+    monkeypatch.setattr("gc_tui.voice_runtime.install.install", fake_install)
     assert vs.install_local(echo=lambda *a: None) is True
     assert seen["base_raw"] == base
 
@@ -228,7 +228,7 @@ def test_probe_respects_verify_ssl(monkeypatch):
 def test_remove_local_reports_a_locked_leftover(monkeypatch):
     """Файлы заняты — окружение осталось на диске. Сказать «удалено» нельзя: статус
     уже переключится на «не установлен», и добить остаток человеку будет нечем."""
-    monkeypatch.setattr("gc_core.voice_runtime.cli._cmd_remove", lambda: 1)
+    monkeypatch.setattr("gc_tui.voice_runtime.cli._cmd_remove", lambda: 1)
     assert vs.remove_local() is False
 
 
@@ -371,9 +371,9 @@ def _update_stubs(monkeypatch, *, install_raises=None):
 
     monkeypatch.setattr(vs, "_load_state", lambda: ST_OLD)
     monkeypatch.setattr(vs, "base_config_raw", lambda: "")
-    monkeypatch.setattr("gc_core.voice_runtime.cli._stop_service", _stop)
-    monkeypatch.setattr("gc_core.voice_runtime.install.install", _install)
-    monkeypatch.setattr("gc_core.voice_runtime.autostart.ensure_voice_service", _ensure)
+    monkeypatch.setattr("gc_tui.voice_runtime.cli._stop_service", _stop)
+    monkeypatch.setattr("gc_tui.voice_runtime.install.install", _install)
+    monkeypatch.setattr("gc_tui.voice_runtime.autostart.ensure_voice_service", _ensure)
     return log
 
 
@@ -383,7 +383,7 @@ def test_failed_update_puts_the_service_back(monkeypatch):
     Находка ревью коллеги: `update_local` гасит работающий сервис, а на
     `VoiceInstallError` возвращает False сразу — и голос молчал до перезапуска gc-ua,
     хотя человек всего лишь не смог обновиться."""
-    from gc_core.voice_runtime.install import VoiceInstallError
+    from gc_tui.voice_runtime.install import VoiceInstallError
 
     said = []
     log = _update_stubs(monkeypatch, install_raises=VoiceInstallError("сеть недоступна"))

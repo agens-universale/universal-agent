@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 
-from gc_core.mcp_runtime.repo_path import ensure_repo_on_sys_path, repo_root
+from recommended_mcp.runtime.repo_path import ensure_repo_on_sys_path, repo_root
 
 
 def test_repo_root_points_at_monorepo() -> None:

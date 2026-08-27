@@ -269,9 +269,9 @@ async def test_final_summary_notice_combines_mcp_and_voice(tmp_path, monkeypatch
     воздух — одна пустая строка после строк сводки."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import paths as vpaths
+    from gc_tui.voice_runtime import paths as vpaths
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path",
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path",
                         lambda: tmp_path / "voice_data" / "state.json")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -288,9 +288,9 @@ async def test_final_summary_notice_combines_mcp_and_voice(tmp_path, monkeypatch
 async def test_final_summary_notice_voice_only(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import paths as vpaths
+    from gc_tui.voice_runtime import paths as vpaths
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path",
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path",
                         lambda: tmp_path / "voice_data" / "state.json")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -1054,14 +1054,14 @@ async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
     реально сработала на этом прогоне, а не осталась мёртвым кодом."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import paths as vpaths
+    from gc_tui.voice_runtime import paths as vpaths
     calls = []
 
     def _fake_state_path():
         calls.append(1)
         return tmp_path / "voice_data" / "state.json"
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path", _fake_state_path)
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", _fake_state_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()

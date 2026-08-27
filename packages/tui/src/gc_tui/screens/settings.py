@@ -1470,7 +1470,7 @@ class SettingsScreen(Screen):
         # на строке режима — не забирать фокус вовсе.
         cursor_field = self._voice_cursor_field() or False
         if self._voice_pane == "local":
-            from gc_core.voice_runtime.wire import local_url    # формат адреса — у владельца wire
+            from gc_tui.voice_runtime.wire import local_url    # формат адреса — у владельца wire
             frame.mount(VoiceEndpointEditor(
                 values={"url": local_url(s.port),
                         "token": _VOICE_LOCAL_TOKEN,
@@ -1603,7 +1603,7 @@ class SettingsScreen(Screen):
         s = self._voice_status
         if s is None or s.port is None:
             return False
-        from gc_core.voice_runtime.autostart import url_is_ours
+        from gc_tui.voice_runtime.autostart import url_is_ours
         return url_is_ours({"voice": {"url": url}}, s.port)
 
     def _mount_voice_override_hint(self, frame: Vertical) -> None:
@@ -1674,7 +1674,7 @@ class SettingsScreen(Screen):
         Поля — часть своей строки режима, подсказка у них с ней общая."""
         if self._voice_pane != "local":
             return _VOICE_MODE_HINTS["cloud"]
-        from gc_core.voice_runtime.state import current_model_short
+        from gc_tui.voice_runtime.state import current_model_short
         return _VOICE_MODE_HINTS["local"].format(model=current_model_short())
 
     def _voice_row_widgets(self) -> list:
@@ -2048,7 +2048,7 @@ class SettingsScreen(Screen):
         cfg = self._config
 
         def _work() -> None:
-            from gc_core.voice_runtime.autostart import ensure_voice_service
+            from gc_tui.voice_runtime.autostart import ensure_voice_service
             try:
                 ok = ensure_voice_service(cfg)
             except Exception:

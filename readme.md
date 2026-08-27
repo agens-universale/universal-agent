@@ -42,7 +42,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 | `gc-server` | ядро + FastAPI-режим и swarm |
 
 ```bash
-# полный агент — все пять команд сразу
+# полный агент — все шесть команд сразу
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
 
 # узкий профиль: своя команда + менеджер MCP одной строкой
@@ -58,9 +58,9 @@ gc-mcp install duckduckgo_search   # один MCP + авто-подключен�
 корневой `pyproject.toml`, а в корне лежит полный профиль. Подробно — в
 [docs/packaging.md](docs/packaging.md).
 
-> Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
-> `gc-tui` → `gc-ua`, `gc-server` → `gc-serve`, `gc-mcp` → `gc-mcp`; полный
-> `gc-ua` — все пять. `uv tool` не экспортирует команды зависимостей, поэтому у
+> Каждый дистрибутив кладёт в PATH только свои команды: `gc-cli` → `gc-cli`,
+> `gc-tui` → `gc-ua` и `gc-voice`, `gc-server` → `gc-serve`, `gc-mcp` → `gc-mcp` и
+> `gc-mcp-install`; полный `gc-ua` — все шесть. `uv tool` не экспортирует команды зависимостей, поэтому у
 > узкого профиля стоит `--with-executables-from gc-mcp` — менеджер MCP при этом
 > приезжает из того же коммита. Смена профиля — переустановка, нужен `--force`.
 

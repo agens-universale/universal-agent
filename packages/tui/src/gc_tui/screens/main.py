@@ -1035,8 +1035,8 @@ class TraceScreen(Screen):
         if self._voice is not None:
             return self._voice
         from gc_tui.services.voice_input import VoiceInputFlow
-        from gc_core.voice.recorder import MicRecorder
-        from gc_core.voice.transcriber import transcribe
+        from gc_tui.voice.recorder import MicRecorder
+        from gc_tui.voice.transcriber import transcribe
         self._voice = VoiceInputFlow(
             self._voice_config(),
             recorder_factory=MicRecorder,
@@ -1090,7 +1090,7 @@ class TraceScreen(Screen):
                 severity="warning",
             )
             return
-        from gc_core.voice.recorder import available
+        from gc_tui.voice.recorder import available
         if not available():
             self.notify(
                 "голосовой ввод: аудио-стек sounddevice недоступен "
@@ -1154,7 +1154,7 @@ class TraceScreen(Screen):
         cfg = getattr(self.app, "_config", None) or {}
 
         def _work() -> None:
-            from gc_core.voice_runtime.autostart import ensure_voice_service
+            from gc_tui.voice_runtime.autostart import ensure_voice_service
             try:
                 ok = ensure_voice_service(cfg)
             except Exception:

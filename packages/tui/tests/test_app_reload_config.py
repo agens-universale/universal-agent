@@ -249,6 +249,10 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
     _bump_mtime(cfg_path)
 
     class _Ctx:
+        # У настоящего RunContext бэкенд есть всегда; двойнику он нужен, потому что
+        # TuiApp включает diff-журнал сам (attach_to_context) — раньше это делало
+        # ядро внутри create_run_context, то есть внутри подменённой функции.
+        os_backend = None
         tools_data = {}
         mcp_status = {}
         logging_path = "/tmp/agent_main_test.log"

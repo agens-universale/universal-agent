@@ -36,7 +36,7 @@ def test_tui_init_config_runs_review_and_exits(tmp_path, monkeypatch):
     from gc_core import thread_store as ts_mod
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
 
-    from gc_core import mcp_daemon_autostart as mcp_da_mod
+    from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
     monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 

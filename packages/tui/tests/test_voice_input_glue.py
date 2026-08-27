@@ -49,7 +49,7 @@ async def test_ctrl_t_records_enter_inserts(monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -78,7 +78,7 @@ async def test_escape_cancels_without_insert(monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -117,7 +117,7 @@ async def test_ensure_voice_flow_builds_real_flow(monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -139,7 +139,7 @@ async def test_paste_chip_survives_enter_stop_of_recording(monkeypatch, tmp_path
         def run(self, messages, *, thread_id, **kw):  # не строит реальный AgentExecutor
             pass
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)},
                  threads_dir=str(tmp_path))
     app._executor_factory = lambda: _Fake()
@@ -185,7 +185,7 @@ async def test_footer_right_width_accounts_for_voice_pill(monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -208,7 +208,7 @@ async def test_insert_adds_space_after_word(monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -225,7 +225,7 @@ async def test_slash_voice_starts_recording(monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -266,7 +266,7 @@ async def test_voice_flow_cache_dropped_on_config_hot_reload(monkeypatch, tmp_pa
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     # Оверлеи машины (managed ~/.gc/config.local.yml с wire'нутым локальным сервисом,
     # project-local <cwd>/.gc/config.yml) не должны перекрывать конфиг теста — тот же
     # приём, что в tests/test_voice_config.py.
@@ -296,7 +296,7 @@ async def test_voice_flow_cache_kept_while_recording(monkeypatch, tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text("voice:\n  url: https://new.x/v1/audio/transcriptions\n",
                         encoding="utf-8")
@@ -327,10 +327,10 @@ async def test_ctrl_t_raises_a_dead_local_service_instead_of_recording(monkeypat
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     monkeypatch.setattr("gc_tui.services.voice_setup.probe_alive", lambda: False)
     raised = []
-    monkeypatch.setattr("gc_core.voice_runtime.autostart.ensure_voice_service",
+    monkeypatch.setattr("gc_tui.voice_runtime.autostart.ensure_voice_service",
                         lambda cfg: raised.append(cfg) or True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
@@ -355,9 +355,9 @@ async def test_ctrl_t_records_when_the_local_service_answers(monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     monkeypatch.setattr("gc_tui.services.voice_setup.probe_alive", lambda: True)
-    monkeypatch.setattr("gc_core.voice_runtime.autostart.ensure_voice_service",
+    monkeypatch.setattr("gc_tui.voice_runtime.autostart.ensure_voice_service",
                         lambda cfg: pytest.fail("живой сервис поднимать незачем"))
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
@@ -382,7 +382,7 @@ async def test_cloud_endpoint_is_not_probed_before_recording(monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     monkeypatch.setattr("gc_tui.services.voice_setup.probe_alive",
                         lambda: pytest.fail("облачный режим порт не меряет"))
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
@@ -408,7 +408,7 @@ async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.voice.recorder.available", lambda: True)
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     monkeypatch.setattr("gc_core.config.managed_config_path", lambda: tmp_path / "no-managed.yml")
     monkeypatch.setattr("gc_core.config._project_local_config_path", lambda: None)
     cfg_file = tmp_path / "config.yml"

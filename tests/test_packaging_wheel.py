@@ -25,8 +25,6 @@ CORE_REQUIRED = [
     "gc_core/assets/prompts/chat_completions_tui_special_instructions.md",
     "gc_core/assets/config.default.yml",
     "gc_core/config.py",
-    "gc_core/tui_entry.py",     # шим точки входа gc-ua обязан быть в ядре
-    "gc_core/serve_entry.py",
 ]
 
 # Ядро не должно содержать код фронтендов — ради этого всё и затевалось.
@@ -104,8 +102,11 @@ def test_core_wheel_does_not_squat_generic_names(wheels):
     gc_core/assets.
 
     recommended_mcp и external пока остаются: первый — настоящий импортируемый
-    пакет (mcp_daemon_autostart тянет recommended_mcp.autostart), второй обязан
-    быть его соседом. Их выносит отдельная задача.
+    пакет, второй обязан быть его соседом. Их выносит отдельная задача.
+
+    С 27.08.2026 ЯДРО их не импортирует вовсе: мост автозапуска daemon'ов уехал в
+    сам дистрибутив рецептов (recommended_mcp.runtime.daemon_autostart), и прежняя
+    оговорка «mcp_daemon_autostart тянет recommended_mcp.autostart» неверна.
     """
     squatted = {"prompts", "skills", "config.default.yml", "assets", "tests", "src"}
     for dist, names in wheels.items():

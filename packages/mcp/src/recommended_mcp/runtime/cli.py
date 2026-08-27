@@ -22,7 +22,7 @@ def _agent_dep_dir():
 
 
 def _load_repo_url(config: Optional[str] = None):
-    from gc_core.mcp_runtime.repo_path import ensure_repo_on_sys_path
+    from recommended_mcp.runtime.repo_path import ensure_repo_on_sys_path
     ensure_repo_on_sys_path()
     from recommended_mcp.runtime.manifest_resolve import resolve_install_manifest_path
     from recommended_mcp import manifest as _r

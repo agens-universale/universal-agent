@@ -405,6 +405,10 @@ def test_profiles_hint_survives_syntactically_broken_yaml(tmp_path, monkeypatch)
 
 def _stub_create_run_context(monkeypatch, captured):
     class _Ctx:
+        # У настоящего RunContext бэкенд есть всегда; двойнику он нужен, потому что
+        # TuiApp включает diff-журнал сам (attach_to_context) — раньше это делало
+        # ядро внутри create_run_context, то есть внутри подменённой функции.
+        os_backend = None
         tools_data = {}
         mcp_status = {}
         logging_path = "/tmp/agent_main_test.log"

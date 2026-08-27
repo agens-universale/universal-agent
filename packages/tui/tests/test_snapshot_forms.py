@@ -59,9 +59,9 @@ def _wizard(tmp_path, **over):
 def _isolate_voice_state(monkeypatch, tmp_path):
     """Батарейка голоса — на tmp: `_voice_installed`/`current_model_short` читают
     реальный каталог данных агента, и кадр зависел бы от машины разработчика."""
-    from gc_core.voice_runtime import paths as vpaths
+    from gc_tui.voice_runtime import paths as vpaths
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path",
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path",
                         lambda: tmp_path / "voice_data" / "state.json")
 
 
@@ -113,11 +113,9 @@ def _isolate_config_layers(monkeypatch, tmp_path):
     любому из них перекрыть адрес, токен, модель или прокси — в кадр домонтируется
     строка «⚠ действует … — перекрыто». Без подмены кадр чист лишь случайно."""
     from gc_core import config as config_mod
-    # Подменять надо НАСТОЯЩИЙ дом функции — config_modules.env_vars.
-    # `mcp_runtime.paths.managed_config_path` лишь реэкспорт, и все его
-    # потребители (config.py, wiring) связали объект шима на импорте:
-    # подмена атрибута шима до них уже не доезжает, а config_origin читает
-    # env_vars напрямую. Шим делегирует лениво, поэтому патч дома покрывает всех.
+    # Секции /settings читают перекрытия через config_origin, а он берёт
+    # managed_config_path из config_modules.env_vars ленивым импортом — поэтому
+    # подменяем именно там. Реэкспорта в mcp_runtime.paths больше нет.
     from gc_core.config_modules import env_vars as _env_vars
     monkeypatch.setattr(_env_vars, "managed_config_path",
                         lambda: tmp_path / "config.local.yml")

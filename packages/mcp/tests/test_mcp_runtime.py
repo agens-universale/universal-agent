@@ -58,5 +58,5 @@ def test_managed_config_path(monkeypatch, tmp_path):
                                                        "data": tmp_path / "d",
                                                        "cache": tmp_path / "c",
                                                        "state": tmp_path / "s"})
-    from gc_core.mcp_runtime.paths import managed_config_path
+    from gc_core.config_modules.env_vars import managed_config_path
     assert managed_config_path() == (tmp_path / "cfg" / "config.local.yml")

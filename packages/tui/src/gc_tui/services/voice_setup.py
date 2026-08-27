@@ -11,10 +11,10 @@ from dataclasses import dataclass
 
 
 from gc_core.onboarding_config_writer import write_values as _write_values
-from gc_core.voice_runtime.net import with_system_trust_retry
-from gc_core.voice_runtime.service import make_silence_wav, port_alive as _port_alive
-from gc_core.voice_runtime.state import available_update as _available_update, load_state as _load_state
-from gc_core.voice_runtime.wire import (
+from gc_tui.voice_runtime.net import with_system_trust_retry
+from gc_tui.voice_runtime.service import make_silence_wav, port_alive as _port_alive
+from gc_tui.voice_runtime.state import available_update as _available_update, load_state as _load_state
+from gc_tui.voice_runtime.wire import (
     base_config_raw, managed_language as _managed_language,
     unwire_voice as _unwire_managed, wire_voice,
 )
@@ -46,7 +46,7 @@ def _post(url, **kwargs):
     """Единственный сетевой шов фасада — через voice_runtime.net.post: общая сессия
     агента (без ~/.netrc, иначе Basic оттуда перетирает наш Bearer) и прокси по тем же
     правилам, что у backend. Отдельная функция — шов для тестов."""
-    from gc_core.voice_runtime.net import post as voice_post
+    from gc_tui.voice_runtime.net import post as voice_post
     return voice_post(url, **kwargs)
 
 
@@ -64,7 +64,7 @@ def engine_update() -> tuple[str, str] | None:
     меняет его под работающим TUI), и подмена `voice_runtime.state` в тестах должна
     доходить сюда."""
     try:
-        from gc_core.voice_runtime.state import available_update, load_state
+        from gc_tui.voice_runtime.state import available_update, load_state
         state = load_state()
         want = available_update(state)
     except Exception:                       # voice-рантайма нет — сверять нечего
@@ -82,7 +82,7 @@ def status_cheap(config_dict: dict) -> VoiceStatus:
     st = _load_state()
     url = str((config_dict.get("voice") or {}).get("url") or "")
     if st is not None:
-        from gc_core.voice_runtime.autostart import url_is_ours
+        from gc_tui.voice_runtime.autostart import url_is_ours
         mode = "local" if url_is_ours(config_dict, st.port) else ("cloud" if url else "off")
         return VoiceStatus(installed=True,
                            service_alive=None,
@@ -113,7 +113,7 @@ def status_snapshot(config_dict: dict) -> VoiceStatus:
 
 
 def install_local(echo=print) -> bool:
-    from gc_core.voice_runtime.install import VoiceInstallError, install
+    from gc_tui.voice_runtime.install import VoiceInstallError, install
     try:
         # base_raw обязателен: без него install видит пустой конфиг, не находит
         # конфликта и МОЛЧА перекрывает уже настроенный человеком voice.url. Раньше
@@ -134,9 +134,9 @@ def update_local(config: dict, echo=print) -> bool:
     (`install` честно скажет «занят», но человеку нужен результат, а не диагноз).
     Порт и модель берём прежние: их выбирал человек, и смена версии движка — не повод
     молча вернуть дефолты."""
-    from gc_core.voice_runtime.autostart import ensure_voice_service
-    from gc_core.voice_runtime.cli import _stop_service   # приватная, как в remove_local ниже
-    from gc_core.voice_runtime.install import VoiceInstallError, install
+    from gc_tui.voice_runtime.autostart import ensure_voice_service
+    from gc_tui.voice_runtime.cli import _stop_service   # приватная, как в remove_local ниже
+    from gc_tui.voice_runtime.install import VoiceInstallError, install
 
     state = _load_state()
     if state is None:
@@ -166,7 +166,7 @@ def update_local(config: dict, echo=print) -> bool:
 
 def remove_local() -> bool:
     # _cmd_remove приватная — публичный remove() в voice_runtime кандидат рефакторинга (не делаем сейчас).
-    from gc_core.voice_runtime.cli import _cmd_remove
+    from gc_tui.voice_runtime.cli import _cmd_remove
     return _cmd_remove() == 0
 
 

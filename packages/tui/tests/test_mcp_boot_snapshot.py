@@ -36,6 +36,10 @@ def test_build_real_executor_stores_mcp_snapshot(tmp_path, monkeypatch):
     )
 
     class _Ctx:
+        # У настоящего RunContext бэкенд есть всегда; двойнику он нужен, потому что
+        # TuiApp включает diff-журнал сам (attach_to_context) — раньше это делало
+        # ядро внутри create_run_context, то есть внутри подменённой функции.
+        os_backend = None
         tools_data = {"mcp_office_read": {"description": "read"}}
         mcp_status = {"office": {"status": "connected", "reason": None,
                                  "tool_count": 1, "elapsed_ms": 1}}

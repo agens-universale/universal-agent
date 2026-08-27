@@ -33,8 +33,8 @@ def test_main_assembles_stack_dry_run(monkeypatch, tmp_path):
             return None
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("gc_core.mcp_daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
-    monkeypatch.setattr("gc_core.mcp_daemon_autostart.shutdown_mcp_daemons", lambda: None)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
 
     from gc_tui import main
     rc = main(argv=["--config", str(cfg_path)])
@@ -85,11 +85,11 @@ def test_main_auto_mcp_default_starts_and_stops_daemons(monkeypatch, tmp_path):
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "gc_core.mcp_daemon_autostart.ensure_mcp_daemons",
+        "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
         lambda cfg: calls.append("ensure"),
     )
     monkeypatch.setattr(
-        "gc_core.mcp_daemon_autostart.shutdown_mcp_daemons",
+        "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
         lambda: calls.append("shutdown"),
     )
 
@@ -123,11 +123,11 @@ def test_main_no_auto_mcp_skips_daemons(monkeypatch, tmp_path):
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "gc_core.mcp_daemon_autostart.ensure_mcp_daemons",
+        "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
         lambda cfg: calls.append("ensure"),
     )
     monkeypatch.setattr(
-        "gc_core.mcp_daemon_autostart.shutdown_mcp_daemons",
+        "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
         lambda: calls.append("shutdown"),
     )
 
@@ -162,11 +162,11 @@ def test_main_auto_mcp_flag_still_works(monkeypatch, tmp_path):
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "gc_core.mcp_daemon_autostart.ensure_mcp_daemons",
+        "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
         lambda cfg: calls.append("ensure"),
     )
     monkeypatch.setattr(
-        "gc_core.mcp_daemon_autostart.shutdown_mcp_daemons",
+        "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
         lambda: calls.append("shutdown"),
     )
 
@@ -188,9 +188,9 @@ def test_main_voice_autostart_does_not_block_startup(monkeypatch, tmp_path):
     pytest.importorskip("textual")
 
     from gc_tui import app as tui_app
-    from gc_core.voice_runtime import autostart as autostart
-    from gc_core.voice_runtime import state as voice_state
-    from gc_core.voice_runtime.state import VoiceState
+    from gc_tui.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import state as voice_state
+    from gc_tui.voice_runtime.state import VoiceState
 
     created: list = []
 
@@ -209,8 +209,8 @@ def test_main_voice_autostart_does_not_block_startup(monkeypatch, tmp_path):
             return None
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("gc_core.mcp_daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
-    monkeypatch.setattr("gc_core.mcp_daemon_autostart.shutdown_mcp_daemons", lambda: None)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
 
     state = VoiceState(version="v1", root="/data/voice/speaches", port=8735, model="m")
     monkeypatch.setattr(voice_state, "load_state", lambda: state)

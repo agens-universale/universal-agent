@@ -421,7 +421,7 @@ async def test_section_entry_shows_the_whole_preset_list(tmp_path):
     (мутация на ревью 2026-08-18 проходит). Проверяется полнота списка на боевом пути
     раскрытия секции."""
     from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
-    from gc_testkit.tui_support import settings_connection
+    from form_harness import settings_connection
     from gc_tui.editors.connection import ConnectionEditor
     async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[1].url) as (pilot, scr):
         ed = scr.query_one(ConnectionEditor)

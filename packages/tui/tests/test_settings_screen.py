@@ -4,10 +4,8 @@ import pytest
 pytest.importorskip("textual")
 
 from textual.widgets import Static
-from gc_testkit.tui_support import (open_settings_section, recording_probe,
-                                settings_connection, settings_mcp_section,
-                                settings_section_index, settings_voice_section,
-                                wait_until)
+from gc_testkit.tui_support import open_settings_section, settings_section_index, wait_until
+from form_harness import recording_probe, settings_connection, settings_mcp_section, settings_voice_section
 
 
 def _cfg():

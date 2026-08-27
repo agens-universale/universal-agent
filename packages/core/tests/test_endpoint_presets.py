@@ -63,10 +63,9 @@ def test_load_config_flattens_custom_presets_into_config_dict(tmp_path, monkeypa
     endpoint_presets — TUI видел только кодовый дефолт, пользовательские
     пресеты из config.yml были мертвы."""
     from gc_core import config as cfgmod
-    from gc_core.mcp_runtime import paths as mpaths
 
     monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
+    monkeypatch.setattr(cfgmod, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(

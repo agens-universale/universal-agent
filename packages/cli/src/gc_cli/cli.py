@@ -20,7 +20,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.run_context import RunContext, create_run_context
-from gc_core.mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
+from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source

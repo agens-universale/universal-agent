@@ -13,6 +13,7 @@ from textual.screen import Screen
 
 from gc_core.runtime_notices import collect_runtime_notices, collect_unread_runtime_notices, push_runtime_notice, register_runtime_notices_listener
 from gc_core.startup_notices import Notice, collect_startup_notices
+from gc_tui.services.voice_notices import voice_notices
 from gc_tui import branding, palette
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
@@ -225,7 +226,7 @@ class TuiApp(App):
         когда будет готов — с полным бюджетом `ensure_voice_service`, без урезания:
         иначе тост мог бы соврать «не запустился» про сервис, который просто ещё
         поднимается."""
-        from gc_core.voice_runtime.autostart import ensure_voice_service
+        from gc_tui.voice_runtime.autostart import ensure_voice_service
         cfg = self._config
 
         def _work() -> None:
@@ -939,6 +940,9 @@ class TuiApp(App):
             # реестр, расходясь с честным хинтом /level (display_router).
             force_legacy=cli_forces_legacy_model(cfg),
         )
+        # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
+        from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
+        _attach_diff(ctx, cfg)
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
         from gc_core.tools.subagents.progress import QueueSubagentProgressSink
@@ -1016,6 +1020,7 @@ class TuiApp(App):
             all_builtin_tool_names(cfg),
             self._mcp_status,
             is_tui=True,
+            extra=voice_notices(cfg),
             deprecated_keys_used=cfg.get("deprecated_keys_used"),
             upgrade_info=self._upgrade_info,
             compat_notices=cfg.get("compat_notices"),

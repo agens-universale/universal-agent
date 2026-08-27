@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from gc_core.mcp_runtime.paths import managed_config_path
+from gc_core.config_modules.env_vars import managed_config_path
 
 _PLACEHOLDER_RE = re.compile(r"\{[a-z_]+\}")
 

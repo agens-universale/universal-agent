@@ -11,7 +11,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
-from gc_core.voice.errors import VoiceError
+from gc_tui.voice.errors import VoiceError
 
 MIN_SECONDS = 0.5   # короче — случайное нажатие: молчаливая отмена
 

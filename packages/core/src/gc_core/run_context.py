@@ -90,7 +90,8 @@ def create_run_context(
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
-    - ``is_tui=True`` + LocalFsBackend → ``TrackingFsBackend`` (Diff journal/snapshot).
+    - ``is_tui=True`` только помечает контекст; diff-журнал включает сам TUI
+      (``gc_tui.diff_tui.tracking.attach_to_context``) — ядро о нём не знает.
     - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
       CLI/server не передают его → константный провайдер из ключа ``config_dict["level"]``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
@@ -197,22 +198,6 @@ def create_run_context(
         on_messages_evicted=on_messages_evicted,
     )
     ctx.is_tui = bool(is_tui)
-
-    if is_tui and os_backend is None:
-        # diff_tui едет вместе с extra [tui]: в headless-профиле пакета нет.
-        # Ядро обязано это пережить — без diff-журнала прогон полностью
-        # работоспособен, поэтому деградируем в no-op, а не роняем сборку
-        # контекста (тот же приём, что в mcp_daemon_autostart).
-        try:
-            from gc_tui.diff_tui.tracking import wrap_local_for_tui
-        except ImportError:
-            wrap_local_for_tui = None
-
-        if wrap_local_for_tui is not None:
-            wrapped = wrap_local_for_tui(backend, ctx)
-            if wrapped is not backend:
-                ctx.os_backend = wrapped
-                ctx.workspace = build_execution_workspace(wrapped, config_dict)
 
     run_logger.debug(
         "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",

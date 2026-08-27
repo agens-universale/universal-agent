@@ -80,9 +80,9 @@ async def test_voice_step_local_option_desc_shows_short_model(monkeypatch, tmp_p
     """Описание «Локальный сервис» собирается динамически: базовая строка из
     _VOICE_OPTIONS + короткое имя модели батарейки (не установлена → DEFAULT_MODEL)."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import paths as vpaths
+    from gc_tui.voice_runtime import paths as vpaths
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -99,9 +99,9 @@ async def test_voice_step_local_option_desc_shows_short_model(monkeypatch, tmp_p
 async def test_voice_step_local_confirm_shows_short_model(monkeypatch, tmp_path):
     """Экран подтверждения: значение «голос» для local включает короткое имя модели."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import paths as vpaths
+    from gc_tui.voice_runtime import paths as vpaths
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -433,7 +433,7 @@ async def test_commit_local_starts_service_after_reload(monkeypatch, tmp_path):
     ПОСЛЕ _on_commit (там reload_config), по перечитанному конфигу — установка только
     что переписала config.local.yml, и гейт автостарта смотрит именно туда."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     async with app.run_test() as pilot:
@@ -465,7 +465,7 @@ async def test_commit_cloud_unwires_managed(monkeypatch, tmp_path):
     перекрыл бы только что записанный юзерский voice — снимаем его после успешной
     записи, симметрично канону /settings (voice_setup.wire_cloud)."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import wire as wire_mod
+    from gc_tui.voice_runtime import wire as wire_mod
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         calls = []
@@ -487,7 +487,7 @@ async def test_commit_cloud_unwires_managed(monkeypatch, tmp_path):
 async def test_commit_local_does_not_unwire(monkeypatch, tmp_path):
     """…и наоборот: локальный выбор managed-слой не трогает (его только что записал install)."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import wire as wire_mod
+    from gc_tui.voice_runtime import wire as wire_mod
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         calls = []
@@ -654,7 +654,7 @@ async def test_service_start_does_not_block_wizard_finish(monkeypatch, tmp_path)
     import threading
     import time
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import autostart as autostart
+    from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     async with app.run_test() as pilot:
@@ -1074,7 +1074,7 @@ async def test_shift_tab_is_symmetric_to_tab(tmp_path):
     """Shift+Tab — предыдущая группа, симметрично Tab, и тоже перехвачен: без явной
     ветки он остался бы живым focus_previous и увёл бы фокус мимо ленты (спека §4.2.7)."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         await pilot.press("shift+tab")
         await pilot.pause()
@@ -1091,7 +1091,7 @@ async def test_tab_moves_between_groups(tmp_path):
     """Tab уводит из вариантов в поля и обратно — на ту строку, где курсор оставили:
     позиция каждой группы помнится своя (спека §4.2.1)."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # У «URL» свой пресет-лист (спека 2026-08-05 §3), и на пустом поле он раскрыт
         # сам — стрелка тогда уходит списку, а не курсору формы (свой сценарий, см.
@@ -1126,7 +1126,7 @@ async def test_arrows_in_fields_do_not_move_variants(tmp_path):
     раньше экран перехватывал стрелки всегда, и из поля ими было не выйти иначе как
     сменив вариант под собой."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам (спека 2026-08-05 §3)
         # и первая же стрелка уходит ему, а не курсору формы (см. test_tab_moves_between_groups).
@@ -1147,7 +1147,7 @@ async def test_arrows_in_fields_do_not_move_variants(tmp_path):
 async def test_tab_is_swallowed_when_no_second_group(tmp_path):
     """На варианте без полей группа одна: Tab молчит — но клавишу всё равно съедает,
     иначе её заберёт штатный focus_next Textual и фокус уедет мимо ленты (спека §4.2.6)."""
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="local") as (pilot, scr):
         focused_before = pilot.app.focused
         await pilot.press("tab")
@@ -1162,7 +1162,7 @@ async def test_tab_collapses_open_list_before_leaving(tmp_path):
     """Tab при раскрытом списке сначала сворачивает его, потом уводит в другую группу —
     чтобы список не остался висеть за спиной (спека §4.2.4)."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # Без адреса список не раскрывается вовсе (идти некуда) — задаём его.
         scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
@@ -1187,7 +1187,7 @@ async def test_cursor_in_fields_leaves_no_highlighted_variant(tmp_path):
     остаётся — он маркер владельца показанных полей, а не курсора (канон /settings,
     `_render_voice`: «подсветка строго по курсору ленты, ▸ живёт по владельцу панели»)."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам на пустом поле (спека
         # 2026-08-05 §3), и Tab тащит за собой чужую асинхронность (монтаж строк
@@ -1223,7 +1223,7 @@ async def test_marking_does_not_reopen_a_list_shut_by_escape(tmp_path):
     он печатает пробел, и раскрытие списка на печать это канон (`reopen_for_typing`),
     а не побочка."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
         await pilot.press("tab")                           # в поля
@@ -1291,7 +1291,7 @@ async def test_returning_to_the_step_starts_in_the_variants_group(tmp_path):
     держат, а курсор, оставшийся в полях с прошлого визита, обещал бы движение по ним от
     пустого места (стрелка прыгала бы в поле, которого никто не выбирал)."""
     from textual.widgets import Input
-    from gc_testkit.tui_support import wizard_voice_step
+    from form_harness import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         await pilot.press("space")                         # ● «Свой endpoint»
         await pilot.press("tab")                           # курсор → в поля
@@ -1414,9 +1414,9 @@ async def test_desc_column_moves_left_without_the_installed_mark(monkeypatch, tm
     оставить между ними дыру. Статус берётся из состояния сервиса — уводим его в tmp,
     иначе результат зависит от того, стоит ли сервис на машине разработчика."""
     from gc_tui.app import TuiApp
-    from gc_core.voice_runtime import paths as vpaths
+    from gc_tui.voice_runtime import paths as vpaths
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -1516,9 +1516,9 @@ def _isolate_voice_state(monkeypatch, tmp_path):
     инжектированного voice= (предсуществующий разнобой этого файла) — без изоляции
     тесты стучались бы в РЕАЛЬНЫЙ каталог данных агента на машине разработчика (тот
     же приём, что test_onboarding_screen.py)."""
-    from gc_core.voice_runtime import paths as vpaths
+    from gc_tui.voice_runtime import paths as vpaths
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_core.voice_runtime.state.voice_state_path",
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path",
                         lambda: tmp_path / "voice_data" / "state.json")
 
 

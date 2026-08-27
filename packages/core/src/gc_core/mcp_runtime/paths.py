@@ -39,15 +39,3 @@ def mcp_python_executable() -> Path:
 def runtime_state_path() -> Path:
     """JSON со ссылкой на venv и последний манифест install."""
     return recommended_mcp_data_dir() / "runtime.json"
-
-
-def managed_config_path() -> Path:
-    """Реэкспорт из config_modules.env_vars — там теперь дом этой функции.
-
-    Оставлен, чтобы не менять вызовы внутри MCP-подсистемы (wiring и др.).
-    Путь принадлежит конфигу, а не MCP: раньше config.py статически импортировал
-    его отсюда, и ядро конфига зависело от MCP-подсистемы.
-    """
-    from gc_core.config_modules.env_vars import managed_config_path as _impl
-
-    return _impl()

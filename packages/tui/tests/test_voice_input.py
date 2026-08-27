@@ -2,7 +2,7 @@
 from gc_tui.services.voice_input import (
     IDLE, MIN_SECONDS, RECORDING, TRANSCRIBING, VoiceInputFlow,
 )
-from gc_core.voice.errors import VoiceError
+from gc_tui.voice.errors import VoiceError
 
 
 class FakeRecorder:

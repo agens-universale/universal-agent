@@ -111,7 +111,7 @@ def test_managed_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, t
     `gc-mcp install`) идёт тем же `deep_merge` и правилу не подсуден иначе, чем своей
     проверкой до слияния."""
     from gc_core.config import load_config_ex
-    from gc_core.mcp_runtime.paths import managed_config_path
+    from gc_core.config_modules.env_vars import managed_config_path
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, _BASE_WITH_A_WHOLE_PAIR)

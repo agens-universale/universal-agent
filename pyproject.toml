@@ -25,12 +25,12 @@ dependencies = [
 all = []
 
 [project.scripts]
-gc-cli = "gc_core.cli_entry:main"
-gc-ua = "gc_core.tui_entry:main"
-gc-serve = "gc_core.serve_entry:main"
+gc-cli = "gc_cli.cli:main"
+gc-ua = "gc_tui:main"
+gc-serve = "gc_server.server:serve"
 gc-mcp = "recommended_mcp.runtime.cli:main"
 gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
-gc-voice = "gc_core.voice_runtime.cli:main"
+gc-voice = "gc_tui.voice_runtime.cli:main"
 
 # Мета — чисто метаданные: ни одного файла, только зависимости и точки входа.
 # Раньше здесь жил meta/gc_ua_launcher.py, каждая функция которого делала

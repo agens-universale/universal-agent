@@ -484,7 +484,7 @@ class OnboardingScreen(Screen):
                         if "://" in self._voice_cloud.get("url", "") else "—")
                 voice_val = f"endpoint {host}"
             elif self._voice_choice == "local":
-                from gc_core.voice_runtime.state import current_model_short
+                from gc_tui.voice_runtime.state import current_model_short
                 voice_val = f"локальный сервис · {current_model_short()}"
             else:
                 voice_val = "нет"
@@ -654,7 +654,7 @@ class OnboardingScreen(Screen):
 
     def _voice_installed(self) -> bool:
         try:
-            from gc_core.voice_runtime.state import load_state
+            from gc_tui.voice_runtime.state import load_state
             return load_state() is not None
         except Exception:
             return False
@@ -703,7 +703,7 @@ class OnboardingScreen(Screen):
 
     def _voice_cost_text(self) -> str:
         """Чем локальный сервис занят и какой моделью."""
-        from gc_core.voice_runtime.state import current_model_short
+        from gc_tui.voice_runtime.state import current_model_short
         return f"{current_model_short()} · {_VOICE_LOCAL_COST}"
 
     def _prefill_voice_from_config(self) -> None:
@@ -1263,7 +1263,7 @@ class OnboardingScreen(Screen):
             # Батарейка могла быть установлена раньше: managed-слой (config.local.yml)
             # перекрыл бы только что записанный юзерский voice — снимаем его, как это
             # делает /settings через voice_setup.wire_cloud (тот же канон).
-            from gc_core.voice_runtime.wire import unwire_voice
+            from gc_tui.voice_runtime.wire import unwire_voice
             try:
                 unwire_voice()
             except Exception:
@@ -1289,7 +1289,7 @@ class OnboardingScreen(Screen):
         cfg = getattr(app, "_config", None) or {}
 
         def _work() -> None:
-            from gc_core.voice_runtime.autostart import ensure_voice_service
+            from gc_tui.voice_runtime.autostart import ensure_voice_service
             try:
                 ok = ensure_voice_service(cfg)
             except Exception:

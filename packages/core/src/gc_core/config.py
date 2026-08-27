@@ -33,7 +33,7 @@ from gc_core.config_modules.profiles import (
 from gc_core.config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from gc_core.config_modules import env_vars
 from gc_core.bundled_assets import bundled_root
-from gc_core.mcp_runtime.paths import managed_config_path
+from gc_core.config_modules.env_vars import managed_config_path
 from gc_core.message_projection import configure_for_model_tags
 from gc_core.trace_id import normalize_trace_id
 
@@ -525,7 +525,7 @@ def load_config_ex(
     _voice_overridden: Optional[str] = None
     _mv = managed_raw.get("voice") or {}
     if _mv:
-        from gc_core.voice_runtime.wire import overridden_user_voice
+        from gc_core.config_modules.voice import overridden_user_voice
         _managed_url = str(_mv.get("url") or "")
         _merged_voice = raw_config.get("voice")
         _effective_url = str((_merged_voice or {}).get("url") or "") \
