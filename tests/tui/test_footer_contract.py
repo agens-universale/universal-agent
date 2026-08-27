@@ -76,6 +76,87 @@ def _all_hint_strings():
     return out
 
 
+def _all_notice_strings():
+    """Notice- и confirm-тексты редакторов — те же обещания клавиш, что в футерах,
+    только сказанные телом секции (спека эффективного вида §5, [Р2a-N15]).
+
+    Отдельный сборщик, а не расширение `_all_footer_strings`: бюджет двух строк —
+    про полосу футера, а вопрос-баннер живёт в теле и переносится законно. По ним
+    стоит проверять словарь клавиш и грамматику отказов.
+
+    Заодно это сторож «текст — module-level константа»: сообщение, собранное
+    f-строкой по месту, в перебор не попадёт вовсе, и подмена клавиши в нём
+    осталась бы незамеченной."""
+    from tui.editors import model_entry_form, models_section
+    from tui.screens import onboarding, settings
+    out = {}
+    for module in (settings, onboarding, models_section, model_entry_form):
+        for name in dir(module):
+            if not (name.startswith("_NOTICE") or name.startswith("_CONFIRM")):
+                continue
+            value = getattr(module, name)
+            if isinstance(value, str):
+                out[f"{module.__name__}.{name}"] = value
+    return out
+
+
+def test_notice_and_confirm_texts_are_collected_at_all():
+    """Сам сборщик — тоже предмет: пустой перебор молча проходил бы все проверки
+    ниже. Секция «Модели» несёт ОБА отказа эффективного вида — Del и Enter на
+    записи основного конфига: имя, не попавшее в перебор, оставило бы предмет
+    стража за его же границей."""
+    from tui.editors import models_section as m
+    collected = set(_all_notice_strings().values())
+    assert m._NOTICE_REMOVE_REFUSED_INHERITED in collected
+    assert m._NOTICE_EDIT_REFUSED_INHERITED in collected
+    # Итог записи — тоже константа: собранный f-строкой по месту, он в перебор не
+    # попадал бы вовсе.
+    assert m._NOTICE_ENTRY_SAVED in collected
+
+
+def test_collected_refusals_follow_the_canon_grammar():
+    """Канон отказов Global Constraints — «✗ не <глагол>: <причина>»: одна форма на
+    все витрины, иначе отказ читается как сбой, а не как ответ."""
+    import re
+    for name, value in _all_notice_strings().items():
+        if not value.startswith("✗"):
+            continue
+        assert re.match(r"^✗ не \w+: ", value), f"{name}: отказ мимо канона — {value}"
+
+
+def test_the_inherited_row_footer_promises_neither_del_nor_enter():
+    """На унаследованной строке не работают ни Del, ни Enter — править и удалять
+    запись основного конфига секция профиля не вправе. Футер обязан молчать про
+    обе клавиши (канон «недоступное не обещаем») и обещать то, что там реально
+    работает."""
+    from tui.editors import models_section as m
+    footer = m._FOOTER_PROFILE_BASE_ENTRY
+    assert "Del" not in footer and "Enter" not in footer
+    assert "n — добавить" in footer
+    assert m._FOOTERS_WITH_VIEW[footer].count("Enter") == 0
+
+
+def test_the_file_viewer_key_is_promised_only_in_the_profile_sub_view():
+    """§11a: `v` открывает файл профиля, и клавиша эта — ПОД-ВИДА профиля.
+    Строки её обещания живут производными от футеров под-вида (`_FOOTERS_WITH_
+    VIEW`), а не вторыми литералами: дописанная в одном месте клавиша обязана
+    появиться в обоих, а бюджет двух строк — считаться и для варианта с `v`
+    (он длиннее оригинала, и именно он попадает на экран).
+
+    Ведёт клавишу ЭКРАН (`settings`), поэтому и обещание гасится его настройкой
+    — но слова обещания стоят рядом с остальными футерами секции, иначе их не
+    видел бы ни один сборщик."""
+    from tui.editors import models_section as m
+    promised = set(m._FOOTERS_WITH_VIEW.values())
+    for name, value in _all_footer_strings().items():
+        if m._VIEW_KEY in value:
+            assert value in promised, f"{name}: обещает просмотр файла вне под-вида"
+    for base, viewed in m._FOOTERS_WITH_VIEW.items():
+        assert m._VIEW_KEY not in base
+        assert viewed.count(m._VIEW_KEY) == 1
+        assert viewed.endswith(m._EXIT_TO_LIST), viewed   # выход остаётся последним
+
+
 def test_no_footer_promises_tab_as_probe():
     """Tab больше не проверяет связь — ни один футер не смеет это обещать."""
     for name, value in _all_footer_strings().items():

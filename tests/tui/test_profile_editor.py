@@ -35,6 +35,12 @@ def _no_managed_overlay(tmp_path, monkeypatch):
     )
 
 
+# Секция-оверлей для стражей превью: НЕПУСТАЯ намеренно. Пустой якорь
+# (`security: {}`) переопределением по §11 не считается — писатель оставляет
+# такой после снятия последнего ключа, — и витрина о нём молчит по праву.
+_OVERLAY_SECTION = "{name}:\n  enabled: true\n"
+
+
 def _texts(scr) -> str:
     return " ".join(str(w.render()) for w in scr.query(Static))
 
@@ -323,11 +329,15 @@ async def test_a_profile_that_only_repoints_slots_is_not_called_empty(tmp_path, 
 
 async def test_the_overlay_preview_stays_silent_about_what_the_forms_show(tmp_path, monkeypatch):
     """Обратная сторона: как только реестр непуст, `slots`/`assign` показывают формы
-    — и в превью им делать нечего, иначе оно дублирует видимое."""
+    — и в превью им делать нечего, иначе оно дублирует видимое.
+
+    Секция-свидетель НЕПУСТА намеренно: пустой якорь (`security: {}`) с §11
+    переопределением не считается вовсе, и на нём страж мерил бы не тот факт."""
     import tui.app as app_mod
     _project(tmp_path, monkeypatch)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(tmp_path / "base" / "profiles" / "work.yml", "security: {}\n" + _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "work.yml",
+           _OVERLAY_SECTION.format(name="security") + _PROFILE_BODY)
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -407,7 +417,7 @@ async def test_an_empty_profile_shows_its_own_empty_state(tmp_path, monkeypatch)
         assert ed._rows() == []
         assert not scr.query(ModelEditor)
         assert m._PROFILE_EMPTY_HINT in _texts(scr)
-        assert _footer(scr) == m._FOOTER_PROFILE_EMPTY
+        assert _footer(scr) == m._FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_EMPTY]
         await pilot.press("n")
         await pilot.pause()
         assert scr.query(ModelEntryForm), "вход в реестр из пустого состояния не работает"
@@ -445,7 +455,7 @@ async def test_the_overlay_preview_truncates_by_whole_names(tmp_path, monkeypatc
     import tui.app as app_mod
     _project(tmp_path, monkeypatch)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    body = "".join(f"{name}: {{}}\n" for name in
+    body = "".join(_OVERLAY_SECTION.format(name=name) for name in
                    ("agent_settings", "intent_guard", "long_memory", "security",
                     "summary_params", "tools")) + _PROFILE_BODY
     _write(tmp_path / "base" / "profiles" / "work.yml", body)
@@ -613,7 +623,10 @@ async def test_the_list_footer_promises_opening(tmp_path, monkeypatch):
 
 async def test_the_editor_footer_leads_back_to_the_list(tmp_path, monkeypatch):
     """Футер под-вида — позиционный футер секции «Модели», но Esc в нём возвращает
-    К СПИСКУ профилей, а не в меню хаба: вложенность обязана быть названа."""
+    К СПИСКУ профилей, а не в меню хаба: вложенность обязана быть названа.
+
+    Строку даёт редактор, а обещание просмотра файла (`v`, §11a) дописывает
+    экран — на экране стоит именно этот, дополненный, вариант."""
     import tui.app as app_mod
     _project(tmp_path, monkeypatch)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
@@ -623,13 +636,13 @@ async def test_the_editor_footer_leads_back_to_the_list(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
-        assert _footer(scr) == m._FOOTER_PROFILE_ENTRY
+        assert _footer(scr) == m._FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_ENTRY]
         _cursor_to(ed, "slot", level="light")
         scr._refresh_footer()
-        assert _footer(scr) == m._FOOTER_PROFILE_SLOT
+        assert _footer(scr) == m._FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_SLOT]
         _cursor_to(ed, "assign", consumer="*")
         scr._refresh_footer()
-        assert _footer(scr) == m._FOOTER_PROFILE_ASSIGN
+        assert _footer(scr) == m._FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_ASSIGN]
 
 
 def test_the_way_back_is_named_one_way_everywhere():

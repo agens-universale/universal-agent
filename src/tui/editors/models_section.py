@@ -84,6 +84,11 @@ _FOOTER_CONFIRM = "Enter — удалить · Esc — отмена"
 _FOOTER_SLOT = "↑/↓ · Enter — выбрать модель · n — добавить · PgUp/PgDn — секции · Esc"
 _FOOTER_ASSIGN = ("↑/↓ · Enter — выбрать уровень или модель · n — добавить · "
                   "PgUp/PgDn — секции · Esc")
+# Строка-действие «+ добавить модель…»: Del на ней не работает — удалять на ней
+# нечего, — и футер её не обещает (канон `_FOOTER_RESERVE`: недоступное не
+# обещаем). Enter и n здесь ОДНА роль, и названы одной парой — канон `←/→/Enter
+# — переключить` секции «Профили»: два обещания на одно действие только шумят.
+_FOOTER_ADD = "↑/↓ · Enter/n — добавить · PgUp/PgDn — секции · Esc"
 # Под-вид открытого профиля: клавиши те же, но Esc возвращает К СПИСКУ профилей, а
 # не в меню хаба (вложенность из Global Constraints — её обязан назвать футер).
 _EXIT_TO_LIST = "Esc — к списку"
@@ -105,6 +110,16 @@ def _to_list_exit(footer: str) -> str:
 _FOOTER_PROFILE_ENTRY = _to_list_exit(_FOOTER_ENTRY)
 _FOOTER_PROFILE_SLOT = _to_list_exit(_FOOTER_SLOT)
 _FOOTER_PROFILE_ASSIGN = _to_list_exit(_FOOTER_ASSIGN)
+_FOOTER_PROFILE_ADD = _to_list_exit(_FOOTER_ADD)
+# Строки чужого происхождения бывают ТОЛЬКО в под-виде профиля (у основной секции
+# тени под собой нет), поэтому у этого футера близнеца с выходом в меню не
+# существует — и производить его из общей строки не из чего.
+#
+# Унаследованная строка: запись живёт в основном конфиге, и секция профиля её ни
+# правит, ни удаляет — ни Del, ни Enter на ней не работают, футер их и не обещает
+# (канон `_FOOTER_RESERVE`). Остаётся то, что работает: ходьба и «n».
+_FOOTER_PROFILE_BASE_ENTRY = ("↑/↓ · n — добавить · "
+                              f"PgUp/PgDn — секции · {_EXIT_TO_LIST}")
 # Пустой реестр профиля: строк нет вовсе, легаси-редактора у профиля не бывает —
 # работает единственная клавиша входа в реестр.
 _FOOTER_PROFILE_EMPTY = f"n — добавить запись · PgUp/PgDn — секции · {_EXIT_TO_LIST}"
@@ -112,6 +127,38 @@ _FOOTER_PROFILE_EMPTY = f"n — добавить запись · PgUp/PgDn — �
 # без него. Экран берёт эту строку ОТСЮДА, а не пишет свою: «куда ведёт Esc»
 # формулируется в одном месте (импорт, не копия).
 _FOOTER_PROFILE_BACK = _EXIT_TO_LIST
+
+# --- просмотр файла профиля (§11a) --------------------------------------------
+#
+# Клавишу ведёт ЭКРАН: просмотрщик (`FileViewerScreen`) — его, гасит обещание его
+# же настройка (`tui.file_view.enabled`), и редактор про файловый просмотр не знает
+# ничего. Здесь живут только СЛОВА обещания — рядом с остальными строками футера
+# секции: перебор стражей смотрит в этот модуль, и обещание, написанное на стороне
+# экрана, осталось бы и без словаря клавиш, и без бюджета двух строк.
+_VIEW_KEY = "v — просмотр файла"
+
+
+def _with_view_key(footer: str) -> str:
+    """Тот же футер под-вида плюс обещание просмотра. ПРОИЗВОДНАЯ, а не второй
+    литерал (та же дисциплина, что у `_to_list_exit`): дописанная в футер клавиша
+    обязана доехать и до варианта с `v`. Выход остаётся ПОСЛЕДНИМ — он и на других
+    экранах хаба замыкает строку."""
+    head, sep, tail = footer.rpartition(f" · {_EXIT_TO_LIST}")
+    if not sep or tail:
+        raise ValueError(f"футер без хвоста «· {_EXIT_TO_LIST}»: {footer}")
+    return f"{head} · {_VIEW_KEY} · {_EXIT_TO_LIST}"
+
+
+# Словарь «футер под-вида → он же с обещанием `v`»: экран подменяет строку по нему,
+# когда просмотрщик доступен. Имя на `_FOOTER` — сборщик стражей перебирает и
+# словари, а бюджет двух строк обязан считаться именно для варианта, который
+# попадает на экран (он длиннее оригинала).
+_FOOTERS_WITH_VIEW = {
+    footer: _with_view_key(footer)
+    for footer in (_FOOTER_PROFILE_ENTRY, _FOOTER_PROFILE_SLOT,
+                   _FOOTER_PROFILE_ASSIGN, _FOOTER_PROFILE_ADD,
+                   _FOOTER_PROFILE_BASE_ENTRY, _FOOTER_PROFILE_EMPTY)
+}
 
 # --- тексты секции ------------------------------------------------------------
 _RESERVE_LABEL = "резервная модель"
@@ -125,16 +172,33 @@ _EMPTY_HINT = (
     "Добавьте модель в реестр, чтобы включить уровни и привязки потребителей."
 )
 # Пустое состояние ПРОФИЛЯ — своё: «модели ниже» у него нет (резервная модель живёт
-# в config.yml). Говорит РОВНО про реестр и ни слова про файл целиком: профиль без
-# своих `models` вполне может переопределять `slots`/`assign` (и строка списка это
-# показывает) — называет их превью оверлеев. Самодостаточно и на «вы» — канон
-# пустых состояний (Global Constraints).
+# в config.yml). Гейт у него ЭФФЕКТИВНЫЙ (§10), а значит состояние ровно одно —
+# реестра нет ни у профиля, ни под ним, — и объясняется оно ОДНОЙ фразой. Двух не
+# бывает: прежняя пара спорила сама с собой (первая говорила, что реестра у
+# основного конфига нет, вторая обещала «модели действуют из основного конфига»).
+# Говорит РОВНО про реестр и ни слова про файл целиком: профиль без своих `models`
+# вполне может переопределять `slots`/`assign` — называет их превью оверлеев.
+# Самодостаточно и на «вы» — канон пустых состояний (Global Constraints).
 _PROFILE_EMPTY_HINT = (
-    "Своего реестра моделей у профиля нет — модели действуют из основного конфига.\n"
-    "Добавьте запись клавишей n, чтобы профиль переопределил и их."
+    "Реестра моделей нет ни у профиля, ни у основного конфига — уровни "
+    "light/default/max выключены, работает модель основного конфига.\n"
+    "Добавьте запись клавишей n — реестр заведётся в профиле, уровни включатся."
 )
 _NO_ADDRESS_HINT = ("адрес не задан ни у записи, ни в «Подключении» — "
                     "по такой записи запрос не уйдёт")
+# Del и Enter на унаследованной строке: в файле профиля нет ни строки, которую
+# удалять, ни ключей, которые править, — запись живёт в основном конфиге, и
+# трогать её оттуда секция профиля не вправе. Отказ на ОБЕ клавиши: футер их не
+# обещает, но обе — универсальные клавиши списка, и молчание в ответ было бы
+# тупиком без обратной связи. Канон отказов «✗ не <глагол>: <причина>» плюс путь,
+# которым это делается на самом деле.
+_NOTICE_REMOVE_REFUSED_INHERITED = (
+    "✗ не удалено: «{alias}» — запись основного конфига. "
+    "Удалите её в секции «Модели».")
+_NOTICE_EDIT_REFUSED_INHERITED = (
+    "✗ не изменено: «{alias}» — запись основного конфига. "
+    "Измените её в секции «Модели».")
+_NOTICE_ENTRY_SAVED = "Запись «{alias}» сохранена — {file}"
 # Ячейка адреса мёртвой записи: причина «мёртвости» видна в самой строке, длинное
 # объяснение (`_NO_ADDRESS_HINT`) остаётся в notice сохранения.
 _DEAD_ADDRESS_CELL = "без адреса"
@@ -152,7 +216,16 @@ _LEVEL_TAIL_SEP = ", "
 # Хвост ячейки адреса у записи без своего `url`: адрес ей достаётся от «Подключения»,
 # и это факт про запись, а не про колонку. Режется он первым (см. `_entry_row_text`) —
 # хост переживает усечение, происхождение адреса можно дочитать в подсказке строки.
+#
+# У УНАСЛЕДОВАННОЙ строки хвост подавлен (§4 спеки эффективного вида): вся строка и
+# так из основного конфига — колонка происхождения говорит это словом, — и хвост дал
+# бы два «основных конфига» в одной строке о разных вещах.
 _INHERITED_TAIL = " · из основного конфига"
+# Колонка происхождения строки реестра (§4): смысл несёт СЛОВО, а не цвет — замер
+# ревью развёл DIM и DEEP_DIM на неразличимые 1.26 контраста, и без колонки
+# унаследованная строка отличалась бы от своей одним неразличимым оттенком.
+# Пустая ячейка = своя запись профиля либо любая запись основной секции.
+_ORIGIN_LABELS = {"base": "основной конфиг", "own": ""}
 _ELLIPSIS = "…"
 # Уже колонки адрес перестаёт быть адресом («o…») — такую колонку честнее убрать
 # целиком и отдать место остальным.
@@ -202,7 +275,10 @@ class _BlockHeader(Static):
         self._on_toggle = on_toggle
 
     def on_click(self, event) -> None:
-        event.stop()
+        """Клик сворачивает блок и НЕ глушит событие: выше по дереву стоит
+        правило В1 (сообщение-итог гаснет на действии пользователя), и `stop()`
+        оставлял бы плашку висеть после осознанного клика. Соседей-обработчиков
+        у клика здесь нет — глушить было не от кого."""
         self._on_toggle(self._kind)
 
 
@@ -246,6 +322,12 @@ def address_host(url: str) -> str:
 # --- нижняя половина секции: слоты (уровень → алиас) и привязки потребителей ---
 _SLOT_UNSET = "не задан"
 _ASSIGN_ACTIVE = "активная"
+# Значение, которого в файле цели нет, а в основном конфиге есть (§7-8): смысл
+# несёт СЛОВО, а не приглушённый цвет (замер ревью развёл DIM и DEEP_DIM на
+# неразличимые 1.26 контраста). Это же слово — подпись первой строки пикера: канон
+# тождества «подпись строки ↔ первый пункт списка», поэтому обе витрины собираются
+# из одной константы, а не из двух похожих.
+_INHERITED_LABEL = "основной"
 # Правая колонка строки «активная» в пикере: снятие привязки не фиксирует ничего —
 # потребитель следует за активным уровнем (`ModelRouter.resolve`, ветка без binding).
 # «сейчас <уровень>» — вычисленное на этот момент, слово «сейчас» и помечает его
@@ -312,6 +394,28 @@ def consumer_labels() -> dict:
     return labels
 
 
+def assign_value(assign: dict, consumer: str):
+    """Значение привязки в СЕКЦИИ `assign`: у субагентов оно лежит вложенным
+    словарём, у служебных — плоским ключом. Разбор один и на файл цели, и на тень
+    основного конфига: вторая копия разошлась бы с первой на первой же правке
+    формы ключа."""
+    if consumer == "*" or consumer.startswith("subagents."):
+        name = "*" if consumer == "*" else consumer.split(".", 1)[1]
+        nested = assign.get("subagents")
+        value = nested.get(name) if isinstance(nested, dict) else None
+    else:
+        value = assign.get(consumer)
+    return value if isinstance(value, str) and value else None
+
+
+def inherited_value(value: str) -> str:
+    """Значение строки слота/привязки, взятое из основного конфига: «основной → gc»
+    (§7-8). Функция, а не f-строка по месту: её НАТУРАЛЬНУЮ длину обязана учесть
+    сетка (`_binding_columns`) — колонка значения, посчитанная по голому алиасу,
+    уехала бы ровно на длину приставки."""
+    return f"{_INHERITED_LABEL} → {value}"
+
+
 def slot_head(level: str) -> str:
     """Голова строки слота — «уровень · роль» копирайтом §1 из ЕДИНОГО источника
     (`tui/toggles.py`, там же его берут хинты `/level`)."""
@@ -366,6 +470,24 @@ def entry_address(entry, inherited_url: str) -> str:
     return entry.get("url") or backend.get("completions_url") or inherited_url or ""
 
 
+def section_dict(document: dict, name: str) -> dict:
+    """Секция документа как словарь: не словарь (в том числе пустой якорь `slots:`,
+    который писатель оставляет после снятия последнего ключа) — пустой словарь.
+    Одна санация на всех читателей документа и тени."""
+    return dict(document[name]) if isinstance(document.get(name), dict) else {}
+
+
+def effective_registry_nonempty(document: dict, shadow: dict) -> bool:
+    """Есть ли что показывать реестром: записи файла цели ЛИБО записи тени (§10).
+
+    ОДИН предикат на редактор (гейт тела: полный экран против пустого состояния) и
+    на экран (§11: какие секции считаются показанными формами). Разойдясь — хотя бы
+    трактовкой не-словаря в `models:`, — они дали бы профиль, в котором строки
+    слотов на экране есть, а превью всё равно называет их «также переопределяет»:
+    ровно тот дефект, ради которого гейт и перебазировался на эффективный реестр."""
+    return bool(section_dict(document, "models") or section_dict(shadow, "models"))
+
+
 def registry_resolves_any_address(document: dict, inherited_url: str) -> bool:
     """Хоть одна запись реестра резолвит адрес. Ноль — реестр честно валиден по схеме,
     но не работает: `url` схемой не требуется, а фаза 2 проверяет только ссылочную
@@ -402,6 +524,7 @@ class ModelsSectionEditor(Vertical):
     """
 
     def __init__(self, *, target, template: str, is_profile: bool = False,
+                 base_registry=None,
                  effective_url: str = "",
                  effective_auth: str | None = None, verify: bool = True,
                  config_proxy: str | None = None, presets=(),
@@ -414,6 +537,12 @@ class ModelsSectionEditor(Vertical):
         # Что за файл перед нами — единственное, чем режимы отличаются: валидатор
         # записи, отсутствие `agent.model` и хвост футера следуют отсюда.
         self._is_profile = is_profile
+        # Тень основного конфига — ПРОВАЙДЕР снимка (callable без аргументов), а не
+        # значение: `_reload` перечитывает её тем же вызовом, и файл основного
+        # конфига, изменившийся пока открыт профиль, доезжает до экрана. `None` —
+        # тени нет вовсе (основная секция): эффективный список равен своему, и ни
+        # одна строка секции не меняет поведения.
+        self._base_registry = base_registry
         self._effective_url = effective_url or ""
         self._effective_auth = effective_auth
         self._verify = verify
@@ -428,6 +557,7 @@ class ModelsSectionEditor(Vertical):
         self._on_notice = on_notice
         self._on_legacy_save = on_legacy_save
         self._document = self._read_document()
+        self._shadow = self._read_shadow()
         # Свёрнутые блоки — общий на процесс словарь по файлу цели (см. коммент
         # у `_COLLAPSED_BLOCKS`): set видов из `_BLOCK_ORDER`.
         self._collapsed = _COLLAPSED_BLOCKS.setdefault(str(target), set())
@@ -447,28 +577,112 @@ class ModelsSectionEditor(Vertical):
         import config_raw
         return config_raw.read_document(self._target)
 
+    def _read_shadow(self) -> dict:
+        """Снимок тени у провайдера. Без провайдера — пустая тень: у основной секции
+        «основного конфига под собой» не существует, и все записи ей свои."""
+        return (self._base_registry() or {}) if self._base_registry is not None else {}
+
     @property
-    def _entries(self) -> dict:
-        models = self._document.get("models")
-        return dict(models) if isinstance(models, dict) else {}
+    def _own_entries(self) -> dict:
+        """Записи ФАЙЛА ЦЕЛИ. Свои — это те, что редактируются и удаляются: правит
+        секция один файл, что бы он ни наследовал."""
+        return section_dict(self._document, "models")
+
+    @property
+    def _shadowed(self) -> bool:
+        """Есть ли под целью ТЕНЬ, то есть показывает ли секция эффективный вид.
+
+        Провайдер, а не его содержимое: тень бывает и пустой (легаси-конфиг без
+        реестра под профилем), а вид от этого эффективным быть не перестаёт —
+        свои записи профиля в такой раскладке по-прежнему «его», и превью
+        обязано говорить это той же грамматикой (§9)."""
+        return self._base_registry is not None
+
+    @property
+    def _base_entries(self) -> dict:
+        """Записи ТЕНИ — реестр основного конфига под открытым профилем (§3)."""
+        return section_dict(self._shadow, "models")
+
+    @property
+    def _base_slots(self) -> dict:
+        return section_dict(self._shadow, "slots")
+
+    @property
+    def _base_assign(self) -> dict:
+        return section_dict(self._shadow, "assign")
+
+    @property
+    def _base_url(self) -> str:
+        """Адрес «Подключения» ИЗ ФАЙЛА основного конфига: от него считаются адреса и
+        мёртвость унаследованных строк (§3) — действующий адрес экрана к ним не
+        относится, он собран с уже активным профилем."""
+        url = self._shadow.get("base_url")
+        return url if isinstance(url, str) else ""
 
     @property
     def _slots(self) -> dict:
-        slots = self._document.get("slots")
-        return dict(slots) if isinstance(slots, dict) else {}
+        return section_dict(self._document, "slots")
 
     @property
     def _assign(self) -> dict:
-        assign = self._document.get("assign")
-        return dict(assign) if isinstance(assign, dict) else {}
+        return section_dict(self._document, "assign")
+
+    @property
+    def _own_aliases(self) -> list:
+        return list(self._own_entries)
+
+    @property
+    def _effective_aliases(self) -> list:
+        """Алиасы СТРОК реестра, порядок §4: унаследованные — в порядке основного
+        файла (своя запись под тем же алиасом стоит на месте той, которую
+        заслоняет), свои-новые — после, в порядке файла профиля."""
+        base = self._base_entries
+        return list(base) + [a for a in self._own_aliases if a not in base]
 
     @property
     def _aliases(self) -> list:
-        return list(self._entries)
+        """Прежнее имя того же списка — строк реестра, то есть эффективного. У
+        основной секции тени нет, и это по-прежнему ровно записи файла."""
+        return self._effective_aliases
+
+    def _entry_origin(self, alias: str) -> str:
+        """Откуда строка: `base` — стоит одной лишь тенью основного конфига, `own`
+        — есть в файле цели (любая запись основной секции; у профиля — и та, что
+        заслоняет собой запись основного конфига: правят и удаляют её в этом
+        файле, а решает это наличие СВОИХ ключей, а не совпадение имён)."""
+        return "base" if (alias in self._base_entries
+                          and alias not in self._own_entries) else "own"
+
+    def _own_entry(self, alias: str) -> dict:
+        entry = self._own_entries.get(alias)
+        return entry if isinstance(entry, dict) else {}
+
+    def _base_entry(self, alias: str) -> dict:
+        entry = self._base_entries.get(alias)
+        return entry if isinstance(entry, dict) else {}
+
+    def _entry(self, alias: str) -> dict:
+        """Запись, которую ПОКАЗЫВАЕТ строка: ключи своей поверх ключей тени.
+
+        Наследование живое и ПОКЛЮЧНОЕ — тем же слиянием, каким собирает запись
+        загрузчик (профиль поверх основного конфига). Профиль, задавший под именем
+        записи основного конфига один `model`, продолжает работать её адресом, и
+        строка обязана показывать этот адрес: показанное и действующее расходиться
+        не имеют права.
+
+        Чтение ВИТРИННОЕ. Правит секция только свой файл, и форме, писателю и
+        ссылкам полагаются `_own_entry`/`_own_entries`."""
+        return {**self._base_entry(alias), **self._own_entry(alias)}
 
     @property
     def registry_empty(self) -> bool:
-        return not self._entries
+        """Пуст ли реестр, который секция ПОКАЗЫВАЕТ, — эффективный (§10): профиль
+        над базой с реестром работает её моделями, и пустым его звать не за что.
+
+        Предикат — модульный (`effective_registry_nonempty`): тот же вопрос задаёт
+        экран, решая состав «показанных формами» секций (§11), и второй его
+        реализации существовать не должно."""
+        return not effective_registry_nonempty(self._document, self._shadow)
 
     def _legacy_default(self) -> bool:
         """Состояние легаси-редактора «по умолчанию» для текущего файла: пустой реестр
@@ -483,24 +697,42 @@ class ModelsSectionEditor(Vertical):
         return value if isinstance(value, str) else ""
 
     def _entry_address(self, alias: str) -> str:
-        return entry_address(self._entries.get(alias), self._effective_url)
+        """Адрес строки. Своя запись падает на действующий адрес экрана (её
+        «Подключение» — то же, в котором работает правящий её человек), а запись
+        основного конфига — на «Подключение» ТЕНИ (`base_url`, адрес из его
+        файла)."""
+        inherited = (self._effective_url if self._entry_origin(alias) == "own"
+                     else self._base_url)
+        return entry_address(self._entry(alias), inherited)
 
     def _slot_value(self, level: str):
         """Значение слота из ФАЙЛА цели либо None («не задан»)."""
         value = self._slots.get(level)
         return value if isinstance(value, str) and value else None
 
+    def _base_slot_value(self, level: str):
+        """Значение слота из ТЕНИ либо None. Отдельно от эффективного: строка без
+        своего ключа обязана назвать ИСТОЧНИК («основной → gc»), а первая строка её
+        пикера — то, что останется ПОСЛЕ снятия своего ключа; оба вопроса про
+        основной конфиг, а не про то, что действует сейчас."""
+        value = self._base_slots.get(level)
+        return value if isinstance(value, str) and value else None
+
+    def _effective_slot_value(self, level: str):
+        """Что уровень значит НА ЭКРАНЕ: свой ключ, иначе ключ тени — профиль без
+        своих `slots` работает раскладкой основного конфига. Яркость значения
+        решает `_slot_value` (факт «ключ есть в файле»), а указатели строк реестра
+        — этот: указатель отвечает на вопрос «чем работает уровень», а не «где это
+        записано»."""
+        return self._slot_value(level) or self._base_slot_value(level)
+
     def _assign_value(self, consumer: str):
-        """Значение привязки из ФАЙЛА цели либо None («активная»): у субагентов оно
-        лежит вложенным словарём, у служебных — плоским ключом."""
-        assign = self._assign
-        if consumer == "*" or consumer.startswith("subagents."):
-            name = "*" if consumer == "*" else consumer.split(".", 1)[1]
-            nested = assign.get("subagents")
-            value = nested.get(name) if isinstance(nested, dict) else None
-        else:
-            value = assign.get(consumer)
-        return value if isinstance(value, str) else None
+        """Значение привязки из ФАЙЛА цели либо None («активная»)."""
+        return assign_value(self._assign, consumer)
+
+    def _base_assign_value(self, consumer: str):
+        """Значение привязки из ТЕНИ либо None — близнец `_base_slot_value`."""
+        return assign_value(self._base_assign, consumer)
 
     # --- строки списка --------------------------------------------------------
     def _rows(self) -> list:
@@ -516,7 +748,7 @@ class ModelsSectionEditor(Vertical):
             return []
         rows: list = []
         if "entry" not in self._collapsed:
-            rows += [{"kind": "entry", "alias": a} for a in self._aliases]
+            rows += [{"kind": "entry", "alias": a} for a in self._effective_aliases]
             # «+ добавить» — последней строкой БЛОКА (ревизия владельца): курсор
             # при входе встаёт на данные, действие — «…и ещё одна» в конце.
             # Клавиша n остаётся путём из любого места секции.
@@ -540,34 +772,47 @@ class ModelsSectionEditor(Vertical):
         """Колонка выравнивается по тому, что на экране ЕСТЬ: у профиля строки
         «резервная модель» нет, и её подпись колонку не расширяет."""
         labels = [] if self._is_profile else [_RESERVE_LABEL]
-        return max([len(a) for a in self._aliases] + [len(label) for label in labels] + [0])
+        return max([len(a) for a in self._effective_aliases]
+                   + [len(label) for label in labels] + [0])
 
     def _model_width(self) -> int:
         """Колонка провайдерского id — по записям реестра. Строка «резервная модель»
         её не расширяет: её значение — последнее в строке, за ним только собственный
         хинт, и выравнивать там нечего."""
-        return max([len(self._entry_model(a)) for a in self._aliases] + [0])
+        return max([len(self._entry_model(a)) for a in self._effective_aliases] + [0])
 
     def _entry_model(self, alias: str) -> str:
-        entry = self._entries.get(alias)
-        entry = entry if isinstance(entry, dict) else {}
-        return str(entry.get("model") or alias)
+        return str(self._entry(alias).get("model") or alias)
 
     def _address_cell(self, alias: str) -> str:
         """Ячейка адреса: хост, куда реально уйдёт запрос, плюс происхождение адреса,
         если он унаследован. Адрес не резолвится вовсе — ячейка называет это сама
         («без адреса»): построчной подсказки у секции больше нет, а «по этой записи
-        запрос не уйдёт» — факт про запись, и место ему в её строке."""
+        запрос не уйдёт» — факт про запись, и место ему в её строке.
+
+        Хвост — про СВОЙ ключ `url`: у своей записи он стоит, пока адрес ей
+        достаётся от «Подключения» либо от заслонённой записи основного конфига.
+
+        У УНАСЛЕДОВАННОЙ строки хвоста нет никогда (§4): её происхождение уже
+        названо своей колонкой, и второе «из основного конфига» читалось бы
+        повтором."""
         address = self._entry_address(alias)
         if not address:
             return _DEAD_ADDRESS_CELL
-        own = (self._entries.get(alias) or {}).get("url")
-        return address_host(address) + ("" if own else _INHERITED_TAIL)
+        inherited = (not self._own_entry(alias).get("url")
+                     and self._entry_origin(alias) != "base")
+        return address_host(address) + (_INHERITED_TAIL if inherited else "")
 
     def _entry_levels(self, alias: str) -> list:
         """Уровни, которые указывают на эту запись, — в каноническом порядке `LEVELS`,
-        а не в порядке ключей файла: колонка читается как трек уровней."""
-        return [level for level in LEVELS if self._slots.get(level) == alias]
+        а не в порядке ключей файла: колонка читается как трек уровней. Уровень
+        берётся ЭФФЕКТИВНЫЙ: слот, не переопределённый профилем, продолжает
+        указывать на запись основного конфига, и строка обязана это показать."""
+        return [level for level in LEVELS
+                if self._effective_slot_value(level) == alias]
+
+    def _origin_cell(self, alias: str) -> str:
+        return _ORIGIN_LABELS[self._entry_origin(alias)]
 
     def _pointer_text(self, alias: str, *, dead: bool = False) -> Text:
         """Указатель уровней: `← light, max`. Каждое слово — цветом своего уровня
@@ -589,7 +834,13 @@ class ModelsSectionEditor(Vertical):
         """Натуральная ширина колонки адреса — по самой длинной ячейке. Колонка НЕ
         растягивается на весь остаток рамки: иначе указатель уезжал бы к правому краю
         и переставал читаться как столбец, стоящий в общей сетке."""
-        return max([len(self._address_cell(a)) for a in self._aliases] + [0])
+        return max([len(self._address_cell(a)) for a in self._effective_aliases] + [0])
+
+    def _origin_width(self) -> int:
+        """Ширина колонки происхождения — по длиннейшему ВИДИМОМУ слову. У своих
+        записей ячейка пуста и колонку не расширяет; тени нет вовсе (основная
+        секция) — ширина 0, и колонки в строке не появляется."""
+        return max([len(self._origin_cell(a)) for a in self._effective_aliases] + [0])
 
     def _pointer_width(self) -> int:
         """Ширина столбца указателя — по самому длинному в списке: все указатели стоят
@@ -599,7 +850,8 @@ class ModelsSectionEditor(Vertical):
         уходит целиком, третьей ступенью лестницы `_entry_columns` (второй жертвой
         после адреса). Ширина, при которой это происходит, — в докстринге лестницы,
         здесь только сам замер."""
-        return max([len(self._pointer_text(a).plain) for a in self._aliases] + [0])
+        return max([len(self._pointer_text(a).plain)
+                    for a in self._effective_aliases] + [0])
 
     def _row_width(self) -> int:
         """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же рода,
@@ -612,10 +864,10 @@ class ModelsSectionEditor(Vertical):
 
     def _entry_columns(self) -> tuple:
         """Раскладка колонок строки записи под ТЕКУЩУЮ ширину рамки:
-        `(alias_w, model_w, address_w, pointer_w)`.
+        `(alias_w, model_w, address_w, origin_w, pointer_w)`.
 
         Порядок жертв — канон all-or-nothing `_mode_row_text` («не влезло — хвост
-        уходит целиком, ядро строки видимо всегда»), только ступеней здесь четыре:
+        уходит целиком, ядро строки видимо всегда»), ступенями §4 спеки:
 
         1. колонка адреса стоит по своему содержимому (`_address_width`) и ужимается
            многоточием только когда рамке не хватает, до `_MIN_ADDRESS_COLS`;
@@ -623,7 +875,11 @@ class ModelsSectionEditor(Vertical):
            зазором (иначе строка длиннее рамки: Static её перенесёт, а перенос рвёт
            указатель пополам и ставит хвост к левому краю без отступа);
         3. не хватает и на указатель — уходит и он;
-        4. ядро (алиас + id) шире рамки — ужимается id, в пределе и алиас: строка не
+        4. следующей уходит колонка происхождения: она живёт ДОЛЬШЕ указателя —
+           смысл несут слова, а не цвет (§2: DIM↔DEEP_DIM неразличимы), и без неё
+           унаследованная строка перестаёт отличаться от своей, а указатель
+           дублируется блоком «уровни»;
+        5. ядро (алиас + id) шире рамки — ужимается id, в пределе и алиас: строка не
            имеет права переноситься НИ на какой ширине.
 
         `address_w is None` — рамка ещё не измерена (первый кадр): усечения нет,
@@ -632,48 +888,65 @@ class ModelsSectionEditor(Vertical):
         Раскладка ОДНА на список, а не своя у каждой строки: колонки стоят друг под
         другом, и посчитанная построчно она бы их развалила."""
         alias_w, model_w = self._alias_width(), self._model_width()
-        pointer_w = self._pointer_width()
+        origin_w, pointer_w = self._origin_width(), self._pointer_width()
         width = self._row_width()
         if width <= 0:
-            return alias_w, model_w, None, pointer_w
+            return alias_w, model_w, None, origin_w, pointer_w
         core = 2 + alias_w + (2 + model_w if model_w else 0)
-        tail = (2 + pointer_w) if pointer_w else 0
+        origin_tail = (2 + origin_w) if origin_w else 0
+        tail = origin_tail + ((2 + pointer_w) if pointer_w else 0)
         address_w = min(width - core - 2 - tail, self._address_width())
         if address_w >= _MIN_ADDRESS_COLS:
-            return alias_w, model_w, address_w, pointer_w
+            return alias_w, model_w, address_w, origin_w, pointer_w
         if core + tail <= width:
-            return alias_w, model_w, 0, pointer_w
+            return alias_w, model_w, 0, origin_w, pointer_w
+        if core + origin_tail <= width:
+            return alias_w, model_w, 0, origin_w, 0
         if core <= width:
-            return alias_w, model_w, 0, 0
+            return alias_w, model_w, 0, 0, 0
         model_w = max(0, width - 2 - alias_w - 2)
         if model_w:
-            return alias_w, model_w, 0, 0
-        return max(0, width - 2), 0, 0, 0
+            return alias_w, model_w, 0, 0, 0
+        return max(0, width - 2), 0, 0, 0, 0
 
     def _entry_row_text(self, alias: str, selected: bool) -> Text:
-        """Строка записи: алиас · провайдерский id · адрес · указатель уровней.
-        Иерархия колонок читается цветом (INK → DIM → DEEP_DIM): чем правее, тем
-        служебнее. Мёртвая запись (адрес не резолвится) гаснет ЦЕЛИКОМ — вместе с
-        указателем: «работает уровнем max» и «по этой записи запрос не уйдёт» в одной
-        строке спорили бы друг с другом.
+        """Строка записи: алиас · провайдерский id · адрес · происхождение ·
+        указатель уровней. Иерархия колонок читается цветом (INK → DIM → DEEP_DIM):
+        чем правее, тем служебнее. Мёртвая запись (адрес не резолвится) гаснет
+        ЦЕЛИКОМ — вместе с указателем: «работает уровнем max» и «по этой записи
+        запрос не уйдёт» в одной строке спорили бы друг с другом.
+
+        Унаследованная строка приглушена так же, но указатель у неё ЦВЕТНОЙ (§4):
+        уровень работает, и происхождение записи этого не отменяет — гасит указатель
+        только мёртвость.
 
         Колонок, не поместившихся в рамку, в строке просто нет (см. `_entry_columns`)
         — каждая приписывается вместе со СВОИМ зазором."""
         dead = not self._entry_address(alias)
-        alias_w, model_w, address_w, pointer_w = self._entry_columns()
+        dim = dead or self._entry_origin(alias) == "base"
+        alias_w, model_w, address_w, origin_w, pointer_w = self._entry_columns()
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
-        t.append(fit_cell(alias, alias_w).ljust(alias_w),
-                 style=DEEP_DIM if dead else INK)
+        if alias_w:
+            # Последняя ступень лестницы отдаёт алиасу 0 колонок (рамка держит один
+            # курсор) — и это «колонки нет», как у всех прочих: без гейта сюда
+            # приезжал бы полный алиас (`fit_cell` трактует 0 как «не ограничивать»)
+            # и строка переносилась бы ровно там, где места нет совсем. Тот же гейт
+            # стоит у подписи `_reserve_row_text`.
+            t.append(fit_cell(alias, alias_w).ljust(alias_w),
+                     style=DEEP_DIM if dim else INK)
         if model_w:
             t.append("  ")
             t.append(fit_cell(self._entry_model(alias), model_w).ljust(model_w),
-                     style=DEEP_DIM if dead else DIM)
+                     style=DEEP_DIM if dim else DIM)
         if address_w is None or address_w:
             cell = self._address_cell(alias)
             t.append("  ")
             t.append(cell if address_w is None else fit_cell(cell, address_w).ljust(address_w),
                      style=DEEP_DIM)
+        if origin_w:
+            t.append("  ")
+            t.append(self._origin_cell(alias).ljust(origin_w), style=DEEP_DIM)
         if pointer_w:
             pointer = self._pointer_text(alias, dead=dead)
             if pointer.plain:
@@ -736,9 +1009,15 @@ class ModelsSectionEditor(Vertical):
         labels = consumer_labels()
         heads = [slot_head(level) for level in LEVELS]
         heads += [labels[consumer] for consumer in assign_consumers()]
+        # Значения строк БЕЗ своего ключа считаются по их фактическим подписям:
+        # «основной → gc» длиннее и алиаса, и «активная», и посчитанная по голому
+        # имени колонка увела бы строку за рамку (§7 — приставка стоит 11 колонок,
+        # ровно поэтому двухстрелочная форма и запрещена).
         values = ([self._slot_unset_label(lvl) for lvl in LEVELS
                    if not self._slot_value(lvl)]
-                  + [_ASSIGN_ACTIVE, *LEVELS, *self._aliases])
+                  + [self._assign_unset_label(c) for c in assign_consumers()
+                     if self._assign_value(c) is None]
+                  + [_ASSIGN_ACTIVE, *LEVELS, *self._effective_aliases])
         head_w = max(len(h) for h in heads) + 3
         value_w = max(len(v) for v in values)
         width = self._row_width()
@@ -778,18 +1057,47 @@ class ModelsSectionEditor(Vertical):
             t.append_text(head)
         if value_w:
             t.append("  ")
-            t.append(fit_cell(shown, value_w).ljust(value_w),
-                     style=DEEP_DIM if value is None else value_style(value))
+            if value is None:
+                style = DEEP_DIM
+            elif self._base_entries and value not in LEVELS:
+                # Профиль: СВОЙ алиас-пин ярче канонного DIM (ревизия владельца по
+                # смоку). Рядом стоит унаследованное «основной → X» в DEEP_DIM, а
+                # DIM↔DEEP_DIM практически неразличимы (контраст 1.26, замер
+                # ревью) — различие держалось на одном слове-приставке. В основной
+                # секции контрастировать не с чем: там канон §12.4 (DIM) в силе.
+                style = INK
+            else:
+                style = value_style(value)
+            t.append(fit_cell(shown, value_w).ljust(value_w), style=style)
         return t
 
     def _slot_unset_label(self, level: str) -> str:
-        """Значение пустого слота называет фоллбэк само: «не задан → default» —
-        построчной подсказки больше нет, а «что реально работает вместо» — главный
-        факт этой строки. Уровень-кандидат или единственная модель — одинаково
-        стрелкой; не резолвится ничего — честное «не задан»."""
+        """Значение строки слота, у которой СВОЕГО ключа нет.
+
+        Задан слот основного конфига — строка говорит это словом: «основной → gc»
+        (§7). Уровень работает, и молчаливое «не задан» было бы прямой ложью.
+
+        Не задан нигде — фоллбэк называет себя сам: «не задан → default»
+        (построчной подсказки больше нет, а «что реально работает вместо» —
+        главный факт этой строки). Уровень-кандидат или единственная модель —
+        одинаково стрелкой; не резолвится ничего — честное «не задан».
+
+        Двухстрелочной формы («основной → не задан → default») не бывает: в этой
+        ветке источника нет вовсе, и слово «основной» в ней было бы ложью — плюс
+        +11 колонок всей нижней половине (§7)."""
+        inherited = self._base_slot_value(level)
+        if inherited:
+            return inherited_value(inherited)
         candidate, alias = self._slot_fallback(level)
         target = candidate or alias
         return f"{_SLOT_UNSET} → {target}" if target else _SLOT_UNSET
+
+    def _assign_unset_label(self, consumer: str) -> str:
+        """Значение строки привязки без своего ключа: привязка основного конфига —
+        словом «основной → light» (§8), иначе прежняя «активная» (потребитель идёт
+        за активным уровнем, фиксировать нечего)."""
+        inherited = self._base_assign_value(consumer)
+        return inherited_value(inherited) if inherited else _ASSIGN_ACTIVE
 
     def _slot_row_text(self, level: str, selected: bool) -> Text:
         return self._binding_row_text(
@@ -800,7 +1108,7 @@ class ModelsSectionEditor(Vertical):
         label = consumer_labels()[consumer]
         return self._binding_row_text(
             lambda w: Text(fit_head(label, w), style=INK), self._assign_value(consumer),
-            _ASSIGN_ACTIVE, selected)
+            self._assign_unset_label(consumer), selected)
 
     def _row_text(self, row: dict, selected: bool) -> Text:
         if row["kind"] == "reserve":
@@ -814,10 +1122,13 @@ class ModelsSectionEditor(Vertical):
             t.append("▸ " if selected else "  ", style=ACCENT)
             # Та же дисциплина, что у всех строк: не переносится НИ на какой ширине
             # (нашлось свипом стража — голый Static на узкой рамке переносился).
+            # Рамка в один курсор — подписи нет вовсе: `fit_cell` трактует 0 как
+            # «не ограничивать» и вернул бы её целиком.
             width = self._row_width()
-            label = _ADD_ROW_LABEL if width <= 0 else fit_cell(_ADD_ROW_LABEL,
-                                                               max(0, width - 2))
-            t.append(label, style=DIM)
+            if width <= 0:
+                t.append(_ADD_ROW_LABEL, style=DIM)
+            elif width > 2:
+                t.append(fit_cell(_ADD_ROW_LABEL, width - 2), style=DIM)
             return t
         return self._entry_row_text(row["alias"], selected)
 
@@ -826,13 +1137,17 @@ class ModelsSectionEditor(Vertical):
         что у `ModelRouter._resolve_level`). `(уровень, алиас)` — фоллбэк по матрице;
         `(None, алиас)` — правило «единственная модель реестра»; `(None, None)` —
         уровень не резолвится. Один обход на обе витрины — текст подсказки и
-        крашеное описание в пикере."""
+        крашеное описание в пикере.
+
+        Считается по MERGED-состоянию (§7): рантайм резолвит уровень уже слитым
+        конфигом, и фоллбэк по одним лишь своим слотам расходился бы с ним ровно
+        в главном сценарии профиля — «те же модели, другая раскладка уровней»."""
         for candidate in LEVEL_FALLBACK[level][1:]:
-            fallback = self._slot_value(candidate)
+            fallback = self._effective_slot_value(candidate)
             if fallback:
                 return candidate, fallback
-        if len(self._aliases) == 1:
-            return None, self._aliases[0]
+        if len(self._effective_aliases) == 1:
+            return None, self._effective_aliases[0]
         return None, None
 
     def _slot_fallback_text(self, level: str) -> str:
@@ -866,7 +1181,12 @@ class ModelsSectionEditor(Vertical):
             # config.yml, здесь не бывает — своё пустое состояние с входом в реестр.
             # Условие — именно пустота РЕЕСТРА: пустой `_rows` бывает и у профиля со
             # всеми свёрнутыми блоками, там телу положены шапки.
-            yield Static(_PROFILE_EMPTY_HINT, classes="set-hint set-dyn", markup=False)
+            #
+            # Реестр здесь ЭФФЕКТИВНЫЙ (§10), а значит пуст и основной конфиг —
+            # обе половины факта называет сама подсказка: иначе экран объяснял бы
+            # пустоту одним лишь профилем и обещал модели оттуда, где их нет.
+            yield Static(_PROFILE_EMPTY_HINT, classes="set-hint set-dyn",
+                         markup=False)
             return
         rows = self._rows()
         # Цель записи — константа всей секции, а не факт строки: одной статичной
@@ -921,19 +1241,38 @@ class ModelsSectionEditor(Vertical):
         return t
 
     def _block_preview(self, kind: str) -> Text:
-        """Одна строка о содержимом свёрнутого блока. Реестр — счёт и хосты; уровни
-        — вся раскладка (имена цветом уровня, канон §12.4); привязки — счёт и
-        сколько переопределено (нули не перечисляем: «все активная» честнее)."""
+        """Одна строка о содержимом свёрнутого блока — ГРАММАТИКОЙ своей роли (§9).
+
+        Под тенью блок отвечает на вопрос профиля («что здесь моё»): реестр
+        называет долю профиля вместо хостов (хост записи виден в её строке, а
+        «моё» не видно нигде больше), привязки — сколько их в профиле. Без тени
+        вопрос прежний («что в реестре»), и грамматика основной секции прежняя.
+
+        Уровни в обеих ролях показывают ЭФФЕКТИВНУЮ раскладку — превью не место
+        различать происхождение (явное упрощение §9): на своих данных профиль
+        писал бы «light→—» о работающем «light→opus».
+
+        Ветка — по наличию ТЕНИ, а не по `is_profile`: показанное решает
+        источник данных, а не то, какой файл правится (долг веток `is_profile`
+        §11b не наращиваем)."""
         if kind == "entry":
             from tui.editors.model import _plural_models
-            n = len(self._aliases)
+            n = len(self._effective_aliases)
+            t = Text(f"{n} {_plural_models(n)}", style=DEEP_DIM)
+            if self._shadowed:
+                # K — записи ФАЙЛА профиля (в том числе заслоняющие записи
+                # основного конфига). Ноль хвоста не получает: «0 в профиле» на
+                # каждой шапке свежего профиля — шум, а не факт.
+                own = len(self._own_entries)
+                if own:
+                    t.append(f" · {own} в профиле", style=DEEP_DIM)
+                return t
             hosts: list = []
-            for alias in self._aliases:
+            for alias in self._effective_aliases:
                 address = self._entry_address(alias)
                 host = address_host(address) if address else None
                 if host and host not in hosts:
                     hosts.append(host)
-            t = Text(f"{n} {_plural_models(n)}", style=DEEP_DIM)
             if hosts:
                 t.append(" · ", style=DEEP_DIM)
                 t.append(hosts[0], style=DEEP_DIM)
@@ -946,13 +1285,16 @@ class ModelsSectionEditor(Vertical):
                 if i:
                     t.append(" · ", style=DEEP_DIM)
                 t.append(level, style=value_style(level))
-                alias = self._slot_value(level)
+                alias = self._effective_slot_value(level)
                 t.append("→", style=DEEP_DIM)
                 t.append(alias or "—", style=DIM if alias else DEEP_DIM)
             return t
         total = len(assign_consumers())
-        bound = sum(1 for c in assign_consumers() if self._assign_value(c) is not None)
-        tail = f"переопределено {bound}" if bound else "все активная"
+        own = sum(1 for c in assign_consumers() if self._assign_value(c) is not None)
+        if self._shadowed:
+            return Text(f"{total} · в профиле {own}" if own else f"{total}",
+                        style=DEEP_DIM)
+        tail = f"переопределено {own}" if own else "все активная"
         return Text(f"{total} · {tail}", style=DEEP_DIM)
 
     def _toggle_block(self, kind: str) -> None:
@@ -984,8 +1326,10 @@ class ModelsSectionEditor(Vertical):
     def on_resize(self) -> None:
         """Живой ресайз меняет рамку — значит и раскладку колонок. Потолок высоты за
         экраном (`cap_frame_height`), ширина колонок — за секцией: её знает только
-        она."""
+        она. Раскрытый список — такие же строки в той же рамке, и своего события
+        ресайза у него нет."""
         self._refresh_rows()
+        self._refresh_picker_rows()
 
     def _schedule_layout_pass(self) -> None:
         """Досчитать строки ПОСЛЕ layout-прохода: ширина колонок выводится из региона
@@ -1039,8 +1383,13 @@ class ModelsSectionEditor(Vertical):
     def _reload(self) -> None:
         """Файл изменился нами же — перечитать состояние цели и пересобрать тело.
         Опустевший реестр возвращает секцию в пустое состояние (легаси-редактор), а
-        наполнившийся — в список: состояние секции задаёт ФАЙЛ, а не история нажатий."""
+        наполнившийся — в список: состояние секции задаёт ФАЙЛ, а не история нажатий.
+
+        Тень перечитывается тем же провайдером: она такой же файл на диске, и
+        застывший на входе снимок расходился бы с ним ровно так же, как застывший
+        документ цели."""
         self._document = self._read_document()
+        self._shadow = self._read_shadow()
         self._legacy_open = self._legacy_default()
         rows = self._rows()
         self._idx = min(self._idx, max(len(rows) - 1, 0))
@@ -1064,6 +1413,15 @@ class ModelsSectionEditor(Vertical):
         """Легаси-редактор на экране: пустое состояние либо под-форма резервной."""
         return self._legacy_open
 
+    @property
+    def showing_list(self) -> bool:
+        """Тело секции — СПИСОК строк: ни формы, ни пикера, ни вопроса, ни
+        легаси-редактора. Знание редактора, а не экрана: под-состояния заводит
+        он, а спрашивает экран — клавиши, которые ведёт он сам (§11a), под
+        висящим выбором работать не должны."""
+        return (self._form is None and self._picker is None
+                and self._pending is None and not self._legacy_open)
+
     def footer_text(self) -> str:
         if self._pending is not None:
             return _FOOTER_CONFIRM
@@ -1082,6 +1440,14 @@ class ModelsSectionEditor(Vertical):
             return _FOOTER_PROFILE_SLOT if self._is_profile else _FOOTER_SLOT
         if row["kind"] == "assign":
             return _FOOTER_PROFILE_ASSIGN if self._is_profile else _FOOTER_ASSIGN
+        if row["kind"] == "add":
+            # Строка-действие: удалять на ней нечего, и общий футер списка обещал
+            # бы Del впустую — в ОБЕИХ ролях (дефект был и у основной секции).
+            return _FOOTER_PROFILE_ADD if self._is_profile else _FOOTER_ADD
+        # Строка реестра обещает по ПРОИСХОЖДЕНИЮ записи под курсором (§5): на
+        # унаследованной не работают ни Del, ни Enter — обещать их там нечем.
+        if self._entry_origin(row["alias"]) == "base":
+            return _FOOTER_PROFILE_BASE_ENTRY
         return _FOOTER_PROFILE_ENTRY if self._is_profile else _FOOTER_ENTRY
 
     def _form_footer(self) -> str:
@@ -1146,6 +1512,13 @@ class ModelsSectionEditor(Vertical):
             self._open_form(None)
         elif row["kind"] in ("slot", "assign"):
             self._open_value_picker(row)
+        elif self._entry_origin(row["alias"]) == "base":
+            # Унаследованная строка: править в файле цели нечего — запись живёт в
+            # основном конфиге. Футер Enter здесь не обещает, но клавиша эта —
+            # универсальный вход в строку, и молчание в ответ было бы тупиком:
+            # отказ говорит, почему и где эта запись правится (симметрия с Del).
+            self._notice(_NOTICE_EDIT_REFUSED_INHERITED.format(alias=row["alias"]),
+                         ok=False)
         else:
             self._open_form(row["alias"])
 
@@ -1214,16 +1587,24 @@ class ModelsSectionEditor(Vertical):
 
     # --- под-формы ------------------------------------------------------------
     def _open_form(self, alias: str | None) -> None:
+        """Форма правит СВОЙ файл, поэтому и поля, и список занятых имён — свои:
+        `initial` собирается из `_own_entries`, а не из витринного `_entry`, —
+        иначе ключи записи основного конфига приехали бы в поля, стали неотличимы
+        от набранных и уехали копией в файл профиля.
+
+        Алиасы тени формa получает отдельно (`base_aliases`): имя, занятое записью
+        основного конфига, — не «дубль своей», и отказ у него свой (§5)."""
         from tui.editors.model_entry_form import ModelEntryForm
         initial = None
         if alias is not None:
-            entry = self._entries.get(alias) or {}
+            entry = self._own_entry(alias)
             initial = {"alias": alias, "model": entry.get("model"),
                        "url": entry.get("url"), "token": entry.get("token")}
         self._form = ModelEntryForm(
-            initial=initial, existing_aliases=self._aliases, presets=self._presets,
+            initial=initial, existing_aliases=self._own_aliases, presets=self._presets,
             effective_url=self._effective_url, effective_auth=self._effective_auth,
-            verify=self._verify, config_proxy=self._config_proxy)
+            verify=self._verify, config_proxy=self._config_proxy,
+            base_aliases=frozenset(self._base_entries))
         self._legacy_open = False           # форма занимает тело целиком
         self._rebuild()
 
@@ -1244,8 +1625,10 @@ class ModelsSectionEditor(Vertical):
         if self._needs_default_slot(alias):
             # Вторая модель делает реестр неоднозначным (спека §4): валидатор отвергнет
             # такую запись отдельной операцией — и правильно. Спрашиваем слот и уходим
-            # ОДНОЙ транзакцией (решение Task 1).
-            aliases = sorted({*self._aliases, alias})
+            # ОДНОЙ транзакцией (решение Task 1). Выбор — из ЭФФЕКТИВНОГО реестра:
+            # слот профиля законно указывает на запись основного конфига, и прятать
+            # её из списка значило бы предлагать неполный набор ответов.
+            aliases = sorted({*self._effective_aliases, alias})
             model_w = max(len(self._entry_model(a)) for a in aliases)
             self._open_picker(
                 [self._picker_alias_item(a, model_w) for a in aliases],
@@ -1262,7 +1645,7 @@ class ModelsSectionEditor(Vertical):
         ключи), переезд всех ссылок slots/assign, снятие старой записи. Порядок
         важен: к моменту `remove_model` на старое имя уже никто не ссылается.
         Валидация — одна, на итог; занятое имя отвергла форма."""
-        merged = dict(self._entries.get(prev) or {})
+        merged = dict(self._own_entries.get(prev) or {})
         for key, value in fields.items():
             if value is None:
                 merged.pop(key, None)
@@ -1279,8 +1662,17 @@ class ModelsSectionEditor(Vertical):
         return ops
 
     def _needs_default_slot(self, alias: str) -> bool:
-        after = {*self._aliases, alias}
-        return len(after) >= 2 and not any(self._slots.get(level) for level in LEVELS)
+        """Спрашивать ли «какая модель по умолчанию»: станет ли после записи
+        неоднозначным ЭФФЕКТИВНЫЙ конфиг (§7) — моделей ≥2 и ни одного слота.
+
+        Считается по merged, а не по своему файлу, потому что валидируется тоже
+        merged: вторая запись в профиль поверх ОДНОЙ модели основного конфига без
+        слотов делает нерезолвимым его, а свой-only гейт этот случай пропускал.
+        Обратная сторона той же формулы: над легаси-базой (реестра нет вовсе)
+        первая запись профиля вопроса не вызывает — одна модель резолвится сама."""
+        after = {*self._effective_aliases, alias}
+        return len(after) >= 2 and not any(self._effective_slot_value(level)
+                                           for level in LEVELS)
 
     def _write(self, ops: list, alias: str) -> None:
         from config_modules.registry_write import RegistryWriteError, apply_registry_ops
@@ -1300,11 +1692,17 @@ class ModelsSectionEditor(Vertical):
             self._notice(f"⚠ запись «{alias}» сохранена в {Path(self._target).name}, "
                          f"но {_NO_ADDRESS_HINT}", ok=None)
             return
-        self._notice(f"Запись «{alias}» сохранена — {Path(self._target).name}", ok=True)
+        self._notice(_NOTICE_ENTRY_SAVED.format(alias=alias,
+                                                file=Path(self._target).name), ok=True)
 
     def _cursor_to(self, alias: str) -> None:
-        if alias in self._aliases:
-            self._idx = self._aliases.index(alias)
+        """Курсор на строку записи — поиском ПО СТРОКАМ: индекс алиаса в реестре и
+        индекс его строки разошлись (унаследованные записи стоят выше своих, а
+        свёрнутый блок строк не даёт вовсе). Строки нет — курсор остаётся где был."""
+        for i, row in enumerate(self._rows()):
+            if row["kind"] == "entry" and row["alias"] == alias:
+                self._idx = i
+                return
 
     def _write_binding(self, op: tuple, done: str) -> None:
         """Запись слота/привязки — немедленно по выбору, через тот же слой с
@@ -1346,6 +1744,14 @@ class ModelsSectionEditor(Vertical):
             return False                    # резервную модель удалять нечем — она поле
         from config_modules.registry_write import RegistryWriteError, references_to
         alias = row["alias"]
+        if self._entry_origin(alias) == "base":
+            # Отказ СРАЗУ, без confirm-баннера (ревизия владельца по смоку A+B):
+            # баннер «точно удалить?» обещал бы удаление, которого не случится ни
+            # при каком ответе — вопрос ложен, а не преждевременен. Ветка
+            # `removed=False` в `confirm_pending` остаётся страховкой от гонки
+            # (запись исчезла из файла между баннером и Enter).
+            self._notice(_NOTICE_REMOVE_REFUSED_INHERITED.format(alias=alias), ok=False)
+            return False
         try:
             references = references_to(self._target, alias)
         except (RegistryWriteError, OSError) as exc:
@@ -1353,9 +1759,17 @@ class ModelsSectionEditor(Vertical):
             # но и падать нельзя — говорим причину.
             self._notice(f"✗ не удалено: {exc}", ok=False)
             return False
-        last = len(self._aliases) == 1
+        # «Реестр станет пустым» — про ЭФФЕКТИВНЫЙ реестр (§5): своя запись может
+        # быть последней в файле профиля, а уровни продолжат работать записями
+        # основного конфига — обещать их выключение было бы ложью.
+        last = self._effective_aliases == [alias]
         self._pending = {"alias": alias, "references": references, "last": last}
-        banner = Static(Text(self._confirm_text(alias, references, last), style=WARN),
+        return self._ask(self._confirm_text(alias, references, last), _FOOTER_CONFIRM)
+
+    def _ask(self, question: str, keys: str) -> bool:
+        """Смонтировать confirm-баннер: сам вопрос плюс клавиши ЕГО футера — второй
+        раз слова клавиш не пишутся, иначе вопрос и футер разошлись бы обещаниями."""
+        banner = Static(Text(f"{question} {keys}", style=WARN),
                         classes=f"models-confirm onb-dyn {KEEP_IN_VIEW}", markup=False)
         self.mount(banner)
         # Вопрос монтируется в КОНЕЦ тела секции, а тело длиннее вьюпорта рамки: без
@@ -1372,7 +1786,6 @@ class ModelsSectionEditor(Vertical):
                          + " — ссылки снимутся вместе с ней.")
         if last:
             parts.append("Реестр станет пустым — уровни выключатся.")
-        parts.append("Enter — удалить · Esc — отмена")
         return " ".join(parts)
 
     def confirm_pending(self) -> None:
@@ -1382,10 +1795,17 @@ class ModelsSectionEditor(Vertical):
             return
         from config_modules.registry_write import RegistryWriteError, remove_model
         try:
-            remove_model(self._target, pending["alias"], force=True,
-                         is_profile=self._is_profile)
+            report = remove_model(self._target, pending["alias"], force=True,
+                                  is_profile=self._is_profile)
         except (RegistryWriteError, OSError) as exc:
             self._notice(f"✗ не удалено: {exc}", ok=False)
+            return
+        if not report.removed:
+            # Записи нет в ФАЙЛЕ ЦЕЛИ — писатель отвечает отчётом, а не исключением
+            # (`RemovalReport(removed=False)`), и рапорт об удалении был бы ложным:
+            # строка стоит из тени, файл не тронут.
+            self._notice(_NOTICE_REMOVE_REFUSED_INHERITED.format(alias=pending["alias"]),
+                         ok=False)
             return
         self._reload()
         self._changed()
@@ -1408,14 +1828,28 @@ class ModelsSectionEditor(Vertical):
     def _picker_alias_item(self, alias: str, model_w: int) -> dict:
         """Позиция-модель: справа ТЕ ЖЕ колонки, что у строки реестра (id + адрес),
         — по одному id модели не различить (две записи на один id, разные endpoint'ы),
-        а выбор вслепую и был проблемой плоского списка."""
+        а выбор вслепую и был проблемой плоского списка.
+
+        При активной тени пикер зеркалит реестр и ПРОИСХОЖДЕНИЕМ (ревизия
+        владельца по смоку A+B): свои — ярко, унаследованные — приглушённо; иначе
+        строка, белая в реестре, серела в списке, и глазу приходилось сверять по
+        имени. Без тени (основная секция) — прежний DIM."""
         desc = Text()
-        desc.append(self._entry_model(alias).ljust(model_w), style=DIM)
+        if self._base_entries and self._entry_origin(alias) != "base":
+            label_style = INK
+            desc.append(self._entry_model(alias).ljust(model_w), style=DIM)
+        else:
+            label_style = DEEP_DIM if self._base_entries else None
+            desc.append(self._entry_model(alias).ljust(model_w),
+                        style=DEEP_DIM if self._base_entries else DIM)
         cell = self._address_cell(alias)
         if cell:
             desc.append("  ")
             desc.append(cell, style=DEEP_DIM)
-        return {"value": alias, "label": alias, "desc": desc}
+        item = {"value": alias, "label": alias, "desc": desc}
+        if label_style is not None:
+            item["label_style"] = label_style
+        return item
 
     def _picker_fallback_desc(self, level: str) -> Text:
         """Крашеная версия `_slot_fallback_text` для строк пикера: имя уровня — своим
@@ -1430,10 +1864,33 @@ class ModelsSectionEditor(Vertical):
         t.append(alias, style=DIM)
         return t
 
+    def _picker_inherited_desc(self, value: str) -> Text:
+        """Описание первой строки, когда снятие своего ключа вернёт значение
+        основного конфига: «→ gc» — ровно хвост подписи строки после слова
+        «основной» (канон тождества «подпись строки ↔ первый пункт»). Стрелка —
+        DEEP_DIM, значение — своим цветом (§12.4: уровень и алиас выглядят
+        одинаково на всём экране)."""
+        t = Text("→ ", style=DEEP_DIM)
+        t.append(value, style=value_style(value))
+        return t
+
+    def _picker_unset_row(self, inherited, label: str, desc: Text) -> dict:
+        """Первая позиция пикера — снятие СВОЕГО ключа (`value is None`, §7-8).
+
+        Значение основного конфига под ним есть — подпись «основной» и описание
+        «→ gc»: пункт отвечает «что будет после снятия», а будет ровно оно. Нет —
+        прежние «не задан»/«активная» со своим описанием-фоллбэком."""
+        if inherited:
+            return {"value": None, "label": _INHERITED_LABEL,
+                    "desc": self._picker_inherited_desc(inherited)}
+        return {"value": None, "label": label, "desc": desc}
+
     def _picker_level_desc(self, level: str) -> Text:
         """Позиция-уровень отвечает «что реально произойдёт»: на какую модель уровень
-        указывает СЕЙЧАС, — а не описание роли (оно стоит в блоке «уровни» выше)."""
-        alias = self._slot_value(level)
+        указывает СЕЙЧАС, — а не описание роли (оно стоит в блоке «уровни» выше).
+        Уровень берётся эффективный (§8): не переопределённый профилем слот
+        продолжает работать раскладкой основного конфига."""
+        alias = self._effective_slot_value(level)
         t = Text()
         if alias:
             # «→» — не `_LEVEL_TAIL_LEAD`: у указателя реестра стрелка смотрит
@@ -1462,22 +1919,27 @@ class ModelsSectionEditor(Vertical):
 
         Уровни и алиасы идут сплошным списком, без черт-разделителей: группы и так
         различимы правой колонкой («→ модель» против «id + адрес») и цветом
-        подписи (ревизия владельца — черты внутри дропдауна резали список)."""
+        подписи (ревизия владельца — черты внутри дропдауна резали список).
+
+        Модели — ЭФФЕКТИВНОГО реестра и в порядке реестра секции (§7): профиль
+        законно ссылается на записи основного конфига, а второй порядок одного и
+        того же списка читался бы как второй список."""
         anchor = self._row_widget(self._idx)
         model_w = self._model_width()
-        alias_items = [self._picker_alias_item(a, model_w) for a in self._aliases]
+        alias_items = [self._picker_alias_item(a, model_w)
+                       for a in self._effective_aliases]
         if row["kind"] == "slot":
             level = row["level"]
-            rows = [{"value": None, "label": _SLOT_UNSET,
-                     "desc": self._picker_fallback_desc(level)},
+            rows = [self._picker_unset_row(self._base_slot_value(level), _SLOT_UNSET,
+                                           self._picker_fallback_desc(level)),
                     *alias_items]
             self._open_picker(rows, lambda chosen: self._write_binding(
                 ("write_slot", level, chosen), self._slot_notice(level, chosen)),
                 after=anchor, current=self._slot_value(level))
             return
         consumer = row["consumer"]
-        rows = ([{"value": None, "label": _ASSIGN_ACTIVE,
-                  "desc": self._picker_active_desc()}]
+        rows = ([self._picker_unset_row(self._base_assign_value(consumer),
+                                        _ASSIGN_ACTIVE, self._picker_active_desc())]
                 + [{"value": lvl, "label": lvl, "desc": self._picker_level_desc(lvl)}
                    for lvl in LEVELS]
                 + alias_items)
@@ -1500,7 +1962,11 @@ class ModelsSectionEditor(Vertical):
         первую строку. Остался он один — вопрос формы «какая модель по умолчанию»,
         там hint и есть сам вопрос."""
         idx = next((i for i, r in enumerate(rows) if r["value"] == current), 0)
-        self._picker = {"rows": rows, "idx": idx, "on_pick": on_pick}
+        # `width` — ширина рамки, под которую посчитаны колонки списка (сосед
+        # `_measured_width` строк секции): часть формы пикера с самого начала, а не
+        # ключ, появляющийся после первой отрисовки, — иначе читателям пришлось бы
+        # гадать `.get` он или `[...]`. `None` — ещё не измерено.
+        self._picker = {"rows": rows, "idx": idx, "on_pick": on_pick, "width": None}
         # Строка-якорь на время раскрытия теряет нижний воздух (.set-spaced):
         # список — продолжение строки и обязан стоять к ней вплотную.
         if after is not None:
@@ -1517,23 +1983,75 @@ class ModelsSectionEditor(Vertical):
                               markup=False), after=scroll)
         self._refresh_picker_rows()
 
+    def _picker_width(self):
+        """Ширина строки пикера внутри её padding (`.onb-option`: `padding: 0 1`).
+        `None` — рамки ещё нет (первый кадр, до layout-прохода): усечения нет,
+        досчитает `_confirm_picker_width`.
+
+        Сентинелом здесь служит именно `None`, а не 0, как у `_row_width`: у строк
+        списка «0 колонок» не бывает (их держит рамка секции), а у строки ПИКЕРА
+        бывает — рамка `.dropdown-scroll` со своим бордюром на узком окне отдаёт
+        под содержимое ноль колонок. Спутать «не измерено» с «нуль» здесь нельзя:
+        трактовка «не измерено» печатает полный текст, тот переносится на десятки
+        строк, список перерастает `max-height` и заводит скроллбар — а скроллбар
+        отнимает колонку и делает замер снова другим. Замер бы не сошёлся никогда."""
+        widgets = list(self.query(".models-picker-row"))
+        if not widgets or widgets[-1].region.width <= 0:
+            return None
+        return max(0, widgets[-1].region.width - 2)
+
+    def _confirm_picker_width(self) -> None:
+        """Самоподтверждение замера — близнец `_confirm_width` строк списка: рамка
+        `.dropdown-scroll` заводит свой скроллбар уже после раскладки, и первый
+        проход считал бы колонки по прежней ширине. Сходимость гарантирована тем,
+        что высота строки от ширины не зависит — строка не переносится."""
+        if self._picker is not None and self._picker["width"] != self._picker_width():
+            self._refresh_picker_rows()
+
     def _refresh_picker_rows(self) -> None:
+        """Строка пикера не переносится НИ НА КАКОЙ ширине — та же дисциплина, что
+        у строк списка, и та же лестница жертв: сперва ужимается описание (оно —
+        хвост, `Text.truncate` с многоточием сохраняет раскраску начала), потом
+        сама подпись (`fit_cell`), в пределе описания нет вовсе вместе с его
+        зазором. Усекается КОПИЯ описания: оригинал живёт в `_picker["rows"]` и
+        переживает ресайзы — усечённый на узкой рамке, обратно он бы не вырос."""
         if self._picker is None:
             return
         rows = self._picker["rows"]
         widgets = list(self.query(".models-picker-row"))
+        width = self._picker_width()
+        self._picker["width"] = width
         label_w = max([len(r["label"]) for r in rows] + [0])
+        if width is not None:
+            label_w = min(label_w, max(0, width - 2))
         for i, (widget, row) in enumerate(zip(widgets, rows)):
             selected = i == self._picker["idx"]
+            if width is not None and width < 2:
+                # Места нет даже под курсор — строка пустая: перенос двух его
+                # колонок на вторую строку ничего не сообщает, а список превращает
+                # в лестницу огрызков.
+                widget.update(Text())
+                widget.set_class(selected, "selected")
+                continue
             text = Text()
             text.append("▸ " if selected else "  ", style=ACCENT)
             # Снятие — по `value is None`, не по тексту подписи: алиас с именем
             # «не задан» схемой разрешён.
             unset = row["value"] is None
-            text.append(row["label"].ljust(label_w),
-                        style=DEEP_DIM if unset else value_style(row["label"]))
+            if label_w:
+                # Цвет — по ПОЛНОЙ подписи: усечение говорит о ширине рамки, а не
+                # о том, уровень это или алиас. `label_style` строки (происхождение
+                # в профильном пикере) перекрывает словарь значений.
+                style = (DEEP_DIM if unset
+                         else row.get("label_style") or value_style(row["label"]))
+                text.append(fit_cell(row["label"], label_w).ljust(label_w),
+                            style=style)
             desc = row.get("desc")
-            if desc is not None and desc.plain:
+            budget = 0 if width is None else width - 2 - label_w - 2
+            if desc is not None and desc.plain and (width is None or budget > 0):
+                if width is not None:
+                    desc = desc.copy()
+                    desc.truncate(budget, overflow="ellipsis")
                 text.append("  ")
                 text.append_text(desc)
             widget.update(text)
@@ -1544,6 +2062,7 @@ class ModelsSectionEditor(Vertical):
             # не следит.
             self.call_after_refresh(widgets[self._picker["idx"]].scroll_visible,
                                     animate=False)
+        self.call_after_refresh(self._confirm_picker_width)
 
     def _pick(self) -> None:
         picker = self._picker

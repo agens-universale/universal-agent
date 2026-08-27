@@ -291,6 +291,49 @@ async def wizard_connection_step(tmp_path):
         os.chdir(cwd)
 
 
+# --- цвет строк списков (§12.4: смысл несут слова, цвет — вспомогательный канал) ---
+#
+# Стражи грамматики строк спрашивают цвет КОНКРЕТНОЙ ячейки, а не «строки вообще»:
+# один и тот же уровень обязан выглядеть одинаково всюду, где он назван. Живут
+# хелперы здесь, а не в файле одной секции: тот же вопрос задают стражи секции
+# «Модели», под-вида профиля и списка профилей.
+
+
+def _value_color(text, value: str):
+    """Цвет колонки значения строки — span, начинающийся ровно на значении (канон
+    стража грамматики строки уровня в `test_settings_profiles_showcase.py`).
+
+    Цвет нормализуется до RGB: у СМОНТИРОВАННОГО виджета `render()` отдаёт стиль,
+    уже прошедший через консоль («rgb(122,130,144)»), а константа палитры — «#hex»;
+    сравнение строк развело бы одинаковые цвета."""
+    from rich.style import Style
+    i = text.plain.index(value)
+    span = next(s for s in text.spans if s.start == i)
+    return Style.parse(str(span.style)).color.get_truecolor()
+
+
+def _rgb(token: str):
+    from rich.style import Style
+    return Style.parse(token).color.get_truecolor()
+
+
+def _row_style_set(text) -> set:
+    """Цвета ВСЕЙ строки — множеством: «строка приглушена целиком» проверяется
+    сравнением с одноэлементным множеством, а не перебором ячеек по одной.
+
+    Пробельные куски в счёт не идут: курсор-маркер («▸ »/«  ») и выравнивание
+    колонок цвета не несут, а в множество добавили бы посторонний ACCENT."""
+    from rich.style import Style
+    colors = set()
+    for span in text.spans:
+        if not text.plain[span.start:span.end].strip():
+            continue
+        style = Style.parse(str(span.style))
+        if style.color is not None:
+            colors.add(style.color.get_truecolor())
+    return colors
+
+
 @contextmanager
 def _isolated_config_layers(tmp_path):
     """Слои поверх базового config.yml — на tmp. Нужны любой секции /settings:

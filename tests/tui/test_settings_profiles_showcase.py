@@ -741,8 +741,9 @@ async def test_none_row_first_active_marker_and_separator(tmp_path, monkeypatch)
 
 
 async def test_none_row_absent_in_empty_state(tmp_path, monkeypatch):
-    """Профилей нет — деактивировать нечего: none-строки нет, пустое состояние
-    как прежде."""
+    """Профилей нет — деактивировать нечего: none-строки нет. Строка-действие
+    «+ добавить профиль…» есть и в пустом состоянии (единственный вход кроме n),
+    строка уровня — как всегда, последняя."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -756,7 +757,7 @@ async def test_none_row_absent_in_empty_state(tmp_path, monkeypatch):
         await pilot.pause()
         await _open_profiles(pilot, scr)
         rows = scr._profiles_rows()
-        assert [r["kind"] for r in rows] == ["level"]
+        assert [r["kind"] for r in rows] == ["add", "level"]
 
 
 async def test_deactivate_writes_empty_pointer_to_base_config(tmp_path, monkeypatch):
@@ -1154,17 +1155,17 @@ async def test_profiles_cursor_survives_row_disappearing_under_it(tmp_path, monk
         app.push_screen(scr)
         await pilot.pause()
         rows = await _open_level_row(pilot, scr)
-        assert len(rows) == 4                       # без профиля, home, work, уровень
+        assert len(rows) == 5           # без профиля, home, work, «+ добавить», уровень
 
         (profiles_dir / "home.yml").unlink()
-        scr._profiles_idx = 3                       # строк осталось 3 — курсор за концом
+        scr._profiles_idx = 4                       # строк осталось 4 — курсор за концом
         await pilot.press("enter")
         await pilot.pause(0.1)
-        assert scr._profiles_idx == 2
+        assert scr._profiles_idx == 3
 
-        scr._profiles_idx = 3
+        scr._profiles_idx = 4
         assert scr._profiles_hint_text(scr._profiles_rows())
-        assert scr._profiles_idx == 2
+        assert scr._profiles_idx == 3
 
 
 async def test_level_hint_names_action_and_target_file_keeps_session_tail(tmp_path, monkeypatch):

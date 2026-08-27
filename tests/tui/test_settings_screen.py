@@ -938,6 +938,109 @@ async def test_flash_disappears_on_next_key(tmp_path):
         assert not scr.query("#set-flash")              # погашен следующим нажатием
 
 
+async def test_notice_dies_on_the_next_action_like_flash(tmp_path):
+    """Правило В1 (ревизия владельца 2026-08-14): notice-отказ живёт по тому же
+    правилу, что плашка успеха, — до следующего осознанного действия. Раньше он
+    жил вечно (гасился только побочным эффектом _render_view, и в секциях со
+    своим виджетом — Модели/MCP/Подключение — не гас никогда: висел после ухода
+    курсора и даже одновременно с confirm-баннером другой строки). Гашение — по
+    родовому маркеру EPHEMERAL, вместе с обёрткой .set-slot."""
+    import tui.app as app_mod
+    from tui.screens.settings import SettingsScreen
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('agent:\n  model: "m"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                                       on_apply=lambda: None,
+                                       probe_fn=_fake_probe(_probe_ok())))
+        await pilot.pause()
+        scr = app.screen
+        scr._notice("✗ не сохранено: тест")
+        await pilot.pause()
+        assert scr.query("#set-notice")
+        await pilot.press("down")
+        await pilot.pause()
+        assert not scr.query("#set-notice")             # погашен следующим действием
+        assert not scr.query(".set-slot")               # обёртка снесена, не копится
+
+
+async def test_report_survives_the_next_key_and_closes_on_escape(tmp_path):
+    """Третий род сообщений (ревизия владельца по смоку): ОТЧЁТ операции
+    (актуализация/сброс config.yml) читают и по нему действуют — гаснуть на
+    следующей клавише он не имеет права. Живёт до явного Esc, который тратится
+    ТОЛЬКО на него (из секции уводит следующий), футер на это время обещает
+    ровно закрытие. Различается природа, а не длина текста."""
+    import tui.app as app_mod
+    from tui.screens.settings import SettingsScreen, _UPDATE
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('agent:\n  model: "m"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                                       on_apply=lambda: None,
+                                       probe_fn=_fake_probe(_probe_ok())))
+        await pilot.pause()
+        scr = app.screen
+        # Секция «Обновление» — ЕДИНСТВЕННАЯ, где отчёты живут: страж обязан идти
+        # её путём. Прежняя версия входила в «Подключение» (Enter из меню), где
+        # `_report` не появляется никогда, а стрелки тело не перерисовывают, —
+        # и была зелёной на невозможном сценарии (находка ревью хвоста).
+        scr._view = _UPDATE
+        scr._render_view()
+        await pilot.pause()
+        scr._report("✓ config.yml обновлён\nбэкап: …")
+        await pilot.pause()
+        assert scr.query("#set-report")
+        assert "Esc — закрыть отчёт" in str(
+            scr.query_one("#set-footer", Static).render())
+        for key in ("down", "up", "n"):
+            await pilot.press(key)                     # ↑/↓ здесь ПЕРЕРИСОВЫВАЮТ тело
+            await pilot.pause()
+            assert scr.query("#set-report"), f"отчёт погас на «{key}»"
+            assert "Esc — закрыть отчёт" in str(
+                scr.query_one("#set-footer", Static).render()), key
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not scr.query("#set-report")             # первый Esc закрыл отчёт
+        assert scr._view == _UPDATE, "тот же Esc увёл из секции"
+        assert "Esc — закрыть отчёт" not in str(
+            scr.query_one("#set-footer", Static).render())
+
+
+async def test_a_reply_replaces_the_report_and_clears_its_promise(tmp_path):
+    """Реплика и отчёт делят экран, но не время: реплика ЗАМЕЩАЕТ отчёт, а не
+    ложится поверх. Иначе оставался бы флаг — футер обещал бы «Esc — закрыть
+    отчёт», а первый Esc уходил бы впустую, не уводя из секции (находка ревью
+    хвоста; реальный путь — «обновить config.yml» дважды: второй раз отвечает
+    репликой «уже актуален»)."""
+    import tui.app as app_mod
+    from tui.screens.settings import SettingsScreen, _UPDATE
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('agent:\n  model: "m"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                                       on_apply=lambda: None,
+                                       probe_fn=_fake_probe(_probe_ok())))
+        await pilot.pause()
+        scr = app.screen
+        scr._view = _UPDATE
+        scr._render_view()
+        await pilot.pause()
+        scr._report("✓ config.yml обновлён")
+        await pilot.pause()
+        scr._notice("config.yml уже актуален — обновлять нечего")
+        await pilot.pause()
+        assert not scr.query("#set-report")             # отчёт уступил место реплике
+        assert scr.query("#set-notice")
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert "Esc — закрыть отчёт" not in footer      # и обещание снято
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr._view == "menu", "Esc съеден мёртвым флагом отчёта"
+
+
 async def test_flash_ok_mounts_band_with_glyph(tmp_path):
     """Флэш успеха — плашка с классом set-flash-ok и ведущим ✓."""
     from tui.screens.settings import SettingsScreen

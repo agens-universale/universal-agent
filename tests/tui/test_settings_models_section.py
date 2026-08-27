@@ -16,8 +16,8 @@ pytest.importorskip("textual")
 import yaml
 from textual.widgets import Input, Static
 
-from tests.tui.conftest import (_isolated_config_layers, open_settings_section,
-                                wait_until)
+from tests.tui.conftest import (_isolated_config_layers, _rgb, _value_color,
+                                open_settings_section, wait_until)
 from tests.tui.test_settings_screen import _cfg, _loaded, _mk_screen
 
 _SECTION = "Модели"
@@ -742,22 +742,10 @@ def _picker_rows(ed) -> list:
     return [str(w.render()) for w in ed.query(".models-picker-row")]
 
 
-def _value_color(text, value: str):
-    """Цвет колонки значения строки — span, начинающийся ровно на значении (канон
-    стража грамматики строки уровня в `test_settings_profiles_showcase.py`).
-
-    Цвет нормализуется до RGB: у СМОНТИРОВАННОГО виджета `render()` отдаёт стиль,
-    уже прошедший через консоль («rgb(122,130,144)»), а константа палитры — «#hex»;
-    сравнение строк развело бы одинаковые цвета."""
-    from rich.style import Style
-    i = text.plain.index(value)
-    span = next(s for s in text.spans if s.start == i)
-    return Style.parse(str(span.style)).color.get_truecolor()
-
-
-def _rgb(token: str):
-    from rich.style import Style
-    return Style.parse(token).color.get_truecolor()
+# `_value_color`/`_rgb` переехали в `tests/tui/conftest.py`: тот же вопрос («каким
+# цветом эта ячейка») задают стражи под-вида профиля и списка профилей, а копия
+# разошлась бы с оригиналом на первой же правке. Имена остаются здесь — стражи ниже
+# зовут их без префикса.
 
 
 async def test_slot_picker_opens_under_the_row_with_unset_first(tmp_path):
@@ -1226,6 +1214,35 @@ async def test_clicking_a_block_header_collapses_and_expands(tmp_path):
         head = str(list(ed.query(".models-block"))[0].render())
         assert head.startswith("▾") and "модели" not in head
         assert head.endswith("─")                   # раскрытая — вписана в черту
+
+
+async def test_the_first_click_after_a_message_still_hits_its_target(tmp_path):
+    """Сообщение-итог гаснет по правилу В1 — но не ЦЕНОЙ первого клика.
+
+    Снос сообщения двигает тело секции, и гашение на `MouseDown` уводило цель
+    из-под курсора до доставки `Click`: первый клик после любой плашки пропадал
+    (находка финального ревью). Цена здесь высокая — сворачивание блоков мышиное
+    и только мышиное, а плашку оставляет каждая успешная запись. Гашение стоит
+    на `Click`, и шапка событие не глушит: случается и действие, и гашение.
+
+    Клик идёт по РЕАЛЬНОЙ позиции (`get_widget_at`), а не по `widget.region`:
+    у проскролленного контейнера region врёт (говорит y=4, когда шапка на y=9),
+    и `pilot.click(виджет)` бьёт мимо — по этому артефакту дефект «виден» даже
+    там, где его нет."""
+    from tui.editors.models_section import _BlockHeader
+    async with _section(tmp_path, _REGISTRY, size=(100, 40)) as (pilot, scr, _cfg):
+        ed = _editor(scr)
+        scr._flash("тестовая плашка")               # сообщение в теле секции
+        for _ in range(6):
+            await pilot.pause()                     # даём подводке доскроллить
+        assert scr.query("#set-flash")
+        head_y = next(y for y in range(1, 25)
+                      if isinstance(scr.get_widget_at(6, y)[0], _BlockHeader))
+        await pilot.click(offset=(6, head_y))       # ПЕРВЫЙ клик по шапке
+        for _ in range(3):
+            await pilot.pause()
+        assert ed._collapsed, "первый клик после сообщения потерян"
+        assert not scr.query("#set-flash")          # и сообщение всё же погасло
 
 
 async def test_slot_row_head_carries_the_colour_of_its_level(tmp_path):

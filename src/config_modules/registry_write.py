@@ -164,11 +164,52 @@ def _upsert_model_text(text: str, template: str, alias: str, fields: dict) -> st
     return ocw.upsert_mapping_entry(text, "models", key, _entry_block_lines(key, entry))
 
 
+def _drop_mapping_entry(text: str, parent: str, key: str, subject: str) -> str:
+    """Снять запись `<parent>.<key>` из текста, УБЕДИВШИСЬ, что она снята.
+
+    Удаление смотрит на файл двумя разными способами: ЧТО удалять, читается по
+    РАЗОБРАННОМУ документу (запись реестра, ссылающиеся слоты и привязки), а
+    удаляется оно по СТРОКАМ файла. Формы, у которых отдельной строки нет вовсе
+    (рукописный инлайновый мэппинг `models: {flash: {…}}`, `slots: {default: …}`),
+    эти взгляды разводят: `remove_mapping_entry` молча отдаёт исходный текст, а
+    вызывающий рапортует успех о неслучившемся — «✓ снято» при нетронутом файле;
+    у каскада хуже: запись снята, ссылка на несуществующий алиас повисла. Текст
+    не изменился — это отказ.
+
+    Проверка стоит на КАЖДОМ снятии по отдельности, а не на итоге транзакции: итог
+    каскада меняется от первой же удавшейся правки, и «результат отличается от
+    исходного» пропустило бы ровно те случаи, ради которых проверка заведена."""
+    new_text = ocw.remove_mapping_entry(text, parent, _yaml_key(key))
+    if new_text == text:
+        # Отказ называет ФАКТ (строки нет), а причину — гипотезой: строки не бывает
+        # у нескольких форм записи ключа, и инлайновый мэппинг лишь самая частая из
+        # них. Утверждать её значило бы иногда врать и советовать неисполнимое.
+        raise RegistryWriteError(
+            f"строки {subject} в файле нет — правки идут построчно; "
+            f"проверьте секцию {parent}: похоже, она инлайновый мэппинг"
+        )
+    return new_text
+
+
+def _drop_entry_text(text: str, alias: str) -> str:
+    """Снять запись реестра — с проверкой `_drop_mapping_entry`."""
+    return _drop_mapping_entry(text, "models", alias, f"записи «{alias}»")
+
+
 def _remove_model_text(text: str, _template: str, alias: str, force: bool = False) -> str:
     """Удалить запись реестра вместе со ссылающимися слотами/привязками. Записи нет
     — идемпотентный no-op. Ссылки есть, а `force` не задан — ошибка с их перечнем:
     у операции внутри транзакции нет канала отчёта, каким располагает `remove_model`,
-    а молча оставить нерезолвимый файл нельзя."""
+    а молча оставить нерезолвимый файл нельзя.
+
+    `force` — именно флаг: словарь-«опции» (`{"keep_references": True}`) в этой
+    позиции читался бы как truthy и молча делал бы РОВНО ОБРАТНОЕ просимому —
+    сносил ссылки каскадом. Всё, что в позиции флага не `bool`, — ошибка
+    вызывающего."""
+    if not isinstance(force, bool):
+        raise TypeError(
+            f"третий аргумент — флаг force (bool), получено {type(force).__name__}"
+        )
     document = _document(text)
     if alias not in (document.get("models") or {}):
         return text
@@ -178,10 +219,14 @@ def _remove_model_text(text: str, _template: str, alias: str, force: bool = Fals
             f"на запись ссылаются {', '.join(references)} — снимите ссылки в этой же "
             "транзакции или удаляйте принудительно"
         )
-    text = ocw.remove_mapping_entry(text, "models", _yaml_key(alias))
+    # Запись снимается ПЕРВОЙ: не снялась — транзакция обрывается здесь, и ссылки
+    # остаются при живой записи, а не наоборот (`_drop_entry_text`).
+    text = _drop_entry_text(text, alias)
     for reference in references:
+        # Каждая ссылка — с той же проверкой: снять запись и оставить ссылку на
+        # неё висеть значит сделать ровно то, что этот каскад и предотвращает.
         parent, _sep, leaf = reference.rpartition(".")
-        text = ocw.remove_mapping_entry(text, parent, _yaml_key(leaf))
+        text = _drop_mapping_entry(text, parent, leaf, f"ссылки {reference}")
     return text
 
 
@@ -232,6 +277,10 @@ def apply_registry_ops(target, ops, template: str, *, is_profile: bool = False) 
     и `template`: `("upsert_model", alias, fields)`, `("remove_model", alias[, force])`,
     `("write_slot", level, alias_or_none)`, `("write_assign", consumer, value_or_none)`.
 
+    Аргументы ПОЗИЦИОННЫЕ: «словарь опций» третьим элементом кортежа лёг бы в
+    позицию `force` у `remove_model` и молча включил бы каскад — такая форма
+    отвергается ошибкой, а не читается как опции.
+
     Нужна там, где ни один из промежуточных результатов не валиден сам по себе, а
     итог валиден: вторая модель в реестре обязана прийти вместе со слотом (при 2+
     моделях и незаданных слотах конфиг нерезолвим, спека §4) — поодиночке ни одна
@@ -240,7 +289,10 @@ def apply_registry_ops(target, ops, template: str, *, is_profile: bool = False) 
 
     Любая операция сломала результат → `RegistryWriteError` (файл не тронут):
     механический сбой называет свою операцию, провал итоговой валидации — состав
-    транзакции и причину от валидатора."""
+    транзакции и причину от валидатора. ОСОЗНАННЫЙ отказ операции (она сама
+    подняла `RegistryWriteError`) доезжает дословно: его текст написан для
+    человека, и служебное имя операции перед ним — шум в пользовательском
+    сообщении."""
     ops = [tuple(op) for op in ops]
     text = _read(target)
     for op in ops:
@@ -252,7 +304,15 @@ def apply_registry_ops(target, ops, template: str, *, is_profile: bool = False) 
             )
         try:
             text = transform(text, template, *op[1:])
-        except (KeyError, TypeError, ValueError) as exc:   # RegistryWriteError — тоже ValueError
+        except RegistryWriteError:
+            # Операция отказала ОСОЗНАННО и уже сказала человеку, что не так
+            # («строки записи «flash» в файле нет…»). Приписывать к готовой фразе
+            # своё внутреннее имя значит вести служебный лог в пользовательском
+            # тексте: отказ доезжает до notice секции дословно.
+            raise
+        except (KeyError, TypeError, ValueError) as exc:
+            # Механический сбой (сломанный аргумент, отсутствующий якорь) фразы для
+            # человека не несёт — вот его и подписываем операцией.
             raise RegistryWriteError(f"{_op_label(op)}: {exc}") from exc
     _commit(target, text, is_profile, label=" + ".join(_op_label(op) for op in ops))
 
@@ -285,7 +345,11 @@ def remove_model(target, alias: str, *, force: bool = False,
     На запись ссылаются слоты/привязки — по умолчанию НИЧЕГО не пишется, вызывающий
     получает отчёт со списком координат и решает, показывать ли подтверждение;
     `force=True` удаляет запись ВМЕСТЕ со ссылками (иначе файл остался бы
-    нерезолвимым). Записи нет — отчёт «не удалено, ссылок нет», файл не тронут."""
+    нерезолвимым). Записи нет — отчёт «не удалено, ссылок нет», файл не тронут.
+
+    Отчёт `removed=True` — про СОСТОЯВШЕЕСЯ удаление: запись, которую не удалось
+    снять текстом (`_drop_entry_text`), приходит `RegistryWriteError`, а не тихим
+    отчётом об успехе."""
     document = _document(_read(target))
     if alias not in (document.get("models") or {}):
         return RemovalReport(removed=False, references=[])

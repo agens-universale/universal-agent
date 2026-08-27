@@ -223,7 +223,9 @@ async def test_inherit_preset_is_offered_when_editing_a_record_with_its_own_url(
         assert form.reload_presets() is True           # Alt+↓ раскрывает явно
         await pilot.pause()
         rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
-        assert rows and "основной конфиг" in rows[0], rows
+        assert rows and "основной конфиг · наследовать" in rows[0], rows
+        # Слово «наследовать» несущее: адрес пункта часто совпадает с
+        # обычным пресетом, и без него строка читалась бы дублем.
         # Раскрытие поверх СВОЕГО адреса никого не подсвечивает (канон §2.4) — иначе
         # Enter молча затёр бы рабочий адрес первой строкой. Наследование выбирается
         # явно: ↓ (стрелка модального списка) и только потом Enter.
@@ -248,7 +250,9 @@ async def test_inherit_preset_leaves_the_field_empty():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()                            # курсор на адресе, список раскрыт
         rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
-        assert rows and "основной конфиг" in rows[0], rows
+        assert rows and "основной конфиг · наследовать" in rows[0], rows
+        # Слово «наследовать» несущее: адрес пункта часто совпадает с
+        # обычным пресетом, и без него строка читалась бы дублем.
         assert form.enter() is True                    # Enter по пункту наследования
         await pilot.pause()
         assert form.query_one("#mef-url", Input).value == ""
@@ -414,6 +418,27 @@ async def test_own_alias_is_editable_and_not_its_own_duplicate():
         assert (ok, alias) == (True, "gemini-2.5-flash")   # Enter принял призрак
 
 
+async def test_creating_an_entry_named_like_a_base_one_is_refused():
+    """§5: имя занято записью основного конфига — своя ошибка, а не общее «уже
+    используется»: своей записи с таким именем в профиле нет, и человеку надо
+    сказать, ЧЕМ имя занято. Призрак алиаса уникализируется против ЭФФЕКТИВНОГО
+    набора — имя, занятое в основном конфиге, он не предложит."""
+    from tui.editors import model_entry_form as mef
+    form = _form(initial=None, existing_aliases=set(),
+                 base_aliases=frozenset({"flash", "gemini-2.5-flash"}))
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-alias", Input).value = "flash"
+        form.query_one("#mef-model", Input).value = "zhipu/glm-4.6"
+        ok, _alias, _fields = form.submit()
+        assert ok is False
+        assert str(form.query_one("#mef-error", Static).render()) == mef._ALIAS_TAKEN_BY_BASE
+        form.query_one("#mef-alias", Input).value = ""
+        form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
+        await pilot.pause()
+        assert form.query_one("#mef-alias", Input).placeholder == "gemini-2.5-flash-2"
+
+
 async def test_empty_model_id_means_the_alias_is_the_id():
     """Пусто в поле id — легально: алиас и есть провайдерский id (`model_router`:
     `entry.get("model") or alias`), ключ `model` не отдаётся."""
@@ -467,6 +492,46 @@ async def test_the_model_list_loads_itself_on_field_entry():
         for _ in range(3):
             await pilot.pause()
         assert len(calls) == 2                         # автоподгрузка была ОДИН раз
+        form.move(1); form.move(-1)                    # ушли с поля и вернулись
+        for _ in range(3):
+            await pilot.pause()
+        assert len(calls) == 2, "те же параметры перечитаны без нужды"
+
+
+async def test_changed_credentials_retry_the_autoload(tmp_path):
+    """Сбой без токена, потом введённый токен — ОДИН сценарий, а не два (ревизия
+    владельца по смоку): вход в поле id обязан сходить заново, когда изменились
+    адрес или авторизация. Прежний флаг «автоподгрузка один раз на форму» держал
+    форму на первой неудаче до ручного Alt+↓."""
+    calls = []
+
+    def fetch(url, auth, **kwargs):
+        calls.append((url, auth))
+        return _models() if auth else None            # без токена сервер молчит
+
+    form = _form(initial=None, existing_aliases=set(), fetch=fetch,
+                 effective_url="http://hub/v1/chat/completions")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        from tui.editors.field_list import LIST_FAILED
+        assert LIST_FAILED in str(form.query_one("#mef-model-status", Static).render())
+        assert len(calls) == 1 and calls[0][1] is None
+        form.move(1); form.move(1)                     # id → алиас → адрес
+        await pilot.pause()
+        form.escape()                                  # вход на адрес раскрыл пресеты
+        form.move(1)                                   # адрес → токен
+        form.query_one("#mef-token", Input).value = "sk-NEW"
+        await pilot.pause()
+        form.move(1); form.move(1)                     # токен → галка → id модели
+        for _ in range(3):
+            await pilot.pause()
+        assert len(calls) == 2, "изменённый токен не перечитал список"
+        assert calls[1][1] == "Bearer sk-NEW"
+        assert [str(w.render()) for w in _rows(form)], "список не раскрылся"
 
 
 async def test_alt_down_reports_a_dead_endpoint_instead_of_staying_silent():

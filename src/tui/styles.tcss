@@ -506,6 +506,10 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; }
 .set-flash-ok   { background: $band-bg; border-left: outer $ok;   padding: 0 1; margin-top: 1; color: $ok; }
 .set-flash-warn { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; color: $warn; }
+/* Отчёт операции (`_report`): плашка-блок для чтения, но НЕ тревога — бордер
+   успеха, как у флэша, а не янтарный язык подтверждений. Текст остаётся
+   обычным: читают содержимое, а не цвет. */
+.set-report { background: $band-bg; border-left: outer $ok; padding: 0 1; margin-top: 1; }
 #set-notice { margin-top: 1; }              /* отделить notice (итог install/удаления) от контента над ним */
 /* Обёртка слота-синглтона (_singleton): нужна, чтобы новая плашка не столкнулась id'ом
    с ещё не отсоединённой старой. Собственной высоты не имеет — только содержимое. */

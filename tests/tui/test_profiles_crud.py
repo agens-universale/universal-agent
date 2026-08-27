@@ -641,9 +641,11 @@ async def test_footer_names_the_v1_keys_on_a_profile_row(tmp_path, monkeypatch):
 
 
 async def test_level_row_footer_still_names_creating(tmp_path, monkeypatch):
-    """Строка уровня — единственная строка пустого состояния, а `n` работает и
-    там: футер, молчащий о ней, оставил бы создание первого профиля без входа
-    (тот же класс лжи, что «молчание о работающей клавише»)."""
+    """Пустое состояние: курсор стартует на строке «+ добавить профиль…» — её
+    футер обещает создание и НЕ обещает клавиш объектов (Space/r/Del на
+    строке-действии не работают: канон «недоступное не обещаем»). Ниже, на
+    строке уровня, футер прежний — с ←/→/Enter и `n`: создание первого профиля
+    видно с обеих строк пустого состояния."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -653,6 +655,12 @@ async def test_level_row_footer_still_names_creating(tmp_path, monkeypatch):
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
+        footer = _footer(scr)
+        assert "Enter — создать" in footer          # курсор на «+ добавить профиль…»
+        for lie in ("Space", "переименовать", "Del"):
+            assert lie not in footer, lie
+        await pilot.press("down")                   # → строка уровня
+        await pilot.pause()
         footer = _footer(scr)
         assert "n — создать" in footer
         assert "←/→/Enter — переключить" in footer

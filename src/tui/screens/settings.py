@@ -15,8 +15,8 @@ from rich.text import Text
 
 from tui.editors.models_section import _FOOTER_PROFILE_BACK
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
-from tui.form_frame import (KEEP_IN_VIEW, cap_frame_height, reveal,
-                            reveal_focus)
+from tui.form_frame import (EPHEMERAL, KEEP_IN_VIEW, KEEP_UNTIL_DISMISSED,
+                            cap_frame_height, reveal, reveal_focus)
 from tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
 SECTIONS = ("Подключение", "Модели", "Профили", "MCP-серверы", "Режимы работы", "Обновление")
@@ -63,6 +63,10 @@ _FOOTERS = {
                 "r — переименовать · Del — удалить · PgUp/PgDn — секции"),
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
+# Отчёт операции (см. `_report`): своя ступень Esc-лестницы, и обещание про неё —
+# и в самом отчёте (последней строкой), и в футере, пока он на экране.
+_REPORT_DISMISS_HINT = "Esc — закрыть отчёт"
+_FOOTER_REPORT = "Esc — закрыть отчёт"
 # Раскрытый пресет-лист адреса забирает клавиши себе — футер на это время становится
 # его (§6.4, канон мастера `onboarding._FOOTER_PRESET_LIST`). Состояние не редкое, а
 # ОБЫЧНОЕ: список раскрывается сам на входе в секцию, как только адрес пуст (чистая
@@ -94,6 +98,9 @@ _FOOTER_CONNECTION_FIELD = ("Enter — сохранить  ·  "
 # работает в том числе в ПУСТОМ состоянии, где строка уровня — единственная.
 # Футер, промолчавший о ней там, оставил бы создание первого профиля без входа —
 # это второй класс лжи футера («молчание о работающей клавише»).
+# Строка-действие «+ добавить профиль…»: обещаем только то, что на ней работает.
+_FOOTER_PROFILES_ADD = ("↑/↓ — выбор  ·  Enter — создать  ·  "
+                        "PgUp/PgDn — секции  ·  Esc — меню")
 _FOOTER_PROFILES_LEVEL = ("↑/↓ — выбор  ·  ←/→/Enter — переключить  ·  n — создать  ·  "
                           "PgUp/PgDn — секции  ·  Esc — меню")
 # Инлайн-ввод имени профиля забирает клавиши себе (контракт п.5 волны B) — футер
@@ -152,6 +159,17 @@ def fit_overlay_suffix(names: list[str], width: int) -> str:
     return ("".join(f"+{x}" for x in out) + tail) if out else "+…"
 
 
+def _empty_anchor(value) -> bool:
+    """Пустой якорь секции файла профиля: `slots: {}` (то, что остаётся после
+    снятия последнего ключа) либо голое `slots:` без значения. Переопределением
+    такая секция не является — переопределять ей нечем (§11).
+
+    Скаляр пустым якорем не бывает НИКОГДА, каким бы он ни был: `level: max` —
+    полноценное переопределение, и трактовать его как контейнер значило бы
+    потерять единственную витрину ключей, форм для которых нет."""
+    return value is None or (isinstance(value, (dict, list)) and not value)
+
+
 class SettingsScreen(Screen):
     def __init__(self, *, config, config_path, on_apply, probe_fn=None) -> None:
         super().__init__()
@@ -199,6 +217,12 @@ class SettingsScreen(Screen):
         self._update_checking = False       # воркер check_for_update в полёте
         self._update_awaiting_confirm = False   # confirm-баннер обновления/рестарта висит
         self._reset_awaiting_confirm = False    # confirm-баннер «сбросить конфиг к умолчанию»
+        # Открытый ОТЧЁТ операции (`_report`) — состояние экрана, а не запрос к DOM:
+        # футер обновляется в том же такте, где отчёт монтируется, а смонтированный
+        # виджет `query` в этот момент ещё не находит. Хранится текстом, чтобы
+        # пережить перерисовку своей секции (стрелки её вызывают).
+        self._report_text: str | None = None
+        self._report_section = None
 
     # --- хром ---
     def compose(self) -> ComposeResult:
@@ -226,6 +250,9 @@ class SettingsScreen(Screen):
         return f"Настройки · {SECTIONS[self._view]}"
 
     def _footer_text(self) -> str:
+        if self._report_open():
+            # Отчёт держит экран: единственное, что сейчас работает, — его закрытие.
+            return _FOOTER_REPORT
         if self._view == "menu":
             return _FOOTERS["menu"]
         if self._view in _WRITE_GATED_SECTIONS and not self._writable():
@@ -251,13 +278,41 @@ class SettingsScreen(Screen):
                 # тело не смонтировано — обещаем только возврат к списку:
                 # `_FOOTER_READONLY` соврал бы про «Esc — меню».
                 ed = self._models_editor()
-                return ed.footer_text() if ed is not None else _FOOTER_PROFILE_BACK
+                return (self._profile_footer(ed) if ed is not None
+                        else _FOOTER_PROFILE_BACK)
             if self._profiles_name_prompt is not None:
                 return (_FOOTER_PROFILE_NAME_RENAME
                         if self._profiles_name_prompt["mode"] == "rename"
                         else _FOOTER_PROFILE_NAME_CREATE)
-            return _FOOTER_PROFILES_LEVEL if self._profiles_on_level_row() else _FOOTERS[_PROFILES]
+            if self._profiles_on_level_row():
+                return _FOOTER_PROFILES_LEVEL
+            if self._profiles_on_add_row():
+                # На строке-действии общий футер врал бы всеми клавишами объектов
+                # (открыть/Space/r/Del на ней не работают) — канон «недоступное
+                # не обещаем», тот же приём, что у строки уровня.
+                return _FOOTER_PROFILES_ADD
+            return _FOOTERS[_PROFILES]
         return _FOOTERS.get(self._view, _FOOTER_READONLY)
+
+    def _profile_footer(self, ed) -> str:
+        """Футер под-вида профиля: строку даёт редактор (она позиционная), а
+        обещание `v` дописывает ЭКРАН — просмотрщик его, и гасит обещание его же
+        настройка (§11a). Редактор про файловый просмотр не знает ничего.
+
+        Обещаем ровно там, где клавиша работает: под висящим выбором (форма,
+        пикер, вопрос) её нет — у тех состояний и варианта с `v` не заведено."""
+        footer = ed.footer_text()
+        if not (ed.showing_list and self._file_view_settings().enabled):
+            return footer
+        from tui.editors.models_section import _FOOTERS_WITH_VIEW
+        return _FOOTERS_WITH_VIEW.get(footer, footer)
+
+    def _file_view_settings(self):
+        """Настройки встроенного просмотрщика — тем же фабричным методом и из того
+        же ключа конфига, что у `/view` главного экрана: вторая сборка разошлась бы
+        с ней на первой же правке схемы."""
+        from tui.services.file_view import FileViewSettings
+        return FileViewSettings.from_mapping((self._config or {}).get("tui_file_view"))
 
     def _connection_editor(self):
         """Свежесмонтированный редактор секции «Подключение».
@@ -613,6 +668,14 @@ class SettingsScreen(Screen):
     def _render_view(self) -> None:
         self._profiles_disk_cache = {}   # новый кадр — данные секции «Профили» перечитываются
         self._menu_pass_snapshot = None  # и цель записи секции «Модели» — тоже
+        if self._report_section != self._view:
+            # Отчёт живёт в СВОЕЙ секции: сменили — закрылся. А вот перерисовка
+            # той же секции (её вызывают и стрелки — «Обновление», «Профили»,
+            # «Режимы») его не трогает: он состояние экрана, и ниже монтируется
+            # заново вместе с телом. Иначе «живёт до явного Esc» не держалось бы
+            # ровно на самых частых клавишах (находка ревью хвоста).
+            self._report_text = None
+            self._report_section = None
         self.query_one("#header-left", Static).update(self._title_text())
         frame = self.query_one("#set-frame", Vertical)
         title = self.query_one("#set-title", Static)
@@ -649,6 +712,8 @@ class SettingsScreen(Screen):
             elif self._view == _PROFILES:
                 self.call_after_refresh(self._refresh_profiles_hint)
                 self.call_after_refresh(self._refresh_profiles_rows)
+        if self._report_text is not None:
+            self._mount_report(self._report_text)   # пережил перерисовку своей секции
         # Футер — про тело, поэтому считается ПОСЛЕ него (канон мастера
         # `_mount_step_body`): состав тела задаёт и состав обещаний.
         self._refresh_footer()
@@ -1581,6 +1646,13 @@ class SettingsScreen(Screen):
         rows = self._profiles_rows()
         return bool(rows) and self._profiles_idx == len(rows) - 1
 
+    def _profiles_on_add_row(self) -> bool:
+        """Курсор — на строке «+ добавить профиль…» (предпоследняя): у неё свой
+        футер, клавиши объектов на ней не работают."""
+        rows = self._profiles_rows()
+        return (0 <= self._profiles_idx < len(rows)
+                and rows[self._profiles_idx]["kind"] == "add")
+
     def _project_config_candidate_path(self):
         from config_modules.env_vars import project_gc_dir
         return project_gc_dir() / "config.yml"
@@ -2503,12 +2575,95 @@ class SettingsScreen(Screen):
         from config_modules.endpoint_presets import endpoint_presets_from_config
         frame.mount(ModelsSectionEditor(
             target=row["ref"].path, template="", is_profile=True,
+            base_registry=self._base_registry_snapshot,
             effective_url=endpoint, effective_auth=auth, verify=verify,
             config_proxy=proxy,
             presets=endpoint_presets_from_config(self._config or {}),
             active_level=str((self._config or {}).get("level") or "default"),
             on_change=self._models_changed, on_notice=self._models_notice))
         return True
+
+    _VIEW_FILE_KEYS = ("v", "м", "V", "М")
+
+    def _route_profile_file_view(self, ed, event: events.Key) -> None:
+        """`v`/`м` — файл профиля в просмотрщике (§11a). Клавиша достаётся сюда
+        только тем, что редактор её не взял (роутинг реестра вернул False).
+
+        Гейты — все про «обещанное работает». Несущий здесь один: под висящим
+        под-состоянием (форма, пикер, вопрос) клавиша молчит вместе с футером —
+        варианта с `v` у тех состояний не заведено. При выключенном просмотрщике
+        (`tui.file_view.enabled: false`) она не работает и не обещается вовсе —
+        канон «недоступное не обещаем», а не отказ-нотис на обещание, которого
+        экран не давал.
+
+        `not isinstance(focused, Input)` — ЗАЩИТНЫЙ, а не несущий (проверено
+        мутацией финального ревью: без него ни один страж не краснеет, поля с
+        Input в под-виде профиля уже отсечены `showing_list`). Стоит каноном
+        клавиш-объектов §5.3 — на случай, если под-вид обзаведётся полем вне
+        формы."""
+        if event.key not in self._VIEW_FILE_KEYS or isinstance(self.focused, Input):
+            return
+        if not (ed.showing_list and self._file_view_settings().enabled):
+            return
+        event.stop()
+        self._open_profile_file()
+
+    def _open_profile_file(self) -> None:
+        """Файл открытого профиля в read-only просмотрщике поверх хаба: немодельные
+        секции правятся только в YAML (идеология «пульт / машинное отделение»), но
+        СМОТРЕТЬ их можно отсюда. Профиль исчез с диска между кадрами — открывать
+        нечего, и молчание здесь честнее нотиса: список перечитается сам."""
+        row = self._profile_row_by_name(self._profiles_open)
+        if row is None:
+            return
+        from tui.screens.file_view import FileViewerScreen
+        from tui.services.file_view import ViewPositionStore
+        store = getattr(self.app, "view_positions", None)
+        if store is None:
+            store = ViewPositionStore()
+            self.app.view_positions = store
+        path = row["ref"].path
+        self.app.push_screen(FileViewerScreen(
+            raw_path=str(path), cwd=str(path.parent), store=store,
+            settings=self._file_view_settings()))
+
+    def _base_registry_snapshot(self) -> dict:
+        """Тень основного конфига для под-вида профиля: что действует в строках
+        реестра и уровней, пока профиль своего не говорит (§3 спеки эффективного
+        вида). `{"models", "slots", "assign", "base_url"}`.
+
+        Источник — ДОКУМЕНТ базового config.yml (цель основной секции), а не
+        merged `self._config`: тот собран с УЖЕ АКТИВНЫМ профилем, и тень стала бы
+        гибридной — открытый профиль A показывал бы «основной конфиг» через оверлей
+        активного профиля B. По той же причине адрес берётся отсюда, а не у
+        `_probe_args_from_config` (он и есть про действующий runtime).
+
+        Осознанные расхождения тени с runtime (тот же скоуп, что у основной секции):
+        managed-слой `~/.gc/config.local.yml` и проектный `.gc/config.yml` в неё не
+        входят. Сентинелы шаблона гасятся тем же правилом, что у пробы: свежая
+        установка не должна показывать «your-backend:PORT» живым унаследованным
+        адресом.
+
+        Метод — ПРОВАЙДЕР (редактор зовёт его и на `_reload`), поэтому читает диск
+        каждый раз: базовый файл правится и снаружи, пока открыт профиль."""
+        import config_raw
+        from config_modules.env_interpolation import resolve_env_placeholders
+        from onboarding import URL_SENTINEL
+        if not self._config_path:
+            return {}
+        document = config_raw.read_document(self._config_path)
+        sections = resolve_env_placeholders(
+            {key: document.get(key)
+             for key in ("models", "slots", "assign", "backend")})
+        backend = sections.get("backend")
+        backend = backend if isinstance(backend, dict) else {}
+        url = backend.get("completions_url") or ""
+        return {
+            "models": sections.get("models") or {},
+            "slots": sections.get("slots") or {},
+            "assign": sections.get("assign") or {},
+            "base_url": "" if url == URL_SENTINEL else url,
+        }
 
     def _profile_document(self, path) -> dict:
         """Сырой документ профиля через кэш прохода — сосед `_profile_summary`:
@@ -2522,13 +2677,17 @@ class SettingsScreen(Screen):
             cache[key] = config_raw.read_document(path)
         return cache[key]
 
-    @staticmethod
-    def _profile_form_sections(document: dict) -> set:
+    def _profile_form_sections(self, document: dict) -> set:
         """Секции файла, которые ПОКАЗЫВАЮТ формы редактора — только их превью и
         исключает. `models` показан всегда (список записей либо пустое состояние),
-        а `slots`/`assign` — лишь пока реестр непуст: без записей строк у них нет,
-        и переопределения файла стали бы невидимыми (профиль без своих моделей,
-        перенацеливающий слоты на алиасы нижнего слоя, — законный и частый).
+        а `slots`/`assign` — лишь пока непуст ЭФФЕКТИВНЫЙ реестр: тем же ПРЕДИКАТОМ
+        (`effective_registry_nonempty` — общая функция редактора, не вторая его
+        реализация), каким редактор решает, рисовать ли полный экран (§10-11 спеки
+        эффективного вида). Профиль без своих `models` над основным конфигом С
+        реестром строки слотов показывает — и называть их ещё и превью значило бы
+        дублировать видимое; над легаси-базой строк нет ни у кого, и тогда превью —
+        их единственный носитель (профиль, перенацеливающий слоты на алиасы нижнего
+        слоя, законен и част).
 
         `level` не показывают формы НИ В ОДНОМ состоянии, поэтому в исключения он не
         входит: строка «уровень модели по умолчанию» секции «Профили» правит
@@ -2536,19 +2695,26 @@ class SettingsScreen(Screen):
         профиль с `level: max` не проявлялся бы на экране нигде (ruling координатора
         2026-08-11). В СТРОКЕ СПИСКА исключение остаётся — там канон §12.3 со своей
         колонкой состава (`profile_display_summary` не тронут)."""
-        if document.get("models"):
+        from tui.editors.models_section import effective_registry_nonempty
+        if effective_registry_nonempty(document, self._base_registry_snapshot()):
             return {"models", "slots", "assign"}
         return {"models"}
 
     def _profile_overlay_names(self) -> list[str]:
         """Что профиль переопределяет ПОМИМО показанного формами: топ-уровневые ключи
-        файла минус секции форм — механически и сырыми именами (§12.3)."""
+        файла минус секции форм — механически и сырыми именами (§12.3).
+
+        Пустые якоря не считаются (§11): писатель оставляет `slots: {}` после
+        снятия последнего ключа, и витрина обязана читать это как отсутствие
+        секции — иначе снятый слот навсегда оставлял бы строку «профиль также
+        переопределяет: slots» о файле, который не переопределяет ничего."""
         row = self._profile_row_by_name(self._profiles_open)
         if row is None:
             return []
         document = self._profile_document(row["ref"].path)
         covered = self._profile_form_sections(document)
-        return sorted(key for key in document if key not in covered)
+        return sorted(key for key, value in document.items()
+                      if key not in covered and not _empty_anchor(value))
 
     def _profile_overlay_width(self) -> int:
         """Ширина строки превью внутри рамки (padding 0 1 — минус 2); до layout-прохода
@@ -2571,9 +2737,18 @@ class SettingsScreen(Screen):
     def _profile_overlay_hint(self) -> str:
         """Подсказка под превью: список ЦЕЛИКОМ (усечённая строка выше могла его не
         вместить — та же пара «строка + hint», что у профиля в списке) плюс главный
-        факт о них: форм для этих секций здесь нет, это YAML-территория (§12.4)."""
-        return (self._PROFILE_OVERLAY_HINT_HEAD + ", ".join(self._profile_overlay_names())
+        факт о них: форм для этих секций здесь нет, это YAML-территория (§12.4).
+
+        Она же называет ход к ним (§11a): «правятся в YAML» без способа их увидеть
+        оставляло бы человека вовсе без хода. Обещание гаснет вместе с самим
+        просмотрщиком — теми же словами и по тому же гейту, что и в футере."""
+        hint = (self._PROFILE_OVERLAY_HINT_HEAD
+                + ", ".join(self._profile_overlay_names())
                 + self._PROFILE_OVERLAY_HINT_TAIL)
+        if not self._file_view_settings().enabled:
+            return hint
+        from tui.editors.models_section import _VIEW_KEY
+        return f"{hint} · {_VIEW_KEY}"
 
     def _profile_overlay_specs(self) -> list[tuple[str, str]]:
         """(текст, css-класс) строк превью — пусто, когда переопределять нечего:
@@ -2838,7 +3013,7 @@ class SettingsScreen(Screen):
         if report.reenter:
             lines.append(f"задайте заново: {', '.join(report.reenter)}")
         lines.append(f"бэкап: {report.backup_path}")
-        self._notice("\n".join(lines))
+        self._report("\n".join(lines))
 
     def _reset_confirm_text(self) -> str:
         return ("config.yml будет заменён пакетным умолчанием текущей версии, ваш файл — "
@@ -2887,7 +3062,7 @@ class SettingsScreen(Screen):
         if onboarding.is_unconfigured(self._config or {}):
             lines.append("настройка не завершена — откройте помощник (--init-config) или впишите поля вручную")
         self._render_view()
-        self._notice("\n".join(lines))
+        self._report("\n".join(lines))
 
     # --- MCP-секция (спека C) ---
     def _mcp_editor(self):
@@ -2949,7 +3124,32 @@ class SettingsScreen(Screen):
         reveal(slot)
 
     def _notice(self, text: str) -> None:
-        self._singleton("set-notice", text, "set-hint set-dyn")
+        # Реплика ЗАМЕЩАЕТ отчёт: два сообщения об одном экране разом не живут, а
+        # оставленный флаг заставлял бы футер обещать закрытие того, чего нет
+        # (находка ревью хвоста).
+        self._dismiss_report()
+        self._singleton("set-notice", text, f"set-hint set-dyn {EPHEMERAL}")
+
+    def _report(self, text: str) -> None:
+        """ОТЧЁТ операции (актуализация/сброс config.yml): его читают и по нему
+        действуют — гаснуть на следующей клавише он не имеет права (ревизия
+        владельца по смоку). Живёт до Esc (своя ступень лестницы) либо до смены
+        секции; перерисовку СВОЕЙ секции переживает — текст хранится в состоянии
+        экрана и перемонтируется в `_render_view`. Оформление — своя плашка
+        `set-report`: фон отделяет материал для чтения от реплик, а бордер
+        успеха, не янтарный язык подтверждений — отчёт не тревога.
+
+        Свой id, не общий с репликами: `_notice`/`_flash` иначе перетирали бы
+        текст отчёта в том же слоте, оставляя флаг — футер обещал бы закрытие
+        того, чего на экране уже нет (находка ревью хвоста)."""
+        self._report_text = text
+        self._report_section = self._view
+        self._mount_report(text)
+        self._refresh_footer()      # отчёт держит экран — футер обещает его закрытие
+
+    def _mount_report(self, text: str) -> None:
+        self._singleton("set-report", f"{text}\n\n{_REPORT_DISMISS_HINT}",
+                        f"set-report set-dyn {KEEP_UNTIL_DISMISSED}")
 
     def _collect_values(self, section: int) -> dict | None:
         """Значения секции; None = ошибка валидации редактора (уже показана);
@@ -2985,7 +3185,8 @@ class SettingsScreen(Screen):
         ведущий глиф, окраска по исходу. outcome: "ok" (зелёная ✓) | "warn" (янтарная ⚠)."""
         glyph = "✓ " if outcome == "ok" else "⚠ "
         cls = "set-dyn set-flash-ok" if outcome == "ok" else "set-dyn set-flash-warn"
-        self._singleton("set-flash", glyph + text, cls)
+        self._dismiss_report()      # плашка замещает отчёт — см. `_notice`
+        self._singleton("set-flash", glyph + text, f"{cls} {EPHEMERAL}")
 
     def _env_refs_overwritten(self, values: dict) -> list[str]:
         """Переменные окружения, чьи ссылки в файле затрёт вводимый литерал
@@ -3257,10 +3458,62 @@ class SettingsScreen(Screen):
             self._view = "menu"
             self._render_view()
 
+    def _report_open(self) -> bool:
+        return self._report_text is not None
+
+    def _dismiss_report(self) -> bool:
+        """Закрыть открытый отчёт. `False` — отчёта нет, Esc достаётся дальше по
+        лестнице."""
+        if self._report_text is None:
+            return False
+        self._report_text = None
+        self._report_section = None
+        for w_ in self.query(f".{KEEP_UNTIL_DISMISSED}"):
+            parent = w_.parent
+            (parent if parent is not None and parent.has_class("set-slot") else w_).remove()
+        # Обещание снимается ЗДЕСЬ, а не у вызывающих: путей закрытия три (Esc,
+        # реплика, плашка), и футер, обещающий закрытие несуществующего отчёта,
+        # — та же ложь, от которой заведён сам маркер.
+        self._refresh_footer()
+        return True
+
+    def _dismiss_ephemeral(self) -> None:
+        """Правило В1 (ревизия владельца): сообщение-итог гаснет на следующем
+        осознанном действии. По родовому маркеру, не по перечню id — чинится
+        класс. Сносится ОБЁРТКА `.set-slot`, а не только Static: иначе пустые
+        обёртки копились бы до `_render_view` (прежняя преамбула флэша этим
+        грешила). Преамбула стоит ДО обработчиков, поэтому сообщение, рождённое
+        этой же клавишей, свою клавишу переживает."""
+        for w_ in self.query(f".{EPHEMERAL}"):
+            parent = w_.parent
+            if parent is not None and parent.has_class("set-slot"):
+                parent.remove()
+            else:
+                w_.remove()
+
+    def on_click(self, event) -> None:
+        """Мышиная половина правила В1 — на КЛИКЕ, не на MouseDown.
+
+        Снос сообщения двигает тело секции вверх (обёртка `.set-slot` живёт в
+        `#set-frame`), а `Click` резолвится по раскладке, актуальной на момент
+        своей доставки. Гашение на `MouseDown` съедало первый клик: цель
+        уезжала из-под курсора между нажатием и кликом — а сворачивание блоков
+        «Моделей» мышиное и только мышиное, и каждая успешная запись оставляет
+        плашку, то есть это был основной путь, а не край (находка финального
+        ревью). На `Click` обработчик цели уже отработал: пользователь получает
+        и действие, и погасшее сообщение."""
+        self._dismiss_ephemeral()
+
     def on_key(self, event: events.Key) -> None:
-        for w_ in self.query("#set-flash"):
-            w_.remove()
+        self._dismiss_ephemeral()
         if event.key == "escape":
+            if self._dismiss_report():
+                # Первая ступень лестницы: открытый отчёт закрывается СВОИМ Esc,
+                # из секции уводит уже следующий (канон вложенности — как у
+                # пикеров и confirm-баннеров).
+                event.stop()
+                self._refresh_footer()
+                return
             if self._view == _MCP:
                 ed = self._mcp_editor()
                 if ed is not None and ed.awaiting_confirm:
@@ -3474,8 +3727,8 @@ class SettingsScreen(Screen):
                 # записи реестра. PgUp/PgDn и Esc сюда не доходят — их разбирают
                 # гейты выше.
                 ed = self._models_editor()
-                if ed is not None:
-                    self._route_registry_editor(ed, event)
+                if ed is not None and not self._route_registry_editor(ed, event):
+                    self._route_profile_file_view(ed, event)
                 return
             if self._profiles_name_prompt is not None:
                 # Ввод имени владеет клавиатурой: своя клавиша здесь одна — Enter

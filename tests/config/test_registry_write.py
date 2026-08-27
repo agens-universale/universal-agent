@@ -460,6 +460,148 @@ def test_transaction_unknown_operation_is_named(tmp_path, template):
     assert path.read_text(encoding="utf-8") == before
 
 
+# --- снятие записи: фаза «текст не изменился — отказ» --------------------------
+#
+# Писатель адресует запись ПОСТРОЧНО, а «есть ли она» читает по разобранному
+# документу: на рукописной инлайновой форме эти два взгляда расходятся, и
+# снятие, ничего не снявшее, обязано отказать, а не отчитаться успехом.
+
+
+_PROFILE_WITH_REFS = (
+    "models:\n"
+    "  opus:\n"
+    '    model: "anthropic/claude-opus-4"\n'
+    "slots:\n"
+    '  default: "opus"\n'
+    "assign:\n"
+    "  subagents:\n"
+    '    subagent_critic: "opus"\n'
+)
+
+
+def _profile(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "work.yml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+# Рукописная flow-форма секции С ЗАПИСЯМИ: в документе запись есть, а СТРОКИ под
+# неё нет — писатель правит файл построчно, и снять её текстом нечем.
+_PROFILE_FLOW_ENTRIES = ('models: {flash: {model: "my/own"}}\n'
+                         "slots:\n"
+                         '  default: "flash"\n')
+
+
+def test_remove_model_refuses_the_same_way_instead_of_stripping_references(tmp_path):
+    """`remove_model` над flow-формой врал: запись оставалась на месте, а ссылки на
+    неё снимались каскадом — отчёт `removed=True` о файле, в котором удалять было
+    нечем. Отказ приходит ДО ссылок: запись снимается первой, и транзакция
+    обрывается на ней — файл байт-в-байт."""
+    path = _profile(tmp_path, _PROFILE_FLOW_ENTRIES)
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError, match="flash"):
+        remove_model(path, "flash", force=True, is_profile=True)
+
+    assert path.read_text(encoding="utf-8") == before
+
+
+# Зеркальная конфигурация: запись БЛОЧНАЯ (снимается штатно), а секция ссылок —
+# инлайновая. Каскад «снимал» ссылку, которой не касался, и оставлял её висеть на
+# удалённом алиасе — у профиля это никто не ловит (фаза 2 к нему не применяется).
+_PROFILE_INLINE_SLOTS = ("models:\n"
+                         "  flash:\n"
+                         '    model: "m"\n'
+                         'slots: {default: "flash"}\n')
+_PROFILE_INLINE_ASSIGN = ("models:\n"
+                          "  flash:\n"
+                          '    model: "m"\n'
+                          "assign:\n"
+                          '  subagents: {subagent_critic: "flash"}\n')
+
+
+@pytest.mark.parametrize("body, reference", [
+    (_PROFILE_INLINE_SLOTS, "slots.default"),
+    (_PROFILE_INLINE_ASSIGN, "assign.subagents.subagent_critic"),
+])
+def test_remove_model_refuses_when_a_reference_cannot_be_stripped(tmp_path, body,
+                                                                  reference):
+    """Каскад обязан снять КАЖДУЮ ссылку, которую пообещал, — иначе он оставляет
+    файл ровно в том состоянии, ради недопущения которого и заведён.
+
+    Зеркало флоу-дефекта записи: ссылка живёт инлайновым мэппингом, строки под неё
+    нет, и `remove_mapping_entry` молча возвращает текст — запись снималась, ссылка
+    повисала на несуществующем алиасе, отчёт говорил «удалено». У config.yml такой
+    итог отвергла бы фаза 2, у профиля не ловит никто (он валидируется частичным).
+    Обещание докстринга «молча оставить нерезолвимый файл нельзя» должно быть
+    правдой."""
+    path = _profile(tmp_path, body)
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError, match=reference.rsplit(".", 1)[-1]):
+        remove_model(path, "flash", force=True, is_profile=True)
+
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_deliberate_refusal_reaches_the_user_without_the_operation_name(tmp_path):
+    """Отказ операции написан ДЛЯ ЧЕЛОВЕКА и доезжает до notice дословно.
+
+    Служебное имя операции впереди («remove_model flash: строки записи «flash»…»)
+    — служебный лог в пользовательском тексте: имя ему ничего не говорит, алиас
+    повторяется дважды, строка распухает. Подпись операцией остаётся у
+    МЕХАНИЧЕСКОГО сбоя — там фразы для человека нет вовсе, и «что сломалось»
+    несёт только она.
+
+    Бэктики в тексте отказа тоже недопустимы: TUI печатает notice как есть, и
+    разметка markdown доезжает до человека буквально."""
+    path = _profile(tmp_path, 'models: {flash: {model: "m"}}\n')
+
+    with pytest.raises(RegistryWriteError) as exc:
+        apply_registry_ops(path, [("remove_model", "flash", True)], "",
+                           is_profile=True)
+
+    assert "remove_model" not in str(exc.value)
+    assert str(exc.value).startswith("строки записи «flash»")
+    assert "`" not in str(exc.value)
+
+    with pytest.raises(RegistryWriteError, match="remove_model"):
+        apply_registry_ops(path, [("remove_model", "flash", {"opt": True})], "",
+                           is_profile=True)
+
+
+def test_removal_of_a_block_form_entry_is_untouched_by_that_check(tmp_path):
+    """Проверка «текст не изменился» стоит на снятии САМОЙ записи и обычную
+    блочную форму не трогает: каскад ссылок работает как работал, а отсутствующий
+    алиас остаётся идемпотентным no-op (снимать там нечего — и отказывать не в
+    чем)."""
+    path = _cfg(tmp_path, _REGISTRY)
+
+    report = remove_model(path, "flash", force=True)
+
+    assert report.removed is True and report.references == ["slots.default"]
+    assert list(_models(path)) == ["glm"]
+    before = path.read_text(encoding="utf-8")
+    assert remove_model(path, "нет-такого").removed is False
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_option_dict_in_the_force_slot_is_refused_not_silently_obeyed(tmp_path):
+    """Аргументы операций доезжают ПОЗИЦИОННО, и «словарь опций» третьим элементом
+    кортежа ложится в позицию `force`: truthy-словарь молча включал каскадное
+    удаление ссылок — ровно обратное тому, чего от «опций» ждут (сверка
+    исполнением). Форма отвергается ошибкой, называющей операцию; файл
+    байт-в-байт, ссылки на месте."""
+    path = _profile(tmp_path, _PROFILE_WITH_REFS)
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError, match="remove_model"):
+        apply_registry_ops(path, [("remove_model", "opus", {"keep_references": True})],
+                           "", is_profile=True)
+
+    assert path.read_text(encoding="utf-8") == before
+
+
 # --- цель-профиль: фаза 1, без ссылочной целостности --------------------------
 
 

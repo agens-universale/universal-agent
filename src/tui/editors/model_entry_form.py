@@ -64,6 +64,11 @@ MODEL_RELOAD_HINT = "Alt+↓ — перечитать список"
 _ALIAS_LABEL = "Алиас"
 _ALIAS_HINT = ("короткое имя записи — им пользуются слоты и привязки · "
                "пусто = имя из id")
+# Имя занято записью ОСНОВНОГО конфига (§5 спеки эффективного вида): своей записи
+# с таким именем в профиле нет, и общее «уже используется» увело бы от того, что
+# на самом деле мешает, — отказ называет, ЧЕМ имя занято.
+_ALIAS_TAKEN_BY_BASE = ("алиас занят записью основного конфига — "
+                        "выберите другое имя")
 # Алиас не обязателен (ревизия владельца): пустое поле показывает ПРИЗРАКОМ то
 # конкретное имя, что реально возьмётся из id (placeholder = default_alias_for +
 # уникализация, следует за полем id), и Enter принимает его без ввода. Пока id
@@ -80,7 +85,13 @@ _URL_LABEL = "Адрес API-сервера"
 _TOKEN_LABEL = "Токен"
 _PH_KEEP = "если не указать — останется как сейчас"
 _PH_NO_TOKEN = "если не указать — без токена"
-_INHERIT_PRESET_NAME = "основной конфиг"
+# Первый пункт пресет-листа адреса — не «ещё один адрес», а РЕШЕНИЕ не задавать
+# свой: поле остаётся пустым, связь живая (сменится адрес в основном конфиге —
+# сменится и здесь). Адрес рядом с ним часто совпадает с адресом обычного
+# пресета, и без слова «наследовать» строка читалась бы дублем: одинаковый url,
+# разные последствия — литерал в файле против пустого поля (ревизия владельца
+# по смоку).
+_INHERIT_PRESET_NAME = "основной конфиг · наследовать"
 _PROBE_RUNNING = "проверяю…"
 _PROBE_NO_URL = "сначала укажите адрес — проверка стучится на него"
 _LIST_NO_URL = "сначала укажите адрес — список приходит с него"
@@ -94,7 +105,8 @@ class ModelEntryForm(Vertical):
     def __init__(self, *, initial: dict | None = None, existing_aliases=(),
                  fetch=None, probe=None, presets: list | None = None,
                  effective_url: str = "", effective_auth: str | None = None,
-                 verify: bool = True, config_proxy: str | None = None) -> None:
+                 verify: bool = True, config_proxy: str | None = None,
+                 base_aliases=frozenset()) -> None:
         super().__init__(classes="onb-dyn")
         initial = initial or {}
         # Эффективные адрес/Authorization основного конфига — то, что реально
@@ -102,6 +114,10 @@ class ModelEntryForm(Vertical):
         # ими же ходят проба и подбор списка, пока своих значений у записи нет.
         self._effective_url = effective_url or ""
         self._effective_auth = effective_auth
+        # Алиасы записей основного конфига: занятое ими имя — не «дубль своей»
+        # (своей такой нет), у него свой отказ, и призрак пустого алиаса обязан
+        # уникализироваться против ЭФФЕКТИВНОГО набора имён, а не одних своих.
+        self._base_aliases = frozenset(base_aliases)
         self._own_alias = initial.get("alias") or None
         self._other_aliases = set(existing_aliases) - (
             {self._own_alias} if self._own_alias else set())
@@ -109,7 +125,7 @@ class ModelEntryForm(Vertical):
         self._model0 = initial.get("model") or ""
         self._url0 = initial.get("url") or ""
         self._token_current = initial.get("token")   # только для маски placeholder
-        self._no_auth = initial.get("token") == ""   # явное "" в записи = галка ●
+        self._no_auth = self._token_current == ""   # явное "" в записи = галка ●
         self._verify = verify
         self._config_proxy = config_proxy
         if fetch is None:
@@ -130,7 +146,12 @@ class ModelEntryForm(Vertical):
         self._positions = ("mef-url", "mef-token", None, "mef-model", "mef-alias")
         self._idx = 0
         self._models: list = []
-        self._models_autoload_done = False   # автоподгрузка — один раз на форму
+        # Ключ последней автоподгрузки — (url, auth), а не флаг «уже пробовали»:
+        # ревизия владельца по смоку. Сбой при пустом токене, потом введённый
+        # токен — вход в поле обязан сходить ЗАНОВО, флаг же держал форму на
+        # первой неудаче до ручного Alt+↓. Повтор с ТЕМИ ЖЕ параметрами не
+        # идёт: дребезга «ходьба по форме долбит сервер» не будет.
+        self._autoload_key: tuple | None = None
         self._list_gen = 0                # поколение загрузки: протухший ответ отбрасывается
         self._probe_gen = 0
         # Оба контроллера заводятся ЗДЕСЬ, а не на монтировании: смонтированные поля
@@ -176,12 +197,21 @@ class ModelEntryForm(Vertical):
 
     def _derived_alias(self, model: str) -> str:
         """Имя, которое реально возьмётся при пустом алиасе: логика мастера
-        (`default_alias_for` + уникализация против чужих имён)."""
+        (`default_alias_for` + уникализация против чужих имён).
+
+        Занятыми считаются и алиасы основного конфига (§5): предложить призраком
+        имя, которое submit тут же отвергнет, значит соврать полем."""
         return onboarding.unique_alias(
-            onboarding.default_alias_for(model), self._other_aliases)
+            onboarding.default_alias_for(model),
+            self._other_aliases | self._base_aliases)
 
     def _alias_placeholder(self, model: str) -> str:
         return self._derived_alias(model) if model else _ALIAS_PLACEHOLDER
+
+    def _alias_hint(self) -> str:
+        """Подсказка под полем алиаса — по тому, что клавиша здесь реально делает:
+        правка → про переезд ссылок; создание → про правило имени."""
+        return _ALIAS_RENAME_HINT if self._is_edit() else _ALIAS_HINT
 
     def _refresh_alias_placeholder(self) -> None:
         """Призрак в поле алиаса следует за полем id: печать в id меняет имя,
@@ -268,8 +298,7 @@ class ModelEntryForm(Vertical):
         yield PasteInput(value=self._alias0,
                          placeholder=self._alias_placeholder(self._model0),
                          id="mef-alias", classes=icls)
-        yield Static(_ALIAS_RENAME_HINT if self._is_edit() else _ALIAS_HINT,
-                     classes="onb-hint onb-dyn")
+        yield Static(self._alias_hint(), classes="onb-hint onb-dyn")
         yield Static(probe_line_text(None), id="mef-probe-line",
                      classes="set-hint set-dyn")
         # Строка ошибки монтируется сразу и пустой (display гасит место под неё):
@@ -302,6 +331,13 @@ class ModelEntryForm(Vertical):
         # маска, и поле не должно врать, что сохранённое значение есть.
         inp.set_class(not self._no_auth and self._token_is_mask(), "has-saved")
 
+    def _skip_position(self, position) -> bool:
+        """Позиция, на которой курсору делать нечего: замороженное (disabled) поле
+        фокусировать нельзя, и стоять на нём — тупик без обратной связи. Заморозка у
+        формы одна — поле токена под галкой «без авторизации», — но живёт она
+        отдельным предикатом, а не веткой в `move`: там ей место среди навигации."""
+        return position == "mef-token" and self._no_auth
+
     def move(self, delta: int) -> None:
         if self._list.move(delta) or self._presets_ctrl.move(delta):
             # Списки модальные: пока по раскрытому есть чем ходить, ↑/↓ водят ПО НЕМУ —
@@ -314,9 +350,7 @@ class ModelEntryForm(Vertical):
         if self._presets_ctrl.is_open:
             self._presets_ctrl.close()
         self._idx = (self._idx + delta) % len(self._positions)
-        if self._no_auth and self._positions[self._idx] == "mef-token":
-            # Замороженное поле токена курсор пропускает — фокусировать disabled-Input
-            # нельзя, и делать там нечего.
+        while self._skip_position(self._positions[self._idx]):
             self._idx = (self._idx + delta) % len(self._positions)
         self._focus_position()
 
@@ -336,12 +370,17 @@ class ModelEntryForm(Vertical):
                 # поле показывает варианты сам, Enter для этого не нужен).
                 if not self._list.is_open:
                     self._list.open(forced=True, filter_text=self._model_value())
-            elif not self._models_autoload_done:
-                # Автоподгрузка — один раз на форму: к этому полю курсор приходит
-                # после адреса и токена, идти есть по чему. Сбой не блокирует
-                # ручной ввод, Alt+↓ остаётся принудительным перечитыванием.
-                self._models_autoload_done = True
-                self._start_models_fetch(refresh=False)
+            else:
+                # Автоподгрузка при входе — по ключу (адрес, авторизация): к этому
+                # полю курсор приходит после них, идти есть по чему. Те же
+                # параметры второй раз не перечитываем (дребезг), ИЗМЕНЁННЫЕ —
+                # обязаны: сбой без токена и повтор с введённым токеном это один
+                # сценарий, а не два. Сбой не блокирует ручной ввод, Alt+↓
+                # остаётся принудительным перечитыванием.
+                key = (self._current_url(), self._current_auth_header())
+                if key != self._autoload_key:
+                    self._autoload_key = key
+                    self._start_models_fetch(refresh=False)
         else:
             self._list.hide_closed_hint()
             # Счётчик/ошибка списка — про поле, с которого курсор ушёл: «2 модели»
@@ -405,6 +444,9 @@ class ModelEntryForm(Vertical):
         наша."""
         if self._positions[self._idx] != "mef-model":
             return False
+        # Ручное перечитывание = автоподгрузка этими параметрами уже состоялась:
+        # иначе уход с поля и возврат сходили бы в сеть ещё раз тем же ключом.
+        self._autoload_key = (self._current_url(), self._current_auth_header())
         return self._start_models_fetch(refresh=True)
 
     def _start_models_fetch(self, *, refresh: bool) -> bool:
@@ -518,7 +560,8 @@ class ModelEntryForm(Vertical):
 
     def _current_auth_header(self) -> str | None:
         """Authorization тем же правилом, каким будет жить запись: ● — честно без
-        токена; введённый текст; собственный токен записи; иначе унаследованный."""
+        токена; введённый текст; собственный токен записи; иначе унаследованный.
+        Поле и проба обязаны говорить об одной и той же связи."""
         if self._no_auth:
             return None
         token_raw = self._field_value("mef-token")
@@ -696,6 +739,11 @@ class ModelEntryForm(Vertical):
             return self._fail(str(exc))
         if alias in self._other_aliases:
             return self._fail(f"алиас '{alias}' уже используется")
+        if alias in self._base_aliases:
+            # Имя записи основного конфига: своей такой в профиле нет, дублем это не
+            # является — но две строки реестра под одним алиасом читались бы как
+            # одна, и отказ говорит, чем имя занято (§5).
+            return self._fail(_ALIAS_TAKEN_BY_BASE)
         url = values["url"]
         if url and not onboarding._valid_endpoint_url(url):
             return self._fail(_URL_ERROR)
