@@ -58,10 +58,14 @@ level: default
 #   glm-local:
 #     url: http://127.0.0.1:8014/v1/chat/completions
 #     # model нет → провайдерский id = "glm-local"; token нет → наследуется backend
+#   deepseek-max:
+#     model: deepseek/deepseek-chat-v3-0324
+#     url: https://api.provider.example/v1/chat/completions
 #
 # slots:                                    # уровни — УКАЗАТЕЛИ в models (не копии)
-#   light: flash
-#   default: glm-local
+#   light: flash                            # незаданный слот резолвится матрицей
+#   default: glm-local                      # фоллбэков соседних уровней
+#   max: deepseek-max
 #
 # assign:                                   # справа — уровень (индирекция через slots)
 #   finish_gate: light                      # ИЛИ алиас (жёсткий пин конкретной модели)

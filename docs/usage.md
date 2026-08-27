@@ -51,7 +51,7 @@ python3.12 -m ensurepip --upgrade
 
 ## Конфиг при первом запуске
 
-При первом запуске `gc-ua`/`gc-cli` без `--config` создаётся пользовательский `config.yml` (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`), и агент **останавливается с подсказкой**: впишите `backend.completions_url`, токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подробнее — [Конфигурация](configuration.md).
+При первом запуске `gc-ua`/`gc-cli` без `--config` создаётся пользовательский `config.yml` (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`). Дальше поверхности расходятся: `gc-ua` открывает **мастер настройки** (адрес, токен, модель, необязательный шаг лёгкой и максимальной моделей, MCP-серверы) и по завершении сразу стартует; `gc-cli` **останавливается с подсказкой**: впишите `backend.completions_url`, токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова — или пройдите тот же мастер командой `gc-cli --init-config`. Подробнее — [Конфигурация](configuration.md).
 
 ## MCP-серверы
 

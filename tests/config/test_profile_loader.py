@@ -281,3 +281,98 @@ def test_project_profile_literal_token_warns(isolated_cwd, tmp_path):
     cfg, meta = load_config_ex(str(base_config))
     assert any("token" in n and "sk-literal-secret" not in n for n in meta.notices)
     assert any("token" in n for n in cfg["compat_notices"])
+
+
+def test_base_root_profile_literal_token_does_not_warn(isolated_env, isolated_cwd, tmp_path):
+    """Обратная половина предыдущего: предупреждение адресное, а не всеобщее.
+
+    Смысл warning'а — «этот файл обычно лежит в репозитории» (§3.5), и он
+    привязан к корню (`config.py`: `warn_literal_tokens=(root_kind == "project")`).
+    Без негативной половины страж молчал бы о снятии условия: варнить на КАЖДЫЙ
+    литеральный токен значит варнить на приватный `~/.gc/profiles/*.yml`, где
+    секрет лежит законно, — и приучить пользователя не читать notice."""
+    from config import load_config_ex
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, _MINIMAL_BASE)
+
+    _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "work"})
+    _write_yaml(
+        base_config.parent / "profiles" / "work.yml",
+        {"models": {"flash": {"url": "http://x/v1/chat/completions",
+                              "token": "sk-literal-secret"}}},
+    )
+
+    cfg, meta = load_config_ex(str(base_config))
+    assert meta.ref is not None and meta.ref.root_kind == "base"
+    assert not [n for n in meta.notices if "token" in n]
+    assert not [n for n in cfg["compat_notices"] if "token" in n]
+
+
+def test_registry_merges_across_layers_overlay_cannot_remove_a_model(isolated_cwd, tmp_path):
+    """§14 «мерж реестров по слоям»: добавление алиаса, перекрытие алиаса и
+    «оверлей не может убрать модель» — три семантики одним снимком.
+
+    Родовой `test_config_merge.py` проверяет их на абстрактном dict, но реестр
+    моделей проходит через `flatten_app_config`, и то, что `models` не попал в
+    список секций-исключений мержа, не утверждает никто.
+
+    Громкую половину последствий фаза 2 ловит сама: профиль, заменивший реестр
+    базы, оставил бы `slots.default` базового слоя висеть на исчезнувшем алиасе,
+    и загрузка упала бы с `slots.default: алиас "keep" не найден в
+    merged-реестре models`. Именно так этот тест и валится под мутацией мержа —
+    по ГРОМКОМУ пути.
+
+    Молчит фаза 2 в другом случае: оверлей подменяет реестр ВМЕСТЕ со слотами —
+    ссылки сходятся, ошибки нет, модели базового слоя просто исчезают (проверено
+    отдельно: `load_config_ex` отдаёт реестр из одного профиля). Такого сценария
+    тест НЕ строит. Первый ассерт ниже, состав реестра, поймал бы и его, но
+    доказано это здесь только на громком пути."""
+    from config import load_config_ex
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, _MINIMAL_BASE)
+
+    _write_yaml(isolated_cwd / ".gc" / "config.yml", {
+        "profile": "work",
+        "models": {"keep": {"url": "http://keep/v1"}, "shared": {"url": "http://base/v1"}},
+        "slots": {"default": "keep"},
+    })
+    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
+        "models": {"shared": {"url": "http://profile/v1"}, "added": {"url": "http://added/v1"}},
+    })
+
+    cfg, _meta = load_config_ex(str(base_config))
+    models = cfg["models"]
+
+    assert set(models) == {"keep", "shared", "added"}
+    assert models["keep"]["url"] == "http://keep/v1"          # оверлей не убрал
+    assert models["shared"]["url"] == "http://profile/v1"     # оверлей перекрыл
+    assert models["added"]["url"] == "http://added/v1"        # оверлей добавил
+
+
+def test_model_inherits_from_backend_overridden_by_profile(isolated_cwd, tmp_path):
+    """§14 Router: наследование от ЭФФЕКТИВНОГО backend, «включая перекрытый
+    профилем». Запись реестра без своих url/token берёт их из backend ПОСЛЕ мержа
+    всей стопки — то есть из профиля, если тот перекрыл backend; иначе профиль
+    «сменить провайдера одной строкой» уводил бы адрес только у явных записей."""
+    from config import load_config_ex
+    from model_router import ModelRouter
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, _MINIMAL_BASE)
+
+    _write_yaml(isolated_cwd / ".gc" / "config.yml", {
+        "profile": "work",
+        "models": {"bare": {}},
+        "slots": {"default": "bare"},
+    })
+    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
+        "backend": {"completions_url": "http://from-profile/v1/chat/completions"},
+    })
+
+    cfg, _meta = load_config_ex(str(base_config))
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+
+    assert resolved.alias == "bare"
+    assert resolved.url == "http://from-profile/v1/chat/completions"

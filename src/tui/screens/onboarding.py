@@ -236,23 +236,40 @@ class OnboardingScreen(Screen):
             t.append(name, style=f"bold {style}" if i == self._step else style)
         return t
 
+    def _shown_values(self) -> dict:
+        """Чем витрины мастера (лента-сводка и подтверждение) заполняют то, чего человек
+        сам не набрал, — по конфигу, каким он СТАНЕТ после мастера (тот же принцип, что
+        у `_layer_note`).
+
+        Обычно это резолвнутый конфиг запуска. Но после «Настроить заново» профиль
+        СНИМАЕТСЯ, и его слой обещал бы адрес с моделью, которых после мастера не
+        останется: фолбэк в этой ветке — сам базовый файл (тот же сырой документ, что
+        читает `_raw_conn`), а чего нет и там, честно остаётся прочерком."""
+        if self._values.get("profile") != "":
+            return {"completions_url": self._config.get("completions_url"),
+                    "model": self._config.get("model"),
+                    "Authorization": (self._config.get("chat_completion_headers") or {}
+                                      ).get("Authorization")}
+        return self._raw_values("completions_url", "Authorization", "model")
+
     def _summary_text(self) -> str:
         from tui.services.onboarding_summary import summary_line
+        shown = self._shown_values()
         # Шаблонные заглушки конфига (…_SENTINEL) — это «ещё не задано», а не значение:
         # показываем прочерком, как редактор адреса трактует URL_SENTINEL пустым полем.
-        url = self._values.get("completions_url") or self._config.get("completions_url") or ""
+        url = self._values.get("completions_url") or shown.get("completions_url") or ""
         if url == onboarding.URL_SENTINEL:
             url = ""
-        model = self._values.get("model") or self._config.get("model") or ""
+        model = self._values.get("model") or shown.get("model") or ""
         if model == onboarding.MODEL_SENTINEL:
             model = ""
         # Токен для сводки — только «задан / не задан / без авторизации» (mask_authorization
-        # сюда не идёт), поэтому фолбэк на резолвнутый self._config безопасен: секрет
-        # никогда не показывается литералом, только Text._token'ом ("Bearer"/"—"/"нет"),
-        # и в файл эта строка не пишется (см. _submit_connection про запись).
+        # сюда не идёт), поэтому фолбэк безопасен: секрет никогда не показывается
+        # литералом, только Text._token'ом ("Bearer"/"—"/"нет"), и в файл эта строка
+        # не пишется (см. _submit_connection про запись).
         auth = self._values.get("Authorization")
         if auth is None:
-            auth = (self._config.get("chat_completion_headers") or {}).get("Authorization")
+            auth = shown.get("Authorization")
         if auth == onboarding.TOKEN_SENTINEL:
             auth = None
         return summary_line(
@@ -453,8 +470,9 @@ class OnboardingScreen(Screen):
                 body.mount(Static(self._mcp_row_text(i == cur, name), classes=cls))
         elif step == STEP_CONFIRM:
             from onboarding import mask_authorization
-            addr = self._values.get("completions_url") or self._config.get("completions_url") or "—"
-            model = self._values.get("model") or self._config.get("model") or "—"
+            shown = self._shown_values()
+            addr = self._values.get("completions_url") or shown.get("completions_url") or "—"
+            model = self._values.get("model") or shown.get("model") or "—"
             # Плейсхолдеры шаблона — не значения (тот же канон, что в строке-сводке
             # выше и в витринах базы): нетронутое поле в _values не попадает, а
             # `agent.model` мастер с волны B не пишет вовсе — у вернувшегося в мастер
@@ -464,11 +482,11 @@ class OnboardingScreen(Screen):
             if model == onboarding.MODEL_SENTINEL:
                 model = "—"
             # Нетронутое поле токена в _values не попадает (см. _submit_connection) —
-            # фолбэк на резолвнутый self._config для отображения безопасен: строка тут
-            # только маскируется (mask_authorization), в файл эта ветка не пишет.
+            # фолбэк для отображения безопасен: строка тут только маскируется
+            # (mask_authorization), в файл эта ветка не пишет.
             auth = self._values.get("Authorization")
             if auth is None:
-                auth = (self._config.get("chat_completion_headers") or {}).get("Authorization")
+                auth = shown.get("Authorization")
             if auth is None or auth == onboarding.TOKEN_SENTINEL:
                 tok = "—"
             elif auth == "":
@@ -813,11 +831,14 @@ class OnboardingScreen(Screen):
         (${ENV:...}/${FILE:...} подставлены), и показать или записать его значение
         обратно в файл значит подменить ссылку на переменную её значением — секрет
         открытым текстом в файле, который коммитят."""
+        return self._raw_values("completions_url", "Authorization", "proxy")
+
+    def _raw_values(self, *keys: str) -> dict:
+        """{ключ-якорь: значение из базового файла как записано}. Файла нет — пусто."""
         if not self._config_path:
             return {}
         import config_raw
         from onboarding import FIELD_ANCHOR_PATHS
-        keys = ("completions_url", "Authorization", "proxy")
         values = config_raw.read_values(self._config_path, (FIELD_ANCHOR_PATHS[k] for k in keys))
         return {k: values[FIELD_ANCHOR_PATHS[k]] for k in keys}
 

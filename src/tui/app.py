@@ -170,6 +170,10 @@ class TuiApp(App):
         # Профили, уже отдавшие notice активации в этой сессии (спека §3.5) — не спамить
         # повторно при каждом пере-мерже одного и того же выбора.
         self._profile_notice_seen: set = set()
+        # Источник действующего профиля на момент последней сборки базы (спека §3.1):
+        # (имя, путь, корень). Нужен ИМЕННО снимком — `active_profile_ref()` резолвит
+        # по диску, и после появления тёзки «прежнее» значение уже не восстановить.
+        self._profile_source: Optional[tuple] = None
         from model_router import CircuitBreaker
         # Сессионный предохранитель моделей (спека §8) — владелец: сессия-тред;
         # персист/restore — persist_circuit_breaker()/load_circuit_breaker() (meta треда).
@@ -317,6 +321,17 @@ class TuiApp(App):
         прочитало этот же файл."""
         self._config_path = path
         self._config_mtime_set = self._compute_mtime_set()
+        self._profile_source = self._current_profile_source()
+
+    def _current_profile_source(self) -> Optional[tuple]:
+        """`(имя, путь, корень)` действующего профиля или None. Снимок для
+        сравнения «до/после» в `reload_config` — резолв идёт по диску, поэтому
+        прежнее значение обязано быть сохранено заранее, а не пере-вычислено."""
+        try:
+            ref = self.active_profile_ref()
+        except Exception:
+            return None
+        return None if ref is None else (ref.name, str(ref.path), ref.root_kind)
 
     def _active_profile_name_for_mtime(self) -> Optional[str]:
         """Действующее имя профиля для мтайм-набора (спека §3.3 — «выбор, не
@@ -373,6 +388,7 @@ class TuiApp(App):
         carry_over_runtime_fields(self._config or {}, cfg)
         old_effective = self.effective_config()
         old_mtime_set = self._config_mtime_set
+        old_source = self._profile_source
         self._config = cfg
         self._threads_dir = resolve_threads_dir(cfg)
         self._session_profile_cache = None   # база сменилась — пере-мерж под сессионный профиль устарел
@@ -385,6 +401,7 @@ class TuiApp(App):
         self._config_mtime_set = self._compute_mtime_set()
         if old_mtime_set != self._config_mtime_set:
             self._circuit_breaker.reset()
+        self._notice_profile_source_change(old_source)
         self._notice_boot_frozen_diff(old_effective, self.effective_config())
         self.invalidate_runner()
 
@@ -568,6 +585,38 @@ class TuiApp(App):
             push_runtime_notice(Notice(
                 "info", "profile_switch_deferred",
                 f"{what} применится после завершения текущей задачи", ()))
+
+    def _notice_profile_source_change(self, old_source: Optional[tuple]) -> None:
+        """Спека §3.1: у активного профиля сменился ФАЙЛ-источник при том же имени.
+
+        Типовой случай — `git pull` принёс `<проект>/.gc/profiles/<имя>.yml`:
+        проектный корень выигрывает у базового, и профиль того же имени начинает
+        приносить другие модели, адреса и токены. Имя в футере при этом не
+        меняется, поэтому без уведомления подмену не по чему заметить (обратный
+        переезд, когда проектный файл удалили, — ровно так же).
+
+        Молчим, когда сменилось само ИМЯ профиля (это осознанное переключение, о
+        нём говорят свои каналы) и когда путь тот же — правка файла источником не
+        является, иначе notice сыпался бы на каждое сохранение из /settings.
+        """
+        self._profile_source = self._current_profile_source()
+        new_source = self._profile_source
+        if old_source is None or new_source is None:
+            return
+        old_name, old_path, old_kind = old_source
+        new_name, new_path, new_kind = new_source
+        if old_name != new_name or old_path == new_path:
+            return
+        # Подпись корня — той же формулой, что у соседних витрин
+        # (`main.py:4025`, `settings.py:2214`): своего словаря здесь не заводим.
+        old_ru = "проектный" if old_kind == "project" else "глобальный"
+        new_ru = "проектный" if new_kind == "project" else "глобальный"
+        push_runtime_notice(Notice(
+            "warning", "profile_source_changed",
+            f'профиль "{new_name}" теперь берётся из другого файла: '
+            f"{new_path} ({new_ru}) вместо {old_path} ({old_ru})",
+            (new_path, old_path),
+        ))
 
     def _notice_boot_frozen_diff(self, old_cfg: dict, new_cfg: dict) -> None:
         """Спека §3.2: boot-frozen-ключи разошлись между старой и новой эффективной

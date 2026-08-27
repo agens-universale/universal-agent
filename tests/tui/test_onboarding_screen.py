@@ -2432,6 +2432,69 @@ async def test_layer_note_goes_silent_after_reconfigure(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_summary_after_reconfigure_drops_the_removed_profile_layer(tmp_path, monkeypatch):
+    """То же правило, что у плашки, — для витрин значений: после «Настроить заново»
+    профиль СНИМАЕТСЯ, и его адрес с моделью в сводке (лента сверху и подтверждение)
+    обещали бы то, чего после мастера не будет. Незаполненное в базовом файле —
+    честный прочерк, а не значение снимаемого слоя."""
+    pytest.importorskip("textual")
+    import re
+    from tui.app import TuiApp
+    from textual.widgets import Static
+    from tui.screens.onboarding import STEP_CONFIRM
+    monkeypatch.chdir(tmp_path)
+    # Базовый файл — шаблонные заглушки (адрес/модель/токен не заданы), merged-конфиг
+    # несёт значения слоя профиля: ровно расклад, на котором слой видно.
+    _cfg_path, scr = _active_profile_screen(
+        tmp_path, config={"completions_url": "https://profile.example/v1/chat/completions",
+                          "chat_completion_headers": {"Authorization": "Bearer profile-token"},
+                          "model": "profile-model", "profile": "work"})
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        assert "модель: profile-model" in str(scr.query_one("#onb-summary", Static).render())
+        await pilot.press("down")                        # → «Настроить заново»
+        await pilot.press("enter")
+        await pilot.pause()
+        line = str(scr.query_one("#onb-summary", Static).render())
+        assert "сервер: —" in line and "токен: —" in line and "модель: —" in line
+        scr._goto(STEP_CONFIRM); await pilot.pause()
+        blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        assert "profile.example" not in blob and "profile-model" not in blob
+        flat = re.sub(r"\s+", " ", blob)                 # колонка меток — не предмет теста
+        assert "адрес: —" in flat and "модель: —" in flat
+
+
+@pytest.mark.asyncio
+async def test_summary_after_reconfigure_keeps_the_base_file_values(tmp_path, monkeypatch):
+    """Обратное направление того же правила: базовый файл СВОИ адрес и модель имеет —
+    их и показываем. Иначе «снять профиль» выглядело бы как «стереть всё»."""
+    pytest.importorskip("textual")
+    import onboarding_config_writer as w
+    from config import validate_config_text
+    from tui.app import TuiApp
+    from textual.widgets import Static
+    monkeypatch.chdir(tmp_path)
+    cfg_path = _profiles_cfg(tmp_path, "work", active="work")
+    w.write_values(cfg_path, {"backend.completions_url": "https://base.example/v1/chat/completions",
+                              "agent.model": "base-model"}, validate=validate_config_text)
+    scr = _screen(config_path=str(cfg_path),
+                  config={"completions_url": "https://profile.example/v1/chat/completions",
+                          "chat_completion_headers": {}, "model": "profile-model",
+                          "profile": "work"})
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("down")                        # → «Настроить заново»
+        await pilot.press("enter")
+        await pilot.pause()
+        line = str(scr.query_one("#onb-summary", Static).render())
+        assert "сервер: base.example" in line and "модель: base-model" in line
+
+
+@pytest.mark.asyncio
 async def test_layer_note_stays_after_skip(tmp_path, monkeypatch):
     """Парный случай: «Пропустить» профиль не трогает — он и дальше перекроет
     настройку, и плашка обязана об этом говорить."""

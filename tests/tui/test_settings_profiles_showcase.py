@@ -533,12 +533,25 @@ async def test_config_screen_header_shows_profile_level_model(tmp_path, monkeypa
         text = scr.rendered_text()
         assert "профиль: work (проектный)" in text
         assert "уровень: default" in text
+        # Модель — третье слагаемое шапки (`tui/screens/config.py:116`). Без неё
+        # тест повторял бы дефект близнеца `/status` ниже: имя обещает три поля,
+        # тело проверяет два, а `модель:` могла бы исчезнуть, не уронив ничего.
+        assert "модель: flash" in text
         assert str(profile_path) in text
 
 
 # --- /status: строка профиля/уровня/модели ---
 
 async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch):
+    """§14 TUI: `/status` — строка профиля/уровня/модели.
+
+    Раньше тест проверял из четырёх полей блока `profile` ровно одно (`level`) —
+    и на конфиге БЕЗ профиля, где остальные три и не могли быть заполнены. Имя
+    обещало больше, чем тело: `name`/`source`/`model` могли исчезнуть из payload,
+    не уронив ничего. Здесь профиль реально активен, реестр непуст, и проверяются
+    все четыре — `/status` для того и зовут, когда не понимают, чем идёт работа.
+    """
+    import json
     import tui.app as app_mod
     from tui.screens.viewer import ViewerScreen
     project_dir = tmp_path / "project"
@@ -548,16 +561,24 @@ async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch
         "mcp_runtime.paths.managed_config_path",
         lambda: tmp_path / "no-managed.yml",
     )
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(project_dir / ".gc" / "profiles" / "work.yml",
+           "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
 
-    app = app_mod.TuiApp(config={"level": "light"})
+    app = app_mod.TuiApp(config={"profile": "work", "level": "light",
+                                 "models": {"flash": {}}, "slots": {"default": "flash"}})
     app.set_config_path(str(base_cfg))
     async with app.run_test() as pilot:
         app.screen._cmd_status("")
         await pilot.pause()
         scr = app.screen
         assert isinstance(scr, ViewerScreen)
-        assert '"level": "light"' in scr._content
+        profile_block = json.loads(scr._content)["runtime"]["profile"]
+
+    assert profile_block["name"] == "work"
+    assert profile_block["source"] == "проектный"
+    assert profile_block["level"] == "light"
+    assert profile_block["model"] == "flash"
 
 
 # --- онбординг-предупреждение о перекрывающем слое (спека §11) ---

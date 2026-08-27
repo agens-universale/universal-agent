@@ -110,6 +110,38 @@ def test_switch_session_profile_remerges_effective_config(tmp_path):
     assert app.effective_config()["profile"] == "work"
 
 
+def test_session_layer_stays_above_profile_in_both_directions(tmp_path):
+    """§2, позиционное правило: сессия — ВЕРХНИЙ слой, а не снимок момента.
+
+    Обе стороны проверяются одним сценарием, потому что ломаются они по
+    отдельности. Сначала тоггл, потом профиль: пере-мерж не имеет права смыть
+    сессионное значение ключом из профиля. Потом наоборот: тоггл поверх уже
+    активного профиля обязан лечь сверху. Между ними — ключ, которого сессия НЕ
+    трогала: он берётся из профиля, иначе «сессия сверху» выродилась бы в
+    «сессия вместо профиля».
+    """
+    _write_yaml(tmp_path / "profiles" / "work.yml", {
+        "models": {"flash": {"url": "http://work/v1/chat/completions"}},
+        "slots": {"default": "flash"},
+        "level": "max",
+    })
+    app = _app_with_base(tmp_path)
+
+    # 1) сессия раньше профиля — профиль её не смывает
+    app.set_session_override("level", "light")
+    app.switch_session_profile("work")
+    assert app.effective_config()["level"] == "light"
+    assert "flash" in app.effective_config()["models"]   # прочее из профиля пришло
+
+    # 2) сессия позже профиля — ложится сверху
+    app.set_session_override("level", "default")
+    assert app.effective_config()["level"] == "default"
+
+    # 3) снять сессионный ключ — из-под него проступает значение профиля
+    app._session_overrides.pop("level")
+    assert app.effective_config()["level"] == "max"
+
+
 # --- 4. кэш: повторные вызовы effective_config не гоняют load_config_ex ------------
 
 
@@ -624,3 +656,119 @@ def test_project_profile_activation_notice(tmp_path, monkeypatch):
     assert "project_profile_activated" in codes
     msg = next(n.message for n in collect_runtime_notices() if n.code == "project_profile_activated")
     assert "work" in msg and "proj/v1" in msg
+
+
+# --- 9. Смена ИСТОЧНИКА активного профиля под ногами (спека §3.1/§14) --------------
+
+
+def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkeypatch):
+    """`git pull` принёс `.gc/profiles/work.yml` — активный профиль того же имени
+    молча переехал бы с базового корня на проектный, сменив модели, адреса и
+    токены. Имя в футере при этом не меняется, и заметить подмену не по чему.
+
+    Мтайм-набор такой переезд уже видит (оба кандидатных пути в нём есть, у
+    несуществующего — `None`), а `reload_config_if_changed` на него срабатывает;
+    не хватало сравнения самого источника «до/после» и уведомления.
+    """
+    clear_runtime_notices()
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+
+    base = tmp_path / "config.yml"
+    _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
+    base_profile = _write_yaml(
+        tmp_path / "profiles" / "work.yml",
+        {"models": {"flash": {"url": "http://base-root/v1/chat/completions"}},
+         "slots": {"default": "flash"}},
+    )
+
+    cfg, _meta = load_config_ex(str(base))
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app.set_config_path(str(base))
+    assert app.active_profile_ref().root_kind == "base"
+
+    # приехал проектный тёзка — он выигрывает по §3.1
+    proj_profile = _write_yaml(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        {"models": {"flash": {"url": "http://project-root/v1/chat/completions"}},
+         "slots": {"default": "flash"}},
+    )
+    app.reload_config_if_changed()
+
+    assert app.active_profile_ref().root_kind == "project"
+    notices = collect_runtime_notices()
+    match = [n for n in notices if n.code == "profile_source_changed"]
+    assert match, f"нет notice о смене источника профиля; коды: {[n.code for n in notices]}"
+    msg = match[0].message
+    assert "work" in msg
+    assert str(proj_profile) in msg      # куда переехал
+    assert str(base_profile) in msg      # откуда
+
+
+def test_no_source_notice_when_profile_file_merely_edited(tmp_path, monkeypatch):
+    """Обратная половина: правка того же файла — не смена источника. Без неё
+    notice сыпался бы на каждое сохранение профиля из /settings и его перестали
+    бы читать."""
+    clear_runtime_notices()
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+
+    base = tmp_path / "config.yml"
+    _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
+    profile = _write_yaml(
+        tmp_path / "profiles" / "work.yml",
+        {"models": {"flash": {"url": "http://one/v1/chat/completions"}},
+         "slots": {"default": "flash"}},
+    )
+
+    cfg, _meta = load_config_ex(str(base))
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app.set_config_path(str(base))
+
+    _write_yaml(profile, {"models": {"flash": {"url": "http://two/v1/chat/completions"}},
+                          "slots": {"default": "flash"}})
+    _bump_mtime(profile)
+    app.reload_config_if_changed()
+
+    assert [n for n in collect_runtime_notices() if n.code == "profile_source_changed"] == []
+
+
+def test_no_source_notice_when_the_profile_name_itself_changed(tmp_path, monkeypatch):
+    """Третья ветка: сменилось само ИМЯ активного профиля — файл, разумеется,
+    другой, но это осознанное переключение, и о нём говорят свои каналы
+    (`project_profile_activated`, `profile_switch_deferred`). Notice «профиль
+    теперь берётся из другого файла» здесь был бы не предупреждением о подмене,
+    а пересказом того, что пользователь только что сделал сам.
+
+    Ветка гарда `old_name != new_name` до этого теста не стереглась ничем: её
+    снятие оставляло зелёными все существующие тесты.
+    """
+    clear_runtime_notices()
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+
+    base = tmp_path / "config.yml"
+    _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
+    for name, url in (("work", "http://work/v1/chat/completions"),
+                      ("home", "http://home/v1/chat/completions")):
+        _write_yaml(tmp_path / "profiles" / f"{name}.yml",
+                    {"models": {"flash": {"url": url}}, "slots": {"default": "flash"}})
+
+    cfg, _meta = load_config_ex(str(base))
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app.set_config_path(str(base))
+    assert app.active_profile_ref().name == "work"
+
+    # указатель переписан на другой профиль — оба файла существуют, менялось имя
+    _write_yaml(base, {**_MINIMAL_BASE, "profile": "home"})
+    _bump_mtime(base)
+    app.reload_config_if_changed()
+
+    assert app.active_profile_ref().name == "home"
+    codes = [n.code for n in collect_runtime_notices()]
+    assert "profile_source_changed" not in codes, (
+        f"смена имени профиля — не смена источника; коды: {codes}"
+    )
