@@ -276,3 +276,116 @@ def test_count_native_candidates_prunes_call_time_paths():
         exclude_paths=["/work/vendor"],
     ) == 3
     assert "-path /work/vendor" in backend.commands[0]
+
+
+# --- needle prefilter in the sandbox: grep -l -F before any download ------------
+
+from utils.find_in_files_scan_mode import Needles
+from utils.native_fs_search import (
+    build_prefilter_command,
+    native_prefilter_candidates,
+    prefilter_terms,
+)
+
+
+def _needles(required=None, or_group=None):
+    return Needles(required_literal=required, or_group=or_group, effective_ci=False)
+
+
+def _prefilter(backend, **overrides):
+    kwargs = dict(
+        terms=["KEY"],
+        case_insensitive=False,
+        exclude_dir_names=[],
+        exclude_nested_dot_dirs=True,
+        file_pattern=None,
+        exclude_paths=[],
+    )
+    kwargs.update(overrides)
+    return native_prefilter_candidates(backend, "/work", **kwargs)
+
+
+def test_prefilter_terms_prefer_the_required_literal():
+    assert prefilter_terms(_needles("KEY", ("1", "2")), case_insensitive=False) == ["KEY"]
+
+
+def test_prefilter_terms_use_the_or_group_when_nothing_is_required():
+    assert prefilter_terms(_needles(None, ("bar", "baz")), case_insensitive=False) == ["bar", "baz"]
+
+
+def test_prefilter_terms_none_without_needles():
+    assert prefilter_terms(_needles(), case_insensitive=False) is None
+
+
+def test_prefilter_terms_refuse_non_ascii_when_case_insensitive():
+    """grep -i сворачивает не-ASCII по локали контейнера — предфильтр был бы unsound."""
+    assert prefilter_terms(_needles("ключ"), case_insensitive=True) is None
+    assert prefilter_terms(_needles("ключ"), case_insensitive=False) == ["ключ"]
+
+
+def test_prefilter_terms_refuse_control_characters():
+    assert prefilter_terms(_needles("a\nb"), case_insensitive=False) is None
+
+
+def test_prefilter_command_lists_files_by_fixed_strings():
+    cmd = build_prefilter_command(
+        "/work",
+        terms=["KEY"],
+        case_insensitive=True,
+        exclude_dir_names=[".git"],
+        exclude_nested_dot_dirs=True,
+        file_pattern=None,
+        exclude_paths=[],
+    )
+    assert cmd.startswith("find -H /work -mindepth 1")
+    assert "| xargs -0 -r grep -l -F -i" in cmd
+    assert "-e KEY" in cmd
+    assert "--binary-files=without-match" not in cmd
+
+
+def test_prefilter_command_keeps_utf16_files_in_play():
+    """Python-путь читает UTF-16 с BOM; байты ASCII-needle grep там не найдёт —
+    BOM-паттерны оставляют такие файлы в кандидатах (over-inclusive, но sound)."""
+    cmd = build_prefilter_command(
+        "/work",
+        terms=["KEY"],
+        case_insensitive=False,
+        exclude_dir_names=[],
+        exclude_nested_dot_dirs=False,
+        file_pattern=None,
+        exclude_paths=[],
+    )
+    assert r"$(printf '\377\376')" in cmd
+    assert r"$(printf '\376\377')" in cmd
+
+
+def test_prefilter_candidates_are_absolute_paths_under_byte_semantics():
+    class _EnvBackend(_Backend):
+        def exec(self, cmd, timeout=None, env=None):
+            self.env = env
+            return super().exec(cmd, timeout, env)
+
+    backend = _EnvBackend(stdout="/work/a.py\nsub/b.py\n")
+    assert _prefilter(backend) == ["/work/a.py", "/work/sub/b.py"]
+    assert backend.env["LC_ALL"] == "C"
+
+
+def test_prefilter_candidates_no_match_is_an_empty_list():
+    assert _prefilter(_Backend(rc=1)) == []
+    assert _prefilter(_Backend(rc=123)) == []
+
+
+def test_prefilter_candidates_failure_is_none():
+    class _Boom(_Backend):
+        def exec(self, cmd, timeout=None, env=None):
+            raise RuntimeError("no shell")
+
+    assert _prefilter(_Boom()) is None
+    assert _prefilter(_Backend(rc=2)) is None
+
+
+def test_prefilter_candidates_capped_output_is_none():
+    """Обрезанный список — неполный, значит небезопасный: лучше обычный обход."""
+    backend = _Backend(stdout="/work/a.py\n")
+    backend._res.stdout_hit_capture_cap = True
+    assert _prefilter(backend) is None

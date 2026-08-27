@@ -52,6 +52,10 @@ from security.read_guard import (
 )
 from security.path_policy import resolve_tool_context, _extract_config_dict
 
+# Python-path fallbacks where an in-sandbox needle prefilter is worth a try: the
+# recipe exists (grep+find), only the pattern/glob could not be expressed natively.
+_PREFILTER_FALLBACK_REASONS = frozenset({"pattern_not_native", "file_pattern_not_native"})
+
 # affix_or re-open budget is the only per-mode open cap (spec §5 / §6.3).
 _MODE_CANDIDATE_LIMIT_ATTR = {
     PatternMode.LIKE: "max_candidates_like",
@@ -197,7 +201,9 @@ class FindInFiles(AbstractSimpleTool):
                 "search_backend=grep ran inside the sandbox; python read each "
                 "candidate file from the host (fallback_reason says why). "
                 "stop_reason=output_capped: grep output hit the transport ceiling — "
-                "narrow pattern/path/file_pattern, not limit."
+                "narrow pattern/path/file_pattern, not limit. "
+                "prefilter=grep: candidate files were picked inside the sandbox by a "
+                "fixed-string needle before any host read."
             ),
             # Copy: callers (inject_tool_fields) mutate parameters in place.
             "parameters": copy.deepcopy(cls._PARAM_SCHEMA),
@@ -225,7 +231,8 @@ class FindInFiles(AbstractSimpleTool):
             "read scan_complete, stop_*, guidance; narrow path/file_pattern/pattern.\n"
             "search_backend=grep ran inside the sandbox; python read each candidate "
             "file from the host (fallback_reason says why). stop_reason=output_capped: "
-            "grep output hit the transport ceiling — narrow the query, not limit.\n"
+            "grep output hit the transport ceiling — narrow the query, not limit. "
+            "prefilter=grep: candidates were picked in the sandbox by a needle first.\n"
         )
 
     @enforce_read_guard(path_arg="path")
@@ -1139,6 +1146,66 @@ class FindInFiles(AbstractSimpleTool):
             key=lambda e: (e.get("reason") or "", e.get("path") or ""),
         )
 
+    def _prefilter_candidates(
+        self,
+        *,
+        path: str,
+        needles: Needles,
+        effective_ci: bool,
+        fallback_reason: Optional[str],
+        file_pattern: Optional[str],
+        accepted_excludes: List[str],
+        config: FsFindInFilesConfig,
+        show_excluded_dirs: bool,
+    ) -> Optional[List[str]]:
+        """``grep -l`` inside the sandbox → candidate files; None → walk as before.
+
+        Only when native grep declined the pattern itself (a sound fixed-string
+        needle still exists) and the walk is not needed for its own report
+        (show_excluded_dirs).
+        """
+        from utils.native_fs_search import (
+            hard_exclude_names_for_grep,
+            native_prefilter_candidates,
+            prefilter_terms,
+        )
+        from utils.pattern_native_gate import is_safe_grep_include
+
+        if show_excluded_dirs or fallback_reason not in _PREFILTER_FALLBACK_REASONS:
+            return None
+        terms = prefilter_terms(needles, case_insensitive=effective_ci)
+        if terms is None:
+            return None
+        backend = self._backend
+        try:
+            if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
+                return None
+        except Exception:
+            return None
+        native_glob = file_pattern if file_pattern and is_safe_grep_include(file_pattern) else None
+        return native_prefilter_candidates(
+            backend,
+            path,
+            terms=terms,
+            case_insensitive=effective_ci,
+            exclude_dir_names=hard_exclude_names_for_grep(config.exclude_dir_names),
+            exclude_nested_dot_dirs=True,
+            file_pattern=native_glob,
+            exclude_paths=accepted_excludes,
+        )
+
+    def _prefiltered_entries(self, root: str, abs_paths: List[str]):
+        """Prefilter hits as walk entries ``(relpath, is_dir=False)``."""
+        backend = self._backend
+        root_n = backend.normpath(root).rstrip("/\\")
+        for abs_path in abs_paths:
+            abs_n = backend.normpath(abs_path)
+            if abs_n.startswith(root_n):
+                rel = abs_n[len(root_n):].lstrip("/\\")
+            else:
+                rel = os.path.basename(abs_n)
+            yield (rel or "."), False
+
     def _try_native_grep_directory(
         self,
         *,
@@ -1448,10 +1515,28 @@ class FindInFiles(AbstractSimpleTool):
         # find_files_by_name. Left to apply_tool's blanket handler they came
         # back as internal_tool_error with "do not retry" guidance — the
         # opposite of what a WalkOutputTooLargeError asks the agent to do.
+        # Needle prefilter inside the sandbox: when native grep cannot answer
+        # the pattern but a sound fixed-string needle exists, grep -l names the
+        # candidate files first and only those are read from the host.
+        prefilter_paths = self._prefilter_candidates(
+            path=path,
+            needles=needles,
+            effective_ci=effective_ci,
+            fallback_reason=fallback_reason,
+            file_pattern=file_pattern,
+            accepted_excludes=accepted_excludes,
+            config=config,
+            show_excluded_dirs=show_excluded_dirs,
+        )
+        prefilter = "grep" if prefilter_paths is not None else None
+
         try:
-            for relpath, is_dir in backend.iter_walk(
-                path, should_descend=_should_descend
-            ):
+            entries = (
+                self._prefiltered_entries(path, prefilter_paths)
+                if prefilter_paths is not None
+                else backend.iter_walk(path, should_descend=_should_descend)
+            )
+            for relpath, is_dir in entries:
                 if is_dir:
                     continue
                 abs_path = backend.join(path, relpath)
@@ -1511,6 +1596,7 @@ class FindInFiles(AbstractSimpleTool):
                 file_pattern=file_pattern,
                 exclude_dir_errors=exclude_soft_errors or None,
                 fallback_reason=fallback_reason,
+                prefilter=prefilter,
                 candidate_count=n,
                 candidate_limit=candidate_limit,
                 breakdown=breakdown,
@@ -1707,6 +1793,7 @@ class FindInFiles(AbstractSimpleTool):
             ),
             search_backend="python",
             fallback_reason=fallback_reason,
+            prefilter=prefilter,
         )
 
     # ------------------------------------------------------------------
@@ -1766,6 +1853,7 @@ class FindInFiles(AbstractSimpleTool):
         search_backend: Optional[str] = None,
         files_too_large: Optional[int] = None,
         fallback_reason: Optional[str] = None,
+        prefilter: Optional[str] = None,
     ) -> str:
         """Slim agent-facing payload (RESPONSE-CONTRACT). Omit-if-absent."""
         payload: Dict[str, Any] = {
@@ -1807,6 +1895,9 @@ class FindInFiles(AbstractSimpleTool):
         # Why the host-side Python path answered instead of in-sandbox grep.
         if fallback_reason is not None:
             payload["fallback_reason"] = fallback_reason
+        # Candidate files were named inside the sandbox first (grep -l on a needle).
+        if prefilter is not None:
+            payload["prefilter"] = prefilter
 
         # Refuse breakdown only (too_many_candidate_files).
         if stop_reason == "too_many_candidate_files":

@@ -336,3 +336,99 @@ def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):
     assert "fallback_reason" not in data
     assert seen_run["exclude_paths"] == [vendor]
     assert seen_count["exclude_paths"] == [vendor]
+
+
+# --- needle prefilter drives the Python path -----------------------------------
+
+def _prefilter_ready(tool, monkeypatch, paths):
+    import utils.native_fs_search as native_fs_search
+
+    backend_cls = type(tool._backend)
+    monkeypatch.setattr(backend_cls, "has_grep", True, raising=False)
+    monkeypatch.setattr(backend_cls, "has_find", True, raising=False)
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return paths
+
+    monkeypatch.setattr(native_fs_search, "native_prefilter_candidates", spy)
+    return calls
+
+
+def _track_opens(tool, monkeypatch):
+    opened = []
+    original = type(tool)._open_decode_text
+
+    def counting(self, abs_path, file_size=None):
+        opened.append(abs_path)
+        return original(self, abs_path, file_size)
+
+    monkeypatch.setattr(type(tool), "_open_decode_text", counting)
+    return opened
+
+
+def test_python_path_opens_only_prefiltered_candidates(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("KEY1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("KEY2\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    calls = _prefilter_ready(tool, monkeypatch, [str(tmp_path / "a.py")])
+    opened = _track_opens(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY(1|2)", query_mode="python-re")
+
+    assert data["search_backend"] == "python"
+    assert data["fallback_reason"] == "pattern_not_native"
+    assert data["prefilter"] == "grep"
+    assert data["count"] == 1
+    assert opened == [str(tmp_path / "a.py")]
+    assert calls[0]["terms"] == ["KEY"]
+
+
+def test_prefilter_is_skipped_without_needles(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("KEY1\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    calls = _prefilter_ready(tool, monkeypatch, [])
+
+    data = _call(tool, tmp_path, pattern=r"KEY\d", query_mode="python-re")
+
+    assert calls == []
+    assert "prefilter" not in data
+    assert data["count"] == 1
+
+
+def test_prefilter_is_skipped_when_show_excluded_dirs(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("KEY1\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    calls = _prefilter_ready(tool, monkeypatch, [])
+
+    data = _call(tool, tmp_path, pattern="KEY(1|2)", query_mode="python-re", show_excluded_dirs=True)
+
+    assert calls == []
+    assert "prefilter" not in data
+    assert data["count"] == 1
+
+
+def test_prefilter_failure_falls_back_to_the_walk(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("KEY1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("KEY2\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    _prefilter_ready(tool, monkeypatch, None)
+
+    data = _call(tool, tmp_path, pattern="KEY(1|2)", query_mode="python-re")
+
+    assert "prefilter" not in data
+    assert data["count"] == 2
+
+
+def test_prefiltered_candidates_still_honour_file_pattern(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("KEY1\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("KEY2\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    calls = _prefilter_ready(tool, monkeypatch, [str(tmp_path / "a.py"), str(tmp_path / "b.txt")])
+
+    data = _call(tool, tmp_path, pattern="KEY(1|2)", query_mode="python-re", file_pattern="*.py")
+
+    assert data["prefilter"] == "grep"
+    assert data["count"] == 1
+    assert calls[0]["file_pattern"] == "*.py"

@@ -15,6 +15,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from utils.find_in_files_scan_mode import Needles
 from utils.fs_search_walk import effective_exclude_dir_names
 from utils.pattern_native_gate import NativeGrepPlan, is_safe_grep_include
 
@@ -276,6 +277,115 @@ def count_native_candidates(
         return int((res.stdout or "0").strip().split()[0])
     except (ValueError, IndexError):
         return None
+
+
+# Byte semantics for the prefilter: with LC_ALL=C ``grep -i`` folds ASCII only
+# (which is exactly what prefilter_terms allows) and BOM bytes are plain bytes.
+_PREFILTER_ENV = dict(_GREP_CLEAN_ENV, LC_ALL="C")
+# UTF-16 BOMs as POSIX printf octal escapes: the Python path decodes such files,
+# but their UTF-16 bytes never contain the needle's UTF-8 bytes — the BOM terms
+# keep them in the candidate list (over-inclusive, hence sound).
+_UTF16_BOM_PRINTF = ("\\377\\376", "\\376\\377")
+
+
+def prefilter_terms(needles: Needles, *, case_insensitive: bool) -> Optional[List[str]]:
+    """Fixed strings whose absence proves the pattern absent — or None.
+
+    Sound only while grep sees the bytes Python would match: control characters
+    cannot travel as ``-e`` terms, and ``grep -i`` folds non-ASCII by locale, so
+    case-insensitive searches keep only ASCII terms (``LC_ALL=C`` folds ASCII).
+    """
+    if needles.required_literal is not None:
+        terms = [needles.required_literal]
+    elif needles.or_group:
+        terms = list(needles.or_group)
+    else:
+        return None
+    for term in terms:
+        if not term or any(ord(ch) < 32 or ch == "\x7f" for ch in term):
+            return None
+        if case_insensitive and not term.isascii():
+            return None
+    return terms
+
+
+def build_prefilter_command(
+    path: str,
+    *,
+    terms: Sequence[str],
+    case_insensitive: bool,
+    exclude_dir_names: Sequence[str],
+    exclude_nested_dot_dirs: bool,
+    file_pattern: Optional[str],
+    exclude_paths: Sequence[str],
+) -> str:
+    """``find … -print0 | xargs -0 -r grep -l -F [-i] -e TERM… -e <BOM>…``.
+
+    Names the candidate files inside the sandbox before a single download. No
+    ``--binary-files=without-match``: a UTF-16 file (NUL bytes) must still be
+    listed through the BOM terms; binaries listed the same way are dropped by
+    the host-side NUL check after a head read, never a body read.
+    """
+    find_argv = _build_find_prune_argv(
+        path,
+        exclude_dir_names=exclude_dir_names,
+        exclude_nested_dot_dirs=exclude_nested_dot_dirs,
+        file_pattern=file_pattern,
+        exclude_paths=exclude_paths,
+    )
+    grep_argv: List[str] = ["grep", "-l", "-F"]
+    if case_insensitive:
+        grep_argv.append("-i")
+    grep_argv.append("--no-messages")
+    for term in terms:
+        grep_argv.extend(["-e", term])
+    find_s = " ".join(shlex.quote(a) for a in find_argv)
+    grep_s = " ".join(shlex.quote(a) for a in grep_argv)
+    bom_s = " ".join(f"-e \"$(printf '{octal}')\"" for octal in _UTF16_BOM_PRINTF)
+    return f"{find_s} | xargs -0 -r {grep_s} {bom_s}"
+
+
+def native_prefilter_candidates(
+    backend: Any,
+    path: str,
+    *,
+    terms: Sequence[str],
+    case_insensitive: bool,
+    exclude_dir_names: Sequence[str],
+    exclude_nested_dot_dirs: bool,
+    file_pattern: Optional[str],
+    exclude_paths: Sequence[str],
+) -> Optional[List[str]]:
+    """Absolute paths grep would open for ``terms``; None → caller walks as before.
+
+    A capped listing is incomplete and therefore unsafe — also None.
+    """
+    cmd = build_prefilter_command(
+        path,
+        terms=terms,
+        case_insensitive=case_insensitive,
+        exclude_dir_names=exclude_dir_names,
+        exclude_nested_dot_dirs=exclude_nested_dot_dirs,
+        file_pattern=file_pattern,
+        exclude_paths=exclude_paths,
+    )
+    try:
+        res = backend.exec(cmd, timeout=120, env=dict(_PREFILTER_ENV))
+    except Exception as exc:
+        log.debug("native prefilter failed: %s", exc)
+        return None
+    if getattr(res, "timed_out", False) or getattr(res, "stdout_hit_capture_cap", False):
+        return None
+    # xargs: 1 = no chunk matched, 123 = some chunk returned 1 (no match there).
+    if res.return_code not in (0, 1, 123, None):
+        return None
+    out: List[str] = []
+    for raw in (res.stdout or "").splitlines():
+        line = raw.rstrip("\r")
+        if not line:
+            continue
+        out.append(line if backend.isabs(line) else backend.join(path, line))
+    return out
 
 
 def run_native_grep(
