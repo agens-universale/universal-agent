@@ -21,7 +21,7 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
-from tui.widgets.click_model import ClickModelMixin
+from tui.widgets.click_model import ClickModelMixin, confirm_is_active
 
 
 class TraceRow(ClickModelMixin, Widget):
@@ -128,6 +128,10 @@ class SummaryMarker(TraceRow):
     Используется и для строки-маркера, и для тела (клик по любому — toggle)."""
 
     def on_click(self, event: events.Click) -> None:
+        # Симметрия с on_key: при security-confirm клик не тогглит сводку —
+        # раскрытое тело съезжает под баннер, а жест пропадает впустую.
+        if confirm_is_active(self):
+            return
         event.stop()
         from tui.messages import SummaryToggleRequest
         self.post_message(SummaryToggleRequest(self._event_no))
@@ -136,11 +140,8 @@ class SummaryMarker(TraceRow):
         if event.key == "enter":
             # Как ClickModelMixin: при security-confirm Enter — ответ баннеру,
             # не toggle сводки (focused-строка получает Key раньше Screen).
-            try:
-                if getattr(self.screen, "_confirm_active", False):
-                    return
-            except Exception:
-                pass
+            if confirm_is_active(self):
+                return
             event.stop()
             from tui.messages import SummaryToggleRequest
             self.post_message(SummaryToggleRequest(self._event_no))

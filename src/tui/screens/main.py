@@ -1155,10 +1155,16 @@ class TraceScreen(Screen):
         # (ConfirmBanner docked options). AskHuman is VerticalScroll — max_height
         # alone is enough; clearing height keeps hug-content behaviour.
         if getattr(banner, "needs_height_when_capped", False):
-            if estimated > cap:
+            capped = estimated > cap
+            if capped:
                 banner.styles.height = cap
             else:
                 banner.styles.height = None  # auto / hug content
+            # Тело растягиваем только при зафиксированной высоте: иначе
+            # height:1fr у ребёнка отменяет hug-content у родителя.
+            hug = getattr(banner, "set_hug_content", None)
+            if callable(hug):
+                hug(not capped)
         region_h = banner.region.height
         if 0 < region_h <= cap:
             return region_h
@@ -2928,6 +2934,8 @@ class TraceScreen(Screen):
             elif key == "enter":
                 from tui.widgets.confirm_banner import choice_for
                 self._answer_confirm(choice_for(banner.selected) if banner is not None else "deny_remember")
+            elif banner is not None and banner.scroll_body(key):
+                pass  # прокрутка тела — не ответ на вопрос
             else:
                 # Same physical-key sets as CLI / confirm_port (QWERTY + ЙЦУКЕН).
                 from security.confirm_port import (

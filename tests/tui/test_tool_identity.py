@@ -35,3 +35,27 @@ def test_unknown_and_empty_pass_through():
     assert tool_id("some_future_tool") == "some_future_tool"
     assert tool_id("") == ""
     assert tool_id(None) is None
+
+
+def test_find_in_files_reaches_the_search_summary_branch():
+    """Без маппинга строка трейса теряла pattern и печатала сырое wire-имя.
+
+    Ветка `search_files` в trace_mapper._arg_summary читает `query or pattern`,
+    то есть готова к новому тулу — не хватало только записи в реестре имён.
+    """
+    assert tool_id("fs_find_in_files") == "search_files"
+
+
+def test_find_in_files_summary_keeps_the_pattern():
+    from tui.services.trace_mapper import _arg_summary
+
+    summary = _arg_summary(
+        tool_id("fs_find_in_files"),
+        {
+            "query_mode": "text",
+            "file_pattern": "*.py",
+            "path": "/proj",
+            "pattern": "def build_tools_data",
+        },
+    )
+    assert "def build_tools_data" in summary
