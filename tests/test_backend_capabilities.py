@@ -337,6 +337,15 @@ def test_backend_without_find_print0_does_not_report_find():
     assert box.has_find is False
 
 
+def test_backend_without_gnu_printf_still_reports_find():
+    """has_find gates the prune pipeline, not Harbor's walk -printf listing."""
+    box = _PosixBox(find_rejects=("-printf",))
+
+    assert probe_find_xargs_grep(box) is True
+    assert probe_has_find(box) is True
+    assert box.has_find is True
+
+
 def test_pipeline_probe_runs_the_production_wire():
     box = _PosixBox()
 

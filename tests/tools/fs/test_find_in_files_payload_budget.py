@@ -15,6 +15,15 @@ def _call(tmp_path, **kwargs):
     return json.loads(tool(path=str(tmp_path), **kwargs))
 
 
+def _python_call(tmp_path, monkeypatch, **kwargs):
+    """Python canon: native grep is a separate contract (see native_live tests)."""
+    tool = with_local_ctx(FindInFiles, config_dict={"launch_root": str(tmp_path)})
+    monkeypatch.setattr(type(tool._backend), "has_grep", False, raising=False)
+    data = json.loads(tool(path=str(tmp_path), **kwargs))
+    assert data.get("search_backend") == "python"
+    return data
+
+
 def test_context_is_bounded_on_a_minified_line(tmp_path):
     """Файл в одну длинную строку: окно контекста не тащит её целиком."""
     (tmp_path / "bundle.js").write_text(("x" * 5000 + "needle") * 40, encoding="utf-8")
@@ -38,13 +47,13 @@ def test_whole_response_stays_small_on_a_minified_line(tmp_path):
     assert len(raw) < 200_000
 
 
-def test_normal_context_window_unchanged(tmp_path):
+def test_normal_context_window_unchanged(tmp_path, monkeypatch):
     """Обычный исходник: контекст по-прежнему отдаёт окно вокруг совпадения."""
     (tmp_path / "app.py").write_text(
         "\n".join(f"line_{i}" for i in range(1, 21)) + "\n", encoding="utf-8"
     )
 
-    data = _call(tmp_path, pattern="line_10", query_mode="text")
+    data = _python_call(tmp_path, monkeypatch, pattern="line_10", query_mode="text")
 
     ctx = data["matches"][0]["context"]
     assert "line_5" in ctx
@@ -53,11 +62,11 @@ def test_normal_context_window_unchanged(tmp_path):
     assert "context_truncated" not in ctx
 
 
-def test_long_line_keeps_the_match_visible(tmp_path):
+def test_long_line_keeps_the_match_visible(tmp_path, monkeypatch):
     """Обрезка контекста не должна прятать саму найденную строку."""
-    (tmp_path / "one.txt") .write_text("a" * 3000 + "NEEDLE" + "b" * 3000, encoding="utf-8")
+    (tmp_path / "one.txt").write_text("a" * 3000 + "NEEDLE" + "b" * 3000, encoding="utf-8")
 
-    data = _call(tmp_path, pattern="NEEDLE", query_mode="text")
+    data = _python_call(tmp_path, monkeypatch, pattern="NEEDLE", query_mode="text")
 
     assert data["count"] == 1
     assert "NEEDLE" in data["matches"][0]["line_content"]

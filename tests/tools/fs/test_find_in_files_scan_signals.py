@@ -24,14 +24,21 @@ def _call(tool, tmp_path, **kwargs):
     return json.loads(tool(path=str(tmp_path), **kwargs))
 
 
-def test_dir_mode_reports_files_skipped_as_too_large(tmp_path):
+def _force_python(tool, monkeypatch):
+    monkeypatch.setattr(type(tool._backend), "has_grep", False, raising=False)
+    return tool
+
+
+def test_dir_mode_reports_files_skipped_as_too_large(tmp_path, monkeypatch):
+    """Python walk: oversized files are counted, not silently grepped."""
     (tmp_path / "big.log").write_text("NEEDLE " * 40, encoding="utf-8")
     (tmp_path / "ok.py").write_text("nothing here\n", encoding="utf-8")
 
-    tool = _tool(tmp_path, {"max_file_bytes": 50})
+    tool = _force_python(_tool(tmp_path, {"max_file_bytes": 50}), monkeypatch)
     data = _call(tool, tmp_path, pattern="NEEDLE", query_mode="text")
 
     assert data["ok"] is True
+    assert data.get("search_backend") == "python"
     assert data["count"] == 0
     assert data["files_too_large"] == 1
     assert data["guidance"]
@@ -117,11 +124,11 @@ def test_show_excluded_dirs_is_answered_not_dropped(tmp_path, monkeypatch):
 
 
 def test_file_size_is_probed_once_per_file(tmp_path, monkeypatch):
-    """Размер уже посчитан при обходе — второй запрос лишний round-trip."""
+    """Python walk: размер уже посчитан при обходе — второй запрос лишний round-trip."""
     (tmp_path / "a.py").write_text("needle here\n", encoding="utf-8")
     (tmp_path / "b.py").write_text("needle there\n", encoding="utf-8")
 
-    tool = _tool(tmp_path)
+    tool = _force_python(_tool(tmp_path), monkeypatch)
     backend_cls = type(tool._backend)
     original = backend_cls.getsize
     seen = []
@@ -133,6 +140,7 @@ def test_file_size_is_probed_once_per_file(tmp_path, monkeypatch):
     monkeypatch.setattr(backend_cls, "getsize", counting)
     data = _call(tool, tmp_path, pattern="needle", query_mode="text")
 
+    assert data.get("search_backend") == "python"
     assert data["count"] == 2
     per_file = Counter(seen)
     assert per_file and all(n == 1 for n in per_file.values()), per_file

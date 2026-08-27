@@ -92,88 +92,11 @@ def probe_has_find(backend: "FsBackend") -> bool:
     """True only if the whole prune recipe runs, not just one of its flags.
 
     ``has_find`` exists to gate ``find -print0 | xargs -0 -r grep``
-    (``utils.native_fs_search.can_native_grep_content`` is its only consumer),
-    so the pipeline is smoked too — the ``-printf`` wire proves a different flag
-    and would let a box that dies on ``-print0``/``xargs -r`` cache True forever.
+    (``utils.native_fs_search.can_native_grep_content`` is its only consumer).
+    GNU ``-printf`` is Harbor walk/listdir, not this recipe — requiring it
+    would fail-closed a BSD find that can still run the pipeline.
     """
-    return _probe_find_printf(backend) and probe_find_xargs_grep(backend)
-
-
-def _probe_find_printf(backend: "FsBackend") -> bool:
-    """True only if find -printf production wire parses a known row."""
-    find_bin = _which_bin(backend, "find")
-    if not find_bin:
-        return False
-
-    # Prefer backend-local temp when sandbox; else host mkdtemp + path if local.
-    tmp_remote: Optional[str] = None
-    host_tmp: Optional[str] = None
-    known = "probe_known.txt"
-    try:
-        if getattr(backend, "is_sandbox", False):
-            # Create temp dir inside container via mktemp/mkdir.
-            res = backend.exec("mktemp -d -t gc_probe_XXXXXX", timeout=10)
-            if res.return_code != 0 or not (res.stdout or "").strip():
-                # Fallback fixed path under /tmp
-                tmp_remote = f"/tmp/{_probe_tmp_name()}"
-                mk = backend.exec(f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
-                if mk.return_code != 0:
-                    return False
-            else:
-                tmp_remote = (res.stdout or "").strip().splitlines()[0].strip()
-            known_path = f"{tmp_remote.rstrip('/')}/{known}"
-            w = backend.exec(
-                f"printf 'x\\n' > {shlex.quote(known_path)}", timeout=10
-            )
-            if w.return_code != 0:
-                return False
-            root = tmp_remote
-        else:
-            host_tmp = tempfile.mkdtemp(prefix="gc_probe_")
-            known_path = os.path.join(host_tmp, known)
-            with open(known_path, "w", encoding="utf-8") as fh:
-                fh.write("x\n")
-            root = host_tmp
-
-        argv = [
-            find_bin,
-            root,
-            "-mindepth",
-            "1",
-            "-printf",
-            "%P\t%y\n",
-        ]
-        # exec_argv passes real tab/newline in the format string.
-        res = _run_argv(backend, argv, timeout=15)
-        if res.return_code not in (0, None):
-            # find returns 0 on success; some return 1 with partial — require 0
-            if res.return_code != 0:
-                return False
-        if getattr(res, "stdout_hit_capture_cap", False):
-            return False
-        rows = parse_find_printf_lines(res.stdout or "")
-        for rel, is_dir in rows:
-            if rel == known or rel.endswith("/" + known) or rel.endswith(known):
-                if not is_dir:
-                    return True
-        # Accept any file row named known basename
-        bases = {os.path.basename(r) for r, d in rows if not d}
-        return known in bases
-    except Exception:
-        return False
-    finally:
-        try:
-            if tmp_remote:
-                backend.exec(f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
-        except Exception:
-            pass
-        if host_tmp:
-            try:
-                import shutil
-
-                shutil.rmtree(host_tmp, ignore_errors=True)
-            except Exception:
-                pass
+    return probe_find_xargs_grep(backend)
 
 
 def probe_has_grep(backend: "FsBackend") -> bool:
