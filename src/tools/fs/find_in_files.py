@@ -1205,6 +1205,7 @@ class FindInFiles(AbstractSimpleTool):
             exclude_dir_names=exclude_names,
             exclude_nested_dot_dirs=exclude_dot,
             file_pattern=file_pattern,
+            exclude_paths=accepted_excludes,
         )
         if n is None:
             return None, "native_error"
@@ -1234,6 +1235,7 @@ class FindInFiles(AbstractSimpleTool):
             report_path=lambda p: p,
             is_dir_target=True,
             allow_path=_hit_allowed,
+            exclude_paths=accepted_excludes,
         )
         if result is None or result.failure:
             return None, (result.failure if result is not None else "native_error")

@@ -62,14 +62,11 @@ def native_grep_refusal(
     except Exception:
         return "no_grep"
 
-    # Call-time abs excludes cannot be expressed as basename prune/--exclude-dir.
-    if call_exclude_dirs:
-        return "exclude_dirs"
-
     names = [n for n in (exclude_dir_names or []) if n]
-    need_prune = bool(names) or bool(exclude_nested_dot_dirs)
+    # Call-time absolute excludes ride the same recipe as ``find -path … -prune``.
+    need_prune = bool(names) or bool(exclude_nested_dot_dirs) or bool(call_exclude_dirs)
     if need_prune:
-        # Express hard/nested-dot skips via find -prune (needs usable find).
+        # Express hard/nested-dot/call-time skips via find -prune (needs usable find).
         try:
             if not getattr(backend, "has_find", False):
                 return "no_find"
@@ -138,6 +135,11 @@ def parse_grep_match_lines(
     return matches
 
 
+def _fnmatch_escape(path: str) -> str:
+    """Literal ``find -path`` pattern: backslash-escape the fnmatch metacharacters."""
+    return "".join("\\" + ch if ch in "\\*?[]" else ch for ch in path)
+
+
 def _build_find_prune_argv(
     path: str,
     *,
@@ -145,6 +147,7 @@ def _build_find_prune_argv(
     exclude_nested_dot_dirs: bool,
     file_pattern: Optional[str],
     print0: bool = True,
+    exclude_paths: Sequence[str] = (),
 ) -> List[str]:
     """find PATH with basename prunes → file paths.
 
@@ -152,6 +155,8 @@ def _build_find_prune_argv(
     basename is a hard-exclude name (search-inside-junk-dir is allowed).
     ``-H`` resolves a symlinked START path only (parity with ``os.walk``, which
     always follows its top); links met inside the tree stay unfollowed.
+    ``exclude_paths``: call-time absolute directories, pruned with the POSIX
+    ``-path`` primary (escaped, so a literal path never acts as a glob).
     """
     argv: List[str] = ["find", "-H", path, "-mindepth", "1"]
     prune_parts: List[List[str]] = []
@@ -161,6 +166,9 @@ def _build_find_prune_argv(
         prune_parts.append(["-type", "d", "-name", name])
     if exclude_nested_dot_dirs:
         prune_parts.append(["-type", "d", "-name", ".*"])
+    for abs_dir in exclude_paths:
+        if abs_dir:
+            prune_parts.append(["-type", "d", "-path", _fnmatch_escape(abs_dir)])
 
     if prune_parts:
         argv.append("(")
@@ -216,6 +224,7 @@ def build_find_xargs_grep_command(
     exclude_nested_dot_dirs: bool,
     file_pattern: Optional[str],
     grep_argv: Sequence[str],
+    exclude_paths: Sequence[str] = (),
 ) -> str:
     """``find -print0 | xargs -0 -r grep …`` — one wire for probe and production.
 
@@ -229,6 +238,7 @@ def build_find_xargs_grep_command(
         exclude_dir_names=exclude_dir_names,
         exclude_nested_dot_dirs=exclude_nested_dot_dirs,
         file_pattern=file_pattern,
+        exclude_paths=exclude_paths,
     )
     find_s = " ".join(shlex.quote(a) for a in find_argv)
     grep_s = " ".join(shlex.quote(a) for a in grep_argv)
@@ -242,6 +252,7 @@ def count_native_candidates(
     exclude_dir_names: Sequence[str],
     exclude_nested_dot_dirs: bool,
     file_pattern: Optional[str],
+    exclude_paths: Sequence[str] = (),
 ) -> Optional[int]:
     """Count files find would search. None on failure."""
     find_argv = _build_find_prune_argv(
@@ -250,6 +261,7 @@ def count_native_candidates(
         exclude_nested_dot_dirs=exclude_nested_dot_dirs,
         file_pattern=file_pattern,
         print0=False,
+        exclude_paths=exclude_paths,
     )
     # Count newlines in -print output (paths should not contain newlines).
     find_s = " ".join(shlex.quote(a) for a in find_argv)
@@ -278,6 +290,7 @@ def run_native_grep(
     report_path: Callable[[str], str],
     is_dir_target: bool,
     allow_path: Optional[Callable[[str], bool]] = None,
+    exclude_paths: Sequence[str] = (),
 ) -> NativeGrepResult:
     """Execute grep recipe (optionally via find prune).
 
@@ -296,7 +309,9 @@ def run_native_grep(
         )
 
     names = [n for n in exclude_dir_names if n]
-    need_prune = is_dir_target and (bool(names) or exclude_nested_dot_dirs)
+    need_prune = is_dir_target and (
+        bool(names) or exclude_nested_dot_dirs or bool(exclude_paths)
+    )
 
     grep_argv: List[str] = build_grep_argv_flags(
         case_insensitive=plan.case_insensitive, fixed=plan.fixed
@@ -312,6 +327,7 @@ def run_native_grep(
                 exclude_nested_dot_dirs=exclude_nested_dot_dirs,
                 file_pattern=file_pattern,
                 grep_argv=grep_argv,
+                exclude_paths=exclude_paths,
             )
             res = backend.exec(cmd, timeout=120, env=dict(_GREP_CLEAN_ENV))
         elif is_dir_target:

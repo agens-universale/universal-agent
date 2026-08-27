@@ -177,8 +177,14 @@ def test_refusal_names_the_missing_grep():
     assert _refusal(b) == "no_grep"
 
 
-def test_refusal_names_call_time_exclude_dirs():
-    assert _refusal(_ready(), call_exclude_dirs=["/work/vendor"]) == "exclude_dirs"
+def test_call_time_exclude_dirs_ride_the_native_recipe_when_find_is_there():
+    assert _refusal(_ready(), call_exclude_dirs=["/work/vendor"]) is None
+
+
+def test_call_time_exclude_dirs_need_find_for_the_path_prune():
+    b = _ready()
+    b.has_find = False
+    assert _refusal(b, call_exclude_dirs=["/work/vendor"]) == "no_find"
 
 
 def test_refusal_names_a_non_native_pattern():
@@ -213,3 +219,60 @@ def test_successful_run_has_no_failure():
     res = _run(_Backend(stdout="/work/a.py:1:KEY\n"))
     assert res.failure is None
     assert [m["file"] for m in res.matches] == ["/work/a.py"]
+
+
+# --- call-time exclude_dirs on the native recipe: find -path … -prune -------------
+
+def test_prune_argv_excludes_call_time_paths():
+    argv = _build_find_prune_argv(
+        "/work",
+        exclude_dir_names=[],
+        exclude_nested_dot_dirs=False,
+        file_pattern=None,
+        exclude_paths=["/work/vendor"],
+    )
+    assert argv[argv.index("-path") + 1] == "/work/vendor"
+    assert argv[argv.index("-prune") - 1] == ")"
+
+
+def test_prune_argv_escapes_glob_metachars_in_paths():
+    argv = _build_find_prune_argv(
+        "/work",
+        exclude_dir_names=[],
+        exclude_nested_dot_dirs=False,
+        file_pattern=None,
+        exclude_paths=["/work/a[1]*?"],
+    )
+    assert argv[argv.index("-path") + 1] == r"/work/a\[1\]\*\?"
+
+
+def test_run_native_grep_prunes_call_time_paths():
+    backend = _Backend()
+    run_native_grep(
+        backend,
+        "/work",
+        PLAN,
+        exclude_dir_names=[".git"],
+        exclude_nested_dot_dirs=True,
+        file_pattern=None,
+        max_matches=10,
+        report_path=lambda p: p,
+        is_dir_target=True,
+        exclude_paths=["/work/vendor"],
+    )
+    assert "-path /work/vendor" in backend.commands[0]
+
+
+def test_count_native_candidates_prunes_call_time_paths():
+    from utils.native_fs_search import count_native_candidates
+
+    backend = _Backend(stdout="3\n")
+    assert count_native_candidates(
+        backend,
+        "/work",
+        exclude_dir_names=[".git"],
+        exclude_nested_dot_dirs=True,
+        file_pattern=None,
+        exclude_paths=["/work/vendor"],
+    ) == 3
+    assert "-path /work/vendor" in backend.commands[0]

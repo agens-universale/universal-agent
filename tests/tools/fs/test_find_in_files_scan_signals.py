@@ -302,3 +302,37 @@ def test_capture_cap_below_limit_is_reported_as_output_capped(tmp_path, monkeypa
     assert data["more_matches_may_exist"] is True
     assert "narrow" in data["guidance"].lower()
     assert "fallback_reason" not in data
+
+
+# --- call-time exclude_dirs stay on the native path ----------------------------
+
+def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):
+    import utils.native_fs_search as native_fs_search
+
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "x.py").write_text("KEY\n", encoding="utf-8")
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    seen_run, seen_count = {}, {}
+
+    def run_spy(*args, **kwargs):
+        seen_run.update(kwargs)
+        return _native_result(tmp_path)
+
+    def count_spy(*args, **kwargs):
+        seen_count.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(native_fs_search, "run_native_grep", run_spy)
+    monkeypatch.setattr(native_fs_search, "count_native_candidates", count_spy)
+    tool = _tool(tmp_path)
+    backend_cls = type(tool._backend)
+    monkeypatch.setattr(backend_cls, "has_grep", True, raising=False)
+    monkeypatch.setattr(backend_cls, "has_find", True, raising=False)
+
+    vendor = str(tmp_path / "vendor")
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", exclude_dirs=[vendor])
+
+    assert data["search_backend"] == "grep"
+    assert "fallback_reason" not in data
+    assert seen_run["exclude_paths"] == [vendor]
+    assert seen_count["exclude_paths"] == [vendor]
