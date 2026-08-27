@@ -625,6 +625,15 @@ def split_at_first_finalizer(tool_calls: List[Dict]) -> tuple[List[Dict], List[D
     return tool_calls, []
 
 
+# finish_reason == "length": JSON вызова усечён потолком max_tokens — объясняем
+# модели причину и советуем компактный вариант / разбиение на вызовы.
+_TRUNCATED_ARGUMENTS_HINT = (
+    "⚠ Output was truncated: output token limit reached "
+    "(finish_reason == \"length\"). Shorten the response "
+    "or split it into multiple calls with smaller payloads."
+)
+
+
 def process_tool_calls(
     messages: List[Dict],
     state: State,
@@ -672,6 +681,7 @@ def process_tool_calls(
     tools_outputs = []
     # Один turn-финализатор на ход: executed исполняем, skipped — только synthetic output.
     unknown_in_batch = 0
+    invalid_in_batch = 0
     executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
     # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
     # executed-output'ами до блокирующего turn_ask_human (иначе пропущенный тул
@@ -770,32 +780,15 @@ def process_tool_calls(
                 call_id=tool_call_id,
             )
         except WrongFunctionArgumentsException as exc:
+            # Отказ одного вызова — не отказ хода: невалидные аргументы становятся
+            # output этого вызова (как unknown_tool), остальные вызовы батча
+            # исполняются. Дальше общий путь: tool_end, sidecar, function_call_output.
             if getattr(exc, "call_id", None) is None:
                 exc.call_id = tool_call_id
-            # Даже при ошибке аргументов закрыть «бегущую» строку в TUI.
-            elapsed_ms = int((time.monotonic() - started_at) * 1000)
-            if emit_tool_row:
-                emit_progress(
-                    ctx,
-                    state,
-                    "tool_end",
-                    elapsed_ms=elapsed_ms,
-                    tool_name=tool_name,
-                    tool_call_id=call_id_str,
-                    ok=False,
-                    error_brief=str(exc),
-                )
-            if persist_tool_trace:
-                persist_subagent_trace(
-                    ctx,
-                    kind="error",
-                    payload={
-                        "type": "function_call_output",
-                        "call_id": tool_call_id,
-                        "output": str(exc),
-                    },
-                )
-            raise
+            if getattr(state, "last_finish_reason", None) == "length":
+                exc.extra_hint = _TRUNCATED_ARGUMENTS_HINT
+            invalid_in_batch += 1
+            tool_res_raw = exc.to_tool_output()
         # Live-прогресс: тул закончил — или текст intermediate_reply.
         # В историю треда это не пишется.
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
@@ -915,6 +908,7 @@ def process_tool_calls(
     # Skip-output'ы уже посчитаны выше и сфлашены перед блокировкой — добавляем в
     # возврат (тред/state дедупят повторный персист по make_message_key).
     state.last_batch_unknown_tool_count = unknown_in_batch
+    state.last_batch_invalid_arguments_count = invalid_in_batch
     tools_outputs.extend(skip_outputs)
 
     if aborted_by_user_stop:
@@ -1330,8 +1324,11 @@ def run_agent(
                         n_unknown = int(
                             getattr(state, "last_batch_unknown_tool_count", 0) or 0
                         )
-                        if n_unknown > 0:
-                            tool_error_cnt += n_unknown
+                        n_invalid = int(
+                            getattr(state, "last_batch_invalid_arguments_count", 0) or 0
+                        )
+                        if n_unknown + n_invalid > 0:
+                            tool_error_cnt += n_unknown + n_invalid
                         else:
                             tool_error_cnt = 0
                         if (
@@ -1414,15 +1411,10 @@ def run_agent(
             except WrongFunctionArgumentsException as e:
                 run_logger.error(e, exc_info=True)
                 tool_error_cnt += 1
-                # Если finish_reason=="length" — JSON был усечён потолком
-                # max_tokens. Объясняем модели причину и советуем компактный
-                # вариант/разбиение на вызовы; иначе — feedback как есть.
+                # Страховка для путей вне батча (finish-аргументы и т.п.): батч
+                # свои невалидные вызовы закрывает сам в process_tool_calls.
                 if getattr(state, "last_finish_reason", None) == "length":
-                    e.extra_hint = (
-                        "⚠ Output was truncated: output token limit reached "
-                        "(finish_reason == \"length\"). Shorten the response "
-                        "or split it into multiple calls with smaller payloads."
-                    )
+                    e.extra_hint = _TRUNCATED_ARGUMENTS_HINT
                 messages = [
                     _make_technical_feedback_user_message(
                         e.to_llm_feedback(),

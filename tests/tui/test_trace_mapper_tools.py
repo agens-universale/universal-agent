@@ -387,3 +387,21 @@ def test_nested_error_dict_still_wins_over_message():
     )
 
     assert _summarize_output(raw, error=True) == "path must be absolute"
+
+
+def test_function_call_output_invalid_arguments_is_error():
+    """Конверт invalid_arguments (вызов с битыми аргументами больше не роняет батч)
+    рендерится как error-строка того же вызова."""
+    from tools.arguments_validation import WrongFunctionArgumentsException
+
+    exc = WrongFunctionArgumentsException(
+        "Unexpected field 'bogus'", received_args='{"bogus": 1}', tool_name="session_think"
+    )
+    ev = map_message(
+        {"type": "function_call_output", "name": "session_think", "call_id": "fc_bad",
+         "output": exc.to_tool_output()},
+        no=1, ts="t",
+    )
+    assert ev.kind == "error"
+    assert ev.call_id == "fc_bad"
+    assert ev.summary == "Unexpected field 'bogus'"
