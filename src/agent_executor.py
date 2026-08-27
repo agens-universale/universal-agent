@@ -556,6 +556,7 @@ class AgentExecutor:
                 run_usage,
                 config_dict.get("pricing"),
                 config_dict.get("model"),
+                config_dict.get("completions_url"),
             )
             if usage_text:
                 if logger is not None:
@@ -567,6 +568,7 @@ class AgentExecutor:
                     run_usage,
                     config_dict.get("pricing"),
                     config_dict.get("model"),
+                    config_dict.get("completions_url"),
                 )
                 if usage_dict:
                     logger.info(

@@ -251,12 +251,18 @@ async def test_wizard_connection_footer_yields_to_the_open_preset_list(tmp_path)
 
 @pytest.mark.asyncio
 async def test_wizard_connection_footer_when_no_preset_matches(tmp_path):
-    """Свой адрес выбивает из списка все строки: подставлять нечего, Enter просто
-    сворачивает список и оставляет набранное."""
+    """Список раскрыт поверх своего адреса — подсвечивать нечего: Enter не подставит,
+    а просто свернёт список и оставит набранное. Футер обязан звать клавишу так же.
+
+    Путь до состояния — живой: набрали свой адрес (список свернулся, канон в редакции
+    2026-08-18), затем сами позвали список `Alt+↓`. Раньше сюда приводила одна печать,
+    но раскрытый пустой список забирал ↑/↓ и обещал Enter то, чего тот не делает."""
     from textual.widgets import Input
     from tests.tui.conftest import wizard_connection_step
     async with wizard_connection_step(tmp_path) as (pilot, scr):
         scr.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
+        await pilot.pause()
+        await pilot.press("alt+down")
         await pilot.pause()
         footer = _footer_widget(scr)
         assert "Enter — подставить" not in footer
@@ -299,14 +305,16 @@ def _set_footer_widget(scr) -> str:
 
 @pytest.mark.asyncio
 async def test_settings_connection_footer_yields_to_the_open_preset_list(tmp_path):
-    """Секция «Подключение» открывается с РАСКРЫТЫМ пресет-листом (адрес пуст или
-    совпал с пресетом — чистая установка и все, кто выбирал адрес из списка). Enter
-    там подставляет провайдера и не сохраняет, Esc сворачивает список — футер
-    «Enter — сохранить · Esc — меню» врёт в самом частом состоянии секции."""
+    """Секция «Подключение» с ПУСТЫМ адресом открывается с раскрытым пресет-листом
+    (чистая установка). Enter там подставляет провайдера и не сохраняет, Esc
+    сворачивает список — футер «Enter — сохранить · Esc — меню» врал бы.
+
+    Канон 2026-08-17: заполненный адрес список больше не поднимает, поэтому состояние
+    задаётся пустым полем, а не совпадением с пресетом."""
     from config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from tests.tui.conftest import settings_connection
     from tui.editors.connection import ConnectionEditor
-    async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[0].url) as (_pilot, scr):
+    async with settings_connection(tmp_path, url="") as (_pilot, scr):
         assert scr.query_one(ConnectionEditor).presets_open
         footer = _set_footer_widget(scr)
         assert "Enter — подставить" in footer and "Esc — свернуть" in footer
@@ -315,13 +323,17 @@ async def test_settings_connection_footer_yields_to_the_open_preset_list(tmp_pat
 
 @pytest.mark.asyncio
 async def test_settings_connection_footer_when_no_preset_matches(tmp_path):
-    """Свой адрес выбивает из списка все строки: подставлять нечего, Enter просто
-    сворачивает список и оставляет набранное (те же слова, что у мастера)."""
-    from textual.widgets import Input
+    """Список раскрыт поверх своего адреса — подсвечивать нечего: Enter не подставит,
+    а свернёт список и оставит набранное (те же слова, что у мастера).
+
+    Входим со своим адресом — на непустом поле список свёрнут (канон), — и зовём его
+    сами через `Alt+↓`. Печать сюда больше не приводит: без совпадений список
+    сворачивается (редакция 2026-08-18)."""
     from config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from tests.tui.conftest import settings_connection
-    async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[0].url) as (pilot, scr):
-        scr.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
+    async with settings_connection(tmp_path,
+                                   url="https://my-own-host.internal/v1") as (pilot, scr):
+        await pilot.press("alt+down")
         await pilot.pause()
         footer = _set_footer_widget(scr)
         assert "Enter — подставить" not in footer
@@ -334,7 +346,7 @@ async def test_settings_connection_footer_returns_to_the_section_after_esc(tmp_p
     в меню. Футер, застрявший на обещаниях списка, врал бы теперь в другую сторону."""
     from config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from tests.tui.conftest import settings_connection
-    async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[0].url) as (pilot, scr):
+    async with settings_connection(tmp_path, url="") as (pilot, scr):
         await pilot.press("escape")
         await pilot.pause()
         footer = _set_footer_widget(scr)

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
-from intent_log.serialize import deserialize_list, serialize_for_meta
+from intent_log.serialize import serialize_for_meta
 from persistence.schema import (
     STATE_SCHEMA_VERSION,
-    StateSchemaError,
+    normalize_session_todo,
     normalize_working_memory,
     reject_legacy_memory_keys,
     serialize_shared_block,
@@ -30,6 +30,7 @@ class ThreadMetaMapper:
                 notes_md=str(shared_raw.get("notes_md") or ""),
                 fetch_url_cache=dict(shared_raw.get("fetch_url_cache") or {}),
                 confirm_rules=dict(shared_raw.get("confirm_rules") or {}),
+                session_todo=normalize_session_todo(shared_raw.get("session_todo")),
             )
 
         return None

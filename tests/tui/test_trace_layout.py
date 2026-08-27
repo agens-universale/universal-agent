@@ -155,3 +155,48 @@ async def test_meta_lines_have_top_margin_class():
             if r.has_class("line-meta")
         ]
         assert len(meta_rows) >= 1
+
+
+@pytest.mark.asyncio
+async def test_todo_row_has_air_above_and_no_double_gap():
+    """Чек-лист session_todo обособлен пустой строкой СВЕРХУ (конвенция трейса:
+    разделение через margin-top следующего элемента), и ровно одной — не двумя."""
+    pytest.importorskip("textual")
+    import json
+    from tui.app import TuiApp
+    from tui.models import TraceEvent
+    from tui.widgets.trace_row import TraceRow
+
+    def call_ev(no, name, args):
+        return TraceEvent(
+            no=no, event_ts_utc_iso="2026-07-30T00:00:00Z", kind="call",
+            title=name, summary=f"{name}(...)", tool_name=name,
+            call_id=f"c{no}", full_payload={"arguments": json.dumps(args)},
+        )
+
+    todo_ev = TraceEvent(
+        no=2, event_ts_utc_iso="2026-07-30T00:00:00Z", kind="todo",
+        title="session_todo", summary="чек-лист 1/2\n  ✓ Шаг 1\n  → Шаг 2",
+        tool_name="session_todo", call_id="c2", full_payload=None,
+    )
+
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        scr._render_event(call_ev(1, "fs_read_file", {"path": "a.py"}))
+        scr._render_event(todo_ev)
+        scr._render_event(call_ev(3, "exec_command", {"command": "pytest"}))
+        await pilot.pause()
+
+        # v5: воздух живёт на блоке-контейнере, а не на строке заголовка.
+        from tui.widgets.todo_block import TodoBlock
+        blocks = list(scr.query(TodoBlock))
+        assert len(blocks) == 1
+        todo = blocks[0]
+        assert todo.styles.margin.top == 1, "нужен отступ сверху"
+        assert todo.styles.margin.bottom == 0, (
+            "нижнего отступа быть не должно: он сложится с margin-top следующего "
+            "элемента (конвенция трейса, см. .user-band в styles.tcss)"
+        )
+        # Заголовок внутри блока собственного воздуха не несёт (иначе сложится).
+        header = todo.todo_rows[0]
+        assert header.has_class("line-todo") and header.styles.margin.top == 0

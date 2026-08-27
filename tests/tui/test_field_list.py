@@ -139,7 +139,9 @@ async def test_move_returns_key_when_filter_matches_nothing():
         assert host.ctrl.move(1) is False
 
 
-async def test_close_removes_rows_and_hint_reopen_does_not_duplicate():
+async def test_close_removes_rows_but_keeps_the_hint_reopen_does_not_duplicate():
+    """Свёртывание уносит строки списка, но НЕ строку-подсказку: её текст —
+    функция состояния (см. `_sync_hint`), и виджет живёт, пока живо поле."""
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()
@@ -148,7 +150,7 @@ async def test_close_removes_rows_and_hint_reopen_does_not_duplicate():
         host.ctrl.close()
         await pilot.pause()
         assert not _rows(host)
-        assert not list(host.query(f".{_HINT}"))
+        assert "показать список" in _hint_text(host)
         host.ctrl.open()
         await pilot.pause()
         host.ctrl.open()                       # повторный open() — без дублей строк
@@ -399,13 +401,45 @@ async def test_pick_becomes_the_new_baseline():
 
 
 async def test_closed_hint_tells_how_to_reopen():
+    """Свёрнутый список называет способ себя вызвать — ДОСЛОВНО `LIST_CLOSED_HINT`.
+
+    Гоняется боевым путём (`close()`), а не ручным показом: `show_closed_hint` и
+    `hide_closed_hint` удалены вместе с каноном 2026-08-17 — строка под полем
+    постоянна, и единственное, что с ней происходит, это смена текста."""
     from tui.editors.field_list import LIST_CLOSED_HINT
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()
-        host.ctrl.show_closed_hint()
+        host.ctrl.open()
+        await pilot.pause()
+        host.ctrl.close()
         await pilot.pause()
         assert _hint(host) == LIST_CLOSED_HINT
-        host.ctrl.hide_closed_hint()
+
+
+def _hint_text(host) -> str:
+    """Текст живой строки-подсказки поля («» — строки нет)."""
+    live = [w for w in host.query(f".{_HINT}") if not w._pruning]
+    return str(live[-1].render()) if live else ""
+
+
+async def test_close_keeps_the_hint_and_switches_its_text():
+    """Строка-подсказка переживает свёртывание: её текст — функция состояния списка.
+
+    Раньше `close()` сносил виджет, и каждый путь закрытия обязан был помнить о
+    ремонте — три пути на пять точек. Забыли бы одну (а забыли две: Enter и фильтр
+    в ноль) — строка пропадала, и форма дёргалась на строку вверх."""
+    host = _Host()
+    app = _harness(host)
+    async with app.run_test() as pilot:
         await pilot.pause()
-        assert not list(host.query(f".{_HINT}"))
+        host.ctrl.open()
+        await pilot.pause()
+        assert host.ctrl.is_open
+        assert "показать список" not in _hint_text(host)
+
+        host.ctrl.close()
+        await pilot.pause()
+
+        assert not host.ctrl.is_open
+        assert "показать список" in _hint_text(host)

@@ -1,4 +1,4 @@
-"""Нормализация ``usage`` из ответов бэкендов к тройке (input, output, cached).
+"""Нормализация ``usage`` из ответов бэкендов к ``UsageSample``.
 
 Две формы токенов:
 - chat_completions: ``{"prompt_tokens": .., "completion_tokens": ..}``;
@@ -9,14 +9,32 @@
 - DeepSeek-native: ``prompt_cache_hit_tokens``.
 ``cached`` — это часть ``input`` (cached ≤ input), не отдельные токены.
 
-Возвращает ``None``, если usage отсутствует/битый — вызывающий код тогда
+Возвращает ``UsageSample`` или ``None``, если usage отсутствует/битый — вызывающий код тогда
 фиксирует пропуск (``UsageAccount.add_missing``) и НЕ добавляет токены.
 Функция никогда не кидает исключение.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
+import math
+from typing import Any, NamedTuple, Optional, Tuple
+
+
+class UsageSample(NamedTuple):
+    """Разобранный ``usage`` одного вызова.
+
+    ``cost`` — фактическая стоимость от провайдера (OpenRouter кладёт её в каждый
+    ответ). Валюту поле не сообщает — она выводится из адреса эндпоинта, см.
+    ``usage/currency.py``. ``billed`` — «цена этого вызова известна»: отделяет
+    бесплатную модель (``cost: 0``) от отсутствия цены.
+    """
+
+    input: int
+    output: int
+    cached: int
+    cost: Optional[float] = None
+    billed: bool = False
+
 
 # (chat_completions ключ, responses ключ)
 _INPUT_KEYS = ("prompt_tokens", "input_tokens")
@@ -60,8 +78,31 @@ def _pick_cached(raw: dict) -> int:
     return 0
 
 
-def normalize_usage(raw: Any, backend_mode: str | None = None) -> Optional[Tuple[int, int, int]]:
-    """Вернуть (input_tokens, output_tokens, cached_tokens) или None, если usage не пришёл.
+def _is_byok(raw: dict) -> bool:
+    """``is_byok`` — bool или строка ("true"/"false"), провайдер-агностично."""
+    value = raw.get("is_byok")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return False
+
+
+def _pick_cost(raw: dict) -> Optional[float]:
+    """Фактическая стоимость вызова или None, если её нет/ей нельзя доверять."""
+    # BYOK: неизвестно, лежит в cost комиссия или полная цена (см. спеку §4.4).
+    if _is_byok(raw):
+        return None
+    value = raw.get("cost")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value < 0 or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def normalize_usage(raw: Any, backend_mode: str | None = None) -> Optional[UsageSample]:
+    """Вернуть ``UsageSample`` с токенами и стоимостью или None, если usage не пришёл.
 
     ``cached`` — часть ``input`` (доля, попавшая в кэш-ставку); ограничена сверху input.
     ``backend_mode`` сейчас не обязателен: оба набора ключей пробуются
@@ -75,4 +116,11 @@ def normalize_usage(raw: Any, backend_mode: str | None = None) -> Optional[Tuple
         return None
     inp = input_tokens or 0
     cached = min(_pick_cached(raw), inp)  # cached не может превышать input
-    return (inp, output_tokens or 0, cached)
+    cost = _pick_cost(raw)
+    return UsageSample(
+        input=inp,
+        output=output_tokens or 0,
+        cached=cached,
+        cost=cost,
+        billed=cost is not None,
+    )

@@ -15,7 +15,6 @@ import functools
 import json
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable
 
 from security.confirm_port import request_confirm

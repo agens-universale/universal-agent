@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 DEFAULT_LAST_DIALOG_STEPS_COUNT = 5
 DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = 1500

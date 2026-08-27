@@ -84,6 +84,9 @@ backend:
   # false — типично для GigaCode и non-OpenAI; при true локальная валидация
   # принимает omit semantic optional (x-optional-keys).
   openai_strict_tools_schema: false
+  # Слать ли провайдеру поле function.strict в схемах тулов.
+  # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
+  send_tool_strict: true
   # Vendor-specific параметры. Настраивайте под свой провайдер.
   chat_completion_kwargs:
     temperature: 0.7
@@ -319,6 +322,14 @@ working_memory:
   max_chars_state: 6000
   max_chars_knowledge: 8000
   total_budget_chars: 20000
+
+# Чек-лист задачи (session_todo): каждые reminder_steps шагов без вызова тула —
+# напоминание. Есть незакрытые пункты — директивное «обнови список»; активного
+# плана нет (пусто ИЛИ всё закрыто) — мягкое «если задача того стоит, заведи»,
+# один раз за прогон. Счётчик переживает границу хода. 0 — политика выключена
+# целиком (тул остаётся, вся инициатива на модели).
+todo:
+  reminder_steps: 10
 
 # Technical hints о памяти (tool_usage_notice, long memory)
 tool_usage_notice:
@@ -624,7 +635,8 @@ mcp:
     request_timeout_sec: 600
 
 # Подсчёт токенов и стоимости прогона. Токены считаются всегда; цена показывается
-# только при enabled: true и наличии тарифа.
+# только при enabled: true и наличии ЛЮБОЙ цены — фактической от провайдера или
+# расчётной по тарифу.
 # - enabled / currency / per_tokens — глобальные;
 # - input/output/cache_read на верхнем уровне — ДЕФОЛТНЫЙ тариф (применяется к agent.model);
 #   для одной модели имя указывать не нужно;
@@ -636,6 +648,11 @@ pricing:
   enabled: false
   currency: "₽"
   per_tokens: 1000000          # ставки указаны за столько токенов
+  # Ставки нужны только провайдерам, которые не сообщают стоимость сами.
+  # OpenRouter и routerai.ru присылают фактическую цену в каждом ответе — тогда
+  # эта секция не используется. Валюта такой цены определяется по адресу вызова
+  # (домен .ru — рубли, остальное — доллары) и запоминается вместе с суммой:
+  # смена провайдера посреди диалога не переразмечает уже потраченное.
   # Дефолтный тариф под agent.model (имя модели указывать не нужно):
   # input: 59
   # output: 118
@@ -649,13 +666,19 @@ pricing:
   #     output: 0.15
 
 # Пресеты выпадающего списка в полях «Адрес API-сервера» (можно дополнять своими).
-endpoint_presets:
-  - name: OpenRouter
-    url: https://openrouter.ai/api/v1/chat/completions
-  - name: Cloud.ru
-    url: https://foundation-models.api.cloud.ru/v1/chat/completions
-  - name: GigaCode
-    url: https://litellm-proxy.sberai-rnd.ru/v1/chat/completions
+# Пресеты адресов провайдеров — выпадающий список под полем «Адрес API-сервера».
+# Закомментировано намеренно: пока ключа тут нет, работает список из кода, и он
+# обновляется вместе с версией агента. Раскомментируете — ваш список перекроет
+# кодовый и с обновлениями меняться уже не будет.
+# endpoint_presets:
+#   - name: OpenRouter
+#     url: https://openrouter.ai/api/v1/chat/completions
+#   - name: GigaCode
+#     url: https://litellm-proxy.sberai-rnd.ru/v1/chat/completions
+#   - name: Cloud.ru
+#     url: https://foundation-models.api.cloud.ru/v1/chat/completions
+#   - name: RouterAI
+#     url: https://routerai.ru/api/v1/chat/completions
 
 # Сборка мусора (gc.collect) — точки C1/C2/C3.
 # C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.

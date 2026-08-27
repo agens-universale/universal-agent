@@ -7,7 +7,7 @@ Textual wrap'ит его внутри этой колонки. Wrapped-стро�
 
 Используется для всех типов строк трассы кроме:
 - user reply (UserReplyContainer / band)
-- fenced code-block panel (AgentReplyLine + rich.syntax)
+- fenced code-block panel (BlockPanel)
 - tool-вызовов (ToolCallRow — собственный compose, тоже Horizontal-based)
 """
 from __future__ import annotations
@@ -76,7 +76,6 @@ class TraceRow(ClickModelMixin, Widget):
         super().__init__(**kwargs)
         self._prefix = prefix
         self._content = content
-        self._kind_class = kind_class
         self._event_no = event_no
         # Apply kind_class to TraceRow itself so CSS rules (margin-top etc.)
         # push the whole row, keeping prefix-Static and content-Static aligned.

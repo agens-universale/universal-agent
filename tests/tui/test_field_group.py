@@ -334,11 +334,16 @@ async def test_ctrl_space_on_an_env_reference_still_probes(tmp_path):
 
 @pytest.mark.asyncio
 async def test_preset_list_opens_full_not_filtered_by_the_current_address(tmp_path):
-    """Вход на экран: список раскрыт ПОЛНЫМ, курсор на совпавшем пресете.
+    """Раскрытый список — ПОЛНЫЙ, а не сужен текущим адресом.
 
-    Было: при первом входе виден один вариант (значение поля прилетало фильтром через
-    Input.Changed от начального присвоения), а при повторном — все три. Разное
+    Было: при первом раскрытии виден один вариант (значение поля прилетало фильтром
+    через Input.Changed от начального присвоения), а при повторном — все три. Разное
     поведение одного и того же входа (смок 2026-08-04).
+
+    Канон 2026-08-17: заполненный адрес список сам не поднимает, поэтому раскрываем
+    явно (`reload_presets` = Alt+↓). Саму ловушку тест не ловил и раньше (проверено
+    мутацией на ревью 2026-08-18) — он сторожит свойство «раскрытый список полон», и
+    оно сохранено; добавилась проверка, что заполненный адрес список не поднимает.
     """
     pytest.importorskip("textual")
     from tests.tui.conftest import settings_connection
@@ -354,13 +359,16 @@ async def test_preset_list_opens_full_not_filtered_by_the_current_address(tmp_pa
         await pilot.pause()
         ed.escape_presets()
         await pilot.pause()
-        # Вход курсора на адрес = автораскрытие. Гоняем лентой, как это делает экран:
-        # ушли на соседнее поле и вернулись (раньше тут звали `focus_first`, но в проде
-        # его не вызывал никто — он повторял приземление `move` и удалён 2026-08-07).
+        # Гоняем лентой, как это делает экран: ушли на соседнее поле и вернулись.
+        # Возврат на адрес список больше не поднимает (значение задано) — раскрываем
+        # явно, как это делает Alt+↓.
         ed.move(1)
         await pilot.pause()
         ed.move(-1)
         await pilot.pause()
-        assert ed.presets_open, "предусловие: список раскрылся сам"
+        assert not ed.presets_open, "заполненный адрес список сам не поднимает"
+        ed.reload_presets()
+        await pilot.pause()
+        assert ed.presets_open, "предусловие: Alt+↓ раскрыл список"
         rows = [w for w in ed.query(".conn-preset-row") if w.display]
         assert len(rows) == len(presets), "список обязан быть полным, а не сужен адресом"

@@ -167,8 +167,9 @@ def test_wizard_model_snapshot(snap_compare, tmp_path, monkeypatch):
 def test_settings_connection_snapshot(snap_compare, tmp_path, monkeypatch):
     """/settings → «Подключение»: три поля, галка «без авторизации», строка пробы.
 
-    Пресет-лист здесь не раскрыт — в отличие от мастера: адрес уже настроен
-    (канон §2.1 ConnectionEditor — список поднимается только на пустом/пресетном)."""
+    Пресет-лист здесь не раскрыт — в отличие от мастера: адрес уже настроен, а канон
+    2026-08-17 поднимает список только на ПУСТОМ поле. Под адресом вместо списка стоит
+    постоянная строка «Alt+↓ — показать список»."""
     _isolate_config_layers(monkeypatch, tmp_path)
     app = _app(tmp_path, _cfg())
     cfg_file = _write_cfg(tmp_path)

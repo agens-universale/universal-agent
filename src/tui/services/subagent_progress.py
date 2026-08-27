@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, List, Literal, Optional, Sequence
 
+from constants.tool_names import SESSION_TODO_TOOL_NAME
 from tools.subagents.progress import SubagentProgressEvent
 
 ProgressActionKind = Literal[
@@ -62,7 +63,10 @@ def reconcile_batch_phases(rows: Sequence[Any]) -> None:
 def plan_progress_actions(
     events: Sequence[SubagentProgressEvent],
 ) -> List[ProgressAction]:
-    """Превратить drained events в список UI-действий (без виджетов)."""
+    """Превратить drained events в список UI-действий (без виджетов).
+
+    Test-only: не покрывает развёрнутый путь session_todo (routed_todo) —
+    продовый путь для него SubagentProgressConsumer.apply_drained ниже."""
     actions: List[ProgressAction] = []
     last_tool: dict[str, Optional[str]] = {}
 
@@ -181,6 +185,7 @@ class SubagentProgressConsumer:
         show_ask_human: Callable[..., None] | None = None,
         hide_ask_human: Callable[..., None] | None = None,
         mount_nested_user: Callable[..., None] | None = None,
+        mount_nested_todo: Callable[..., None] | None = None,
     ) -> None:
         for ev in events:
             pid = ev.parent_call_id
@@ -189,14 +194,29 @@ class SubagentProgressConsumer:
                     self._last_tool[pid] = ev.tool_name
                 if ev.tool_call_id:
                     self._seen_tool_calls.add(ev.tool_call_id)
-                mount_nested_tool(
-                    parent_call_id=pid,
-                    tool_name=ev.tool_name or "<tool>",
-                    tool_call_id=ev.tool_call_id or "",
-                    args_summary=ev.args_summary or "",
-                    step=ev.step,
-                    max_steps=ev.max_steps,
-                )
+                routed_todo = False
+                # Каждый вызов session_todo — развёрнутым чек-листом (v3 спеки:
+                # правило «первый/смена состава» упразднено живой доводкой).
+                if (
+                    ev.tool_name == SESSION_TODO_TOOL_NAME
+                    and ev.todo_items is not None
+                    and mount_nested_todo is not None
+                ):
+                    mount_nested_todo(
+                        parent_call_id=pid,
+                        tool_call_id=ev.tool_call_id or "",
+                        todo_items=ev.todo_items,
+                    )
+                    routed_todo = True
+                if not routed_todo:
+                    mount_nested_tool(
+                        parent_call_id=pid,
+                        tool_name=ev.tool_name or "<tool>",
+                        tool_call_id=ev.tool_call_id or "",
+                        args_summary=ev.args_summary or "",
+                        step=ev.step,
+                        max_steps=ev.max_steps,
+                    )
                 parent_heartbeat(
                     parent_call_id=pid,
                     step=ev.step,

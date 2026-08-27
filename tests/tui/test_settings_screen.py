@@ -662,11 +662,11 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     дословно `LIST_CLOSED_HINT`). До правки `escape_presets`
     сворачивал список молча — способа узнать про `Alt+↓` не было.
 
-    Фикс-раунд 1 (ревью): подсказка не переживает уход курсора с адреса — с чужого
-    поля `Alt+↓` список адреса уже не раскрывает (`reload_presets` гейтует именно
-    позицию курсора), и висящий текст врал бы про несуществующий путь. Полный путь:
-    Esc → хинт появился → стрелкой ушли на «Токен» → хинта нет → стрелкой вернулись →
-    список раскрылся заново, хинт снова канонный (`PRESET_HINT`)."""
+    Канон 2026-08-17: строка под адресом ПОСТОЯННА — уход курсора её не снимает и
+    текст не меняет. Она ярлык способа, а не команда момента (как `Space —
+    переключить` у галки, работающая только со своей позиции); что нажимать сейчас,
+    отвечает футер. Полный путь: Esc → хинт появился → ушли на «Токен» → хинт НА
+    МЕСТЕ (раньше он исчезал) → вернулись на пустой адрес → список поднялся снова."""
     from tui.editors.field_list import LIST_CLOSED_HINT
     from tui.editors.preset_list import PRESET_HINT
     cfg_file = _write_cfg(tmp_path, url='""')
@@ -685,10 +685,14 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
         assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT
         await pilot.press("down")                       # уйти с адреса на токен
         await pilot.pause()
-        assert not scr.query(".conn-url-preset-hint")   # подсказка ушла вместе с курсором
+        hints = scr.query(".conn-url-preset-hint")
+        assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT   # строка постоянна
         await pilot.press("up")                         # вернуться на адрес
         await pilot.pause()
-        assert scr.query(".conn-preset-row")            # список раскрылся заново
+        # Поле здесь ПУСТОЕ — на нём канон список поднимает, и хинт снова канонный.
+        # (С заполненным адресом список остался бы свёрнутым — см. таблицу состояний
+        # в test_editors_connection::test_canon_table_of_list_states.)
+        assert scr.query(".conn-preset-row")
         hints = scr.query(".conn-url-preset-hint")
         assert hints and str(hints[-1].render()) == PRESET_HINT
 
@@ -726,7 +730,11 @@ async def test_alt_down_over_own_address_opens_without_a_highlight(tmp_path):
 async def test_connection_footer_names_alt_down_only_on_the_url_field(tmp_path):
     """Находка D финального ревью 2026-08-06: Alt+↓ раскрывает список только с адреса
     (`ConnectionEditor.on_url_field` гейтит именно эту позицию, `reload_presets`) —
-    на «Токене»/«Прокси» клавиша молчит, и футер не должен её там обещать."""
+    на «Токене»/«Прокси» клавиша молчит, и футер не должен её там обещать.
+
+    Адрес пресетный, поэтому по канону 2026-08-17 список свёрнут с самого входа —
+    сворачивать его `Esc` больше не нужно (и нельзя: с заполненным адресом `Esc`
+    закрыл бы секцию, это названный побочный эффект канона)."""
     from config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     cfg_file = _write_cfg(tmp_path, url=f'"{DEFAULT_ENDPOINT_PRESETS[0].url}"')
     cfg = _loaded(cfg_file)
@@ -736,17 +744,13 @@ async def test_connection_footer_names_alt_down_only_on_the_url_field(tmp_path):
         scr = await _open_settings(app, pilot, cfg_file, cfg)
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        await pilot.press("escape")          # свернуть список, курсор остаётся на адресе
-        await pilot.pause()
         footer = str(scr.query_one("#set-footer", Static).render())
         assert "Alt+↓ — показать список" in footer
         await pilot.press("down")            # адрес → токен
         await pilot.pause()
         footer2 = str(scr.query_one("#set-footer", Static).render())
         assert "Alt+↓" not in footer2
-        await pilot.press("up")              # обратно на адрес — список раскрылся заново
-        await pilot.pause()
-        await pilot.press("escape")
+        await pilot.press("up")              # обратно на адрес
         await pilot.pause()
         footer3 = str(scr.query_one("#set-footer", Static).render())
         assert "Alt+↓ — показать список" in footer3
@@ -1755,6 +1759,48 @@ async def test_auth_draft_probe_server_ignores_token(tmp_path):
         assert "токен принят" not in probe_line
 
 
+async def test_connection_line_separates_bad_data_from_dead_server(tmp_path):
+    """Три разных «плохо» не должны схлопываться в «сервер недоступен»: кривой
+    токен (запрос вообще не ушёл), неподтверждённый токен (сервер ответил) и
+    настоящий обрыв связи. Раньше первые два печатались как лежачий сервер."""
+    from tui.screens.settings import SettingsScreen, _CONNECTION
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+
+        bad_token = ProbeResult("rejected", None, None, 0,
+                                "в токене недопустимые символы — нужны только латиница и цифры",
+                                auth_state="rejected")
+        line = str(scr._probe_line_text(bad_token, _CONNECTION))
+        assert "недопустимые символы" in line and "сервер недоступен" not in line
+
+        unconfirmed = ProbeResult("unknown", 400, None, 9,
+                                  "не удалось подтвердить токен: на заведомо неверный "
+                                  "сервер отвечает так же (400)")
+        line = str(scr._probe_line_text(unconfirmed, _CONNECTION))
+        assert "подтвердить токен" in line and "сервер недоступен" not in line
+
+        # Настоящий обрыв — единственный случай, когда сервер можно винить.
+        offline = ProbeResult("unknown", None, None, 9,
+                              "нет соединения (timeout)", offline=True)
+        assert "сервер недоступен" in str(scr._probe_line_text(offline, _CONNECTION))
+
+        # А это — наш собственный сбой (так его заворачивает _work). Статуса нет,
+        # как и при обрыве, но сервер здесь ни при чём: раньше вердикт сваливался
+        # в «сервер недоступен», и причина терялась вместе с detail.
+        internal = ProbeResult("unknown", None, None, 0,
+                               "внутренняя ошибка проверки: boom")
+        line = str(scr._probe_line_text(internal, _CONNECTION))
+        assert "внутренняя ошибка" in line and "сервер недоступен" not in line
+
+
 async def test_connection_probe_line_combined_verdicts(tmp_path):
     """Строка probe «Подключения» — совокупный вердикт по таблице A4."""
     from tui.screens.settings import SettingsScreen, _CONNECTION
@@ -1780,7 +1826,10 @@ async def test_connection_probe_line_combined_verdicts(tmp_path):
         # не «включает» (раньше паттерн-матч по тексту делал именно это).
         text_only = ProbeResult("ok", 200, [], 10, "токен принят")
         assert "токен принят" not in str(scr._probe_line_text(text_only, _CONNECTION))
-        unk = ProbeResult("unknown", 0, None, 10, "нет связи")
+        # «Недоступен» теперь включает флаг offline, а не пустой http_status:
+        # без статуса остаются и наши внутренние сбои, а они про сервер не говорят.
+        unk = ProbeResult("unknown", None, None, 10, "нет соединения (timeout)",
+                          offline=True)
         assert "недоступен" in str(scr._probe_line_text(unk, _CONNECTION)).lower()
         inconclusive = ProbeResult("unknown", 500, None, 10, "сервер ответил 500")
         assert "не удалось проверить" in str(scr._probe_line_text(inconclusive, _CONNECTION))
@@ -3305,3 +3354,154 @@ async def test_ctrl_space_on_the_model_section_does_nothing(tmp_path, monkeypatc
         await pilot.pause()
         assert app.screen is scr                       # приложение живо
         assert [str(w.render()) for w in scr.query(".onb-option")] == rows_before
+
+
+async def test_connection_glyph_is_about_server_and_token_not_the_model(tmp_path):
+    """Живой кейс GigaCode: сервер доступен, токен принят, но имя модели неверное —
+    ступень 2 отвечает 404 «проверьте адрес и имя модели». Раньше «достижимым»
+    считался только ok или 401, поэтому такой ответ красил «Подключение» красным
+    «!» с пометкой «сервер недоступен СЕЙЧАС» — при живом сервере и рабочем токене.
+
+    Глиф «Подключения» отвечает за сервер и токен; про модель краснеет своя строка."""
+    from tui.screens.settings import SettingsScreen, _CONNECTION
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        scr._raw["Authorization"] = "Bearer sk-live"
+
+        scr._probe_config = ProbeResult(
+            "rejected", 404, None, 12,
+            "отклонено сервером (404): проверьте адрес и имя модели")
+        assert scr._menu_glyph(_CONNECTION)[0] == "✓"    # сервер ответил, токен не 401
+
+        # Настоящий обрыв — вот теперь «!» по делу.
+        scr._probe_config = ProbeResult("unknown", None, None, 12,
+                                        "нет соединения (timeout)", offline=True)
+        assert scr._menu_glyph(_CONNECTION)[0] == "!"
+
+        # Отклонённый токен — тоже «!», но по другой причине.
+        scr._probe_config = ProbeResult("rejected", 401, None, 12, "токен отклонён (401)")
+        assert scr._menu_glyph(_CONNECTION)[0] == "!"
+
+
+async def test_connection_glyph_not_green_when_server_demands_a_token(tmp_path):
+    """Токен снят (Ctrl+U / «без авторизации»), а сервер отвечает 401 — конфиг
+    нерабочий, агент на нём не поедет. Хаб обязан это показать: раньше правило
+    «токена нет → решает только достижимость» ставило зелёную галочку рядом с
+    секцией, которая честно писала «⚠ сервер требует авторизацию (401)»."""
+    from tui.screens.settings import SettingsScreen, _CONNECTION
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        scr._raw["Authorization"] = ""            # токена нет
+
+        scr._probe_config = ProbeResult("rejected", 401, None, 12, "токен отклонён (401)")
+        assert scr._menu_glyph(_CONNECTION)[0] == "!"
+
+        # А вот сервер, которому токен и не нужен, — зелёный по делу.
+        scr._probe_config = ProbeResult("ok", 200, None, 12, "доступен")
+        assert scr._menu_glyph(_CONNECTION)[0] == "✓"
+
+
+async def test_connection_footer_names_the_clear_key_on_the_token_field(tmp_path):
+    """Футер секции контекстный: «Alt+↓ — показать список» обещается только на
+    адресе. Симметрично и «Ctrl+U — очистить» — только на токене и только когда
+    есть что стирать. Клавиши на разных полях, в одной строке не встречаются,
+    так что бюджету ширины ничего не грозит."""
+    from tui.screens.settings import SettingsScreen, _CONNECTION
+    import tui.app as app_mod
+    cfg_file = _write_cfg(tmp_path)          # с сохранённым токеном — иначе стирать нечего
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr._connection_editor()
+
+        assert "Ctrl+U" not in scr._footer_text()      # курсор на адресе — молчим
+        ed.move(1)                                     # → токен
+        await pilot.pause()
+        assert "Ctrl+U — очистить" in scr._footer_text()
+
+        ed.clear_token()                               # стёрли — стирать больше нечего
+        await pilot.pause()
+        assert "Ctrl+U" not in scr._footer_text()
+
+
+async def test_ctrl_u_over_env_ref_warns_about_deletion_not_a_leak(tmp_path, monkeypatch):
+    """Ctrl+U поверх ссылки `${ENV:VAR}`: страж перезаписи обязан сработать (ссылка
+    не гибнет молча), но сказать ПРАВДУ — сохранение её удалит, а не «запишет
+    введённое значение открытым текстом». Утечки на этом пути нет: поле пустое.
+
+    Единый текст на оба случая пугал утечкой ровно там, где идёт стирание."""
+    monkeypatch.setenv("GC_API_KEY", "sk-REALSECRET123")
+    cfg_file = _write_cfg(tmp_path, auth='"${ENV:GC_API_KEY}"')
+    import tui.app as app_mod
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr._connection_editor()
+        ed.move(1)                                   # → поле токена
+        await pilot.pause()
+        assert ed.clear_token() is True              # маска была — есть что стирать
+        await pilot.pause()
+
+        await pilot.press("enter")                   # сохранение → страж
+        await pilot.pause(); await pilot.pause()
+        banner = " ".join(str(w.render()) for w in scr.query("#set-envconfirm"))
+        assert "GC_API_KEY" in banner                        # страж сработал
+        assert "удалит ссылку из файла" in banner
+        assert "открытым текстом" not in banner
+
+
+async def test_literal_over_env_ref_still_warns_about_the_leak(tmp_path, monkeypatch):
+    """Обратный случай не должен пострадать от правки выше: вписанный поверх ссылки
+    литерал по-прежнему предупреждает именно об утечке в файл."""
+    monkeypatch.setenv("GC_API_KEY", "sk-REALSECRET123")
+    cfg_file = _write_cfg(tmp_path, auth='"${ENV:GC_API_KEY}"')
+    import tui.app as app_mod
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        from textual.widgets import Input as _Input
+        scr._connection_editor().query_one("#conn-token", _Input).value = "sk-typed-by-hand"
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.pause(); await pilot.pause()
+        banner = " ".join(str(w.render()) for w in scr.query("#set-envconfirm"))
+        assert "GC_API_KEY" in banner
+        assert "открытым текстом" in banner
+        assert "удалит ссылку" not in banner
+
+
+def test_env_confirm_text_names_both_fates_when_they_differ():
+    """Адрес перезаписали литералом, токен стёрли — обе ссылки затрагиваются, но
+    по-разному. Умолчать об одной значило бы выбрать, о чём соврать."""
+    scr = _mk_screen()
+    text = scr._env_confirm_text(["GC_URL"], ["GC_API_KEY"])
+    assert "GC_URL — сохранение запишет введённое значение в файл открытым текстом" in text
+    assert "GC_API_KEY — сохранение удалит ссылку из файла" in text

@@ -61,13 +61,13 @@ class NoticesScreen(Screen):
         infos = sum(1 for n in notices if n.level == "info")
         parts = []
         if warns:
-            parts.append(f"{_WARN_GLYPH}{warns}")
+            parts.append(f"{_WARN_GLYPH} {warns}")
         if infos:
-            parts.append(f"{_INFO_GLYPH}{infos}")
+            parts.append(f"{_INFO_GLYPH} {infos}")
         # Счётчики — пара, между ними хватает пробела; точка отделяет их от названия
-        # экрана (тот же язык, что у бейджа: format_notices_badge). Глиф и число
-        # склеены — там это спасает пару от разрыва переносом, а язык обязан совпадать.
-        return "уведомления" + (" · " + " ".join(parts) if parts else "")
+        # экрана (тот же язык, что у бейджа: format_notices_badge). Внутри пары
+        # пробел, между парами двойной — язык обязан совпадать с бейджем дословно.
+        return "уведомления" + (" · " + "  ".join(parts) if parts else "")
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):

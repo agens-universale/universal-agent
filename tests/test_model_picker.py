@@ -1,4 +1,40 @@
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import pytest
+
 import model_picker as mp
+
+
+@pytest.fixture
+def local_http_server():
+    """Настоящий доступный HTTP-сервер на свободном порту → базовый URL.
+
+    Нужен там, где проверяется поведение транспорта ДО ответа сервера (кодирование
+    заголовков): на закрытом порту соединение отваливается раньше, и тест зеленеет
+    по неверной причине."""
+    class _H(BaseHTTPRequestHandler):
+        def _reply(self):
+            body = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = do_POST = _reply
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_port}"
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_parse_config_models():
@@ -94,20 +130,51 @@ def _capture_user_agents(monkeypatch) -> list:
     return seen
 
 
-def test_requests_introduce_themselves_by_product_name(monkeypatch):
-    """Каждый исходящий запрос несёт визитку продукта. Без неё Python подставляет
-    `Python-urllib/X.Y`, и щит провайдера (Cloudflare у Groq — проверено живьём)
-    отвечает 403 ещё ДО проверки токена: список моделей молчал бы на рабочем ключе."""
+def test_requests_introduce_themselves_by_product_name():
+    """Каждый исходящий запрос несёт визитку продукта. Без неё библиотека шлёт свой
+    дефолт («python-requests/X.Y», «Python-urllib/X.Y»), и щит провайдера (Cloudflare
+    у Groq — проверено живьём) отвечает 403 ещё ДО проверки токена: список моделей
+    молчал бы на рабочем ключе.
+
+    Спрашиваем сами точки входа, а не транспорт: заголовки собирает `_headers`, и
+    подменённый транспорт видит ровно тот набор, что ушёл бы в сеть. Тест на самом
+    транспорте проверял бы функцию, которую в бою никто не зовёт."""
+    import app_version
+    seen = []
+
+    def get_ex(url, headers, verify):
+        seen.append(headers.get("User-Agent"))
+        return mp.HttpReply(status=200, payload={})
+
+    def post_ex(url, headers, body, verify):
+        seen.append(headers.get("User-Agent"))
+        return mp.HttpReply(status=200, payload={})
+
+    def get(url, headers, verify):
+        seen.append(headers.get("User-Agent"))
+        return {}
+
+    mp.probe_fetch("https://h/v1/chat/completions", "Bearer t", http_get_ex=get_ex)
+    mp.probe_post("https://h/v1/chat/completions", "Bearer t", "m", http_post_ex=post_ex)
+    mp.fetch_models("https://h/v1/chat/completions", "Bearer t", http_get=get)
+
+    expected = f"{app_version.DIST_NAME}/{app_version.agent_version()}"
+    assert seen and set(seen) == {expected}
+    assert expected.startswith("gc-ua/")
+
+
+def test_the_legacy_urllib_transport_introduces_itself_too(monkeypatch):
+    """`_urllib_get_ex` — легаси-транспорт без прокси: в бою его не зовут, но он
+    остаётся инъектируемой заменой для `probe_fetch`, и визитку ставит своим путём
+    (`_request`), мимо `_headers`. Отвалится — отвалится молча."""
     import app_version
     seen = _capture_user_agents(monkeypatch)
 
-    mp._urllib_get("https://h/v1/models", {"Content-Type": "application/json"}, True)
     mp._urllib_get_ex("https://h/v1/models", {}, True)
-    mp._urllib_post_ex("https://h/v1/chat/completions", {}, {"model": "m"}, True)
 
     expected = f"{app_version.DIST_NAME}/{app_version.agent_version()}"
-    assert seen == [expected] * 3
-    assert seen[0].startswith("gc-ua/") and "urllib" not in seen[0]
+    assert seen == [expected]
+    assert "urllib" not in seen[0]
 
 
 def test_the_user_agent_carries_the_live_version(monkeypatch):
@@ -118,7 +185,24 @@ def test_the_user_agent_carries_the_live_version(monkeypatch):
     mp._user_agent.cache_clear()
     try:
         seen = _capture_user_agents(monkeypatch)
-        mp._urllib_get("https://h/v1/models", {}, True)
+        mp._urllib_get_ex("https://h/v1/models", {}, True)
         assert seen == ["gc-ua/9.9.9"]
     finally:
         mp._user_agent.cache_clear()
+
+
+def test_transport_survives_non_latin1_header(local_http_server):
+    """Кириллица в токене — ошибка ДАННЫХ, а не сбой процесса: заголовки HTTP
+    кодируются в latin-1, и http.client бросает UnicodeEncodeError. Это ValueError,
+    а не RequestException, поэтому мимо перехвата он рвёт вызывающий код и доезжает
+    до юзера как «сервер недоступен» — при том, что сервера никто не спрашивал.
+
+    Сервер здесь настоящий и доступный: на закрытом порту соединение отвалилось бы
+    РАНЬШЕ кодирования заголовка, и тест был бы зелёным даже без фикса."""
+    url = f"{local_http_server}/v1/chat/completions"
+    ok = mp._requests_post_ex(url, mp._headers("Bearer sk-latin"), {"model": "m"}, True)
+    assert ok.status == 200          # контроль: до сервера доезжаем
+
+    reply = mp._requests_post_ex(url, mp._headers("Bearer уквxxx"), {"model": "m"}, True)
+    assert reply.status is None
+    assert reply.network_error

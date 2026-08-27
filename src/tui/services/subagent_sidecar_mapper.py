@@ -20,6 +20,7 @@ SidecarActionKind = Literal[
     "mount_nested_prose",
     "mount_nested_user",
     "mount_nested_summary",
+    "mount_nested_todo",
 ]
 
 
@@ -33,6 +34,7 @@ class SidecarNestedAction:
     prose: Optional[str] = None
     ok: Optional[bool] = None
     error_brief: Optional[str] = None
+    todo_items: Optional[List[Dict[str, str]]] = None
 
 
 def _seq_key(record: Dict[str, Any]) -> int:
@@ -44,6 +46,9 @@ def plan_sidecar_nested_actions(
     records: Sequence[Dict[str, Any]],
 ) -> List[SidecarNestedAction]:
     """Group by parent_call_id, order by seq; skip finished/HITL-like noise."""
+    from constants.tool_names import SESSION_TODO_TOOL_NAME
+    from tools.subagents.progress import todo_items_from_arguments
+
     by_parent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for rec in records:
         if not isinstance(rec, dict):
@@ -69,13 +74,32 @@ def plan_sidecar_nested_actions(
             if kind == "call":
                 call_id = payload.get("call_id")
                 name = payload.get("name")
+                if str(name) == SESSION_TODO_TOOL_NAME:
+                    # Каждый вызов — развёрнутым чек-листом (v3 спеки: правило
+                    # «первый/смена состава» упразднено живой доводкой).
+                    # Битые аргументы (items is None) — НЕ чек-лист: проваливаемся
+                    # в generic tool-строку, статус сбоя виден механикой.
+                    items = todo_items_from_arguments(payload.get("arguments"))
+                    if items is not None:
+                        actions.append(
+                            SidecarNestedAction(
+                                kind="mount_nested_todo",
+                                parent_call_id=pid,
+                                tool_call_id=str(call_id) if call_id else "",
+                                todo_items=items,
+                            )
+                        )
+                        continue
                 actions.append(
                     SidecarNestedAction(
                         kind="mount_nested_tool",
                         parent_call_id=pid,
                         tool_name=str(name) if name else "",
                         tool_call_id=str(call_id) if call_id else "",
-                        args_summary=brief_args_summary(payload.get("arguments")),
+                        args_summary=brief_args_summary(
+                            payload.get("arguments"),
+                            tool_name=str(name) if name else None,
+                        ),
                     )
                 )
             elif kind == "result":
@@ -145,8 +169,9 @@ def apply_sidecar_nested_actions(
     mount_nested_tool: Callable[..., None],
     finish_nested_tool: Callable[..., None],
     mount_nested_prose: Callable[..., None],
-    mount_nested_summary: Callable[..., None],
+    mount_nested_summary: Callable[..., None] | None = None,
     mount_nested_user: Callable[..., None] | None = None,
+    mount_nested_todo: Callable[..., None] | None = None,
 ) -> None:
     for act in actions:
         if act.kind == "mount_nested_tool":
@@ -180,10 +205,34 @@ def apply_sidecar_nested_actions(
                     prose=act.prose or "",
                 )
         elif act.kind == "mount_nested_summary":
-            mount_nested_summary(
-                parent_call_id=act.parent_call_id,
-                prose=act.prose or CHILD_SUMMARY_LABEL,
-            )
+            if mount_nested_summary is not None:
+                mount_nested_summary(
+                    parent_call_id=act.parent_call_id,
+                    prose=act.prose or CHILD_SUMMARY_LABEL,
+                )
+            else:
+                mount_nested_prose(
+                    parent_call_id=act.parent_call_id,
+                    prose=act.prose or CHILD_SUMMARY_LABEL,
+                )
+        elif act.kind == "mount_nested_todo":
+            if mount_nested_todo is not None:
+                mount_nested_todo(
+                    parent_call_id=act.parent_call_id,
+                    tool_call_id=act.tool_call_id or "",
+                    todo_items=act.todo_items or [],
+                )
+            else:
+                # потребитель без todo-колбэка — деградация до свёрнутой строки
+                mount_nested_tool(
+                    parent_call_id=act.parent_call_id,
+                    tool_name="session_todo",
+                    tool_call_id=act.tool_call_id or "",
+                    args_summary=brief_args_summary(
+                        {"todos": act.todo_items or []},
+                        tool_name="session_todo",
+                    ),
+                )
 
 
 def detail_from_sidecar_records(
@@ -240,7 +289,7 @@ def trace_events_from_nested_detail(
         event_ts_utc_iso="",
         kind="call",
         title=name,
-        summary=brief_args_summary(call_payload.get("arguments")),
+        summary=brief_args_summary(call_payload.get("arguments"), tool_name=name or None),
         full_payload=call_payload,
         call_id=call_id,
         tool_name=name,

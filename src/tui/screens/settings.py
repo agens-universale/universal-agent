@@ -31,9 +31,9 @@ _WRITE_GATED_SECTIONS = _EDITOR_SECTIONS | {_MODELS}
 
 _FOOTERS = {
     "menu": "↑/↓ — выбор  ·  Enter — открыть  ·  Esc — закрыть",
-    # Пресет-лист адреса открывается сам почти всегда (пусто/совпало с пресетом,
-    # см. комментарий у `_FOOTER_PRESET_LIST` ниже) — но когда он свёрнут (свой
-    # адрес, не встретившийся в пресетах), футер обязан назвать способ вернуть его
+    # Пресет-лист адреса открывается сам только на пустом поле (канон 2026-08-17,
+    # см. комментарий у `_FOOTER_PRESET_LIST` ниже) — а когда он свёрнут (адрес уже
+    # задан, обычное состояние), футер обязан назвать способ вернуть его
     # (спека 2026-08-06 §4.4): без этого `Esc` уводил бы список в один конец без
     # обратного пути. Дописывание `Alt+↓ — показать список` вырастило строку со 108 до
     # 136 символов — на самом узком окне (`_FOOTER_MIN_COLS`, сторож
@@ -68,9 +68,10 @@ _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
 _REPORT_DISMISS_HINT = "Esc — закрыть отчёт"
 _FOOTER_REPORT = "Esc — закрыть отчёт"
 # Раскрытый пресет-лист адреса забирает клавиши себе — футер на это время становится
-# его (§6.4, канон мастера `onboarding._FOOTER_PRESET_LIST`). Состояние не редкое, а
-# ОБЫЧНОЕ: список раскрывается сам на входе в секцию, как только адрес пуст (чистая
-# установка) или совпал с пресетом (все, кто выбирал его из списка).
+# его (§6.4, канон мастера `onboarding._FOOTER_PRESET_LIST`). Состояние редкое: канон
+# 2026-08-17 поднимает список сам только на ПУСТОМ поле (чистая установка), а поверх
+# заданного адреса — лишь по явному Alt+↓. У заполненного адреса стрелки остаются
+# у формы, и способ вызвать список назван строкой под полем.
 # «↑/↓ — выбор», а не «выбор провайдера» (как зовёт то же место мастер): у `#set-footer`
 # ширина минус padding, и полная формулировка давала ровно 120 — на канонных 120
 # колонках хвост «секции» срывался на вторую строку в самом частом состоянии секции.
@@ -89,6 +90,11 @@ _FOOTER_PRESET_LIST_NO_MATCH = ("↑/↓  ·  Enter — оставить сво�
 # `_FOOTERS[_CONNECTION]` в этом состоянии обещал бы неработающую клавишу (находка
 # финального ревью 2026-08-06, D). Тот же текст без сегмента про Alt+↓.
 _FOOTER_CONNECTION_FIELD = ("Enter — сохранить  ·  "
+                            "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню")
+# Курсор на токене и есть что стирать. Сегмент занимает место «Alt+↓ — показать
+# список» — тот обещается только на адресе, эти двое на разных полях и в одной
+# строке не встречаются, поэтому бюджету ширины ничего не грозит.
+_FOOTER_CONNECTION_TOKEN = ("Enter — сохранить  ·  Ctrl+U — очистить  ·  "
                             "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню")
 # Строка уровня (последняя в секции «Профили») — тот же позиционный приём, что и
 # «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Space —
@@ -171,7 +177,8 @@ def _empty_anchor(value) -> bool:
 
 
 class SettingsScreen(Screen):
-    def __init__(self, *, config, config_path, on_apply, probe_fn=None) -> None:
+    def __init__(self, *, config, config_path, on_apply, probe_fn=None,
+                 auth_probe_fn=None) -> None:
         super().__init__()
         self._config = config or {}
         self._config_path = config_path
@@ -196,7 +203,15 @@ class SettingsScreen(Screen):
         self._profiles_open = None
         self._menu_pass_snapshot = None   # (текст, документ) цели записи на один проход меню
         from tui.services.settings_probe import probe as _default_probe
+        from tui.services.settings_probe import probe_auth as _default_auth_probe
         self._probe_fn = probe_fn or _default_probe
+        # Отдельно от _probe_fn: тому нужна models-цепочка (глифы хаба показывают
+        # модели сервера), а вердикт об авторизации обязан идти строго по
+        # chat/completions — у публичного /models он получился бы ложным.
+        #
+        # Подменили probe_fn — значит забрали сеть целиком, и вторым каналом наружу
+        # экран не ходит: иначе частично застабленный экран молча стучится в интернет.
+        self._auth_probe_fn = auth_probe_fn or probe_fn or _default_auth_probe
         self._probe_config = None       # ProbeResult сохранённых значений → глифы хаба
         self._config_gen = 0            # generation config-probe: устаревшие результаты отбрасываются
         self._draft_gen = 0             # generation draft-probe: независим от config-probe
@@ -270,7 +285,10 @@ class SettingsScreen(Screen):
             # Список свёрнут: Alt+↓ обещаем, только пока курсор на адресе — на «Токене»/
             # «Прокси» клавиша молчит (`on_url_field` гейтит ровно эту позицию,
             # находка финального ревью 2026-08-06, D), и обещать её там значило бы врать.
-            return _FOOTERS[_CONNECTION] if self._connection_on_url() else _FOOTER_CONNECTION_FIELD
+            if self._connection_on_url():
+                return _FOOTERS[_CONNECTION]
+            return (_FOOTER_CONNECTION_TOKEN if self._connection_can_clear_token()
+                    else _FOOTER_CONNECTION_FIELD)
         if self._view == _PROFILES:
             if self._profiles_open is not None:
                 # Открытый профиль — тот же редактор форм, что и «Модели», и футер у
@@ -348,6 +366,14 @@ class SettingsScreen(Screen):
             return self._connection_editor().on_url_field
         except NoMatches:
             return True
+
+    def _connection_can_clear_token(self) -> bool:
+        """Курсор на токене и есть что стирать — футер обещает Ctrl+U. Редактора
+        нет — обещать нечего (курсор стартует на адресе)."""
+        try:
+            return self._connection_editor().on_token_field_with_saved()
+        except NoMatches:
+            return False
 
     def on_connection_editor_ready(self, event) -> None:
         """Редактор адреса домонтировался: заполнил поле и решил, раскрывать ли
@@ -630,12 +656,20 @@ class SettingsScreen(Screen):
                     return "—", DEEP_DIM
                 if r is None:
                     return "—", DEEP_DIM
-                reachable = r.verdict == "ok" or (r.verdict == "rejected" and r.http_status == 401)
-                if not reachable:
+                # Достижим — значит ОТВЕТИЛ, каким бы ни был ответ. Раньше сюда
+                # пускали только ok и 401, и содержательный отказ про модель
+                # (живой GigaCode: 404 «проверьте адрес и имя модели») красил
+                # «Подключение» красным при живом сервере и принятом токене.
+                # Имя модели — забота своей строки, у неё свой глиф.
+                if r.offline or r.http_status is None:
                     return "!", ERR                  # сервер недоступен СЕЙЧАС
                 auth = self._raw.get("Authorization")
                 if not auth:
-                    return "✓", OK                   # без авторизации — решает только достижимость
+                    # Токена нет. Зелёный — только если сервер его и не требует:
+                    # 401 здесь означает нерабочий конфиг (агент не поедет), и
+                    # молчать об этом нельзя — секция пишет то же «⚠ сервер
+                    # требует авторизацию (401)», хаб обязан с ней совпадать.
+                    return ("!", ERR) if r.http_status == 401 else ("✓", OK)
                 if auth == TOKEN_SENTINEL:
                     return "—", DEEP_DIM             # токен не задан (шаблон) — нечем подтвердить
                 return ("✓", OK) if r.auth_ok else ("!", ERR)   # токен принят/отклонён (401)
@@ -908,7 +942,10 @@ class SettingsScreen(Screen):
                 t = Text("✓ сервер доступен · ", style=OK)
                 t.append("✗ токен отклонён (401)", style=WARN)
                 return t
-            if r.verdict == "unknown" and not r.http_status:
+            if r.offline:
+                # Винить сервер можно только когда до него не дошли. Раньше сюда
+                # попадал любой unknown без статуса — в том числе наш внутренний
+                # сбой, и причина терялась вместе с detail.
                 return Text("✗ сервер недоступен", style=WARN)
             return Text(f"? не удалось проверить: {r.detail}", style=WARN)
         if r.verdict == "ok":
@@ -938,9 +975,10 @@ class SettingsScreen(Screen):
             token = None                             # без авторизации
         elif token_raw:
             token = authorization_header(token_raw)  # введённый токен
+        elif self._connection_editor().token_cleared:
+            token = None                             # Ctrl+U: сохранённый стёрт ещё до записи
         else:
             token = auth_cfg                         # поле пусто → действующий токен
-        has_token = bool(token)
         # draft proxy: поле → иначе config; пустое поле = «не задано» → env через резолвер
         proxy = proxy_draft if proxy_draft else proxy_cfg
         # Снимок ПОЛЕЙ (не резолва) — по нему автопроба ухода с поля отличает
@@ -952,17 +990,11 @@ class SettingsScreen(Screen):
         self._set_probe_line(Text("проверяю…", style=DEEP_DIM))
 
         def _work() -> None:
-            from tui.services.settings_probe import ProbeResult, interpret_auth
+            from tui.services.settings_probe import ProbeResult, probe_connection
             try:
-                control = self._probe_fn(
-                    endpoint, None, verify, model, config_proxy=proxy,
-                )
-                with_token = None
-                if control.verdict == "rejected" and control.http_status == 401 and has_token:
-                    with_token = self._probe_fn(
-                        endpoint, token, verify, model, config_proxy=proxy,
-                    )
-                result = interpret_auth(control, with_token, has_token)
+                result = probe_connection(endpoint, token, verify, model,
+                                          config_proxy=proxy,
+                                          probe_fn=self._auth_probe_fn)
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
             self.app.call_from_thread(self._on_draft_probe, result, gen=gen,
@@ -3188,21 +3220,38 @@ class SettingsScreen(Screen):
         self._dismiss_report()      # плашка замещает отчёт — см. `_notice`
         self._singleton("set-flash", glyph + text, f"{cls} {EPHEMERAL}")
 
-    def _env_refs_overwritten(self, values: dict) -> list[str]:
-        """Переменные окружения, чьи ссылки в файле затрёт вводимый литерал
-        (пусто — затирать нечего либо новое значение само ссылка)."""
+    def _env_refs_overwritten(self, values: dict) -> tuple[list[str], list[str]]:
+        """Переменные окружения, чьи ссылки в файле затрёт сохранение, разложенные
+        по тому, ЧТО с ними произойдёт: (перезапись литералом, удаление пустым
+        значением). Оба списка пусты — затирать нечего либо новое значение само ссылка.
+
+        Раскладка нужна предупреждению: у литерала последствие — утечка секрета в
+        файл, у пустого поля — исчезновение ссылки. Одним словом их не назвать."""
         import config_raw
-        out: list[str] = []
+        written: list[str] = []
+        erased: list[str] = []
         for key, value in values.items():
             if config_raw.env_refs(value):
                 continue
-            out.extend(config_raw.env_refs(self._raw.get(key)))
-        return out
+            refs = config_raw.env_refs(self._raw.get(key))
+            (written if str(value or "").strip() else erased).extend(refs)
+        return written, erased
 
-    def _env_confirm_text(self, refs: list[str]) -> str:
-        return (f"В файле — ссылка на переменную окружения ({', '.join(refs)}); "
-                "сохранение запишет введённое значение в файл открытым текстом.  "
-                "Enter — сохранить  ·  Esc — отмена")
+    def _env_confirm_text(self, written: list[str], erased: list[str]) -> str:
+        """Предупреждение называет ПОСЛЕДСТВИЕ, а не сам факт затирания.
+
+        Единый текст «запишет введённое значение открытым текстом» пугал утечкой и
+        на пути `Ctrl+U`, где поле пустое и ничего не пишется — ссылка удаляется.
+        Оба списка разом реальны: в «Подключении» ссылками могут быть и адрес, и
+        токен, и судьба у них может разойтись."""
+        parts = []
+        if written:
+            parts.append(f"{', '.join(written)} — сохранение запишет введённое "
+                         "значение в файл открытым текстом")
+        if erased:
+            parts.append(f"{', '.join(erased)} — сохранение удалит ссылку из файла")
+        return ("В файле — ссылка на переменную окружения: " + ";  ".join(parts)
+                + ".  Enter — сохранить  ·  Esc — отмена")
 
     def _cancel_env_confirm(self) -> None:
         """Снять confirm перезаписи ссылки. Секцию НЕ перерисовываем: ре-рендер поднял бы
@@ -3225,10 +3274,11 @@ class SettingsScreen(Screen):
         if not confirmed:
             # Единственная точка записи → ссылка на переменную не может стать литералом
             # молча, каким бы путём (probe, force, секция 1) сюда ни пришли.
-            refs = self._env_refs_overwritten(values)
-            if refs:
+            written, erased = self._env_refs_overwritten(values)
+            if written or erased:
                 self._pending_env_save = (section, values, warn_detail)
-                self._singleton("set-envconfirm", Text(self._env_confirm_text(refs), style=WARN),
+                self._singleton("set-envconfirm",
+                                Text(self._env_confirm_text(written, erased), style=WARN),
                                 f"set-confirm set-dyn {KEEP_IN_VIEW}")
                 return
         dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in values.items()}
@@ -3675,10 +3725,10 @@ class SettingsScreen(Screen):
                     ed = self._connection_editor()
                 except NoMatches:
                     ed = None
-                # автопробу здесь НЕ трогаем: список открыт по умолчанию (пустой адрес
-                # или совпадение с пресетом — обычное дело на чистой установке), и если
-                # Enter поглощён им, своя проба не стартует — без автопробы вердикт связи
-                # не появился бы вовсе, до первого Ctrl+Space или правки с Enter.
+                # автопробу здесь НЕ трогаем: на пустом адресе список раскрыт (канон
+                # 2026-08-17 — чистая установка), и если Enter поглощён им, своя проба
+                # не стартует — без автопробы вердикт связи не появился бы вовсе, до
+                # первого Ctrl+Space или правки с Enter.
                 if ed is not None and ed.enter_presets():
                     self._refresh_footer()       # список свернулся — футер снова про секцию
                     return                       # пресет-лист открыт — подставил/открыл, не сабмит
@@ -3844,6 +3894,22 @@ class SettingsScreen(Screen):
                 self._update_dirty()
                 self._autoprobe_on_leave(ed, leaving_id)
                 self._refresh_footer()   # вход на адрес раскрывает список, уход — сворачивает
+            return
+        if event.key == "ctrl+u" and self._view == _CONNECTION:
+            # Очистка сохранённого токена. Клавишу приходится перехватывать здесь:
+            # Input держит на ней delete_left_all, а поле токена пустое (секрет
+            # живёт в конфиге, в поле — маска), и штатное поведение там вхолостую.
+            # clear_token() сама решает, её ли это случай; не её — клавиша идёт
+            # дальше, к Input.
+            try:
+                ed = self._connection_editor()
+            except NoMatches:
+                ed = None
+            if ed is not None and ed.clear_token():
+                event.prevent_default()
+                event.stop()
+                self._update_dirty()
+                self._refresh_footer()
             return
         if event.key == "space" and self._view == _CONNECTION:
             # Галка «без авторизации» — Space переключает её, только если курсор

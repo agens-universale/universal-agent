@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
-from config_modules.message_notice import (
-    project_memory_notice_from_config_dict,
+from config_modules.project_memory import (
+    project_memory_from_config_dict,
     project_memory_notice_enabled,
 )
 from message_policy.tool_usage_notice.state import (
@@ -82,7 +82,7 @@ def collect_project_memory_hints(
         from project_memory import get_hash  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
         get_hash_fn = get_hash
 
-    cfg = project_memory_notice_from_config_dict(config_dict)
+    cfg = project_memory_from_config_dict(config_dict)
     interval = cfg.check_interval_messages
     if get_project_memory_check_cnt(meta) < interval:
         return []

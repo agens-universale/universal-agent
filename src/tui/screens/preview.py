@@ -11,6 +11,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
+from tui.messages import CopyBlockRequest
+from tui.services.clipboard_ops import copy_out
 from tui.services.skill_view import truncate_path_left
 
 _PATH_MAXLEN = 48
@@ -26,11 +28,13 @@ class PreviewScreen(Screen[bool]):
     ]
 
     def __init__(self, *, segments: list, thread_id: str = "",
-                 project_path: str = "") -> None:
+                 project_path: str = "",
+                 subagent_records: list | None = None) -> None:
         super().__init__()
         self._segments = segments
         self._thread_id = thread_id
         self._project_path = project_path
+        self._subagent_records = subagent_records
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -45,8 +49,12 @@ class PreviewScreen(Screen[bool]):
                 id="preview-footer", markup=False)
 
     def on_mount(self) -> None:
-        from tui.services.trace_render import render_segments_readonly
-        render_segments_readonly(self.query_one("#trace", VerticalScroll), self._segments)
+        from tui.services.trace_render import (
+            merge_nested_readonly, render_segments_readonly)
+        trace = self.query_one("#trace", VerticalScroll)
+        calls = render_segments_readonly(trace, self._segments)
+        if self._subagent_records:
+            merge_nested_readonly(trace, self._subagent_records, calls)
 
     def action_resume(self) -> None:
         self.dismiss(True)
@@ -77,3 +85,14 @@ class PreviewScreen(Screen[bool]):
             body.add_class("hidden")
             if marker is not None:
                 marker.set_prefix("▸ ")
+
+    def on_copy_block_request(self, event: CopyBlockRequest) -> None:
+        """Копия наружу без буфера сессии: превью показывает ЧУЖОЙ тред, а
+        _push_session_copy_buffer пишет в активную сессию главного экрана.
+
+        Двойной клик перед этим сам рождает TextSelected и ставит в очередь
+        отложенную автокопию видимого — отменяем, иначе она затрёт payload
+        позже (гонка copy-on-select)."""
+        if event.payload:
+            self.app.cancel_pending_select_copy()
+            copy_out(self.app, event.payload, toast=True, blocking=False)

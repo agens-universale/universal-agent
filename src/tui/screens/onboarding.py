@@ -66,11 +66,13 @@ _LEVEL_FORM_LABEL = {"light": "Лёгкая модель (light)",
 
 # Раскрытый список забирает клавиши себе — футер на это время становится его: обещать
 # «Enter — далее», когда Enter подставляет строку списка, значит врать (спека §6.4).
-# Пресет-лист адреса на шаге «Подключение» — список раскрывается САМ на входе в поле,
-# то есть человек застаёт это состояние по умолчанию, а не ищет его: список раскрыт
-# сразу, Enter подставляет провайдера и возвращается, Esc сворачивает список, а не
-# выходит из мастера. Ctrl+Space до списка не относится и работает как везде на шаге —
-# проверяет связь.
+# Пресет-лист адреса на шаге «Подключение» раскрывается САМ, пока поле пусто (канон
+# 2026-08-17) — то есть на первом запуске человек застаёт это состояние по умолчанию,
+# а не ищет его: Enter подставляет провайдера и возвращается, Esc сворачивает список,
+# а не выходит из мастера. Как только адрес задан (вернулись на шаг назад, подставили
+# пресет), список свёрнут: стрелки водят по форме, а вызвать его можно `Alt+↓` —
+# он назван строкой под полем. Ctrl+Space до списка не относится и работает как везде
+# на шаге — проверяет связь.
 _FOOTER_PRESET_LIST = ("↑↓ — выбор провайдера  ·  Enter — подставить  ·  Esc — свернуть"
                        "  ·  Ctrl+Space — проверить связь  ·  PgDn — далее")
 # Набран свой адрес — в списке не осталось строк: подставлять нечего, Enter лишь
@@ -115,7 +117,10 @@ class OnboardingScreen(Screen):
             self._mcp = mcp_mod
         else:
             self._mcp = mcp
-        from tui.services.settings_probe import probe as _default_probe
+        # Вердикт шага «Подключение» — только по chat/completions: models-цепочка
+        # у публичного /models (OpenRouter) отвечает без токена и сказала бы
+        # «доступен» про маршрут, который токен как раз требует.
+        from tui.services.settings_probe import probe_auth as _default_probe
         self._probe_fn = probe or _default_probe
         self._steps = _BASE_STEPS
         self._step = 0
@@ -811,10 +816,14 @@ class OnboardingScreen(Screen):
             self._probe_gen += 1   # обесценить летящую пробу
             self._set_conn_probe_line(Text(f"⚠ {onboarding.display_value(url)}", style=WARN))
             return
-        auth = (onboarding.authorization_header(token_raw) if token_raw
-                else self._values.get("Authorization"))
-        if auth is None:
-            auth = (self._config.get("chat_completion_headers") or {}).get("Authorization")
+        if token_raw:
+            auth = onboarding.authorization_header(token_raw)
+        elif ed.token_cleared:
+            auth = None                  # Ctrl+U: сохранённый стёрт ещё до записи
+        else:
+            auth = self._values.get("Authorization")
+            if auth is None:
+                auth = (self._config.get("chat_completion_headers") or {}).get("Authorization")
         if auth == onboarding.TOKEN_SENTINEL:
             auth = None
         verify = bool((self._config or {}).get("use_ssl", True))
@@ -830,12 +839,21 @@ class OnboardingScreen(Screen):
             probe_proxy = resolve_env_placeholders(proxy) if proxy else proxy
             config_proxy = probe_proxy or None
             try:
-                result = self._probe_fn(probe_url, probe_auth, verify, "", config_proxy=config_proxy)
+                result = self._run_connection_probe(probe_url, probe_auth, verify,
+                                                    config_proxy)
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
             self.app.call_from_thread(self._on_auto_probe_done, result, gen)
 
         self.run_worker(_work, thread=True, exclusive=True, name="onboarding-conn-probe")
+
+    def _run_connection_probe(self, url: str, auth, verify: bool, config_proxy):
+        """Вердикт шага «Подключение» — той же differential-пробой, что в /settings:
+        иначе мастер и настройки скажут про один сервер разное. Вынесен из воркера
+        отдельным методом, чтобы проверяться без потока."""
+        from tui.services.settings_probe import probe_connection
+        return probe_connection(url, auth, verify, "", config_proxy=config_proxy,
+                                probe_fn=self._probe_fn)
 
     def _on_auto_probe_done(self, result, gen: int) -> None:
         if gen != self._probe_gen or not self.is_mounted:
@@ -945,6 +963,21 @@ class OnboardingScreen(Screen):
 
     def on_key(self, event: events.Key) -> None:
         step = self._step_id()
+        if event.key == "ctrl+u" and step == STEP_CONNECTION:
+            # Очистка сохранённого токена — та же клавиша, что в /settings.
+            # Перехватываем здесь: Input держит на ней delete_left_all, а поле
+            # токена пустое (секрет живёт в конфиге, в поле — маска).
+            from textual.css.query import NoMatches
+            from tui.editors.connection import ConnectionEditor
+            try:
+                ed = self.query_one(ConnectionEditor)
+            except NoMatches:
+                ed = None
+            if ed is not None and ed.clear_token():
+                event.prevent_default()
+                event.stop()
+                self._refresh_footer()
+            return
         if event.key in ("alt+down", "ctrl+down"):
             # Развод клавиш (спека 2026-08-06 §2): раскрыть/перечитать список поля под
             # курсором. Списков в мастере два: пресеты адреса («Подключение») и модели
@@ -1065,7 +1098,7 @@ class OnboardingScreen(Screen):
                 url, _auth_idx, token_raw, proxy = ed.peek()
                 if url and (url, token_raw, proxy) != self._last_probed_snapshot:
                     self._auto_probe()
-            self._refresh_footer()   # вход на адрес раскрывает список, уход — сворачивает
+            self._refresh_footer()   # состав клавиш зависит от того, раскрыт ли список
             return
         if event.key in ("up", "down") and (step == STEP_MODEL or self._level_form_open()):
             from tui.editors.model import ModelEditor
