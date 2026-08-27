@@ -170,3 +170,86 @@ async def test_banner_long_payload_keeps_options_visible(tmp_path):
         assert "path_0" in rendered
         assert "path_39" in rendered
         assert "… (+" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_banner_hugs_short_content(tmp_path):
+    """Короткий контент: баннер не раздувается до потолка.
+
+    `.cb-body { height: 1fr }` внутри `auto`-родителя убирает зависимость от
+    контента, и баннер всегда занимал максимум — при пяти строках содержимого.
+    """
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.confirm_banner import ConfirmBanner
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test(size=(100, 40)) as pilot:
+        scr = pilot.app.screen
+        scr.show_confirm_banner(
+            "Проверка команды",
+            "Разрешить запуск?",
+            [("Команда", "ls -la"), ("Риски", "low")],
+        )
+        await pilot.pause()
+        await pilot.pause()
+        banner = list(scr.query(ConfirmBanner))[0]
+        cap = pilot.app.size.height // 2
+
+        assert banner.region.height < cap, (
+            f"баннер занял потолок ({banner.region.height}) при коротком контенте"
+        )
+
+
+@pytest.mark.asyncio
+async def test_banner_body_scrolls_from_keyboard(tmp_path):
+    """Длинную команду должно быть видно целиком без мыши."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.confirm_banner import ConfirmBanner
+
+    long_code = "\n".join(f"line_{i} = {i}" for i in range(60))
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.show_confirm_banner(
+            "Проверка команды", "Разрешить запуск?", [("Код", long_code)]
+        )
+        await pilot.pause()
+        await pilot.pause()
+        banner = list(scr.query(ConfirmBanner))[0]
+        body = banner.query_one(".cb-body")
+        assert body.max_scroll_y > 0, "нечего скроллить — тест бессмыслен"
+
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert body.scroll_y > 0, "pagedown не прокрутил тело баннера"
+
+        await pilot.press("home")
+        await pilot.pause()
+        assert body.scroll_y == 0, "home не вернул тело в начало"
+
+        await pilot.press("end")
+        await pilot.pause()
+        assert body.scroll_y == body.max_scroll_y
+
+
+@pytest.mark.asyncio
+async def test_scroll_keys_do_not_answer_the_banner(tmp_path):
+    """Прокрутка — не ответ: баннер остаётся активным."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    long_code = "\n".join(f"line_{i}" for i in range(60))
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.show_confirm_banner("Проверка", "Разрешить?", [("Код", long_code)])
+        await pilot.pause()
+        await pilot.pause()
+
+        await pilot.press("pagedown")
+        await pilot.press("end")
+        await pilot.pause()
+
+        assert scr._confirm_active is True

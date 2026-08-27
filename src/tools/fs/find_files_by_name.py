@@ -57,6 +57,9 @@ class FindFilesByName(AbstractSimpleTool):
                 "Matches names and paths only — does not search file contents. "
                 "query is a plain substring (file/dir name or path under path) or a glob "
                 "(e.g. '*.py', '**/Config*.yml'). Short plain queries can match many paths. "
+                "A query containing * ? [ or ] is read as a glob, so a name with literal "
+                "brackets (e.g. 'report[1].pdf') cannot be matched exactly — search a "
+                "bracket-free fragment of it instead. "
                 f"Does not enter nested directories named `.gc`, {skip}, or any nested "
                 "directory whose name starts with '.'. "
                 "If path itself is such a directory, it is still searched. "
@@ -81,7 +84,10 @@ class FindFilesByName(AbstractSimpleTool):
                             "Plain text matches a substring of the file/dir name or of the "
                             "path relative to path. "
                             "Globs match the path relative to path; a glob without '/' "
-                            "matches at any depth."
+                            "matches at any depth. "
+                            "The mode is inferred: any of * ? [ ] makes the query a glob. "
+                            "So 'config[1].yml' is a character class and matches "
+                            "'config1.yml', not the literal name — search 'config' instead."
                         ),
                     },
                     "case_insensitive": {
@@ -119,7 +125,10 @@ class FindFilesByName(AbstractSimpleTool):
             f"Does not enter nested `.gc`, nested dirs named {skip}, or nested dirs whose "
             "name starts with '.'. If path itself is such a directory, it is still searched.\n"
             "query: plain substring of the name or relative path (short strings match many "
-            "paths), or a glob (basename globs like '*.py' match at any depth).\n"
+            "paths), or a glob (basename globs like '*.py' match at any depth). "
+            "The mode is inferred: any of * ? [ ] makes it a glob, so 'config[1].yml' is a "
+            "character class matching 'config1.yml' — for a literal bracketed name search a "
+            "bracket-free fragment.\n"
             "Args: path (required, absolute directory), query (required), "
             "case_insensitive (default true), max_matches (default 100, maximum 200).\n"
             "Response: ok, matches[{path, type, …}], count, truncated, "
@@ -326,7 +335,7 @@ class FindFilesByName(AbstractSimpleTool):
 
         if not isinstance(path, str):
             return _result(ok=False, error={"type": "invalid_argument", "field": "path"})
-        if not os.path.isabs(path):
+        if not self._backend.isabs(path):
             return _result(
                 ok=False,
                 error={

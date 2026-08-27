@@ -165,6 +165,44 @@ class ConfirmBanner(Vertical):
             body_lines += text.count("\n") + 1
         return body_lines + _OPTIONS_RESERVED_ROWS + 2  # +2 border
 
+    # Клавиши прокрутки тела: решение принимают по полному тексту команды,
+    # а колесо мыши есть не у всех.
+    _BODY_SCROLL_KEYS = ("pagedown", "pageup", "home", "end")
+
+    def _body(self) -> VerticalScroll | None:
+        try:
+            return self.query_one(".cb-body", VerticalScroll)
+        except Exception:
+            return None
+
+    def set_hug_content(self, hug: bool) -> None:
+        """Тело тянется на остаток только когда баннер упёрся в потолок.
+
+        ``height: 1fr`` внутри ``auto``-родителя убирает зависимость высоты от
+        контента, и баннер всегда занимает максимум. Растягиваем тело лишь
+        тогда, когда высота и правда зафиксирована.
+        """
+        body = self._body()
+        if body is not None:
+            body.styles.height = "auto" if hug else "1fr"
+
+    def scroll_body(self, key: str) -> bool:
+        """Прокрутка тела с клавиатуры. True — клавиша обработана."""
+        if key not in self._BODY_SCROLL_KEYS:
+            return False
+        body = self._body()
+        if body is None:
+            return False
+        if key == "pagedown":
+            body.scroll_page_down(animate=False)
+        elif key == "pageup":
+            body.scroll_page_up(animate=False)
+        elif key == "home":
+            body.scroll_home(animate=False)
+        else:
+            body.scroll_end(animate=False)
+        return True
+
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="cb-body"):
             yield Static(

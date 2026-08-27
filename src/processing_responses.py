@@ -31,7 +31,12 @@ from message_policy.stop_persist import is_persist_discarded
 from message_policy.user_stop import not_started_due_to_user_stop_output
 from summarize.limit_trace_summary import build_limit_envelope
 from request_backend_policy import request_chat_completions_with_policy
-from tools import apply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
+from tools import (
+    apply_tool,
+    WrongFunctionArgumentsException,
+    is_internal_tool_error_output,
+    is_unknown_tool_output,
+)
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from tools.subagents.progress import (
     brief_args_summary,
@@ -855,6 +860,18 @@ def process_tool_calls(
             state.last_unknown_tool_name = None
             state.unknown_tool_repeat_count = 0
 
+        if is_internal_tool_error_output(tool_res_raw):
+            if tool_name == getattr(state, "last_internal_error_tool_name", None):
+                state.internal_error_repeat_count = (
+                    int(getattr(state, "internal_error_repeat_count", 0) or 0) + 1
+                )
+            else:
+                state.last_internal_error_tool_name = tool_name
+                state.internal_error_repeat_count = 1
+        else:
+            state.last_internal_error_tool_name = None
+            state.internal_error_repeat_count = 0
+
         # Длинный output ужимаем в stored-envelope; остальное оставляем как есть.
         tool_res = maybe_store_and_wrap_tool_output(
             tool_res_raw,
@@ -1327,6 +1344,19 @@ def run_agent(
                             state.terminal_outcome = "tool_errors"
                             return (
                                 f"Agent stopped: repeated unknown tool '{unknown_name}'."
+                            )
+                        if (
+                            int(getattr(state, "internal_error_repeat_count", 0) or 0)
+                            >= max_unknown_tool_repeats
+                        ):
+                            broken_name = (
+                                getattr(state, "last_internal_error_tool_name", None)
+                                or "unknown"
+                            )
+                            state.terminal_outcome = "tool_errors"
+                            return (
+                                f"Agent stopped: tool '{broken_name}' keeps failing "
+                                "with the same client-side error."
                             )
                         # Полный ход: LLM уже вернул tools, batch исполнен.
                         count_completed_step = True

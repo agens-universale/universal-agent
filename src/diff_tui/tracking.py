@@ -100,6 +100,24 @@ class TrackingFsBackend:
     def exec_output_capture_max_chars(self, value: int) -> None:
         self._inner.exec_output_capture_max_chars = int(value)
 
+    # Capability probes живут на inner (ленивый кэш там же) — обёртка только
+    # пробрасывает, иначе native-пути (find/grep) молча считаются недоступными.
+    @property
+    def has_find(self) -> bool:
+        return self._inner.has_find
+
+    @property
+    def has_grep(self) -> bool:
+        return self._inner.has_grep
+
+    @property
+    def grep_exclude_dir(self) -> bool:
+        return self._inner.grep_exclude_dir
+
+    @property
+    def grep_include(self) -> bool:
+        return self._inner.grep_include
+
     @property
     def inner(self) -> Any:
         return self._inner
@@ -326,3 +344,6 @@ class TrackingFsBackend:
 
     def join(self, base: str, name: str) -> str:
         return self._inner.join(base, name)
+
+    def isabs(self, path: str) -> bool:
+        return self._inner.isabs(path)

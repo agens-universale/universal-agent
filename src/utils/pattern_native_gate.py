@@ -55,6 +55,21 @@ def is_safe_grep_include(file_pattern: Optional[str]) -> bool:
     return True
 
 
+def _has_control_chars(pattern: str) -> bool:
+    """True if pattern carries a char grep argv must never receive.
+
+    A newline is a pattern separator for grep, so it would silently widen the
+    match into an OR; the rest are equally unsafe to hand to argv.
+    """
+    for ch in pattern:
+        if ch in "\x00\n\r\t":
+            return True
+        o = ord(ch)
+        if o < 32 or o == 127:
+            return True
+    return False
+
+
 def is_grep_native_safe(
     pattern: str,
     *,
@@ -71,6 +86,10 @@ def is_grep_native_safe(
     if query_mode == "python-re-dotall":
         return None
     if query_mode not in ("text", "python-re"):
+        return None
+
+    # control chars are unsafe for grep argv in every mode → fail closed
+    if _has_control_chars(pattern):
         return None
 
     # text mode → fixed string
@@ -132,12 +151,4 @@ def _looks_like_simple_ere(pattern: str) -> bool:
     Rejects nested complexity we do not want to reason about: lookbehind-like
     already blocked by (? ; backrefs blocked; braces blocked.
     """
-    if "\x00" in pattern:
-        return False
-    for ch in pattern:
-        o = ord(ch)
-        if ch in "\n\r\t":
-            return False
-        if o < 32 or o == 127:
-            return False
-    return True
+    return not _has_control_chars(pattern)

@@ -338,3 +338,48 @@ def test_schema_keys_present_in_template_or_expert_only():
         "EXPERT_ONLY_KEYS содержит пути, отсутствующие в схеме (AppConfig) — удали мёртвые записи:\n"
         + "\n".join(sorted(phantom))
     )
+
+
+# Ключи, которых нет в demo-файлах ещё до появления этого стража. Долг, а не
+# разрешение: список должен только сокращаться. Новый дрейф сюда не дописывать —
+# правило проекта требует синхронной правки demo_config.yml и config.default.yml.
+DEMO_KNOWN_GAPS: set = {
+    "agent.limit_trace_summary",
+    "backend.chat_completion_headers",
+    "pricing.input",
+    "pricing.output",
+    "tui.bang_shell.enabled",
+    "tui.bang_shell.max_output_bytes",
+    "tui.bang_shell.max_output_lines",
+}
+
+
+def test_demo_config_covers_the_same_keys_as_the_template():
+    """demo_config.yml объявлен полным справочником — значит и полнота та же.
+
+    Страж A2 читал только config.default.yml, поэтому 13 ключей
+    fs_tools.find_in_files доехали в шаблон и не доехали в demo: расхождение
+    прошло мимо CI. Правило проекта требует синхронной правки обоих файлов.
+    """
+    schema_paths = _leaf_paths(AppConfig().model_dump())
+    template_paths = _leaf_paths(_template_raw())
+    template_covered = _template_covered(schema_paths, template_paths)
+
+    # Полным справочником объявлен именно demo_config.yml (config.default.yml:5,
+    # docs/configuration.md). demo_config_openai.yml — вариант под провайдера,
+    # полноты с него не требуем.
+    name = "demo_config.yml"
+    demo_file = Path(__file__).resolve().parents[1] / name
+    demo_raw = yaml.safe_load(demo_file.read_text(encoding="utf-8")) or {}
+    demo_covered = _template_covered(schema_paths, _leaf_paths(demo_raw))
+
+    missing = template_covered - demo_covered - DEMO_KNOWN_GAPS
+    assert not missing, (
+        f"{name} отстал от config.default.yml — добавь ключи:\n"
+        + "\n".join(sorted(missing))
+    )
+    closed = DEMO_KNOWN_GAPS & demo_covered
+    assert not closed, (
+        f"{name}: эти ключи уже добавлены — удали их из DEMO_KNOWN_GAPS:\n"
+        + "\n".join(sorted(closed))
+    )

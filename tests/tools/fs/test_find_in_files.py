@@ -777,6 +777,60 @@ class TestPrefilterNeedles:
         assert data["matches"][0]["file"].endswith("b.py")
         assert data["case_insensitive"] is False
 
+    def test_top_level_or_outside_group_is_not_prefiltered(self, tmp_path):
+        """``foo(bar|baz)|qux`` does not require ``foo`` — prefilter must not drop the file."""
+        _make_tree(tmp_path, {"a.py": "qux only here\n"})
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path),
+            pattern="foo(bar|baz)|qux",
+            query_mode="python-re",
+        )
+        assert data["ok"] is True
+        assert data["count"] == 1
+        assert data["matches"][0]["file"].endswith("a.py")
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path / "a.py"),
+            pattern="foo(bar|baz)|qux",
+            query_mode="python-re",
+        )
+        assert data["ok"] is True
+        assert data["count"] == 1
+
+    def test_optional_or_group_does_not_gate_the_prefilter(self, tmp_path):
+        """``foo(bar|baz)?`` — группа необязательна, достаточно required-литерала.
+
+        Правило сформулировано в самом файле рядом с ``_match_decoded_text``:
+        "optional or_group does not skip re (soundness of required alone)".
+        """
+        _make_tree(tmp_path, {"a.py": "fooqux here\n"})
+
+        for pattern in ("foo(bar|baz)?", "foo(bar|baz)*", "foo(bar|baz){0,2}"):
+            data = _call(
+                with_local_ctx(FindInFiles),
+                path=str(tmp_path),
+                pattern=pattern,
+                query_mode="python-re",
+            )
+            assert data["ok"] is True, pattern
+            assert data["count"] == 1, pattern
+
+    def test_required_literal_still_gates_the_prefilter(self, tmp_path):
+        """Обязательная часть по-прежнему отсекает файл без неё."""
+        _make_tree(tmp_path, {"a.py": "nothing relevant here\n"})
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path),
+            pattern="foo(bar|baz)?",
+            query_mode="python-re",
+        )
+        assert data["ok"] is True
+        assert data["count"] == 0
+
 
 # ------------------------------------------------------------------
 # 8. Error envelopes
