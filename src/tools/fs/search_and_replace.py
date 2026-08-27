@@ -3,7 +3,8 @@ import functools
 import difflib
 from typing import Dict, Any
 from tools.simple_tool_base import AbstractSimpleTool
-from tools.fs.edit_line_endings import NEWLINE_MODES, resolve_edit_line_endings
+from constants.tool_names import FS_WRITE_FILE_NAME
+from tools.fs.edit_line_endings import resolve_edit_line_endings
 from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
@@ -134,15 +135,6 @@ class SearchAndReplace(AbstractSimpleTool):
                             "Successful edits are written back in the same encoding."
                         ),
                     },
-                    "newline": {
-                        "type": "string",
-                        "enum": ["auto", "preserve"],
-                        "description": (
-                            "auto (default): an LF anchor matches a CRLF file and the replacement is "
-                            "written in the matched line's style. preserve: use search/replace "
-                            "bytes exactly as given (deliberate line-ending changes, protocol fixtures)."
-                        ),
-                    },
                 },
                 "required": ["path", "search", "replace"],
                 "additionalProperties": False
@@ -194,7 +186,7 @@ Important Usage Rules
   - error: object|null — error details when ok=false due to an error (not "not found").
   - line_endings_normalized: boolean — `search`/`replace` were converted to the file's CRLF/LF style.
 - **NEVER** use shell commands like `sed`, `perl -pi`, etc. — this tool is safe and cross-platform.
-- Line endings: write `search`/`replace` with \\n. CRLF files are matched and written in their own style automatically; the response reports it as `line_endings_normalized: true`. Pass `newline: "preserve"` to use `search`/`replace` bytes exactly as given (deliberate line-ending changes, protocol fixtures).
+- Line endings: write `search`/`replace` with \\n. CRLF files are matched and written in their own style automatically; the response reports it as `line_endings_normalized: true`. This tool never changes a file's line-ending style; to convert a file use fs_write_file with newline=lf|crlf.
 
 Examples
 Replace database URL in config:
@@ -303,25 +295,11 @@ Update version string:
         max_diff_chars: int = default_max_diff_chars,
         expected_file_sha256: str | None = None,
         encoding: str | None = None,
-        newline: str | None = None,
         **kwargs,
     ) -> str:
         expected_file_sha256 = coalesce_optional_string(expected_file_sha256)
         encoding = coalesce_optional_string(encoding)
-        newline = coalesce_optional_string(newline) or "auto"
         _result = functools.partial(self._result, path=path, applied=False)
-        if newline not in NEWLINE_MODES:
-            return _result(
-                ok=False,
-                matched=False,
-                replaced=0,
-                match_count=0,
-                line_numbers=[],
-                message="Argument 'newline' must be 'auto' or 'preserve'.",
-                suggestions=[],
-                suggestions_total=0,
-                error={"type": "invalid_argument", "field": "newline"},
-            )
 
         # Input validation
         if not isinstance(path, str):
@@ -589,7 +567,7 @@ Update version string:
             )
         content = decoded.text or ""
         encoding_used = decoded.encoding_used
-        resolved = resolve_edit_line_endings(content, search, replace, mode=newline)
+        resolved = resolve_edit_line_endings(content, search, replace)
         search = resolved.search
         replace = resolved.replace
         _result = functools.partial(_result, line_endings_normalized=resolved.normalized)
@@ -714,10 +692,11 @@ Update version string:
             noop_message = "No change needed (content identical after replacement)."
             if resolved.normalized:
                 # A deliberate line-ending change was folded back into the file's
-                # style; say so instead of a bare no-op.
+                # style: say so and point to the tool that owns the file's style.
                 noop_message += (
-                    " Replacement line endings were adapted to the file; pass "
-                    "newline='preserve' to write them exactly as given."
+                    " The replacement differs from the matched text only by line endings, "
+                    "which this tool keeps as in the file. To change the file's line-ending "
+                    f"style, rewrite it with {FS_WRITE_FILE_NAME} (newline=lf|crlf) or a shell command."
                 )
             return _result(
                 ok=False,

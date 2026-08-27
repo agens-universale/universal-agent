@@ -5,10 +5,11 @@ literally, so the anchor is resolved here: literal first, then converted to the
 file's style (both styles when the file mixes them). The replacement follows the
 line ending of the matched region — a multi-line anchor carries its own, a
 single-line anchor takes the line it sits on — so an edit never introduces a
-second style into that region. File content itself is never rewritten.
+second style into that region.
 
-``mode="preserve"`` switches all of this off: search and replace are used byte
-for byte (deliberate line-ending changes, protocol fixtures).
+The line-ending style is a property of the file: edit tools never change it and
+never rewrite file content. Converting a file is the job of the write tool
+(newline=lf|crlf) or a shell command.
 """
 
 from __future__ import annotations
@@ -22,8 +23,6 @@ from utils.file_text import (
     line_ending_at,
 )
 
-NEWLINE_MODES = ("auto", "preserve")
-
 
 @dataclass(frozen=True)
 class EditLineEndings:
@@ -33,12 +32,10 @@ class EditLineEndings:
     normalized: bool  # search and/or replace were converted
 
 
-def resolve_edit_line_endings(
-    content: str, search: str, replace: str, *, mode: str = "auto"
-) -> EditLineEndings:
+def resolve_edit_line_endings(content: str, search: str, replace: str) -> EditLineEndings:
     file_eol = detect_line_ending(content)
-    if mode == "preserve" or file_eol is None:
-        return EditLineEndings(search, replace, file_eol, False)
+    if file_eol is None:
+        return EditLineEndings(search, replace, None, False)
 
     resolved_search = search
     idx = content.find(search)

@@ -177,7 +177,7 @@ def test_search_and_replace_dry_run_diff_uses_file_style(tmp_path):
 
 
 # --- ревью F1: цель замены — EOL найденной строки; оба стиля на смешанном файле;
-# --- явный опт-аут newline="preserve"; флаг на каждом edit_result ---------------
+# --- стиль строки матча; честный отказ при смене концов строк; флаг на каждом edit_result ---
 
 ISLAND_TEXT = "x\r\ny\r\nISLAND\nz\r\n"          # CRLF-доминантный файл с LF-островом
 MINOR_REGION_TEXT = "x\r\ny\r\nA\nB\nz\r\n"      # целевой регион целиком в минорном стиле
@@ -202,42 +202,14 @@ def test_single_line_anchor_at_eof_without_newline_uses_the_previous_line_eol():
     assert res.replace == "c\r\nd"
 
 
-def test_preserve_mode_never_touches_search_or_replace():
-    res = resolve_edit_line_endings(CRLF_TEXT, "def a():\r\n    return 1\r\n", "def a():\n    return 10\n", mode="preserve")
-    assert res.search == "def a():\r\n    return 1\r\n"
-    assert res.replace == "def a():\n    return 10\n"
-    assert res.normalized is False
-    assert res.file_line_ending == "\r\n"
-
-
 @pytest.mark.parametrize("run", TOOLS)
-def test_intentional_eol_change_is_a_noop_with_a_hint_by_default(tmp_path, run):
+def test_intentional_eol_change_is_refused_with_a_pointer_to_the_write_tool(tmp_path, run):
     p = tmp_path / "f.txt"
     p.write_bytes(b"a\r\nb\r\nc\r\n")
     res = run(p, "a\r\nb\r\n", "a\nb\n")
     assert res["ok"] is False
-    assert "newline" in res["message"] and "preserve" in res["message"]
+    assert "line endings" in res["message"] and "fs_write_file" in res["message"]
     assert p.read_bytes() == b"a\r\nb\r\nc\r\n"
-
-
-@pytest.mark.parametrize("run", TOOLS)
-def test_newline_preserve_writes_search_and_replace_bytes_as_given(tmp_path, run):
-    p = tmp_path / "f.txt"
-    p.write_bytes(b"a\r\nb\r\nc\r\n")
-    res = run(p, "a\r\nb\r\n", "a\nb\n", newline="preserve")
-    assert res["ok"] is True and res["applied"] is True
-    assert p.read_bytes() == b"a\nb\nc\r\n"
-
-
-@pytest.mark.parametrize("run", TOOLS)
-def test_invalid_newline_value_is_rejected(tmp_path, run):
-    p = tmp_path / "f.txt"
-    p.write_bytes(b"a\r\nb\r\n")
-    res = run(p, "a", "A", newline="crlf")
-    assert res["ok"] is False
-    assert res["error"]["type"] == "invalid_argument"
-    assert res["error"]["field"] == "newline"
-    assert p.read_bytes() == b"a\r\nb\r\n"
 
 
 def test_island_edit_keeps_the_island_style_on_disk(tmp_path):
@@ -262,4 +234,4 @@ def test_plain_noop_batch_keeps_ok_true_without_a_hint(tmp_path):
     p.write_bytes(b"a\r\nb\r\n")
     res = _apply_edits(p, "a", "a")
     assert res["ok"] is True and res["applied"] is False
-    assert "preserve" not in res["message"]
+    assert "fs_write_file" not in res["message"]

@@ -12,7 +12,8 @@ from utils.file_text import (
     try_encode_text_bytes,
 )
 from utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
-from tools.fs.edit_line_endings import NEWLINE_MODES, resolve_edit_line_endings
+from constants.tool_names import FS_WRITE_FILE_NAME
+from tools.fs.edit_line_endings import resolve_edit_line_endings
 from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
@@ -92,15 +93,6 @@ class ApplyFileEdits(AbstractSimpleTool):
                             "Successful edits are written back in the same encoding."
                         ),
                     },
-                    "newline": {
-                        "type": "string",
-                        "enum": ["auto", "preserve"],
-                        "description": (
-                            "auto (default): LF anchors match CRLF files and replacements are "
-                            "written in the matched line's style. preserve: use search/replace "
-                            "bytes exactly as given (deliberate line-ending changes, protocol fixtures)."
-                        ),
-                    },
                 },
                 "required": ["path", "edits"],
                 "additionalProperties": False,
@@ -119,8 +111,8 @@ class ApplyFileEdits(AbstractSimpleTool):
             "Short search like 'i += 1' may match unseen duplicates in file parts not in current read page;\n"
             "prefer broader unique fragments and guard with expected_matches=1 when appropriate.\n"
             "Line endings: write search/replace with \\n; CRLF files are matched and written in their own style\n"
-            "automatically (edit_results[i].line_endings_normalized=true when a conversion happened);\n"
-            "newline='preserve' switches this off and uses search/replace bytes exactly as given.\n"
+            "automatically (edit_results[i].line_endings_normalized=true when a conversion happened).\n"
+            f"This tool never changes a file's line-ending style; to convert a file use {FS_WRITE_FILE_NAME} with newline=lf|crlf.\n"
             "If any edit fails validation or matching, no file changes are written.\n"
             "edits_would_apply/total_would_replace count in-memory simulation;\n"
             "edits_applied/total_replaced are non-zero only when applied=true.\n"
@@ -218,11 +210,8 @@ class ApplyFileEdits(AbstractSimpleTool):
         *,
         content: str,
         edit: Dict[str, Any],
-        newline_mode: str = "auto",
     ) -> tuple[bool, str, Dict[str, Any], Dict[str, Any] | None]:
-        resolved = resolve_edit_line_endings(
-            content, edit["search"], edit["replace"], mode=newline_mode
-        )
+        resolved = resolve_edit_line_endings(content, edit["search"], edit["replace"])
         search = resolved.search
         replace = resolved.replace
         normalized = resolved.normalized
@@ -318,15 +307,11 @@ class ApplyFileEdits(AbstractSimpleTool):
         max_diff_chars: int = default_max_diff_chars,
         expected_file_sha256: str | None = None,
         encoding: str | None = None,
-        newline: str | None = None,
         **kwargs,
     ) -> str:
         expected_file_sha256 = coalesce_optional_string(expected_file_sha256)
         encoding = coalesce_optional_string(encoding)
-        newline = coalesce_optional_string(newline) or "auto"
         _result = functools.partial(self._result, path=path)
-        if newline not in NEWLINE_MODES:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'newline' must be 'auto' or 'preserve'.", error={"type": "invalid_argument", "field": "newline"})
         if not isinstance(path, str):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'path' must be a string.", error={"type": "invalid_argument", "field": "path"})
         if not isinstance(edits, list) or len(edits) == 0:
@@ -402,9 +387,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             if not isinstance(edit["replace"], str):
                 return _result(ok=False, applied=False, edits_would_apply=edits_would_apply, total_would_replace=total_would_replace, edits_applied=0, total_replaced=0, edit_results=edit_results, failed_edit_index=i, message=f"Edit #{i} has invalid 'replace'.", error={"type": "invalid_argument", "field": "replace"})
 
-            ok_edit, next_content, meta, err = self._apply_one_edit(
-                content=current, edit=edit, newline_mode=newline
-            )
+            ok_edit, next_content, meta, err = self._apply_one_edit(content=current, edit=edit)
             meta["index"] = i
             edit_results.append(meta)
             if not ok_edit:
@@ -471,10 +454,12 @@ class ApplyFileEdits(AbstractSimpleTool):
             folded = any(r.get("line_endings_normalized") for r in edit_results)
             if folded:
                 # A deliberate line-ending change was folded back into the file's
-                # style: the request was not carried out, say so instead of a bare no-op.
+                # style: the request was not carried out — say so and point to the
+                # tool that owns the file's line-ending style.
                 noop_message += (
-                    " Replacement line endings were adapted to the file; pass "
-                    "newline='preserve' to write them exactly as given."
+                    " The replacement differs from the matched text only by line endings, "
+                    "which this tool keeps as in the file. To change the file's line-ending "
+                    f"style, rewrite it with {FS_WRITE_FILE_NAME} (newline=lf|crlf) or a shell command."
                 )
             return _result(
                 ok=not folded,
