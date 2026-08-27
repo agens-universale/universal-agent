@@ -118,8 +118,13 @@ async def test_escape_collapses_the_list_and_then_gives_the_key_back(tmp_path):
 
 
 async def test_is_dirty_is_honest():
-    """Вход без правок — не dirty; правка поля и переключение галки — dirty."""
-    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+    """Вход без правок — не dirty; правка поля и переключение галки — dirty.
+
+    Пара у записи своя: галка ● живёт только в этом состоянии (§4), а половину пары
+    (адрес без токена) правило вообще запрещает."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
+                          "token": "sk-secret"},
                  existing_aliases={"flash"})
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -153,11 +158,36 @@ async def test_empty_url_inherits_and_no_key_is_emitted():
             "наследуется: http://hub/v1/chat/completions")
 
 
+async def test_the_url_placeholder_names_the_address_that_really_acts():
+    """Адрес записи может жить во ВТОРОМ написании (`backend.completions_url`) — поле
+    `url` при этом пусто, и placeholder говорил «наследуется: <общий адрес>». Это ложь:
+    у `backend.completions_url` приоритет над общим (`model_router._resolve_alias`), и
+    названный призраком общий адрес не действует.
+
+    Поле обязано называть ДЕЙСТВУЮЩИЙ адрес — тем же правилом, каким поле токена
+    показывает маску своего секрета записи, а не унаследованного."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "token": "sk-OWN",
+                          "backend": {"completions_url": "https://my-host/v1"}},
+                 existing_aliases={"flash"},
+                 effective_url="http://hub/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.query_one("#mef-url", Input).value == ""
+        assert form.query_one("#mef-url", Input).placeholder == "https://my-host/v1"
+        # Токен той же записи и так честен — маска СВОЕГО секрета, не общего.
+        assert "sk-HUB" not in form.query_one("#mef-token", Input).placeholder
+
+
 async def test_clearing_a_prefilled_url_removes_the_key(tmp_path):
     """Стёртое ПРЕДЗАПОЛНЕННОЕ поле — это «снять», а не «промолчать»: ключ уходит
     из записи (`None` — контракт писателя), и адрес снова наследуется от основного
     конфига. Иначе форма показывала бы «изменено», Enter отвечал бы «сохранено», а
-    в файле оставался бы прежний адрес."""
+    в файле оставался бы прежний адрес.
+
+    Одним адресом это больше не выражается (§2): он уходит ВМЕСТЕ с токеном — пара
+    возвращается к общей целиком, и в файле не остаётся ни того, ни другого."""
     from config_modules.registry_write import upsert_model
     target = tmp_path / "config.yml"
     target.write_text(_REGISTRY_WITH_PRICING, encoding="utf-8")
@@ -176,13 +206,20 @@ async def test_clearing_a_prefilled_url_removes_the_key(tmp_path):
         # называть, ЧТО теперь будет действовать.
         assert form.query_one("#mef-url", Input).placeholder == (
             "наследуется: http://hub/v1/chat/completions")
+        # Половину пары форма не сохранит и скажет почему — совет исполним отсюда же:
+        # поле токена открыто, курсор на него встаёт.
+        assert form.submit()[0] is False
+        form.escape()                                   # опустевшее поле раскрыло пресеты
+        form.move(1)                                    # адрес → токен
+        await pilot.pause()
+        assert form.clear_token() is True
         ok, alias, fields = form.submit()
-        assert ok is True and fields["url"] is None
+        assert ok is True and fields["url"] is None and fields["token"] is None
     upsert_model(target, alias, fields, template)
     entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
-    assert "url" not in entry, entry                    # ключ снят — наследование
+    assert "url" not in entry, entry                    # ключи сняты — наследование
+    assert "token" not in entry, entry
     assert entry["pricing"] == {"input": 0.3, "output": 1.2}
-    assert entry["token"] == "sk-secret"                # соседей это не задело
 
 
 async def test_clearing_a_prefilled_model_id_removes_the_key(tmp_path):
@@ -194,7 +231,8 @@ async def test_clearing_a_prefilled_model_id_removes_the_key(tmp_path):
     target.write_text(_REGISTRY_WITH_PRICING, encoding="utf-8")
     template = Path(_default_config_path()).read_text(encoding="utf-8")
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
-                          "url": "https://openrouter.ai/api/v1/chat/completions"},
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
+                          "token": "sk-secret"},
                  existing_aliases={"flash"})
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -258,10 +296,285 @@ async def test_inherit_preset_leaves_the_field_empty():
         assert form.query_one("#mef-url", Input).value == ""
 
 
+# --- адрес и токен — одно состояние (§4) ---------------------------------------
+
+async def test_token_is_read_only_while_the_connection_is_shared():
+    """§4: токен и галка доступны только при СВОЁМ адресе. Пока адрес общий, решать про
+    токен нечего — он придёт вместе с адресом, а набранный над общим адресом токен был бы
+    ровно запрещённой половиной."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        token = form.query_one("#mef-token", Input)
+        assert token.disabled is True
+        assert "токен приходит из раздела «Подключение»" in str(
+            form.query_one("#mef-noauth", Static).render())
+        assert form.own_connection() is False
+
+
+async def test_typing_an_address_opens_the_token_and_drops_the_inherited_mask():
+    """Печать в адресе — вход в «своё»: маска унаследованного токена обещала бы чужой
+    секрет для чужого теперь адреса."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        await pilot.pause()
+        token = form.query_one("#mef-token", Input)
+        assert token.disabled is False
+        assert token.placeholder == "укажите токен для этого адреса"
+        assert form.own_connection() is True
+
+
+async def test_the_pair_row_says_where_the_address_and_token_come_from():
+    """§4: состояние пары не переключается отдельным элементом — оно выводится из полей,
+    и строка над ними называет, откуда пара взята."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        row = form.query_one("#mef-pair", Static)
+        assert str(row.render()) == "Адрес и токен: общие — из раздела «Подключение»"
+        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        await pilot.pause()
+        assert str(row.render()) == "Адрес и токен: свои"
+
+
+async def test_empty_common_token_is_explained_not_masked():
+    """§4: `Authorization: ""` приводится к None (`settings.py:854-856`) — маски быть не
+    может. Наследование пустого общего токена законно: запись не задаёт ничего, значит
+    наследует пару целиком и работает без авторизации."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth=None)
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        token = form.query_one("#mef-token", Input)
+        assert token.placeholder == "общий токен не задан — запросы идут без авторизации"
+        ok, _alias, fields = form.submit()
+        assert ok is True and "token" not in fields and "url" not in fields
+
+
+async def test_the_form_refuses_to_save_an_address_without_a_token():
+    """§2: своё подключение задаётся ЦЕЛИКОМ, и форма обязана не давать собрать то, что
+    валидатор конфига отвергнет, — иначе отказ придёт от писателя, когда правка уже
+    сделана."""
+    form = _form(initial=None, existing_aliases=set(),
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-alias", Input).value = "flash"
+        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        await pilot.pause()
+        ok, _alias, _fields = form.submit()
+        assert ok is False
+        assert str(form.query_one("#mef-error", Static).render()) == (
+            "задан свой адрес, но не задан токен — укажите токен "
+            "или отметьте «без авторизации»")
+        form.query_one("#mef-token", Input).value = "sk-OWN"
+        ok, alias, fields = form.submit()
+        assert (ok, alias) == (True, "flash")
+        assert fields["url"] == "https://my-host/v1/chat/completions"
+        assert fields["token"] == "sk-OWN"
+
+
+async def test_the_form_refuses_to_save_a_token_without_an_address():
+    """Симметричный конец правила: стёртый адрес — «пусто» становится решением при
+    сохранении (§4, краевые случаи), а свой токен записи никуда не делся. Поле токена при
+    этом остаётся открытым: иначе снять оставшуюся половину было бы нечем."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://my-host/v1/chat/completions",
+                          "token": "sk-OWN"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-url", Input).value = ""
+        await pilot.pause()
+        assert form.query_one("#mef-token", Input).disabled is False
+        ok, _alias, _fields = form.submit()
+        assert ok is False
+        assert str(form.query_one("#mef-error", Static).render()) == (
+            "задан свой токен, но не задан адрес — укажите адрес "
+            "или верните общее подключение")
+
+
+async def test_the_checkbox_is_inert_while_the_connection_is_shared():
+    """Галка неактивна при общей паре (§4), и знает это ФОРМА, а не навигация: сегодня
+    курсор на строку не встаёт, но обработчик Task 3 переезжает на уровень формы, и
+    гейт, оставленный на одной позиции курсора, там развалится."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        # Ставим курсор на строку галки в обход навигации — она-то её и пропускает.
+        form._idx = form._positions.index(None)
+        assert form.toggle_no_auth() is False
+        assert form.own_connection() is False
+        assert "○" in str(form.query_one("#mef-noauth", Static).render())
+
+
+async def test_erasing_the_address_leaves_the_own_token_reachable():
+    """Тупик, который правило могло бы построить само: набрали свою пару, стёрли адрес.
+    Состояние на лету не переключается (§4, краевые случаи) — иначе поле токена
+    замёрзло бы вместе с набранным ключом, курсор на него не встаёт, и совет отказа
+    («укажите адрес или верните общее подключение») стал бы неисполним."""
+    form = _form(initial=None, existing_aliases=set(),
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-alias", Input).value = "flash"
+        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        await pilot.pause()
+        form.query_one("#mef-token", Input).value = "sk-OWN"
+        await pilot.pause()
+        form.query_one("#mef-url", Input).value = ""
+        await pilot.pause()
+        token = form.query_one("#mef-token", Input)
+        assert form.own_connection() is True            # своё осталось — токен
+        assert token.disabled is False and token.value == "sk-OWN"
+        form.move(1)                                    # адрес → токен: позиция жива
+        await pilot.pause()
+        ok, _alias, _fields = form.submit()
+        assert ok is False
+        # Совет отказа исполним прямо здесь: стёрли набранный токен — пара снова общая.
+        token.value = ""
+        await pilot.pause()
+        assert form.own_connection() is False
+        ok, alias, fields = form.submit()
+        assert (ok, alias) == (True, "flash")
+        assert "url" not in fields and "token" not in fields
+
+
+async def test_the_inherit_preset_returns_the_whole_pair_not_just_the_address():
+    """Пункт «основной конфиг · наследовать» — «вернуть общие», а не «очистить адрес»
+    (§5): оставленный токен был бы ровно запрещённой половиной, снять которую в общей
+    паре нечем. Уходят оба ключа разом."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://my-host/v1/chat/completions",
+                          "token": "sk-OWN"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.reload_presets() is True            # Alt+↓ поверх своего адреса
+        await pilot.pause()
+        form.move(1)                                    # подсветить пункт наследования
+        await pilot.pause()
+        assert form.enter() is True
+        await pilot.pause()
+        assert form.own_connection() is False
+        assert form.query_one("#mef-token", Input).disabled is True
+        assert str(form.query_one("#mef-pair", Static).render()) == (
+            "Адрес и токен: общие — из раздела «Подключение»")
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["url"] is None and fields["token"] is None
+
+
+async def test_the_second_writing_of_the_pair_is_read_as_own():
+    """§2 знает два написания пары, и форма обязана считать её тем же ядровым
+    определением (`model_registry.connection_parts`): иначе запись, задавшую своё
+    подключение через `backend`, форма объявит общей и откажется сохранить БЕЗ единой
+    правки — а починить это в ней нечем, `backend` она не правит."""
+    by_backend_url = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                                    "token": "sk-OWN",
+                                    "backend": {"completions_url": "https://my-host/v1"}},
+                           existing_aliases={"flash"},
+                           effective_url="https://openrouter.ai/api/v1/chat/completions",
+                           effective_auth="Bearer sk-COMMON")
+    async with _harness(by_backend_url).run_test() as pilot:
+        await pilot.pause()
+        assert by_backend_url.own_connection() is True
+        assert by_backend_url.query_one("#mef-token", Input).disabled is False
+        ok, _alias, fields = by_backend_url.submit()
+        # Правок не было — отказывать не в чем, и ключей пары форма не трогает.
+        assert ok is True
+        assert "url" not in fields and "token" not in fields
+    by_backend_auth = _form(
+        initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                 "url": "https://my-host/v1/chat/completions",
+                 "backend": {"chat_completion_headers": {"Authorization": "Bearer sk-OWN"}}},
+        existing_aliases={"flash"},
+        effective_url="https://openrouter.ai/api/v1/chat/completions",
+        effective_auth="Bearer sk-COMMON")
+    async with _harness(by_backend_auth).run_test() as pilot:
+        await pilot.pause()
+        assert by_backend_auth.own_connection() is True
+        ok, _alias, fields = by_backend_auth.submit()
+        assert ok is True
+        assert "token" not in fields
+
+
+async def test_probe_does_not_send_the_inherited_token_to_a_typed_address():
+    """§4: в сеть уходит только СОБРАННАЯ пара. Иначе «напечатал чужой адрес → нажал
+    Ctrl+Space» отправляет общий ключ на чужой хост ещё до сохранения.
+
+    Смотрим на ВСЕ вызовы пробы, а не на первый: differential-танец
+    (`settings_probe.probe_connection`) первым всегда шлёт контроль БЕЗ токена, и утечка
+    видна только во втором — том, что идёт после 401."""
+    seen = []
+
+    def fake_probe(endpoint, auth, verify, model, **kwargs):
+        seen.append((endpoint, auth))
+        return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON", probe=fake_probe)
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-url", Input).value = "https://foreign/v1/chat/completions"
+        await pilot.pause()
+        assert form.probe_connection() is True
+        for _ in range(3):
+            await pilot.pause()
+        assert seen and all(e.startswith("https://foreign") for e, _ in seen), seen
+        assert [auth for _, auth in seen] == [None], seen   # общий ключ не ушёл
+
+
+async def test_the_model_list_does_not_send_the_inherited_token_to_a_typed_address():
+    """Тот же страж для АВТОПОДГРУЗКИ: список уходит на эндпоинт при простом переходе
+    курсора на поле id — без единой сетевой клавиши и до всякого сохранения."""
+    calls = []
+
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                 existing_aliases={"flash"},
+                 fetch=lambda url, auth, **k: calls.append((url, auth)) or None,
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-COMMON")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-url", Input).value = "https://foreign/v1/chat/completions"
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        assert calls == [("https://foreign/v1/chat/completions", None)], calls
+
+
 async def test_untouched_token_field_keeps_the_saved_secret():
     """Заморозка токена: нетронутое поле не отдаёт ключ `token` — сохранённый
     секрет переживает правку соседнего поля; сам секрет в значение не заезжает."""
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
                           "token": "sk-SECRETVALUE"},
                  existing_aliases={"flash"})
     async with _harness(form).run_test() as pilot:
@@ -279,8 +592,10 @@ async def test_untouched_token_field_keeps_the_saved_secret():
 
 async def test_no_auth_toggle_freezes_the_field_and_writes_empty_token():
     """Галка ● «без авторизации» — поле замораживается (раскладка не прыгает), а
-    submit отдаёт явное `token: ""` — это НЕ то же самое, что «не задан»."""
+    submit отдаёт явное `token: ""` — это НЕ то же самое, что «не задан». Пара при этом
+    остаётся целой: `token: ""` — заданный токен своего адреса (§2)."""
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
                           "token": "sk-secret"},
                  existing_aliases={"flash"})
     async with _harness(form).run_test() as pilot:
@@ -297,12 +612,19 @@ async def test_no_auth_toggle_freezes_the_field_and_writes_empty_token():
 
 
 async def test_no_auth_switched_off_returns_the_record_to_inheritance():
-    """Галку сняли, своего токена не ввели → ключ `token` УДАЛЯЕТСЯ (`None` —
-    контракт писателя): иначе `token: ""` остался бы в файле навсегда, и
-    переключатель работал бы только в одну сторону."""
+    """Снятая галка не создаёт запрещённое состояние МОЛЧА: над своим адресом ○ значит
+    «токена нет» — ровно половина пары (§2), и форма отказывает, называя причину.
+    Раньше здесь возвращалось наследование одного токена — при правиле §2 это и есть
+    запрещённая половина, а возврат пары целиком делает Ctrl+U.
+
+    Дорога назад при этом остаётся: стёртый адрес уводит пару в общую, и `token: ""`
+    уходит из файла вместе с ним (`None` — контракт писателя). Иначе пустая строка
+    осталась бы в записи навсегда, и переключатель работал бы в одну сторону."""
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://my-host/v1/chat/completions",
                           "token": ""},
                  existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
                  effective_auth="Bearer sk-HUB")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -310,14 +632,23 @@ async def test_no_auth_switched_off_returns_the_record_to_inheritance():
         form.move(1)                                   # адрес → (токен ●) → галка
         await pilot.pause()
         assert form.toggle_no_auth() is True           # ● → ○
+        await pilot.pause()
+        assert form.submit()[0] is False
+        assert str(form.query_one("#mef-error", Static).render()) == (
+            "задан свой адрес, но не задан токен — укажите токен "
+            "или отметьте «без авторизации»")
+        form.query_one("#mef-url", Input).value = ""
+        await pilot.pause()
+        assert form.own_connection() is False
         ok, _alias, fields = form.submit()
-        assert ok is True and fields["token"] is None
+        assert ok is True and fields["url"] is None and fields["token"] is None
 
 
 async def test_no_auth_already_active_and_untouched_writes_nothing():
     """Запись уже была `token: ""`, галку не трогали → ключ не переписывается
     заново («не изменилось — не пишем»)."""
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
                           "token": ""},
                  existing_aliases={"flash"})
     async with _harness(form).run_test() as pilot:
@@ -353,31 +684,239 @@ async def test_ctrl_u_drops_the_own_token_mask_and_shows_the_inherited_one():
         assert form.is_dirty() is True
 
 
-async def test_ctrl_u_is_not_ours_off_the_token_field_or_without_an_own_token():
-    """Клавиша работает ТОЛЬКО на поле токена и только когда есть что снимать: иначе
-    False — и хозяин обязан отдать её `Input` (там у Ctrl+U своё штатное дело)."""
+@pytest.mark.parametrize("field_id", ["mef-url", "mef-token"])
+async def test_ctrl_u_returns_the_whole_pair_from_either_field(field_id):
+    """§5: клавиша живёт на уровне формы — под галкой ● поле токена disabled и курсором
+    пропускается, поэтому «на любом из двух полей» иначе выродилось бы в «только на
+    адресе». С обоих полей результат ОДИН: пара уходит к общей целиком."""
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://my-host/v1/chat/completions",
+                          "token": "sk-OWN"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        for _ in form._positions:                      # дойти до поля своей ходьбой
+            if form._positions[form._idx] == field_id:
+                break
+            form.move(1)
+        await pilot.pause()
+        assert form._positions[form._idx] == field_id, "позиция недостижима курсором"
+        assert form.clear_token() is True
+        await pilot.pause()
+        assert form.own_connection() is False
+        assert form.query_one("#mef-url", Input).value == ""
+        assert form.query_one("#mef-token", Input).disabled is True
+        assert str(form.query_one("#mef-pair", Static).render()) == (
+            "Адрес и токен: общие — из раздела «Подключение»")
+        ok, _alias, fields = form.submit()
+        assert ok is True and fields["url"] is None and fields["token"] is None
+
+
+async def test_ctrl_u_takes_the_no_auth_checkbox_off_too():
+    """Галка ● — часть пары (`token: ""` над своим адресом, §2), и Ctrl+U снимает её
+    вместе с обоими полями. Оставь он галку — запись осталась бы «своей» с пустой
+    половиной, а снять галку было бы нечем: при общей паре она неактивна.
+
+    Курсор при этом стоит на адресе, и не случайно: под ● поле токена заморожено и
+    курсором пропускается — вход в клавишу здесь ровно один."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://my-host/v1/chat/completions",
+                          "token": ""},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert "●" in str(form.query_one("#mef-noauth", Static).render())
+        assert form.clear_token() is True
+        await pilot.pause()
+        assert "○" in str(form.query_one("#mef-noauth", Static).render())
+        assert form.own_connection() is False
+        ok, _alias, fields = form.submit()
+        assert ok is True and fields["url"] is None and fields["token"] is None
+
+
+async def test_ctrl_u_gets_the_record_out_of_half_a_pair():
+    """Правило ПЕРЕВЕРНУЛО прежний случай: свой адрес без токена — половина пары,
+    сохранить её нельзя (§2), и Ctrl+U здесь обязан работать — он и есть выход. Прежняя
+    редакция клавиши отвечала на этот случай «не наша»: гейт требовал непустого своего
+    токена, то есть молчал ровно там, где человек и застревает."""
+    form = _form(initial=None, existing_aliases=set(),
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-alias", Input).value = "flash"
+        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        await pilot.pause()
+        assert form.submit()[0] is False               # половина пары — не сохранить
+        assert form.clear_token() is True              # курсор на адресе
+        await pilot.pause()
+        assert form.own_connection() is False
+        assert form.query_one("#mef-url", Input).value == ""
+        ok, alias, fields = form.submit()
+        assert (ok, alias) == (True, "flash")
+        assert "url" not in fields and "token" not in fields
+
+
+async def test_the_refusal_goes_away_with_the_state_it_was_about():
+    """Отказ живёт ровно столько, сколько состояние, о котором он сказан: человек
+    послушался и нажал обещанную клавишу — красная строка про половину пары обязана
+    уйти вместе с половиной. Иначе форма спорит сама с собой: строка над полями говорит
+    «общие», отказ под ними — «задан свой адрес»."""
+    form = _form(initial=None, existing_aliases=set(),
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-alias", Input).value = "flash"
+        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        await pilot.pause()
+        assert form.submit()[0] is False
+        error = form.query_one("#mef-error", Static)
+        assert error.display is True
+        assert form.clear_token() is True
+        await pilot.pause()
+        assert error.display is False
+        assert str(error.render()) == ""
+
+
+async def test_the_token_label_stays_silent_under_the_no_auth_checkbox():
+    """Под ● поле токена заморожено и курсором пропускается — обещать в ЕГО подписи
+    клавишу значит звать её туда, куда не встать. Выход при этом не теряется: клавиша
+    работает с поля адреса, и там её называет футер."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://my-host/v1/chat/completions",
+                          "token": ""},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert "●" in str(form.query_one("#mef-noauth", Static).render())
+        assert str(form.query_one("#mef-token-label", Static).render()) == "Токен"
+        assert form.clear_token() is True               # с адреса клавиша всё равно наша
+
+
+async def test_the_second_writing_says_where_the_pair_is_edited():
+    """Пара во втором написании живёт в секции `backend`, а форма её не правит — и
+    обязана это СКАЗАТЬ. Иначе строка «Адрес и токен: свои» обещает правку теми полями,
+    которые к этой паре отношения не имеют, и человеку негде узнать, куда идти."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "token": "sk-OWN",
+                          "backend": {"completions_url": "https://my-host/v1"}},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert str(form.query_one("#mef-pair", Static).render()) == (
+            "Адрес и токен: свои — заданы секцией backend, правятся в файле")
+
+
+async def test_ctrl_u_is_neither_promised_nor_taken_over_a_pair_in_backend():
+    """Клавиша не обещается там, где не может доделать: пара (или её половина) задана
+    секцией `backend`, форма её не правит — снятые `url`/`token` оставили бы запись
+    своей, и нажатие выглядело бы сделанным, ничего не сделав.
+
+    «Сделал» и «не сделал» не должны выглядеть одинаково: действие отвечает False, и
+    клавиша уходит `Input` — второе нажатие подряд рапортовало бы успех над неизменным
+    состоянием."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "token": "sk-OWN",
+                          "backend": {"completions_url": "https://my-host/v1"}},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.own_connection() is True
+        assert str(form.query_one("#mef-token-label", Static).render()) == "Токен"
+        assert form.can_return_shared_pair is False
+        assert form.clear_token() is False              # курсор на адресе
+        form.move(1)                                    # адрес → токен (поле живое)
+        await pilot.pause()
+        assert form.can_return_shared_pair is False
+        assert form.clear_token() is False
+        assert form.clear_token() is False              # и второе нажатие — тот же ответ
+        assert form.token_cleared is False
+        assert form.query_one("#mef-token", Input).value == ""
+        assert form.own_connection() is True            # состояние не тронуто
+
+
+async def test_the_inherit_preset_is_gated_like_the_key_that_does_the_same():
+    """§5: пункт «основной конфиг · наследовать» и Ctrl+U — два входа в ОДНО действие,
+    значит и гейт у них один. Пара во втором написании (секция `backend`) форме не
+    подвластна: клавиша честно отказывает, а пункт проходил — снимал токен и оставлял
+    запись с адресом из `backend` без своего токена, то есть запрещённой половиной,
+    которую `submit()` отвергает. Тупик: строка пары говорит «правятся в файле», а
+    форма требует токен, взять который ей неоткуда.
+
+    Обратная половина обязательна: там, где действие исполнимо, пункт стоит на месте —
+    он и есть явный вход в наследование, и убрать его заодно с тупиком значило бы
+    лечить болезнь ампутацией."""
+    in_backend = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                                "token": "sk-OWN",
+                                "backend": {"completions_url": "https://my-host/v1"}},
+                       existing_aliases={"flash"},
+                       effective_url="http://hub/v1/chat/completions",
+                       effective_auth="Bearer sk-HUB")
+    async with _harness(in_backend).run_test() as pilot:
+        await pilot.pause()
+        in_backend.reload_presets()
+        await pilot.pause()
+        rows = [str(w.render()) for w in in_backend.query(".mef-preset-row")]
+        assert not any("наследовать" in r for r in rows), rows
+        assert in_backend.token_cleared is False        # и снимать было нечем
+
+    own = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                         "url": "https://my-host/v1/chat/completions", "token": "sk-OWN"},
+                existing_aliases={"flash"},
+                effective_url="http://hub/v1/chat/completions",
+                effective_auth="Bearer sk-HUB")
+    async with _harness(own).run_test() as pilot:
+        await pilot.pause()
+        assert own.reload_presets() is True
+        await pilot.pause()
+        rows = [str(w.render()) for w in own.query(".mef-preset-row") if w.display]
+        assert rows and "основной конфиг · наследовать" in rows[0], rows
+
+
+async def test_ctrl_u_is_not_ours_off_the_pair_fields_or_over_a_shared_pair():
+    """Клавиша работает на полях ПАРЫ и только пока пара своя. Иначе False — и хозяин
+    обязан отдать её `Input`: на алиасе и id модели у Ctrl+U своё штатное дело, и там
+    оно настоящее — эти поля предзаполнены, стирать в них есть что."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
                           "token": "sk-OWNSECRET"},
                  existing_aliases={"flash"})
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.clear_token() is False              # курсор на адресе
+        form.move(-1)                                  # адрес → алиас (по кольцу)
+        await pilot.pause()
+        assert form.clear_token() is False             # поле алиаса — не поле пары
         assert form.token_cleared is False
-    inherited = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
-                      existing_aliases={"flash"},
-                      effective_auth="Bearer sk-HUB")
-    async with _harness(inherited).run_test() as pilot:
+        assert form.own_connection() is True           # пара цела, клавиша её не тронула
+    # Вторая половина — про «возвращать нечего»: пара общая, и оба её поля пусты.
+    shared = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                   existing_aliases={"flash"},
+                   effective_url="https://openrouter.ai/api/v1/chat/completions",
+                   effective_auth="Bearer sk-HUB")
+    async with _harness(shared).run_test() as pilot:
         await pilot.pause()
-        inherited.move(1)                              # адрес → токен
-        await pilot.pause()
-        assert inherited.clear_token() is False        # своего токена нет — снимать нечего
-        assert inherited.token_cleared is False
+        assert shared.own_connection() is False
+        assert shared.clear_token() is False           # курсор на адресе — и всё равно нет
+        assert shared.token_cleared is False
 
 
 async def test_the_token_label_promises_ctrl_u_only_when_there_is_something_to_drop():
     """Обещание клавиши живёт в ПОДПИСИ ПОЛЯ (канон `ConnectionEditor._token_label`)
-    и ровно там, где клавиша работает: свой токен есть — подпись зовёт Ctrl+U; нет
-    своего (или его уже сняли) — подписи нет, клавиша молчит и обещать ей нечего."""
+    и ровно в том состоянии, где клавиша работает: пара своя — подпись зовёт «вернуть
+    общие»; пара общая (в том числе сразу после Ctrl+U) — возвращать нечего, подписи
+    нет. Гейт именно ПАРА, а не свой токен: над своим адресом без токена клавиша тоже
+    работает — она и есть выход из половины пары."""
     from textual.widgets import Static
     inherited = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
                       existing_aliases={"flash"},
@@ -386,48 +925,73 @@ async def test_the_token_label_promises_ctrl_u_only_when_there_is_something_to_d
         await pilot.pause()
         assert str(inherited.query_one("#mef-token-label", Static).render()) == "Токен"
     own = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                         "url": "https://openrouter.ai/api/v1/chat/completions",
                          "token": "sk-OWNSECRET"},
                 existing_aliases={"flash"},
                 effective_auth="Bearer sk-HUB")
     async with _harness(own).run_test() as pilot:
         await pilot.pause()
         label = own.query_one("#mef-token-label", Static)
-        assert str(label.render()) == "Токен   Ctrl+U — наследовать"
+        assert str(label.render()) == "Токен   Ctrl+U — вернуть общие"
         own.move(1)
         await pilot.pause()
         assert own.clear_token() is True
         await pilot.pause()
         assert str(label.render()) == "Токен"          # сняли — обещать больше нечего
+    # Половина пары — состояние, где клавиша нужнее всего: свой адрес набран, токена
+    # нет, и сохранить такое правило не даст. Обещай подпись по СВОЕМУ ТОКЕНУ — выход
+    # отсюда остался бы неназванным ровно там, где его ищут.
+    half = _form(initial=None, existing_aliases=set(),
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(half).run_test() as pilot:
+        await pilot.pause()
+        half.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        await pilot.pause()
+        assert str(half.query_one("#mef-token-label", Static).render()) == (
+            "Токен   Ctrl+U — вернуть общие")
 
 
 async def test_typing_after_ctrl_u_cancels_the_mark(tmp_path):
-    """Передумали: набранный после Ctrl+U токен снимает пометку сам — в файл уедет
-    НАБРАННОЕ, а не удаление ключа. Иначе submit пошёл бы по ветке «снять», и
-    введённый токен молча пропал бы."""
+    """Передумали: набранная после Ctrl+U пара снимает пометку сама — в файл уедет
+    НАБРАННОЕ, а не удаление ключей. Иначе submit пошёл бы по ветке «снять», и
+    введённое молча пропало бы.
+
+    Набирается именно ПАРА, и порядок не выбирают: клавиша вернула общую целиком, а над
+    общим адресом поле токена заморожено — оживает оно только со своим адресом."""
     from textual.widgets import Static
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
                           "token": "sk-OWNSECRET"},
                  existing_aliases={"flash"},
+                 effective_url="http://hub/v1/chat/completions",
                  effective_auth="Bearer sk-HUB")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.move(1)
         await pilot.pause()
         assert form.clear_token() is True
+        await pilot.pause()
+        assert form.query_one("#mef-token", Input).disabled is True
+        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        await pilot.pause()
+        assert form.query_one("#mef-token", Input).disabled is False
         form.query_one("#mef-token", Input).value = "sk-NEW"
         await pilot.pause()
         assert form.token_cleared is False
         # Клавиша снова работает — и подпись снова о ней говорит.
         assert str(form.query_one("#mef-token-label", Static).render()) == (
-            "Токен   Ctrl+U — наследовать")
+            "Токен   Ctrl+U — вернуть общие")
         ok, _alias, fields = form.submit()
         assert ok is True and fields["token"] == "sk-NEW"
+        assert fields["url"] == "https://my-host/v1/chat/completions"
 
 
-async def test_saving_after_ctrl_u_removes_the_token_key_from_the_file(tmp_path):
-    """Главное последствие: в ФАЙЛЕ ключа `token` больше нет — запись вернулась к
-    наследованию. Соседние ключи, о которых форма не знает (`pricing`), это не
-    задело."""
+async def test_saving_after_ctrl_u_removes_both_pair_keys_from_the_file(tmp_path):
+    """Главное последствие: в ФАЙЛЕ не осталось ни `token`, ни `url` — запись вернулась
+    к общей паре целиком (§5). Один снятый токен был бы ровно запрещённой половиной, и
+    отказал бы уже валидатор конфига. Соседние ключи, о которых форма не знает
+    (`pricing`), это не задело."""
     from config_modules.registry_write import upsert_model
     target = tmp_path / "config.yml"
     target.write_text(_REGISTRY_WITH_PRICING, encoding="utf-8")
@@ -436,6 +1000,7 @@ async def test_saving_after_ctrl_u_removes_the_token_key_from_the_file(tmp_path)
                           "url": "https://openrouter.ai/api/v1/chat/completions",
                           "token": "sk-secret"},
                  existing_aliases={"flash"},
+                 effective_url="http://hub/v1/chat/completions",
                  effective_auth="Bearer sk-HUB")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -443,28 +1008,30 @@ async def test_saving_after_ctrl_u_removes_the_token_key_from_the_file(tmp_path)
         await pilot.pause()
         assert form.clear_token() is True
         ok, alias, fields = form.submit()
-        assert ok is True and fields["token"] is None
+        assert ok is True and fields["token"] is None and fields["url"] is None
     upsert_model(target, alias, fields, template)
     entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
-    assert "token" not in entry, entry                 # ключ снят — наследование
+    assert "token" not in entry, entry                 # ключи сняты — наследование
+    assert "url" not in entry, entry
     assert entry["pricing"] == {"input": 0.3, "output": 1.2}
-    assert entry["url"] == "https://openrouter.ai/api/v1/chat/completions"
 
 
 async def test_the_checkbox_and_ctrl_u_write_different_things(tmp_path):
     """Главный страж различия смыслов: ● «без авторизации» пишет явное `token: ""`
-    (осознанно без токена), Ctrl+U УДАЛЯЕТ ключ (наследовать общий). Совпади они —
-    возврат к наследованию снова стал бы недостижим с экрана, ради чего клавиша и
-    заводилась."""
+    (осознанно без токена СВОЕГО адреса — пара остаётся своей и целой), Ctrl+U снимает
+    пару ЦЕЛИКОМ (наследовать общую). Совпади они — возврат к наследованию снова стал
+    бы недостижим с экрана, ради чего клавиша и заводилась."""
     from config_modules.registry_write import upsert_model
     template = Path(_default_config_path()).read_text(encoding="utf-8")
+    own_url = "https://openrouter.ai/api/v1/chat/completions"
     written = {}
     for case in ("checkbox", "ctrl+u"):
         target = tmp_path / f"config-{case.replace('+', '-')}.yml"
         target.write_text(_REGISTRY_WITH_PRICING, encoding="utf-8")
         form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
-                              "token": "sk-secret"},
+                              "url": own_url, "token": "sk-secret"},
                      existing_aliases={"flash"},
+                     effective_url="http://hub/v1/chat/completions",
                      effective_auth="Bearer sk-HUB")
         async with _harness(form).run_test() as pilot:
             await pilot.pause()
@@ -481,7 +1048,9 @@ async def test_the_checkbox_and_ctrl_u_write_different_things(tmp_path):
         upsert_model(target, alias, fields, template)
         written[case] = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
     assert written["checkbox"]["token"] == ""          # ● — осознанно без токена
+    assert written["checkbox"]["url"] == own_url       # свой адрес при этом остался
     assert "token" not in written["ctrl+u"], written["ctrl+u"]   # Ctrl+U — наследование
+    assert "url" not in written["ctrl+u"], written["ctrl+u"]     # и адрес вместе с ним
 
 
 # --- алиас: валидация на месте -------------------------------------------------
@@ -676,6 +1245,10 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
     form = _form(initial=None, existing_aliases=set(), fetch=fetch,
                  effective_url="http://hub/v1/chat/completions")
     async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        # Адрес — свой: над общим полем токена нет вовсе (§4), а сценарий именно про
+        # токен, введённый после неудачи.
+        form.query_one("#mef-url", Input).value = "http://hub/v1/chat/completions"
         await pilot.pause()
         form.escape()                                  # свернуть пресеты входа
         form.move(-1); form.move(-1)                   # адрес → алиас → id модели

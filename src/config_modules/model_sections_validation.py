@@ -7,6 +7,10 @@
 merged-реестра, ключи `assign.subagents` → канонический реестр имён субагентов.
 Кросс-слойные ссылки (слот в config.yml на алиас из профиля) легальны и
 проверяются только тут — до мержа проверить нечего.
+
+Отсюда же уходят стартовые notices про сами записи (§7 спеки пары: ослабленный
+транспорт под общим токеном) — канал у предупреждений один, и второго заводить
+незачем: `load_config` мёржит их в `config_dict["compat_notices"]`.
 """
 from __future__ import annotations
 
@@ -109,6 +113,17 @@ def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[st
     if errors:
         raise ValueError("; ".join(errors))
 
+    # §7 спеки пары: запись, не задавшая своего подключения, работает ОБЩИМ токеном —
+    # и вправе при этом ослабить транспорт под собой (`use_ssl: false`, клиентский
+    # сертификат). Отказом это не считается (решение владельца 2), но и молчать нельзя:
+    # что общий ключ уходит по ослабленному каналу, видно только отсюда — в самой
+    # записи это выглядит одним сетевым квирком. Предикат — у записи
+    # (`ModelEntry.weakens_shared_transport`), здесь только СЛОВА предупреждения.
+    notices = [
+        f"{prefix}запись {alias} ослабляет защиту запроса, который идёт с общим токеном"
+        for alias, entry in models.items() if entry.weakens_shared_transport()
+    ]
     if not models and assign_touched:
-        return [f"{prefix}assign: привязки без реестра моделей не действуют (models пуст)"]
-    return []
+        notices.append(
+            f"{prefix}assign: привязки без реестра моделей не действуют (models пуст)")
+    return notices

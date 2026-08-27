@@ -701,7 +701,7 @@ def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+          "models:\n  flash:\n    url: http://x\n    token: sk\nslots:\n  default: flash\n")
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
 
     from config import load_config_ex

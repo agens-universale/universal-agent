@@ -579,7 +579,7 @@ async def test_reserve_row_edits_agent_model_through_its_own_subform(tmp_path):
     from tui.editors.model import ModelEditor
     async with _section(tmp_path, _REGISTRY, models=("test-model", "other-model")) \
             as (pilot, scr, cfg_file):
-        assert "не работает: действует, только если реестр пуст" in _texts(scr)
+        assert "не работает при живом реестре" in _texts(scr)
         assert "база для незаданного" not in _texts(scr)
         ed = _editor(scr)
         _goto(ed, "reserve")
@@ -751,6 +751,82 @@ async def test_form_footer_follows_the_filter_of_the_address_list(tmp_path):
         await pilot.pause()
         assert (form.presets_open, form.presets_have_selection) == (True, False)
         assert "Enter — оставить своё" in _footer(scr)
+
+
+async def test_the_form_footer_promises_returning_the_shared_pair_where_the_key_works(tmp_path):
+    """§5: футер обещает `Ctrl+U — вернуть общие` ровно там, где клавиша работает —
+    гейт у обоих один (`can_return_shared_pair`): поля ПАРЫ своей записи. На алиасе у
+    Ctrl+U своё штатное дело (поле предзаполнено, стирать есть что), и «вернуть общие»
+    там было бы обещанием чужого действия; после возврата пары обещать уже нечего.
+
+    Клавиша идёт живым путём — через экран: гейт, не догнанный обновлением футера,
+    оставил бы обещание висеть там, где оно перестало работать."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    body = """models:
+  flash:
+    model: "google/gemini-2.5-flash"
+    url: "https://my-host/v1/chat/completions"
+    token: "sk-own"
+slots:
+  default: "flash"
+"""
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        _goto(_editor(scr), "entry", alias="flash")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        assert "Ctrl+U — вернуть общие" in _footer(scr)   # курсор на адресе
+        await pilot.press("down")                         # адрес → токен
+        await pilot.pause()
+        assert "Ctrl+U — вернуть общие" in _footer(scr)
+        await pilot.press("up")                           # назад на адрес
+        await pilot.press("alt+down")                     # раскрыть пресет-лист
+        await pilot.pause()
+        # Футер раскрытого списка не модальный: под ним работает Ctrl+Space, работает и
+        # Ctrl+U — молчание о работающей клавише такая же ложь, как обещание мёртвой.
+        assert form.presets_open is True
+        assert "Ctrl+U — вернуть общие" in _footer(scr)
+        await pilot.press("escape")                       # свернуть список
+        await pilot.pause()
+        await pilot.press("up")                           # адрес → алиас (по кольцу)
+        await pilot.pause()
+        assert "Ctrl+U" not in _footer(scr)
+        await pilot.press("down")                         # назад на адрес
+        await pilot.pause()
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert form.own_connection() is False             # клавиша дошла живым путём
+        assert "Ctrl+U" not in _footer(scr)               # возвращать больше нечего
+
+
+async def test_the_form_gets_the_whole_entry_not_just_the_four_fields(tmp_path):
+    """Шов секции → форма: своё подключение пишется и вторым написанием
+    (`backend.completions_url` / `chat_completion_headers.Authorization`), а форма
+    судит пару ядровым определением §2. Приедь в неё только четыре знакомых ключа —
+    запись со своей парой в `backend` объявилась бы «общей» и не сохранилась бы БЕЗ
+    единой правки, а починить это в форме нечем: `backend` она не правит."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    # Пара ЦЕЛИКОМ во втором написании: знакомых формe ключей `url`/`token` у записи
+    # нет вовсе, и потерянный швом `backend` не восполнить ничем.
+    body = """models:
+  flash:
+    model: "google/gemini-2.5-flash"
+    backend:
+      completions_url: "https://my-host/v1/chat/completions"
+      chat_completion_headers:
+        Authorization: "Bearer sk-own"
+slots:
+  default: "flash"
+"""
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        _goto(_editor(scr), "entry", alias="flash")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        assert form.own_connection() is True
+        assert form.query_one("#mef-token", Input).disabled is False
 
 
 async def test_ctrl_u_in_the_entry_form_returns_the_record_to_the_shared_token(tmp_path):
@@ -1384,6 +1460,40 @@ async def test_inherited_address_says_where_it_came_from(tmp_path):
         assert cell.endswith("· адрес из «Подключения»")
 
 
+_SECOND_WRITING = (
+    "models:\n"
+    "  second:\n"
+    '    model: "vendor/second"\n'
+    '    token: "sk-own"\n'
+    "    backend:\n"
+    '      completions_url: "https://my-host/v1/chat/completions"\n'
+    "  proxied:\n"
+    '    model: "vendor/proxied"\n'
+    '    token: "sk-own"\n'
+    "    backend:\n"
+    '      proxy: "socks5://127.0.0.1:9050"\n'
+    "slots:\n"
+    '  default: "second"\n'
+)
+
+
+async def test_own_connection_in_the_second_writing_gets_no_inherited_tail(tmp_path):
+    """§6: хвост «· адрес из «Подключения»» означает УНАСЛЕДОВАННУЮ пару. Запись,
+    задавшая своё подключение вторым написанием (`backend.completions_url`, `proxy`),
+    показывала свой хост И этот хвост — ложь, которая была тут и до правила: гейт
+    смотрел на один ключ `url`, а сам адрес считался с учётом `backend`.
+
+    Судит гейт ЯДРОВЫМ определением §2 (`model_registry.connection_parts`) — тем же,
+    каким пару считают обе точки валидации и форма записи. Прокси — тоже своё
+    подключение (решение владельца 1): он решает, куда физически уйдёт запрос, и
+    звать такой адрес «из «Подключения»» значит называть чужую половину источником."""
+    async with _section(tmp_path, _SECOND_WRITING) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        assert ed._address_cell("second") == "my-host"
+        assert ed._address_cell("proxied") == "host"
+
+
 async def test_the_address_column_shrinks_but_the_pointer_stays_whole(tmp_path):
     """Узкая рамка жертвует АДРЕСОМ, а не указателем: сперва колонка адреса ужимается
     многоточием, потом схлопывается вместе со своим зазором — и на каждой из ширин
@@ -1559,6 +1669,39 @@ async def test_the_reserve_row_drops_its_hint_whole(tmp_path):
         row = ed._row_text({"kind": "reserve"}, False)
         assert _RESERVE_HINT not in row.plain
         assert row.plain.rstrip().endswith("test-model")
+
+
+@pytest.mark.parametrize("model,fits", [("MiniMax-M2.7", True),
+                                        ("google/gemini-2.5-flash", False)],
+                         ids=["короткий id", "vendor/model"])
+async def test_the_reserve_row_tail_lives_within_the_frame_budget(tmp_path, model, fits):
+    """Хвост уходит ЦЕЛИКОМ, значит вопрос ровно один: виден он на живой ширине или
+    предупреждения нет вовсе. Мерить его подменённым `_row_width` нельзя — это ширина
+    ВНУТРИ рамки, а не терминала: на 80-колоночном терминале строке достаётся 69, и
+    `_row_width = lambda: 80` показывал бы строку такой, какой её видит терминал 91.
+
+    Бюджет: `2 + колонка алиасов + 2 + agent.model + 2 + хвост ≤ _row_width()`. Обе
+    переменные — легаси-модель `agent.model` и колонка алиасов реестра (снизу её
+    подпирает сама подпись «резервная модель», 16 символов); ни id моделей реестра, ни
+    адрес в бюджет не входят.
+
+    Реальная граница на 80 колонках — около 18 символов имени: короткий id вроде
+    `MiniMax-M2.7` предупреждение сохраняет, типовой `vendor/model` (23) теряет его
+    целиком. Прежний хвост в 47 символов не оставлял бюджета вовсе (≈0) — на 80
+    колонках он не показывался никогда."""
+    from tui.editors.models_section import _RESERVE_HINT
+    async with _section(tmp_path, _ADDRESSED, model=f'"{model}"', size=(80, 40)) \
+            as (pilot, scr, _cfg_file):
+        await pilot.resize_terminal(80, 40)
+        await pilot.pause()
+        ed = _editor(scr)
+        width = ed._row_width()
+        budget = width - 6 - ed._entry_columns()[0] - len(_RESERVE_HINT)
+        row = str(_lower_rows(ed)[-1].render())         # смонтированная строка, живьём
+        assert "резервная модель" in row and model in row, row
+        assert (len(model) <= budget) is fits, (width, budget)
+        assert row.endswith(_RESERVE_HINT) is fits, row
+        assert len(row) <= width, (width, row)
 
 
 async def test_the_reserve_row_never_outgrows_the_frame(tmp_path):

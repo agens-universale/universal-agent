@@ -117,6 +117,47 @@ def test_source_hint_prefixes_error():
         validate_model_sections(cfg, source_hint="~/.gc/profiles/work.yml")
 
 
+# --- §7: ослабленный транспорт под общим токеном ------------------------------
+
+_WEAKENED = "запись gc ослабляет защиту запроса, который идёт с общим токеном"
+
+
+def test_inherited_pair_with_ssl_off_warns_about_the_shared_token():
+    """§7 (решение владельца 2): `use_ssl`/сертификаты в правило пары НЕ входят — они
+    не меняют адрес, а ослабляют защиту запроса. Но запрос этот идёт с ОБЩИМ токеном
+    (пара унаследована), и уходит он по ослабленному каналу — про это предупреждаем при
+    старте. Notice, а не отказ: сетап с самоподписанным сертификатом законен."""
+    cfg = AppConfig.model_validate({
+        "models": {"gc": {"model": "x", "backend": {"use_ssl": False}}},
+    })
+    assert validate_model_sections(cfg) == [_WEAKENED]
+
+
+def test_inherited_pair_with_client_cert_warns_too():
+    """Клиентский сертификат меняет тот же запрос с общим токеном — и предупреждение
+    у него то же: человек обязан увидеть, ЧЕЙ токен уходит по изменённому каналу."""
+    for backend in ({"cert_path": "/c.crt"}, {"key_path": "/k.key"}):
+        cfg = AppConfig.model_validate({"models": {"gc": {"model": "x", "backend": backend}}})
+        assert validate_model_sections(cfg) == [_WEAKENED], backend
+
+
+def test_own_pair_with_ssl_off_is_not_warned_about():
+    """Своя пара — свой токен: ослабленный канал уносит СВОЙ ключ записи на СВОЙ адрес,
+    и предупреждать про общий токен здесь не о чем (он туда не идёт, §2)."""
+    cfg = AppConfig.model_validate({
+        "models": {"gc": {"url": "http://own/v1", "token": "sk-own",
+                          "backend": {"use_ssl": False}}},
+    })
+    assert validate_model_sections(cfg) == []
+
+
+def test_inherited_pair_without_transport_quirks_is_silent():
+    """Обратная половина: унаследованная пара сама по себе — штатная форма записи, и
+    notice на каждой такой строке был бы шумом."""
+    cfg = AppConfig.model_validate({"models": {"gc": {"model": "x"}}})
+    assert validate_model_sections(cfg) == []
+
+
 def test_level_fallback_matrix():
     assert LEVEL_FALLBACK == {
         "light": ("light", "default", "max"),

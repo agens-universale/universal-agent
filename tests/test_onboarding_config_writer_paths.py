@@ -117,7 +117,8 @@ def test_validate_config_text_ignores_unresolvable_sections():
     """Фаза 1 ссылочную целостность не проверяет — слот на несуществующий алиас
     проходит (её ловит только `validate_config_text_with_sections`)."""
     from config import validate_config_text
-    validate_config_text('models:\n  flash:\n    url: "http://x"\nslots:\n  default: "нет-такого"\n')
+    validate_config_text(
+        'models:\n  flash:\n    url: "http://x"\n    token: "sk"\nslots:\n  default: "нет-такого"\n')
 
 
 def test_validate_config_text_with_sections_rejects_dangling_slot():
@@ -125,13 +126,13 @@ def test_validate_config_text_with_sections_rejects_dangling_slot():
     import pytest
     with pytest.raises(ValueError):
         validate_config_text_with_sections(
-            'models:\n  flash:\n    url: "http://x"\nslots:\n  default: "нет-такого"\n')
+            'models:\n  flash:\n    url: "http://x"\n    token: "sk"\nslots:\n  default: "нет-такого"\n')
 
 
 def test_validate_config_text_with_sections_accepts_resolvable_registry():
     from config import validate_config_text_with_sections
     validate_config_text_with_sections(
-        'models:\n  flash:\n    url: "http://x"\nslots:\n  default: "flash"\n')
+        'models:\n  flash:\n    url: "http://x"\n    token: "sk"\nslots:\n  default: "flash"\n')
 
 
 def test_field_anchor_paths_resolve_in_real_template():

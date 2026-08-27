@@ -108,7 +108,11 @@ def _every_entry_carries(c: Dict[str, Any], field: str) -> bool:
     models = c.get("models") or {}
     return (c.get("backend_api_mode") == "chat_completions"
             and bool(models)
-            and all((entry or {}).get(field) for entry in models.values()))
+            # «Задано» = ключ задан, а не «значение непусто»: `token: ""` — штатная
+            # форма записи локального сервера (адрес и токен задаются парой), и её
+            # `authorization_header` пустой. Truthiness объявила бы полностью
+            # настроенный локальный сетап незаполненным шаблоном.
+            and all((entry or {}).get(field) is not None for entry in models.values()))
 
 
 def _endpoint_set(c: Dict[str, Any]) -> bool:

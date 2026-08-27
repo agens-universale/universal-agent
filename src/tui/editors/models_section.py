@@ -38,8 +38,10 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Rule, Static
 
-from config_modules.model_registry import LEVEL_FALLBACK, LEVELS
+from config_modules.model_registry import (LEVEL_FALLBACK, LEVELS, connection_parts,
+                                           resolve_entry_address)
 from config_modules.model_sections_validation import SUBAGENT_NAMES
+from tui.editors.model_entry_form import CTRL_U_PAIR, ModelEntryForm
 from tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
 
@@ -60,22 +62,36 @@ _FOOTER_EMPTY = ("↑/↓ · Enter — сохранить · Alt+↓ — пер�
 # реестром, а save-машины у секции больше нет.
 _FOOTER_RESERVE_FORM = ("↑/↓ · Enter — сохранить · Alt+↓ — перечитать список · "
                         "Esc — к списку")
-# «Ctrl+U — очистить» — обещание встроенного биндинга Textual Input
-# (delete_left_all, конвенция readline): он работает во всех полях, но обещан на
-# адресе — там очистка значит «вернуть наследование», и владелец её не находил.
 _FOOTER_FORM_URL = ("Enter — сохранить · Alt+↓ — показать список · "
-                    "Ctrl+U — очистить · Ctrl+Space — проверить связь · "
-                    "Esc — к списку")
+                    "Ctrl+Space — проверить связь · Esc — к списку")
 _FOOTER_FORM_MODEL = ("Enter — сохранить · Alt+↓ — перечитать список · "
                       "Ctrl+Space — проверить связь · Esc — к списку")
 _FOOTER_FORM_NOAUTH = ("↑/↓ · Enter — сохранить · Space — переключить · "
                        "Ctrl+Space — проверить связь · Esc — к списку")
 _FOOTER_FORM_FIELD = ("↑/↓ · Enter — сохранить · Ctrl+Space — проверить связь · "
                       "Esc — к списку")
+# Пара своя и курсор на одном из её полей: `Ctrl+U` возвращает общее подключение
+# ЦЕЛИКОМ (§5). Слова взяты из словаря формы, а не списаны заново: ту же клавишу
+# называет подпись поля токена, и разойтись двум обещаниям одного действия нельзя.
+# Своя строка на каждое из двух полей, а не сегмент-довесок: обещания у них разные
+# (на адресе есть ещё `Alt+↓`), общего куска, куда его вставить, нет.
+# Прежнее «Ctrl+U — очистить» с адреса ушло: это был встроенный `delete_left_all`
+# Textual, а над заполненным адресом клавишу теперь забирает пара — над пустым же
+# стирать нечего, и обещать её там значило бы обещать мёртвую клавишу.
+_FOOTER_FORM_URL_PAIR = ("Enter — сохранить · Alt+↓ — показать список · "
+                         f"{CTRL_U_PAIR} · Ctrl+Space — проверить связь · "
+                         "Esc — к списку")
+_FOOTER_FORM_TOKEN_PAIR = (f"↑/↓ · Enter — сохранить · {CTRL_U_PAIR} · "
+                           "Ctrl+Space — проверить связь · Esc — к списку")
 _FOOTER_FORM_LIST = ("↑/↓ — выбор · Enter — подставить · Esc — свернуть · "
                      "Ctrl+Space — проверить связь")
 _FOOTER_FORM_LIST_NO_MATCH = ("↑/↓ · Enter — оставить своё · Esc — свернуть · "
                               "Ctrl+Space — проверить связь")
+# Футер раскрытого списка НЕ модальный: `Ctrl+Space` под ним работает, и `Ctrl+U` над
+# своим адресом тоже (список адреса раскрывают поверх заполненного поля, `Alt+↓`).
+# Молчание о работающей клавише — та же ложь футера, что обещание мёртвой.
+_FOOTER_FORM_LIST_PAIR = f"{_FOOTER_FORM_LIST} · {CTRL_U_PAIR}"
+_FOOTER_FORM_LIST_NO_MATCH_PAIR = f"{_FOOTER_FORM_LIST_NO_MATCH} · {CTRL_U_PAIR}"
 _FOOTER_PICKER = "↑/↓ — выбор · Enter — выбрать · Esc — отмена"
 _FOOTER_CONFIRM = "Enter — удалить · Esc — отмена"
 # Нижняя половина секции: на строке слота значение — только алиас реестра, на
@@ -92,6 +108,16 @@ _FOOTER_ADD = "↑/↓ · Enter/n — добавить · PgUp/PgDn — секц
 # Под-вид открытого профиля: клавиши те же, но Esc возвращает К СПИСКУ профилей, а
 # не в меню хаба (вложенность из Global Constraints — её обязан назвать футер).
 _EXIT_TO_LIST = "Esc — к списку"
+
+
+def _list_footer(has_selection: bool, pair: bool) -> str:
+    """Футер раскрытого списка формы: обещание Enter — по подсветке, обещание Ctrl+U —
+    по тому же предикату, что и сама клавиша. Один выбор на оба списка (адреса и
+    моделей): у списка моделей курсор стоит не на поле пары, и предикат отвечает «нет»
+    сам — второй ветки для этого не нужно."""
+    if has_selection:
+        return _FOOTER_FORM_LIST_PAIR if pair else _FOOTER_FORM_LIST
+    return _FOOTER_FORM_LIST_NO_MATCH_PAIR if pair else _FOOTER_FORM_LIST_NO_MATCH
 
 
 def _to_list_exit(footer: str) -> str:
@@ -168,7 +194,12 @@ _RESERVE_LABEL = "резервная модель"
 # первым, условие вторым. «Действует только без реестра» читалось описанием живой
 # настройки, хотя видна эта строка ровно рядом с непустым реестром, то есть ровно
 # там, где резервная модель не работает (смок владельца).
-_RESERVE_HINT = "не работает: действует, только если реестр пуст"
+#
+# Условие сказано ОДНОЙ придаточной, а не вторым предложением (§7 спеки пары):
+# канон all-or-nothing сносит хвост целиком, и прежние 47 символов вместе с обычным
+# именем модели не влезали в 80 колонок — предупреждение пропадало ровно там, где
+# его видят чаще всего.
+_RESERVE_HINT = "не работает при живом реестре"
 _EMPTY_HINT = (
     "Реестр моделей пуст — уровни light/default/max выключены, работает одна "
     "модель ниже.\n"
@@ -463,17 +494,20 @@ def value_style(value: str) -> str:
 
 
 def entry_address(entry, inherited_url: str) -> str:
-    """Адрес, по которому реально пойдёт запись реестра: свой `url`, точечный оверлей
-    `backend.completions_url`, иначе унаследованный от основного конфига — та же
-    цепочка, которой резолвит `ModelRouter`. Пусто — запись нерабочая.
+    """Адрес, по которому реально пойдёт запись реестра. Пусто — запись нерабочая.
 
-    Владелец цепочки один на секцию и на глиф хаба: витрина и вердикт не имеют права
+    Здесь — САНАЦИЯ сырой записи документа (не словарь, `backend` не словарь), сама
+    цепочка живёт у ядра (`model_registry.resolve_entry_address`): её же произносит
+    форма записи, и второй раз выписанная здесь она разъехалась бы с рантаймом на
+    первой правке. Одна на секцию и на глиф хаба: витрина и вердикт не имеют права
     расходиться (реестр из одной записи без адреса показывался «✓» на хабе и гас в
     секции — находка ревью Task 3)."""
     if not isinstance(entry, dict):
         entry = {}
     backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-    return entry.get("url") or backend.get("completions_url") or inherited_url or ""
+    return resolve_entry_address(url=entry.get("url"),
+                                 completions_url=backend.get("completions_url"),
+                                 inherited=inherited_url)
 
 
 def section_dict(document: dict, name: str) -> dict:
@@ -813,8 +847,13 @@ class ModelsSectionEditor(Vertical):
         («без адреса»): построчной подсказки у секции больше нет, а «по этой записи
         запрос не уйдёт» — факт про запись, и место ему в её строке.
 
-        Хвост — про СВОЙ ключ `url`: у своей записи он стоит, пока адрес ей
-        достаётся от «Подключения» либо от заслонённой записи основного конфига.
+        Хвост — про СВОЁ ПОДКЛЮЧЕНИЕ записи, и судит его ядровое определение §2
+        (`connection_parts`), а не один ключ `url`: второе написание
+        (`backend.completions_url`, `proxy`) — тоже своё, и запись, задавшая адрес
+        так, показывала свой хост И хвост «из «Подключения»» разом. Своего
+        определения у витрины быть не должно — им же считают пару обе точки
+        валидации и форма записи. Хвост стоит, пока адрес достаётся записи от
+        «Подключения» либо от заслонённой записи основного конфига.
 
         У УНАСЛЕДОВАННОЙ строки хвоста нет никогда (§4): её происхождение уже
         названо своей колонкой, и хвост про источник адреса читался бы вторым
@@ -822,8 +861,12 @@ class ModelsSectionEditor(Vertical):
         address = self._entry_address(alias)
         if not address:
             return _DEAD_ADDRESS_CELL
-        inherited = (not self._own_entry(alias).get("url")
-                     and self._entry_origin(alias) != "base")
+        own = self._own_entry(alias)
+        backend = own.get("backend") if isinstance(own.get("backend"), dict) else {}
+        own_address, _ = connection_parts(
+            url=own.get("url"), token=None, authorization=None,
+            completions_url=backend.get("completions_url"), proxy=backend.get("proxy"))
+        inherited = not own_address and self._entry_origin(alias) != "base"
         return address_host(address) + (_INHERITED_TAIL if inherited else "")
 
     def _entry_levels(self, alias: str) -> list:
@@ -1477,18 +1520,24 @@ class ModelsSectionEditor(Vertical):
     def _form_footer(self) -> str:
         form = self._form
         if form.presets_open:
-            return (_FOOTER_FORM_LIST if form.presets_have_selection
-                    else _FOOTER_FORM_LIST_NO_MATCH)
+            return _list_footer(form.presets_have_selection,
+                                form.can_return_shared_pair)
         if form.list_open:
-            return (_FOOTER_FORM_LIST if form.list_has_selection
-                    else _FOOTER_FORM_LIST_NO_MATCH)
+            return _list_footer(form.list_has_selection, form.can_return_shared_pair)
+        # Обещание «вернуть общие» гейтится ТЕМ ЖЕ предикатом, что и сама клавиша
+        # (`can_return_shared_pair`): свой гейт витрины разошёлся бы с клавишей на
+        # первой правке правила — ложь того же рода, что стережёт `test_footer_contract`.
         if form.on_url_field:
-            return _FOOTER_FORM_URL
+            return (_FOOTER_FORM_URL_PAIR if form.can_return_shared_pair
+                    else _FOOTER_FORM_URL)
         if form.on_model_field:
             return _FOOTER_FORM_MODEL
         if form.on_no_auth_row:
             return _FOOTER_FORM_NOAUTH
-        return _FOOTER_FORM_FIELD
+        # Остались поле токена и поле алиаса: у первого клавиша есть, пока пара своя,
+        # у второго — своё штатное `delete_left_all`, и предикат их различает сам.
+        return (_FOOTER_FORM_TOKEN_PAIR if form.can_return_shared_pair
+                else _FOOTER_FORM_FIELD)
 
     # --- клавиши --------------------------------------------------------------
     def move(self, delta: int) -> None:
@@ -1610,10 +1659,10 @@ class ModelsSectionEditor(Vertical):
         return False
 
     def clear_token(self) -> bool:
-        """`Ctrl+U` — снять свой токен записи, вернув её к токену «Подключения».
-        Клавиша есть только у формы записи и только на её поле токена (решает сама
-        форма). False — состояние не наше, и клавишу съедать нельзя: в полях
-        легаси-редактора её штатный `delete_left_all` работает как обычно."""
+        """`Ctrl+U` — вернуть записи общее подключение: снять её адрес, токен и галку
+        разом (§5). Клавиша есть только у формы записи и только на полях её пары
+        (решает сама форма). False — состояние не наше, и клавишу съедать нельзя: в
+        полях легаси-редактора её штатный `delete_left_all` работает как обычно."""
         if self._form is not None:
             return self._form.clear_token()
         return False
@@ -1627,12 +1676,14 @@ class ModelsSectionEditor(Vertical):
 
         Алиасы тени формa получает отдельно (`base_aliases`): имя, занятое записью
         основного конфига, — не «дубль своей», и отказ у него свой (§5)."""
-        from tui.editors.model_entry_form import ModelEntryForm
         initial = None
         if alias is not None:
-            entry = self._own_entry(alias)
-            initial = {"alias": alias, "model": entry.get("model"),
-                       "url": entry.get("url"), "token": entry.get("token")}
+            # Запись едет ЦЕЛИКОМ, а не четырьмя знакомыми ключами: своё подключение
+            # пишется и вторым написанием (`backend.completions_url`/`proxy`/
+            # `chat_completion_headers.Authorization`), и форма обязана видеть пару так
+            # же, как её видит валидатор, — иначе объявит запись общей и откажется
+            # сохранить её без единой правки. Правит форма по-прежнему только свои поля.
+            initial = {"alias": alias, **self._own_entry(alias)}
         self._form = ModelEntryForm(
             initial=initial, existing_aliases=self._own_aliases, presets=self._presets,
             effective_url=self._effective_url, effective_auth=self._effective_auth,

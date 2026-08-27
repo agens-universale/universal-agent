@@ -17,7 +17,7 @@ import yaml
 
 from config_modules.compat import apply_compat
 from config_modules.env_interpolation import resolve_env_placeholders
-from config_modules.model_registry import RESERVED_WORDS
+from config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
 from config_modules.root import AppConfig
 
 
@@ -194,6 +194,7 @@ def load_profile_document(
     for fact in apply_compat(raw):
         if notices is not None:
             notices.append(f"{path}: {fact}")
+    validate_registry_pairs(raw, source=str(path))
     _validate_profile_document(raw, source=str(path))
     return raw
 

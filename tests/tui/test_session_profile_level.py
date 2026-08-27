@@ -54,7 +54,7 @@ def _app_with_base(tmp_path: Path) -> TuiApp:
 def _write_work_profile(tmp_path: Path, url: str = "http://work/v1/chat/completions") -> Path:
     return _write_yaml(
         tmp_path / "profiles" / "work.yml",
-        {"models": {"flash": {"url": url}}, "slots": {"default": "flash"}},
+        {"models": {"flash": {"url": url, "token": ""}}, "slots": {"default": "flash"}},
     )
 
 
@@ -121,7 +121,7 @@ def test_session_layer_stays_above_profile_in_both_directions(tmp_path):
     «сессия вместо профиля».
     """
     _write_yaml(tmp_path / "profiles" / "work.yml", {
-        "models": {"flash": {"url": "http://work/v1/chat/completions"}},
+        "models": {"flash": {"url": "http://work/v1/chat/completions", "token": ""}},
         "slots": {"default": "flash"},
         "level": "max",
     })
@@ -200,7 +200,7 @@ def test_reload_config_if_changed_picks_up_edit_of_session_selected_profile(tmp_
     assert app.effective_config()["models"]["flash"]["url"] == "http://work/v1/chat/completions"
 
     work_path = tmp_path / "profiles" / "work.yml"
-    _write_yaml(work_path, {"models": {"flash": {"url": "http://work-v2/v1/chat/completions"}},
+    _write_yaml(work_path, {"models": {"flash": {"url": "http://work-v2/v1/chat/completions", "token": ""}},
                             "slots": {"default": "flash"}})
     _bump_mtime(work_path)
 
@@ -643,7 +643,7 @@ def test_project_profile_activation_notice(tmp_path, monkeypatch):
     _write_yaml(base, _MINIMAL_BASE)
     _write_yaml(
         project_dir / ".gc" / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://proj/v1/chat/completions"}},
+        {"models": {"flash": {"url": "http://proj/v1/chat/completions", "token": ""}},
          "slots": {"default": "flash"}},
     )
     cfg, _meta = load_config_ex(str(base))
@@ -679,7 +679,7 @@ def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkey
     _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
     base_profile = _write_yaml(
         tmp_path / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://base-root/v1/chat/completions"}},
+        {"models": {"flash": {"url": "http://base-root/v1/chat/completions", "token": ""}},
          "slots": {"default": "flash"}},
     )
 
@@ -691,7 +691,7 @@ def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkey
     # приехал проектный тёзка — он выигрывает по §3.1
     proj_profile = _write_yaml(
         project_dir / ".gc" / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://project-root/v1/chat/completions"}},
+        {"models": {"flash": {"url": "http://project-root/v1/chat/completions", "token": ""}},
          "slots": {"default": "flash"}},
     )
     app.reload_config_if_changed()
@@ -719,7 +719,7 @@ def test_no_source_notice_when_profile_file_merely_edited(tmp_path, monkeypatch)
     _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
     profile = _write_yaml(
         tmp_path / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://one/v1/chat/completions"}},
+        {"models": {"flash": {"url": "http://one/v1/chat/completions", "token": ""}},
          "slots": {"default": "flash"}},
     )
 
@@ -727,7 +727,7 @@ def test_no_source_notice_when_profile_file_merely_edited(tmp_path, monkeypatch)
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
     app.set_config_path(str(base))
 
-    _write_yaml(profile, {"models": {"flash": {"url": "http://two/v1/chat/completions"}},
+    _write_yaml(profile, {"models": {"flash": {"url": "http://two/v1/chat/completions", "token": ""}},
                           "slots": {"default": "flash"}})
     _bump_mtime(profile)
     app.reload_config_if_changed()
@@ -755,7 +755,7 @@ def test_no_source_notice_when_the_profile_name_itself_changed(tmp_path, monkeyp
     for name, url in (("work", "http://work/v1/chat/completions"),
                       ("home", "http://home/v1/chat/completions")):
         _write_yaml(tmp_path / "profiles" / f"{name}.yml",
-                    {"models": {"flash": {"url": url}}, "slots": {"default": "flash"}})
+                    {"models": {"flash": {"url": url, "token": ""}}, "slots": {"default": "flash"}})
 
     cfg, _meta = load_config_ex(str(base))
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)

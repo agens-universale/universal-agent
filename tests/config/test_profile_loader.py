@@ -335,11 +335,15 @@ def test_registry_merges_across_layers_overlay_cannot_remove_a_model(isolated_cw
 
     _write_yaml(isolated_cwd / ".gc" / "config.yml", {
         "profile": "work",
-        "models": {"keep": {"url": "http://keep/v1"}, "shared": {"url": "http://base/v1"}},
+        "models": {"keep": {"url": "http://keep/v1", "token": "sk-keep"},
+                   "shared": {"url": "http://base/v1", "token": "sk-base"}},
         "slots": {"default": "keep"},
     })
+    # Перекрытие алиаса — парой целиком (§2): слой, задавший только адрес, увёз бы
+    # токен базы на свой хост и отвергается правилом ещё до мержа.
     _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
-        "models": {"shared": {"url": "http://profile/v1"}, "added": {"url": "http://added/v1"}},
+        "models": {"shared": {"url": "http://profile/v1", "token": "sk-profile"},
+                   "added": {"url": "http://added/v1", "token": "sk-added"}},
     })
 
     cfg, _meta = load_config_ex(str(base_config))

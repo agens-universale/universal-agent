@@ -193,6 +193,23 @@ def test_registry_with_own_url_but_no_token_does_not_close_auth():
     assert onboarding.is_unconfigured(cfg) is True
 
 
+def test_registry_of_local_servers_without_auth_closes_auth():
+    """`token: ""` («сервер не требует авторизации») — ЗАДАННЫЙ токен: адрес и токен
+    записи задаются парой, и локальная раздача без ключа пишется именно так. Её
+    `authorization_header` пустой, поэтому проверка по truthiness объявила бы
+    полностью настроенный локальный сетап незаполненным шаблоном и гнала бы человека
+    в мастер на каждом старте."""
+    cfg = {
+        "backend_api_mode": "chat_completions",
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "model": onboarding.MODEL_SENTINEL,
+        "models": {"glm-local": {"model": "g", "url": "http://127.0.0.1:8014/v1",
+                                 "authorization_header": ""}},
+    }
+    assert onboarding.is_unconfigured(cfg) is False
+
+
 def test_setup_guide_on_registry_config_does_not_demand_model():
     """Рабочий реестровый конфиг: гайд не требует `agent.model` (иначе `--init-config`
     без TTY и стоп-гайд `gc-ua` печатали бы «не заполнено» настроенному человеку)."""

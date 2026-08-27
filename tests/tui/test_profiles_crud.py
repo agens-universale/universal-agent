@@ -51,7 +51,7 @@ def _base_config_text(profile: str = "") -> str:
     )
 
 
-_PROFILE_BODY = "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n"
+_PROFILE_BODY = "models:\n  glm:\n    url: http://y\n    token: sk\nslots:\n  default: glm\n"
 
 
 def _base_dict() -> dict:

@@ -42,7 +42,7 @@ def test_consumers_constant_matches_spec():
 
 def test_binding_level_resolves_through_slot():
     router = _router({
-        "models": {"flash": {"url": "http://flash/v1"}},
+        "models": {"flash": {"url": "http://flash/v1", "token": ""}},
         "slots": {"light": "flash"},
         "assign": {"finish_gate": "light"},
     })
@@ -55,7 +55,8 @@ def test_binding_level_resolves_through_slot():
 
 def test_binding_alias_pins_directly_bypassing_level():
     router = _router({
-        "models": {"deepseek-max": {"url": "http://ds/v1"}, "flash": {"url": "http://fl/v1"}},
+        "models": {"deepseek-max": {"url": "http://ds/v1", "token": ""},
+                   "flash": {"url": "http://fl/v1", "token": ""}},
         "slots": {"default": "flash"},
         "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
     }, level="default")
@@ -119,7 +120,7 @@ def test_level_fallback_matrix_when_requested_slot_unset():
 
 
 def test_single_model_registry_without_any_slot_resolves_to_it():
-    router = _router({"models": {"solo": {"url": "http://solo/v1"}}}, level="light")
+    router = _router({"models": {"solo": {"url": "http://solo/v1", "token": ""}}}, level="light")
     resolved = router.resolve("main")
     assert resolved.alias == "solo"
     assert resolved.source  # заполнен
@@ -172,7 +173,7 @@ def test_assign_bindings_are_inert_while_registry_is_empty():
 
 def test_legacy_force_overrides_nonempty_registry():
     router = _router({
-        "models": {"flash": {"url": "http://flash/v1"}},
+        "models": {"flash": {"url": "http://flash/v1", "token": ""}},
         "slots": {"default": "flash"},
         "backend": {"completions_url": "http://legacy/v1"},
         "agent": {"model": "legacy-model"},
@@ -201,7 +202,7 @@ def test_model_inherits_url_and_token_from_effective_backend_when_unset():
 
 def test_model_token_normalized_to_bearer():
     router = _router({
-        "models": {"secure": {"token": "sk-abc"}},
+        "models": {"secure": {"url": "http://secure/v1", "token": "sk-abc"}},
         "slots": {"default": "secure"},
     })
     assert router.resolve("main").authorization == "Bearer sk-abc"
@@ -209,7 +210,7 @@ def test_model_token_normalized_to_bearer():
 
 def test_model_token_empty_string_means_explicitly_no_auth():
     router = _router({
-        "models": {"open": {"token": ""}},
+        "models": {"open": {"url": "http://open/v1", "token": ""}},
         "slots": {"default": "open"},
     })
     assert router.resolve("main").authorization == ""
@@ -217,7 +218,8 @@ def test_model_token_empty_string_means_explicitly_no_auth():
 
 def test_model_url_inherited_from_own_backend_completions_url_override():
     router = _router({
-        "models": {"viaBackend": {"backend": {"completions_url": "http://backend-url/v1"}}},
+        "models": {"viaBackend": {"token": "",
+                                  "backend": {"completions_url": "http://backend-url/v1"}}},
         "slots": {"default": "viaBackend"},
     })
     resolved = router.resolve("main")

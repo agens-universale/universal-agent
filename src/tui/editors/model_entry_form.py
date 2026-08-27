@@ -32,7 +32,8 @@ from textual.css.query import NoMatches
 from textual.widgets import Input, Static
 
 import onboarding
-from config_modules.model_registry import validate_model_alias
+from config_modules.model_registry import (connection_parts, resolve_entry_address,
+                                           validate_model_alias)
 from onboarding_fields import (
     ADDRESS_HINT as _ADDRESS_HINT,
     NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
@@ -86,18 +87,45 @@ _ALIAS_RENAME_HINT = "переименование обновит уровни �
 _MODEL_LABEL = "Провайдерский id модели"
 _MODEL_PLACEHOLDER = "если не указать — id модели равен алиасу"
 _URL_LABEL = "Адрес API-сервера"
+# Своё подключение задаётся ЦЕЛИКОМ (спека 2026-08-19 §2): адрес и токен принадлежат
+# одному провайдеру, и половина пары либо уносит общий ключ на чужой хост, либо уезжает
+# вслед за сменой общего адреса. Состояние пары не переключается отдельным элементом —
+# оно ВЫВОДИТСЯ из полей, а строка над ними называет, откуда пара взята (§4).
+_PAIR_SHARED = "Адрес и токен: общие — из раздела «Подключение»"
+_PAIR_OWN = "Адрес и токен: свои"
+# Второе написание пары (§2): она живёт в секции `backend` записи, и форма её НЕ правит
+# — ни поля, ни клавиша «вернуть общие» до неё не достают. Молчать об этом нельзя:
+# «свои» без уточнения обещали бы правку теми полями, которые к этой паре отношения не
+# имеют, и человеку негде было бы узнать, куда идти.
+_PAIR_OWN_BACKEND = "Адрес и токен: свои — заданы секцией backend, правятся в файле"
+# Поля пары — те, на которых работает «вернуть общие» (§5). Галка в набор не входит:
+# она не поле, и её собственная клавиша (Space) на этой строке уже занята.
+_PAIR_FIELDS = ("mef-url", "mef-token")
+_TOKEN_SHARED_HINT = "токен приходит из раздела «Подключение»"
+_TOKEN_NEEDED = "укажите токен для этого адреса"
+# `Authorization: ""` и сентинел приведены к None ещё в `settings.py:854-856` — маски в
+# этом случае не бывает, а молчать нельзя: поле обязано сказать, что теперь будет.
+# Наследование пустого общего токена законно: запись не задаёт ничего — значит наследует
+# пару целиком и работает без авторизации.
+_COMMON_TOKEN_EMPTY = "общий токен не задан — запросы идут без авторизации"
+# Отказ формы — то же правило §2, что у валидатора конфига, укороченное до одной строки
+# формы: имена ключей файла человеку здесь ни к чему, перед ним поля и галка.
+_PAIR_NEEDS_TOKEN = ("задан свой адрес, но не задан токен — укажите токен "
+                     "или отметьте «без авторизации»")
+_PAIR_NEEDS_URL = ("задан свой токен, но не задан адрес — укажите адрес "
+                   "или верните общее подключение")
 _TOKEN_LABEL = "Токен"
+# Слова клавиши — ОДНА константа на подпись поля и на футер секции (канон
+# `onboarding_fields.URL_ERROR`): списанные заново, они разойдутся на первой
+# самостоятельной правке одной из витрин, а обещают они одно и то же действие.
+CTRL_U_PAIR = "Ctrl+U — вернуть общие"
 # Ctrl+U называется В ПОДПИСИ ПОЛЯ, а не в футере (канон `ConnectionEditor.
 # _token_label`): подсказка нужна там, куда смотрят, как «Space — переключить» у
 # галки. Глагол ДРУГОЙ, и это не синонимы: у «Подключения» над токеном слоя нет и
-# Ctrl+U там СТИРАЕТ, а у записи реестра над ним есть общий токен — снятие своего
-# ключа возвращает наследование. Обещаем только когда есть что снимать.
-_TOKEN_LABEL_INHERIT = "Токен   Ctrl+U — наследовать"
-_PH_KEEP = "если не указать — останется как сейчас"
-_PH_NO_TOKEN = "если не указать — без токена"
-# Свой токен снят Ctrl+U, а наследовать нечего — «Подключение» токена не задаёт.
-# Молчать здесь нельзя: маска ушла, и поле обязано сказать, что теперь будет.
-_PH_TOKEN_CLEARED = "токен записи снят · «Подключение» токена не задаёт"
+# Ctrl+U там СТИРАЕТ, а у записи реестра над ним есть общее подключение — клавиша
+# возвращает к нему ПАРУ целиком (§5), а не один токен: половина пары запрещена
+# правилом §2. Обещаем ровно в том состоянии, где клавише есть что возвращать.
+_TOKEN_LABEL_INHERIT = f"{_TOKEN_LABEL}   {CTRL_U_PAIR}"
 # Первый пункт пресет-листа адреса — не «ещё один адрес», а РЕШЕНИЕ не задавать
 # свой: поле остаётся пустым, связь живая (сменится адрес в основном конфиге —
 # сменится и здесь). Адрес рядом с ним часто совпадает с адресом обычного
@@ -137,6 +165,14 @@ class ModelEntryForm(Vertical):
         self._alias0 = self._own_alias or ""
         self._model0 = initial.get("model") or ""
         self._url0 = initial.get("url") or ""
+        # Второе написание пары (`backend.completions_url` / `proxy` /
+        # `chat_completion_headers.Authorization`) форма не правит, но обязана ВИДЕТЬ:
+        # правило §2 считает его таким же своим подключением, и запись, задавшую пару
+        # так, форма иначе объявила бы общей и отказалась сохранить без единой правки.
+        backend0 = initial.get("backend")
+        self._backend0 = backend0 if isinstance(backend0, dict) else {}
+        # Состояние пары, показанное на экране: DOM трогаем только на его смене.
+        self._pair_own: bool | None = None
         self._token_current = initial.get("token")   # только для маски placeholder
         self._no_auth = self._token_current == ""   # явное "" в записи = галка ●
         # Третье состояние поля токена (идиома `ConnectionEditor`): пусто = «ключ не
@@ -180,7 +216,7 @@ class ModelEntryForm(Vertical):
         # им нужны только в работе (`_field()` ищет по id лениво), а «ещё не заведён»
         # — состояние, о котором пришлось бы помнить каждому вызову хозяина.
         presets_items = list(presets) if presets is not None else []
-        if self._effective_url:
+        if self._effective_url and not self._pair_in_backend():
             # Пункт-наследование первым и с РЕАЛЬНЫМ адресом основного конфига: Enter
             # на нём осознанно ОЧИЩАЕТ поле (`_apply_preset`), а пустое поле и значит
             # «наследовать». Запись с собственным адресом — не исключение, наоборот:
@@ -188,6 +224,15 @@ class ModelEntryForm(Vertical):
             # (решение 7). Над ЛЮБЫМ заданным адресом — своим или каталожным —
             # список сам не раскрывается (канон 2026-08-17, `can_open`): там его
             # раскрывает `reload_presets` (Alt+↓).
+            #
+            # Пара во втором написании (секция `backend`) пункта не получает: он и
+            # `Ctrl+U` — два входа в ОДНО действие (§5), а форма `backend` не правит,
+            # и снятые `url`/`token` оставили бы запись своей. Клавиша в этом состоянии
+            # честно отказывает (`_pair_returnable`), пункт же доводил дело до половины
+            # пары, которую `submit()` отвергает, — из тупика человеку выйти нечем.
+            # Гейт — статическая половина того же предиката: динамическая
+            # (`own_connection`) к списку, собранному один раз, неприменима, а при общей
+            # паре пункт законен — он держит живую связь с основным конфигом.
             presets_items.insert(0, SimpleNamespace(name=_INHERIT_PRESET_NAME,
                                                     url=self._effective_url, inherit=True))
         self._presets_ctrl = preset_list_controller(
@@ -253,10 +298,84 @@ class ModelEntryForm(Vertical):
         режиме правки это значит «стёрли, чтобы снять»), поэтому он говорит про
         пустоту, а не про сохранённое: пустое поле = наследование, и текст называет
         конкретный адрес, который начнёт действовать (эталон — маска прокси
-        `connection.py:143-145`, где пустое поле тоже значит «снять»)."""
+        `connection.py:143-145`, где пустое поле тоже значит «снять»).
+
+        Второе написание адреса (`backend.completions_url`) сильнее общего, и при
+        пустом поле действует ОНО: назвать призраком общий адрес значило бы назвать
+        НЕдействующий. Правило то же, каким поле токена показывает маску своего секрета
+        записи, а не унаследованного.
+
+        Что сильнее чего — решает ядровая цепочка (`resolve_entry_address`), та же, что
+        у витрины реестра и у рантайма; своего порядка у формы быть не должно. Спрашиваем
+        её без `url`: placeholder виден ровно при пустом поле, а собственного `url` в
+        записи с адресом в `backend` не бывает — схема запрещает два написания разом."""
+        own_url = resolve_entry_address(
+            url=None, completions_url=self._backend0.get("completions_url"))
+        if own_url:
+            return str(own_url)
         if self._effective_url:
             return _inherited(self._effective_url)
         return _ADDRESS_HINT
+
+    def _pair_parts(self) -> tuple[bool, bool]:
+        """Что запись задаёт СВОЕГО — (адрес, токен) — ядровым определением §2
+        (`model_registry.connection_parts`), тем же, каким судит валидатор конфига.
+
+        Считаем то, что получится в файле ПОСЛЕ merge писателя, а не набранное в полях:
+        нетронутый токен записи остаётся в ней и без единой правки поля, а галка ● — это
+        заданный `token: ""`, не «токена нет». Считать иначе значит разойтись с
+        `submit()` — и молча записать то, что правило запрещает: снятая галка над
+        сохранённым `token: ""` УДАЛЯЕТ ключ, и пара при своём адресе теряет половину."""
+        headers = self._backend0.get("chat_completion_headers") or {}
+        if self._no_auth:
+            token = ""
+        elif self._token_value():
+            token = self._token_value()
+        elif self._token_cleared or self._token_current == "":
+            token = None
+        else:
+            token = self._token_current
+        return connection_parts(
+            url=self._url_value(),
+            token=token,
+            completions_url=self._backend0.get("completions_url"),
+            proxy=self._backend0.get("proxy"),
+            authorization=headers.get("Authorization"),
+        )
+
+    def _pair_in_backend(self) -> bool:
+        """Пара (или её половина) задана ВТОРЫМ написанием — секцией `backend` записи.
+
+        Тем же ядровым определением §2, что и всё остальное: спрашиваем его про слой
+        `backend` в одиночку, обнулив свои поля. Своей проверки «есть ли ключ в
+        backend» здесь быть не должно — она стала бы третьим определением пары."""
+        headers = self._backend0.get("chat_completion_headers") or {}
+        return any(connection_parts(
+            url="", token=None,
+            completions_url=self._backend0.get("completions_url"),
+            proxy=self._backend0.get("proxy"),
+            authorization=headers.get("Authorization"),
+        ))
+
+    def _pair_returnable(self) -> bool:
+        """Пара своя И форма может вернуть её ЦЕЛИКОМ — условие, по которому клавиша
+        работает и по которому её обещают подпись и футер.
+
+        Второе написание исключено: `backend` форма не правит, снятые `url`/`token`
+        оставили бы запись своей, и клавиша выглядела бы сделанной, ничего не сделав.
+        Обещать полдела — та же ложь витрины, что обещать мёртвую клавишу."""
+        return self.own_connection() and not self._pair_in_backend()
+
+    def own_connection(self) -> bool:
+        """Пара своя: запись задаёт своим хоть что-то из пары — адрес или токен.
+        Токен, галка ● и клавиша «вернуть общие» живут ровно в этом состоянии.
+
+        По СОВОКУПНОСТИ, а не по одному адресу: стёртый до пустоты адрес — ещё не
+        решение (§4, краевые случаи), решением он становится при сохранении. Считай
+        форма его решением сразу — оставшаяся половина (свой токен записи) оказалась бы
+        в замороженном и недостижимом курсором поле: отказ сохранения виден, а
+        исполнить его нечем."""
+        return any(self._pair_parts())
 
     @property
     def token_cleared(self) -> bool:
@@ -275,26 +394,34 @@ class ModelEntryForm(Vertical):
         """placeholder токена сейчас — маска (своего секрета записи или
         унаследованного), а не подсказка: маркер `has-saved` красит её цветом
         значения (спека §3.4), и врать им нельзя."""
-        return self._own_token_active() or bool(self._effective_auth)
+        if self._own_token_active():
+            return True
+        return not self.own_connection() and bool(self._effective_auth)
 
     def _token_placeholder(self) -> str:
-        """Свой токен записи — маской (и никакого хинта: маска сама говорит
-        «текущее значение остаётся»); своего нет — маска того, что реально
-        унаследуется от основного конфига; нет и там — честное «без токена»."""
+        """Поле токена говорит ровно то, с чем реально уйдёт запрос, — тем же правилом,
+        каким его собирает `_current_auth_header`: свой токен записи — маской; над своим
+        адресом без токена — что его надо указать (унаследованный сюда не пойдёт, §4);
+        над унаследованным адресом — маска того, что придёт вместе с ним."""
         if self._own_token_active():
             return onboarding.display_secret(self._token_current)
+        if self.own_connection():
+            return _TOKEN_NEEDED
         if self._effective_auth:
             return _inherited(onboarding.display_secret(self._effective_auth))
-        if self._token_cleared:
-            return _PH_TOKEN_CLEARED
-        return _PH_KEEP if self._is_edit() else _PH_NO_TOKEN
+        return _COMMON_TOKEN_EMPTY
 
     def _token_label(self) -> str:
-        """Подпись поля токена. Клавиша обещается ровно там, где работает: свой
-        токен есть и он в силе. Нечего снимать — подписи нет: клавиша молчит, и
-        обещать ей нечего (канон «недоступное не обещаем»)."""
+        """Подпись поля токена. Клавиша обещается ровно там, где по ней можно нажать и
+        где она доделает: пара своя, возвратимая (`_pair_returnable`) и поле живое.
+
+        Гейт по ПАРЕ, а не по своему токену (§5): над своим адресом без токена клавиша
+        тоже работает — она и есть выход из половины пары. Под ● поле заморожено и
+        курсором пропускается, и обещание в его подписи звало бы туда, куда не встать;
+        выход при этом не теряется — с адреса клавиша работает, и там её называет
+        футер (канон «недоступное не обещаем»)."""
         return (_TOKEN_LABEL_INHERIT
-                if self._own_token_active() and not self._no_auth else _TOKEN_LABEL)
+                if self._pair_returnable() and not self._no_auth else _TOKEN_LABEL)
 
     def _sync_token_label(self) -> None:
         for w in self.query("#mef-token-label"):
@@ -306,10 +433,13 @@ class ModelEntryForm(Vertical):
 
     def _noauth_text(self) -> Text:
         # Подсказка живёт В строке, а не в футере: Space — клавиша ровно этой строки,
-        # в полях он печатает пробел (разбор подсказок в теле, ConnectionEditor).
+        # в полях он печатает пробел (разбор подсказок в теле, ConnectionEditor). При
+        # общей паре галка неактивна, и строка объясняет почему: обещать «Space —
+        # переключить» там, где переключать нечего, — то же враньё, что мёртвая клавиша.
         t = Text()
         t.append(("● " if self._no_auth else "○ ") + _NO_AUTH_LABEL)
-        t.append("   " + _NO_AUTH_TOGGLE_HINT, style=DEEP_DIM)
+        hint = _NO_AUTH_TOGGLE_HINT if self.own_connection() else _TOKEN_SHARED_HINT
+        t.append("   " + hint, style=DEEP_DIM)
         return t
 
     def _model_row_text(self, model, *, selected: bool) -> Text:
@@ -325,6 +455,9 @@ class ModelEntryForm(Vertical):
         # группа, у одинокого поля — класс set-framed. Порядок полей — как в
         # `_positions`: адрес → токен → id → алиас.
         icls = "onb-dyn set-framed"
+        # Строка состояния пары — НАД парой полей (§4): она про оба сразу, и пометки у
+        # каждого поля разнесли бы одно состояние по двум подписям.
+        yield Static(_PAIR_SHARED, id="mef-pair", classes="onb-hint onb-dyn")
         yield Static(_URL_LABEL, classes="onb-hint onb-dyn")
         self._url_input = PasteInput(value="", placeholder=self._url_placeholder(),
                                      id="mef-url", classes="onb-dyn group-field")
@@ -364,19 +497,49 @@ class ModelEntryForm(Vertical):
         yield error
 
     def on_mount(self) -> None:
-        self._sync_token_visibility()
         # Адрес — программной записью (`write_field`): обычное присваивание постит
         # `Input.Changed`, и пресет-лист сужался бы по собственному значению поля
-        # (живой смок 2026-08-04 «Подключения»).
+        # (живой смок 2026-08-04 «Подключения»). Состояние пары считаем ПОСЛЕ него —
+        # оно выводится из поля.
         write_field(self._url_input, self._url0)
+        self._sync_pair_state()
         self._focus_position()
 
     # --- навигация ---
+    def _sync_pair_state(self) -> None:
+        """Перерисовать всё, что зависит от состояния пары: строку над полями,
+        редактируемость токена и активность галки."""
+        own = self.own_connection()
+        if own == self._pair_own:
+            return
+        self._pair_own = own
+        for w in self.query("#mef-pair"):
+            w.update(self._pair_row_text(own))
+        # Отказ живёт ровно столько, сколько состояние, о котором он сказан: оба отказа
+        # пары («задан свой адрес…», «задан свой токен…») с её сменой перестают быть
+        # правдой, и оставленная строка спорила бы со строкой над полями.
+        self._clear_error()
+        for w in self.query("#mef-noauth"):
+            w.update(self._noauth_text())
+        self._sync_token_visibility()
+
+    def _pair_row_text(self, own: bool) -> str:
+        """Строка НАД парой: откуда пара взята (§4). У своей два происхождения, и
+        читаются они по-разному — знакомые поля формы либо секция `backend`, до которой
+        форма не достаёт."""
+        if not own:
+            return _PAIR_SHARED
+        return _PAIR_OWN_BACKEND if self._pair_in_backend() else _PAIR_OWN
+
     def _sync_token_visibility(self) -> None:
         """● — поле не исчезает (раскладка не прыгает), а замораживается: disabled,
-        пустое, placeholder «не используется». ○ — оживает с прежним placeholder."""
+        пустое, placeholder «не используется». ○ — оживает с прежним placeholder.
+
+        Общая пара замораживает его по другой причине (§4): решать про токен нечего, он
+        придёт вместе с адресом, — а набранный над общим адресом токен был бы ровно
+        запрещённой половиной."""
         inp = self.query_one("#mef-token", Input)
-        inp.disabled = self._no_auth
+        inp.disabled = self._no_auth or not self.own_connection()
         if self._no_auth:
             inp.value = ""
             inp.placeholder = _NO_AUTH_FROZEN_PLACEHOLDER
@@ -385,15 +548,18 @@ class ModelEntryForm(Vertical):
         # Маркер живёт вместе с placeholder'ом: при ● текст «не используется» — не
         # маска, и поле не должно врать, что сохранённое значение есть.
         inp.set_class(not self._no_auth and self._token_is_mask(), "has-saved")
-        # Подпись обещает Ctrl+U по тем же условиям, что и клавиша работает: под ●
-        # поле заморожено, снимать в нём нечего — обещание уходит вместе с маской.
+        # Подпись обещает Ctrl+U по тем же условиям, что и клавиша нажимается: под ●
+        # поле заморожено и курсором пропускается — обещание уходит вместе с маской.
         self._sync_token_label()
 
     def _skip_position(self, position) -> bool:
         """Позиция, на которой курсору делать нечего: замороженное (disabled) поле
-        фокусировать нельзя, и стоять на нём — тупик без обратной связи. Заморозка у
-        формы одна — поле токена под галкой «без авторизации», — но живёт она
-        отдельным предикатом, а не веткой в `move`: там ей место среди навигации."""
+        фокусировать нельзя, и стоять на нём — тупик без обратной связи. Заморозок две, и
+        обе про токен: галка «без авторизации» и общая пара (§4) — при общем адресе и
+        поле, и сама галка неактивны, а почему, сказано в строке галки. Живёт отдельным
+        предикатом, а не веткой в `move`: там ей место среди навигации."""
+        if not self.own_connection():
+            return position == "mef-token" or position is None
         return position == "mef-token" and self._no_auth
 
     def move(self, delta: int) -> None:
@@ -453,59 +619,101 @@ class ModelEntryForm(Vertical):
 
     def toggle_no_auth(self) -> bool:
         """Space на позиции галки: переключить «без авторизации». True — курсор был
-        на галке (переключено); False — курсор в другом месте, клавишу хост НЕ стопит
-        (пробел печатается в фокусное поле как обычно)."""
-        if self._positions[self._idx] is not None:
+        на галке (переключено); False — клавиша не наша, хост её НЕ стопит (пробел
+        печатается в фокусное поле как обычно).
+
+        Гейт двойной — позиция И состояние пары: при общей паре галка неактивна (§4), и
+        курсор на неё не встаёт, но решает это навигация. Держать «можно ли переключать»
+        на одной навигации значит поручить правило тому, кто его не знает."""
+        if self._positions[self._idx] is not None or not self.own_connection():
             return False
         self._no_auth = not self._no_auth
         self.query_one("#mef-noauth", Static).update(self._noauth_text())
         self._sync_token_visibility()
+        self._sync_pair_state()
         return True
 
-    def on_token_field_with_saved(self) -> bool:
-        """Курсор на поле токена, и есть что снимать — ровно условие работы Ctrl+U.
-        Отдельным предикатом, а не веткой внутри действия (эталон — одноимённый метод
-        `ConnectionEditor`): по нему же спрашивают витрины, а спросить действием
-        нельзя — оно меняет состояние."""
-        return (self._positions[self._idx] == "mef-token"
-                and not self._no_auth and self._own_token_active())
+    @property
+    def can_return_shared_pair(self) -> bool:
+        """Условие работы Ctrl+U: пара своя И курсор на одном из её полей.
+
+        Предикат живёт на уровне ФОРМЫ, а не поля токена (§5): под галкой ● это поле
+        `disabled` и курсором пропускается, и гейт «курсор на токене» отвечал бы «нет»
+        ровно там, где клавиша обязана работать. Состояние пары — по совокупности
+        (`own_connection`), а не по своему токену: над своим адресом без токена клавиша
+        и есть выход из запрещённой половины.
+
+        Позиция всё же нужна: на алиасе и id модели у Ctrl+U своё штатное дело
+        (`Input.delete_left_all`), и там оно настоящее — поля предзаполнены.
+
+        Пара во втором написании (секция `backend`) исключена `_pair_returnable`: форма
+        её не правит, вернуть общее подключение отсюда нечем — и «сделал» не должно
+        выглядеть так же, как «не сделал».
+
+        Отдельным предикатом, а не веткой внутри действия (эталон — `ConnectionEditor.
+        on_token_field_with_saved`): по нему же гейтится обещание в футере, а спросить
+        действием нельзя — оно меняет состояние."""
+        return self._pair_returnable() and self._positions[self._idx] in _PAIR_FIELDS
 
     def clear_token(self) -> bool:
-        """`Ctrl+U` на поле токена: снять СВОЙ токен записи — вернуть её к общему
-        токену «Подключения». True — обработали, клавиша наша.
+        """`Ctrl+U` на поле пары: вернуть записи ОБЩЕЕ подключение — снять свой адрес,
+        свой токен и галку разом. True — обработали, клавиша наша.
+
+        Пара, а не токен (§5): своё подключение задаётся целиком, и снятая половина
+        либо унесла бы общий ключ на чужой хост, либо уехала вслед за сменой общего
+        адреса. Имя метода — про клавишу, а не про действие: тем же именем её ведут
+        `ConnectionEditor` и хозяин-экран.
 
         Отличие от `ConnectionEditor.clear_token` не в механике, а в последствии: там
         над токеном слоя нет, и Ctrl+U его СТИРАЕТ (`Authorization: ""`); здесь слой
-        есть, и снятие своего ключа не оставляет запись без авторизации — она
-        начинает работать общим токеном. Поэтому и в файл уедет не пустая строка, а
-        УДАЛЕНИЕ ключа `token` (`submit`).
+        есть, и снятие своего не оставляет запись без авторизации — она начинает
+        работать общей парой. Поэтому и в файл уедут не пустые строки, а УДАЛЕНИЕ
+        ключей `url`/`token` (`submit`).
 
         Действует сразу: маска своего секрета уходит, placeholder называет маской то,
-        что теперь унаследуется, проба с этого момента идёт унаследованным токеном —
-        результат виден ДО сохранения. Передумать можно, просто набрав новый (пометка
+        что теперь унаследуется, проба с этого момента идёт унаследованной парой —
+        результат виден ДО сохранения. Передумать можно, набрав пару заново (пометка
         снимется сама, `on_input_changed`)."""
-        if not self.on_token_field_with_saved():
-            return False        # снимать нечего либо курсор не там — клавиша не наша
-        self._token_cleared = True
-        inp = self.query_one("#mef-token", Input)
-        inp.value = ""
-        inp.placeholder = self._token_placeholder()
-        inp.set_class(self._token_is_mask(), "has-saved")
-        self._sync_token_label()
-        # Связь, по которой ходила проба, изменилась (`_current_auth_header` с этого
-        # момента отдаёт унаследованный), а `Input.Changed` по Ctrl+U не летит —
-        # обесценивать вердикт приходится руками, иначе на экране остаётся «✓» про
-        # проверку СВОИМ токеном.
-        self._invalidate_probe()
+        if not self.can_return_shared_pair:
+            return False        # возвращать нечего либо курсор не там — клавиша не наша
+        self._return_shared_pair()
         return True
+
+    def _return_shared_pair(self) -> None:
+        """Само действие «вернуть общие» — у него ДВА входа (§5): клавиша `Ctrl+U` и
+        пункт `основной конфиг · наследовать` первым в списке адресов. Разъедься они —
+        два пути к одному состоянию оставляли бы разные записи.
+
+        Токен помечается снятым только если в записи он есть: `None` в `submit()` —
+        просьба УДАЛИТЬ ключ, и на записи без него это была бы правка из ничего
+        (форма показала бы «изменено» там, где менять нечего)."""
+        write_field(self.query_one("#mef-url", Input), "")
+        write_field(self.query_one("#mef-token", Input), "")
+        self._no_auth = False
+        self._token_cleared = self._token_current is not None
+        self.query_one("#mef-noauth", Static).update(self._noauth_text())
+        self._sync_token_visibility()
+        self._sync_pair_state()
+        # Связь, по которой ходила проба, изменилась (`_current_url`/`_current_auth_
+        # header` с этого момента отдают унаследованные), а `Input.Changed` по
+        # программной записи не летит — обесценивать вердикт приходится руками, иначе
+        # на экране остаётся «✓» про проверку СВОЕЙ парой.
+        self._invalidate_probe()
 
     # --- списки: пресеты адреса и модели эндпоинта ---
     def _apply_preset(self, preset) -> None:
         """Enter по строке пресета. Пункт-наследование (duck-атрибут `.inherit`) —
-        осознанно ОСТАВИТЬ поле пустым: подстановка адреса убила бы живую связь с
+        осознанно ОСТАВИТЬ пару пустой: подстановка адреса убила бы живую связь с
         основным конфигом (контракт `preset_list_controller`, `value_of`)."""
-        field = self.query_one("#mef-url", Input)
-        write_field(field, "" if getattr(preset, "inherit", False) else preset.url)
+        if getattr(preset, "inherit", False):
+            # Пункт «наследовать» — «вернуть ОБЩИЕ», а не «очистить адрес» (§5, два
+            # входа в ОДНО действие): оставленный токен был бы ровно запрещённой
+            # половиной, а поле токена при общей паре заморожено — снять его стало бы
+            # нечем. Уходят разом набранное, галка и сохранённый ключ записи.
+            self._return_shared_pair()
+            return
+        write_field(self.query_one("#mef-url", Input), preset.url)
+        self._sync_pair_state()
         self._invalidate_probe()
 
     def _apply_model(self, model_id: str) -> None:
@@ -659,6 +867,11 @@ class ModelEntryForm(Vertical):
             # работает, и молчать о нём нельзя.
             self._token_cleared = False
             self._sync_token_label()
+        if event.input.id in ("mef-url", "mef-token"):
+            # Печать в паре меняет её состояние: адрес — вход в «своё» и выход из него,
+            # набранный токен — вторая половина. Пересчитываем здесь же, как призрак
+            # алиаса в ветке поля id: своя правка — свой пересчёт.
+            self._sync_pair_state()
         if event.input.id in ("mef-url", "mef-token", "mef-model"):
             self._invalidate_probe()
 
@@ -672,21 +885,35 @@ class ModelEntryForm(Vertical):
     # --- проба (Ctrl+Space) ---
     def _current_url(self) -> str:
         """Адрес пробы и списка: поле, иначе эффективный из основного конфига — то,
-        по чему запись реально пойдёт (наследование)."""
-        return self._field_value("mef-url") or self._effective_url
+        по чему запись реально пойдёт (наследование).
+
+        Пара своя, а адрес не набран — собранной пары нет вовсе: общий адрес такой
+        записи не достанется (её просто не сохранить), и проба на него отвечала бы не
+        про то. Молчим тем же «сначала укажите адрес»."""
+        own_url = self._url_value()
+        if own_url:
+            return own_url
+        return "" if self.own_connection() else self._effective_url
 
     def _current_auth_header(self) -> str | None:
         """Authorization тем же правилом, каким будет жить запись: ● — честно без
         токена; введённый текст; собственный токен записи; иначе унаследованный.
-        Поле и проба обязаны говорить об одной и той же связи."""
+        Поле и проба обязаны говорить об одной и той же связи.
+
+        В сеть уходит только СОБРАННАЯ пара (§4): унаследованный токен принадлежит
+        унаследованному адресу и уходит только вместе с ним, а свой — своему. Иначе
+        «напечатал чужой адрес → перешёл на поле id» отправлял бы общий ключ на чужой
+        хост автоподгрузкой списка, ещё до всякого сохранения."""
         if self._no_auth:
             return None
+        if not self.own_connection():
+            return self._effective_auth
         token_raw = self._field_value("mef-token")
         if token_raw:
             return onboarding.authorization_header(token_raw)
         if self._own_token_active():
             return onboarding.authorization_header(self._token_current)
-        return self._effective_auth
+        return None
 
     def probe_connection(self) -> bool:
         """`Ctrl+Space`: проверить связь по тем значениям, что стоят в полях СЕЙЧАС.
@@ -783,6 +1010,20 @@ class ModelEntryForm(Vertical):
         except NoMatches:
             return self._model0
 
+    def _token_value(self) -> str:
+        try:
+            return self._field_value("mef-token")
+        except NoMatches:
+            return ""
+
+    def _url_value(self) -> str:
+        """Адрес, набранный в записи. До монтирования поля его знает только `initial` —
+        а состояние пары спрашивают и оттуда (`compose`)."""
+        try:
+            return self._field_value("mef-url")
+        except NoMatches:
+            return self._url0
+
     @property
     def original_alias(self) -> str | None:
         """Алиас, под которым запись живёт в файле СЕЙЧАС (None — создание).
@@ -838,10 +1079,11 @@ class ModelEntryForm(Vertical):
 
         Токен предзаполнить нельзя (секрет), поэтому пустое поле здесь всегда значит
         «не трогаем», а два его снятия разведены по СМЫСЛУ и по клавише: галка ●
-        «без авторизации» — явное `""` (осознанно без токена, снятая ● возвращает
-        `None`), `Ctrl+U` — `None`, то есть удаление ключа и возврат к общему токену
-        «Подключения». Одним переключателем это не выражается: `""` и «ключа нет» —
-        разные состояния файла, и путь к каждому обязан быть свой.
+        «без авторизации» — явное `""` (осознанно без токена СВОЕГО адреса, пара при
+        этом остаётся своей и целой), `Ctrl+U` — `None` у обоих ключей пары, то есть
+        возврат к общему подключению «Подключения». Одним переключателем это не
+        выражается: `""` и «ключа нет» — разные состояния файла, и путь к каждому
+        обязан быть свой.
 
         Ошибка остаётся В ФОРМЕ: сообщение под полями, `ok=False`, писать нечего."""
         values = self.peek()
@@ -868,6 +1110,13 @@ class ModelEntryForm(Vertical):
         url = values["url"]
         if url and not onboarding._valid_endpoint_url(url):
             return self._fail(_URL_ERROR)
+        # §2: своё подключение задаётся ЦЕЛИКОМ — половину пары форма не сохраняет.
+        # Иначе отказ пришёл бы от валидатора конфига, когда правка уже сделана.
+        has_address, has_token = self._pair_parts()
+        if has_address and not has_token:
+            return self._fail(_PAIR_NEEDS_TOKEN)
+        if has_token and not has_address:
+            return self._fail(_PAIR_NEEDS_URL)
         self._clear_error()
         fields: dict = {}
         if values["model"]:

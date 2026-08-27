@@ -246,3 +246,27 @@ def test_model_override_without_registry_is_plain_legacy_not_forced(isolated_cwd
     resolved = router.resolve("main")
     assert resolved.model == "forced-model"
     assert resolved.source == "легаси"
+
+
+# --- --models: CLI-реестр доезжает до Router В ТОЙ ЖЕ форме, что и файловый ---------
+
+
+def test_cli_models_override_carries_its_own_token_to_the_router():
+    """`--models` кладётся в плоский `config_dict` МИМО схемы, а Router читает
+    СЕРИАЛИЗОВАННУЮ запись (`authorization_header`, `config._serialize_model_entry`) —
+    сырой `token` из CLI до него не доезжал вовсе, и запись со своим адресом уходила на
+    него с ОБЩИМ ключом. Оверрайд обязан приводиться к той же форме, что кладёт
+    `flatten_app_config`, иначе правило пары на `--models` декоративно: пара в строке
+    есть, а до сети доезжает половина."""
+    cfg = {
+        "completions_url": "https://common/v1/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer sk-common"},
+    }
+    apply_cli_overrides(cfg, extra_overrides={
+        "models": {"gc": {"url": "https://own/v1/chat/completions", "token": "sk-own"}},
+    })
+
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+
+    assert resolved.url == "https://own/v1/chat/completions"
+    assert resolved.authorization == "Bearer sk-own"

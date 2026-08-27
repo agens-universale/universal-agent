@@ -105,11 +105,25 @@ def test_upsert_model_merge_preserves_pricing_and_backend(tmp_path, template):
 def test_upsert_model_merge_removes_key_passed_as_none(tmp_path, template):
     path = _cfg(tmp_path, _REGISTRY)
 
-    upsert_model(path, "flash", {"token": None}, template)
+    upsert_model(path, "flash", {"model": None}, template)
 
     entry = _models(path)["flash"]
-    assert "token" not in entry                        # ключ со значением None — удалён
-    assert entry["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert "model" not in entry                        # ключ со значением None — удалён
+    assert entry["url"] == "https://openrouter.ai/api/v1/chat/completions"   # сосед как был
+
+
+def test_upsert_model_leaving_half_a_pair_is_rejected(tmp_path, template):
+    """Слой записи валидирует РЕЗУЛЬТАТ, значит правило пары (§2) действует и на нём:
+    снять `token` у записи, которая держит свой адрес, — это оставить половину, после
+    которой общий ключ ушёл бы на её хост. Файл не тронут ни на байт, как на любом
+    другом отказе валидации."""
+    path = _cfg(tmp_path, _REGISTRY)
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError):
+        upsert_model(path, "flash", {"token": None}, template)
+
+    assert path.read_text(encoding="utf-8") == before
 
 
 def test_upsert_model_keeps_neighbour_entry(tmp_path, template):
@@ -158,12 +172,12 @@ def test_upsert_model_alias_with_dot_replaces_not_duplicates(tmp_path, template)
     path = _cfg(tmp_path, _BASE)
 
     upsert_model(path, "opus-4.8", {"model": "anthropic/claude-opus-4.8"}, template)
-    upsert_model(path, "opus-4.8", {"url": "https://other/v1"}, template)
+    upsert_model(path, "opus-4.8", {"url": "https://other/v1", "token": "sk-own"}, template)
 
     models = _models(path)
     assert list(models) == ["opus-4.8"]
     assert models["opus-4.8"] == {
-        "model": "anthropic/claude-opus-4.8", "url": "https://other/v1"}
+        "model": "anthropic/claude-opus-4.8", "url": "https://other/v1", "token": "sk-own"}
 
 
 def test_upsert_model_quotes_yaml_scalar_alias(tmp_path, template):
@@ -417,12 +431,12 @@ def test_transaction_second_upsert_merges_onto_first(tmp_path, template):
 
     apply_registry_ops(path, [
         ("upsert_model", "opus", {"model": "anthropic/opus"}),
-        ("upsert_model", "opus", {"url": "https://other/v1"}),
+        ("upsert_model", "opus", {"url": "https://other/v1", "token": "sk-own"}),
         ("write_slot", "default", "flash"),
     ], template)
 
     assert yaml.safe_load(path.read_text(encoding="utf-8"))["models"]["opus"] == {
-        "model": "anthropic/opus", "url": "https://other/v1"}
+        "model": "anthropic/opus", "url": "https://other/v1", "token": "sk-own"}
 
 
 def test_transaction_can_remove_model_together_with_its_references(tmp_path, template):
@@ -656,8 +670,10 @@ def test_validate_profile_text_rejects_profile_key_and_bad_types():
     with pytest.raises(ValueError):
         validate_profile_text("models: not-a-mapping\n")
     with pytest.raises(ValueError):
-        validate_profile_text("models:\n  light:\n    url: http://x\n")   # зарезервированный алиас
-    validate_profile_text("models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+        # пара §2 задана целиком — отказ остаётся именно про зарезервированный алиас
+        validate_profile_text("models:\n  light:\n    url: http://x\n    token: sk\n")
+    validate_profile_text(
+        "models:\n  flash:\n    url: http://x\n    token: sk\nslots:\n  default: flash\n")
 
 
 def test_validate_profile_text_rejects_broken_yaml():
