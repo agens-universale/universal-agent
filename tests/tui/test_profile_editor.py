@@ -1,0 +1,654 @@
+"""Редактор открытого профиля — под-вид секции «Профили» (план волны B, Task 6).
+
+Симметрия §1 спеки: формы ОДНИ, целевых файла два. Enter на строке профиля
+открывает тот же `ModelsSectionEditor`, что и секция «Модели», но целью записи
+становится файл профиля, валидатором — профильный (`validate_profile_text`:
+запрет `profile:` внутри, compat устаревших ключей), а «резервной модели»
+(`agent.model` основного конфига) в профиле нет вовсе.
+
+Esc — назад к списку профилей (под-состояние закрывается своим уровнем, Global
+Constraints); PgUp/PgDn и повторный вход в секцию под-вид не переживает.
+"""
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("textual")
+
+import yaml
+from textual.widgets import Input, Static
+
+from tests.tui.test_profiles_crud import (_PROFILE_BODY, _base_config_text, _base_dict,
+                                          _flash, _footer, _notice, _profiles_screen,
+                                          _put_cursor, _type_name, _write)
+from tui.editors import models_section as m
+from tui.screens import settings as s
+
+
+@pytest.fixture(autouse=True)
+def _no_managed_overlay(tmp_path, monkeypatch):
+    """Без этого происхождение полей читает НАСТОЯЩИЙ ~/.gc/config.local.yml
+    разработчика (тот же приём, что в tests/tui/test_profiles_crud.py)."""
+    monkeypatch.setattr(
+        "mcp_runtime.paths.managed_config_path",
+        lambda: tmp_path / "no-managed-overlay-here.yml",
+    )
+
+
+def _texts(scr) -> str:
+    return " ".join(str(w.render()) for w in scr.query(Static))
+
+
+def _editor(scr):
+    from tui.editors.models_section import ModelsSectionEditor
+    return scr.query(ModelsSectionEditor).last()
+
+
+def _doc(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _project(tmp_path, monkeypatch) -> Path:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    return project_dir
+
+
+async def _open_profile(pilot, scr, name: str):
+    await _put_cursor(pilot, scr, "profile", name)
+    await pilot.press("enter")
+    await pilot.pause()
+    return _editor(scr)
+
+
+def _cursor_to(ed, kind: str, **match) -> None:
+    """Курсор редактора на строку нужного рода (индексы строк знает сам редактор —
+    состав рядов у профиля другой, чем у config.yml)."""
+    for i, row in enumerate(ed._rows()):
+        if row["kind"] == kind and all(row.get(k) == v for k, v in match.items()):
+            ed._idx = i
+            ed._refresh_rows()
+            return
+    raise AssertionError(f"строки {kind}/{match} нет: {ed._rows()}")
+
+
+async def _fill_entry(pilot, scr, alias: str, model: str) -> None:
+    from tui.editors.model_entry_form import ModelEntryForm
+    form = scr.query(ModelEntryForm).last()
+    form.query_one("#mef-alias", Input).value = alias
+    form.query_one("#mef-model", Input).value = model
+    await pilot.pause()
+    await pilot.press("enter")
+    await pilot.pause()
+
+
+# --- дверь: Enter открывает, создание открывает сразу ------------------------------
+
+
+async def test_enter_on_a_profile_row_opens_the_editor_on_that_file(tmp_path, monkeypatch):
+    """Enter — «войти внутрь» (решение В1): тело секции заменяется редактором форм,
+    целью записи которого стал ФАЙЛ ПРОФИЛЯ, а не config.yml."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        assert Path(ed._target) == profile
+        assert not scr.query(".set-profiles-row")      # список уехал под редактор
+        assert "профиль work" in str(scr.query_one("#set-title", Static).render())
+        assert any("glm" in str(w.render()) for w in scr.query(".models-row"))
+
+
+async def test_create_opens_the_new_profile_right_away(tmp_path, monkeypatch):
+    """«Создать → сразу открыть» (UX старого плана): человек назвал профиль, чтобы
+    его заполнить, — заполнять он идёт следующим действием, а не ищет строку."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await pilot.press("n")
+        await pilot.pause()
+        await _type_name(pilot, scr, "work")
+        assert Path(_editor(scr)._target) == tmp_path / "base" / "profiles" / "work.yml"
+        assert "создан" in _flash(scr)                 # плашка создания не потерялась
+
+
+async def test_enter_on_the_none_row_says_there_is_nothing_to_open(tmp_path, monkeypatch):
+    """«— без профиля» — не файл. Футер обещает «Enter — открыть» и на этой строке
+    (он один на весь список), поэтому молчание было бы его ложью: no-op + подсказка
+    (решение В1)."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "none")
+        await pilot.press("enter")
+        await pilot.pause()
+        from tui.editors.models_section import ModelsSectionEditor
+        assert not scr.query(ModelsSectionEditor)
+        assert scr._profiles_open is None
+        assert s._PROFILE_NONE_NOTHING_TO_OPEN in str(
+            scr.query_one("#set-title", Static).render())
+
+
+async def test_enter_does_not_open_a_profile_whose_root_is_read_only(tmp_path, monkeypatch):
+    """Урок N1 Task 5: не спрашивай там, где заведомо откажешь. Редактор — поверхность
+    ЗАПИСИ; профиль внутри установленного пакета не пишется, и дверь не открывается."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+    monkeypatch.setattr("config._default_config_path", lambda: base_cfg)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("enter")
+        await pilot.pause()
+        from tui.editors.models_section import ModelsSectionEditor
+        assert not scr.query(ModelsSectionEditor)
+        assert "не открыто" in _notice(scr)
+        assert "каталог профилей" in _notice(scr)
+        assert scr.query(".set-profiles-row")          # список на месте
+
+
+# --- запись: цель — файл профиля, config.yml не тронут -----------------------------
+
+
+async def test_the_form_writes_the_entry_into_the_profile_and_not_into_config_yml(
+        tmp_path, monkeypatch):
+    """Формы одни, целевых файла два: запись из открытого профиля уходит в его файл,
+    а базовый config.yml остаётся байт-в-байт прежним."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        before = base_cfg.read_bytes()
+        await _open_profile(pilot, scr, "work")
+        await pilot.press("n")
+        await pilot.pause()
+        await _fill_entry(pilot, scr, "flash", "google/gemini-2.5-flash")
+
+    assert _doc(profile)["models"]["flash"]["model"] == "google/gemini-2.5-flash"
+    assert _doc(profile)["models"]["glm"], "прежняя запись профиля потерялась"
+    assert base_cfg.read_bytes() == before
+
+
+async def test_the_slot_picker_writes_into_the_profile(tmp_path, monkeypatch):
+    """Слоты и привязки — тот же путь записи с той же целью: пикер значения пишет
+    в файл профиля (а не в config.yml) и проходит профильным валидатором."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        before = base_cfg.read_bytes()
+        ed = await _open_profile(pilot, scr, "work")
+        _cursor_to(ed, "slot", level="light")
+        await pilot.press("enter")                     # раскрыть пикер значений
+        await pilot.pause()
+        assert ed.picker_open
+        await pilot.press("down")                      # первая позиция — снятие слота
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert _doc(profile)["slots"]["light"] == "glm"
+    assert base_cfg.read_bytes() == before
+
+
+async def test_the_profile_key_cannot_be_written_into_a_profile(tmp_path, monkeypatch):
+    """Профильный валидатор реально подключён (Task 1, `is_profile=True`): документ с
+    `profile:` внутри — запрещённая цепочка профилей (§3.2), и запись отвергается
+    целиком. КОНФИГ-валидатор тот же текст принимает — разницу даёт только цель."""
+    import tui.app as app_mod
+    from config import validate_config_text_with_sections
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml",
+                     'profile: "other"\n' + _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        before = profile.read_bytes()
+        await _open_profile(pilot, scr, "work")
+        await pilot.press("n")
+        await pilot.pause()
+        await _fill_entry(pilot, scr, "flash", "google/gemini-2.5-flash")
+        notice = _notice(scr)
+
+    assert "не сохранено" in notice
+    assert "profile" in notice                         # причина названа, а не «что-то не так»
+    assert profile.read_bytes() == before
+    validate_config_text_with_sections(profile.read_text(encoding="utf-8"))
+
+
+async def test_a_removed_legacy_key_in_the_profile_does_not_break_the_write(
+        tmp_path, monkeypatch):
+    """Устаревший ключ (`compat.REMOVED`) попадает в профиль копипастой секции из
+    старого config.yml. Валидатор профиля применяет тот же compat, что загрузчик, —
+    запись проходит, а не падает на `extra="forbid"`."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml",
+                     "logging:\n  dump_storage: true\n" + _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _open_profile(pilot, scr, "work")
+        await pilot.press("n")
+        await pilot.pause()
+        await _fill_entry(pilot, scr, "flash", "google/gemini-2.5-flash")
+
+    assert _doc(profile)["models"]["flash"]["model"] == "google/gemini-2.5-flash"
+    assert _doc(profile)["logging"]["dump_storage"] is True   # чужой ключ не вычищен
+
+
+# --- состав секции в профильном режиме --------------------------------------------
+
+
+async def test_the_reserve_model_row_is_absent_in_a_profile(tmp_path, monkeypatch):
+    """`agent.model` — ключ config.yml; в профиле его нет, значит нет ни строки
+    «резервная модель», ни её под-формы: Enter на последней строке открывает пикер
+    привязки, а не легаси-редактор модели."""
+    import tui.app as app_mod
+    from tui.editors.model import ModelEditor
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        assert not [r for r in ed._rows() if r["kind"] == "reserve"]
+        assert "резервная модель" not in _texts(scr)
+        ed._idx = len(ed._rows()) - 1
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not ed.legacy_open
+        assert not scr.query(ModelEditor)
+
+
+async def test_a_profile_that_only_repoints_slots_is_not_called_empty(tmp_path, monkeypatch):
+    """Профиль без своих `models`, но со своими `slots`/`assign`: реестра у него нет,
+    а переопределяет он вполне себе — и строка того же файла в списке, одним
+    нажатием раньше, показывает «default flash». Экран не имеет права ни
+    противоречить ей, ни утверждать, что файл ничего не переопределяет.
+
+    Формы `slots`/`assign` показывают только при НЕПУСТОМ реестре — значит здесь их
+    не показывает никто, и они становятся такими же невидимыми оверлеями, как
+    security/summary: место им в превью."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml",
+           'slots:\n  default: flash\nassign:\n  "*": max\n')
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        row = " ".join(str(w.render()) for w in scr.query(".set-profiles-row"))
+        assert "default flash" in row              # список говорит: переопределяет
+        ed = await _open_profile(pilot, scr, "work")
+        assert ed._rows() == []                    # реестра действительно нет
+        texts = _texts(scr)
+        assert "ничего не переопределяет" not in texts
+        assert "профиль также переопределяет: assign · slots" in texts
+        assert "секции: assign, slots" in texts
+
+
+async def test_the_overlay_preview_stays_silent_about_what_the_forms_show(tmp_path, monkeypatch):
+    """Обратная сторона: как только реестр непуст, `slots`/`assign` показывают формы
+    — и в превью им делать нечего, иначе оно дублирует видимое."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", "security: {}\n" + _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _open_profile(pilot, scr, "work")
+        assert scr._profile_overlay_names() == ["security"]
+
+
+async def test_level_inside_a_profile_shows_in_the_preview_but_not_in_the_list_row(
+        tmp_path, monkeypatch):
+    """`level` внутри файла профиля не показывают формы НИ В ОДНОМ состоянии: строка
+    «уровень модели по умолчанию» секции «Профили» правит ГЛОБАЛЬНЫЙ `level:`
+    конфига, а не ключ этого файла. По общему правилу превью («называем то, чего не
+    видно формами») место ему там — иначе профиль с `level: max` не проявляется на
+    экране нигде.
+
+    В СТРОКЕ СПИСКА исключение остаётся: там канон §12.3, у профиля своя колонка
+    состава, и `level` исключён осознанно (ruling координатора 2026-08-11)."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", "level: max\n" + _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        row = next(str(w.render()) for w in scr.query(".set-profiles-row")
+                   if "work" in str(w.render()))
+        assert "level" not in row
+        await _open_profile(pilot, scr, "work")
+        assert scr._profile_overlay_names() == ["level"]
+        assert "профиль также переопределяет: level" in _texts(scr)
+
+
+async def test_a_validator_error_with_brackets_reaches_the_screen(tmp_path, monkeypatch):
+    """Отказ валидатора — ЧУЖОЙ текст (сообщение pydantic несёт `[type=…,
+    input_value=[], …]`), и уходит он в тот же `_singleton`, что и все notice'ы.
+    Разметка Rich в нём — не разметка, а данные: разбирать её значит ронять
+    приложение на первом же устаревшем ключе в открытом профиле."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml",
+                     "bogus: []\n" + _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        before = profile.read_bytes()
+        await _open_profile(pilot, scr, "work")
+        await pilot.press("n")
+        await pilot.pause()
+        await _fill_entry(pilot, scr, "flash", "google/gemini-2.5-flash")
+        notice = _notice(scr)
+        assert "не сохранено" in notice
+        assert "input_value=[]" in notice           # текст доехал целиком, как есть
+        assert scr._profiles_open == "work"        # экран жив, под-вид на месте
+    assert profile.read_bytes() == before
+
+
+async def test_an_empty_profile_shows_its_own_empty_state(tmp_path, monkeypatch):
+    """Только что созданный профиль (бланк `PROFILE_SKELETON`) — реестр пуст. Легаси-
+    редактора модели у профиля нет, поэтому пустое состояние своё: самодостаточная
+    подсказка на «вы» + вход в реестр клавишей `n`."""
+    import tui.app as app_mod
+    from config_modules.profiles import PROFILE_SKELETON
+    from tui.editors.model import ModelEditor
+    from tui.editors.model_entry_form import ModelEntryForm
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", PROFILE_SKELETON)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        assert ed._rows() == []
+        assert not scr.query(ModelEditor)
+        assert m._PROFILE_EMPTY_HINT in _texts(scr)
+        assert _footer(scr) == m._FOOTER_PROFILE_EMPTY
+        await pilot.press("n")
+        await pilot.pause()
+        assert scr.query(ModelEntryForm), "вход в реестр из пустого состояния не работает"
+
+
+# --- превью секций-оверлеев --------------------------------------------------------
+
+
+_OVERLAY_BODY = ("security:\n  urls_blacklist: []\n"
+                 "summary_params:\n  last_dialog_steps_count: 2\n") + _PROFILE_BODY
+
+
+async def test_the_overlay_preview_names_the_sections_raw(tmp_path, monkeypatch):
+    """Превью «профиль также переопределяет: …» — механически из топ-уровневых ключей
+    файла минус `models/slots/assign/level`, СЫРЫМИ именами (§12.3): форм для этих
+    секций нет, и об этом сказано прямо."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _OVERLAY_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _open_profile(pilot, scr, "work")
+        texts = _texts(scr)
+        assert "профиль также переопределяет: security · summary_params" in texts
+        assert "секции: security, summary_params" in texts
+        assert "YAML" in texts                         # форм для них здесь нет
+
+
+async def test_the_overlay_preview_truncates_by_whole_names(tmp_path, monkeypatch):
+    """Усечение — ЦЕЛЫМИ именами с хвостом «…» (канон `fit_mode_pairs`): половина
+    имени секции читалась бы как другое имя. Полный список остаётся в подсказке."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    body = "".join(f"{name}: {{}}\n" for name in
+                   ("agent_settings", "intent_guard", "long_memory", "security",
+                    "summary_params", "tools")) + _PROFILE_BODY
+    _write(tmp_path / "base" / "profiles" / "work.yml", body)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _open_profile(pilot, scr, "work")
+        monkeypatch.setattr(type(scr), "_profile_overlay_width", lambda self: 46)
+        text = scr._profile_overlay_text()
+        names = ["agent_settings", "intent_guard", "long_memory", "security",
+                 "summary_params", "tools"]
+        shown = text.split(": ", 1)[1].split(" · ")
+        assert shown[-1] == "…", f"хвоста усечения нет: {text}"
+        assert shown[:-1] == names[:len(shown) - 1], f"имя разрезано: {text}"
+        assert len(shown) - 1 < len(names)
+        assert all(name in scr._profile_overlay_hint() for name in names)
+
+
+# --- выходы: под-состояние не переживает ни один из них ----------------------------
+
+
+async def test_esc_returns_to_the_list_and_the_second_esc_to_the_menu(tmp_path, monkeypatch):
+    """Esc-вложенность (Global Constraints): под-вид закрывается СВОИМ уровнем и
+    съедает клавишу, в меню уводит только следующий Esc."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _open_profile(pilot, scr, "work")
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr._view == s._PROFILES
+        assert scr.query(".set-profiles-row"), "список профилей не вернулся"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr._view == "menu"
+
+
+async def test_esc_closes_the_inner_picker_before_the_editor(tmp_path, monkeypatch):
+    """Вложенность работает на всю глубину: раскрытый пикер значения — под-состояние
+    редактора, и первый Esc снимает его, не выбрасывая к списку профилей."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        _cursor_to(ed, "slot", level="max")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert ed.picker_open
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not ed.picker_open
+        assert not scr.query(".set-profiles-row"), "выбросило к списку профилей"
+
+
+async def test_switching_sections_closes_the_open_profile(tmp_path, monkeypatch):
+    """PgUp/PgDn идёт через `_open_section` — под-вид живёт ровно один заход в секцию:
+    вернувшийся сюда человек застаёт список, а не чужой открытый профиль."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _open_profile(pilot, scr, "work")
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert scr._view != s._PROFILES
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert scr._view == s._PROFILES
+        assert scr.query(".set-profiles-row"), "секция открылась чужим под-видом"
+
+
+async def test_a_profile_deleted_from_outside_falls_back_to_the_list(tmp_path, monkeypatch):
+    """Файл открытого профиля исчез под ногами (правка извне, второе окно): секция
+    возвращается к списку сама, а не рисует редактор поверх несуществующего файла."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _open_profile(pilot, scr, "work")
+        profile.unlink()
+        scr._render_view()
+        await pilot.pause()
+        from tui.editors.models_section import ModelsSectionEditor
+        assert not scr.query(ModelsSectionEditor)
+        assert scr._profiles_open is None
+
+
+async def test_the_list_keys_do_not_reach_it_while_the_editor_is_open(tmp_path, monkeypatch):
+    """Пока открыт под-вид, клавиши секции целиком его — включая те, которых у
+    редактора нет ВОВСЕ.
+
+    `Del` он берёт сам, и адресует она ЗАПИСЬ РЕЕСТРА, а не профиль под курсором
+    списка. А `r` редактор не берёт — и обработчик обязан оборваться всё равно:
+    провалившись в список под ним, она открыла бы переименование профиля прямо
+    поверх редактора. Тот же обрыв прикрывает `Space` (активация) и `n` в поле
+    ввода — «клавиша не взята» и «клавиша разрешена нижнему слою» здесь разные
+    вещи."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        _cursor_to(ed, "entry", alias="glm")
+        await pilot.press("delete")
+        await pilot.pause()
+        assert ed.awaiting_confirm
+        assert not scr.query(".set-confirm"), "поднялся баннер удаления ПРОФИЛЯ"
+        assert "glm" in _texts(scr)
+        await pilot.press("escape")                # снять баннер записи реестра
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.pause()
+        assert scr._profiles_name_prompt is None, "клавиша списка провалилась под редактор"
+        assert scr._profiles_open == "work"
+        await pilot.press("escape")                # назад к списку — там тоже чисто
+        await pilot.pause()
+        assert not scr.query("#set-profile-name")
+    assert profile.is_file()
+
+
+# --- футеры ------------------------------------------------------------------------
+
+
+async def test_the_list_footer_promises_opening(tmp_path, monkeypatch):
+    """Enter заработал — футер обязан его назвать (молчание о работающей клавише —
+    тот же класс лжи, что обещание неработающей). Полный литерал В1 стережёт
+    `test_profiles_crud.test_footer_names_the_v1_keys_on_a_profile_row`."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "work")
+        footer = _footer(scr)
+
+    assert "Enter — открыть" in footer
+    assert footer == s._FOOTERS[s._PROFILES]
+
+
+async def test_the_editor_footer_leads_back_to_the_list(tmp_path, monkeypatch):
+    """Футер под-вида — позиционный футер секции «Модели», но Esc в нём возвращает
+    К СПИСКУ профилей, а не в меню хаба: вложенность обязана быть названа."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        assert _footer(scr) == m._FOOTER_PROFILE_ENTRY
+        _cursor_to(ed, "slot", level="light")
+        scr._refresh_footer()
+        assert _footer(scr) == m._FOOTER_PROFILE_SLOT
+        _cursor_to(ed, "assign", consumer="*")
+        scr._refresh_footer()
+        assert _footer(scr) == m._FOOTER_PROFILE_ASSIGN
+
+
+def test_the_way_back_is_named_one_way_everywhere():
+    """Фолбэк футера (тело под-вида ещё не смонтировано — первый кадр) обещает
+    возврат К СПИСКУ, а не «Esc — меню»: недостижимость обещания его правдой не
+    делает. Формулировка при этом ОДНА на оба модуля — импорт, не копия."""
+    from tui.editors.models_section import _FOOTER_PROFILE_BACK
+    assert s._FOOTER_PROFILE_BACK is _FOOTER_PROFILE_BACK
+    assert "меню" not in s._FOOTER_PROFILE_BACK
+    assert m._FOOTER_PROFILE_ENTRY.endswith(s._FOOTER_PROFILE_BACK)
+
+
+def test_profile_footers_mirror_the_config_ones():
+    """Профильные футеры — ПРОИЗВОДНЫЕ от конфиговых, а не вторые литеральные строки:
+    клавиша, дописанная в одном режиме, обязана появиться и в другом — иначе футер
+    соврёт молчанием на второй же правке."""
+    pairs = ((m._FOOTER_ENTRY, m._FOOTER_PROFILE_ENTRY),
+             (m._FOOTER_SLOT, m._FOOTER_PROFILE_SLOT),
+             (m._FOOTER_ASSIGN, m._FOOTER_PROFILE_ASSIGN))
+    for base, profile in pairs:
+        assert base.endswith(" · Esc")
+        assert profile.endswith(" · Esc — к списку")
+        assert profile[:-len(" — к списку")] == base

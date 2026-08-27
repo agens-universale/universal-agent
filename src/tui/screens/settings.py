@@ -13,6 +13,7 @@ from textual.screen import Screen
 from textual.widgets import Input, Rule, Static
 from rich.text import Text
 
+from tui.editors.models_section import _FOOTER_PROFILE_BACK
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
@@ -48,7 +49,16 @@ _FOOTERS = {
     _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · PgUp/PgDn — секции · Esc",
     _MODES: "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню",
     _UPDATE: "↑/↓ · Enter — выполнить · PgUp/PgDn — секции · Esc — меню",
-    _PROFILES: "↑/↓ — выбор  ·  Enter — активировать  ·  PgUp/PgDn — секции  ·  Esc — меню",
+    # Раскладка — решение юзера В1 (`docs/specs/2026-08-10-profiles-b-plan.md`),
+    # выведенное из канона базы: Enter = «войти внутрь» (меню «открыть», MCP
+    # «установить»), Space = переключение состояния (MCP «вкл/выкл», post-update
+    # «отметить»). Активация профиля — смена состояния, поэтому её клавиша Space,
+    # а Enter открывает редактор профиля (Task 6).
+    # Стиль строки — MCP (точки-разделителями, без «Esc»): канонный хвост
+    # «↑/↓ — выбор · … · Esc — меню» с пятью клавишами не влезает в две строки на
+    # 64 колонках (бюджет `_FOOTER_MIN_COLS`).
+    _PROFILES: ("↑/↓ · Enter — открыть · Space — активировать · n — создать · "
+                "r — переименовать · Del — удалить · PgUp/PgDn — секции"),
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
 # Раскрытый пресет-лист адреса забирает клавиши себе — футер на это время становится
@@ -75,11 +85,22 @@ _FOOTER_PRESET_LIST_NO_MATCH = ("↑/↓  ·  Enter — оставить сво�
 _FOOTER_CONNECTION_FIELD = ("Enter — сохранить  ·  "
                             "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню")
 # Строка уровня (последняя в секции «Профили») — тот же позиционный приём, что и
-# «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Enter —
-# активировать» там, где Enter (и ←/→) на самом деле переключают уровень —
-# ложь того же рода, что нашёл финальный обзор 2026-08-06, D.
-_FOOTER_PROFILES_LEVEL = ("↑/↓ — выбор  ·  ←/→/Enter — переключить  ·  "
+# «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Space —
+# активировать» там, где ←/→/Enter на самом деле переключают уровень — ложь того
+# же рода, что нашёл финальный обзор 2026-08-06, D.
+# «n — создать» здесь остаётся: клавиша секционная (не про строку под курсором) и
+# работает в том числе в ПУСТОМ состоянии, где строка уровня — единственная.
+# Футер, промолчавший о ней там, оставил бы создание первого профиля без входа —
+# это второй класс лжи футера («молчание о работающей клавише»).
+_FOOTER_PROFILES_LEVEL = ("↑/↓ — выбор  ·  ←/→/Enter — переключить  ·  n — создать  ·  "
                           "PgUp/PgDn — секции  ·  Esc — меню")
+# Инлайн-ввод имени профиля забирает клавиши себе (контракт п.5 волны B) — футер
+# на это время про него, и глагол называет ровно то, что произойдёт.
+_FOOTER_PROFILE_NAME_CREATE = "Enter — создать  ·  Esc — отмена"
+_FOOTER_PROFILE_NAME_RENAME = "Enter — переименовать  ·  Esc — отмена"
+# Строка «— без профиля» — не файл: «Enter — открыть» футера на ней не сбывается,
+# и молчать об этом нельзя (решение В1: no-op + подсказка).
+_PROFILE_NONE_NOTHING_TO_OPEN = "открывать нечего — это не файл профиля"
 # Бюджет ширины футера — `#set-footer` две строки БЕЗ скролла (тот же контракт у
 # `#onb-footer` мастера): что не влезло, то отрезано вместе с хвостом «Esc — меню».
 # Меряется он ПЕРЕНОСОМ на самом узком окне, а не числом символов: перенос идёт по
@@ -143,6 +164,16 @@ class SettingsScreen(Screen):
         self._modes_idx = 0             # курсор строки подэкрана «Режимы работы»
         self._profiles_idx = 0          # курсор строки подэкрана «Профили»
         self._profiles_disk_cache: dict = {}   # дисковые чтения секции «Профили» на один проход UI
+        # Под-состояния секции «Профили» (волна B): открытый инлайн-ввод имени
+        # ({"mode": "create"|"rename", "original": имя|None}), имя профиля,
+        # ждущего подтверждения удаления, и имя ОТКРЫТОГО в редакторе профиля
+        # (Task 6). Все три — по одному полю, как `_pending` секции MCP: «висит ли
+        # баннер»/«открыт ли под-вид» выводится из наличия значения. Хранится ИМЯ, а
+        # не ref/путь: набор строк перечитывается с диска на каждый кадр, и файл мог
+        # уехать под ногами — резолвить имя надо там же, где рисуем.
+        self._profiles_name_prompt = None
+        self._profiles_delete_name = None
+        self._profiles_open = None
         self._menu_pass_snapshot = None   # (текст, документ) цели записи на один проход меню
         from tui.services.settings_probe import probe as _default_probe
         self._probe_fn = probe_fn or _default_probe
@@ -212,6 +243,17 @@ class SettingsScreen(Screen):
             # находка финального ревью 2026-08-06, D), и обещать её там значило бы врать.
             return _FOOTERS[_CONNECTION] if self._connection_on_url() else _FOOTER_CONNECTION_FIELD
         if self._view == _PROFILES:
+            if self._profiles_open is not None:
+                # Открытый профиль — тот же редактор форм, что и «Модели», и футер у
+                # него тот же позиционный: экран его не считает, а спрашивает. Пока
+                # тело не смонтировано — обещаем только возврат к списку:
+                # `_FOOTER_READONLY` соврал бы про «Esc — меню».
+                ed = self._models_editor()
+                return ed.footer_text() if ed is not None else _FOOTER_PROFILE_BACK
+            if self._profiles_name_prompt is not None:
+                return (_FOOTER_PROFILE_NAME_RENAME
+                        if self._profiles_name_prompt["mode"] == "rename"
+                        else _FOOTER_PROFILE_NAME_CREATE)
             return _FOOTER_PROFILES_LEVEL if self._profiles_on_level_row() else _FOOTERS[_PROFILES]
         return _FOOTERS.get(self._view, _FOOTER_READONLY)
 
@@ -594,6 +636,8 @@ class SettingsScreen(Screen):
             if self._view == _MODES:
                 self.call_after_refresh(self._refresh_modes_hint)
                 self.call_after_refresh(self._refresh_modes_rows)
+            elif self._view == _PROFILES and self._profiles_open is not None:
+                self.call_after_refresh(self._refresh_profile_overlay)
             elif self._view == _PROFILES:
                 self.call_after_refresh(self._refresh_profiles_hint)
                 self.call_after_refresh(self._refresh_profiles_rows)
@@ -610,6 +654,16 @@ class SettingsScreen(Screen):
             self.call_after_refresh(self._refresh_footer)
 
     # --- dirty-маркер заголовка (спека v2 §3.1, Task 7) ---
+    def _section_title(self) -> str:
+        """Имя секции в заголовке рамки — с хвостом под-вида, если он открыт: внутри
+        профиля тело секции чужое (редактор форм), и заголовок обязан сказать, ЧЕЙ
+        файл правится. Спрашивают его два места (`_update_dirty` и `_title_note`) —
+        значит считает одно."""
+        name = SECTIONS[self._view]
+        if self._view == _PROFILES and self._profiles_open is not None:
+            return f"{name} · профиль {self._profiles_open}"
+        return name
+
     def _update_dirty(self) -> None:
         """Обновляет #set-title: имя секции (+ dirty-маркер « изменено» для редакторов 0–2)."""
         if self._view == "menu":
@@ -618,7 +672,7 @@ class SettingsScreen(Screen):
             title = self.query_one("#set-title", Static)
         except NoMatches:
             return
-        name = SECTIONS[self._view]
+        name = self._section_title()
         if self._view in _EDITOR_SECTIONS and self._is_dirty(self._view):
             t = Text(name)
             t.append("  изменено", style=WARN)
@@ -635,7 +689,7 @@ class SettingsScreen(Screen):
             title = self.query_one("#set-title", Static)
         except NoMatches:
             return
-        t = Text(SECTIONS[self._view])
+        t = Text(self._section_title())
         t.append("  " + text, style=DEEP_DIM)
         title.update(t)
         if self._note_timer is not None:
@@ -912,6 +966,14 @@ class SettingsScreen(Screen):
         "✗ не сохранено: конфиг недоступен для записи — используется пакетный "
         "шаблон (настройте GC_HOME или запустите gc-ua --init-config)"
     )
+    # Тот же отказ для файловых операций секции «Профили», но подставляются И
+    # глагол («не создано»/«не переименовано»/«не удалено»), И объект: недоступен
+    # бывает либо каталог профилей, либо файл конфига со ссылкой на профиль —
+    # называть второе первым конкретно неверно (`_profile_write_block`).
+    _PROFILE_FILE_WRITE_REFUSAL = (
+        "✗ не {done}: {reason} — используется пакетный шаблон "
+        "(настройте GC_HOME или запустите gc-ua --init-config)"
+    )
 
     _SECRET_FIELD = "Authorization"   # действующее значение секрета маскируем, не печатаем как есть
 
@@ -1014,12 +1076,89 @@ class SettingsScreen(Screen):
 
     # --- секция «Модели»: швы экрана (монтаж, запись легаси-поля, витрины) ------
     def _models_editor(self):
-        """Свежесмонтированное тело секции «Модели» либо None (read-only конфиг /
+        """Свежесмонтированный `ModelsSectionEditor` либо None (read-only конфиг /
         первый кадр). ПОСЛЕДНИЙ матч — по той же причине, что у `_connection_editor`:
-        снесённый предыдущим рендером ещё в дереве, а решения принимает живой."""
+        снесённый предыдущим рендером ещё в дереве, а решения принимает живой.
+
+        Метод — про КЛАСС, а не про секцию: тот же редактор стоит телом секции
+        «Модели» и под-видом открытого профиля (формы одни, целей две), а на экране
+        в каждый момент смонтирован ровно один."""
         from tui.editors.models_section import ModelsSectionEditor
         editors = list(self.query(ModelsSectionEditor))
         return editors[-1] if editors else None
+
+    def _route_registry_editor(self, ed, event: events.Key) -> bool:
+        """Клавиши редактора реестра — секции «Модели» И под-вида открытого профиля
+        (редактор один, значит и роутинг один: разойдясь, они дали бы разные клавиши
+        одним и тем же формам). True — обработчик экрана должен завершиться.
+
+        Образец — блок MCP: секция ведёт СВОИ клавиши целиком, у неё свои
+        под-состояния (форма записи, под-форма резервной, пикер, confirm), а экран
+        только роутит. Читается сверху вниз тем же порядком: confirm глотает всё →
+        навигация → действия."""
+        # Подтверждение перезаписи ${ENV:VAR} держит СНИМОК значений на момент
+        # Enter. Свои две клавиши — Enter (подтвердить) и Esc (отменить) — до
+        # сюда не доходят: их перехватывают гейты выше. Значит любая клавиша,
+        # добравшаяся до блока, из этого состояния уводит: двигает курсор,
+        # перечитывает список (выбор падает на якорь, если модель пропала из
+        # ответа), открывает форму записи. Снимок после неё — уже не про то,
+        # что показано, и следующий Enter записал бы ПРЕЖНЮЮ модель поверх
+        # ссылки на переменную окружения.
+        #
+        # Отмена стоит ОДИН раз здесь, а не в каждой ветке: так закрывается
+        # класс дефекта, а не три его экземпляра — следующая клавиша секции
+        # получит правило даром. Спешить с отменой безопасно: она fail-safe
+        # (ссылка остаётся в файле), а следующий Enter поднимет баннер заново.
+        # (В профиле снимку взяться неоткуда — плоских полей у него нет; вызов
+        # там безобиден и правило остаётся одним на обе цели.)
+        self._cancel_env_confirm()
+        if ed.awaiting_confirm:
+            event.stop()
+            if event.key == "enter":
+                ed.confirm_pending()    # escape снят выше, глобальным гейтом
+                self._refresh_footer()
+            return True
+        if event.key in ("up", "down"):
+            event.stop()
+            ed.move(-1 if event.key == "up" else 1)
+            self._refresh_footer()
+            return True
+        if event.key in ("alt+down", "ctrl+down"):
+            # Карта проб §2.5: подбор списка (форма — свой, легаси-редактор —
+            # свой). Клавиша съедается безусловно: свёртывания у списка
+            # моделей нет, обещание в футере гейтится позицией курсора.
+            event.stop()
+            ed.alt_down()
+            self._refresh_footer()
+            return True
+        if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
+            # Проба есть только у формы записи; на списке и в легаси-редакторе
+            # её нет (§5.2) — клавиша съедается молча, ничего не обещая.
+            event.stop()
+            ed.probe()
+            return True
+        if event.key == "enter":
+            event.stop()
+            ed.enter()
+            self._refresh_footer()
+            return True
+        if event.key == "delete" and not isinstance(self.focused, Input):
+            event.stop()
+            ed.request_remove()
+            self._refresh_footer()
+            return True
+        if event.key == "space":
+            if ed.space():
+                event.stop()            # галка формы; иначе пробел печатается
+            return True
+        if event.key in ("alt+n", "alt+т", "alt+N", "alt+Т") or (
+                event.key in ("n", "т", "N", "Т")
+                and not isinstance(self.focused, Input)):
+            event.stop()
+            ed.new_entry()
+            self._refresh_footer()
+            return True
+        return False
 
     def _legacy_model_editor(self):
         """Свежесмонтированный легаси-редактор модели.
@@ -1491,8 +1630,9 @@ class SettingsScreen(Screen):
         return self._profiles_base_path()
 
     def _deactivate_profile(self) -> None:
-        """Enter на «— без профиля»: деактивация записью `profile: ""` по единому
-        правилу записи; «ничего не активно» — честный no-op."""
+        """Space на «— без профиля» (клавиша перевешена решением В1 волны B):
+        деактивация записью `profile: ""` по единому правилу записи; «ничего не
+        активно» — честный no-op."""
         config_active = self._config.get("profile") or None
         if config_active is None:
             self._title_note("профиль не выбран")
@@ -1524,9 +1664,10 @@ class SettingsScreen(Screen):
         self._flash(f"Профиль деактивирован — {target}. {effect}")
 
     def _activate_profile(self, name: str, ref) -> None:
-        """Enter на строке профиля. «Уже активен» — сравнение с КОНФИГ-указателем
-        (`self._config["profile"]`, то, что реально пишет Enter), не с сессионным
-        выбором: сессия — отдельный механизм (`/profiles`), запись файла её не трогает."""
+        """Space на строке профиля (клавиша перевешена решением В1 волны B). «Уже
+        активен» — сравнение с КОНФИГ-указателем (`self._config["profile"]`, то, что
+        реально пишет активация), не с сессионным выбором: сессия — отдельный
+        механизм (`/profiles`), запись файла её не трогает."""
         config_active = self._config.get("profile") or None
         if name == config_active:
             self._title_note("уже активен")
@@ -1620,6 +1761,397 @@ class SettingsScreen(Screen):
                          "значение перекрыто слоем выше (проектный конфиг или профиль)")
             return
         self._flash(f"Уровень «{new_value}» установлен — {target}")
+
+    # --- CRUD файлов профилей (волна B, Task 5) ---
+    def _profiles_base_root(self):
+        """Базовый корень профилей — единственная цель СОЗДАНИЯ (§12.3: проектный
+        `.gc/profiles` остаётся ручной YAML-территорией, территорию не расширяем).
+        Правило корней живёт в одном месте — `profile_roots` (проектный первым)."""
+        import os
+        from pathlib import Path
+        from config_modules.profiles import profile_roots
+        return profile_roots(Path(os.getcwd()), self._profiles_base_path())[1]
+
+    def _profiles_root_writable(self, ref=None) -> bool:
+        """Гейт файловых операций секции — тот же guard пакетного шаблона, что у
+        записи указателя (`_target_writable`), но по КОРНЮ профилей: базовый корень
+        лежит рядом с базовым config.yml, и на пакетном шаблоне создание/удаление
+        писало бы внутрь установленного пакета. Проектный корень — территория
+        пользователя, он писуч всегда."""
+        if ref is not None and ref.root_kind == "project":
+            return True
+        return self._target_writable(self._profiles_base_path())
+
+    def _profile_row_by_name(self, name: str):
+        """Строка профиля по имени либо None: набор перечитывается с диска на каждое
+        нажатие, и файл мог исчезнуть между открытием ввода/баннера и подтверждением."""
+        return next((r for r in self._profiles_rows()
+                     if r["kind"] == "profile" and r["name"] == name), None)
+
+    def _base_config_doc(self) -> dict:
+        """Сырой документ базового config.yml через кэш прохода — симметрично
+        `_project_config_doc`: указатель `profile:` живёт в обоих файлах, и
+        спрашивают их одни и те же места."""
+        cache = self._profiles_disk_cache
+        if "base_doc" not in cache:
+            import config_raw
+            cache["base_doc"] = config_raw.read_document(self._profiles_base_path())
+        return cache["base_doc"]
+
+    def _profile_pointer_layers(self, name: str) -> list:
+        """Файловые слои, чей указатель `profile:` называет `name` (проектный
+        первым — порядок победы при merge).
+
+        Спрашивать «активен ли профиль» у merged-конфига (`self._config["profile"]`)
+        для файловых операций НЕЛЬЗЯ: там виден только слой-победитель, а `profile:`
+        стоит в обоих файлах независимо. Базовый конфиг назвал `work`, проектный
+        перекрыл на `corp` — merged отвечает «work не активен», и переименование/
+        удаление оставляло бы базовый указатель висеть на исчезнувшем имени. Первый
+        же запуск ВНЕ проекта (проектного слоя нет) падал бы «профиль work не
+        найден» — ровно тот отказ §3.1, ради недопущения которого сделан порядок
+        «указатель → файл» с откатом.
+
+        Machine-managed оверлей (`config.local.yml`) здесь не спрашивается — его не
+        знает и правило записи волны A (`_profile_activation_target`): указатель
+        туда не пишет никто, а знание о слое, размазанное по двум правилам, хуже
+        одного (пробел зафиксирован в отчёте)."""
+        layers = []
+        if self._project_config_doc().get("profile") == name:
+            layers.append(self._project_config_candidate_path())
+        if self._base_config_doc().get("profile") == name:
+            layers.append(self._profiles_base_path())
+        return layers
+
+    def _repoint_profile_layers(self, layers: list, value: str) -> tuple[list, str | None]:
+        """Записать `profile: <value>` в каждый слой. Возвращает (записанные,
+        текст ошибки | None) — откат частичной записи на вызывающем: только он
+        знает, каким глаголом назвать неслучившееся действие."""
+        written = []
+        for target in layers:
+            try:
+                self._write_profile_pointer(target, value)
+            except (ValueError, OSError) as exc:
+                return written, str(exc)
+            written.append(target)
+        return written, None
+
+    def _profile_name_error(self, name: str, *, exclude: str | None = None) -> str | None:
+        """Имя годится для создания/переименования — иначе текст ошибки. `exclude` —
+        текущее имя при переименовании (сам себе тёзкой не считается).
+
+        Разделители пути отклоняем отдельно от прочего: имя идёт прямо в имя файла
+        (`<имя>.yml`), и это единственная защита от выхода за пределы корня."""
+        from config_modules.model_registry import RESERVED_WORDS
+        from config_modules.profiles import discover_all_refs, profile_roots
+        import os
+        from pathlib import Path
+        if not name:
+            return "введите имя профиля"
+        if "/" in name or "\\" in name or name in (".", ".."):
+            return "имя не должно содержать разделители пути"
+        if name in RESERVED_WORDS:
+            return f'имя «{name}» зарезервировано ({", ".join(RESERVED_WORDS)})'
+        roots = profile_roots(Path(os.getcwd()), self._profiles_base_path())
+        if name in discover_all_refs(roots) and name != exclude:
+            return f'профиль «{name}» уже существует'
+        return None
+
+    def _profile_write_block(self, *, ref=None, name: str | None = None) -> str | None:
+        """Что мешает файловой операции над профилем — причина отказа либо None.
+
+        Предикат ОДИН на дверь (`n`/`r`/`Del`) и на саму операцию: разойдясь, они
+        дают ложное обещание — поле ввода/баннер поднимаются лишь затем, чтобы
+        отказать после ответа. Проверяются оба объекта, и они разные: каталог
+        профилей (туда ляжет файл) и файл конфига, чей указатель придётся
+        переписать (`_profile_pointer_layers`). Второй бывает непишущимся при
+        писучем первом — проектный профиль, названный базовым конфигом."""
+        if not self._profiles_root_writable(ref):
+            return "каталог профилей недоступен для записи"
+        for target in (self._profile_pointer_layers(name) if name else []):
+            if not self._target_writable(target):
+                return f"файл конфига {target} недоступен для записи"
+        return None
+
+    def _profile_write_refusal(self, done: str, reason: str) -> str:
+        return self._PROFILE_FILE_WRITE_REFUSAL.format(done=done, reason=reason)
+
+    def _begin_profile_name_prompt(self, mode: str, original: str | None = None) -> None:
+        """Поднять инлайн-ввод имени (контракт п.5): поле раскрывается на месте —
+        под своей строкой при переименовании, под списком при создании."""
+        ref = None if original is None else (self._profile_row_by_name(original) or {}).get("ref")
+        block = self._profile_write_block(ref=ref, name=original)
+        if block:
+            self._notice(self._profile_write_refusal(
+                "переименовано" if mode == "rename" else "создано", block))
+            return
+        self._profiles_name_prompt = {"mode": mode, "original": original}
+        self._render_view()
+
+    def _cancel_profile_name_prompt(self) -> None:
+        self._profiles_name_prompt = None
+        self._render_view()
+
+    def _submit_profile_name_prompt(self) -> None:
+        prompt = self._profiles_name_prompt
+        try:
+            value = self.query_one("#set-profile-name", Input).value.strip()
+        except NoMatches:
+            return
+        if prompt["mode"] == "rename":
+            self._rename_profile(prompt["original"], value)
+        else:
+            self._create_profile(value)
+
+    def _reload_after_profile_file_change(self, done: str) -> bool:
+        """Перечитать конфиг после файловой операции над профилем — та же
+        последовательность, что у активации рядом. Перечитка нужна и когда профиль
+        не был активен: сессионный выбор (`/profiles`) мог указывать именно на этот
+        файл, и санацию (§9.2) делает именно она (`app.reload_config` →
+        `sanitize_session_profile` + notice). False — перечитать не удалось, о чём
+        уже сказано notice'ом (сама операция при этом состоялась)."""
+        try:
+            self._on_apply()
+            self._config = getattr(self.app, "_config", None) or self._config
+        except Exception as exc:
+            self._render_view()
+            self._notice(f"{done}, но конфиг не перечитан: {exc}")
+            return False
+        self._raw = self._read_raw()
+        self._origins = self._read_origins()
+        return True
+
+    def _create_profile(self, name: str) -> None:
+        """`n` → имя → файл из `PROFILE_SKELETON` (бланк с шапкой-инструкцией, а НЕ
+        учебный пример пустого состояния: у того литеральный токен и чужой адрес).
+        Курсор встаёт на новую строку, и профиль сразу ОТКРЫВАЕТСЯ в редакторе:
+        имя дают, чтобы файл заполнить, — заполнять идут следующим действием."""
+        import onboarding_config_writer as ocw
+        from config_modules.profiles import PROFILE_SKELETON
+        error = self._profile_name_error(name)
+        if error:
+            self._notice(f"✗ не создано: {error}")
+            return
+        path = self._profiles_base_root() / f"{name}.yml"
+        try:
+            ocw.create_profile_file(path, PROFILE_SKELETON)
+        except (OSError, ValueError) as exc:
+            self._notice(f"✗ не создано: {exc}")
+            return
+        self._profiles_name_prompt = None
+        rows = self._profiles_rows()
+        row = next((r for r in rows if r["kind"] == "profile" and r["name"] == name), None)
+        if row is not None:
+            self._profiles_idx = rows.index(row)
+            # Открытие рисует само. Отказать оно здесь не может: дверь и создание
+            # спрашивают ОДИН предикат об одном и том же корне, а только что
+            # записанный бланк читается. Ветка `else` — про НЕнайденную строку
+            # (файл исчез между записью и перечиткой), а не про отказ.
+            self._open_profile(row)
+        else:
+            self._render_view()
+        self._flash(f"Профиль «{name}» создан — {path}")
+
+    def _session_profile_name(self) -> str | None:
+        return (getattr(self.app, "_session_overrides", None) or {}).get("profile")
+
+    def _profile_session_effect(self, before: str | None, *, pointer_changed: bool) -> str:
+        """Эффект операции для ТЕКУЩЕЙ сессии — в плашку, а не только в `/notices`
+        (канон волны A, `_activate_profile`). Считается ПОСЛЕ перечитки: снял ли
+        сессионный выбор санатор (§9.2) и куда он переехал, видно только по факту.
+
+        `pointer_changed` — переписан ли хоть один действующий указатель. Без него
+        хвост «применится со следующего хода агента» вставал бы и там, где для
+        агента не изменилось НИЧЕГО (переименован профиль, на который не ссылается
+        ни один слой), — тот же класс лжи, за который переписывались футеры. Нечего
+        сказать — пустая строка, а не вежливая неправда."""
+        after = self._session_profile_name()
+        if after and after != before:
+            return f'сессионный выбор /profiles переехал на «{after}»'
+        if after:
+            return f'текущая сессия остаётся на «{after}» (сессионный выбор /profiles)'
+        if before:
+            acting = (self._config.get("profile") or None) or "без профиля"
+            return f'сессионный выбор «{before}» снят — действует «{acting}»'
+        return "применится со следующего хода агента" if pointer_changed else ""
+
+    def _rename_profile(self, original: str, new_name: str) -> None:
+        """`r` → новое имя: переименовываются файл И указатель в КАЖДОМ файловом
+        слое, который называет старое имя (`_profile_pointer_layers`).
+
+        Порядок: указатели ПЕРЕД файловой операцией. Обратный оставлял бы висячий
+        `profile: <старое имя>` без файла при сбое записи указателя ПОСЛЕ уже
+        состоявшегося rename, а холодный старт с нерезолвимым указателем — строгая
+        ошибка (§3.1)."""
+        if new_name == original:
+            self._cancel_profile_name_prompt()      # ничего не изменилось — тихая отмена
+            return
+        error = self._profile_name_error(new_name, exclude=original)
+        if error:
+            self._notice(f"✗ не переименовано: {error}")
+            return
+        row = self._profile_row_by_name(original)
+        if row is None:
+            self._cancel_profile_name_prompt()      # файл исчез под ногами — показать как есть
+            return
+        ref = row["ref"]
+        block = self._profile_write_block(ref=ref, name=original)
+        if block:
+            self._notice(self._profile_write_refusal("переименовано", block))
+            return
+        layers = self._profile_pointer_layers(original)
+        session_before = self._session_profile_name()
+        written, error = self._repoint_profile_layers(layers, new_name)
+        if error is not None:
+            self._rollback_profile_pointers(written, original, file_exc=error,
+                                            action="переименовать")
+            return
+        try:
+            ref.path.rename(ref.path.with_name(f"{new_name}.yml"))
+        except OSError as exc:
+            self._rollback_profile_pointers(written, original, file_exc=exc,
+                                            action="переименовать")
+            return
+        self._profiles_name_prompt = None
+        if session_before == original:
+            # Переименование — не исчезновение: сессионный выбор ЕДЕТ за именем
+            # (ruling координатора), а не снимается санацией §9.2. Через
+            # `apply_session_override`, а не голый set: у удаления санация доходит
+            # до meta треда, и переезд обязан доходить туда же — иначе возврат в
+            # тред воскресил бы старое имя, и его снял бы уже санатор.
+            try:
+                self.app.apply_session_override("profile", new_name)
+            except OSError:
+                pass        # meta недоступна: оверрайд откачен, дальше его снимет санация
+        if not self._reload_after_profile_file_change("переименовано"):
+            return
+        self._render_view()
+        self._flash(" ".join(filter(None, [
+            f"Профиль «{original}» переименован в «{new_name}».",
+            self._profile_session_effect(session_before, pointer_changed=bool(layers)),
+        ])))
+
+    def _request_delete_profile(self, name: str) -> None:
+        row = self._profile_row_by_name(name)
+        if row is not None:
+            # Отказ НА ВХОДЕ, тем же предикатом, что и сама операция: поднимать
+            # вопрос, на который заведомо ответишь отказом, — ложное обещание.
+            block = self._profile_write_block(ref=row["ref"], name=name)
+            if block:
+                self._notice(self._profile_write_refusal("удалено", block))
+                return
+        self._profiles_delete_name = name
+        self._render_view()
+
+    def _cancel_delete_profile(self) -> None:
+        self._profiles_delete_name = None
+        self._render_view()
+
+    def _profile_delete_confirm_text(self) -> str:
+        """Баннер называет ВСЕ необратимые следствия заранее: файл, каждый файловый
+        указатель (их бывает больше одного — см. `_profile_pointer_layers`) и
+        сессионный выбор, который снимет санация."""
+        name = self._profiles_delete_name or ""
+        parts = [f"Удалить профиль «{name}»? Файл уедет в backups/ рядом с ним."]
+        layers = self._profile_pointer_layers(name)
+        if layers:
+            active = " (сейчас активен)" if (self._config.get("profile") or None) == name else ""
+            parts.append(f"Указатель на него{active} снимется в: "
+                         + ", ".join(str(t) for t in layers) + ".")
+        if self._session_profile_name() == name:
+            parts.append("Сессионный выбор /profiles тоже снимется.")
+        parts.append("Enter — удалить · Esc — отмена")
+        return " ".join(parts)
+
+    def _confirm_delete_profile(self) -> None:
+        name = self._profiles_delete_name
+        self._profiles_delete_name = None
+        if name is not None:
+            self._delete_profile(name)
+
+    def _delete_profile(self, name: str) -> None:
+        """Enter в confirm-баннере: файл уезжает в бэкап конвенцией `config_sync`
+        (`backups/<файл>.bak-<ts>`, решение юзера В2), плашка называет путь.
+
+        Порядок тот же, что у переименования, и по той же причине: указатель
+        снимается в КАЖДОМ файловом слое, который называет профиль
+        (`_profile_pointer_layers`), ПЕРЕД перемещением файла; сбой перемещения
+        откатывает все переписанные указатели обратно."""
+        import shutil
+        row = self._profile_row_by_name(name)
+        if row is None:
+            self._render_view()                     # файл исчез под ногами — просто перерисовать
+            return
+        ref = row["ref"]
+        block = self._profile_write_block(ref=ref, name=name)
+        if block:
+            self._notice(self._profile_write_refusal("удалено", block))
+            return
+        layers = self._profile_pointer_layers(name)
+        session_before = self._session_profile_name()
+        shadow = row.get("shadow")
+        written, error = self._repoint_profile_layers(layers, "")
+        if error is not None:
+            self._rollback_profile_pointers(written, name, file_exc=error, action="удалить")
+            return
+        path = ref.path
+        backup = self._profile_backup_path(path)
+        try:
+            # mkdir — в ТОМ ЖЕ try, что и move: указатели к этому моменту уже
+            # переписаны, и сбой создания каталога обязан откатывать их так же,
+            # как сбой самого перемещения.
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(path), str(backup))
+        except OSError as exc:
+            self._rollback_profile_pointers(written, name, file_exc=exc, action="удалить")
+            return
+        if not self._reload_after_profile_file_change("удалено"):
+            return
+        self._profiles_idx = 0
+        self._render_view()
+        parts = [f"Профиль «{name}» удалён — бэкап: {backup}."]
+        if shadow is not None:
+            # Удалён победивший тёзка: строка с тем же именем остаётся в списке
+            # (из второго корня) — молчание читалось бы как «удаление не сработало».
+            parts.append(f"Имя «{name}» теперь резолвится в {shadow.path}.")
+        parts.append(self._profile_session_effect(session_before,
+                                                  pointer_changed=bool(layers)))
+        self._flash(" ".join(filter(None, parts)))
+
+    @staticmethod
+    def _profile_backup_path(path):
+        """`backups/<файл>.bak-<ts>` (конвенция `config_sync`) + счётчик при занятом
+        имени. Счётчик — не педантизм: `config_sync` КОПИРУЕТ, оригинал остаётся на
+        месте, а здесь бэкап — ЕДИНСТВЕННАЯ копия удалённого файла, и второе
+        удаление в ту же секунду затёрло бы первую безвозвратно."""
+        import time
+        backups = path.parent / "backups"
+        stem = f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+        candidate = backups / stem
+        n = 2
+        while candidate.exists():
+            candidate = backups / f"{stem}-{n}"
+            n += 1
+        return candidate
+
+    def _rollback_profile_pointers(self, layers: list, old_value: str, *, file_exc,
+                                   action: str) -> None:
+        """Указатели уже переписаны, а файловая операция ПОСЛЕ них упала — вернуть
+        каждый к тому, что действовало до начала операции. Иначе конфиг остаётся
+        со ссылкой на несуществующее/непереименованное имя, а холодный старт с
+        нерезолвимым `profile:` — строгая ошибка (§3.1)."""
+        stuck = []
+        for target in layers:
+            try:
+                self._write_profile_pointer(target, old_value)
+            except (ValueError, OSError) as rollback_exc:
+                stuck.append(f"{target} ({rollback_exc})")
+        if stuck:
+            self._notice(
+                f"✗ не удалось {action}: {file_exc}; указатель НЕ откачен в "
+                f"{', '.join(stuck)} — конфиг может ссылаться на несуществующий "
+                "файл, поправьте вручную")
+            return
+        self._notice(f"✗ не удалось {action}: {file_exc}")
 
     def _profiles_name_width(self, rows: list[dict]) -> int:
         names = [r["name"] for r in rows if r["kind"] == "profile"]
@@ -1747,11 +2279,11 @@ class SettingsScreen(Screen):
         if row["kind"] == "none":
             if (self._config.get("profile") or None) is None:
                 return "профиль не выбран — действует чистый конфиг"
-            return f"Enter — деактивировать (запись: {self._deactivation_target()})"
+            return f"Space — деактивировать (запись: {self._deactivation_target()})"
         name, ref = row["name"], row["ref"]
         lines = [str(ref.path)]
         target = self._profile_activation_target(ref)
-        lines.append(f"Enter — активировать (запись: {target})")
+        lines.append(f"Space — активировать (запись: {target})")
         if row.get("shadow") is not None:
             lines.append(f"тёзка перекрыта: {row['shadow'].path}")
         if self._project_sets_profile_pointer() and (self._config.get("profile") or None) == name \
@@ -1765,6 +2297,8 @@ class SettingsScreen(Screen):
         return "\n".join(lines)
 
     def _mount_profiles_section(self, frame: Vertical) -> None:
+        if self._profiles_open is not None and self._mount_open_profile(frame):
+            return
         rows = self._profiles_rows()
         self._profiles_idx = min(self._profiles_idx, len(rows) - 1)
         profile_rows = [r for r in rows if r["kind"] == "profile"]
@@ -1774,8 +2308,8 @@ class SettingsScreen(Screen):
                 "настроек — модели, уровни, гварды и любые другие секции конфига",
                 classes="set-hint set-dyn"))
             frame.mount(Static(
-                "Чтобы создать профиль — сохраните файл ~/.gc/profiles/<имя>.yml, "
-                "например:",
+                "Создать — клавишей n; вручную — сохраните файл "
+                "~/.gc/profiles/<имя>.yml, например:",
                 classes="set-hint set-dyn"))
             skeleton = (
                 "models:\n"
@@ -1796,6 +2330,13 @@ class SettingsScreen(Screen):
                 text = (self._none_row_text(rows, selected) if row["kind"] == "none"
                         else self._profile_row_text(row, rows, selected))
                 frame.mount(Static(text, classes=cls))
+                if self._name_prompt_belongs_to(row):
+                    self._mount_profile_name_prompt(frame)
+        if (self._profiles_name_prompt or {}).get("mode") == "create":
+            # Создание своей строки не имеет — поле раскрывается ПОД СПИСКОМ
+            # (контракт п.5), в пустом состоянии — под подсказкой-примером.
+            self._mount_profile_name_prompt(frame)
+        if profile_rows:
             # Черта перед строкой уровня: уровень — не «ещё один профиль»,
             # отделяем как группы «Режимов работы».
             frame.mount(Rule(classes="set-group-sep"))
@@ -1809,6 +2350,27 @@ class SettingsScreen(Screen):
         frame.mount(Static(self._level_row_text(selected), classes=cls))
         frame.mount(Static(self._profiles_hint_text(rows),
                            classes="set-hint set-dyn set-profiles-hint"))
+        if self._profiles_delete_name is not None:
+            frame.mount(Static(Text(self._profile_delete_confirm_text(), style=WARN),
+                               classes="set-confirm set-dyn", markup=False))
+
+    def _name_prompt_belongs_to(self, row: dict) -> bool:
+        """Строка, под которой раскрывается инлайн-ввод имени: своя строка профиля
+        при переименовании (создание строки не имеет — см. `_mount_profiles_section`)."""
+        prompt = self._profiles_name_prompt
+        return (prompt is not None and prompt["mode"] == "rename"
+                and row["kind"] == "profile" and row["name"] == prompt["original"])
+
+    def _mount_profile_name_prompt(self, frame: Vertical) -> None:
+        """Инлайн-ввод имени (контракт п.5): поле без отдельной подписи — контекст
+        даёт строка, под которой оно раскрылось; рамка — канон полей /settings."""
+        from tui.widgets.paste_input import PasteInput
+        prompt = self._profiles_name_prompt
+        prefill = prompt["original"] if prompt["mode"] == "rename" else ""
+        inp = PasteInput(value=prefill or "", placeholder="имя профиля",
+                         id="set-profile-name", classes="set-dyn set-spaced set-framed")
+        frame.mount(inp)
+        inp.focus()
 
     def _refresh_profiles_rows(self) -> None:
         """Carry-fix (тот же приём, что `_refresh_modes_rows`): досчитать усечение
@@ -1836,6 +2398,139 @@ class SettingsScreen(Screen):
         widgets = list(self.query(".set-profiles-hint"))
         if widgets:
             widgets[-1].update(self._profiles_hint_text(rows))
+
+    # --- редактор открытого профиля (волна B, Task 6) ---
+    #
+    # Симметрия §1 спеки: формы одни, целевых файла два. Под-вид ВНУТРИ секции
+    # «Профили» — тот же `ModelsSectionEditor`, но целью записи ему дан файл
+    # профиля, а валидатором — профильный (`is_profile=True`). Экран здесь делает
+    # ровно то же, что для секции «Модели»: монтирует, роутит клавиши и держит
+    # витрины; логика редактора живёт в его модуле.
+    _PROFILE_OVERLAY_HEAD = "профиль также переопределяет: "
+    _PROFILE_OVERLAY_HINT_HEAD = "секции: "
+    _PROFILE_OVERLAY_HINT_TAIL = " · правятся в YAML — форм для них здесь нет"
+
+    def _open_profile(self, row: dict) -> None:
+        """Enter на строке профиля: открыть под-вид редактора на его файле. Отказ —
+        notice БЕЗ перерисовки (канон отказов секции: `_render_view` снёс бы своё же
+        сообщение вместе с прочим динамическим содержимым).
+
+        Гейт — тот же `_profile_write_block`, что у остальных файловых операций
+        секции: редактор это поверхность ЗАПИСИ, и открывать его над файлом, куда
+        запись заведомо не пойдёт, значит обещать ложно (урок N1 Task 5). Причину
+        предикат называет сам. Битый YAML — второй такой случай: писать в него
+        нельзя ни одной операцией (слой записи разбирает документ перед правкой),
+        а показанный «пустой реестр» был бы враньём о содержимом файла."""
+        block = self._profile_write_block(ref=row["ref"])
+        if block:
+            self._notice(self._profile_write_refusal("открыто", block))
+            return
+        error = self._profile_summary(row["ref"].path).error
+        if error:
+            self._notice(f"✗ не открыто: не удалось прочитать файл профиля: {error}")
+            return
+        self._profiles_open = row["name"]
+        self._render_view()
+
+    def _mount_open_profile(self, frame: Vertical) -> bool:
+        """Тело под-вида. False — открытого профиля больше нет (файл переименовали
+        или удалили извне, пока он был открыт): под-состояние снимается само, и
+        секция рисует список — состояние экрана задаёт диск, а не история нажатий."""
+        row = self._profile_row_by_name(self._profiles_open)
+        if row is None:
+            self._profiles_open = None
+            return False
+        from tui.editors.models_section import ModelsSectionEditor
+        for text, cls in self._profile_overlay_specs():
+            frame.mount(Static(text, classes=cls, markup=False))
+        endpoint, auth, verify, _m, proxy = self._probe_args_from_config()
+        from config_modules.endpoint_presets import endpoint_presets_from_config
+        frame.mount(ModelsSectionEditor(
+            target=row["ref"].path, template="", is_profile=True,
+            effective_url=endpoint, effective_auth=auth, verify=verify,
+            config_proxy=proxy,
+            presets=endpoint_presets_from_config(self._config or {}),
+            on_change=self._models_changed, on_notice=self._models_notice))
+        return True
+
+    def _profile_document(self, path) -> dict:
+        """Сырой документ профиля через кэш прохода — сосед `_profile_summary`:
+        витрине под-вида нужны не только оверлеи, но и то, ЧТО из секций моделей
+        лежит в файле (пустой реестр меняет состав форм, а с ним и состав
+        «невидимого»)."""
+        cache = self._profiles_disk_cache.setdefault("profile_docs", {})
+        key = str(path)
+        if key not in cache:
+            import config_raw
+            cache[key] = config_raw.read_document(path)
+        return cache[key]
+
+    @staticmethod
+    def _profile_form_sections(document: dict) -> set:
+        """Секции файла, которые ПОКАЗЫВАЮТ формы редактора — только их превью и
+        исключает. `models` показан всегда (список записей либо пустое состояние),
+        а `slots`/`assign` — лишь пока реестр непуст: без записей строк у них нет,
+        и переопределения файла стали бы невидимыми (профиль без своих моделей,
+        перенацеливающий слоты на алиасы нижнего слоя, — законный и частый).
+
+        `level` не показывают формы НИ В ОДНОМ состоянии, поэтому в исключения он не
+        входит: строка «уровень модели по умолчанию» секции «Профили» правит
+        ГЛОБАЛЬНЫЙ `level:` конфига, а не ключ внутри файла профиля, и без превью
+        профиль с `level: max` не проявлялся бы на экране нигде (ruling координатора
+        2026-08-11). В СТРОКЕ СПИСКА исключение остаётся — там канон §12.3 со своей
+        колонкой состава (`profile_display_summary` не тронут)."""
+        if document.get("models"):
+            return {"models", "slots", "assign"}
+        return {"models"}
+
+    def _profile_overlay_names(self) -> list[str]:
+        """Что профиль переопределяет ПОМИМО показанного формами: топ-уровневые ключи
+        файла минус секции форм — механически и сырыми именами (§12.3)."""
+        row = self._profile_row_by_name(self._profiles_open)
+        if row is None:
+            return []
+        document = self._profile_document(row["ref"].path)
+        covered = self._profile_form_sections(document)
+        return sorted(key for key in document if key not in covered)
+
+    def _profile_overlay_width(self) -> int:
+        """Ширина строки превью внутри рамки (padding 0 1 — минус 2); до layout-прохода
+        региона нет — 0, что трактуется как «без усечения» (carry-fix, как у
+        `_profiles_row_width`)."""
+        widgets = list(self.query(".set-profiles-overlay"))
+        if not widgets:
+            return 0
+        return max(0, widgets[-1].region.width - 2)
+
+    def _profile_overlay_text(self) -> str:
+        """Строка превью: усечение ЦЕЛЫМИ именами (`fit_mode_pairs` — тот же приём и
+        тот же хвост «· …», что у превью «Режимов работы»): половина имени секции
+        читалась бы как другое имя."""
+        names = self._profile_overlay_names()
+        width = self._profile_overlay_width()
+        budget = 0 if width <= 0 else max(0, width - len(self._PROFILE_OVERLAY_HEAD))
+        return self._PROFILE_OVERLAY_HEAD + fit_mode_pairs(names, budget)
+
+    def _profile_overlay_hint(self) -> str:
+        """Подсказка под превью: список ЦЕЛИКОМ (усечённая строка выше могла его не
+        вместить — та же пара «строка + hint», что у профиля в списке) плюс главный
+        факт о них: форм для этих секций здесь нет, это YAML-территория (§12.4)."""
+        return (self._PROFILE_OVERLAY_HINT_HEAD + ", ".join(self._profile_overlay_names())
+                + self._PROFILE_OVERLAY_HINT_TAIL)
+
+    def _profile_overlay_specs(self) -> list[tuple[str, str]]:
+        """(текст, css-класс) строк превью — пусто, когда переопределять нечего:
+        профиль из одних моделей молчит, а не показывает пустую фразу."""
+        if not self._profile_overlay_names():
+            return []
+        return [(self._profile_overlay_text(), "set-info set-dyn set-profiles-overlay"),
+                (self._profile_overlay_hint(), "set-hint set-dyn set-profiles-overlay-hint")]
+
+    def _refresh_profile_overlay(self) -> None:
+        """Досчитать усечение ПОСЛЕ layout-прохода, когда регион строки уже известен
+        (тот же carry-fix, что `_refresh_profiles_rows`)."""
+        for widget in self.query(".set-profiles-overlay"):
+            widget.update(self._profile_overlay_text())
 
     _UPDATE_ACTION_UPDATE = "Обновить агента"
     _UPDATE_ACTION_CHECK = "Проверить обновления"
@@ -2171,7 +2866,13 @@ class SettingsScreen(Screen):
         бы DuplicateIds. Ждать освобождения id нельзя: отложенный повтор крутится в
         собственной очереди сообщений и до применения удаления не доходит (livelock).
         Обёртка занимает ноль строк (height: auto) и уезжает вместе с содержимым фрейма
-        при следующем `_render_view`."""
+        при следующем `_render_view`.
+
+        `markup=False`: сюда приезжают ЧУЖИЕ тексты — сообщения валидаторов и
+        исключений. Квадратные скобки в них (`[type=extra_forbidden,
+        input_value=[], input_type=list]` от pydantic) — данные, а не разметка, и
+        разбор их роняет приложение `MarkupError`. Единственный вызов с готовым
+        `Text` (`set-envconfirm`) флаг не задевает — у `Text` разметки нет вовсе."""
         for w in self.query(f"#{wid}"):
             if w._pruning:
                 continue
@@ -2179,7 +2880,8 @@ class SettingsScreen(Screen):
             w.set_classes(cls)
             return
         self.query_one("#set-frame", Vertical).mount(
-            Vertical(Static(text, id=wid, classes=cls), classes="set-dyn set-slot"))
+            Vertical(Static(text, id=wid, classes=cls, markup=False),
+                     classes="set-dyn set-slot"))
 
     def _notice(self, text: str) -> None:
         self._singleton("set-notice", text, "set-hint set-dyn")
@@ -2365,6 +3067,14 @@ class SettingsScreen(Screen):
         self._view = i
         self._reset_draft_state()   # бампает gen — стухший воркер прежней секции отбрасывается
         self._cancel_autoprobe()    # осиротевший таймер прошлого захода в «Подключение» не копим
+        # Под-состояния «Профилей» живут ровно один заход в секцию (тем же приёмом,
+        # что курсор и черновики остальных): вернувшийся сюда человек не должен
+        # застать чужой ввод имени, неотвеченный вопрос об удалении или чужой
+        # открытый профиль. Через этот же метод идут PgUp/PgDn (`_switch_section`),
+        # поэтому смена секции снимает их даром.
+        self._profiles_name_prompt = None
+        self._profiles_delete_name = None
+        self._profiles_open = None
         if i == _UPDATE:
             self._update_idx = None     # пересчитать дефолт-курсор при (пере)входе в секцию
         self._render_view()
@@ -2519,6 +3229,25 @@ class SettingsScreen(Screen):
                     event.stop()                # закрыто под-состояние секции, из неё не выходим
                     self._refresh_footer()
                     return
+            if self._view == _PROFILES and self._profiles_open is not None:
+                # Вложенность на всю глубину: сперва своё под-состояние закрывает сам
+                # редактор (пикер, форма), и только когда закрывать нечего — под-вид
+                # схлопывается к списку профилей. В меню уводит уже следующий Esc.
+                event.stop()
+                ed = self._models_editor()
+                if ed is None or not ed.escape():
+                    self._profiles_open = None
+                    self._render_view()
+                self._refresh_footer()
+                return
+            if self._view == _PROFILES and self._profiles_name_prompt is not None:
+                event.stop()                    # отмена ввода имени, из секции не выходим
+                self._cancel_profile_name_prompt()
+                return
+            if self._view == _PROFILES and self._profiles_delete_name is not None:
+                event.stop()                    # снятие подтверждения удаления — тоже своим уровнем
+                self._cancel_delete_profile()
+                return
             event.stop()
             self._close_or_back()
             return
@@ -2610,72 +3339,9 @@ class SettingsScreen(Screen):
             self._start_draft_probe(self._view)
             return
         if self._view == _MODELS:
-            # Секция ведёт СВОИ клавиши целиком (образец — блок MCP ниже): у неё свои
-            # под-состояния (форма записи, под-форма резервной, пикер, confirm), и
-            # экран только роутит. Читается сверху вниз тем же порядком, что и там:
-            # confirm глотает всё → навигация → действия.
             ed = self._models_editor()
-            if ed is not None:
-                # Подтверждение перезаписи ${ENV:VAR} держит СНИМОК значений на момент
-                # Enter. Свои две клавиши — Enter (подтвердить) и Esc (отменить) — до
-                # сюда не доходят: их перехватывают гейты выше. Значит любая клавиша,
-                # добравшаяся до блока, из этого состояния уводит: двигает курсор,
-                # перечитывает список (выбор падает на якорь, если модель пропала из
-                # ответа), открывает форму записи. Снимок после неё — уже не про то,
-                # что показано, и следующий Enter записал бы ПРЕЖНЮЮ модель поверх
-                # ссылки на переменную окружения.
-                #
-                # Отмена стоит ОДИН раз здесь, а не в каждой ветке: так закрывается
-                # класс дефекта, а не три его экземпляра — следующая клавиша секции
-                # получит правило даром. Спешить с отменой безопасно: она fail-safe
-                # (ссылка остаётся в файле), а следующий Enter поднимет баннер заново.
-                self._cancel_env_confirm()
-                if ed.awaiting_confirm:
-                    event.stop()
-                    if event.key == "enter":
-                        ed.confirm_pending()    # escape снят выше, глобальным гейтом
-                        self._refresh_footer()
-                    return
-                if event.key in ("up", "down"):
-                    event.stop()
-                    ed.move(-1 if event.key == "up" else 1)
-                    self._refresh_footer()
-                    return
-                if event.key in ("alt+down", "ctrl+down"):
-                    # Карта проб §2.5: подбор списка (форма — свой, легаси-редактор —
-                    # свой). Клавиша съедается безусловно: свёртывания у списка
-                    # моделей нет, обещание в футере гейтится позицией курсора.
-                    event.stop()
-                    ed.alt_down()
-                    self._refresh_footer()
-                    return
-                if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
-                    # Проба есть только у формы записи; на списке и в легаси-редакторе
-                    # её нет (§5.2) — клавиша съедается молча, ничего не обещая.
-                    event.stop()
-                    ed.probe()
-                    return
-                if event.key == "enter":
-                    event.stop()
-                    ed.enter()
-                    self._refresh_footer()
-                    return
-                if event.key == "delete" and not isinstance(self.focused, Input):
-                    event.stop()
-                    ed.request_remove()
-                    self._refresh_footer()
-                    return
-                if event.key == "space":
-                    if ed.space():
-                        event.stop()            # галка формы; иначе пробел печатается
-                    return
-                if event.key in ("alt+n", "alt+т", "alt+N", "alt+Т") or (
-                        event.key in ("n", "т", "N", "Т")
-                        and not isinstance(self.focused, Input)):
-                    event.stop()
-                    ed.new_entry()
-                    self._refresh_footer()
-                    return
+            if ed is not None and self._route_registry_editor(ed, event):
+                return
         if event.key == "enter" and self._view in _PROBE_SECTIONS:
             event.stop()
             section = self._view
@@ -2732,6 +3398,32 @@ class SettingsScreen(Screen):
             return
         if self._view == _PROFILES:
             self._profiles_disk_cache = {}   # нажатие — свежий взгляд на диск
+            if self._profiles_open is not None:
+                # Под-вид держит клавиатуру ЦЕЛИКОМ и обрывает обработчик даже там,
+                # где сам клавишу не взял: под ним лежит список профилей со своими
+                # Del/r/Space, и провалившийся туда `Del` снёс бы профиль вместо
+                # записи реестра. PgUp/PgDn и Esc сюда не доходят — их разбирают
+                # гейты выше.
+                ed = self._models_editor()
+                if ed is not None:
+                    self._route_registry_editor(ed, event)
+                return
+            if self._profiles_name_prompt is not None:
+                # Ввод имени владеет клавиатурой: своя клавиша здесь одна — Enter
+                # (Esc снят выше, глобальным гейтом). Остальные НЕ съедаем: правка
+                # поля (backspace, ←/→, Home/End) живёт биндингами Input, а они
+                # разбираются ПОСЛЕ всплытия события к App — съеденная тут клавиша
+                # до них не дойдёт, и имя стало бы нестираемым. Клавиши секции при
+                # этом молчат сами: ↑/↓ у Input биндинга не имеют.
+                if event.key == "enter":
+                    event.stop()
+                    self._submit_profile_name_prompt()
+                return
+            if self._profiles_delete_name is not None:
+                event.stop()                 # confirm-баннер висит: Enter — удалить,
+                if event.key == "enter":     # прочее — no-op (канон MCP)
+                    self._confirm_delete_profile()
+                return
             rows = self._profiles_rows()
             if event.key in ("up", "down"):
                 event.stop()
@@ -2749,9 +3441,39 @@ class SettingsScreen(Screen):
                 if row["kind"] == "level":
                     self._level_apply(1)
                 elif row["kind"] == "profile":
+                    self._open_profile(row)
+                else:
+                    # «— без профиля» — не файл, открывать нечего (деактивация —
+                    # Space). Молчание было бы ложью футера, обещающего «Enter —
+                    # открыть» на этой строке тоже: no-op + подсказка (решение В1).
+                    self._title_note(_PROFILE_NONE_NOTHING_TO_OPEN)
+                return
+            # Клавиши-объекты (буквы, пробел, Del) — по фокусу (§5.3): в поле ввода
+            # они печатаются и правят текст, а не командуют секцией. Гейт стоит ОДИН
+            # раз на входе в их группу, а не при каждой — так следующая клавиша
+            # получит правило даром (тот же приём, что у отмены confirm в «Моделях»).
+            if isinstance(self.focused, Input):
+                return
+            if event.key == "space":
+                event.stop()
+                if row["kind"] == "profile":
                     self._activate_profile(row["name"], row["ref"])
                 elif row["kind"] == "none":
                     self._deactivate_profile()
+                return
+            if event.key in ("n", "т", "N", "Т"):
+                event.stop()
+                self._begin_profile_name_prompt("create")
+                return
+            if event.key in ("r", "к", "R", "К"):
+                event.stop()
+                if row["kind"] == "profile":
+                    self._begin_profile_name_prompt("rename", row["name"])
+                return
+            if event.key == "delete":
+                event.stop()
+                if row["kind"] == "profile":
+                    self._request_delete_profile(row["name"])
                 return
         if self._view == _MCP and self._writable_or_mcp():
             ed = self._mcp_editor()
@@ -2824,10 +3546,11 @@ class SettingsScreen(Screen):
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._view in _PROBE_SECTIONS:
             self._reset_draft_state()
-        if self._view in (_CONNECTION, _MODELS):
+        if self._view in (_CONNECTION, _MODELS) or self._profiles_open is not None:
             # Печать в адресе меняет фильтр пресет-листа, а с ним и обещания клавиш
             # (подставить ↔ оставить свой адрес) — футер догоняет её же событием.
-            # У формы записи реестра ровно те же два списка и та же развилка.
+            # У формы записи реестра ровно те же два списка и та же развилка — в
+            # открытом профиле это та же форма, значит и то же правило.
             self._refresh_footer()
         if self._view in _EDITOR_SECTIONS:
             self._update_dirty()

@@ -6,7 +6,8 @@ _STYLES = Path(__file__).resolve().parents[2] / "src" / "tui" / "styles.tcss"
 
 # id полей, которые обязаны иметь и плоский, и framed-стиль
 _FRAMED_FIELD_IDS = ("conn-url", "conn-token", "conn-proxy", "onb-model",
-                     "mef-alias", "mef-model", "mef-url", "mef-token")
+                     "mef-alias", "mef-model", "mef-url", "mef-token",
+                     "set-profile-name")
 
 
 def _css() -> str:

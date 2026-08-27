@@ -7,6 +7,15 @@
 — `McpSectionEditor`: своё состояние, свой рендер, экран только монтирует и роутит
 клавиши.
 
+**Формы одни — целевых файла два** (симметрия §1 спеки): тот же редактор с
+`is_profile=True` становится под-видом секции «Профили» и правит ФАЙЛ ПРОФИЛЯ
+(Task 6). Второго редактора нет; профильный режим меняет ровно три вещи, и все
+три — следствия того, что за файл перед нами: валидатор записи (профильный —
+запрет `profile:`, compat), отсутствие строки «резервная модель» (`agent.model`
+— ключ config.yml, в профиле его нет вовсе, а значит нет и легаси-редактора, и
+пустое состояние у профиля своё) и хвост футера (Esc возвращает к списку
+профилей, а не в меню хаба).
+
 Запись — НЕМЕДЛЕННО по действию, через `config_modules/registry_write` (решение 2):
 секция вышла из save-машины `_EDITOR_SECTIONS`, submit-цикла с «изменено» у неё нет.
 Показывается ФАЙЛОВОЕ состояние цели (решение 6) — редактируется файл; действующий
@@ -70,6 +79,34 @@ _FOOTER_CONFIRM = "Enter — удалить · Esc — отмена"
 _FOOTER_SLOT = "↑/↓ · Enter — выбрать модель · n — добавить · PgUp/PgDn — секции · Esc"
 _FOOTER_ASSIGN = ("↑/↓ · Enter — выбрать уровень или модель · n — добавить · "
                   "PgUp/PgDn — секции · Esc")
+# Под-вид открытого профиля: клавиши те же, но Esc возвращает К СПИСКУ профилей, а
+# не в меню хаба (вложенность из Global Constraints — её обязан назвать футер).
+_EXIT_TO_LIST = "Esc — к списку"
+
+
+def _to_list_exit(footer: str) -> str:
+    """Тот же футер для под-вида профиля. ПРОИЗВОДНАЯ, а не вторая литеральная
+    строка: список клавиш у двух режимов один, и дописанная в одном месте клавиша
+    обязана появиться в обоих — иначе футер соврёт молчанием (тот же класс лжи, что
+    стережёт `test_footer_contract`). Хвоста «· Esc» нет — это ошибка кода, а не
+    краевой случай: молча вернуть исходную строку значило бы обещать выход в меню
+    там, где его нет."""
+    head, sep, tail = footer.rpartition(" · Esc")
+    if not sep or tail:
+        raise ValueError(f"футер без хвоста «· Esc» в под-вид не переводится: {footer}")
+    return f"{head} · {_EXIT_TO_LIST}"
+
+
+_FOOTER_PROFILE_ENTRY = _to_list_exit(_FOOTER_ENTRY)
+_FOOTER_PROFILE_SLOT = _to_list_exit(_FOOTER_SLOT)
+_FOOTER_PROFILE_ASSIGN = _to_list_exit(_FOOTER_ASSIGN)
+# Пустой реестр профиля: строк нет вовсе, легаси-редактора у профиля не бывает —
+# работает единственная клавиша входа в реестр.
+_FOOTER_PROFILE_EMPTY = f"n — добавить запись · PgUp/PgDn — секции · {_EXIT_TO_LIST}"
+# Тело под-вида ещё не смонтировано (первый кадр) — обещаем ровно то, что работает
+# без него. Экран берёт эту строку ОТСЮДА, а не пишет свою: «куда ведёт Esc»
+# формулируется в одном месте (импорт, не копия).
+_FOOTER_PROFILE_BACK = _EXIT_TO_LIST
 
 # --- тексты секции ------------------------------------------------------------
 _RESERVE_LABEL = "резервная модель"
@@ -81,6 +118,15 @@ _EMPTY_HINT = (
     "Реестр моделей пуст — уровни light/default/max выключены, работает одна "
     "модель ниже.\n"
     "Добавьте модель в реестр, чтобы включить уровни и привязки потребителей."
+)
+# Пустое состояние ПРОФИЛЯ — своё: «модели ниже» у него нет (резервная модель живёт
+# в config.yml). Говорит РОВНО про реестр и ни слова про файл целиком: профиль без
+# своих `models` вполне может переопределять `slots`/`assign` (и строка списка это
+# показывает) — называет их превью оверлеев. Самодостаточно и на «вы» — канон
+# пустых состояний (Global Constraints).
+_PROFILE_EMPTY_HINT = (
+    "Своего реестра моделей у профиля нет — модели действуют из основного конфига.\n"
+    "Добавьте запись клавишей n, чтобы профиль переопределил и их."
 )
 _NO_ADDRESS_HINT = ("адрес не задан ни у записи, ни в «Подключении» — "
                     "по такой записи запрос не уйдёт")
@@ -223,14 +269,18 @@ class ModelsSectionEditor(Vertical):
     * confirm-баннер удаления.
     """
 
-    def __init__(self, *, target, template: str, effective_url: str = "",
+    def __init__(self, *, target, template: str, is_profile: bool = False,
+                 effective_url: str = "",
                  effective_auth: str | None = None, verify: bool = True,
                  config_proxy: str | None = None, presets=(),
-                 legacy_editor_factory, legacy_hints=(),
+                 legacy_editor_factory=None, legacy_hints=(),
                  on_change=None, on_notice=None, on_legacy_save=None) -> None:
         super().__init__(classes="onb-dyn")
         self._target = target
         self._template = template
+        # Что за файл перед нами — единственное, чем режимы отличаются: валидатор
+        # записи, отсутствие `agent.model` и хвост футера следуют отсюда.
+        self._is_profile = is_profile
         self._effective_url = effective_url or ""
         self._effective_auth = effective_auth
         self._verify = verify
@@ -247,7 +297,7 @@ class ModelsSectionEditor(Vertical):
         # Легаси-редактор — СОСТОЯНИЕ (флаг), а виджет пересоздаётся каждой сборкой
         # тела: снесённый Textual'ом виджет обратно не монтируется, и переиспользование
         # ссылки давало пустое тело секции.
-        self._legacy_open = self.registry_empty
+        self._legacy_open = self._legacy_default()
         self._legacy = None
         self._picker = None               # {"items", "idx", "on_pick"}
         self._pending = None              # {"alias", "references", "last"} — confirm удаления
@@ -280,6 +330,13 @@ class ModelsSectionEditor(Vertical):
     def registry_empty(self) -> bool:
         return not self._entries
 
+    def _legacy_default(self) -> bool:
+        """Состояние легаси-редактора «по умолчанию» для текущего файла: пустой реестр
+        config.yml — это он и есть (секция поглотила легаси-«Модель»), а у профиля его
+        не бывает вовсе. Решает ОДНО место: тот же вопрос задают конструктор, `_reload`
+        и выход из формы, и разойтись им нечем."""
+        return self.registry_empty and not self._is_profile
+
     def _reserve_model(self) -> str:
         import config_raw
         value = config_raw.value_at(self._document, "agent.model")
@@ -309,13 +366,18 @@ class ModelsSectionEditor(Vertical):
     def _rows(self) -> list:
         """Строки списка: записи реестра, слоты уровней, привязки потребителей и
         резервная модель. В пустом состоянии строк нет вовсе — там курсор держит
-        легаси-редактор, а слотам и привязкам без реестра управлять нечем."""
+        легаси-редактор (у профиля — своё пустое состояние), а слотам и привязкам
+        без реестра управлять нечем.
+
+        «Резервной модели» у профиля нет: это ключ `agent.model` файла config.yml
+        (§12.4), и рисовать его строку поверх чужого файла значило бы обещать
+        правку того, чего в нём не существует."""
         if self.registry_empty:
             return []
         return ([{"kind": "entry", "alias": a} for a in self._aliases]
                 + [{"kind": "slot", "level": level} for level in LEVELS]
                 + [{"kind": "assign", "consumer": c} for c in assign_consumers()]
-                + [{"kind": "reserve"}])
+                + ([] if self._is_profile else [{"kind": "reserve"}]))
 
     def _row_at_cursor(self) -> dict | None:
         rows = self._rows()
@@ -325,7 +387,10 @@ class ModelsSectionEditor(Vertical):
         return rows[self._idx]
 
     def _alias_width(self) -> int:
-        return max([len(a) for a in self._aliases] + [len(_RESERVE_LABEL)])
+        """Колонка выравнивается по тому, что на экране ЕСТЬ: у профиля строки
+        «резервная модель» нет, и её подпись колонку не расширяет."""
+        labels = [] if self._is_profile else [_RESERVE_LABEL]
+        return max([len(a) for a in self._aliases] + [len(label) for label in labels] + [0])
 
     def _entry_row_text(self, alias: str, selected: bool) -> Text:
         entry = self._entries.get(alias)
@@ -467,6 +532,11 @@ class ModelsSectionEditor(Vertical):
             yield from self._legacy_hint_widgets()
             return
         rows = self._rows()
+        if not rows:
+            # Пустой реестр профиля: легаси-редактора, который держал бы это место в
+            # config.yml, здесь не бывает — своё пустое состояние с входом в реестр.
+            yield Static(_PROFILE_EMPTY_HINT, classes="set-hint set-dyn", markup=False)
+            return
         previous = None
         for i, row in enumerate(rows):
             # Черта на СМЕНЕ группы (записи → слоты → привязки → резервная) — то же
@@ -522,7 +592,7 @@ class ModelsSectionEditor(Vertical):
         Опустевший реестр возвращает секцию в пустое состояние (легаси-редактор), а
         наполнившийся — в список: состояние секции задаёт ФАЙЛ, а не история нажатий."""
         self._document = self._read_document()
-        self._legacy_open = self.registry_empty
+        self._legacy_open = self._legacy_default()
         rows = self._rows()
         self._idx = min(self._idx, max(len(rows) - 1, 0))
         self._rebuild()
@@ -555,13 +625,15 @@ class ModelsSectionEditor(Vertical):
         if self._legacy_open:
             return _FOOTER_EMPTY if self.registry_empty else _FOOTER_RESERVE_FORM
         row = self._row_at_cursor()
-        if row is not None and row["kind"] == "reserve":
+        if row is None:
+            return _FOOTER_PROFILE_EMPTY    # строк нет только у профиля (см. `_body`)
+        if row["kind"] == "reserve":
             return _FOOTER_RESERVE
-        if row is not None and row["kind"] == "slot":
-            return _FOOTER_SLOT
-        if row is not None and row["kind"] == "assign":
-            return _FOOTER_ASSIGN
-        return _FOOTER_ENTRY
+        if row["kind"] == "slot":
+            return _FOOTER_PROFILE_SLOT if self._is_profile else _FOOTER_SLOT
+        if row["kind"] == "assign":
+            return _FOOTER_PROFILE_ASSIGN if self._is_profile else _FOOTER_ASSIGN
+        return _FOOTER_PROFILE_ENTRY if self._is_profile else _FOOTER_ENTRY
 
     def _form_footer(self) -> str:
         form = self._form
@@ -639,7 +711,7 @@ class ModelsSectionEditor(Vertical):
             if self._form.escape():
                 return True                 # закрыт только список формы
             self._form = None
-            self._legacy_open = self.registry_empty   # назад в СВОЁ состояние, не в меню
+            self._legacy_open = self._legacy_default()  # назад в СВОЁ состояние, не в меню
             self._rebuild()
             return True
         if self._legacy_open and not self.registry_empty:
@@ -731,7 +803,8 @@ class ModelsSectionEditor(Vertical):
     def _write(self, ops: list, alias: str) -> None:
         from config_modules.registry_write import RegistryWriteError, apply_registry_ops
         try:
-            apply_registry_ops(self._target, ops, self._template)
+            apply_registry_ops(self._target, ops, self._template,
+                               is_profile=self._is_profile)
         except (RegistryWriteError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}", ok=False)
             return
@@ -759,7 +832,8 @@ class ModelsSectionEditor(Vertical):
         from config_modules.registry_write import RegistryWriteError, apply_registry_ops
         self._close_picker()
         try:
-            apply_registry_ops(self._target, [op], self._template)
+            apply_registry_ops(self._target, [op], self._template,
+                               is_profile=self._is_profile)
         except (RegistryWriteError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}", ok=False)
             return
@@ -821,7 +895,8 @@ class ModelsSectionEditor(Vertical):
             return
         from config_modules.registry_write import RegistryWriteError, remove_model
         try:
-            remove_model(self._target, pending["alias"], force=True)
+            remove_model(self._target, pending["alias"], force=True,
+                         is_profile=self._is_profile)
         except (RegistryWriteError, OSError) as exc:
             self._notice(f"✗ не удалено: {exc}", ok=False)
             return

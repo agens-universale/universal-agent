@@ -377,7 +377,9 @@ async def test_profiles_hint_shows_path_and_activation_target(tmp_path, monkeypa
             i for i, r in enumerate(rows) if r["kind"] == "profile")
         hint = scr._profiles_hint_text(rows)
         assert str(profile_path) in hint
-        assert f"Enter — активировать (запись: {base_cfg})" in hint
+        # Волна B, решение юзера В1: активация — смена состояния, её клавиша Space
+        # (Enter = «войти внутрь», редактор профиля приезжает в Task 6).
+        assert f"Space — активировать (запись: {base_cfg})" in hint
 
 
 # --- shadow-hint в «Подключении» ---
@@ -696,8 +698,9 @@ async def test_none_row_absent_in_empty_state(tmp_path, monkeypatch):
 
 
 async def test_deactivate_writes_empty_pointer_to_base_config(tmp_path, monkeypatch):
-    """Enter на «— без профиля» при активном глобальном профиле → `profile: ""`
-    в базовый конфиг (единое правило записи)."""
+    """Space на «— без профиля» при активном глобальном профиле → `profile: ""`
+    в базовый конфиг (единое правило записи). Клавиша — В1 волны B: снятие
+    активации это та же смена состояния, что и активация."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -715,7 +718,7 @@ async def test_deactivate_writes_empty_pointer_to_base_config(tmp_path, monkeypa
         rows = scr._profiles_rows()
         assert rows[0]["kind"] == "none"
         hint_before = scr._profiles_hint_text(rows)
-        assert f"Enter — деактивировать (запись: {base_cfg}" in hint_before
+        assert f"Space — деактивировать (запись: {base_cfg}" in hint_before
         scr._deactivate_profile()
         import yaml
         saved = yaml.safe_load(base_cfg.read_text(encoding="utf-8"))
@@ -1224,7 +1227,7 @@ async def test_level_row_matches_mode_row_grammar(tmp_path, monkeypatch):
 
 async def test_profiles_footer_is_positional_toggle_hint_on_level_row(tmp_path, monkeypatch):
     """Футер секции — позиционный (канон `_CONNECTION`): на строке профиля/«без
-    профиля» — прежний «Enter — активировать», на строке уровня — вариант с
+    профиля» — «Space — активировать» (В1 волны B), на строке уровня — вариант с
     «←/→/Enter — переключить»."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
@@ -1244,7 +1247,7 @@ async def test_profiles_footer_is_positional_toggle_hint_on_level_row(tmp_path, 
         scr._render_view()
         await pilot.pause()
         footer_on_profile = str(scr.query_one("#set-footer", Static).render())
-        assert "Enter — активировать" in footer_on_profile
+        assert "Space — активировать" in footer_on_profile
         assert "←/→/Enter — переключить" not in footer_on_profile
 
         scr._profiles_idx = len(rows) - 1
@@ -1252,4 +1255,4 @@ async def test_profiles_footer_is_positional_toggle_hint_on_level_row(tmp_path, 
         await pilot.pause()
         footer_on_level = str(scr.query_one("#set-footer", Static).render())
         assert "←/→/Enter — переключить" in footer_on_level
-        assert "Enter — активировать" not in footer_on_level
+        assert "Space — активировать" not in footer_on_level
