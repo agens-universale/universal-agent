@@ -98,3 +98,78 @@ def test_envelope_shape():
     assert payload["ok"] is False
     assert payload["error"] == {"type": "invalid_arguments", "tool": "fs_read_file", "message": "bad args"}
     assert payload["message"].startswith("❌ Wrong arguments for `fs_read_file`: bad args")
+
+
+def test_truncation_hint_is_appended_to_the_tool_hint_not_instead_of_it(monkeypatch):
+    def fake_apply_tool(**kw):
+        raise pr.WrongFunctionArgumentsException(
+            "Unexpected field 'bogus'", received_args=kw["arguments"], tool_name="session_think",
+            extra_hint="TOOL HINT: allowed fields are thought, next_step",
+        )
+
+    monkeypatch.setattr(pr, "apply_tool", fake_apply_tool)
+    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
+    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
+
+    outs = pr.process_tool_calls(
+        messages=[_fc("session_think", "c1")], state=_state(last_finish_reason="length"), ctx=_ctx(), run_agent_func=None
+    )
+    message = json.loads(outs[0]["output"])["message"]
+    assert "TOOL HINT: allowed fields are thought, next_step" in message
+    assert "Output was truncated" in message
+
+
+_ASK_HUMAN_SPEC = {
+    "name": "turn_ask_human",
+    "parameters": {
+        "type": "object",
+        "properties": {"question": {"type": "string"}},
+        "required": ["question"],
+        "additionalProperties": False,
+    },
+}
+
+
+def _ctx_with_ask_human_spec():
+    ctx = _ctx()
+    ctx.tools_data = {"turn_ask_human": {"spec": _ASK_HUMAN_SPEC, "tool_fabric": None, "injected_fields": []}}
+    return ctx
+
+
+def _patch_ask_human(monkeypatch, calls):
+    def fake_apply_tool(**kw):
+        calls.append(kw["tool_name"])
+        if kw["tool_name"] == "turn_ask_human" and "question" not in kw["arguments"]:
+            raise pr.WrongFunctionArgumentsException(
+                "Missing required field 'question'", received_args=kw["arguments"], tool_name="turn_ask_human"
+            )
+        return '{"ok": true}'
+
+    monkeypatch.setattr(pr, "apply_tool", fake_apply_tool)
+    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
+    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
+
+
+def test_a_finalizer_with_invalid_arguments_does_not_skip_its_siblings(monkeypatch):
+    calls: list[str] = []
+    _patch_ask_human(monkeypatch, calls)
+    batch = [_fc("turn_ask_human", "c1", '{"bogus": 1}'), _fc("session_memory", "c2", '{"action": "read"}')]
+
+    outs = pr.process_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
+
+    assert calls == ["turn_ask_human", "session_memory"]
+    assert json.loads(outs[0]["output"])["error"]["type"] == "invalid_arguments"
+    assert json.loads(outs[1]["output"]) == {"ok": True}
+
+
+def test_a_valid_finalizer_still_skips_its_siblings(monkeypatch):
+    calls: list[str] = []
+    _patch_ask_human(monkeypatch, calls)
+    batch = [_fc("turn_ask_human", "c1", '{"question": "which one?"}'), _fc("session_memory", "c2", '{"action": "read"}')]
+
+    outs = pr.process_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
+
+    assert calls == ["turn_ask_human"]
+    assert json.loads(outs[1]["output"])["skipped"] is True

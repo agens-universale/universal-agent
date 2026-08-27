@@ -36,6 +36,7 @@ from tools import (
     WrongFunctionArgumentsException,
     is_internal_tool_error_output,
     is_unknown_tool_output,
+    tool_arguments_valid,
 )
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from tools.subagents.progress import (
@@ -615,14 +616,34 @@ def process_user_ask(messages, state: State, ctx: Any):
     return resp_messages, response_id
 
 
-def split_at_first_finalizer(tool_calls: List[Dict]) -> tuple[List[Dict], List[Dict]]:
+def split_at_first_finalizer(
+    tool_calls: List[Dict], *, finalizes: Optional[Callable[[Dict], bool]] = None
+) -> tuple[List[Dict], List[Dict]]:
     """Разбивает tool_calls на (executed, skipped): всё до и включая первый
     turn-финализирующий тул исполняется; остальное в этом ответе — пропускается
-    (ход уже завершён). intermediate_reply финализатором не считается."""
+    (ход уже завершён). intermediate_reply финализатором не считается.
+
+    ``finalizes`` уточняет, завершит ли кандидат ход на самом деле (например,
+    валидны ли его аргументы); отвергнутый кандидат исполняется как обычный вызов."""
     for i, m in enumerate(tool_calls):
-        if str(m.get("name") or "") in TURN_FINALIZING_TOOLS:
-            return tool_calls[: i + 1], tool_calls[i + 1:]
+        if str(m.get("name") or "") not in TURN_FINALIZING_TOOLS:
+            continue
+        if finalizes is not None and not finalizes(m):
+            continue
+        return tool_calls[: i + 1], tool_calls[i + 1:]
     return tool_calls, []
+
+
+def _finalizer_arguments_valid(call: Dict, ctx: Any) -> bool:
+    """Финализатор с невалидными аргументами ход не завершает, поэтому и соседей
+    по батчу пропускать нельзя. Судим теми же правилами, что и apply_tool; без
+    tools_data (тест-дублёры) судить нечем — считаем валидным."""
+    tools_data = getattr(ctx, "tools_data", None)
+    if not tools_data:
+        return True
+    return tool_arguments_valid(
+        str(call.get("name") or ""), call.get("arguments"), tools_data
+    )
 
 
 # finish_reason == "length": JSON вызова усечён потолком max_tokens — объясняем
@@ -632,6 +653,15 @@ _TRUNCATED_ARGUMENTS_HINT = (
     "(finish_reason == \"length\"). Shorten the response "
     "or split it into multiple calls with smaller payloads."
 )
+
+
+def _attach_truncation_hint(exc: WrongFunctionArgumentsException, state: Any) -> None:
+    """Дописать объяснение про усечение к фидбэку, не затирая подсказку самого
+    тула (wrong_arguments_feedback_hint), которую положило место возбуждения."""
+    if getattr(state, "last_finish_reason", None) != "length":
+        return
+    hints = [h for h in (getattr(exc, "extra_hint", None), _TRUNCATED_ARGUMENTS_HINT) if h]
+    exc.extra_hint = "\n\n".join(hints)
 
 
 def process_tool_calls(
@@ -656,7 +686,9 @@ def process_tool_calls(
 
     До цикла по batch:
       - после первого turn-финализатора (finish / ask_human) остальные call'ы
-        не исполняем — сразу synthetic skip-output;
+        не исполняем — сразу synthetic skip-output; финализатор с невалидными
+        аргументами ход не завершает — исполняется как обычный вызов (получит
+        invalid_arguments), соседей не пропускаем;
       - skip готовим заранее, чтобы успеть записать их до ask_human вместе
         с уже выполненными тулами.
 
@@ -682,7 +714,10 @@ def process_tool_calls(
     # Один turn-финализатор на ход: executed исполняем, skipped — только synthetic output.
     unknown_in_batch = 0
     invalid_in_batch = 0
-    executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
+    executed, skipped = split_at_first_finalizer(
+        grouped_messages["tool_calls"],
+        finalizes=lambda call: _finalizer_arguments_valid(call, ctx),
+    )
     # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
     # executed-output'ами до блокирующего turn_ask_human (иначе пропущенный тул
     # тоже висит "running" до ответа юзера).
@@ -785,8 +820,7 @@ def process_tool_calls(
             # исполняются. Дальше общий путь: tool_end, sidecar, function_call_output.
             if getattr(exc, "call_id", None) is None:
                 exc.call_id = tool_call_id
-            if getattr(state, "last_finish_reason", None) == "length":
-                exc.extra_hint = _TRUNCATED_ARGUMENTS_HINT
+            _attach_truncation_hint(exc, state)
             invalid_in_batch += 1
             tool_res_raw = exc.to_tool_output()
         # Live-прогресс: тул закончил — или текст intermediate_reply.
@@ -1017,6 +1051,7 @@ def run_agent(
     state.last_unknown_tool_name = None
     state.unknown_tool_repeat_count = 0
     state.last_batch_unknown_tool_count = 0
+    state.last_batch_invalid_arguments_count = 0
     while True:
         if check_stop is not None and check_stop():
             return None
@@ -1328,7 +1363,10 @@ def run_agent(
                             getattr(state, "last_batch_invalid_arguments_count", 0) or 0
                         )
                         if n_unknown + n_invalid > 0:
-                            tool_error_cnt += n_unknown + n_invalid
+                            # Бюджет считаем по ходам без нормального вызова, а не
+                            # по вызовам: один кривой батч стоит одну единицу, иначе
+                            # он гасит прогон раньше, чем модель увидит фидбэк.
+                            tool_error_cnt += 1
                         else:
                             tool_error_cnt = 0
                         if (
@@ -1413,8 +1451,7 @@ def run_agent(
                 tool_error_cnt += 1
                 # Страховка для путей вне батча (finish-аргументы и т.п.): батч
                 # свои невалидные вызовы закрывает сам в process_tool_calls.
-                if getattr(state, "last_finish_reason", None) == "length":
-                    e.extra_hint = _TRUNCATED_ARGUMENTS_HINT
+                _attach_truncation_hint(e, state)
                 messages = [
                     _make_technical_feedback_user_message(
                         e.to_llm_feedback(),
