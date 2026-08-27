@@ -39,6 +39,20 @@ class StreamSink:
                 self._chars += len(text)
                 if self._reasoning_started_at is None:
                     self._reasoning_started_at = self._clock()
+            elif kind == "tool":
+                # Аргументы вызова инструмента. В _think/_answer им НЕЛЬЗЯ: на них
+                # смотрит has_content(), и блок потока показал бы сырой JSON. Но в
+                # счётчик они идут — это те же пришедшие из потока токены, а на шаге
+                # с вызовом инструмента других не бывает вовсе.
+                self._chars += len(text)
+                # Рассуждение закончилось: модель перешла к выводу. Без этого шаг
+                # «рассуждение → вызов» навсегда оставался бы в состоянии "thinking",
+                # потому что фазу закрывала только ветка ответа.
+                if (
+                    self._reasoning_started_at is not None
+                    and self._reasoning_ended_at is None
+                ):
+                    self._reasoning_ended_at = self._clock()
             else:  # "answer" (default)
                 self._answer += text
                 self._chars += len(text)
