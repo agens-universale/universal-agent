@@ -204,7 +204,9 @@ class FindInFiles(AbstractSimpleTool):
                 "stop_reason=output_capped: grep output hit the transport ceiling — "
                 "narrow pattern/path/file_pattern, not limit. "
                 "prefilter=grep: candidate files were picked inside the sandbox by a "
-                "fixed-string needle before any host read (ASCII case folding)."
+                "fixed-string needle before any host read (ASCII case folding); "
+                "prefilter=timeout|capped|failed: that pass gave up and every candidate "
+                "was read from the host — narrow path/file_pattern."
             ),
             # Copy: callers (inject_tool_fields) mutate parameters in place.
             "parameters": copy.deepcopy(cls._PARAM_SCHEMA),
@@ -234,7 +236,8 @@ class FindInFiles(AbstractSimpleTool):
             "file from the host (fallback_reason says why). stop_reason=output_capped: "
             "grep output hit the transport ceiling — narrow the query, not limit. "
             "prefilter=grep: candidates were picked in the sandbox by a needle first "
-            "(ASCII case folding).\n"
+            "(ASCII case folding); prefilter=timeout|capped|failed: that pass gave up, "
+            "every candidate was read from the host — narrow path/file_pattern.\n"
         )
 
     @enforce_read_guard(path_arg="path")
@@ -1159,8 +1162,10 @@ class FindInFiles(AbstractSimpleTool):
         accepted_excludes: List[str],
         config: FsFindInFilesConfig,
         show_excluded_dirs: bool,
-    ) -> Optional[List[str]]:
-        """``grep -l`` inside the sandbox → candidate files; None → walk as before.
+    ) -> Tuple[Optional[List[str]], Optional[str]]:
+        """``grep -l`` inside the sandbox → ``(candidate files, None)``;
+        ``(None, reason)`` when it was tried and gave up, ``(None, None)`` when
+        it does not apply — the caller walks as before either way.
 
         Only when native grep declined the pattern itself (a sound fixed-string
         needle still exists) and the walk is not needed for its own report
@@ -1174,16 +1179,16 @@ class FindInFiles(AbstractSimpleTool):
         from utils.pattern_native_gate import is_safe_grep_include
 
         if show_excluded_dirs or fallback_reason not in _PREFILTER_FALLBACK_REASONS:
-            return None
+            return None, None
         terms = prefilter_terms(needles, case_insensitive=effective_ci)
         if terms is None:
-            return None
+            return None, None
         backend = self._backend
         try:
             if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
-                return None
+                return None, None
         except Exception:
-            return None
+            return None, None
         native_glob = file_pattern if file_pattern and is_safe_grep_include(file_pattern) else None
         return native_prefilter_candidates(
             backend,
@@ -1532,7 +1537,7 @@ class FindInFiles(AbstractSimpleTool):
         # Needle prefilter inside the sandbox: when native grep cannot answer
         # the pattern but a sound fixed-string needle exists, grep -l names the
         # candidate files first and only those are read from the host.
-        prefilter_paths = self._prefilter_candidates(
+        prefilter_paths, prefilter_failure = self._prefilter_candidates(
             path=path,
             needles=needles,
             effective_ci=effective_ci,
@@ -1542,7 +1547,9 @@ class FindInFiles(AbstractSimpleTool):
             config=config,
             show_excluded_dirs=show_excluded_dirs,
         )
-        prefilter = "grep" if prefilter_paths is not None else None
+        # "grep" — candidates came from the sandbox; a failure name — it was tried
+        # and the walk below read every candidate from the host; None — not applicable.
+        prefilter = "grep" if prefilter_paths is not None else prefilter_failure
 
         # Hard-floor prune runs inside the backend traversal (find -prune / os.walk);
         # show_excluded_dirs needs the host walk to see and report those dirs.

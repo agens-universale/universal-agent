@@ -366,26 +366,26 @@ def test_prefilter_candidates_are_absolute_paths_under_byte_semantics():
             return super().exec(cmd, timeout, env)
 
     backend = _EnvBackend(stdout="/work/a.py\nsub/b.py\n")
-    assert _prefilter(backend) == ["/work/a.py", "/work/sub/b.py"]
+    assert _prefilter(backend) == (["/work/a.py", "/work/sub/b.py"], None)
     assert backend.env["LC_ALL"] == "C"
 
 
 def test_prefilter_candidates_no_match_is_an_empty_list():
-    assert _prefilter(_Backend(rc=1)) == []
-    assert _prefilter(_Backend(rc=123)) == []
+    assert _prefilter(_Backend(rc=1)) == ([], None)
+    assert _prefilter(_Backend(rc=123)) == ([], None)
 
 
-def test_prefilter_candidates_failure_is_none():
+def test_prefilter_candidates_failure_is_named():
     class _Boom(_Backend):
         def exec(self, cmd, timeout=None, env=None):
             raise RuntimeError("no shell")
 
-    assert _prefilter(_Boom()) is None
-    assert _prefilter(_Backend(rc=2)) is None
+    assert _prefilter(_Boom()) == (None, "failed")
+    assert _prefilter(_Backend(rc=2)) == (None, "failed")
 
 
-def test_prefilter_candidates_capped_output_is_none():
+def test_prefilter_candidates_capped_output_is_named():
     """Обрезанный список — неполный, значит небезопасный: лучше обычный обход."""
     backend = _Backend(stdout="/work/a.py\n")
     backend._res.stdout_hit_capture_cap = True
-    assert _prefilter(backend) is None
+    assert _prefilter(backend) == (None, "capped")

@@ -340,7 +340,7 @@ def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):
 
 # --- needle prefilter drives the Python path -----------------------------------
 
-def _prefilter_ready(tool, monkeypatch, paths):
+def _prefilter_ready(tool, monkeypatch, paths, failure=None):
     import utils.native_fs_search as native_fs_search
 
     backend_cls = type(tool._backend)
@@ -350,7 +350,7 @@ def _prefilter_ready(tool, monkeypatch, paths):
 
     def spy(*args, **kwargs):
         calls.append(kwargs)
-        return paths
+        return paths, failure
 
     monkeypatch.setattr(native_fs_search, "native_prefilter_candidates", spy)
     return calls
@@ -521,3 +521,15 @@ def test_prefiltered_entries_respect_the_path_boundary(tmp_path):
     rels = [e.rel for e in tool._prefiltered_entries(str(root), [str(sibling), str(inside)])]
 
     assert rels == ["x.py", "y.py"]  # сосед с общим префиксом имени — не «2/x.py»
+
+
+def test_prefilter_timeout_is_reported_and_the_walk_answers(tmp_path, monkeypatch):
+    """Отказ префильтра не молчит: prefilter=timeout, ответ даёт обход с хоста."""
+    (tmp_path / "a.py").write_text("foo_suffix", encoding="utf-8")
+    tool = _tool(tmp_path)
+    _prefilter_ready(tool, monkeypatch, None, failure="timeout")
+
+    data = _call(tool, tmp_path, pattern="(foo|bar)_suffix", query_mode="python-re")
+
+    assert data["count"] == 1
+    assert data["prefilter"] == "timeout"

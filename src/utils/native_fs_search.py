@@ -307,6 +307,8 @@ def count_native_candidates(
 # native grep path has carried the same gap since it exists; folding the terms
 # for them would either disable the prefilter for most words or multiply terms.
 _PREFILTER_ENV = dict(_GREP_CLEAN_ENV, LC_ALL="C")
+# Seconds for the whole ``find | xargs grep -l`` pass; see native_prefilter_candidates.
+PREFILTER_TIMEOUT_SEC = 60
 # UTF-16 BOMs as POSIX printf octal escapes: the Python path decodes such files,
 # but their UTF-16 bytes never contain the needle's UTF-8 bytes — the BOM terms
 # keep them in the candidate list (over-inclusive, hence sound).
@@ -382,10 +384,13 @@ def native_prefilter_candidates(
     exclude_nested_dot_dirs: bool,
     file_pattern: Optional[str],
     exclude_paths: Sequence[str],
-) -> Optional[List[str]]:
-    """Absolute paths grep would open for ``terms``; None → caller walks as before.
+) -> tuple[Optional[List[str]], Optional[str]]:
+    """``(paths, None)``: absolute paths grep would open for ``terms``;
+    ``(None, reason)``: the caller walks as before and tells the agent why
+    (``timeout`` / ``capped`` — an incomplete listing is unsafe / ``failed``).
 
-    A capped listing is incomplete and therefore unsafe — also None.
+    One minute is the whole budget: a tree where ``grep -l`` cannot finish in
+    that time is hopeless for the host-side walk anyway — fail fast instead.
     """
     cmd = build_prefilter_command(
         path,
@@ -397,22 +402,24 @@ def native_prefilter_candidates(
         exclude_paths=exclude_paths,
     )
     try:
-        res = backend.exec(cmd, timeout=120, env=dict(_PREFILTER_ENV))
+        res = backend.exec(cmd, timeout=PREFILTER_TIMEOUT_SEC, env=dict(_PREFILTER_ENV))
     except Exception as exc:
         log.debug("native prefilter failed: %s", exc)
-        return None
-    if getattr(res, "timed_out", False) or getattr(res, "stdout_hit_capture_cap", False):
-        return None
+        return None, "failed"
+    if getattr(res, "timed_out", False):
+        return None, "timeout"
+    if getattr(res, "stdout_hit_capture_cap", False):
+        return None, "capped"
     # xargs: 1 = no chunk matched, 123 = some chunk returned 1 (no match there).
     if res.return_code not in (0, 1, 123, None):
-        return None
+        return None, "failed"
     out: List[str] = []
     for raw in (res.stdout or "").splitlines():
         line = raw.rstrip("\r")
         if not line:
             continue
         out.append(line if backend.isabs(line) else backend.join(path, line))
-    return out
+    return out, None
 
 
 def run_native_grep(
