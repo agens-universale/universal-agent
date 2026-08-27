@@ -2457,3 +2457,121 @@ def test_wizard_checks_token_on_the_real_route():
                                           "Bearer good", True, None)
     assert seen == [None, "Bearer good"]
     assert result.auth_state == "accepted" and "токен принят" in result.detail
+
+
+# ── Ctrl+U и автопроба шага «Подключение» (разбор ревью 2026-08-18) ──
+
+def _fake_auth_probe(seen=None):
+    """Заглушка с сигнатурой `probe_auth`: сети нет, вызовы можно считать."""
+    from tui.services.settings_probe import ProbeResult
+
+    def probe(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        if seen is not None:
+            seen.append(auth)
+        return ProbeResult("ok", 200, None, 1, "доступен")
+
+    return probe
+
+
+async def _conn_step(pilot, tmp_path, **over):
+    """Мастер на шаге «Подключение» поверх конфига с СОХРАНЁННЫМ токеном."""
+    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
+                               auth="Bearer sk-SECRET", model="m")
+    cfg = _resolved_conn_cfg(cfg_path)
+    kw = dict(review_all=True, config_path=str(cfg_path), config=cfg,
+              probe=_fake_auth_probe())
+    kw.update(over)
+    scr = _screen(**kw)
+    await pilot.app.push_screen(scr)
+    await pilot.pause()
+    from tui.editors.connection import ConnectionEditor
+    ed = scr.query_one(ConnectionEditor)
+    ed.escape_presets()
+    return scr, ed
+
+
+def _count_probes(scr):
+    """Считает фактические пробы, не подменяя их: снимок пишет сам `_auto_probe`."""
+    calls = []
+    orig = scr._auto_probe
+
+    def counted():
+        calls.append(1)
+        orig()
+
+    scr._auto_probe = counted
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_wizard_ctrl_u_on_token_clears_saved_token(tmp_path):
+    """Ctrl+U на поле токена снимает сохранённый — та же клавиша, что в /settings.
+
+    Ветка обработчика читала `ConnectionEditor` раньше функционально-локальных
+    импортов ниже по той же `on_key`: имя было локальным для всей функции, и
+    первое же нажатие роняло мастер (`except NoMatches` этого не ловит)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr, ed = await _conn_step(pilot, tmp_path)
+        ed.move(1)                          # лента курсора: адрес → токен
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert ed.token_cleared is True
+
+
+@pytest.mark.asyncio
+async def test_wizard_ctrl_u_on_address_field_leaves_token_alone(tmp_path):
+    """Ctrl+U — клавиша поля токена (футер обещает её только там). На адресе она
+    молчит: иначе сохранённый токен помечается к удалению незаметно для того, кто
+    целился очистить строку адреса."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr, ed = await _conn_step(pilot, tmp_path)
+        await pilot.press("ctrl+u")         # курсор на адресе (позиция 0)
+        await pilot.pause()
+        assert ed.token_cleared is False
+
+
+@pytest.mark.asyncio
+async def test_wizard_arrows_without_edits_do_not_reprobe(tmp_path):
+    """Ходьба по форме без правок не стучится в сервер.
+
+    Гейт по снимку был только у ветки адреса: уход с токена/прокси звал пробу
+    безусловно, и пролистанная стрелками форма давала запрос на каждое нажатие
+    (на платном провайдере — деньги)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr, ed = await _conn_step(pilot, tmp_path)
+        calls = _count_probes(scr)
+        await pilot.press("down")           # уход с адреса — первая (и единственная) проба
+        await pilot.press("down")
+        await pilot.press("up")
+        await pilot.press("up")
+        await pilot.pause()
+        assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_wizard_reprobes_after_token_cleared(tmp_path):
+    """Очистка токена — изменение того, что уйдёт в запрос, значит пробу надо
+    повторить. Снимок хранил только (адрес, набранный токен, прокси): Ctrl+U его
+    не двигал, и на экране оставался вердикт «токен принят» под конфигурацией,
+    где токена уже нет."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr, ed = await _conn_step(pilot, tmp_path)
+        calls = _count_probes(scr)
+        await pilot.press("down")           # уход с адреса → проба #1
+        await pilot.press("ctrl+u")         # курсор на токене — снять сохранённый
+        await pilot.press("down")           # уход с токена → проба обязана повториться
+        await pilot.pause()
+        assert ed.token_cleared is True
+        assert len(calls) == 2

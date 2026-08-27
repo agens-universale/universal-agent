@@ -1,6 +1,6 @@
 import requests
 
-from utils.backend_errors import is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
+from utils.backend_errors import EmbeddedChoiceError, is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
 from utils.chat_completions_stream import BackendStreamError
 
 
@@ -86,6 +86,26 @@ def test_retriable_unrelated_false():
     assert is_retriable_backend_error(ValueError("boom")) is False
 
 
+def test_retriable_embedded_504_true():
+    assert is_retriable_backend_error(EmbeddedChoiceError("x", status_code=504, raw_code=504)) is True
+
+def test_retriable_embedded_auth_false():
+    for code in (401, 403, 404):
+        assert is_retriable_backend_error(EmbeddedChoiceError("x", status_code=code, raw_code=code)) is False
+
+def test_retriable_embedded_nonnumeric_code_false():
+    # insufficient_quota/invalid_api_key: код ПРИСУТСТВУЕТ, но нечисловой →
+    # status_code=None, raw_code задан; повтором не чинится → не ретраим.
+    assert is_retriable_backend_error(
+        EmbeddedChoiceError("x", status_code=None, raw_code="insufficient_quota")
+    ) is False
+
+def test_retriable_embedded_no_code_true():
+    # finish_reason='error' с пустым выбором: кода нет вовсе (raw_code=None) —
+    # транзиентный сбой, ретрай оправдан.
+    assert is_retriable_backend_error(EmbeddedChoiceError("x")) is True
+
+
 def test_auth_error_http_401_true():
     resp = requests.Response(); resp.status_code = 401
     assert is_auth_error(requests.exceptions.HTTPError(response=resp)) is True
@@ -101,6 +121,13 @@ def test_auth_error_403_and_500_false():
 def test_auth_error_unrelated_false():
     assert is_auth_error(ValueError("boom")) is False
     assert is_auth_error(BackendStreamError("x")) is False
+
+def test_auth_error_embedded_401_true():
+    # Прокси завернул 401 в HTTP-200 — тот же истёкший токен, лечится рефрешем.
+    assert is_auth_error(EmbeddedChoiceError("x", status_code=401, raw_code=401)) is True
+
+def test_auth_error_embedded_504_false():
+    assert is_auth_error(EmbeddedChoiceError("x", status_code=504, raw_code=504)) is False
 
 
 def test_model_unavailable_covers_network_errors():
@@ -148,6 +175,56 @@ def test_model_unavailable_ignores_non_network_request_exceptions():
     assert is_model_unavailable_error(requests.exceptions.TooManyRedirects("loop")) is False
     assert is_model_unavailable_error(
         requests.exceptions.JSONDecodeError("Expecting value", "<html>", 0)
+    ) is False
+
+
+def _embedded_exc(response):
+    """Исключение строит ПРОД (`_raise_on_embedded_choice_error`) из реального
+    тела ответа — руками не собираем: иначе тест проверял бы наши догадки о
+    форме, а не то, что действительно присылает прокси."""
+    from request_backend_policy import _raise_on_embedded_choice_error
+    try:
+        _raise_on_embedded_choice_error(response)
+    except EmbeddedChoiceError as exc:
+        return exc
+    raise AssertionError("ожидали EmbeddedChoiceError")
+
+
+def test_model_unavailable_covers_embedded_choice_errors():
+    """Прокси заворачивает отказ в HTTP-200 (choices[0].error), поэтому такой же
+    отказ модели приходит другим типом исключения. Без этой ветки предохранитель
+    и фоллбэк «привязка недоступна → активная модель» слепы ровно к тем
+    провайдерам, ради которых develop и завёл EmbeddedChoiceError."""
+    from utils.backend_errors import is_model_unavailable_error
+    upstream_timeout = {"choices": [{"error": {
+        "code": 504, "message": "Upstream idle timeout",
+        "metadata": {"error_type": "timeout"}}}]}
+    assert is_model_unavailable_error(_embedded_exc(upstream_timeout)) is True
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {"code": 401, "message": "bad key"}}]})
+    ) is True
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {"code": 404, "message": "no such model"}}]})
+    ) is True
+    # Вторая типовая форма — ошибка верхнего уровня, без choices.
+    assert is_model_unavailable_error(
+        _embedded_exc({"error": {"code": 503, "message": "service unavailable"}})
+    ) is True
+
+
+def test_model_unavailable_ignores_embedded_without_http_status():
+    """Нечисловой код (insufficient_quota/invalid_api_key) и полное отсутствие
+    кода (finish_reason="error" с пустым выбором) дают status_code=None. Гасить
+    по ним алиас на всю сессию нельзя: первое — деньги и ключи, повтором другой
+    моделью не лечится, второе — неизвестно что. Та же осторожность, что у
+    BackendStreamError без статуса."""
+    from utils.backend_errors import is_model_unavailable_error
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {
+            "code": "insufficient_quota", "message": "quota exceeded"}}]})
+    ) is False
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"finish_reason": "error", "message": {}}]})
     ) is False
 
 

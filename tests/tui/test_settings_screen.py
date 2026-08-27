@@ -1222,7 +1222,8 @@ async def test_hub_glyphs_bang_on_network_unknown():
     from tui.services.settings_probe import ProbeResult
     import tui.app as app_mod
     from tui.screens.settings import SettingsScreen
-    res = ProbeResult("unknown", None, None, 5000, "нет соединения (timeout)")
+    res = ProbeResult("unknown", None, None, 5000, "нет соединения (timeout)",
+                      offline=True)   # сетевой отказ — реальная проба всегда метит его так
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
         app.push_screen(SettingsScreen(config=_cfg(), config_path="C:/tmp/c.yml",
@@ -1334,12 +1335,14 @@ async def test_open_connection_autoruns_differential_probe(tmp_path):
 
 def _probe_rejected():
     from tui.services.settings_probe import ProbeResult
-    return ProbeResult("rejected", 401, None, 90, "токен отклонён (401)")
+    return ProbeResult("rejected", 401, None, 90, "токен отклонён (401)",
+                       auth_state="rejected")
 
 
 def _probe_unknown():
     from tui.services.settings_probe import ProbeResult
-    return ProbeResult("unknown", None, None, 5000, "нет соединения (timeout)")
+    return ProbeResult("unknown", None, None, 5000, "нет соединения (timeout)",
+                       offline=True)
 
 
 async def _open_addr_with_probe(app, pilot, tmp_path, probe_result, url="https://new/v1/chat/completions"):
@@ -1747,9 +1750,12 @@ async def test_auth_draft_probe_server_ignores_token(tmp_path):
         await pilot.pause()
         open_settings_section(scr, "Подключение")            # токен в поле
         from tests.tui.conftest import wait_until
-        # авто-differential входа шлёт контроль auth=None (config-probe маунта — с токеном);
-        # его появление заодно гарантирует, что поля редактора смонтированы для ручной проверки
-        await wait_until(pilot, lambda: None in captured, "auto-probe on entry")
+        # Ждём ОСАДКИ автопробы входа по её собственному следу — вердикту секции
+        # (`_draft_checked`, канон `settings_connection`), а не по появлению
+        # контрольного auth=None в журнале: такой запрос шлёт и config-probe хаба,
+        # когда догоняет вердикт о токене, — и ожидание кончалось бы ДО того, как
+        # поля редактора смонтированы.
+        await wait_until(pilot, lambda: scr._draft_checked is not None, "auto-probe on entry")
         captured.clear()             # отбросить config-probe маунта и авто-probe входа
         scr._start_draft_probe(0)                         # ручная проверка
         await pilot.pause(); await pilot.pause()
@@ -3567,3 +3573,200 @@ def test_env_confirm_text_names_both_fates_when_they_differ():
     text = scr._env_confirm_text(["GC_URL"], ["GC_API_KEY"])
     assert "GC_URL — сохранение запишет введённое значение в файл открытым текстом" in text
     assert "GC_API_KEY — сохранение удалит ссылку из файла" in text
+
+
+# ── хаб догоняет вердикт о токене ровно там, где его нет (разбор ревью 2026-08-18) ──
+
+def _models_ok(ids=("test-model",)):
+    from model_picker import ModelInfo
+    from tui.services.settings_probe import ProbeResult
+    return ProbeResult("ok", 200, [ModelInfo(id=i) for i in ids], 10, "доступен")
+
+
+def _auth_probe_returning(*results):
+    """Заглушка маршрута chat/completions: по одному ответу на вызов, потом последний."""
+    seen = []
+
+    def probe(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        seen.append(auth)
+        return results[min(len(seen) - 1, len(results) - 1)]
+
+    probe.seen = seen
+    return probe
+
+
+async def _hub(app, pilot, *, probe_fn, auth_probe_fn):
+    from tui.screens.settings import SettingsScreen
+    scr = SettingsScreen(config=_cfg(), config_path="C:/tmp/c.yml", on_apply=lambda: None,
+                         probe_fn=probe_fn, auth_probe_fn=auth_probe_fn)
+    app.push_screen(scr)
+    await pilot.pause(); await pilot.pause(); await pilot.pause()
+    return scr
+
+
+async def test_hub_judges_the_token_on_the_real_route():
+    """Публичный справочник моделей (OpenRouter) отвечает и без токена — вердикта о
+    токене в нём нет. Хаб догоняет differential-пробой по chat/completions, иначе он
+    рисует «✓» ровно там, где секция пишет «✗ токен отклонён»."""
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    auth = _auth_probe_returning(ProbeResult("rejected", 401, None, 5, "токен отклонён (401)"))
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = await _hub(app, pilot, probe_fn=_fake_probe(_models_ok()),
+                         auth_probe_fn=auth)
+        assert auth.seen, "differential не запускался"
+        assert scr._menu_glyph(settings_section_index("Подключение"))[0] == "!"
+        assert scr._menu_glyph(settings_section_index("Модель"))[0] == "✓"   # модели не потеряны
+
+
+async def test_hub_shows_the_accepted_token_green():
+    """Тот же путь с принятым токеном: сервер требует авторизацию, наш токен проходит."""
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    auth = _auth_probe_returning(
+        ProbeResult("rejected", 401, None, 5, "токен отклонён (401)"),   # control без токена
+        ProbeResult("ok", 200, None, 5, "доступен"),                     # повтор с токеном
+    )
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = await _hub(app, pilot, probe_fn=_fake_probe(_models_ok()), auth_probe_fn=auth)
+        assert scr._menu_glyph(settings_section_index("Подключение"))[0] == "✓"
+
+
+async def test_hub_does_not_recheck_a_verdict_that_is_already_certain():
+    """Справочник ответил 401 — токен отклонён достоверно, второй заход был бы
+    лишним запросом. Догоняем только неизвестность, а не всё подряд."""
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    auth = _auth_probe_returning(ProbeResult("ok", 200, None, 5, "доступен"))
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        rejected = ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+        scr = await _hub(app, pilot, probe_fn=_fake_probe(rejected), auth_probe_fn=auth)
+        assert auth.seen == []                                            # лишних запросов нет
+        assert scr._menu_glyph(settings_section_index("Подключение"))[0] == "!"
+
+
+async def test_hub_does_not_recheck_when_the_probe_already_used_the_real_route():
+    """Справочника нет (gigacode: /config отдаёт 401), и проба сама ушла на
+    chat/completions — её «ок» уже про реальный маршрут. Догонять нечего."""
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+    auth = _auth_probe_returning(ProbeResult("ok", 200, None, 5, "доступен"))
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        via_post = ProbeResult("ok", 200, None, 5, "доступен")            # models=None
+        scr = await _hub(app, pilot, probe_fn=_fake_probe(via_post), auth_probe_fn=auth)
+        assert auth.seen == []
+        assert scr._menu_glyph(settings_section_index("Подключение"))[0] == "✓"
+
+
+async def test_hub_says_nothing_about_a_token_it_could_not_check():
+    """Догон сорвался (сеть моргнула ровно на нём): утверждать про токен нечего —
+    «—», а не «✓» и не «!». Молчать честнее, чем гадать."""
+    from tui.services.settings_probe import ProbeResult
+    import tui.app as app_mod
+
+    def failing_auth(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+        return ProbeResult("unknown", None, None, 5, "нет соединения (timeout)", offline=True)
+
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = await _hub(app, pilot, probe_fn=_fake_probe(_models_ok()),
+                         auth_probe_fn=failing_auth)
+        assert scr._menu_glyph(settings_section_index("Подключение"))[0] == "—"
+
+
+# ── перенесено из feat/profiles-a при синке 2026-08-25 ──
+
+def _conn_glyph(result):
+    from tui.services.settings_probe import ProbeResult  # noqa: F401  (тип результата)
+    scr = _mk_screen(_cfg())
+    scr._probe_config = result
+    return scr._menu_glyph(settings_section_index("Подключение"))[0]
+
+def test_hub_glyph_blames_the_server_when_it_did_not_answer():
+    """До сервера не дошли — он и виноват. Контрольный случай для теста ниже."""
+    from tui.services.settings_probe import ProbeResult
+    r = ProbeResult("unknown", None, None, 0, "нет соединения (timeout)", offline=True)
+    assert _conn_glyph(r) == "!"
+
+def test_hub_glyph_does_not_blame_the_server_for_our_own_failure():
+    """Проверка сорвалась у нас (исключение в воркере — например, кривой прокси-резолв):
+    ответа нет, но и до сервера мы не доходили. Строка секции про этот же результат
+    пишет «не удалось проверить», а хаб рисовал «!» и объявлял сервер недоступным —
+    правило «винить сервер можно только когда до него не дошли» ветка применила
+    только к одному из двух рендеров."""
+    from tui.services.settings_probe import ProbeResult
+    r = ProbeResult("unknown", None, None, 0, "внутренняя ошибка проверки: boom")
+    assert _conn_glyph(r) != "!"
+
+async def test_ctrl_u_under_the_env_banner_is_not_lost(tmp_path, monkeypatch):
+    """Подтверждение перезаписи ссылки висит, человек тем временем стирает токен.
+    Подтверждают ВСЕГДА текущую форму: снимок, снятый до очистки, сохранил бы токен,
+    который на экране уже помечен к удалению, — а баннер назвал бы не ту судьбу.
+
+    Печать в поле проходит этот же сброс через `on_input_changed`; Ctrl+U стирает
+    то, чего в поле нет (секрет — под маской), и события Changed не порождает."""
+    monkeypatch.setenv("GC_URL", "http://from-env/v1/chat/completions")
+    cfg_file = _write_cfg(tmp_path, url='"${ENV:GC_URL}"')
+    import tui.app as app_mod
+    from textual.widgets import Input
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr._connection_editor()
+        ed.query_one("#conn-url", Input).value = "http://typed/v1/chat/completions"
+        await pilot.pause()
+
+        await pilot.press("enter")                   # страж: ссылка в адресе будет перезаписана
+        await pilot.pause(); await pilot.pause()
+        assert scr._pending_env_save is not None     # предусловие: подтверждение висит
+        assert "Authorization" not in scr._pending_env_save[1]   # токен пока не тронут
+
+        ed.move(1)                                   # → поле токена
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert ed.token_cleared is True
+        assert scr._pending_env_save is None         # прежний снимок протух вместе с формой
+
+        await pilot.press("enter")                   # страж поднимается заново — уже по текущей форме
+        await pilot.pause(); await pilot.pause()
+        assert scr._pending_env_save is not None
+        assert scr._pending_env_save[1].get("Authorization") == ""   # очистка не потерялась
+
+async def test_ctrl_u_reprobes_on_the_next_leave(tmp_path):
+    """Очистка токена меняет то, что уйдёт в запрос (проба пойдёт без него), значит
+    вердикт устарел. Снимок дребезга хранил только (адрес, набранный токен, прокси):
+    Ctrl+U его не двигал, и уход с поля пробу не повторял — на экране оставалось
+    «токен принят» под конфигурацией, где токена уже нет."""
+    cfg_file = _write_cfg(tmp_path)
+    import tui.app as app_mod
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr._connection_editor()
+        ed.move(1)                                   # → поле токена
+        await pilot.pause()
+
+        probes = []
+        orig = scr._start_draft_probe
+        scr._start_draft_probe = lambda *a, **kw: (probes.append(1), orig(*a, **kw))[1]
+
+        await pilot.press("down")                    # уход без правок — проверять нечего
+        await pilot.pause()
+        assert probes == []                          # предусловие: гейт дребезга работает
+
+        await pilot.press("up")                      # вернулись на токен
+        await pilot.press("ctrl+u")
+        await pilot.press("down")                    # теперь уходим уже с очисткой
+        await pilot.pause()
+        assert ed.token_cleared is True
+        assert len(probes) == 1

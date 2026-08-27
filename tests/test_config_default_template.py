@@ -111,6 +111,9 @@ EXPERT_ONLY_KEYS: set = {
     "backend.chat_completion_kwargs",
     # Минимум токенов в ответе (провайдеро-специфичный параметр).
     "backend.chat_completions_min_response_tokens",
+    # Ретрай ошибки, зашитой прокси в HTTP-200 (choices[0].error / top-level
+    # error / finish_reason=error); дефолт true, тюнинг — под конкретный прокси.
+    "backend.retry_embedded_choice_errors",
     # Глобальный флаг стриминга; управляется через tui.stream (в шаблоне есть).
     "backend.stream",
 

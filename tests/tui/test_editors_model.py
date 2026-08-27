@@ -438,8 +438,8 @@ async def test_no_truncation_hint():
 ])
 def test_models_counter_plural(n, expected):
     """Счётчик над списком склоняется по-русски: «2 модели», а не «2 моделей»."""
-    from tui.editors.model import _plural_models
-    assert f"{n} {_plural_models(n)}" == expected
+    from tui.services.probe_presentation import plural_models
+    assert f"{n} {plural_models(n)}" == expected
 
 
 async def test_filter_no_match_falls_back_to_manual_entry():

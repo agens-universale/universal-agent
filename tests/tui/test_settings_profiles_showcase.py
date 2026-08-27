@@ -15,6 +15,14 @@ from tests.tui.conftest import open_settings_section
 
 
 def _fake_probe(result=None):
+    """Дефолт — УСПЕШНЫЙ вердикт, а не `None`: воркер проб моделей эндпоинта
+    разыменовывает `result.models` (`tui/screens/settings.py`), поэтому `None`
+    роняет не строку пробы, а весь экран через `WorkerFailed`. Эталон вердикта
+    один на все settings-тесты — `_probe_ok` из `test_settings_screen`."""
+    if result is None:
+        from tests.tui.test_settings_screen import _probe_ok
+        result = _probe_ok()
+
     def probe_fn(endpoint, auth, verify, model, **kw):
         return result
     return probe_fn
@@ -75,7 +83,7 @@ async def test_profiles_section_lists_both_roots_with_source(tmp_path, monkeypat
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     _write(tmp_path / "base" / "profiles" / "home.yml",
           "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
 
@@ -110,7 +118,7 @@ async def test_profiles_section_tie_break_one_row_shadow_in_hint(tmp_path, monke
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     proj_profile = _write(project_dir / ".gc" / "profiles" / "work.yml",
-                          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+                          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     base_profile = _write(tmp_path / "base" / "profiles" / "work.yml",
                           "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
 
@@ -138,7 +146,7 @@ async def test_profiles_section_overlay_suffix_shows_plus_security(tmp_path, mon
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n"
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\n"
           "slots:\n  default: flash\n"
           "security:\n  command_moderation:\n    enabled: true\n")
 
@@ -159,7 +167,7 @@ async def test_profiles_section_slot_composition_shown_inline(tmp_path, monkeypa
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n  glm:\n    url: http://y\n"
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\n  glm:\n    url: http://y\n    token: \"\"\n"
           "slots:\n  default: glm\n  light: flash\n")
 
     app = app_mod.TuiApp(config=_base_dict())
@@ -223,7 +231,7 @@ async def test_activate_project_profile_writes_project_config_creates_file(tmp_p
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     project_config = project_dir / ".gc" / "config.yml"
     assert not project_config.exists()
 
@@ -396,7 +404,7 @@ async def test_shadow_hint_shown_when_profile_active(tmp_path, monkeypatch):
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
     _write(tmp_path / "base" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
 
     app = app_mod.TuiApp(config={**_base_dict(), "profile": "work", "models": {"flash": {}}})
     async with app.run_test() as pilot:
@@ -519,7 +527,7 @@ async def test_config_screen_header_shows_profile_level_model(tmp_path, monkeypa
         lambda: tmp_path / "no-managed.yml",
     )
     profile_path = _write(project_dir / ".gc" / "profiles" / "work.yml",
-                          "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+                          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
 
     app = app_mod.TuiApp(config={"profile": "work", "level": "default",
@@ -1150,7 +1158,7 @@ async def test_profiles_cursor_survives_row_disappearing_under_it(tmp_path, monk
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     profiles_dir = tmp_path / "base" / "profiles"
     _write(profiles_dir / "home.yml", "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
-    _write(profiles_dir / "work.yml", "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
+    _write(profiles_dir / "work.yml", "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -1322,3 +1330,137 @@ async def test_profiles_footer_is_positional_toggle_hint_on_level_row(tmp_path, 
         footer_on_level = str(scr.query_one("#set-footer", Static).render())
         assert "←/→/Enter — переключить" in footer_on_level
         assert "Space — активировать" not in footer_on_level
+
+
+# --- Клавиша активации: Space (канон базы), Enter — тихий алиас -----------------
+
+async def _cursor_to(scr, kind, name=None):
+    """Курсор на строку нужного вида, с перерисовкой."""
+    rows = scr._profiles_rows()
+    scr._profiles_idx = next(
+        i for i, r in enumerate(rows)
+        if r["kind"] == kind and (name is None or r.get("name") == name))
+    scr._render_view()
+
+
+async def test_profiles_footer_promises_space_not_enter(tmp_path, monkeypatch):
+    """Активация профиля — смена состояния, и по канону базы это Space (так же
+    у MCP «вкл/выкл» и у отметки в post-update). Enter в базе значит «войти
+    внутрь», поэтому глаголом активации футер его больше не называет."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "profile")
+        await pilot.pause()
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert "Space — активировать" in footer
+        assert "Enter — активировать" not in footer
+
+
+async def test_profiles_footer_on_none_row_names_deactivation(tmp_path, monkeypatch):
+    """Строка «— без профиля» при АКТИВНОМ профиле снимает его — футер обязан
+    называть это своим глаголом. Раньше он обещал «активировать», а подсказка в
+    том же кадре говорила «деактивировать»: курсор при входе в секцию стоит
+    ровно здесь, так что первое, что видел пользователь, было противоречие."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    cfg = _base_dict()
+    cfg["profile"] = "home"
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=cfg, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "none")
+        await pilot.pause()
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert "Space — деактивировать" in footer
+        assert "активировать  " not in footer.replace("деактивировать", "")
+
+
+async def test_profiles_footer_on_none_row_is_silent_with_nothing_to_undo(tmp_path, monkeypatch):
+    """Профиль не выбран — на этой строке делать нечего, и футер молчит о
+    действии вовсе. Обещать «деактивировать» там, где деактивировать некого, —
+    та же ложь, только с другим глаголом."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "none")
+        await pilot.pause()
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert "активировать" not in footer          # ни с приставкой, ни без
+        assert "↑/↓ — выбор" in footer and "Esc — меню" in footer
+
+
+async def test_space_activates_profile(tmp_path, monkeypatch):
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "profile", "home")
+        await pilot.pause()
+        await pilot.press("space")
+        await pilot.pause(0.1)
+        assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_enter_still_activates_as_quiet_alias(tmp_path, monkeypatch):
+    """Enter продолжает активировать, но футер о нём молчит: пока волна B не
+    привезла «вход в профиль», отнимать привычную клавишу не за что, а обещать
+    её — значит закреплять расклад, который вот-вот сменится."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "profile", "home")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
+
+
+# ── перенесено из feat/profiles-a при синке 2026-08-25 ──

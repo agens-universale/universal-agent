@@ -70,8 +70,8 @@ def effective_cert_config(config_dict: Dict, resolved: Optional[ResolvedModel]) 
 
 def resolve_network_params(
     config_dict: Dict, resolved: Optional[ResolvedModel]
-) -> Tuple[bool, Optional[Tuple[str, str]], bool, float, Optional[str]]:
-    """``(verify, cert, use_retry, timeout_sec, proxy)`` — эффективные сетевые параметры
+) -> Tuple[bool, Optional[Tuple[str, str]], bool, float, Optional[str], bool]:
+    """``(verify, cert, use_retry, timeout_sec, proxy, retry_embedded_choice_errors)`` — эффективные сетевые параметры
     backend-запроса: ``config_dict`` с наложенным ``resolved.backend_overrides`` поверх
     (``use_ssl``/``cert_path``+``key_path``/``use_retry``/``request_timeout_sec``/``proxy``).
 
@@ -104,7 +104,17 @@ def resolve_network_params(
     proxy = (
         config_dict.get("proxy") if proxy_override is NO_BACKEND_OVERRIDE else proxy_override
     )
-    return verify, cert, use_retry, timeout_sec, proxy
+    # Ретрай ошибки, зашитой прокси в HTTP-200, — параметр той же политики повторов,
+    # что и use_retry, и тюнится он под КОНКРЕТНЫЙ прокси. Поэтому живёт здесь, а не
+    # читается плоско в каждой воронке: иначе `models.<alias>.backend` принимал бы
+    # ключ (BackendConfig целиком), а рантайм молча брал глобальный.
+    retry_embedded_override = backend_override_value(resolved, "retry_embedded_choice_errors")
+    retry_embedded = (
+        config_dict.get("retry_embedded_choice_errors", True)
+        if retry_embedded_override is NO_BACKEND_OVERRIDE
+        else retry_embedded_override
+    )
+    return verify, cert, use_retry, timeout_sec, proxy, bool(retry_embedded)
 
 
 def normalize_chat_completions_tools(

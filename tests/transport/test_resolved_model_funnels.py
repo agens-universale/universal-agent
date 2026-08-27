@@ -832,3 +832,150 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
     )
     assert captured["url"] == "http://legacy.local/v1/chat/completions"
     assert captured["payload"]["model"] == "legacy-model"
+
+
+def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(monkeypatch):
+    """Секция модели принимает ВЕСЬ BackendConfig, поэтому в ней законны и
+    `retry_embedded_choice_errors`, и лимиты токенов. Читались они плоско из cfg —
+    и модель с маленьким окном получала запрос от чужого потолка, а тюнинг ретрая
+    под конкретный прокси не применялся вовсе (соседний use_retry при этом
+    оверрайд уважал)."""
+    import processing_responses as processing_module
+
+    captured = {}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        captured.update(kwargs)
+        captured["initial_max_tokens"] = initial_max_tokens
+        payload_factory(initial_max_tokens)
+        return {"id": "chat_1", "choices": [{"index": 0, "message": {
+            "role": "assistant", "content": "hi", "tool_calls": []},
+            "finish_reason": "stop"}]}, {}
+
+    monkeypatch.setattr(
+        processing_module, "request_chat_completions_with_policy", _fake_policy)
+
+    router = SimpleNamespace(resolve=Mock(return_value=_resolved(
+        model="tiny-model",
+        backend_overrides={
+            "retry_embedded_choice_errors": False,
+            "chat_completions_max_tokens": 4096,
+            "chat_completions_min_response_tokens": 256,
+        },
+    )))
+    ctx = SimpleNamespace(
+        config_dict={
+            "backend_api_mode": "chat_completions",
+            "completions_url": "http://legacy.local/v1/chat/completions",
+            "use_ssl": True,
+            "use_retry": False,
+            "backend_request_timeout_sec": 600,
+            "retry_embedded_choice_errors": True,
+            "chat_completions_max_tokens": 32768,
+            "chat_completions_min_response_tokens": 1024,
+        },
+        model_router=router,
+        auth_connector=None,
+        logger=None,
+    )
+
+    processing_module._request_backend_canonical_once(
+        [{"role": "user", "content": "hi"}], _state(default_model="legacy-model"), ctx)
+
+    assert captured["retry_embedded_choice_errors"] is False
+    assert captured["initial_max_tokens"] == 4096
+    assert captured["min_response_tokens"] == 256
+
+
+def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
+    """То же для служебной воронки: единственное поле backend, которое она читала
+    мимо оверрайдов, — ретрай зашитой ошибки."""
+    captured = {}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        captured.update(kwargs)
+        payload_factory(initial_max_tokens)
+        return {"choices": [{"message": {"content": "ok"}}]}, {}
+
+    monkeypatch.setattr(llm_chat_client, "request_chat_completions_with_policy", _fake_policy)
+    monkeypatch.setattr(
+        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {})
+
+    router = SimpleNamespace(resolve=Mock(return_value=_resolved(
+        backend_overrides={"retry_embedded_choice_errors": False})))
+    ctx = SimpleNamespace(
+        config_dict={
+            "completions_url": "http://legacy.local/v1/chat/completions",
+            "backend_request_timeout_sec": 600,
+            "retry_embedded_choice_errors": True,
+        },
+        model_router=router,
+        logger=None,
+    )
+    llm_chat_client.request_chat_completion_text(
+        ctx=ctx, state=_state(), messages=[{"role": "user", "content": "hi"}],
+        max_tokens=10, consumer="summary")
+
+    assert captured["retry_embedded_choice_errors"] is False
+
+
+# ---------------------------------------------------------------------------
+# 4) Сторож: каждое поле BackendConfig классифицировано
+# ---------------------------------------------------------------------------
+
+# `models.<alias>.backend` — это ВЕСЬ BackendConfig, поэтому любое поле, которое
+# добавят в схему, секция модели примет молча. Если рантайм его не читает, ключ
+# принимается и не работает — без ошибки, без предупреждения. Так уже приехали
+# retry_embedded_choice_errors и send_tool_strict (синк с develop 2026-08-20).
+# Сторож заставляет решать судьбу нового поля в момент его появления.
+
+# Читаются из resolved.backend_overrides по факту вызова.
+_HONORED_PER_MODEL = {
+    "cert_path", "key_path",                        # utils/connect_backend.effective_cert_config
+    "chat_completion_headers",                      # create_call_headers
+    "chat_completion_kwargs",                       # сборка payload обеих воронок
+    "chat_completions_max_tokens",                  # потолок адаптивного цикла
+    "chat_completions_min_response_tokens",         # пол адаптивного цикла
+    "completions_url",                              # model_router: адрес модели
+    "proxy", "request_timeout_sec", "use_retry", "use_ssl",   # resolve_network_params
+    "retry_embedded_choice_errors",                 # там же
+    "use_max_tokens_param",                         # выбор max_tokens/max_completion_tokens
+}
+
+# Остаются глобальными ОСОЗНАННО — с причиной у каждого.
+_GLOBAL_ONLY = {
+    "api_mode": "режим прогона: responses/chat_completions выбирается один раз на ран",
+    "stream": "флаг TUI-стрима, к модели отношения не имеет",
+    "openai_strict_tools_schema": "спека тулов собирается один раз на RunContext",
+    "send_tool_strict": "то же: build_tools_data не знает resolved (бэклог «tools-схема per-model»)",
+}
+
+
+def test_every_backend_field_is_classified_per_model_or_global():
+    """Новое поле BackendConfig обязано попасть в один из двух списков. Падение
+    здесь — не поломка, а вопрос: работает ли ключ в секции модели? Если да —
+    прочитать его в воронке и внести в _HONORED_PER_MODEL; если нет — записать
+    в _GLOBAL_ONLY с причиной, чтобы ограничение было названо вслух."""
+    from config_modules.backend import BackendConfig
+
+    schema_fields = set(BackendConfig.model_fields)
+    unclassified = schema_fields - _HONORED_PER_MODEL - set(_GLOBAL_ONLY)
+    assert not unclassified, (
+        f"поля backend без решения про per-model: {sorted(unclassified)}. "
+        "Секция модели их уже принимает — либо прочитайте в воронке, либо "
+        "назовите глобальными с причиной")
+    stale = (_HONORED_PER_MODEL | set(_GLOBAL_ONLY)) - schema_fields
+    assert not stale, f"в списках есть поля, которых в схеме больше нет: {sorted(stale)}"
+
+
+def test_fields_declared_per_model_are_actually_read_by_the_funnels():
+    """Заявить поле per-model мало — его должен кто-то прочитать. Ищем имя в
+    модулях, которые накладывают оверрайды; отсутствие означает, что ключ
+    принимается схемой и молча теряется."""
+    from pathlib import Path
+
+    readers = [Path("src/utils/connect_backend.py"), Path("src/utils/llm_chat_client.py"),
+               Path("src/processing_responses.py"), Path("src/model_router.py")]
+    text = "\n".join(p.read_text(encoding="utf-8") for p in readers)
+    missing = sorted(f for f in _HONORED_PER_MODEL if f'"{f}"' not in text)
+    assert not missing, f"заявлены per-model, но не читаются ни одной воронкой: {missing}"

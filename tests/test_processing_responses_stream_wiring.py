@@ -21,6 +21,7 @@ def _patch_policy(monkeypatch):
         verify,
         cert=None,
         use_retry,
+        retry_embedded_choice_errors=True,
         logger=None,
         on_delta=None,
         request_label=None,

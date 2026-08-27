@@ -453,6 +453,7 @@ async def test_clear_token_marks_saved_for_removal():
         inp = ed.query_one("#conn-token", Input)
         assert "***" in inp.placeholder            # до очистки — маска сохранённого
 
+        ed.move(1)                                 # курсор туда, где обещана клавиша
         assert ed.clear_token() is True
         await pilot.pause()
 
@@ -472,6 +473,21 @@ async def test_clear_token_is_a_noop_without_saved_token():
         assert ed.token_cleared is False
 
 
+async def test_clear_token_is_a_noop_off_the_token_field():
+    """Курсор не на токене — клавиша не наша: футер обещает Ctrl+U ровно на поле
+    токена, и на адресе она обязана уйти к Input (там у неё своя роль — стереть
+    строку). Иначе сохранённый токен помечается к удалению незаметно."""
+    from tui.editors.connection import ConnectionEditor
+    ed = ConnectionEditor(url_current="http://h/v1/chat/completions",
+                          auth_header="Bearer sk-old")
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert ed.on_token_field_with_saved() is False   # курсор на адресе
+        assert ed.clear_token() is False
+        assert ed.token_cleared is False
+
+
 async def test_typing_a_token_cancels_the_clear():
     """Очистил, потом передумал и набрал новый — пометка снимается сама,
     иначе набранное молча не сохранилось бы."""
@@ -481,6 +497,7 @@ async def test_typing_a_token_cancels_the_clear():
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
+        ed.move(1)
         ed.clear_token()
         ed.query_one("#conn-token", Input).value = "sk-new"
         await pilot.pause()
@@ -496,6 +513,7 @@ async def test_cleared_token_is_saved_as_empty_header():
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
+        ed.move(1)
         ed.clear_token()
         _url, header, err, _proxy = ed.submit()
         assert err is None
@@ -694,3 +712,35 @@ async def test_typing_an_unmatched_address_returns_the_arrows_to_the_form():
         await pilot.pause()
         assert ed._positions[ed._idx] == "conn-token"
         assert not ed._presets_ctrl.is_open
+
+
+# ── probe_snapshot: гейт дребезга видит и то, чего в полях нет ──
+
+async def test_probe_snapshot_follows_the_cleared_token():
+    """Ctrl+U меняет то, что уйдёт в запрос (токена не будет), а поля при этом те же:
+    снимок обязан отличаться, иначе гейт запретит перепроверку и на экране останется
+    вердикт про токен, которого уже нет."""
+    from tui.editors.connection import ConnectionEditor
+    ed = ConnectionEditor(url_current="http://h/v1/chat/completions",
+                          auth_header="Bearer sk-old")
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        before = ed.probe_snapshot()
+        ed.move(1)                                   # → поле токена
+        assert ed.clear_token() is True
+        assert ed.probe_snapshot() != before
+
+
+async def test_probe_snapshot_follows_the_no_auth_toggle():
+    """Галка «без авторизации» тоже не поле: она решает, пойдёт ли токен вообще."""
+    from tui.editors.connection import ConnectionEditor
+    ed = ConnectionEditor(url_current="http://h/v1/chat/completions",
+                          auth_header="Bearer sk-old")
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        before = ed.probe_snapshot()
+        ed.move(2)                                   # → позиция галки
+        assert ed.toggle_no_auth() is True
+        assert ed.probe_snapshot() != before

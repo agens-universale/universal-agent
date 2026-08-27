@@ -194,6 +194,9 @@ def load_profile_document(
     for fact in apply_compat(raw):
         if notices is not None:
             notices.append(f"{path}: {fact}")
+    # Пары «адрес+токен» — по СЫРОМУ документу и ДО схемы: слои сливаются позже,
+    # и половина пары, наложенная на чужую полную, даёт корректный на вид итог,
+    # пока токен базы уходит на адрес этого файла. Здесь же видно, чей это файл.
     validate_registry_pairs(raw, source=str(path))
     _validate_profile_document(raw, source=str(path))
     return raw
