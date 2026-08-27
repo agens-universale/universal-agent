@@ -116,7 +116,7 @@ def test_function_call_output_command_moderation_block_is_error_not_agent():
         "cwd": "/work", "exit_code": None, "timed_out": False, "truncated": False,
         "error": {"type": "unsafe_command_blocked", "mode": "deny",
                   "reason": "Judge is unavailable; fail-closed policy blocks execution.",
-                  "risk_flags": [], "command_preview": "rm -rf /"},
+                  "risk_flags": []},
         "stdout": "", "stderr": "",
     })
     ev = map_message({"type": "function_call_output", "name": "exec_command",
@@ -347,3 +347,43 @@ def test_intermediate_reply_output_filtered():
         no=2, ts="t",
     )
     assert ev is None
+
+
+def test_flat_error_code_falls_through_to_the_message():
+    """Плоский код ошибки сам по себе ничего не сообщает.
+
+    apply_tool отдаёт internal_tool_error строкой, а текст исключения кладёт
+    рядом в "message". Истинная строка коротила `or`, и в строке трейса вместо
+    текста была константа — до PR туда доходил текст исключения.
+    """
+    from tui.services.trace_mapper import _summarize_output
+
+    raw = json.dumps(
+        {
+            "ok": False,
+            "error": "internal_tool_error",
+            "exception_type": "TypeError",
+            "message": "unexpected keyword argument 'reason'",
+            "guidance": "Client runtime failed while executing the tool.",
+            "tool": "fs_read_file",
+        },
+        ensure_ascii=False,
+    )
+
+    assert _summarize_output(raw, error=True) == "unexpected keyword argument 'reason'"
+
+
+def test_nested_error_dict_still_wins_over_message():
+    """Регрессия: доменный конверт {type, message} читается как раньше."""
+    from tui.services.trace_mapper import _summarize_output
+
+    raw = json.dumps(
+        {
+            "ok": False,
+            "error": {"type": "invalid_argument", "message": "path must be absolute"},
+            "message": "не должно использоваться",
+        },
+        ensure_ascii=False,
+    )
+
+    assert _summarize_output(raw, error=True) == "path must be absolute"

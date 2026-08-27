@@ -34,6 +34,12 @@ _NEW_TO_CANONICAL: dict[str, str] = {
     # Тулы без core-константы (имена сняты в Task 3 на merged-дереве):
     "fs_append_file": "append_to_file",
     "fs_list_files": "list_files",
+    "fs_find_files_by_name": "find_files_by_name",
+    # Ветка search_files в _arg_summary читает `query or pattern` — новый тул
+    # ложится в неё как есть. Без записи строка трейса печатала сырое wire-имя
+    # и теряла pattern в generic-ветке «первые 3 скаляра».
+    "fs_find_in_files": "search_files",
+    # Старое wire-имя: нужно для чтения тредов, записанных до переименования.
     "fs_search_files": "search_files",
     "fs_search_and_replace": "search_and_replace",
 }

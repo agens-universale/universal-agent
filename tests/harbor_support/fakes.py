@@ -11,8 +11,35 @@ class FakeBackend:
     is_sandbox = True
     default_exec_timeout = None
 
-    def __init__(self, files=None):
+    def __init__(self, files=None, *, capabilities=None):
         self.files = dict(files or {})
+        # Explicit capability overrides (no real probe). Default: no native CLI.
+        self._cap_overrides = dict(
+            capabilities
+            if capabilities is not None
+            else {
+                "has_find": False,
+                "has_grep": False,
+                "grep_exclude_dir": False,
+                "grep_include": False,
+            }
+        )
+
+    @property
+    def has_find(self) -> bool:
+        return bool(self._cap_overrides.get("has_find", False))
+
+    @property
+    def has_grep(self) -> bool:
+        return bool(self._cap_overrides.get("has_grep", False))
+
+    @property
+    def grep_exclude_dir(self) -> bool:
+        return bool(self._cap_overrides.get("grep_exclude_dir", False))
+
+    @property
+    def grep_include(self) -> bool:
+        return bool(self._cap_overrides.get("grep_include", False))
 
     # stat primitives
     def exists(self, p):
@@ -146,6 +173,9 @@ class FakeBackend:
 
     def join(self, base, name):
         return base.rstrip("/") + "/" + name
+
+    def isabs(self, p):
+        return p.startswith("/")
 
     def default_cwd(self):
         return None

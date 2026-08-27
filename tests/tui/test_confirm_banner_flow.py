@@ -24,9 +24,59 @@ class _StubRunner:
         self.stopped = True
 
 
+def _tool_call_events():
+    """Пара call+result для call_id="c1" — из неё Screen строит ToolCallDetailScreen."""
+    from tui.models import TraceEvent
+    call_ev = TraceEvent(
+        no=1, event_ts_utc_iso="t", kind="call", title="exec_command",
+        summary="curl",
+        full_payload={
+            "type": "function_call", "name": "exec_command",
+            "arguments": '{"command":"curl"}', "call_id": "c1",
+        },
+        call_id="c1", tool_name="exec_command",
+    )
+    result_ev = TraceEvent(
+        no=2, event_ts_utc_iso="t", kind="result", title="exec_command",
+        summary="ok",
+        full_payload={"type": "function_call_output", "call_id": "c1", "output": "ok"},
+        call_id="c1", tool_name="exec_command",
+    )
+    return [call_ev, result_ev]
+
+
+async def _settle(pilot) -> None:
+    """Дождаться простоя приложения (layout, call_after_refresh, очереди сообщений).
+
+    pilot.pause(N) — это просто sleep; фиксированные миллисекунды под нагрузкой
+    делают негативную проверку «экран не открылся» ложно-зелёной («ещё не успел»)
+    и двигают строку под курсором уже после расчёта точки клика.
+    """
+    for _ in range(3):
+        await pilot.pause()
+        await pilot.pause(0.05)
+
+
+async def _mouse_click(pilot, row, *, ctrl: bool = False) -> None:
+    """Настоящий клик мышью по строке трейса: MouseDown/MouseUp/Click идут через
+    screen._forward_event (pilot.click), а НЕ row.focus().
+
+    Клик по фокусу — не клик: именно подмена жеста фокусом спрятала дыру в
+    мышиной половине confirm-гейта. Строку сначала подводим в зону видимости
+    (в трейсе сверху приветственный #brand-block) и проверяем, что курсор
+    действительно попал в неё — иначе тест «прошёл бы» на промахе.
+    """
+    row.scroll_visible(animate=False)
+    await _settle(pilot)
+    hit, _ = pilot.app.get_widget_at(*row.region.offset)
+    assert row in hit.ancestors_with_self, hit
+    await pilot.click(row, control=ctrl)
+    await _settle(pilot)
+
+
 @pytest.mark.asyncio
-async def test_confirm_banner_y_answers_once(tmp_path):
-    """«y» при активном баннере: submit_confirm_reply("once"), баннер снят."""
+async def test_confirm_banner_y_answers_allow_remember(tmp_path):
+    """«y» при активном баннере: submit_confirm_reply("allow_remember"), баннер снят."""
     pytest.importorskip("textual")
     from textual.containers import Horizontal
     from tui.app import TuiApp
@@ -50,7 +100,7 @@ async def test_confirm_banner_y_answers_once(tmp_path):
         await pilot.press("y")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["once"]
+        assert runner.replies == ["allow_remember"]
         assert not scr._confirm_active
         assert scr._confirm_banner is None
         assert len(pilot.app.query(ConfirmBanner)) == 0
@@ -59,8 +109,8 @@ async def test_confirm_banner_y_answers_once(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_s_answers_session(tmp_path):
-    """«s» при активном баннере: submit_confirm_reply("session")."""
+async def test_confirm_banner_o_answers_allow_once(tmp_path):
+    """«o» при активном баннере: submit_confirm_reply("allow_once")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -75,17 +125,17 @@ async def test_confirm_banner_s_answers_session(tmp_path):
         scr.show_confirm_banner("Тест", "Разрешить?")
         await pilot.pause(0.1)
 
-        await pilot.press("s")
+        await pilot.press("o")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["session"]
+        assert runner.replies == ["allow_once"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_n_answers_deny(tmp_path):
-    """«n» при активном баннере: submit_confirm_reply("deny")."""
+async def test_confirm_banner_n_answers_deny_remember(tmp_path):
+    """«n» при активном баннере: submit_confirm_reply("deny_remember")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -103,14 +153,14 @@ async def test_confirm_banner_n_answers_deny(tmp_path):
         await pilot.press("n")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["deny"]
+        assert runner.replies == ["deny_remember"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_escape_answers_deny(tmp_path):
-    """Esc при активном баннере: submit_confirm_reply("deny"), не проваливается
+async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
+    """Esc при активном баннере: submit_confirm_reply("deny_remember"), не проваливается
     в глобальную Esc-лестницу (нет exit-модалки)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -129,7 +179,7 @@ async def test_confirm_banner_escape_answers_deny(tmp_path):
         await pilot.press("escape")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["deny"]
+        assert runner.replies == ["deny_remember"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # Не открылась exit-модалка (screen_stack == 1)
@@ -137,8 +187,8 @@ async def test_confirm_banner_escape_answers_deny(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_enter_default_answers_once(tmp_path):
-    """Enter без навигации (selected==0): submit_confirm_reply("once")."""
+async def test_confirm_banner_enter_default_answers_allow_remember(tmp_path):
+    """Enter без навигации (selected==0): submit_confirm_reply("allow_remember")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -156,14 +206,14 @@ async def test_confirm_banner_enter_default_answers_once(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["once"]
+        assert runner.replies == ["allow_remember"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_down_then_enter_answers_session(tmp_path):
-    """↓ + Enter (selected==1): submit_confirm_reply("session")."""
+async def test_confirm_banner_down_then_enter_answers_allow_once(tmp_path):
+    """↓ + Enter (selected==1): submit_confirm_reply("allow_once")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -183,9 +233,285 @@ async def test_confirm_banner_down_then_enter_answers_session(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["session"]
+        assert runner.replies == ["allow_once"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
+
+
+@pytest.mark.asyncio
+async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
+    """Регресс: фокус на running ToolCallRow + confirm → Enter/Y отвечают
+    баннеру, а не открывают ToolCallDetailScreen.
+
+    Раньше Key шёл в ClickModelMixin.on_key строки (stop) до Screen.on_key,
+    и Enter открывал viewer деталей вызова вместо once/deny.
+    """
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.models import TraceEvent
+    from tui.screens.tool_call_detail import ToolCallDetailScreen
+    from tui.widgets.confirm_banner import ConfirmBanner
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    runner = _StubRunner()
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        call_ev = TraceEvent(
+            no=1,
+            event_ts_utc_iso="t",
+            kind="call",
+            title="exec_command",
+            summary="curl",
+            full_payload={
+                "type": "function_call",
+                "name": "exec_command",
+                "arguments": '{"command":"curl"}',
+                "call_id": "c1",
+            },
+            call_id="c1",
+            tool_name="exec_command",
+        )
+        scr._task_events = [call_ev]
+        row = ToolCallRow(
+            call_id="c1", tool_name="exec_command", args_summary="curl",
+        )
+        await scr.query_one("#trace").mount(row)
+        await pilot.pause(0.05)
+
+        scr.show_confirm_banner("Команда", "Разрешить?", [("Command", "curl")])
+        await pilot.pause(0.05)
+        # Симулируем клик/Tab по строке тула во время confirm (фокус украден).
+        row.focus()
+        await pilot.pause(0.05)
+        assert isinstance(pilot.app.focused, ToolCallRow)
+
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        stack = [type(s).__name__ for s in pilot.app.screen_stack]
+        assert "ToolCallDetailScreen" not in stack, stack
+        assert not any(isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack)
+        assert runner.replies == ["allow_remember"]
+        assert not scr._confirm_active
+        assert len(pilot.app.query(ConfirmBanner)) == 0
+
+
+@pytest.mark.asyncio
+async def test_confirm_ctrl_click_not_open_tool_detail(tmp_path):
+    """Регресс (мышиная половина): Ctrl+КЛИК по ToolCallRow при активном confirm
+    НЕ пушит ToolCallDetailScreen поверх баннера.
+
+    Клавиатурный гейт (Enter) уже стоял, мышиный — нет: экран события накрывал
+    баннер, «y» уходил в накрывший экран, а агент продолжал ждать ответа.
+    Здесь диспатчится НАСТОЯЩИЙ events.Click (не row.focus()) — именно этот
+    жест дырку и открывал.
+    """
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.tool_call_detail import ToolCallDetailScreen
+    from tui.widgets.confirm_banner import ConfirmBanner
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    runner = _StubRunner()
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._task_events = _tool_call_events()
+        row = ToolCallRow(call_id="c1", tool_name="exec_command", args_summary="curl")
+        await scr.query_one("#trace").mount(row)
+        row.set_result(summary="ok", error=False)
+        await pilot.pause(0.05)
+
+        scr.show_confirm_banner("Команда", "Разрешить?", [("Command", "curl")])
+        await pilot.pause(0.05)
+        stack_before = len(pilot.app.screen_stack)
+
+        await _mouse_click(pilot, row, ctrl=True)
+
+        assert len(pilot.app.screen_stack) == stack_before
+        assert not any(isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack)
+        assert scr._confirm_active
+
+        # Баннер по-прежнему отвечает на «y».
+        await pilot.press("y")
+        await pilot.pause(0.1)
+
+        assert runner.replies == ["allow_remember"]
+        assert not scr._confirm_active
+        assert len(pilot.app.query(ConfirmBanner)) == 0
+
+
+@pytest.mark.asyncio
+async def test_ctrl_click_opens_tool_detail_without_confirm(tmp_path):
+    """Контроль: без confirm Ctrl+клик по ToolCallRow по-прежнему открывает
+    детальный экран — гейт не выключает фичу целиком."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.tool_call_detail import ToolCallDetailScreen
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._task_events = _tool_call_events()
+        row = ToolCallRow(call_id="c1", tool_name="exec_command", args_summary="curl")
+        await scr.query_one("#trace").mount(row)
+        row.set_result(summary="ok", error=False)
+        await pilot.pause(0.05)
+
+        assert not scr._confirm_active
+        await _mouse_click(pilot, row, ctrl=True)
+
+        assert any(isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack)
+
+
+@pytest.mark.asyncio
+async def test_confirm_ctrl_click_not_open_viewer_for_trace_row(tmp_path):
+    """То же для обычной строки трейса (viewer-путь): Ctrl+клик при confirm
+    не пушит ViewerScreen поверх баннера."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.models import TraceEvent
+    from tui.screens.viewer import ViewerScreen
+    from tui.widgets.trace_row import TraceRow
+
+    runner = _StubRunner()
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._task_events = [TraceEvent(
+            no=5, event_ts_utc_iso="t", kind="agent", title="agent",
+            summary="ответ", full_payload={"text": "ответ"},
+        )]
+        row = TraceRow(prefix="● ", content="ответ",
+                       kind_class="line-agent", event_no=5)
+        await scr.query_one("#trace").mount(row)
+        await pilot.pause(0.05)
+
+        scr.show_confirm_banner("Команда", "Разрешить?")
+        await pilot.pause(0.05)
+        stack_before = len(pilot.app.screen_stack)
+
+        await _mouse_click(pilot, row, ctrl=True)
+
+        assert len(pilot.app.screen_stack) == stack_before
+        assert not any(isinstance(s, ViewerScreen) for s in pilot.app.screen_stack)
+        assert scr._confirm_active
+
+        await pilot.press("y")
+        await pilot.pause(0.1)
+
+        assert runner.replies == ["allow_remember"]
+        assert not scr._confirm_active
+
+
+@pytest.mark.asyncio
+async def test_confirm_click_does_not_toggle_summary_body(tmp_path):
+    """SummaryMarker: клик при активном confirm не раскрывает тело сводки
+    (симметрия с уже стоящим гейтом на Enter)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.trace_row import SummaryMarker
+
+    runner = _StubRunner()
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        marker = SummaryMarker(prefix="▸ ", content="──── контекст сжат ────",
+                               kind_class="summary-marker", event_no=9)
+        body = SummaryMarker(prefix="   ", content="Контекст сохранён:\nтекст",
+                             kind_class="summary-body hidden", event_no=9,
+                             focusable=False)
+        trace = scr.query_one("#trace")
+        await trace.mount(marker)
+        await trace.mount(body)
+        scr._summary_marker_widgets[9] = marker
+        scr._summary_body_widgets[9] = body
+        await pilot.pause(0.05)
+
+        scr.show_confirm_banner("Команда", "Разрешить?")
+        await pilot.pause(0.05)
+        assert body.has_class("hidden")
+
+        await _mouse_click(pilot, marker)
+
+        assert body.has_class("hidden")
+        assert scr._confirm_active
+
+        await pilot.press("y")
+        await pilot.pause(0.1)
+
+        assert runner.replies == ["allow_remember"]
+        assert not scr._confirm_active
+
+
+@pytest.mark.asyncio
+async def test_click_toggles_summary_body_without_confirm(tmp_path):
+    """Контроль: без confirm клик по маркеру по-прежнему раскрывает сводку."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.trace_row import SummaryMarker
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        marker = SummaryMarker(prefix="▸ ", content="──── контекст сжат ────",
+                               kind_class="summary-marker", event_no=9)
+        body = SummaryMarker(prefix="   ", content="Контекст сохранён:\nтекст",
+                             kind_class="summary-body hidden", event_no=9,
+                             focusable=False)
+        trace = scr.query_one("#trace")
+        await trace.mount(marker)
+        await trace.mount(body)
+        scr._summary_marker_widgets[9] = marker
+        scr._summary_body_widgets[9] = body
+        await pilot.pause(0.05)
+
+        assert not scr._confirm_active
+        await _mouse_click(pilot, marker)
+
+        assert not body.has_class("hidden")
+
+
+@pytest.mark.asyncio
+async def test_confirm_banner_receives_focus_on_show(tmp_path):
+    """show_confirm_banner ставит фокус на баннер (не None / не tool-row)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.confirm_banner import ConfirmBanner
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        row = ToolCallRow(call_id="c1", tool_name="exec_command", args_summary="x")
+        await scr.query_one("#trace").mount(row)
+        row.focus()
+        await pilot.pause(0.05)
+
+        scr.show_confirm_banner("T", "Q?")
+        await pilot.pause(0.05)
+
+        assert isinstance(pilot.app.focused, ConfirmBanner)
 
 
 # ── Tests for Ctrl+C / _reset_render_state confirm handling ──────────────────

@@ -304,6 +304,7 @@ gc-cli -q "..." --write-guard true
 }
 
 // command_moderation fail-closed (judge offline, mode=deny)
+// (no command/code preview — model already has full args in the tool call)
 {
   "tool": "run_python_code",
   "ok": false,
@@ -311,7 +312,7 @@ gc-cli -q "..." --write-guard true
     "type": "unsafe_command_blocked",
     "mode": "deny",
     "reason": "Judge is unavailable; fail-closed policy blocks execution.",
-    "code_preview": "print(open('/etc/passwd').read()[:200])"
+    "risk_flags": []
   }
 }
 

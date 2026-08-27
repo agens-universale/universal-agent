@@ -36,8 +36,8 @@ DeepAgents: **тул определён один раз** (валидация, �
 хост-режим гоняют один и тот же код тулов.
 
 Бэкенд затрагивает **только тулы с ФС/shell** (`fs_read_file`, `fs_write_file`,
-`fs_append_file`, `fs_apply_file_edits`, `fs_search_and_replace`, `fs_list_files`,
-`fs_search_files`, `fs_file_info`, `fs_save_base64_file`, `exec_command`, `exec_python`).
+`fs_append_file`, `fs_apply_file_edits`, `fs_search_and_replace`, `fs_list_files`, `fs_find_files_by_name`,
+`fs_find_in_files`, `fs_file_info`, `fs_save_base64_file`, `exec_command`, `exec_python`).
 Остальные тулы (think, web, память, subagents, скиллы, MCP) хост не трогают — остаются
 без изменений.
 

@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 from tools.fs.list_files import ListFiles
-from tools.fs.search_files import SearchFiles
 
 
 from tests.helpers.tool_ctx import with_local_ctx
@@ -39,16 +38,6 @@ def test_list_deep_hides_gc_and_its_contents(tmp_path):
         assert ".gc" not in Path(e["path"]).parts
     names = {Path(e["path"]).name for e in res["entries"]}
     assert ".gitignore" in names
-
-
-def test_search_files_skips_gc_contents(tmp_path):
-    _mkproject(tmp_path)
-    res = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="needle"))
-    assert res["ok"] is True
-    files = {Path(m["file"]).name for m in res["matches"]}
-    assert "a.txt" in files
-    assert "config.yml" not in files
-    assert "s.md" not in files
 
 
 def test_exact_match_only_gcignore_and_suffix_stay_visible(tmp_path):

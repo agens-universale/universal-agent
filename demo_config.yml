@@ -401,10 +401,29 @@ summary:
   intent_log_preview_chars: 10000
 
 # Лимиты FS-тулов, которые поднимают файл целиком в память.
-# read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
+# read — fs_read_file; mutate — apply/replace (не append).
 fs_tools:
   max_read_bytes: 8388608       # 8 MiB
   max_mutate_bytes: 16777216    # 16 MiB (peak RAM ≈ ×2–3; raise via config if needed)
+  # fs_find_in_files — search text inside files (path = file or directory).
+  # max_file_bytes is a UNIFIED cap (file & directory mode); not read/mutate limits.
+  # Candidate caps are per pattern_mode (scan automaton); over L(mode) → refuse.
+  find_in_files:
+    max_file_bytes: 16777216          # 16 MiB — single cap for file & dir mode
+    max_candidates_like: 500000       # like / query_mode=text
+    max_candidates_or_simple: 200000  # pure a|b|…
+    max_candidates_affix_or: 300000   # one (group) + pure prefix/suffix
+    max_candidates_complex: 50000     # no cheap prefilter
+    max_open_files_affix_or: 50000    # full-re opens budget (affix_or only)
+    content_workers_threshold: 20000  # N >= → 2 workers; else 1
+    max_exclude_dirs: 32
+    top_level_dirs_cap: 5
+    default_limit: 100                # limit if caller omits it
+    max_total_matches: 300            # hard ceiling: limit_eff = min(requested, 300)
+    exclude_dot_dirs: true            # nested '.' dirs (hard floor always on)
+    # Extra basenames only; hard floor always includes venv, __pycache__,
+    # node_modules, .git (clearing this list does not re-open them).
+    exclude_dir_names: []
 
 security:
   # =========================================================================

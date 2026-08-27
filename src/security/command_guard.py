@@ -109,7 +109,6 @@ def enforce_command_guard(
                         "User declined the command. Do NOT retry the same command, "
                         "and do NOT silently run a modified command — ask the user or stop."
                     ),
-                    "command_preview": payload[:200],
                 }
                 blocked_method = getattr(self_obj, "_command_moderation_blocked_result", None)
                 if callable(blocked_method):
@@ -123,7 +122,6 @@ def enforce_command_guard(
             err = {
                 "type": "protected_path_denied",
                 "message": "Command targets a protected path (.gc / config).",
-                "command_preview": payload[:200],
             }
             # Use tool's own blocked-result method if available (mirrors moderation pattern).
             blocked_method = getattr(self_obj, "_command_moderation_blocked_result", None)

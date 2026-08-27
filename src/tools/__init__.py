@@ -1,6 +1,8 @@
 import difflib
 import json
 import traceback
+
+import sys
 import logging
 from typing import Any, Dict, Iterable, Tuple, Optional
 
@@ -29,6 +31,70 @@ from tools.schema_optional import (
 
 _fallback_logger = logging.getLogger(__name__)
 _LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
+
+INTERNAL_TOOL_ERROR = "internal_tool_error"
+_INTERNAL_TOOL_ERROR_MESSAGE_CAP = 500
+_INTERNAL_TOOL_ERROR_GUIDANCE_CAP = 800
+_INTERNAL_TOOL_ERROR_GUIDANCE = (
+    "Client runtime failed while executing the tool "
+    "(not an arguments-schema rejection). "
+    "Do not retry the identical call hoping for a different schema outcome. "
+    "Change strategy, pick another tool, or report the failure if the task is blocked."
+)
+
+
+def _truncate_for_tool_output(text: str, cap: int) -> str:
+    if cap <= 0:
+        return ""
+    if len(text) <= cap:
+        return text
+    if cap <= 3:
+        return text[:cap]
+    return text[: cap - 3] + "..."
+
+
+def format_internal_tool_error_output(
+    *,
+    tool_name: str | None,
+    exc: BaseException,
+    call_id: str | None = None,
+) -> str:
+    """Slim JSON tool output for unexpected exceptions in apply_tool (no traceback)."""
+    message = str(exc).strip()
+    if not message:
+        message = type(exc).__name__
+    message = _truncate_for_tool_output(
+        message.replace("\n", " ").strip(),
+        _INTERNAL_TOOL_ERROR_MESSAGE_CAP,
+    )
+    guidance = _truncate_for_tool_output(
+        _INTERNAL_TOOL_ERROR_GUIDANCE,
+        _INTERNAL_TOOL_ERROR_GUIDANCE_CAP,
+    )
+    payload: Dict[str, Any] = {
+        "ok": False,
+        "error": INTERNAL_TOOL_ERROR,
+        "exception_type": type(exc).__name__,
+        "message": message,
+        "guidance": guidance,
+    }
+    if isinstance(tool_name, str) and tool_name:
+        payload["tool"] = tool_name
+    if isinstance(call_id, str) and call_id:
+        payload["call_id"] = call_id
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def is_internal_tool_error_output(output: str) -> bool:
+    if not isinstance(output, str) or not output:
+        return False
+    try:
+        parsed = json.loads(output)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return parsed.get("ok") is False and parsed.get("error") == INTERNAL_TOOL_ERROR
 
 
 def format_unknown_tool_output(tool_name: str, available_names: Iterable[str]) -> str:
@@ -376,14 +442,24 @@ def apply_tool(
     #    tool_fabric,
     #    tool,
     #)
+    call_id = kwargs.get("call_id")
+    if not isinstance(call_id, str):
+        call_id = None
+
     try:
         res = tool.__call__(**arguments)
     except Exception as e:  # noqa: BLE001
-        res = str(e)
-        res += (
-            "\n"
-            + "Agent tool execution Error in cli agent tool execution: "
-            + traceback.format_exc()
+        # Stack stays in logs only — tool output is a slim JSON envelope for the LLM.
+        # See docs_md/actual/2026-08-14-apply-tool-internal-error-CONTRACT.ru.md
+        log.exception(
+            "apply_tool internal error tool=%s call_id=%s",
+            tool_name,
+            call_id,
+        )
+        return format_internal_tool_error_output(
+            tool_name=tool_name,
+            exc=e,
+            call_id=call_id,
         )
 
     if isinstance(res, str):
@@ -400,8 +476,11 @@ def apply_tool(
 
 __all__ = [
     "WrongFunctionArgumentsException",
+    "INTERNAL_TOOL_ERROR",
     "build_tools_data",
     "apply_tool",
+    "format_internal_tool_error_output",
     "format_unknown_tool_output",
+    "is_internal_tool_error_output",
     "is_unknown_tool_output",
 ]

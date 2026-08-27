@@ -18,10 +18,7 @@ from tools.fs.agent_hidden import is_agent_hidden
 
 
 class ListFiles(AbstractSimpleTool):
-    """
-    Tool to list files and directories in a given path.
-    Supports flat and depth-limited listing.
-    """
+    """List files and directories under a path with optional depth and glob filter."""
 
     @classmethod
     def tool_description(cls):
@@ -29,46 +26,46 @@ class ListFiles(AbstractSimpleTool):
             "type": "function",
             "name": "fs_list_files",
             "description": (
-                "Lists files and directories by path/name (not file contents); "
-                "does not search text inside files. Returns only the immediate children of `path` "
-                "by default (max_depth=0). To descend into subdirectories, set `max_depth` > 0 — "
-                "required for any glob containing '/' or '**' (e.g. '**/*.md', 'src/*.py'), "
-                "otherwise only top-level matches are returned. Returns: ok, path, max_depth, "
-                "max_entries, truncated, count, entries, and optional glob/error."
+                "List files and directories under an absolute directory path. "
+                "Default max_depth=0 lists only immediate children; raise max_depth to go deeper. "
+                "Optional glob filters paths relative to path (only within max_depth). "
+                "Does not search file contents. "
+                "Shows normal folders as they are (including node_modules, .git, venv, etc.); "
+                "omits the `.gc` directory. "
+                "At most max_entries results (default 200); truncated=true if more exist."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The absolute path of the directory to list contents from. Must be a valid existing directory."
+                        "description": (
+                            "Absolute path of the directory to list. "
+                            "Must be an existing directory."
+                        ),
                     },
                     "glob": {
                         "type": "string",
                         "description": (
-                            "Glob to find files/dirs by relative path from `path` "
-                            "(e.g., '*.py', '**/*.md', 'src/**'). Filters by name/path only, "
-                            "not by file contents. When unset, all entries are returned. "
-                            "Note: globs containing '/' or '**' require max_depth > 0 to match "
-                            "files in subdirectories."
+                            "Optional filter on paths relative to path (e.g. '*.py', 'src/*'). "
+                            "Only entries within max_depth can match; use max_depth > 0 for nested globs."
                         ),
                     },
                     "max_depth": {
                         "type": "integer",
                         "minimum": 0,
                         "description": (
-                            "Max directory depth to traverse. "
-                            "0 means only immediate children of `path` (default if omitted). "
-                            "Raise this for any glob with '/' or '**' (e.g. '**/*.md' needs "
-                            "depth 10+, '*/config.yml' needs depth 1)."
+                            "How deep to list. "
+                            "0 = only immediate children of path (default). "
+                            "Higher values include nested directories."
                         )
                     },
                     "max_entries": {
                         "type": "integer",
                         "minimum": 1,
                         "description": (
-                            "Max number of returned entries (files + directories). "
-                            "Default: 200. If exceeded, response will be truncated."
+                            "Maximum entries to return (files + directories). "
+                            "Default 200. truncated=true if the directory has more."
                         )
                     }
                 },
@@ -80,57 +77,24 @@ class ListFiles(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: fs_list_files  
-Tool description: Lists files and directories by path/name (not contents); does not search text inside files. Returns only immediate children of `path` by default (max_depth=0). To descend into subdirectories, set max_depth > 0 — required for any glob containing '/' or '**' (e.g. '**/*.md', 'src/*.py').
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The directory absolute path to list contents for."}, "max_depth": {"type": "integer", "minimum": 0, "description": "Max directory depth to traverse. Default 0 = only immediate children; raise for globs with '/' or '**' (**/*.md needs 10+, */config.yml needs 1)."}, "max_entries": {"type": "integer", "minimum": 1, "description": "Max number of returned entries. Default 200."}, "glob": {"type": "string", "description": "Glob by relative path (e.g. **/*.md). Name/path listing only — not content search."}}, "required": ["path"], "additionalProperties": false}
+        description = '''Tool name: fs_list_files
+List files and directories under an absolute directory path.
+Default max_depth=0 = immediate children only; raise max_depth to list nested entries.
+Optional glob filters the listing (only paths within max_depth).
+Does not search text inside files.
+Lists folders as on disk (node_modules, .git, venv, hidden files, …); omits `.gc`.
+At most max_entries results (default 200); truncated=true means the list was cut, not that the folder is empty.
 
-Usage:
-- Use this tool to explore directory structure or **find files by name/glob**.
-- Always provide an **absolute path**.
-- Prefer `max_depth` to control how deep the traversal goes. Default **0** = only immediate children. Any glob with `/` or `**` (e.g. `**/*.md`, `src/*.py`, `*/config.yml`) requires `max_depth` > 0 — use depth 10+ for `**`, or at least the number of `/` in the glob.
-- Set `max_entries` to limit output size.
-- This tool does **not** search text/code inside files — only names and directory structure.
-- Return format (JSON string):
-{
-  "tool": "fs_list_files",
-  "ok": true|false,
-  "path": "...",
-  "max_depth": integer,
-  "max_entries": integer,
-  "truncated": true|false,
-  "count": integer,
-  "entries": [
-    { "path": "...", "type": "file"|"directory", "is_hidden": boolean }
-  ],
-  "glob": "..." (only when `glob` is provided),
-  "error": {"type":"...","message":"..."} (only when `ok=false`)
-}
+Args: path (required, absolute directory), glob (optional), max_depth (default 0), max_entries (default 200).
 
-Important Rules:
-- **NEVER** use external commands like `ls`, `dir`, `find`, etc. — this tool is safe and cross-platform.
-- The `path` must be a valid directory.
-- If the directory does not exist or is inaccessible, an error will be raised.
-- Hidden files (like `.gitignore`) are included regardless of platform.
-- On Windows, uses file attributes to detect hidden files.
+Response JSON: ok, path, max_depth, max_entries, truncated, count, entries
+[{path, type: file|directory, is_hidden}], optional glob, optional error,
+optional guidance (only when truncated).
 
 Examples:
-List top-level contents:
-{
-  "path": "/home/user/project"
-}
-
-List deeper files (example):
-{
-  "path": "/home/user/project",
-  "max_depth": 10
-}
-
-Find all Markdown files under a tree:
-{
-  "path": "/home/user/project",
-  "glob": "**/*.md",
-  "max_depth": 20
-}
+{"path": "/home/user/project"}
+{"path": "/home/user/project", "max_depth": 2}
+{"path": "/home/user/project", "glob": "*.py", "max_depth": 0}
 '''
         return description
 
@@ -155,12 +119,47 @@ Find all Markdown files under a tree:
             "truncated": truncated,
             "count": len(entries) if entries is not None else 0,
         }
+        if truncated:
+            payload["guidance"] = (
+                f"Results truncated (showing up to {max_entries} entries). "
+                "Increase max_entries if you need more."
+            )
         if glob is not None:
             payload["glob"] = glob
         if error is not None:
             payload["error"] = error
         payload["entries"] = entries if entries is not None else []
+        # listing_backend set by caller on success paths via optional kw — see __call__
 
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _result_with_backend(
+        self,
+        *,
+        path: str,
+        glob: Optional[str],
+        max_depth: Optional[int],
+        max_entries: Optional[int],
+        ok: bool,
+        entries: Optional[List[Dict[str, Any]]] = None,
+        truncated: bool = False,
+        error: Optional[Dict[str, Any]] = None,
+        listing_backend: Optional[str] = None,
+    ) -> str:
+        raw = self._result(
+            path=path,
+            glob=glob,
+            max_depth=max_depth,
+            max_entries=max_entries,
+            ok=ok,
+            entries=entries,
+            truncated=truncated,
+            error=error,
+        )
+        if listing_backend is None:
+            return raw
+        payload = json.loads(raw)
+        payload["listing_backend"] = listing_backend
         return json.dumps(payload, ensure_ascii=False)
 
     def _resolve_read_guard(self) -> tuple:
@@ -205,6 +204,15 @@ Find all Markdown files under a tree:
                 ok=False,
                 error={"type": "invalid_argument", "field": "path"},
             )
+        if not self._backend.isabs(path):
+            return _result(
+                ok=False,
+                error={
+                    "type": "invalid_argument",
+                    "field": "path",
+                    "message": "path must be absolute",
+                },
+            )
         if glob is not None and not isinstance(glob, str):
             return _result(
                 ok=False,
@@ -248,6 +256,10 @@ Find all Markdown files under a tree:
 
             file_matcher = _matches
 
+        # Enumeration always via backend traverse API (listdir / iter_walk).
+        # Harbor: walk/listdir use private find channel (~50M, fail-closed) —
+        # never tool-exec 60k. Local: os.listdir / os.walk. Name/glob filter is
+        # Python on that stream (no separate native find dump).
         result: List[Dict[str, Any]] = []
         try:
             hit_limit: bool
@@ -285,7 +297,16 @@ Find all Markdown files under a tree:
         if max_entries is not None and len(result) > max_entries:
             result = result[:max_entries]
 
-        return _result(ok=True, entries=result, truncated=hit_limit)
+        return self._result_with_backend(
+            path=path,
+            glob=glob,
+            max_depth=effective_max_depth,
+            max_entries=max_entries,
+            ok=True,
+            entries=result,
+            truncated=hit_limit,
+            listing_backend="python",
+        )
 
     def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
         return {
