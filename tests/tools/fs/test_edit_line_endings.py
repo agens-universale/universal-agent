@@ -134,11 +134,16 @@ def test_apply_file_edits_reports_normalization_per_edit(tmp_path):
     assert res["edit_results"][0]["line_endings_normalized"] is True
 
 
-def test_apply_file_edits_omits_flag_when_nothing_normalized(tmp_path):
+def test_apply_file_edits_reports_the_flag_on_every_edit_result(tmp_path):
+    """Один концепт — один контракт: флаг есть и на успехе, и на промахе (как у search_and_replace)."""
     p = tmp_path / "f.py"
     p.write_bytes(CRLF)
     res = _apply_edits(p, CRLF_ANCHOR, CRLF_REPLACE)
-    assert "line_endings_normalized" not in res["edit_results"][0]
+    assert res["edit_results"][0]["line_endings_normalized"] is False
+    p.write_bytes(CRLF)
+    miss = _apply_edits(p, "nope\n", "x")
+    assert miss["ok"] is False
+    assert miss["edit_results"][0]["line_endings_normalized"] is False
 
 
 def test_search_and_replace_reports_normalization(tmp_path):
@@ -169,3 +174,92 @@ def test_search_and_replace_dry_run_diff_uses_file_style(tmp_path):
     assert res["ok"] is True and res["applied"] is False
     assert "-    return 1\r\n" in res["diff"] and "+    return 10\r\n" in res["diff"]
     assert p.read_bytes() == CRLF
+
+
+# --- ревью F1: цель замены — EOL найденной строки; оба стиля на смешанном файле;
+# --- явный опт-аут newline="preserve"; флаг на каждом edit_result ---------------
+
+ISLAND_TEXT = "x\r\ny\r\nISLAND\nz\r\n"          # CRLF-доминантный файл с LF-островом
+MINOR_REGION_TEXT = "x\r\ny\r\nA\nB\nz\r\n"      # целевой регион целиком в минорном стиле
+
+
+def test_single_line_anchor_replace_follows_the_matched_line_eol():
+    res = resolve_edit_line_endings(ISLAND_TEXT, "ISLAND", "ISLAND\nNEW")
+    assert res.search == "ISLAND"
+    assert res.replace == "ISLAND\nNEW"
+    assert res.normalized is False
+
+
+def test_anchor_in_dominant_style_still_finds_a_minor_style_region():
+    res = resolve_edit_line_endings(MINOR_REGION_TEXT, "A\r\nB\r\n", "A\r\nC\r\nB\r\n")
+    assert res.search == "A\nB\n"
+    assert res.replace == "A\nC\nB\n"
+    assert res.normalized is True
+
+
+def test_single_line_anchor_at_eof_without_newline_uses_the_previous_line_eol():
+    res = resolve_edit_line_endings("a\r\nb\r\nc", "c", "c\nd")
+    assert res.replace == "c\r\nd"
+
+
+def test_preserve_mode_never_touches_search_or_replace():
+    res = resolve_edit_line_endings(CRLF_TEXT, "def a():\r\n    return 1\r\n", "def a():\n    return 10\n", mode="preserve")
+    assert res.search == "def a():\r\n    return 1\r\n"
+    assert res.replace == "def a():\n    return 10\n"
+    assert res.normalized is False
+    assert res.file_line_ending == "\r\n"
+
+
+@pytest.mark.parametrize("run", TOOLS)
+def test_intentional_eol_change_is_a_noop_with_a_hint_by_default(tmp_path, run):
+    p = tmp_path / "f.txt"
+    p.write_bytes(b"a\r\nb\r\nc\r\n")
+    res = run(p, "a\r\nb\r\n", "a\nb\n")
+    assert res["ok"] is False
+    assert "newline" in res["message"] and "preserve" in res["message"]
+    assert p.read_bytes() == b"a\r\nb\r\nc\r\n"
+
+
+@pytest.mark.parametrize("run", TOOLS)
+def test_newline_preserve_writes_search_and_replace_bytes_as_given(tmp_path, run):
+    p = tmp_path / "f.txt"
+    p.write_bytes(b"a\r\nb\r\nc\r\n")
+    res = run(p, "a\r\nb\r\n", "a\nb\n", newline="preserve")
+    assert res["ok"] is True and res["applied"] is True
+    assert p.read_bytes() == b"a\nb\nc\r\n"
+
+
+@pytest.mark.parametrize("run", TOOLS)
+def test_invalid_newline_value_is_rejected(tmp_path, run):
+    p = tmp_path / "f.txt"
+    p.write_bytes(b"a\r\nb\r\n")
+    res = run(p, "a", "A", newline="crlf")
+    assert res["ok"] is False
+    assert res["error"]["type"] == "invalid_argument"
+    assert res["error"]["field"] == "newline"
+    assert p.read_bytes() == b"a\r\nb\r\n"
+
+
+def test_island_edit_keeps_the_island_style_on_disk(tmp_path):
+    p = tmp_path / "f.txt"
+    p.write_bytes(ISLAND_TEXT.encode())
+    res = _search_replace(p, "ISLAND", "ISLAND\nNEW")
+    assert res["ok"] is True
+    assert p.read_bytes() == b"x\r\ny\r\nISLAND\nNEW\nz\r\n"
+
+
+def test_dominant_style_anchor_edits_a_minor_style_region_on_disk(tmp_path):
+    p = tmp_path / "f.txt"
+    p.write_bytes(MINOR_REGION_TEXT.encode())
+    res = _apply_edits(p, "A\r\nB\r\n", "A\r\nC\r\nB\r\n")
+    assert res["ok"] is True
+    assert res["edit_results"][0]["line_endings_normalized"] is True
+    assert p.read_bytes() == b"x\r\ny\r\nA\nC\nB\nz\r\n"
+
+
+def test_plain_noop_batch_keeps_ok_true_without_a_hint(tmp_path):
+    p = tmp_path / "f.txt"
+    p.write_bytes(b"a\r\nb\r\n")
+    res = _apply_edits(p, "a", "a")
+    assert res["ok"] is True and res["applied"] is False
+    assert "preserve" not in res["message"]

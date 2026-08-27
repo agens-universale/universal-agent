@@ -416,8 +416,29 @@ def detect_line_ending(text: str) -> str | None:
 
 
 def convert_line_endings(text: str, eol: str) -> str:
-    """Rewrite every ``\\r\\n`` / ``\\n`` in ``text`` as ``eol``. Bare ``\\r`` is left alone."""
+    """Rewrite every ``\\r\\n`` / ``\\n`` in ``text`` as ``eol``.
+
+    A bare ``\\r`` is data, not a line break (progress bars, protocol fixtures),
+    so it is left alone — unlike ``fs_write_to_file``'s explicit ``newline=lf|crlf``,
+    which is a request to normalize everything.
+    """
     return text.replace("\r\n", "\n").replace("\n", eol)
+
+
+def has_mixed_line_endings(text: str) -> bool:
+    crlf = text.count("\r\n")
+    return crlf > 0 and text.count("\n") > crlf
+
+
+def line_ending_at(text: str, pos: int) -> str | None:
+    """Line ending of the line containing ``pos`` (the last line borrows the one
+    before it); ``None`` when the text has no line break around ``pos``."""
+    nl = text.find("\n", pos)
+    if nl == -1:
+        nl = text.rfind("\n", 0, pos)
+        if nl == -1:
+            return None
+    return "\r\n" if nl > 0 and text[nl - 1] == "\r" else "\n"
 
 
 def decode_text_best_effort(data: bytes) -> str | None:
