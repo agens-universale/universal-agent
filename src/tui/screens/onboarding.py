@@ -19,11 +19,8 @@ from tui import branding
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 from tui.form_frame import cap_frame_height
 
-# Именованные шаги мастера. Состав считается на входе и от прогона к прогону
-# разный: шаг «Профили» есть, только если дискавери нашёл профили (спека §11), —
-# поэтому шаг адресуется ИМЕНЕМ, а `self._step` всего лишь позиция в составе ЭТОГО
-# прогона. Числовые сравнения врали бы, как только состав меняется.
-STEP_PROFILES = "profiles"
+# Именованные шаги мастера. Состав статичен, но шаг адресуется ИМЕНЕМ, а не
+# номером: числовые сравнения врали бы при любой правке состава.
 STEP_CONNECTION = "connection"
 STEP_MODEL = "model"
 STEP_LEVELS = "levels"
@@ -32,7 +29,6 @@ STEP_CONFIRM = "confirm"
 
 _BASE_STEPS = (STEP_CONNECTION, STEP_MODEL, STEP_LEVELS, STEP_MCP, STEP_CONFIRM)
 _STEP_TITLE = {
-    STEP_PROFILES: "Профили",
     STEP_CONNECTION: "Подключение",
     STEP_MODEL: "Модель",
     STEP_LEVELS: "Уровни моделей",
@@ -40,7 +36,6 @@ _STEP_TITLE = {
     STEP_CONFIRM: "Подтверждение",
 }
 _STEP_SHORT = {                    # короткие имена для степпера (финала в нём нет)
-    STEP_PROFILES: "Профили",
     STEP_CONNECTION: "Подключение",
     STEP_MODEL: "Модель",
     STEP_LEVELS: "Уровни",
@@ -48,25 +43,24 @@ _STEP_SHORT = {                    # короткие имена для степ
 }
 _MARK_STEPS = (STEP_MODEL, STEP_LEVELS)   # шаги с отдельной от курсора пометкой ● (двухролевой Enter)
 
-# Шаг «Профили» (спека §11, макет ревизии 2026-07-29): три варианта строками, и
-# каждый делает с указателем СВОЁ (решение владельца 2026-08-11): выбрать —
-# записать имя; настроить заново — СНЯТЬ профиль (иначе то, что человек следом
-# настроит в основном конфиге, перекрылось бы тем же профилем, ради обхода
-# которого вариант и выбирают); пропустить — не касаться указателя вовсе.
-_PROFILE_OPTIONS = (
-    ("Выбрать активный", "включить один из найденных"),
-    ("Настроить заново", "снять профиль и настроить с нуля"),
-    ("Пропустить", "оставить профили как есть"),
-)
-_PROFILE_DESC_COL = 22             # своя колонка описаний шага (левые части короче MCP)
-_FOOTER_PROFILES_PICK = "↑↓ навигация  ·  Enter — выбрать профиль  ·  PgUp/Esc — назад"
-
 # Шаг уровней (спека §11: «добавить лёгкую и максимальную модели?») — две
 # независимые под-формы, каждая необязательна: пропуск не пишет ничего.
 _LEVEL_ROWS = ("light", "max")
 _LEVELS_QUESTION = ("Добавить лёгкую и максимальную модели? Шаг можно пропустить — "
                     "уровни настраиваются и позже, в настройках.")
 _LEVEL_UNSET = "не задана"
+# Шаг «Модель» задаёт тот же уровень, что и шаг «Уровни», — `default` (одна карта
+# `MODEL_SLOT_KEYS` на все три, один путь записи). Разведены они только по
+# обязательности: без `default` конфиг нерабочий. Подпись называет эту связь — иначе
+# слово «default» человек впервые встречает уже в итоговой сводке.
+_MODEL_STEP_HINT = ("основная модель — уровень default; light и max можно задать "
+                    "на следующем шаге")
+# Выход со шага строкой-действием, а не клавишей: Enter на этом шаге раскрывает форму
+# уровня под курсором, и «далее» ему взять неоткуда — курсор всегда стоит на уровне.
+# Идиома строки-действия — из секции «Модели» (`models_section._ADD_ROW_LABEL`):
+# глиф + подпись, приглушённо. Шаг необязательный, поэтому подпись одна на оба исхода
+# (уровни заданы / пропущены) — скачущее имя рассказывало бы про механику, не про выбор.
+_LEVELS_CONTINUE_LABEL = "→ продолжить"
 _LEVEL_FORM_LABEL = {"light": "Лёгкая модель (light)",
                      "max": "Максимальная модель (max)"}
 
@@ -90,6 +84,10 @@ class OnboardingScreen(Screen):
     # показывала бы справку с неработающими клавишами и уведомления по незаписанному
     # конфигу. Гейт — TuiApp.check_action.
     BLOCKS_GLOBAL_NAV = True
+
+    # Хвост плашки о перекрывающем профиле: экран мастера — единственная поверхность,
+    # где «Настройки · Профили» существуют, поэтому только он вправе звать туда.
+    _NOTE_SETTINGS_TAIL = " · изменить в Настройки · Профили"
 
     # priority=True — перехватывает PgUp/PgDn раньше фокусированного Input (иначе поля
     # #conn-url/#conn-token/#onb-model не отдали бы клавишу навигации).
@@ -119,15 +117,8 @@ class OnboardingScreen(Screen):
             self._mcp = mcp
         from tui.services.settings_probe import probe as _default_probe
         self._probe_fn = probe or _default_probe
-        # Состав шагов этого прогона: предлагать выбор профиля есть смысл только
-        # когда профили на дисках есть (спека §11). Дискавери — общий с секцией
-        # «Профили» (`onboarding.discover_profiles_for_onboarding`), своего обхода
-        # каталогов у мастера нет.
-        self._profiles = sorted(onboarding.discover_profiles_for_onboarding(config_path))
-        self._steps = (STEP_PROFILES,) + _BASE_STEPS if self._profiles else _BASE_STEPS
+        self._steps = _BASE_STEPS
         self._step = 0
-        self._profile_stage = "menu"   # "menu" (три варианта) | "pick" (список профилей)
-        self._profile_idx = 0
         self._levels_stage = "ask"     # "ask" (две строки) | "light" | "max" (под-форма)
         self._levels_idx = 0
         self._values: dict = {}
@@ -159,33 +150,19 @@ class OnboardingScreen(Screen):
 
     # --- плашка о перекрывающем слое ---
     def _layer_note(self):
-        """Вердикт `overriding_layer_note` по конфигу, каким он СТАНЕТ после
-        мастера: решение шага «Профили» уже принято и уедет в файл вместе со
-        всем остальным. Считать по состоянию до мастера значило бы предупреждать
-        «профиль перекроет ваш выбор» там, где этот профиль сейчас же снимут, —
-        и молчать там, где человек профиль только что выбрал."""
-        config = dict(self._config or {})
-        if "profile" in self._values:
-            config["profile"] = self._values["profile"]
-        return onboarding.overriding_layer_note(config, self._config_path)
+        """Вердикт `overriding_layer_note` по конфигу запуска: профилями мастер не
+        управляет (это «Настройки · Профили»), поэтому его шаги вердикт не меняют —
+        плашка ставится раз в `compose` и переживает пересборку тела шага (та сносит
+        только `.onb-dyn`).
 
-    def _refresh_layer_note(self) -> None:
-        """Плашка живёт кадром шага, а не одним разом в `compose`: решение,
-        принятое на первом шаге, меняет её вердикт в ОБЕ стороны — снятый профиль
-        перекрывать нечем, выбранный перекроет. Пустой вердикт — плашки нет вовсе
-        (её место не занимает пустая строка)."""
-        text = self._layer_note()
-        existing = self.query("#onb-profile-warn")
-        if not text:
-            for widget in existing:
-                widget.remove()
-            return
-        if existing:
-            existing.first().update(text)
-            return
-        self.query_one("#onb-frame", Vertical).mount(
-            Static(text, id="onb-profile-warn", classes="onb-warn", markup=False),
-            before=self.query_one("#onb-body", Static))
+        Общий текст политики — факт без адреса (его печатает и gc-cli); адрес
+        действия дописывает поверхность, и только профильному вердикту: экран
+        «Настройки · Профили» правит профиль, а не чужой слой реестра."""
+        config = self._config or {}
+        note = onboarding.overriding_layer_note(config, self._config_path)
+        if note and config.get("profile"):
+            note += self._NOTE_SETTINGS_TAIL
+        return note
 
     # --- состав шагов (имена вместо номеров) ---
     def _step_id(self) -> str:
@@ -193,22 +170,17 @@ class OnboardingScreen(Screen):
         return self._steps[self._step]
 
     def _goto(self, step_id: str) -> None:
-        """Перейти на именованный шаг, в том числе через голову: выбор активного
-        профиля ведёт сразу на подтверждение (план волны B, шаг (а))."""
+        """Перейти на именованный шаг. Прод-переходы идут через `_advance`/`_go_back`;
+        сегодня это тест-хелпер — тесты навигации адресуют шаги им."""
         self._leave_step()
         self._step = self._steps.index(step_id)
         self._render_step()
 
     def _leave_step(self) -> None:
         """Уход со шага — общий хвост всех переходов: летящая авто-проба
-        обесценивается, а под-состояния шага (под-список профилей, под-форма
-        уровня) его не переживают. Иначе вернувшийся человек застаёт шаг в
-        середине чужого выбора: первый кадр возврата показывал бы список профилей
-        вместо трёх вариантов."""
+        обесценивается, а под-состояние шага (под-форма уровня) его не переживает.
+        Иначе вернувшийся человек застаёт шаг в середине чужого выбора."""
         self._probe_gen += 1
-        if self._profile_stage != "menu":
-            self._profile_stage = "menu"
-            self._profile_idx = 0
         self._levels_stage = "ask"
 
     def _last_step(self) -> int:
@@ -238,20 +210,14 @@ class OnboardingScreen(Screen):
         return t
 
     def _shown_values(self) -> dict:
-        """Чем витрины мастера (лента-сводка и подтверждение) заполняют то, чего человек
-        сам не набрал, — по конфигу, каким он СТАНЕТ после мастера (тот же принцип, что
-        у `_layer_note`).
-
-        Обычно это резолвнутый конфиг запуска. Но после «Настроить заново» профиль
-        СНИМАЕТСЯ, и его слой обещал бы адрес с моделью, которых после мастера не
-        останется: фолбэк в этой ветке — сам базовый файл (тот же сырой документ, что
-        читает `_raw_conn`), а чего нет и там, честно остаётся прочерком."""
-        if self._values.get("profile") != "":
-            return {"completions_url": self._config.get("completions_url"),
-                    "model": self._config.get("model"),
-                    "Authorization": (self._config.get("chat_completion_headers") or {}
-                                      ).get("Authorization")}
-        return self._raw_values("completions_url", "Authorization", "model")
+        """Чем витрины мастера (лента-сводка и подтверждение) заполняют то, чего
+        человек сам не набрал, — резолвнутым конфигом запуска. При активном профиле
+        это значения его слоя: витрина говорит о том, чем агент реально будет
+        работать, а плашка рядом объясняет, откуда они (спека §5)."""
+        return {"completions_url": self._config.get("completions_url"),
+                "model": self._config.get("model"),
+                "Authorization": (self._config.get("chat_completion_headers") or {}
+                                  ).get("Authorization")}
 
     def _summary_text(self) -> str:
         from tui.services.onboarding_summary import summary_line
@@ -287,16 +253,13 @@ class OnboardingScreen(Screen):
         if step == STEP_CONNECTION and self._presets_open():
             return (_FOOTER_PRESET_LIST if self._presets_have_selection()
                     else _FOOTER_PRESET_LIST_NO_MATCH)
-        if step == STEP_PROFILES and self._profile_stage == "pick":
-            # Под-список профилей забирает клавиши себе (тот же приём, что у
-            # раскрытого пресет-листа выше): Enter здесь выбирает профиль, а Esc
-            # возвращает к вариантам, а не выходит из мастера.
-            return _FOOTER_PROFILES_PICK
         parts = ["↑↓ навигация", "Enter — далее", "Esc — выход"]
-        # Enter ведёт далее не везде: на шаге «Профили» он выбирает вариант, на
-        # помеченных шагах — ставит пометку под курсором. «Далее» в эти моменты — PgDn.
-        enter_chooses = (step == STEP_PROFILES
-                         or (step in _MARK_STEPS and not self._step_marked()))
+        # Enter ведёт далее не везде: на помеченных шагах он ставит пометку под
+        # курсором. «Далее» в эти моменты — PgDn.
+        enter_chooses = (step in _MARK_STEPS and not self._step_marked()
+                         # …кроме строки-действия списка уровней: там Enter и есть «далее».
+                         and not (step == STEP_LEVELS and self._levels_stage == "ask"
+                                  and self._levels_on_continue()))
         if enter_chooses:
             parts[1:2] = ["Enter — выбрать", "PgDn — далее"]
         # Развод §2 спеки 2026-08-06: раскрытие/перечитывание списка ушло на Alt+↓,
@@ -411,9 +374,7 @@ class OnboardingScreen(Screen):
             w.remove()
         body = self.query_one("#onb-frame", Vertical)
         step = self._step_id()
-        if step == STEP_PROFILES:
-            self._mount_profiles_body(body)
-        elif step == STEP_CONNECTION:
+        if step == STEP_CONNECTION:
             from tui.editors.connection import ConnectionEditor
             from config_modules.endpoint_presets import endpoint_presets_from_config
             # Поля показывают СЫРОЕ значение файла, не self._config (он уже резолвнут
@@ -439,6 +400,8 @@ class OnboardingScreen(Screen):
                               classes="onb-hint onb-dyn set-group-gap onb-conn-probe"))
         elif step == STEP_MODEL:
             from tui.editors.model import ModelEditor
+            body.mount(Static(_MODEL_STEP_HINT, classes="onb-hint onb-dyn set-spaced",
+                              markup=False))
             endpoint, auth = self._endpoint_auth()
             cfg_model = self._config.get("model") or ""
             if cfg_model == onboarding.MODEL_SENTINEL:
@@ -502,23 +465,16 @@ class OnboardingScreen(Screen):
                 tok = mask_authorization(auth)
             mcp_val = (", ".join(sorted(self._mcp_selected)) if self._mcp_selected
                        else "не выбраны — можно добавить позже")
-            rows = []
+            # Слоты реестра — сущности одного рода, и названы одинаково: «модель» держит
+            # контекст, имя слота — то же, что уедет в файл (`slots.default`) и что
+            # человек увидит в секции «Модели» и в `/level`.
+            rows = [("адрес:", addr), ("модель default:", model)]
             # Строки необязательных шагов — только когда на них что-то решено:
-            # подтверждают ровно то, что уедет в файл (пустая строка «профиль: —»
-            # рассказывала бы про механику, а не про выбор человека). Снятие —
-            # тоже запись, и назвать её обязательно: иначе человек подтверждает
-            # выключение профиля, не видя его в сводке.
-            chosen_profile = self._values.get("profile")
-            active_profile = (self._config or {}).get("profile")
-            if chosen_profile:
-                rows.append(("профиль:", chosen_profile))
-            elif chosen_profile == "" and active_profile:
-                rows.append(("профиль:", f"«{active_profile}» снимается"))
-            rows += [("адрес:", addr), ("модель:", model)]
+            # подтверждают ровно то, что уедет в файл.
             for level in _LEVEL_ROWS:
                 value = self._values.get(onboarding.MODEL_SLOT_KEYS[level])
                 if value:
-                    rows.append((f"{level}:", value))
+                    rows.append((f"модель {level}:", value))
             rows += [("токен:", tok), ("MCP:", mcp_val)]
             summary = Text()
             label_width = max(len(label) for label, _ in rows) + 1  # колонка под самую длинную метку
@@ -552,7 +508,6 @@ class OnboardingScreen(Screen):
         self.query_one("#header-left", Static).update(self._title_text())
         self.query_one("#onb-stepper", Static).update(self._stepper_text())
         self.query_one("#onb-summary", Static).update(self._summary_text())
-        self._refresh_layer_note()
         self.query_one("#onb-body", Static).update(self._body_placeholder())
         # Футер здесь НЕ обновляем: он описывает тело, которого ещё нет. Посчитанный
         # до монтажа, он видит одну группу вместо двух и молчит про Tab ровно там, где
@@ -634,76 +589,23 @@ class OnboardingScreen(Screen):
             auth = None
         return endpoint, auth
 
-    # --- шаг «Профили»: выбрать активный / настроить заново / пропустить ---
-    def _mount_profiles_body(self, body: Vertical) -> None:
-        """Тело шага: объявление находки + строки-варианты (или под-список профилей).
-        Грамматика строк — та же, что у шага MCP: курсор ▸ ACCENT, подпись, описание
-        приглушённой колонкой."""
-        body.mount(Static(f"Найдены профили: {', '.join(self._profiles)}.",
-                          classes="onb-hint onb-dyn", markup=False))
-        if self._profile_stage == "menu":
-            rows = [self._option_row_text(i == self._profile_idx, label, desc)
-                    for i, (label, desc) in enumerate(_PROFILE_OPTIONS)]
-        else:
-            rows = [self._option_row_text(i == self._profile_idx, name, "")
-                    for i, name in enumerate(self._profiles)]
-        for i, text in enumerate(rows):
-            cls = "onb-option onb-dyn set-spaced" + (" selected" if i == self._profile_idx else "")
-            body.mount(Static(text, classes=cls))
-
-    def _option_row_text(self, is_cursor: bool, label: str, desc: str) -> Text:
-        t = Text()
-        t.append("▸ " if is_cursor else "  ", style=ACCENT)
-        t.append(label)
-        self._append_desc(t, desc, _PROFILE_DESC_COL)
-        return t
-
-    def _move_profiles(self, delta: int) -> None:
-        items = _PROFILE_OPTIONS if self._profile_stage == "menu" else self._profiles
-        self._profile_idx = (self._profile_idx + delta) % max(1, len(items))
-        self._render_step()
-
-    def _submit_profiles(self) -> None:
-        """Enter шага: в меню — выбранный вариант, в под-списке — активный профиль.
-
-        Выбор профиля ведёт СРАЗУ на подтверждение и не выходит из мастера (план
-        волны B): указатель ложится в `_values` и уезжает в файл там же, где и всё
-        остальное, — иначе Esc-выход обещал бы «данные не сохранятся» поверх уже
-        записанного файла."""
-        if self._profile_stage == "pick":
-            self._values["profile"] = self._profiles[self._profile_idx]
-            self._goto(STEP_CONFIRM)
-            return
-        if self._profile_idx == 0:                 # «Выбрать активный»
-            self._profile_stage = "pick"
-            self._profile_idx = 0
-            self._render_step()
-            return
-        if self._profile_idx == 1:                 # «Настроить заново»
-            # Снятие — тоже решение, и оно уезжает в файл: пустой указатель
-            # выключает профиль, чтобы настроенное следом реально работало.
-            self._values["profile"] = ""
-        else:                                      # «Пропустить»
-            # Указателя не касаемся вовсе — в том числе снимаем выбор, сделанный
-            # до возврата на шаг: иначе передумавший человек унёс бы в файл
-            # профиль, от которого только что отказался.
-            self._values.pop("profile", None)
-        self._advance()
-
-    def _close_profile_picker(self) -> None:
-        """Под-список свернулся — вариантами шага снова владеет меню (Esc/PgUp)."""
-        self._profile_stage = "menu"
-        self._profile_idx = 0
-        self._render_step()
-
     # --- шаг уровней: две необязательные под-формы (light/max) ---
     def _mount_levels_body(self, body: Vertical) -> None:
         if self._levels_stage == "ask":
-            body.mount(Static(_LEVELS_QUESTION, classes="onb-hint onb-dyn", markup=False))
+            # Воздух отделяет вопрос от строк-ответов, а сами строки идут вплотную —
+            # грамматика блока настроек (`.set-hint` + `.set-row` без margin): плотный
+            # список читается как один выбор, разреженный — как отдельные пункты.
+            body.mount(Static(_LEVELS_QUESTION, classes="onb-hint onb-dyn set-spaced",
+                              markup=False))
             for i, level in enumerate(_LEVEL_ROWS):
-                cls = "onb-option onb-dyn set-spaced" + (" selected" if i == self._levels_idx else "")
+                cls = "onb-option onb-dyn" + (" selected" if i == self._levels_idx else "")
                 body.mount(Static(self._level_row_text(i == self._levels_idx, level),
                                   classes=cls))
+            cont = Text()
+            cont.append("▸ " if self._levels_on_continue() else "  ", style=ACCENT)
+            cont.append(_LEVELS_CONTINUE_LABEL, style=DIM)
+            body.mount(Static(cont, classes="onb-option onb-dyn"
+                              + (" selected" if self._levels_on_continue() else "")))
             return
         from tui.editors.model import ModelEditor
         level = self._levels_stage
@@ -722,18 +624,30 @@ class OnboardingScreen(Screen):
     def _level_row_text(self, is_cursor: bool, level: str) -> Text:
         """Строка уровня — грамматика строк слотов секции «Модели»
         (`models_section._binding_row_text`): курсор, голова «уровень · роль»
-        (копирайт §1 из единого источника), значение в своей колонке."""
-        from tui.editors.models_section import slot_head
+        (копирайт §1 из единого источника), значение в своей колонке.
+
+        Голова берётся у `slot_head_text` ЦЕЛИКОМ, вместе с раскраской: имя уровня
+        несёт цвет уровня (`TOGGLES["level"]`) — тот же, каким его красят список
+        `/level` и слоты секции «Модели». Собирать её здесь заново значило бы
+        показывать одну сущность на одном экране двумя способами."""
+        from tui.editors.models_section import slot_head, slot_head_text
         value = self._values.get(onboarding.MODEL_SLOT_KEYS[level], "")
         width = max(len(slot_head(name)) for name in _LEVEL_ROWS) + 2
         t = Text()
         t.append("▸ " if is_cursor else "  ", style=ACCENT)
-        t.append(slot_head(level).ljust(width), style=INK)
+        head = slot_head_text(level)
+        head.pad_right(max(0, width - len(head.plain)))
+        t.append(head)
         t.append(value or _LEVEL_UNSET, style=DIM if value else DEEP_DIM)
         return t
 
+    def _levels_on_continue(self) -> bool:
+        """Курсор списка уровней — на строке-действии (последней), а не на уровне."""
+        return self._levels_idx == len(_LEVEL_ROWS)
+
     def _move_levels(self, delta: int) -> None:
-        self._levels_idx = (self._levels_idx + delta) % len(_LEVEL_ROWS)
+        # Строк на одну больше, чем уровней: последняя — «продолжить».
+        self._levels_idx = (self._levels_idx + delta) % (len(_LEVEL_ROWS) + 1)
         self._render_step()
 
     def _submit_levels(self) -> None:
@@ -741,6 +655,9 @@ class OnboardingScreen(Screen):
         та же двухтактная механика, что на шаге «Модель» (не помечено → Enter метит,
         помечено → фиксирует и возвращает к списку)."""
         if self._levels_stage == "ask":
+            if self._levels_on_continue():
+                self._advance()
+                return
             self._levels_stage = _LEVEL_ROWS[self._levels_idx]
             self._render_step()
             return
@@ -792,13 +709,12 @@ class OnboardingScreen(Screen):
         self._append_desc(t, desc)
         return t
 
-    def _append_desc(self, t: Text, desc: str, col: int | None = None) -> None:
+    def _append_desc(self, t: Text, desc: str) -> None:
         """Дописать приглушённое описание с выравниванием на колонку (приём — как
-        McpSectionEditor._row_text в /settings). col — своя колонка шага, если левые
-        части там длиннее общей."""
+        McpSectionEditor._row_text в /settings)."""
         if not desc:
             return
-        pad = (col or self._DESC_COL) - t.cell_len
+        pad = self._DESC_COL - t.cell_len
         t.append(" " * pad if pad > 0 else "  ")
         t.append(desc, style=DEEP_DIM)
 
@@ -976,11 +892,8 @@ class OnboardingScreen(Screen):
             self._render_step()
 
     def _go_back(self) -> None:
-        """PgUp: сперва закрывается под-состояние шага (под-список профилей,
-        под-форма уровня), и только потом мастер отступает на шаг назад."""
-        if self._step_id() == STEP_PROFILES and self._profile_stage == "pick":
-            self._close_profile_picker()
-            return
+        """PgUp: сперва закрывается под-состояние шага (под-форма уровня), и только
+        потом мастер отступает на шаг назад."""
         if self._level_form_open():
             self._close_level_form(take_value=False)
             return
@@ -1003,8 +916,6 @@ class OnboardingScreen(Screen):
             self._advance_model()
         elif self._level_form_open():
             self._close_level_form(take_value=True)   # «далее» из под-формы — к списку уровней
-        elif step == STEP_PROFILES and self._profile_stage == "pick":
-            return                        # под-список профилей «далее» не обещает
         elif step != STEP_CONFIRM:
             self._advance()
 
@@ -1125,25 +1036,15 @@ class OnboardingScreen(Screen):
                 event.stop()
                 self._refresh_footer()   # клавиши вернулись шагу — футер за ними
                 return
-        if event.key == "escape" and step == STEP_PROFILES and self._profile_stage == "pick":
-            # То же правило вложенности для под-списка профилей: Esc закрывает его,
-            # а не мастер.
-            event.stop()
-            self._close_profile_picker()
-            return
         if event.key == "escape" and self._level_form_open():
-            # …и для под-формы уровня: закрывается БЕЗ значения — уровень
-            # необязателен, отказ обязан оставаться отказом.
+            # То же правило вложенности для под-формы уровня: закрывается БЕЗ
+            # значения — уровень необязателен, отказ обязан оставаться отказом.
             event.stop()
             self._close_level_form(take_value=False)
             return
         if event.key == "escape":
             event.stop()
             self._confirm_exit()
-            return
-        if event.key in ("up", "down") and step == STEP_PROFILES:
-            event.stop()
-            self._move_profiles(-1 if event.key == "up" else 1)
             return
         if event.key in ("up", "down") and step == STEP_LEVELS and self._levels_stage == "ask":
             event.stop()
@@ -1196,8 +1097,6 @@ class OnboardingScreen(Screen):
                     self._refresh_footer()   # список свернулся — футер снова про шаг
                     return
                 self._submit_connection()
-            elif step == STEP_PROFILES:
-                self._submit_profiles()
             elif step == STEP_MODEL:
                 self._submit_model()
             elif step == STEP_LEVELS:

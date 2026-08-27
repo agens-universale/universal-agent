@@ -116,18 +116,16 @@ def _app(tmp_path, config=None):
 
 # --- мастер первого запуска ---
 
-def _isolate_profile_discovery(monkeypatch, tmp_path):
-    """Работать из `tmp_path`: состав шагов мастера зависит от дискавери профилей,
-    а тот смотрит и в ПРОЕКТНЫЙ корень (`<cwd>/.gc/profiles`) — фича сама этот путь
-    рекламирует, и первый же заведённый в репозитории каталог профилей добавил бы
-    мастеру шаг «Профили». Кадр разъехался бы диффом, из которого причину не
-    прочитать (тот же приём, что у `tests/tui/conftest.py::wizard_connection_step`)."""
+def _isolate_snapshot_cwd(monkeypatch, tmp_path):
+    """Работать из `tmp_path`: снимок не должен зависеть от того, из какого
+    каталога запущен pytest (тот же приём, что у
+    `tests/tui/conftest.py::wizard_connection_step`)."""
     monkeypatch.chdir(tmp_path)
 
 
 def test_wizard_connection_snapshot(snap_compare, tmp_path, monkeypatch):
     """Шаг «Подключение» мастера: три поля, пресеты раскрыты под адресом."""
-    _isolate_profile_discovery(monkeypatch, tmp_path)
+    _isolate_snapshot_cwd(monkeypatch, tmp_path)
     app = _app(tmp_path)
 
     async def setup(pilot):
@@ -145,7 +143,7 @@ def test_wizard_model_snapshot(snap_compare, tmp_path, monkeypatch):
     from tui.editors.connection import ConnectionEditor
     from tui.editors.model import ModelEditor
     from textual.widgets import Input
-    _isolate_profile_discovery(monkeypatch, tmp_path)
+    _isolate_snapshot_cwd(monkeypatch, tmp_path)
     app = _app(tmp_path)
 
     async def setup(pilot):

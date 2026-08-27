@@ -474,56 +474,26 @@ def test_write_wizard_values_result_resolves_in_both_api_modes(tmp_path, monkeyp
         assert resolved.authorization is None                    # наследуется заголовок
 
 
-# --- шаги (а) «профили» и (в) «light/max»: их доля в записи (волна B, Task 8) ---
+# --- шаг «light/max»: его доля в записи (волна B, Task 8) ---
 
-def test_discover_profiles_for_onboarding_sees_both_roots(tmp_path, monkeypatch):
-    """Дискавери шага «Профили» — общий с секцией «Профили» (`config_modules.profiles`,
-    оба корня спеки §3.1): проектный `.gc/profiles` от текущего каталога и «рядом с
-    базой» от конфига мастера. Своего обхода каталогов у мастера нет."""
-    from config_modules.profiles import PROFILE_SKELETON
-
-    cfg_path = _wizard_config(tmp_path, monkeypatch)
-    base_root = tmp_path / "profiles"
-    base_root.mkdir()
-    (base_root / "work.yml").write_text(PROFILE_SKELETON, encoding="utf-8")
-    project_root = tmp_path / ".gc" / "profiles"
-    project_root.mkdir(parents=True)
-    (project_root / "local.yml").write_text(PROFILE_SKELETON, encoding="utf-8")
-
-    found = onboarding.discover_profiles_for_onboarding(cfg_path)
-    assert sorted(found) == ["local", "work"]
-
-
-def test_discover_profiles_for_onboarding_without_config_path():
-    """Пути конфига ещё нет (плейсхолдер до резолва) — резолвить корни не от чего."""
-    assert onboarding.discover_profiles_for_onboarding(None) == {}
-
-
-def test_write_wizard_values_writes_profile_pointer(tmp_path, monkeypatch):
-    """Выбранный на шаге «Профили» активный профиль уезжает в файл тем же путём
-    записи, что и всё остальное, — на подтверждении (Esc до него обещает «данные не
-    сохранятся», и запись в момент выбора сделала бы это обещание ложным)."""
-    cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {"profile": "work"})
-    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-    assert raw["profile"] == "work"
-
-
-def test_write_wizard_values_adds_the_pointer_anchor_when_absent(tmp_path, monkeypatch):
-    """Конфиг старой установки строки `profile:` не содержит вовсе, а дописать
-    топ-уровневый скаляр `write_values` не умеет (его фолбэк на шаблон работает
-    только для dotted-ключей) — без якоря выбор человека молча не записался бы
-    (ключ вернулся бы в `missing`, а мастер отчитался «✓ конфиг записан»)."""
-    cfg_path = _wizard_config(tmp_path, monkeypatch)
-    text = cfg_path.read_text(encoding="utf-8")
-    cfg_path.write_text(
-        "\n".join(line for line in text.splitlines() if not line.startswith("profile:")) + "\n",
-        encoding="utf-8")
-    assert yaml.safe_load(cfg_path.read_text(encoding="utf-8")).get("profile") is None
-
-    missing = onboarding.write_wizard_values(cfg_path, {"profile": "work"})
-    assert missing == []
-    assert yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"] == "work"
+def test_write_wizard_values_never_touches_the_profile_pointer(tmp_path):
+    """Мастер профилями не управляет (спека §2): указатель в файле остаётся
+    таким, каким был, при любом проходе."""
+    from pathlib import Path
+    import onboarding
+    from config import _default_config_path
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(Path(_default_config_path()).read_text(encoding="utf-8"),
+                   encoding="utf-8")
+    import yaml
+    text = cfg.read_text(encoding="utf-8").replace('profile: ""', 'profile: work')
+    cfg.write_text(text, encoding="utf-8")
+    onboarding.write_wizard_values(str(cfg), {
+        "completions_url": "http://h/v1/chat/completions",
+        "Authorization": "Bearer t",
+        onboarding.MODEL_SLOT_KEYS["default"]: "m",
+    })
+    assert (yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}).get("profile") == "work"
 
 
 def test_write_wizard_values_writes_level_models_with_slots(tmp_path, monkeypatch):

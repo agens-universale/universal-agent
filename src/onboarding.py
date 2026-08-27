@@ -239,8 +239,10 @@ def overriding_layer_note(config: Dict[str, Any], config_path=None) -> Optional[
     без эффекта. Без `config_path` слой не различить — тогда только профиль."""
     profile = config.get("profile") or None
     if profile:
-        return (f'действует профиль "{profile}" — ваш выбор ляжет в основной конфиг, '
-                'но профиль его перекроет')
+        # Текст — общий для всех поверхностей (экран мастера и подсказка gc-cli),
+        # поэтому это чистый факт без адреса действия: звать в «Настройки · Профили»
+        # там, где TUI нет, значит врать. Адрес дописывает поверхность (спека §3).
+        return f'действует профиль "{profile}" — он перекроет модельные настройки'
     if config.get("models") and _registry_overridden_above(config_path):
         return ("действует реестр моделей из другого слоя конфигурации — ваш выбор "
                 "ляжет в основной конфиг, но этот слой его перекроет")
@@ -289,25 +291,6 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
         f"    • Либо впишите поля вручную и запустите снова.\n\n"
         f"  MCP-серверы (веб-поиск, документы и др.): gc-mcp install — поставить, gc-mcp help — все команды\n"
     )
-
-
-# --- Профили, которые мастер может предложить (шаг «Профили», спека §11) ---
-
-def discover_profiles_for_onboarding(config_path) -> Dict[str, Any]:
-    """Профили обоих корней (спека §3.1) — тем же дискавери, что у секции
-    «Профили» (`config_modules.profiles`): проектный `.gc/profiles` от текущего
-    каталога и «рядом с базой» от конфига, который правит мастер. Своего обхода
-    каталогов у мастера нет.
-
-    Пути конфига ещё нет (плейсхолдер до резолва в `TuiApp`) — резолвить корни не
-    от чего, предлагать нечего."""
-    from pathlib import Path
-
-    from config_modules.profiles import discover_profiles, profile_roots
-
-    if not config_path:
-        return {}
-    return discover_profiles(profile_roots(Path.cwd(), Path(config_path)))
 
 
 # --- Запись собранного мастером (волна B, спека §11) ----------------------
@@ -400,10 +383,6 @@ def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
     `responses` они не действуют (§4), и запись, самодостаточная в
     `chat_completions`, увела бы responses-конфиг с рабочего endpoint'а.
 
-    Указатель профиля (`profile`, шаг «Профили») пишется тем же путём и в тот же
-    момент — на подтверждении: мастер обещает «данные не сохранятся» при выходе,
-    и запись в момент выбора сделала бы это обещание ложным.
-
     Все записи реестра уходят ОДНОЙ транзакцией: вторая запись без слота
     нерезолвима (§4) и была бы отвергнута валидацией отдельной операцией.
 
@@ -420,11 +399,6 @@ def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
     model_keys = set(MODEL_SLOT_KEYS.values())
     flat = {FIELD_ANCHOR_PATHS.get(key, key): value
             for key, value in values.items() if key not in model_keys}
-    if "profile" in values:
-        # Указатель — топ-уровневый скаляр: у конфигов, созданных до его появления,
-        # строки нет вовсе, а дописать её `write_values` не умеет (его фолбэк на
-        # шаблон работает только для dotted-ключей) — якорь готовит writer.
-        ocw.ensure_pointer_anchor(config_path, template_path=template_path)
     missing = ocw.write_values(config_path, flat, template_path=template_path,
                                validate=validate_config_text)
     ops = _registry_ops(values)

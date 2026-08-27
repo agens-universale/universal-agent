@@ -61,9 +61,10 @@ def _resolved_conn_cfg(cfg_path):
 
 def _profiles_cfg(tmp_path, *names, active=None):
     """Настоящий config.yml + профили в корне «рядом с базой» (`<каталог конфига>/
-    profiles`, спека §3.1). Шаг «Профили» появляется от ДИСКАВЕРИ, а не от флага —
-    поэтому файлы кладутся на диск, а не подсовываются моком. `active` — указатель
-    в самом конфиге (проверки снятия профиля мастером)."""
+    profiles`, спека §3.1). Файлы на диске — обстановка: мастер профилями не
+    управляет и от их наличия не зависит вовсе, а тесты обязаны это показывать на
+    настоящей раскладке. `active` — указатель в самом конфиге: им и задаётся
+    ДЕЙСТВУЮЩИЙ профиль, о котором мастер информирует."""
     import onboarding_config_writer as w
     from config import validate_config_text
     from config_modules.profiles import PROFILE_SKELETON
@@ -77,41 +78,47 @@ def _profiles_cfg(tmp_path, *names, active=None):
     return cfg_path
 
 
-def test_wizard_steps_are_named_and_do_not_include_profiles_without_them(tmp_path, monkeypatch):
-    """Состав шагов считается на входе и адресуется ИМЕНАМИ: профилей на дисках
-    нет — шага «Профили» нет, остальные (включая скипаемый шаг уровней) есть всегда.
-    Числовые индексы шагов константами больше не являются."""
-    from tui.screens.onboarding import (STEP_CONFIRM, STEP_CONNECTION, STEP_LEVELS,
-                                        STEP_MCP, STEP_MODEL)
-    monkeypatch.chdir(tmp_path)                  # проектный корень профилей — не репозиторий
-    cfg_path = _write_conn_cfg(tmp_path)
-    scr = _screen(config_path=str(cfg_path))
-    assert scr._steps == (STEP_CONNECTION, STEP_MODEL, STEP_LEVELS, STEP_MCP, STEP_CONFIRM)
-    assert scr._step_id() == STEP_CONNECTION
-    # Хром считает шаги по СОСТАВУ, а не по зашитому числу: счётчик в шапке, состав
-    # степпера (финала в нём нет) и отметки пройденного на финале.
-    assert scr._title_text() == "Настройка · 1/4"
-    assert "○ Уровни" in scr._stepper_text().plain
-    scr._step = scr._steps.index(STEP_CONFIRM)
-    assert scr._title_text() == "Настройка · подтверждение"
-    assert scr._stepper_text().plain.count("✓") == 4
+def test_wizard_steps_are_named_and_static():
+    """Шаги адресуются именами, состав один и тот же всегда (спека §2)."""
+    from tui.screens.onboarding import (_BASE_STEPS, STEP_CONFIRM, STEP_CONNECTION,
+                                        STEP_LEVELS, STEP_MCP, STEP_MODEL)
+    scr = _screen()
+    assert scr._steps == _BASE_STEPS == (STEP_CONNECTION, STEP_MODEL, STEP_LEVELS,
+                                         STEP_MCP, STEP_CONFIRM)
 
 
-def test_wizard_steps_start_with_profiles_when_profiles_exist(tmp_path, monkeypatch):
-    """Второй вариант состава: дискавери нашёл профили — первым идёт шаг «Профили»,
-    остальные не меняются."""
-    from tui.screens.onboarding import (STEP_CONFIRM, STEP_CONNECTION, STEP_LEVELS,
-                                        STEP_MCP, STEP_MODEL, STEP_PROFILES)
+def test_header_counter_names_the_position_and_the_finale():
+    """Шапка называет позицию человека в мастере: «N/4» по всем шагам подряд
+    (знаменатель — шаги БЕЗ финального) и «подтверждение» вместо счётчика на
+    финале. Сверяется весь список заголовков разом — сдвиг на единицу, лишний
+    шаг в знаменателе или счётчик на финале ломают его."""
+    from tui.screens.onboarding import STEP_CONFIRM
+    scr = _screen()
+    titles = []
+    for position in range(len(scr._steps)):
+        scr._step = position
+        titles.append(scr._title_text())
+    assert titles == ["Настройка · 1/4", "Настройка · 2/4", "Настройка · 3/4",
+                      "Настройка · 4/4", "Настройка · подтверждение"]
+    assert scr._steps[len(titles) - 1] == STEP_CONFIRM   # без счётчика — именно финал
+
+
+def test_wizard_steps_are_static_with_profiles_on_disk(tmp_path, monkeypatch):
+    """Состав шагов больше не зависит ни от профилей на диске, ни от каталога
+    запуска: шага «Профили» нет, дискавери нет вовсе (спека §2, §9)."""
     monkeypatch.chdir(tmp_path)
-    cfg_path = _profiles_cfg(tmp_path, "work", "home")
-    scr = _screen(config_path=str(cfg_path))
-    assert scr._steps == (STEP_PROFILES, STEP_CONNECTION, STEP_MODEL, STEP_LEVELS,
-                          STEP_MCP, STEP_CONFIRM)
-    assert scr._step_id() == STEP_PROFILES
-    assert scr._title_text() == "Настройка · 1/5"      # шагов на один больше
-    assert "● Профили" in scr._stepper_text().plain
-    scr._step = scr._steps.index(STEP_CONFIRM)
-    assert scr._stepper_text().plain.count("✓") == 5
+    from tui.screens.onboarding import _BASE_STEPS
+    _cfg_path, scr = _active_profile_screen(tmp_path)
+    assert scr._steps == _BASE_STEPS
+
+
+def test_wizard_module_has_no_profiles_step_left():
+    """Негатив на недоснятое: имя шага и его дискавери должны исчезнуть, иначе
+    мёртвая ветка тихо переживёт правку (спека §8)."""
+    import onboarding
+    from tui.screens import onboarding as screen_mod
+    assert not hasattr(screen_mod, "STEP_PROFILES")
+    assert not hasattr(onboarding, "discover_profiles_for_onboarding")
 
 
 @pytest.mark.asyncio
@@ -302,7 +309,7 @@ async def test_final_summary_hides_template_sentinels(tmp_path):
         blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert onboarding.MODEL_SENTINEL not in blob
         assert onboarding.URL_SENTINEL not in blob
-        assert "модель:" in blob and "адрес:" in blob and "—" in blob
+        assert "модель default:" in blob and "адрес:" in blob and "—" in blob
 
 
 @pytest.mark.asyncio
@@ -323,10 +330,10 @@ async def test_final_summary_glyph_only_for_filled_rows(tmp_path):
         lines = [ln for w in scr.query("Static.onb-dyn")
                  for ln in str(w.render()).splitlines()]
         addr_line = next(ln for ln in lines if "адрес:" in ln)
-        model_line = next(ln for ln in lines if "модель:" in ln)
+        model_line = next(ln for ln in lines if "модель default:" in ln)
         assert addr_line.startswith("  ") and "✓" not in addr_line
         assert model_line.startswith("✓ ")
-        assert addr_line.index("адрес:") == model_line.index("модель:")
+        assert addr_line.index("адрес:") == model_line.index("модель default:")
 
 
 @pytest.mark.asyncio
@@ -1108,6 +1115,22 @@ async def test_pagedown_does_not_commit_on_confirm_step(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pgup_from_confirm_returns_to_mcp_step(tmp_path):
+    """С финала PgUp — обычный шаг назад, на предыдущий по составу шаг «MCP»."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM, STEP_MCP
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_CONFIRM); await pilot.pause()
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert scr._step_id() == STEP_MCP
+
+
+@pytest.mark.asyncio
 async def test_model_enter_marks_then_advances(tmp_path):
     """Шаг «Модель»: Enter#1 помечает подсвеченную (● переезжает на неё), Enter#2 — далее."""
     pytest.importorskip("textual")
@@ -1871,181 +1894,9 @@ async def test_alt_down_on_the_model_step_goes_past_the_session_cache(tmp_path):
                          "перечитывание должно идти мимо сессионного кэша")
 
 
-# --- шаг «Профили» (а) и шаг уровней (в) — волна B, Task 8 -------------------
-# Оба шага живут в СОСТАВЕ шагов, а не поверх него: состав считается на входе, и
-# сравнения кода идут по именам (`_step_id`), а не по номерам.
-
-
-def _profiles_screen(tmp_path, **over):
-    """Мастер на конфиге, рядом с которым лежат профили `home` и `work`."""
-    cfg_path = _profiles_cfg(tmp_path, "home", "work")
-    return cfg_path, _screen(config_path=str(cfg_path), **over)
-
-
-@pytest.mark.asyncio
-async def test_profiles_step_choose_active_writes_pointer_and_jumps_to_confirm(
-        tmp_path, monkeypatch):
-    """«Выбрать активный» → под-список профилей → выбор ведёт СРАЗУ на подтверждение
-    (мастер не выходит), а указатель уезжает в файл тем же путём записи, что и всё
-    остальное, — на подтверждении."""
-    pytest.importorskip("textual")
-    import yaml
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONFIRM, STEP_PROFILES
-    from tests.tui.conftest import wait_until
-    monkeypatch.chdir(tmp_path)
-    committed = []
-    cfg_path, scr = _profiles_screen(tmp_path, on_commit=lambda: committed.append(True))
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        assert scr._step_id() == STEP_PROFILES
-        blob = " ".join(str(w.render()) for w in scr.query(".onb-dyn"))
-        assert "home" in blob and "work" in blob        # найденные профили названы
-        await pilot.press("enter")                       # «Выбрать активный»
-        await pilot.pause()
-        assert scr._profile_stage == "pick"
-        await pilot.press("enter")                       # первый в списке — home
-        await pilot.pause()
-        assert scr._step_id() == STEP_CONFIRM
-        assert scr._values["profile"] == "home"
-        assert yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"] == ""
-        await pilot.press("enter")                       # подтвердить и завершить
-        await wait_until(pilot, lambda: committed, "commit done")
-        assert yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"] == "home"
-
-
-@pytest.mark.asyncio
-async def test_pgup_from_confirm_returns_into_the_wizard(tmp_path, monkeypatch):
-    """Прыжок на финал — не выход: PgUp возвращает в мастер существующей механикой
-    (шаг назад по составу)."""
-    pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONFIRM, STEP_MCP
-    monkeypatch.chdir(tmp_path)
-    _cfg_path, scr = _profiles_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("enter")                       # «Выбрать активный»
-        await pilot.press("enter")                       # профиль → финал
-        await pilot.pause()
-        assert scr._step_id() == STEP_CONFIRM
-        await pilot.press("pageup")
-        await pilot.pause()
-        assert scr._step_id() == STEP_MCP
-
-
-@pytest.mark.asyncio
-async def test_profiles_step_reconfigure_continues_the_usual_flow(tmp_path, monkeypatch):
-    """«Настроить заново» — обычный поток: следующий шаг «Подключение», а указатель
-    профиля снимается (решение владельца; сквозной путь до файла — в
-    `test_profiles_reconfigure_removes_the_active_profile`)."""
-    pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONNECTION
-    monkeypatch.chdir(tmp_path)
-    _cfg_path, scr = _profiles_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("down")                        # → «Настроить заново»
-        await pilot.press("enter")
-        await pilot.pause()
-        assert scr._step_id() == STEP_CONNECTION
-        assert scr._values["profile"] == ""
-
-
-@pytest.mark.asyncio
-async def test_profiles_step_skip_continues_the_usual_flow(tmp_path, monkeypatch):
-    """«Пропустить» — обычный поток (план волны B, Task 8): указатель профиля не
-    трогается, мастер идёт своими шагами дальше. От «Настроить заново» вариант
-    отличается намерением, а не механикой, — оба ведут на «Подключение»."""
-    pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONNECTION
-    monkeypatch.chdir(tmp_path)
-    _cfg_path, scr = _profiles_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("down")
-        await pilot.press("down")                        # → «Пропустить»
-        await pilot.press("enter")
-        await pilot.pause()
-        assert scr._step_id() == STEP_CONNECTION
-        assert "profile" not in scr._values
-
-
-@pytest.mark.asyncio
-async def test_profile_picker_escape_returns_to_the_options(tmp_path, monkeypatch):
-    """Esc-вложенность: под-список профилей — своё под-состояние, Esc сворачивает
-    ЕГО, а не выходит из мастера."""
-    pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.confirm import ConfirmScreen
-    monkeypatch.chdir(tmp_path)
-    _cfg_path, scr = _profiles_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("enter")                       # «Выбрать активный»
-        await pilot.pause()
-        assert scr._profile_stage == "pick"
-        await pilot.press("escape")
-        await pilot.pause()
-        assert scr._profile_stage == "menu"
-        assert not isinstance(app.screen, ConfirmScreen)
-        await pilot.press("escape")                      # а вот теперь — выход из мастера
-        await pilot.pause()
-        assert isinstance(app.screen, ConfirmScreen)
-
-
-@pytest.mark.asyncio
-async def test_profiles_footer_promises_choose_not_next(tmp_path, monkeypatch):
-    """Enter на шаге «Профили» ВЫБИРАЕТ вариант, а не ведёт далее (контракт п.8
-    плана) — футер обязан говорить именно это; «далее» здесь уводит PgDn."""
-    pytest.importorskip("textual")
-    from textual.widgets import Static
-    from tui.app import TuiApp
-    monkeypatch.chdir(tmp_path)
-    _cfg_path, scr = _profiles_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render())
-        assert "Enter — выбрать" in footer and "Enter — далее" not in footer
-        assert "PgDn — далее" in footer
-
-
-@pytest.mark.asyncio
-async def test_overriding_layer_note_survives_on_the_profiles_step(tmp_path, monkeypatch):
-    """Нота о перекрывающем слое (`overriding_layer_note`) висит над телом шага —
-    новый первый шаг её не отменяет."""
-    pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_PROFILES
-    monkeypatch.chdir(tmp_path)
-    cfg_path = _profiles_cfg(tmp_path, "work")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        scr = _screen(config_path=str(cfg_path),
-                      config={"completions_url": "", "chat_completion_headers": {},
-                              "model": "", "profile": "work"})
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        assert scr._step_id() == STEP_PROFILES
-        note = str(scr.query_one("#onb-profile-warn").render())
-        assert "work" in note
-
-
-# --- шаг уровней (в): две опциональные под-формы ---------------------------
+# --- шаг уровней (в) — волна B, Task 8: две опциональные под-формы -----------
+# Шаг живёт в СОСТАВЕ шагов, а не поверх него: сравнения кода идут по именам
+# (`_step_id`), а не по номерам.
 
 
 def _levels_screen(tmp_path, **over):
@@ -2159,6 +2010,97 @@ async def test_level_form_escape_returns_to_the_list_without_setting(tmp_path):
         assert not isinstance(app.screen, ConfirmScreen)
 
 
+def test_level_row_paints_the_level_name_with_its_own_color():
+    """Имя уровня в строке шага несёт ЦВЕТ уровня из `TOGGLES["level"]` (max — ACCENT),
+    как в раскрытом списке `/level` и в слотах секции «Модели»: одна сущность не имеет
+    права выглядеть на одном экране двумя способами. Роль после «·» — обычная."""
+    from tui.palette import ACCENT, INK
+    scr = _screen()
+    row = scr._level_row_text(False, "max")
+    styles = {row.plain[span.start:span.end]: span.style for span in row.spans}
+    assert styles.get("max") == ACCENT
+    assert styles.get(" · самая сильная: сложные задачи") == INK
+
+
+@pytest.mark.asyncio
+async def test_model_step_names_the_level_it_fills(tmp_path):
+    """Шаг «Модель» задаёт слот `default` — тот же уровень, что и шаг «Уровни».
+    Подпись называет связь: без неё слово «default» человек впервые встречает уже
+    в итоговой сводке («модель default: …»)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_MODEL
+    from model_picker import ModelInfo
+    scr = _screen(fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True)])
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_MODEL); await pilot.pause()
+        blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        assert "уровень default" in blob
+
+
+@pytest.mark.asyncio
+async def test_levels_continue_row_leaves_the_step_on_enter(tmp_path):
+    """Выход со шага — строкой-действием: Enter на уровне раскрывает форму, и «далее»
+    ему взять неоткуда. Курсор ходит по трём строкам (light, max, «продолжить»), и на
+    последней Enter уводит на следующий шаг, ничего не записав."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_LEVELS, STEP_MCP
+    cfg_path, scr = _levels_screen(tmp_path)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_LEVELS); await pilot.pause()
+        await pilot.press("down"); await pilot.press("down")   # light → max → продолжить
+        await pilot.pause()
+        assert scr._levels_on_continue()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert scr._step_id() == STEP_MCP
+        assert "model_light" not in scr._values and "model_max" not in scr._values
+
+
+@pytest.mark.asyncio
+async def test_levels_cursor_cycles_through_three_rows(tmp_path):
+    """Список замкнут по трём строкам: с «продолжить» ↓ возвращает на первый уровень."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_LEVELS
+    cfg_path, scr = _levels_screen(tmp_path)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_LEVELS); await pilot.pause()
+        seen = []
+        for _ in range(4):
+            seen.append(scr._levels_idx)
+            await pilot.press("down"); await pilot.pause()
+        assert seen == [0, 1, 2, 0]
+
+
+@pytest.mark.asyncio
+async def test_levels_footer_follows_the_row_under_the_cursor(tmp_path):
+    """Футер обещает роль Enter для строки ПОД КУРСОРОМ: на уровне — «выбрать»
+    (далее уводит PgDn), на строке-действии Enter сам и есть «далее»."""
+    pytest.importorskip("textual")
+    from textual.widgets import Static
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_LEVELS
+    cfg_path, scr = _levels_screen(tmp_path)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_LEVELS); await pilot.pause()
+        footer = str(scr.query_one("#onb-footer", Static).render())
+        assert "Enter — выбрать" in footer and "PgDn — далее" in footer
+        await pilot.press("down"); await pilot.press("down")   # → «продолжить»
+        await pilot.pause()
+        footer = str(scr.query_one("#onb-footer", Static).render())
+        assert "Enter — далее" in footer and "PgDn — далее" not in footer
+
+
 @pytest.mark.asyncio
 async def test_levels_footer_promises_the_keys_that_work(tmp_path):
     """Футер шага: в списке уровней Enter выбирает (далее — PgDn), в под-форме
@@ -2185,11 +2127,18 @@ async def test_levels_footer_promises_the_keys_that_work(tmp_path):
         assert "Esc — назад" in footer and "Esc — выход" not in footer
 
 
+def _screen_with_profiles_on_disk(tmp_path, **over):
+    """Мастер на конфиге, рядом с которым просто лежат файлы профилей `home` и
+    `work` (указатель `profile` в конфиге не выставлен) — состав шагов мастера
+    от их наличия не зависит."""
+    cfg_path = _profiles_cfg(tmp_path, "home", "work")
+    return cfg_path, _screen(config_path=str(cfg_path), **over)
+
+
 @pytest.mark.asyncio
 async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, monkeypatch):
-    """Полный проход с обоими новыми шагами: «Настроить заново» → подключение →
-    модель → уровень max → MCP → подтверждение. Итог — валидный конфиг (та же
-    двухфазная проверка, что у записи реестра)."""
+    """Полный проход: подключение → модель → уровень max → MCP → подтверждение.
+    Итог — валидный конфиг (та же двухфазная проверка, что у записи реестра)."""
     pytest.importorskip("textual")
     import yaml
     from model_picker import ModelInfo
@@ -2202,16 +2151,13 @@ async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, mo
     from tests.tui.conftest import wait_until
     monkeypatch.chdir(tmp_path)
     committed = []
-    cfg_path, scr = _profiles_screen(
+    cfg_path, scr = _screen_with_profiles_on_disk(
         tmp_path, on_commit=lambda: committed.append(True),
         fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True),
                                ModelInfo("Heavy", tool_capable=True)])
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("down")                        # «Настроить заново»
-        await pilot.press("enter")
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
@@ -2254,67 +2200,6 @@ async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, mo
 
 
 @pytest.mark.asyncio
-async def test_profiles_skip_after_a_pick_clears_the_pointer(tmp_path, monkeypatch):
-    """Сценарий ревью: выбрал профиль → финал → PgUp обратно на шаг → «Пропустить»
-    → подтвердил. Указатель обязан быть СНЯТ: «пропустить» значит «оставить профили
-    как есть», а не «записать выбор, о котором человек передумал»."""
-    pytest.importorskip("textual")
-    import yaml
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONFIRM, STEP_PROFILES
-    from tests.tui.conftest import wait_until
-    monkeypatch.chdir(tmp_path)
-    committed = []
-    cfg_path, scr = _profiles_screen(tmp_path, on_commit=lambda: committed.append(True))
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("enter")                       # «Выбрать активный»
-        await pilot.press("enter")                       # home → финал
-        await pilot.pause()
-        assert scr._values["profile"] == "home"
-        for _ in range(len(scr._steps) - 1):             # PgUp до первого шага
-            await pilot.press("pageup")
-            await pilot.pause()
-        assert scr._step_id() == STEP_PROFILES
-        await pilot.press("down")
-        await pilot.press("down")                        # → «Пропустить»
-        await pilot.press("enter")
-        await pilot.pause()
-        assert "profile" not in scr._values
-        scr._goto(STEP_CONFIRM); await pilot.pause()
-        await pilot.press("enter")
-        await wait_until(pilot, lambda: committed, "commit done")
-        assert yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"] == ""
-
-
-@pytest.mark.asyncio
-async def test_returning_to_the_profiles_step_shows_the_options_again(tmp_path, monkeypatch):
-    """Под-состояние шага не переживает уход с него: вернувшийся PgUp'ом человек
-    застаёт три варианта, а не под-список профилей, из которого он ушёл."""
-    pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_PROFILES
-    monkeypatch.chdir(tmp_path)
-    _cfg_path, scr = _profiles_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("enter")                       # «Выбрать активный»
-        await pilot.press("enter")                       # профиль → финал
-        await pilot.pause()
-        for _ in range(len(scr._steps) - 1):
-            await pilot.press("pageup")
-            await pilot.pause()
-        assert scr._step_id() == STEP_PROFILES
-        assert scr._profile_stage == "menu"
-        blob = " ".join(str(w.render()) for w in scr.query(".onb-option"))
-        assert "Настроить заново" in blob                # варианты, а не имена профилей
-
-
-@pytest.mark.asyncio
 async def test_leaving_the_level_form_does_not_survive_the_step(tmp_path):
     """То же правило для второго под-состояния: под-форма уровня не переживает уход
     со шага — вернувшийся застаёт список уровней."""
@@ -2338,85 +2223,32 @@ async def test_leaving_the_level_form_does_not_survive_the_step(tmp_path):
         assert scr._levels_stage == "ask"
 
 
-# --- решение владельца: три ветки шага «Профили» расходятся по-настоящему ---
-# «Выбрать активный» пишет имя · «Настроить заново» СНИМАЕТ профиль (иначе всё,
-# что человек настроит следом в основном конфиге, перекроется тем же профилем) ·
-# «Пропустить» указателя не касается вовсе.
+# --- действующий профиль: мастер им не управляет, но обязан о нём говорить ---
+# Управление профилями живёт в «Настройки · Профили»; мастер только информирует —
+# плашкой над телом шага и значениями слоя в витринах.
 
 
 def _active_profile_screen(tmp_path, **over):
-    """Мастер на конфиге с ДЕЙСТВУЮЩИМ профилем `work` (и вторым, `home`, на диске)."""
+    """Мастер на конфиге с ДЕЙСТВУЮЩИМ профилем `work` (и вторым, `home`, на диске).
+
+    Модель — отличимой строкой, а не односимвольной: витрину подтверждения сверяют
+    вхождением, и короткое значение нашлось бы внутри соседнего адреса (`completions`),
+    зеленя проверку модели независимо от того, показывает её витрина или нет."""
     cfg_path = _profiles_cfg(tmp_path, "home", "work", active="work")
     kw = dict(config_path=str(cfg_path),
               config={"completions_url": "https://h/v1/chat/completions",
-                      "chat_completion_headers": {}, "model": "m", "profile": "work"})
+                      "chat_completion_headers": {}, "model": "profile-layer-model",
+                      "profile": "work"})
     kw.update(over)
     return cfg_path, _screen(**kw)
 
 
 @pytest.mark.asyncio
-async def test_profiles_reconfigure_removes_the_active_profile(tmp_path, monkeypatch):
-    """«Настроить заново» — снять профиль: иначе настройка, ради которой человек
-    выбрал этот вариант, легла бы под перекрытие тем же профилем. Финал называет
-    снятие, файл после подтверждения несёт пустой указатель."""
+async def test_layer_note_in_the_wizard_carries_the_settings_address(tmp_path, monkeypatch):
+    """Экран мастера — единственная поверхность, где «Настройки · Профили»
+    существуют: общий текст политики он дополняет адресом действия."""
     pytest.importorskip("textual")
-    import yaml
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONFIRM, STEP_CONNECTION
-    from tests.tui.conftest import wait_until
-    monkeypatch.chdir(tmp_path)
-    committed = []
-    cfg_path, scr = _active_profile_screen(tmp_path, on_commit=lambda: committed.append(True))
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("down")                        # → «Настроить заново»
-        await pilot.press("enter")
-        await pilot.pause()
-        assert scr._step_id() == STEP_CONNECTION
-        assert scr._values["profile"] == ""
-        scr._goto(STEP_CONFIRM); await pilot.pause()
-        blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
-        assert "профиль:" in blob and "work" in blob      # снятие названо на подтверждении
-        await pilot.press("enter")
-        await wait_until(pilot, lambda: committed, "commit done")
-        assert yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"] == ""
-
-
-@pytest.mark.asyncio
-async def test_profiles_skip_leaves_the_active_profile_alone(tmp_path, monkeypatch):
-    """«Пропустить» — указателя не касается ВОВСЕ: действующий профиль переживает
-    мастер, ни записи, ни снятия."""
-    pytest.importorskip("textual")
-    import yaml
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONFIRM
-    from tests.tui.conftest import wait_until
-    monkeypatch.chdir(tmp_path)
-    committed = []
-    cfg_path, scr = _active_profile_screen(tmp_path, on_commit=lambda: committed.append(True))
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("down")
-        await pilot.press("down")                        # → «Пропустить»
-        await pilot.press("enter")
-        await pilot.pause()
-        assert "profile" not in scr._values
-        scr._goto(STEP_CONFIRM); await pilot.pause()
-        await pilot.press("enter")
-        await wait_until(pilot, lambda: committed, "commit done")
-        assert yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"] == "work"
-
-
-@pytest.mark.asyncio
-async def test_layer_note_goes_silent_after_reconfigure(tmp_path, monkeypatch):
-    """Плашка предупреждает «профиль перекроет ваш выбор». После «Настроить заново»
-    профиль будет СНЯТ — перекрывать нечем, и плашка обязана замолчать, иначе
-    интерфейс обещает то, чего не произойдёт."""
-    pytest.importorskip("textual")
+    from textual.widgets import Static
     from tui.app import TuiApp
     monkeypatch.chdir(tmp_path)
     _cfg_path, scr = _active_profile_screen(tmp_path)
@@ -2424,114 +2256,113 @@ async def test_layer_note_goes_silent_after_reconfigure(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert 'действует профиль "work"' in str(scr.query_one("#onb-profile-warn").render())
-        await pilot.press("down")                        # → «Настроить заново»
-        await pilot.press("enter")
-        await pilot.pause()
-        assert not scr.query("#onb-profile-warn")
+        note = str(scr.query_one("#onb-profile-warn", Static).render())
+        assert note == ('действует профиль "work" — он перекроет модельные настройки'
+                        ' · изменить в Настройки · Профили')
 
 
 @pytest.mark.asyncio
-async def test_summary_after_reconfigure_drops_the_removed_profile_layer(tmp_path, monkeypatch):
-    """То же правило, что у плашки, — для витрин значений: после «Настроить заново»
-    профиль СНИМАЕТСЯ, и его адрес с моделью в сводке (лента сверху и подтверждение)
-    обещали бы то, чего после мастера не будет. Незаполненное в базовом файле —
-    честный прочерк, а не значение снимаемого слоя."""
+async def test_no_active_profile_shows_no_warning_plaque(tmp_path, monkeypatch):
+    """Профили `home`/`work` лежат на диске, но указателя `profile` в конфиге
+    нет — действующего профиля тоже нет, и плашки `#onb-profile-warn` на экране
+    быть не должно вовсе (а не пустой строкой)."""
+    pytest.importorskip("textual")
+    from textual.css.query import NoMatches
+    from tui.app import TuiApp
+    monkeypatch.chdir(tmp_path)
+    cfg_path = _profiles_cfg(tmp_path, "home", "work")
+    scr = _screen(config_path=str(cfg_path))
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        with pytest.raises(NoMatches):
+            scr.query_one("#onb-profile-warn")
+
+
+def test_registry_layer_note_has_no_settings_address(tmp_path, monkeypatch):
+    """Второй вердикт `overriding_layer_note` — про реестр из чужого слоя, и
+    «Настройки · Профили» к нему отношения не имеют: хвост клеится только к
+    профильной ветке (спека §3)."""
+    import config as cfg_mod
+    base = tmp_path / "config.yml"
+    base.write_text('profile: ""\n', encoding="utf-8")
+    project = tmp_path / ".gc" / "config.yml"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
+                       encoding="utf-8")
+    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: str(project))
+    scr = _screen(config={"models": {"proj": {}}}, config_path=str(base))
+    note = scr._layer_note()
+    assert note is not None and "реестр моделей" in note
+    assert "Настройки · Профили" not in note
+
+
+@pytest.mark.asyncio
+async def test_layer_note_shows_on_every_step_for_an_active_profile(tmp_path, monkeypatch):
+    """Информирование остаётся: активный профиль виден на каждом шаге и на
+    подтверждении (спека §3)."""
+    pytest.importorskip("textual")
+    from textual.widgets import Static
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM, STEP_MODEL
+    monkeypatch.chdir(tmp_path)
+    _cfg_path, scr = _active_profile_screen(tmp_path)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        for step in (STEP_MODEL, STEP_CONFIRM):
+            scr._goto(step)
+            await pilot.pause()
+            note = str(scr.query_one("#onb-profile-warn", Static).render())
+            assert 'действует профиль "work"' in note
+
+
+@pytest.mark.asyncio
+async def test_confirm_shows_the_profile_layer_values(tmp_path, monkeypatch):
+    """Новое поведение (спека §5): при активном профиле витрина показывает
+    значения ЕГО слоя как значения конфига — это правда о том, чем агент будет
+    работать, а плашка рядом объясняет их происхождение."""
     pytest.importorskip("textual")
     import re
-    from tui.app import TuiApp
     from textual.widgets import Static
+    from tui.app import TuiApp
     from tui.screens.onboarding import STEP_CONFIRM
     monkeypatch.chdir(tmp_path)
-    # Базовый файл — шаблонные заглушки (адрес/модель/токен не заданы), merged-конфиг
-    # несёт значения слоя профиля: ровно расклад, на котором слой видно.
-    _cfg_path, scr = _active_profile_screen(
-        tmp_path, config={"completions_url": "https://profile.example/v1/chat/completions",
-                          "chat_completion_headers": {"Authorization": "Bearer profile-token"},
-                          "model": "profile-model", "profile": "work"})
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        assert "модель: profile-model" in str(scr.query_one("#onb-summary", Static).render())
-        await pilot.press("down")                        # → «Настроить заново»
-        await pilot.press("enter")
-        await pilot.pause()
-        line = str(scr.query_one("#onb-summary", Static).render())
-        assert "сервер: —" in line and "токен: —" in line and "модель: —" in line
-        scr._goto(STEP_CONFIRM); await pilot.pause()
-        blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
-        assert "profile.example" not in blob and "profile-model" not in blob
-        flat = re.sub(r"\s+", " ", blob)                 # колонка меток — не предмет теста
-        assert "адрес: —" in flat and "модель: —" in flat
-
-
-@pytest.mark.asyncio
-async def test_summary_after_reconfigure_keeps_the_base_file_values(tmp_path, monkeypatch):
-    """Обратное направление того же правила: базовый файл СВОИ адрес и модель имеет —
-    их и показываем. Иначе «снять профиль» выглядело бы как «стереть всё»."""
-    pytest.importorskip("textual")
-    import onboarding_config_writer as w
-    from config import validate_config_text
-    from tui.app import TuiApp
-    from textual.widgets import Static
-    monkeypatch.chdir(tmp_path)
-    cfg_path = _profiles_cfg(tmp_path, "work", active="work")
-    w.write_values(cfg_path, {"backend.completions_url": "https://base.example/v1/chat/completions",
-                              "agent.model": "base-model"}, validate=validate_config_text)
-    scr = _screen(config_path=str(cfg_path),
-                  config={"completions_url": "https://profile.example/v1/chat/completions",
-                          "chat_completion_headers": {}, "model": "profile-model",
-                          "profile": "work"})
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        await pilot.press("down")                        # → «Настроить заново»
-        await pilot.press("enter")
-        await pilot.pause()
-        line = str(scr.query_one("#onb-summary", Static).render())
-        assert "сервер: base.example" in line and "модель: base-model" in line
-
-
-@pytest.mark.asyncio
-async def test_layer_note_stays_after_skip(tmp_path, monkeypatch):
-    """Парный случай: «Пропустить» профиль не трогает — он и дальше перекроет
-    настройку, и плашка обязана об этом говорить."""
-    pytest.importorskip("textual")
-    from tui.app import TuiApp
-    monkeypatch.chdir(tmp_path)
+    # конфиг слоя: url https://h/…, model profile-layer-model
     _cfg_path, scr = _active_profile_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("down")
-        await pilot.press("down")                        # → «Пропустить»
-        await pilot.press("enter")
+        scr._goto(STEP_CONFIRM)
         await pilot.pause()
-        assert 'действует профиль "work"' in str(scr.query_one("#onb-profile-warn").render())
+        # Витрина подтверждения — тело шага (`.onb-dyn`), а не заголовочный
+        # `#onb-body`: тот несёт только имя шага.
+        body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        flat = re.sub(r"\s+", " ", body)     # колонка меток — не предмет теста
+        # Строки витрины целиком: значение обязано стоять ЗА своей меткой, иначе
+        # проверка зеленела бы от случайного вхождения в соседнюю строку.
+        assert "адрес: https://h/v1/chat/completions" in flat
+        assert "модель default: profile-layer-model" in flat
+        assert "профиль:" not in flat        # строка выбора ушла вместе с шагом
 
 
-@pytest.mark.asyncio
-async def test_layer_note_appears_after_choosing_a_profile(tmp_path, monkeypatch):
-    """Обратное направление того же правила: профиля не было, человек выбрал его на
-    первом шаге и вернулся настраивать — теперь его выбор перекроет уже ВЫБРАННЫЙ
-    профиль, и плашка обязана появиться."""
-    pytest.importorskip("textual")
-    from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONNECTION
+def test_stepper_marks_match_the_position(tmp_path, monkeypatch):
+    """Полоса шагов честна по построению: на шаге N ровно N−1 «✓» и len−N «○»
+    (прыжок через голову, который её ломал, снят)."""
     monkeypatch.chdir(tmp_path)
-    _cfg_path, scr = _profiles_screen(tmp_path)          # активного профиля в конфиге нет
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr)
-        await pilot.pause()
-        assert not scr.query("#onb-profile-warn")        # предупреждать не о чем
-        await pilot.press("enter")                       # «Выбрать активный»
-        await pilot.press("enter")                       # home → финал
-        await pilot.pause()
-        while scr._step_id() != STEP_CONNECTION:         # вернулись настраивать
-            await pilot.press("pageup")
-            await pilot.pause()
-        assert 'действует профиль "home"' in str(scr.query_one("#onb-profile-warn").render())
+    _cfg_path, scr = _active_profile_screen(tmp_path)
+    total = scr._last_step()
+    for position in range(total):
+        scr._step = position
+        text = str(scr._stepper_text())
+        assert text.count("✓") == position
+        assert text.count("○") == total - position - 1
+    # Финал в полосе не показан вовсе, но остальные шаги на нём пройдены — иначе
+    # подтверждение выглядело бы серединой пути.
+    scr._step = total
+    text = str(scr._stepper_text())
+    assert text.count("✓") == total
+    assert "○" not in text

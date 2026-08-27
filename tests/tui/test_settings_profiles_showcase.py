@@ -584,12 +584,12 @@ async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch
 # --- онбординг-предупреждение о перекрывающем слое (спека §11) ---
 
 def test_onboarding_note_for_active_profile():
-    """Профиль лежит НАД базовым конфигом (ось 2, §2) — то, что мастер запишет в
-    config.yml, профиль перекроет; об этом и предупреждаем."""
+    """Профиль лежит НАД базовым конфигом (ось 2, §2) и перекроет модельную часть
+    того, что мастер запишет. Текст — факт без адреса действия: ту же строку
+    печатает gc-cli, где экрана «Настройки · Профили» не существует."""
     from onboarding import overriding_layer_note
     note = overriding_layer_note({"profile": "work"})
-    assert note == ('действует профиль "work" — ваш выбор ляжет в основной конфиг, '
-                    'но профиль его перекроет')
+    assert note == 'действует профиль "work" — он перекроет модельные настройки'
 
 
 def test_onboarding_note_absent_for_registry_in_the_edited_file(tmp_path):
@@ -628,7 +628,10 @@ def test_setup_guide_includes_profile_note():
     from onboarding import setup_guide
     text = setup_guide("/p/config.yml", {"profile": "work", "model": "x",
                                         "completions_url": "http://x", }, program="gc-ua")
-    assert 'действует профиль "work"' in text
+    assert 'действует профиль "work" — он перекроет модельные настройки' in text
+    # Адрес действия — принадлежность экрана мастера: в CLI-подсказке этого
+    # экрана нет, и звать туда нельзя (спека §3).
+    assert "Настройки · Профили" not in text
 
 
 class _FakeMcp:
