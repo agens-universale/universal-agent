@@ -295,10 +295,6 @@ _FOOTER_PROFILES_NONE_EMPTY = "↑/↓ — выбор  ·  n — создать 
 # Строка-действие «+ добавить профиль…»: обещаем только то, что на ней работает.
 _FOOTER_PROFILES_ADD = ("↑/↓ — выбор  ·  Enter — создать  ·  "
                         "PgUp/PgDn — секции  ·  Esc — меню")
-# Строка уровня (последняя в секции «Профили») — тот же позиционный приём, что и
-# «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Space —
-# активировать» там, где ←/→/Enter на самом деле переключают уровень — ложь того
-# же рода, что нашёл финальный обзор 2026-08-06, D.
 # Инлайн-ввод имени профиля забирает клавиши себе (контракт п.5 волны B) — футер
 # на это время про него, и глагол называет ровно то, что произойдёт.
 _FOOTER_PROFILE_NAME_CREATE = "Enter — создать  ·  Esc — отмена"
@@ -2972,8 +2968,8 @@ class SettingsScreen(Screen):
         split базы/резерва, что у палитры — `command_palette.py::_toggle_columns`).
         label_w — макс. ширина головы строки: «name · label» и у пресета, и у
         ребёнка (ревизия 7 — flat, маркера/отступа нет, оба head в одном
-        формате) / голый `spec.label` у прочих (standalone, не пресет и не
-        чей-либо ребёнок) + 3 + 2 на курсор; base_w — макс. ширина БАЗОВОГО
+        формате — `_modes_head`, одна формула на все строки) + 3 + 2 на курсор;
+        base_w — макс. ширина БАЗОВОГО
         трека (2*n-1 ячеек, без 4-й позиции); extra_w — макс. ширина custom-
         резерва (3 ячейки у preset-тоггла — 4-я позиция зарезервирована в
         Settings всегда, спека §4.2; 0 у single-key тогглов — у них 4-й
@@ -3159,6 +3155,27 @@ class SettingsScreen(Screen):
         for i, row in enumerate(widgets[-len(names):]):
             row.update(self._mode_row_text(names[i], i == self._modes_idx))
 
+    def _file_snapshot(self, target):
+        """Текст файла до записи — или None, если его ещё нет (тогда откатывать
+        нечего: не было файла, не будет и следа)."""
+        from pathlib import Path
+        try:
+            return Path(target).read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    def _restore_snapshot(self, target, snapshot) -> None:
+        """Вернуть файл к снимку. Не удалось — молчим: отказ уже показан, а вторая
+        жалоба поверх первой сказала бы человеку меньше, чем первая."""
+        if snapshot is None:
+            return
+        from pathlib import Path
+        try:
+            if Path(target).read_text(encoding="utf-8") != snapshot:
+                Path(target).write_text(snapshot, encoding="utf-8")
+        except OSError:
+            pass
+
     def _overriding_layer_name(self, values: dict) -> str:
         """Как назвать слой, перекрывший записанное значение.
 
@@ -3180,6 +3197,13 @@ class SettingsScreen(Screen):
             found = origins(self._config_path, list(values))
         except Exception:
             return general              # диагностика не обязана ронять запись
+        # Ключ выбираем по РАСХОЖДЕНИЮ с записанным, а не первый перекрытый: у пары
+        # пресета перекрытыми бывают оба, разными слоями, и первый попавшийся —
+        # обычно тот самый проектный файл, который запись как раз перехватил и
+        # перекрыть уже не мог. Человека послали бы не туда.
+        for dotted, origin in found.items():
+            if origin.is_overridden and origin.effective != values.get(dotted):
+                return overlay_label(origin)
         for origin in found.values():
             if origin.is_overridden:
                 return overlay_label(origin)
@@ -3221,34 +3245,42 @@ class SettingsScreen(Screen):
         spec = TOGGLES[name]
         current = toggle_state_base(self.app, name)
         new_value = cycle_value(name, current, direction)   # пресет: по low/medium/high
-        if not self._writable():
-            self._notice("✗ не сохранено: конфиг недоступен для записи — используется "
-                         "пакетный шаблон (настройте GC_HOME или запустите gc-ua --init-config)")
-            return
         values = PRESETS[new_value] if spec.preset_keys else {spec.dotted: new_value}
         target = self._keys_write_target(values)
+        # Гейт пакетного шаблона — ОДИН и по ЦЕЛИ, как у соседних записей секции
+        # «Профили». Прежняя предпроверка по пути запуска стояла раньше него и
+        # спорила с правилом выбора файла: проектный `.gc/config.yml` писуч всегда,
+        # и запрещать запись туда из-за пакетной базы было не за что.
         if not self._target_writable(target):
             self._notice(self._TEMPLATE_WRITE_REFUSAL)
             return
+        anchors = [key for key in values if "." not in key]
+        # Снимок ДО якорей: `ensure_pointer_anchor` — отдельная запись на диск и
+        # валидации не знает, а `write_values` ниже отвергает итог целиком. Без
+        # отката отказ оставлял бы дописанный `level:` со ЗНАЧЕНИЕМ ИЗ ШАБЛОНА:
+        # действующий уровень молча менялся, а человеку говорили «не сохранено».
+        # «Всё или ничего» — обещание всей секции, а не одной её записи.
+        snapshot = self._file_snapshot(target) if anchors else None
         try:
-            for key in values:
-                if "." not in key:
-                    # Топ-уровневый скаляр (`level:`) `write_values` сам дописать не
-                    # умеет — его фоллбэк на шаблон работает только для dotted-ключей,
-                    # а конфиг, созданный до появления ключа, этой строки не содержит.
-                    w.ensure_pointer_anchor(
-                        target, template_path=_default_config_path(), key=key)
+            for key in anchors:
+                # Топ-уровневый скаляр (`level:`) `write_values` сам дописать не
+                # умеет — его фоллбэк на шаблон работает только для dotted-ключей,
+                # а конфиг, созданный до появления ключа, этой строки не содержит.
+                w.ensure_pointer_anchor(
+                    target, template_path=_default_config_path(), key=key)
             missing = w.write_values(
                 target, values,
                 template_path=_default_config_path(),
                 validate=validate_config_text,
             )
         except (ValueError, OSError) as exc:
+            self._restore_snapshot(target, snapshot)
             self._notice(f"✗ не сохранено: {exc}")
             return
         if missing:
             # Файл не тронут (запись «всё или ничего») — молчать нельзя, иначе слайдер
             # покажет новое значение, которого в конфиге нет (находка ревью коллеги).
+            self._restore_snapshot(target, snapshot)
             self._notice(f"✗ не сохранено: не нашлись ключи {', '.join(missing)}")
             return
         # Хвост записи — как у соседних секций (_do_save): перечитать сырые значения
@@ -3283,9 +3315,9 @@ class SettingsScreen(Screen):
 
     def _profiles_rows(self) -> list[dict]:
         """Строки секции: одна на каждое найденное имя профиля (тёзки — ОДНОЙ
-        строкой, побеждает проектный) + редактируемая строка «уровень по
-        умолчанию» (←/→/Enter) — она всегда последняя и всегда есть, даже без
-        единого профиля."""
+        строкой, побеждает проектный) + «+ добавить профиль…» последней. Уровень
+        сюда больше не входит — он правит глобальный ключ конфига и живёт в
+        «Режимах работы»."""
         import os
         from pathlib import Path
         from config_modules.profiles import discover_all_refs, profile_roots
@@ -3309,7 +3341,7 @@ class SettingsScreen(Screen):
         return rows
 
     def _profiles_on_add_row(self) -> bool:
-        """Курсор — на строке «+ добавить профиль…» (предпоследняя): у неё свой
+        """Курсор — на строке «+ добавить профиль…» (последняя): у неё свой
         футер, клавиши объектов на ней не работают."""
         rows = self._profiles_rows()
         return (0 <= self._profiles_idx < len(rows)
@@ -4358,9 +4390,9 @@ class SettingsScreen(Screen):
         слоя, законен и част).
 
         `level` не показывают формы НИ В ОДНОМ состоянии, поэтому в исключения он не
-        входит: строка «уровень модели по умолчанию» секции «Профили» правит
-        ГЛОБАЛЬНЫЙ `level:` конфига, а не ключ внутри файла профиля, и без превью
-        профиль с `level: max` не проявлялся бы на экране нигде (ruling координатора
+        входит: ручка уровня правит ГЛОБАЛЬНЫЙ `level:` конфига, а не ключ внутри
+        файла профиля, и живёт в «Режимах работы» — без превью профиль с
+        `level: max` не проявлялся бы на экране нигде (ruling координатора
         2026-08-11). В СТРОКЕ СПИСКА исключение остаётся — там канон §12.3 со своей
         колонкой состава (`profile_display_summary` не тронут)."""
         from tui.editors.models_section import effective_registry_nonempty

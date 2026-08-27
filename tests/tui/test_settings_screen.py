@@ -4126,3 +4126,107 @@ async def test_modes_flash_names_the_file_absolutely(tmp_path, monkeypatch):
 
         flashes = [str(w.render()) for w in scr.query("#set-flash")]
         assert any(str(base_cfg.resolve()) in f for f in flashes), flashes
+
+
+async def test_modes_write_leaves_the_file_untouched_when_it_fails(tmp_path, monkeypatch):
+    """«✗ не сохранено» обязано означать нетронутый файл — как и обещает комментарий
+    рядом («запись всё или ничего»).
+
+    Якорь топ-уровневого ключа дописывается ОТДЕЛЬНОЙ записью и валидации не знает:
+    если следом `write_values` отвергнет итог, на диске уже лежит `level:` со
+    ЗНАЧЕНИЕМ ИЗ ШАБЛОНА — действующий уровень молча изменился, а человеку сказали,
+    что не записано. Ровно тот класс лжи, что закрыт для мастера в `8346f00b`.
+
+    Невалидность наводится ИЗВНЕ после старта — так этот путь и достижим: конфиг
+    правят руками, пока окно открыто."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    app, base_cfg = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "off"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+        # правка руками, пока окно открыто: ключ вне схемы (`extra="forbid"`)
+        base_cfg.write_text(base_cfg.read_text(encoding="utf-8") + "ключ_вне_схемы: 1\n",
+                            encoding="utf-8")
+        before = base_cfg.read_text(encoding="utf-8")
+
+        scr._modes_apply(1)
+        await pilot.pause()
+
+        assert base_cfg.read_text(encoding="utf-8") == before
+        notices = [str(w.render()) for w in scr.query("#set-notice")]
+        assert any("не сохранено" in n for n in notices), notices
+
+
+async def test_overriding_layer_names_the_key_that_actually_diverged(tmp_path, monkeypatch):
+    """У пары пресета перекрытыми могут оказаться ОБА ключа — разными слоями.
+    Называть надо тот, чьё действующее значение разошлось с записанным, а не
+    первый попавшийся: иначе человека посылают в файл, который запись как раз
+    перехватил и перекрыть уже не мог.
+
+    Здесь проект задаёт `finish_gate_mode` (туда пара и уходит целиком), а
+    профиль — `text_answer_mode`; разошёлся именно второй, его слой и назван."""
+    pytest.importorskip("textual")
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    gc_dir = project_dir / ".gc"
+    gc_dir.mkdir()
+    (gc_dir / "config.yml").write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'tui:\n  text_answer_mode: "deny"\n', encoding="utf-8")
+
+    app, _ = _app_with_config(
+        tmp_path,
+        'profile: "work"\ntui:\n  finish_gate_mode: "off"\n  text_answer_mode: "allow"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+
+        name = scr._overriding_layer_name(
+            {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"})
+
+        assert "профилем work" in name, name
+
+
+async def test_modes_write_to_the_project_config_survives_a_packaged_base(
+        tmp_path, monkeypatch):
+    """Запуск на пакетном шаблоне (GC_HOME не настроен) не запрещает запись в
+    ПРОЕКТНЫЙ конфиг: он территория пользователя и писуч всегда.
+
+    Гейт остался один — по ЦЕЛИ (`_target_writable`), как у соседних записей
+    «Профилей». Прежняя предпроверка по пути запуска отказывала раньше него и
+    противоречила новому правилу выбора файла."""
+    pytest.importorskip("textual")
+    import yaml
+    import config as config_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    gc_dir = project_dir / ".gc"
+    gc_dir.mkdir()
+    project_config = gc_dir / "config.yml"
+    project_config.write_text('tui:\n  finish_gate_mode: "off"\n', encoding="utf-8")
+
+    packaged = tmp_path / "packaged" / "config.default.yml"
+    packaged.parent.mkdir()
+    packaged.write_text('tui:\n  finish_gate_mode: "off"\n  text_answer_mode: "allow"\n',
+                        encoding="utf-8")
+    monkeypatch.setattr(config_mod, "_default_config_path", lambda: str(packaged))
+
+    app, _ = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "off"\n  text_answer_mode: "allow"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._config_path = str(packaged)          # база — пакетный шаблон
+        scr._modes_idx = modes_row_index("gate")
+
+        scr._modes_apply(1)
+        await pilot.pause()
+
+        assert yaml.safe_load(project_config.read_text(encoding="utf-8"))["tui"][
+            "finish_gate_mode"] != "off"          # в проектный писать можно
+        assert 'finish_gate_mode: "off"' in packaged.read_text(encoding="utf-8")
