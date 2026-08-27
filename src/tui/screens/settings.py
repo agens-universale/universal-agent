@@ -1258,6 +1258,19 @@ class SettingsScreen(Screen):
             event.stop()
             ed.probe()
             return True
+        if event.key == "ctrl+u":
+            # Снять свой токен записи (вернуть наследование от «Подключения»).
+            # Перехватывать приходится здесь по той же причине, что и в
+            # «Подключении»: `Input` держит на клавише `delete_left_all`, а поле
+            # токена пустое — секрет живёт маской в placeholder, и штатное поведение
+            # там вхолостую. Условие «наш ли это случай» решает форма (курсор на
+            # токене и есть что снимать); не наш — клавишу НЕ съедаем, и в полях
+            # легаси-редактора её очистка работает как обычно.
+            if not ed.clear_token():
+                return False
+            event.prevent_default()
+            event.stop()
+            return True
         if event.key == "enter":
             event.stop()
             ed.enter()
@@ -3908,6 +3921,17 @@ class SettingsScreen(Screen):
             if ed is not None and ed.clear_token():
                 event.prevent_default()
                 event.stop()
+                # Ctrl+U — такая же правка значения, как печать в поле, только
+                # `Input.Changed` по ней не летит: clear_token() кладёт пустое поверх
+                # пустого (секрет жил в маске). Значит обесценивать проверенное надо
+                # руками, иначе на экране остаётся «✓ токен принят» под конфигурацией
+                # БЕЗ токена, а уцелевший `_last_probed_snapshot` гейтом дребезга
+                # запрещает уходу с поля перепроверить. `_reset_draft_state` снимает
+                # оба (и заодно зовёт `_cancel_env_confirm` — висящий confirm держал
+                # ПРЕЖНИЙ `_pending_env_save`, и Enter сохранил бы токен литералом,
+                # потеряв очистку). Первым, до `_update_dirty`/`_refresh_footer`:
+                # футер и признак правок считаются уже по обнулённому состоянию.
+                self._reset_draft_state()
                 self._update_dirty()
                 self._refresh_footer()
             return

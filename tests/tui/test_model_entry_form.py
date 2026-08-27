@@ -327,6 +327,163 @@ async def test_no_auth_already_active_and_untouched_writes_nothing():
         assert ok is True and "token" not in fields
 
 
+# --- Ctrl+U: свой токен снят, запись наследует общий ---------------------------
+
+async def test_ctrl_u_drops_the_own_token_mask_and_shows_the_inherited_one():
+    """Ctrl+U на поле токена возвращает запись к общему токену «Подключения», и
+    видно это СРАЗУ: маска своего секрета уходит, placeholder называет маской то, что
+    теперь унаследуется. Результат клавиши обязан быть виден ДО сохранения — иначе
+    она снова «невыводима из экрана» (смок владельца)."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "token": "sk-OWNSECRET"},
+                 existing_aliases={"flash"},
+                 effective_auth="Bearer sk-HUBSECRET")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        token = form.query_one("#mef-token", Input)
+        assert "OWNSECRET" not in token.placeholder    # свой секрет — только маской
+        assert not token.placeholder.startswith("наследуется")
+        form.move(1)                                   # адрес → токен
+        await pilot.pause()
+        assert form.clear_token() is True
+        await pilot.pause()
+        assert form.token_cleared is True
+        assert token.placeholder.startswith("наследуется")
+        assert "HUBSECRET" not in token.placeholder    # унаследованный — тоже маской
+        assert form.is_dirty() is True
+
+
+async def test_ctrl_u_is_not_ours_off_the_token_field_or_without_an_own_token():
+    """Клавиша работает ТОЛЬКО на поле токена и только когда есть что снимать: иначе
+    False — и хозяин обязан отдать её `Input` (там у Ctrl+U своё штатное дело)."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "token": "sk-OWNSECRET"},
+                 existing_aliases={"flash"})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.clear_token() is False              # курсор на адресе
+        assert form.token_cleared is False
+    inherited = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                      existing_aliases={"flash"},
+                      effective_auth="Bearer sk-HUB")
+    async with _harness(inherited).run_test() as pilot:
+        await pilot.pause()
+        inherited.move(1)                              # адрес → токен
+        await pilot.pause()
+        assert inherited.clear_token() is False        # своего токена нет — снимать нечего
+        assert inherited.token_cleared is False
+
+
+async def test_the_token_label_promises_ctrl_u_only_when_there_is_something_to_drop():
+    """Обещание клавиши живёт в ПОДПИСИ ПОЛЯ (канон `ConnectionEditor._token_label`)
+    и ровно там, где клавиша работает: свой токен есть — подпись зовёт Ctrl+U; нет
+    своего (или его уже сняли) — подписи нет, клавиша молчит и обещать ей нечего."""
+    from textual.widgets import Static
+    inherited = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                      existing_aliases={"flash"},
+                      effective_auth="Bearer sk-HUB")
+    async with _harness(inherited).run_test() as pilot:
+        await pilot.pause()
+        assert str(inherited.query_one("#mef-token-label", Static).render()) == "Токен"
+    own = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                         "token": "sk-OWNSECRET"},
+                existing_aliases={"flash"},
+                effective_auth="Bearer sk-HUB")
+    async with _harness(own).run_test() as pilot:
+        await pilot.pause()
+        label = own.query_one("#mef-token-label", Static)
+        assert str(label.render()) == "Токен   Ctrl+U — наследовать"
+        own.move(1)
+        await pilot.pause()
+        assert own.clear_token() is True
+        await pilot.pause()
+        assert str(label.render()) == "Токен"          # сняли — обещать больше нечего
+
+
+async def test_typing_after_ctrl_u_cancels_the_mark(tmp_path):
+    """Передумали: набранный после Ctrl+U токен снимает пометку сам — в файл уедет
+    НАБРАННОЕ, а не удаление ключа. Иначе submit пошёл бы по ветке «снять», и
+    введённый токен молча пропал бы."""
+    from textual.widgets import Static
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "token": "sk-OWNSECRET"},
+                 existing_aliases={"flash"},
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.move(1)
+        await pilot.pause()
+        assert form.clear_token() is True
+        form.query_one("#mef-token", Input).value = "sk-NEW"
+        await pilot.pause()
+        assert form.token_cleared is False
+        # Клавиша снова работает — и подпись снова о ней говорит.
+        assert str(form.query_one("#mef-token-label", Static).render()) == (
+            "Токен   Ctrl+U — наследовать")
+        ok, _alias, fields = form.submit()
+        assert ok is True and fields["token"] == "sk-NEW"
+
+
+async def test_saving_after_ctrl_u_removes_the_token_key_from_the_file(tmp_path):
+    """Главное последствие: в ФАЙЛЕ ключа `token` больше нет — запись вернулась к
+    наследованию. Соседние ключи, о которых форма не знает (`pricing`), это не
+    задело."""
+    from config_modules.registry_write import upsert_model
+    target = tmp_path / "config.yml"
+    target.write_text(_REGISTRY_WITH_PRICING, encoding="utf-8")
+    template = Path(_default_config_path()).read_text(encoding="utf-8")
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
+                          "token": "sk-secret"},
+                 existing_aliases={"flash"},
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.move(1)
+        await pilot.pause()
+        assert form.clear_token() is True
+        ok, alias, fields = form.submit()
+        assert ok is True and fields["token"] is None
+    upsert_model(target, alias, fields, template)
+    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
+    assert "token" not in entry, entry                 # ключ снят — наследование
+    assert entry["pricing"] == {"input": 0.3, "output": 1.2}
+    assert entry["url"] == "https://openrouter.ai/api/v1/chat/completions"
+
+
+async def test_the_checkbox_and_ctrl_u_write_different_things(tmp_path):
+    """Главный страж различия смыслов: ● «без авторизации» пишет явное `token: ""`
+    (осознанно без токена), Ctrl+U УДАЛЯЕТ ключ (наследовать общий). Совпади они —
+    возврат к наследованию снова стал бы недостижим с экрана, ради чего клавиша и
+    заводилась."""
+    from config_modules.registry_write import upsert_model
+    template = Path(_default_config_path()).read_text(encoding="utf-8")
+    written = {}
+    for case in ("checkbox", "ctrl+u"):
+        target = tmp_path / f"config-{case.replace('+', '-')}.yml"
+        target.write_text(_REGISTRY_WITH_PRICING, encoding="utf-8")
+        form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                              "token": "sk-secret"},
+                     existing_aliases={"flash"},
+                     effective_auth="Bearer sk-HUB")
+        async with _harness(form).run_test() as pilot:
+            await pilot.pause()
+            form.move(1)                               # адрес → токен
+            await pilot.pause()
+            if case == "checkbox":
+                form.move(1)                           # токен → галка
+                await pilot.pause()
+                assert form.toggle_no_auth() is True
+            else:
+                assert form.clear_token() is True
+            ok, alias, fields = form.submit()
+            assert ok is True
+        upsert_model(target, alias, fields, template)
+        written[case] = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
+    assert written["checkbox"]["token"] == ""          # ● — осознанно без токена
+    assert "token" not in written["ctrl+u"], written["ctrl+u"]   # Ctrl+U — наследование
+
+
 # --- алиас: валидация на месте -------------------------------------------------
 
 async def test_reserved_alias_is_rejected_with_an_honest_error():
@@ -492,10 +649,17 @@ async def test_the_model_list_loads_itself_on_field_entry():
         for _ in range(3):
             await pilot.pause()
         assert len(calls) == 2                         # автоподгрузка была ОДИН раз
+        form.escape()                                  # свернуть — иначе ↑/↓ водят ПО списку
         form.move(1); form.move(-1)                    # ушли с поля и вернулись
         for _ in range(3):
             await pilot.pause()
         assert len(calls) == 2, "те же параметры перечитаны без нужды"
+        # Канон 2026-08-17: САМ список раскрывается только над ПУСТЫМ полем — поверх
+        # подставленного id он забрал бы ↑/↓ себе, и Enter молча затёр бы набранное.
+        # Путь назад один, и он назван постоянной строкой под полем.
+        assert form.list_open is False
+        hint = str(form.query(".mef-model-hint").last().render())
+        assert hint == "Alt+↓ — перечитать список", hint
 
 
 async def test_changed_credentials_retry_the_autoload(tmp_path):
@@ -619,8 +783,17 @@ async def test_form_tells_the_host_where_the_cursor_is_and_what_is_open():
         assert (form.presets_open, form.presets_have_selection) == (True, True)
         form.query_one("#mef-url", Input).value = "https://my-own.internal/v1"
         await pilot.pause()
-        # Строки видны все, но ни одна не подсвечена: Enter здесь оставит свой адрес,
-        # и футер обязан читать именно этот признак, а не «список не пуст».
+        # Канон 2026-08-18: набранного в каталоге нет — список СВОРАЧИВАЕТСЯ (обещать
+        # ему нечего), а постоянная строка под полем говорит об этом и называет
+        # клавишу возврата.
+        assert form.presets_open is False
+        hint = str(form.query(".mef-url-preset-hint").last().render())
+        assert hint == "в списке такого нет · Alt+↓ — показать список", hint
+        # `Alt+↓` поверх СВОЕГО адреса — единственное живое состояние «список раскрыт,
+        # но ничего не подсвечено»: строки видны все, Enter оставит набранное. Футер
+        # обязан читать именно этот признак, а не «список не пуст».
+        assert form.reload_presets() is True
+        await pilot.pause()
         assert (form.presets_open, form.presets_have_selection) == (True, False)
         assert form.escape() is True                   # свернуть — двигаться дальше
         await pilot.pause()

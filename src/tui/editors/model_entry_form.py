@@ -15,9 +15,9 @@ placeholder, контракт наружу — `peek()`/`is_dirty()`/`submit()`.
 конфиг», Enter по которому осознанно оставляет поле пустым (живая связь).
 
 Две РАЗНЫЕ клавиши, и путать их нельзя (находка A4 ревью плана):
-`Ctrl+Space` — проба соединения (`tui/services/settings_probe`, differential-вердикт
-как в «Подключении»: контрольный запрос без токена и повтор с токеном только на
-401); `Alt+↓` — подбор списка моделей с эндпоинта (сетевой источник строк, механика
+`Ctrl+Space` — проба соединения (тот же differential-вердикт, что в «Подключении»,
+и тем же общим `tui/services/settings_probe.probe_connection`); `Alt+↓` — подбор
+списка моделей с эндпоинта (сетевой источник строк, механика
 `ModelEditor`: воркер-поток + поколение загрузки). Роли не пересекаются: проба
 ничего не подбирает, подбор ничего не проверяет.
 """
@@ -40,6 +40,7 @@ from onboarding_fields import (
     NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
     URL_ERROR as _URL_ERROR,
 )
+from tui.editors.connection import _PRESET_NO_MATCH_CLOSED
 from tui.editors.field_list import (
     LIST_FAILED,
     LIST_LOADING,
@@ -55,8 +56,11 @@ from tui.widgets.paste_input import PasteInput
 # Хинты списков формы. Клавиши названы канон-словарём (спека 2026-08-06 §2.1):
 # «перечитать список» — глагол сетевого источника, и он один в обоих состояниях
 # списка, свёрнут тот или раскрыт. Сторож словаря — tests/tui/test_footer_contract.
+# «В списке такого нет» — формулировка канона 2026-08-18 (та же, что у пресет-листа
+# адреса, `preset_list.PRESET_HINT_NO_MATCH`): обе строки живут в одной форме, и
+# звать одно и то же состояние двумя разными словами нельзя.
 MODEL_LIST_HINT = "модели с сервера · печать — фильтр/свой id · Enter — подставить · Esc — свернуть"
-MODEL_LIST_HINT_NO_MATCH = "нет совпадений · Enter — оставить свой id · Esc — свернуть"
+MODEL_LIST_HINT_NO_MATCH = "в списке такого нет · Enter — оставить свой id · Esc — свернуть"
 # Список ходит на сервер и раскрытым, и свёрнутым — поэтому «перечитать», а не
 # «показать» (`field_list.LIST_CLOSED_HINT` — вариант локального источника).
 MODEL_RELOAD_HINT = "Alt+↓ — перечитать список"
@@ -83,8 +87,17 @@ _MODEL_LABEL = "Провайдерский id модели"
 _MODEL_PLACEHOLDER = "если не указать — id модели равен алиасу"
 _URL_LABEL = "Адрес API-сервера"
 _TOKEN_LABEL = "Токен"
+# Ctrl+U называется В ПОДПИСИ ПОЛЯ, а не в футере (канон `ConnectionEditor.
+# _token_label`): подсказка нужна там, куда смотрят, как «Space — переключить» у
+# галки. Глагол ДРУГОЙ, и это не синонимы: у «Подключения» над токеном слоя нет и
+# Ctrl+U там СТИРАЕТ, а у записи реестра над ним есть общий токен — снятие своего
+# ключа возвращает наследование. Обещаем только когда есть что снимать.
+_TOKEN_LABEL_INHERIT = "Токен   Ctrl+U — наследовать"
 _PH_KEEP = "если не указать — останется как сейчас"
 _PH_NO_TOKEN = "если не указать — без токена"
+# Свой токен снят Ctrl+U, а наследовать нечего — «Подключение» токена не задаёт.
+# Молчать здесь нельзя: маска ушла, и поле обязано сказать, что теперь будет.
+_PH_TOKEN_CLEARED = "токен записи снят · «Подключение» токена не задаёт"
 # Первый пункт пресет-листа адреса — не «ещё один адрес», а РЕШЕНИЕ не задавать
 # свой: поле остаётся пустым, связь живая (сменится адрес в основном конфиге —
 # сменится и здесь). Адрес рядом с ним часто совпадает с адресом обычного
@@ -126,6 +139,12 @@ class ModelEntryForm(Vertical):
         self._url0 = initial.get("url") or ""
         self._token_current = initial.get("token")   # только для маски placeholder
         self._no_auth = self._token_current == ""   # явное "" в записи = галка ●
+        # Третье состояние поля токена (идиома `ConnectionEditor`): пусто = «ключ не
+        # трогаем», напечатано = «заменить», помечено = «снять свой ключ и вернуть
+        # наследование». Нужно потому, что токен, в отличие от прочих полей, физически
+        # не в Input — он секрет, поле держат пустым, и стирать обычным Backspace
+        # там нечего.
+        self._token_cleared = False
         self._verify = verify
         self._config_proxy = config_proxy
         if fetch is None:
@@ -133,7 +152,10 @@ class ModelEntryForm(Vertical):
             from tui.services.model_list_cache import make_cached_fetch
             fetch = make_cached_fetch(fetch_models)
         if probe is None:
-            from tui.services.settings_probe import probe as default_probe
+            # `probe_auth`, а не `probe`: вердикт об авторизации идёт СТРОГО по
+            # chat/completions — у публичного `/models` (OpenRouter) он получился бы
+            # ложным. Тот же дефолт, что у «Подключения» (`settings.py`).
+            from tui.services.settings_probe import probe_auth as default_probe
             probe = default_probe
         self._fetch = fetch
         self._probe = probe
@@ -163,8 +185,9 @@ class ModelEntryForm(Vertical):
             # на нём осознанно ОЧИЩАЕТ поле (`_apply_preset`), а пустое поле и значит
             # «наследовать». Запись с собственным адресом — не исключение, наоборот:
             # ей этот путь и нужен, другого явного возврата к наследованию нет
-            # (решение 7). Над своим адресом список сам не раскрывается (канон
-            # `can_open`) — там его раскрывает `reload_presets` (Alt+↓).
+            # (решение 7). Над ЛЮБЫМ заданным адресом — своим или каталожным —
+            # список сам не раскрывается (канон 2026-08-17, `can_open`): там его
+            # раскрывает `reload_presets` (Alt+↓).
             presets_items.insert(0, SimpleNamespace(name=_INHERIT_PRESET_NAME,
                                                     url=self._effective_url, inherit=True))
         self._presets_ctrl = preset_list_controller(
@@ -179,6 +202,12 @@ class ModelEntryForm(Vertical):
             value_of=lambda m: m.id, on_pick=self._apply_model,
             hint=lambda ok: MODEL_LIST_HINT if ok else MODEL_LIST_HINT_NO_MATCH,
             closed_hint=MODEL_RELOAD_HINT,
+            # Канон 2026-08-17: САМ список раскрывается только над пустым полем —
+            # поверх набранного id он увёл бы ↑/↓ себе, и Enter молча затёр бы
+            # введённое. Готовое значение показывает список только по явной просьбе
+            # (`Alt+↓` → `forced=True`), а чем его вызвать, говорит постоянная строка
+            # под полем (`MODEL_RELOAD_HINT`, её держит `_sync_hint`).
+            can_open=lambda value: not value,
             # Печать в поле id — не только фильтр, но и ввод СВОЕГО имени модели
             # (сервер может её не отдавать): откатывать её по Esc нельзя — правило
             # поля адреса, а не языка (`preset_list`, `restore_on_close=False`).
@@ -229,21 +258,47 @@ class ModelEntryForm(Vertical):
             return _inherited(self._effective_url)
         return _ADDRESS_HINT
 
+    @property
+    def token_cleared(self) -> bool:
+        """Свой токен записи помечен к снятию (Ctrl+U): `submit()` УДАЛИТ ключ
+        `token`, и запись вернётся к общему токену «Подключения». Read-only и без
+        сайд-эффектов — то же зеркало третьего состояния, что у `ConnectionEditor`."""
+        return self._token_cleared
+
+    def _own_token_active(self) -> bool:
+        """У записи есть СВОЙ токен и он ещё в силе: помеченный к снятию (Ctrl+U)
+        своим больше не считается — с этого момента и маска, и проба, и submit
+        говорят про унаследованный."""
+        return bool(self._token_current) and not self._token_cleared
+
     def _token_is_mask(self) -> bool:
         """placeholder токена сейчас — маска (своего секрета записи или
         унаследованного), а не подсказка: маркер `has-saved` красит её цветом
         значения (спека §3.4), и врать им нельзя."""
-        return bool(self._token_current) or bool(self._effective_auth)
+        return self._own_token_active() or bool(self._effective_auth)
 
     def _token_placeholder(self) -> str:
         """Свой токен записи — маской (и никакого хинта: маска сама говорит
         «текущее значение остаётся»); своего нет — маска того, что реально
         унаследуется от основного конфига; нет и там — честное «без токена»."""
-        if self._token_current:
+        if self._own_token_active():
             return onboarding.display_secret(self._token_current)
         if self._effective_auth:
             return _inherited(onboarding.display_secret(self._effective_auth))
+        if self._token_cleared:
+            return _PH_TOKEN_CLEARED
         return _PH_KEEP if self._is_edit() else _PH_NO_TOKEN
+
+    def _token_label(self) -> str:
+        """Подпись поля токена. Клавиша обещается ровно там, где работает: свой
+        токен есть и он в силе. Нечего снимать — подписи нет: клавиша молчит, и
+        обещать ей нечего (канон «недоступное не обещаем»)."""
+        return (_TOKEN_LABEL_INHERIT
+                if self._own_token_active() and not self._no_auth else _TOKEN_LABEL)
+
+    def _sync_token_label(self) -> None:
+        for w in self.query("#mef-token-label"):
+            w.update(self._token_label())
 
     def _noauth_cls(self) -> str:
         sel = " selected" if self._positions[self._idx] is None else ""
@@ -275,7 +330,7 @@ class ModelEntryForm(Vertical):
                                      id="mef-url", classes="onb-dyn group-field")
         with Vertical(classes="field-group onb-dyn", id="mef-url-group"):
             yield self._url_input
-        yield Static(_TOKEN_LABEL, id="mef-token-label",
+        yield Static(self._token_label(), id="mef-token-label",
                      classes="onb-hint onb-dyn set-group-gap")
         # has-saved: placeholder говорит одно из двух (маска действующего значения /
         # подсказка-объяснение), и различать их надо не вчитываясь (спека §3.4).
@@ -330,6 +385,9 @@ class ModelEntryForm(Vertical):
         # Маркер живёт вместе с placeholder'ом: при ● текст «не используется» — не
         # маска, и поле не должно врать, что сохранённое значение есть.
         inp.set_class(not self._no_auth and self._token_is_mask(), "has-saved")
+        # Подпись обещает Ctrl+U по тем же условиям, что и клавиша работает: под ●
+        # поле заморожено, снимать в нём нечего — обещание уходит вместе с маской.
+        self._sync_token_label()
 
     def _skip_position(self, position) -> bool:
         """Позиция, на которой курсору делать нечего: замороженное (disabled) поле
@@ -358,18 +416,17 @@ class ModelEntryForm(Vertical):
         """Приземление курсора: подсветка галки, раскрытие/подсказки списков, фокус."""
         target = self._positions[self._idx]
         if target == "mef-url":
-            self._presets_ctrl.open()        # канон §2.1: вход на адрес — всегда раскрыть
-        else:
-            # Подсказка возврата не имеет права остаться висеть под чужим полем:
-            # клавиша гейтится позицией курсора, и обещание уходит вместе с ней.
-            self._presets_ctrl.hide_closed_hint()
+            # Канон 2026-08-17: раскрываем, только если поле пусто (решает `can_open`).
+            # Есть адрес — список остаётся свёрнутым, ↑/↓ водят по форме, а способ
+            # его вызвать назван постоянной строкой под полем (Alt+↓).
+            self._presets_ctrl.open()
         if target == "mef-model":
-            self._list.show_closed_hint()    # чем перечитать список (Alt+↓)
             if self._models:
-                # Список уже подгружен — раскрыть сразу (ревизия владельца: вход в
-                # поле показывает варианты сам, Enter для этого не нужен).
+                # Список уже подгружен — показать варианты сразу, но по тому же
+                # правилу (`can_open`): над пустым полем сам, над набранным id —
+                # только по явному Alt+↓.
                 if not self._list.is_open:
-                    self._list.open(forced=True, filter_text=self._model_value())
+                    self._list.open(filter_text=self._model_value())
             else:
                 # Автоподгрузка при входе — по ключу (адрес, авторизация): к этому
                 # полю курсор приходит после них, идти есть по чему. Те же
@@ -382,7 +439,6 @@ class ModelEntryForm(Vertical):
                     self._autoload_key = key
                     self._start_models_fetch(refresh=False)
         else:
-            self._list.hide_closed_hint()
             # Счётчик/ошибка списка — про поле, с которого курсор ушёл: «2 модели»
             # под чужим полем не про что.
             self._set_status("")
@@ -406,6 +462,43 @@ class ModelEntryForm(Vertical):
         self._sync_token_visibility()
         return True
 
+    def on_token_field_with_saved(self) -> bool:
+        """Курсор на поле токена, и есть что снимать — ровно условие работы Ctrl+U.
+        Отдельным предикатом, а не веткой внутри действия (эталон — одноимённый метод
+        `ConnectionEditor`): по нему же спрашивают витрины, а спросить действием
+        нельзя — оно меняет состояние."""
+        return (self._positions[self._idx] == "mef-token"
+                and not self._no_auth and self._own_token_active())
+
+    def clear_token(self) -> bool:
+        """`Ctrl+U` на поле токена: снять СВОЙ токен записи — вернуть её к общему
+        токену «Подключения». True — обработали, клавиша наша.
+
+        Отличие от `ConnectionEditor.clear_token` не в механике, а в последствии: там
+        над токеном слоя нет, и Ctrl+U его СТИРАЕТ (`Authorization: ""`); здесь слой
+        есть, и снятие своего ключа не оставляет запись без авторизации — она
+        начинает работать общим токеном. Поэтому и в файл уедет не пустая строка, а
+        УДАЛЕНИЕ ключа `token` (`submit`).
+
+        Действует сразу: маска своего секрета уходит, placeholder называет маской то,
+        что теперь унаследуется, проба с этого момента идёт унаследованным токеном —
+        результат виден ДО сохранения. Передумать можно, просто набрав новый (пометка
+        снимется сама, `on_input_changed`)."""
+        if not self.on_token_field_with_saved():
+            return False        # снимать нечего либо курсор не там — клавиша не наша
+        self._token_cleared = True
+        inp = self.query_one("#mef-token", Input)
+        inp.value = ""
+        inp.placeholder = self._token_placeholder()
+        inp.set_class(self._token_is_mask(), "has-saved")
+        self._sync_token_label()
+        # Связь, по которой ходила проба, изменилась (`_current_auth_header` с этого
+        # момента отдаёт унаследованный), а `Input.Changed` по Ctrl+U не летит —
+        # обесценивать вердикт приходится руками, иначе на экране остаётся «✓» про
+        # проверку СВОИМ токеном.
+        self._invalidate_probe()
+        return True
+
     # --- списки: пресеты адреса и модели эндпоинта ---
     def _apply_preset(self, preset) -> None:
         """Enter по строке пресета. Пункт-наследование (duck-атрибут `.inherit`) —
@@ -424,9 +517,10 @@ class ModelEntryForm(Vertical):
 
     def reload_presets(self) -> bool:
         """`Alt+↓` на поле адреса: раскрыть свёрнутый пресет-лист (канон локального
-        источника — «показать список»). Свой адрес список сам не раскрывает
-        (`can_open`), а вернуть его после Esc иначе нечем — и подсказка свёрнутого
-        списка (`escape`) обещала бы мёртвую клавишу.
+        источника — «показать список»). Над заданным адресом список сам не
+        раскрывается (канон 2026-08-17, `can_open`), а печать без совпадений его
+        сворачивает (канон в редакции 2026-08-18) — эта клавиша и есть единственный
+        путь назад, который постоянная строка под полем обещает.
 
         `False` — курсор не на адресе либо список уже раскрыт: перечитывать у
         статического источника нечего."""
@@ -527,12 +621,10 @@ class ModelEntryForm(Vertical):
         черновик умрёт вместе с ней). Порядок вложенности из Global Constraints."""
         if self._presets_ctrl.is_open:
             self._presets_ctrl.close()
-            self._presets_ctrl.show_closed_hint()
             return True
         if self._list.is_open:
             self._list.close()
             self._set_status("")             # счётчик свёрнутого списка ни о чём
-            self._list.show_closed_hint()
             return True
         return False
 
@@ -541,7 +633,32 @@ class ModelEntryForm(Vertical):
             self._list.apply_filter(event.input.value)   # no-op, если список свёрнут
             self._refresh_alias_placeholder()
         elif event.input.id == "mef-url":
-            self._presets_ctrl.apply_filter(event.input.value)
+            # Канон 2026-08-17 в редакции 2026-08-18 (эталон — `ConnectionEditor`):
+            # список раскрыт, пока значение складывается И есть из чего выбирать.
+            # Оба множителя проверяются здесь и только по текущему тексту, а не по
+            # предыстории поля, — иначе с пустого поля печать фильтровала бы, а с
+            # заполненного не делала ничего.
+            value = event.input.value
+            if not self._presets_ctrl.would_match(value):
+                # Набранного в каталоге нет: список сворачиваем (предлагать нечего),
+                # но не молчим — строка под полем говорит, что совпадений не нашлось,
+                # и чем список вернуть. Раскрытым пустым он обещал бы «Enter —
+                # оставить свой адрес» там, где Enter сохраняет форму.
+                self._presets_ctrl.close(closed_hint=_PRESET_NO_MATCH_CLOSED)
+            elif self._presets_ctrl.is_open:
+                self._presets_ctrl.apply_filter(value)
+            else:
+                # `reopen_for_typing`, а не `open()`: он не трогает `_value0`, и Esc
+                # после раскрытия по печати вернёт исходный адрес, а не набранное.
+                self._presets_ctrl.reopen_for_typing(value)
+                self._presets_ctrl.apply_filter(value)
+        elif event.input.id == "mef-token" and event.input.value and self._token_cleared:
+            # Сняли свой токен, а потом набрали новый — пометка снимается сама.
+            # Иначе submit пошёл бы по ветке «удалить ключ» и набранное молча
+            # пропало бы. Подпись возвращается вместе с пометкой: Ctrl+U снова
+            # работает, и молчать о нём нельзя.
+            self._token_cleared = False
+            self._sync_token_label()
         if event.input.id in ("mef-url", "mef-token", "mef-model"):
             self._invalidate_probe()
 
@@ -567,7 +684,7 @@ class ModelEntryForm(Vertical):
         token_raw = self._field_value("mef-token")
         if token_raw:
             return onboarding.authorization_header(token_raw)
-        if self._token_current:
+        if self._own_token_active():
             return onboarding.authorization_header(self._token_current)
         return self._effective_auth
 
@@ -575,12 +692,14 @@ class ModelEntryForm(Vertical):
         """`Ctrl+Space`: проверить связь по тем значениям, что стоят в полях СЕЙЧАС.
         Это ПРОБА, не подбор списка (контракт п.4).
 
-        Вердикт differential, как в «Подключении»: контрольный запрос БЕЗ токена
-        отвечает, требует ли сервер авторизацию вообще, и только на 401 идёт повтор
-        С токеном — иначе «токен принят» говорилось бы там, где токен не проверяли.
-        Смысл вердикта собирает `interpret_auth`, текст — общий `probe_line_text`
-        (у него же модельный хвост: запись про конкретный id, и «доступен» без слова
-        о самой модели было бы полуправдой)."""
+        Вердикт — ТОТ ЖЕ дифференциальный, что в «Подключении», и тем же общим
+        `settings_probe.probe_connection`: контрольный запрос БЕЗ токена отвечает,
+        требует ли сервер авторизацию вообще; только на 401 идёт повтор С токеном;
+        спорный отказ (не 401 и не 2xx) добирается КАНАРЕЙКОЙ — заведомо негодным
+        токеном, и совпавший с ним ответ значит, что сервер токены не различает и
+        «принят» заявлять нельзя. Своя копия этого танца здесь и жила до синка —
+        без канарейки, то есть врала ровно там, где канон 2026-08-17 научился
+        молчать. Текст вердикта — общий `probe_line_text`."""
         url = self._current_url()
         if not url:
             self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
@@ -596,15 +715,11 @@ class ModelEntryForm(Vertical):
         return True
 
     def _probe_blocking(self, url: str, auth: str | None, model: str, gen: int) -> None:
-        from tui.services.settings_probe import ProbeResult, interpret_auth
+        from tui.services.settings_probe import ProbeResult, probe_connection
         try:
-            control = self._probe(url, None, self._verify, model,
-                                  config_proxy=self._config_proxy)
-            with_token = None
-            if control.verdict == "rejected" and control.http_status == 401 and auth:
-                with_token = self._probe(url, auth, self._verify, model,
-                                         config_proxy=self._config_proxy)
-            result = interpret_auth(control, with_token, bool(auth))
+            result = probe_connection(url, auth, self._verify, model,
+                                      config_proxy=self._config_proxy,
+                                      probe_fn=self._probe)
         except Exception as exc:
             result = ProbeResult("unknown", None, None, 0,
                                  f"внутренняя ошибка проверки: {exc}")
@@ -691,6 +806,8 @@ class ModelEntryForm(Vertical):
             return False
         if values != self._initial_snapshot:
             return True
+        if self._token_cleared:
+            return True                      # Ctrl+U: свой токен помечен к снятию
         # Галка отличается от действующего варианта: «явно без авторизации» — такая
         # же правка, как текст в поле, хотя все поля стоят как были.
         return self._no_auth != (self._token_current == "")
@@ -719,8 +836,12 @@ class ModelEntryForm(Vertical):
           Промолчать здесь было бы враньём — форма показала бы «изменено», Enter
           ответил бы «сохранено», а в файле остался бы прежний адрес.
 
-        Токен предзаполнить нельзя (секрет), поэтому его снятие ходит не через
-        пустоту, а через галку «без авторизации»: ● — явное `""`, снятая ● — `None`.
+        Токен предзаполнить нельзя (секрет), поэтому пустое поле здесь всегда значит
+        «не трогаем», а два его снятия разведены по СМЫСЛУ и по клавише: галка ●
+        «без авторизации» — явное `""` (осознанно без токена, снятая ● возвращает
+        `None`), `Ctrl+U` — `None`, то есть удаление ключа и возврат к общему токену
+        «Подключения». Одним переключателем это не выражается: `""` и «ключа нет» —
+        разные состояния файла, и путь к каждому обязан быть свой.
 
         Ошибка остаётся В ФОРМЕ: сообщение под полями, `ok=False`, писать нечего."""
         values = self.peek()
@@ -764,6 +885,12 @@ class ModelEntryForm(Vertical):
                 fields["token"] = ""
         elif values["token"]:
             fields["token"] = values["token"]
+        elif self._token_cleared:
+            # Ctrl+U: свой токен снят — ключ УДАЛЯЕТСЯ (`None` — контракт писателя),
+            # и запись возвращается к общему токену «Подключения». Именно удаление, а
+            # не `token: ""`: пустая строка значит «осознанно без авторизации» (галка
+            # ●), и написать её здесь значило бы подменить один смысл другим.
+            fields["token"] = None
         elif self._token_current == "":
             # Галку сняли, своего токена не ввели: запись возвращается к наследованию —
             # ключ УДАЛЯЕТСЯ. Промолчать здесь значило бы оставить `token: ""` в файле

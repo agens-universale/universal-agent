@@ -575,11 +575,11 @@ async def test_list_reload_after_env_confirm_cancels_it(tmp_path):
 
 async def test_reserve_row_edits_agent_model_through_its_own_subform(tmp_path):
     """Строка «резервная модель» открывает под-форму `ModelEditor` и правит
-    `agent.model`; хинт — «действует только без реестра», НЕ «база наследования»."""
+    `agent.model`; хинт говорит ВЕРДИКТ («не работает»), а не «база наследования»."""
     from tui.editors.model import ModelEditor
     async with _section(tmp_path, _REGISTRY, models=("test-model", "other-model")) \
             as (pilot, scr, cfg_file):
-        assert "действует только без реестра" in _texts(scr)
+        assert "не работает: действует, только если реестр пуст" in _texts(scr)
         assert "база для незаданного" not in _texts(scr)
         ed = _editor(scr)
         _goto(ed, "reserve")
@@ -591,6 +591,38 @@ async def test_reserve_row_edits_agent_model_through_its_own_subform(tmp_path):
         await pilot.pause()
         await pilot.pause()
         assert "other-model" in cfg_file.read_text(encoding="utf-8")
+
+
+async def test_the_reserve_row_shows_up_only_for_a_really_set_legacy_model(tmp_path):
+    """Строка «резервная модель» — ПРЕДУПРЕЖДЕНИЕ тому, у кого в конфиге остался
+    старый `agent.model`. Задавать нечего — предупреждать не о чем, и строки нет
+    вовсе: «не задана · не работает» это чистый шум.
+
+    Плейсхолдер шаблона (`MODEL_SENTINEL`) считается НЕ ЗАДАННЫМ наравне с пустотой:
+    показанный как настоящая модель, он врал бы про рабочую конфигурацию (канон
+    мастера и `/config`)."""
+    from onboarding import MODEL_SENTINEL
+    for value in (f'"{MODEL_SENTINEL}"', '""'):
+        async with _section(tmp_path, _REGISTRY, model=value) as (_pilot, scr, _cfg):
+            ed = _editor(scr)
+            assert not any(r["kind"] == "reserve" for r in ed._rows()), value
+            assert "резервная модель" not in _texts(scr), value
+            assert MODEL_SENTINEL not in _texts(scr), value
+            # Колонка алиасов больше не подпёрта подписью, которой на экране нет.
+            assert ed._alias_width() == len("flash")
+
+
+async def test_the_reserve_row_warns_about_a_legacy_model_that_is_really_set(tmp_path):
+    """Обратная половина: модель задана, реестр непуст — строка есть, называет саму
+    модель и говорит вердикт («не работает»), а не описывает настройку как живую."""
+    from tui.editors.models_section import _RESERVE_HINT
+    async with _section(tmp_path, _REGISTRY, model='"legacy-model"') as (_p, scr, _cfg):
+        ed = _editor(scr)
+        assert [r for r in ed._rows() if r["kind"] == "reserve"]
+        ed._row_width = lambda: 100
+        row = ed._row_text({"kind": "reserve"}, False).plain
+        assert "резервная модель" in row and "legacy-model" in row
+        assert row.endswith(_RESERVE_HINT), row
 
 
 # --- швы экрана ---------------------------------------------------------------
@@ -686,22 +718,73 @@ async def test_footer_is_positional_over_the_section_rows(tmp_path):
 
 
 async def test_form_footer_follows_the_filter_of_the_address_list(tmp_path):
-    """Печать в адресе сужает пресет-лист — вместе с ним меняется и обещание Enter
-    (подставить ↔ оставить своё). Футер обязан догонять её тем же событием, иначе
-    он обещает подстановку там, где подставлять уже нечего."""
+    """Печать в адресе меняет судьбу пресет-листа — вместе с ним меняется и обещание
+    Enter (подставить ↔ оставить своё ↔ сохранить). Футер обязан догонять её тем же
+    событием, иначе он обещает подстановку там, где подставлять уже нечего.
+
+    Признак, по которому футер решает, — `presets_have_selection` (есть ли ПОДСВЕЧЕННАЯ
+    строка), а не «список не пуст»: живое состояние «раскрыт без подсветки» одно —
+    `Alt+↓` поверх своего адреса (канон 2026-08-18: печать без совпадений список
+    сворачивает)."""
     from tui.editors.model_entry_form import ModelEntryForm
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         await pilot.press("n")
         await pilot.pause()
         form = scr.query(ModelEntryForm).last()
-        await pilot.press("down")                   # алиас → провайдерский id
-        await pilot.press("down")                   # id → адрес (пресет-лист раскрылся)
+        await pilot.press("down")                   # ↑/↓ водят по раскрытому списку
+        await pilot.press("down")                   # — курсор остаётся на адресе
         await pilot.pause()
         assert form.presets_open, "пресет-лист адреса не раскрылся"
         assert "Enter — подставить" in _footer(scr)
         form.query_one("#mef-url", Input).value = "https://my-own-host.internal/v1"
         await pilot.pause()
+        # Совпадений нет — список свернулся, и футер ушёл на обещания ПОЛЯ; о том,
+        # что случилось и чем список вернуть, говорит постоянная строка под полем.
+        assert form.presets_open is False
+        assert "Enter — оставить своё" not in _footer(scr)
+        assert "Alt+↓ — показать список" in _footer(scr)
+        hint = str(form.query(".mef-url-preset-hint").last().render())
+        assert hint == "в списке такого нет · Alt+↓ — показать список", hint
+        # Alt+↓ поверх своего адреса: строки видны все, подсвеченной нет — Enter
+        # оставит набранное, и футер обязан сказать именно это.
+        await pilot.press("alt+down")
+        await pilot.pause()
+        assert (form.presets_open, form.presets_have_selection) == (True, False)
         assert "Enter — оставить своё" in _footer(scr)
+
+
+async def test_ctrl_u_in_the_entry_form_returns_the_record_to_the_shared_token(tmp_path):
+    """Живой путь клавиши: Ctrl+U на поле токена формы обязан дойти ДО формы, а не
+    сгинуть в штатном `Input.delete_left_all` (поле-то пустое — секрет живёт маской).
+    Итог сохранения — ключа `token` в записи НЕТ: она вернулась к токену
+    «Подключения». До этой клавиши путь был двухходовкой через галку с промежуточным
+    сохранением (смок владельца)."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n'
+            '    token: "sk-own"\n'
+            "slots:\n"
+            '  default: "flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        _goto(_editor(scr), "entry", alias="flash")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form._presets_ctrl.close()                  # раскрытый на входе список съел бы клавиши
+        await pilot.pause()
+        await pilot.press("down")                   # адрес → токен
+        await pilot.pause()
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert form.token_cleared is True           # клавиша дошла и сработала
+        placeholder = form.query_one("#mef-token", Input).placeholder
+        assert placeholder.startswith("наследуется"), placeholder
+        await pilot.press("enter")                  # сохранить
+        await pilot.pause()
+    entry = _doc(cfg_file)["models"]["flash"]
+    assert "token" not in entry, entry
 
 
 def test_module_footers_and_hints_are_registered_in_the_contract_guard():
@@ -1162,11 +1245,14 @@ async def test_wildcard_row_names_the_subagents_it_really_covers(tmp_path):
 async def test_reserve_row_is_dimmed_while_the_registry_works(tmp_path):
     """Резервная модель при живом реестре не работает — и выглядит так же, как
     прочие нерабочие записи (DEEP_DIM целиком), а не равноправной строкой."""
+    from tui.editors.models_section import _RESERVE_HINT
     from tui.palette import DEEP_DIM
     async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
-        text = _editor(scr)._row_text({"kind": "reserve"}, False)
+        ed = _editor(scr)
+        ed._row_width = lambda: 100     # предмет здесь цвет, а не лестница ширины
+        text = ed._row_text({"kind": "reserve"}, False)
         assert "test-model" in text.plain
-        assert "действует только без реестра" in text.plain
+        assert _RESERVE_HINT in text.plain
         assert _spans_style(text) == {_rgb(DEEP_DIM)}
 
 
@@ -1286,14 +1372,16 @@ async def test_entry_row_shows_the_address_and_every_level_that_points_at_it(tmp
 
 
 async def test_inherited_address_says_where_it_came_from(tmp_path):
-    """Запись без своего `url` работает адресом основного конфига — и говорит об этом
-    в хвосте ячейки (усечётся он первым, хост уцелеет)."""
+    """Запись без своего `url` работает адресом из «Подключения» — и говорит об этом
+    в хвосте ячейки (усечётся он первым, хост уцелеет). Хвост называет ИСТОЧНИК
+    АДРЕСА именем экрана: «из основного конфига» на экране основного конфига было
+    тавтологией и читалось как происхождение самой записи (смок владельца)."""
     async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
         cell = ed._address_cell("opus")
         assert cell.startswith("host")
-        assert cell.endswith("· из основного конфига")
+        assert cell.endswith("· адрес из «Подключения»")
 
 
 async def test_the_address_column_shrinks_but_the_pointer_stays_whole(tmp_path):
@@ -1405,7 +1493,7 @@ def _grid_rows(ed) -> list:
 
 @pytest.mark.parametrize("body,model", [(_ADDRESSED, '"test-model"'),
                                         (_LONG_ALIAS, '""')],
-                         ids=["типовой реестр", "длинный алиас, резервная не задана"])
+                         ids=["типовой реестр", "длинный алиас, резервной строки нет"])
 async def test_the_lower_half_never_wraps_at_any_width(tmp_path, body, model):
     """Ни одна строка нижней половины — слоты, привязки и резервная модель — не
     переносится НИ НА КАКОЙ ширине; слоты и привязки при этом стоят одной колонкой.
@@ -1453,19 +1541,23 @@ async def test_the_reserve_row_stands_in_the_registry_grid(tmp_path):
 
 
 async def test_the_reserve_row_drops_its_hint_whole(tmp_path):
-    """Хвост строки — подсказка «действует только без реестра» — уходит ЦЕЛИКОМ
-    (канон `_mode_row_text`), а не режется многоточием: та же фраза стоит в шапке
-    под-формы резервной модели (Enter), терять её насовсем негде. Ядро строки —
-    подпись и сама модель."""
+    """Хвост строки — подсказка про нерабочую резервную — уходит ЦЕЛИКОМ (канон
+    `_mode_row_text`), а не режется многоточием: та же фраза стоит в шапке под-формы
+    резервной модели (Enter), терять её насовсем негде. Ядро строки — подпись и сама
+    модель.
+
+    Натуральная ширина считается от самой константы, а не пинится числом: подсказка
+    уже переписывалась, и число молча описывало бы прежнюю фразу."""
+    from tui.editors.models_section import _RESERVE_HINT
+    natural = len("  резервная модель  test-model  ") + len(_RESERVE_HINT)
     async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
-        ed._row_width = lambda: 60          # натуральная ширина строки — ровно она
-        assert ed._row_text({"kind": "reserve"}, False).plain.endswith(
-            "действует только без реестра")
-        ed._row_width = lambda: 59
+        ed._row_width = lambda: natural     # натуральная ширина строки — ровно она
+        assert ed._row_text({"kind": "reserve"}, False).plain.endswith(_RESERVE_HINT)
+        ed._row_width = lambda: natural - 1
         row = ed._row_text({"kind": "reserve"}, False)
-        assert "действует" not in row.plain
+        assert _RESERVE_HINT not in row.plain
         assert row.plain.rstrip().endswith("test-model")
 
 

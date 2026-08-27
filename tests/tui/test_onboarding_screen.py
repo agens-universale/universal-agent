@@ -1701,6 +1701,58 @@ async def test_auto_probe_reports_missing_env_var_instead_of_probing(tmp_path, m
         assert "нет соединения" not in line
 
 
+@pytest.mark.asyncio
+async def test_ctrl_u_clears_the_saved_token_and_probes_without_it(tmp_path):
+    """Ctrl+U на шаге «Подключение» стирает СОХРАНЁННЫЙ токен — ту же клавишу мастер
+    держит, что и /settings. Поле токена пустое (секрет живёт маской в placeholder),
+    так что штатный `delete_left_all` у Input здесь вхолостую, и обработчик экрана
+    обязан перехватить клавишу сам.
+
+    Второе — проба: раз токен помечен к удалению, она обязана уйти БЕЗ него ещё до
+    сохранения (`_auto_probe`, ветка `token_cleared`). Иначе мастер показывал бы
+    вердикт про конфигурацию, которой после Enter уже не будет.
+
+    Сервер здесь ТРЕБУЕТ авторизацию (401 на контрольный запрос): без этого токену
+    некуда доехать, и «ушла без токена» вышло бы верным само собой."""
+    pytest.importorskip("textual")
+    from textual.widgets import Input
+    from tests.tui.conftest import wait_until
+    from tui.app import TuiApp
+    from tui.editors.connection import ConnectionEditor, _TOKEN_PH_CLEARED
+    from tui.services.settings_probe import ProbeResult
+
+    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
+                               auth="Bearer sk-REALSECRET123")
+    cfg = _resolved_conn_cfg(cfg_path)
+    seen = []
+
+    def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
+        seen.append(auth)
+        if auth is None:
+            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+        return ProbeResult("ok", 200, None, 5, "доступен")
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(config_path=str(cfg_path), config=cfg, probe=fake_probe)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        ed = scr.query_one(ConnectionEditor)
+        token = ed.query_one("#conn-token", Input)
+        assert "REALSECRET" not in token.placeholder      # маска, а не секрет
+        assert token.placeholder != _TOKEN_PH_CLEARED     # …но маска сохранённого есть
+
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert ed.token_cleared is True
+        assert token.placeholder == _TOKEN_PH_CLEARED     # маска ушла, обещано удаление
+
+        scr._auto_probe()
+        await wait_until(pilot, lambda: seen, "проба ушла")
+        await pilot.pause()
+        assert seen == [None], "проба потащила стёртый токен"
+
+
 async def test_ctrl_space_reprobes_the_connection_step(tmp_path):
     """Ctrl+Space на поле «Подключения» шлёт пробу — и шлёт её ПОВТОРНО, хотя поля не
     менялись: снимок против дребезга гасит только автопробу, ручную глушить нельзя

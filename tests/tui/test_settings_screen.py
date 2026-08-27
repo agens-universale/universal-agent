@@ -613,8 +613,8 @@ async def test_space_off_galka_types_space_and_does_not_toggle(tmp_path):
 
 
 async def test_connection_section_esc_collapses_presets_enter_substitutes(tmp_path):
-    """Поле адреса пустое (спека-отклонение №5: список раскрывается только на
-    пустом/пресетном значении — см. test_preset_list.py) — вход в него раскрывает
+    """Поле адреса пустое (канон 2026-08-17: сам список раскрывается только на
+    ПУСТОМ значении — см. test_preset_list.py) — вход в него раскрывает
     пресеты сразу (канон §2.1); Esc сворачивает СПИСОК, секция остаётся открытой;
     повторный вход на адрес раскрывает список заново; Enter подставляет url
     выделенного пресета; список уже свёрнут — следующий Enter обычный submit (не
@@ -3496,6 +3496,68 @@ async def test_literal_over_env_ref_still_warns_about_the_leak(tmp_path, monkeyp
         assert "GC_API_KEY" in banner
         assert "открытым текстом" in banner
         assert "удалит ссылку" not in banner
+
+
+async def test_ctrl_u_invalidates_the_verdict_and_reprobes_on_leaving_the_field(tmp_path):
+    """Ctrl+U — правка значения, а `Input.Changed` по ней не летит (пустое поверх
+    пустого). Значит обесценивать проверенное обязан сам обработчик: иначе на экране
+    остаётся вердикт, проверявший конфигурацию С токеном, а уцелевший снимок полей
+    гейтом дребезга запрещает уходу с поля перепроверить — «✓ токен принят» так и
+    висит над конфигурацией БЕЗ токена, и Enter сохраняет с этим вердиктом."""
+    calls = []
+    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
+        ed = scr._connection_editor()
+        await pilot.press("down")                    # адрес → токен (значения те же: пробы нет)
+        await pilot.pause()
+        assert scr._draft_checked is not None        # вердикт входа в секцию на месте
+        before = len(calls)
+
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert ed.token_cleared is True              # клавиша дошла и сработала
+        assert scr._draft_checked is None            # вердикт обесценен
+
+        await pilot.press("down")                    # уход с токена → автопроба заново
+        await wait_until(pilot, lambda: len(calls) > before,
+                         "уход с поля после Ctrl+U перезапустил пробу")
+        assert calls[-1][1] is None                  # и ушла БЕЗ токена
+
+
+async def test_ctrl_u_dismisses_the_pending_env_confirm(tmp_path, monkeypatch):
+    """Ctrl+U снимает висящий confirm перезаписи `${ENV:...}`.
+
+    Confirm держит СНИМОК значений (`_pending_env_save`), сделанный до очистки. Оставь
+    его на экране — и следующий Enter сохранит именно тот снимок: очистка токена в него
+    не попала, и в файл уехало бы состояние ДО Ctrl+U.
+
+    Ссылка здесь в АДРЕСЕ, а не в токене: страж поднимается правкой адреса, курсор
+    остаётся на нём (стрелка бы confirm сняла сама), а Ctrl+U на позиции адреса всё
+    равно стирает сохранённый токен — `clear_token()` смотрит на маску, не на курсор.
+    Поле токена при этом пустое, `Input.Changed` по очистке не летит, и снять страж
+    некому, кроме самого обработчика клавиши."""
+    monkeypatch.setenv("GC_URL", "https://from-env/v1/chat/completions")
+    cfg_file = _write_cfg(tmp_path, url='"${ENV:GC_URL}"')   # токен — обычный литерал (маска есть)
+    import tui.app as app_mod
+    from textual.widgets import Input as _Input
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr._connection_editor()
+        ed.query_one("#conn-url", _Input).value = "https://typed-by-hand/v1/chat/completions"
+        await pilot.pause()
+
+        await pilot.press("enter")                   # сохранение → страж перезаписи ссылки
+        await pilot.pause(); await pilot.pause()
+        assert list(scr.query("#set-envconfirm")), "страж не поднялся — проверять нечего"
+
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert ed.token_cleared is True              # клавиша дошла и сработала
+        assert not list(scr.query("#set-envconfirm")), "баннер остался висеть"
+        assert scr._pending_env_save is None          # и снимок под ним не пережил очистку
 
 
 def test_env_confirm_text_names_both_fates_when_they_differ():

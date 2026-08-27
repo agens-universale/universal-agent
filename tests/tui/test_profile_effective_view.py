@@ -274,7 +274,7 @@ async def test_an_own_entry_shows_the_keys_it_inherits_per_key(tmp_path, monkeyp
                '    model: "google/gemini-3.0-flash"\n')
     async with _profile_view(tmp_path, monkeypatch, profile=profile) as (_p, _scr, ed):
         ed._row_width = lambda: 100
-        assert ed._address_cell("flash") == "flash-host · из основного конфига"
+        assert ed._address_cell("flash") == "flash-host · адрес из «Подключения»"
         flash = _entry_row(ed, "flash")
         assert "google/gemini-3.0-flash" in flash.plain    # id — свой, он заслоняет
         assert ed._origin_cell("flash") == ""
@@ -282,7 +282,7 @@ async def test_an_own_entry_shows_the_keys_it_inherits_per_key(tmp_path, monkeyp
 
 async def test_an_own_address_keeps_the_inherited_model_id(tmp_path, monkeypatch):
     """Обратная половина того же: профиль задал только `url` — провайдерский id
-    остаётся от записи основного конфига, а хвоста «из основного конфига» у
+    остаётся от записи основного конфига, а хвоста про адрес из «Подключения» у
     ячейки адреса больше нет (адрес стал своим)."""
     profile = ("models:\n"
                "  flash:\n"
@@ -475,7 +475,7 @@ async def test_the_origin_column_survives_longer_than_the_pointer(tmp_path, monk
     Три факта разом: строка не переносится НИ НА КАКОЙ ширине; порядок жертв
     §4 — происхождение переживает указатель (существует ширина, где указателя
     уже нет, а слово «основной конфиг» ещё стоит); у унаследованной строки
-    хвост «· из основного конфига» подавлен — двух «основных конфигов» в одной
+    хвост про адрес из «Подключения» подавлен — двух происхождений в одной
     строке не бывает ни на какой ширине."""
     async with _profile_view(tmp_path, monkeypatch, size=(80, 40)) as (pilot, _scr, ed):
         origin_outlived_pointer = False
@@ -494,7 +494,7 @@ async def test_the_origin_column_survives_longer_than_the_pointer(tmp_path, monk
                        if w.region.height != 1]
             assert not wrapped, (width, ed._row_width(), wrapped[:2])
             base = _entry_row(ed, "opus").plain
-            assert "из основного" not in base, (width, base)
+            assert "адрес из" not in base, (width, base)
             if "основной конфиг" in base and "←" not in base:
                 origin_outlived_pointer = True
         assert origin_outlived_pointer, "колонка происхождения ушла раньше указателя"
