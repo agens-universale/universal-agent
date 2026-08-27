@@ -12,6 +12,7 @@ from utils.file_text import (
     try_encode_text_bytes,
 )
 from utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
+from tools.fs.edit_line_endings import resolve_edit_line_endings
 from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
@@ -108,6 +109,8 @@ class ApplyFileEdits(AbstractSimpleTool):
             "or use occurrence/first/last/all and expected_matches.\n"
             "Short search like 'i += 1' may match unseen duplicates in file parts not in current read page;\n"
             "prefer broader unique fragments and guard with expected_matches=1 when appropriate.\n"
+            "Line endings: write search/replace with \\n; CRLF files are matched and written in their own style\n"
+            "automatically (edit_results[i].line_endings_normalized=true when a conversion happened).\n"
             "If any edit fails validation or matching, no file changes are written.\n"
             "edits_would_apply/total_would_replace count in-memory simulation;\n"
             "edits_applied/total_replaced are non-zero only when applied=true.\n"
@@ -206,8 +209,9 @@ class ApplyFileEdits(AbstractSimpleTool):
         content: str,
         edit: Dict[str, Any],
     ) -> tuple[bool, str, Dict[str, Any], Dict[str, Any] | None]:
-        search = edit["search"]
-        replace = edit["replace"]
+        resolved = resolve_edit_line_endings(content, edit["search"], edit["replace"])
+        search = resolved.search
+        replace = resolved.replace
         occurrence = edit.get("occurrence")
         if occurrence is None:
             occurrence = "first"
@@ -273,13 +277,16 @@ class ApplyFileEdits(AbstractSimpleTool):
         parts.append(content[prev_end:])
         new_content = "".join(parts)
         ranges = [{"start_line": m[1], "end_line": m[2]} for m in selected]
-        return True, new_content, {
+        meta: Dict[str, Any] = {
             "matched": True,
             "replaced": len(selected),
             "match_count": match_count,
             "line_numbers": sorted({m[1] for m in selected}),
             "match_ranges": ranges,
-        }, None
+        }
+        if resolved.normalized:
+            meta["line_endings_normalized"] = True
+        return True, new_content, meta, None
 
     @enforce_write_guard(path_arg="path", operation="write")
     def __call__(

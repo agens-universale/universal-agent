@@ -406,6 +406,20 @@ def count_lines_in_text(text: str) -> int:
     return text.count("\n") + (0 if text.endswith("\n") else 1)
 
 
+def detect_line_ending(text: str) -> str | None:
+    """Dominant newline style of ``text``: ``"\\r\\n"`` or ``"\\n"``; ``None`` without newlines."""
+    crlf = text.count("\r\n")
+    lf = text.count("\n") - crlf
+    if crlf == 0 and lf == 0:
+        return None
+    return "\r\n" if crlf > lf else "\n"
+
+
+def convert_line_endings(text: str, eol: str) -> str:
+    """Rewrite every ``\\r\\n`` / ``\\n`` in ``text`` as ``eol``. Bare ``\\r`` is left alone."""
+    return text.replace("\r\n", "\n").replace("\n", eol)
+
+
 def decode_text_best_effort(data: bytes) -> str | None:
     """Best-effort decode for metadata/display (not for write). Never raises on codec fail.
 

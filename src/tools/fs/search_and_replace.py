@@ -3,6 +3,7 @@ import functools
 import difflib
 from typing import Dict, Any
 from tools.simple_tool_base import AbstractSimpleTool
+from tools.fs.edit_line_endings import resolve_edit_line_endings
 from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
@@ -182,8 +183,9 @@ Important Usage Rules
   - path: string — the file path.
   - message: string — human-readable summary.
   - error: object|null — error details when ok=false due to an error (not "not found").
+  - line_endings_normalized: boolean — `search`/`replace` were converted to the file's CRLF/LF style.
 - **NEVER** use shell commands like `sed`, `perl -pi`, etc. — this tool is safe and cross-platform.
-- For multiline replacements use line feed characters (e.g. \\n, \\r\\n depending on the platform)  in literal text for arguments `search` and `replace`
+- Line endings: write `search`/`replace` with \\n. CRLF files are matched and written in their own style automatically; the response reports it as `line_endings_normalized: true`.
 
 Examples
 Replace database URL in config:
@@ -228,6 +230,7 @@ Update version string:
         suggestions_total: int = 0,
         sha256: str | None = None,
         encoding_used: str | None = None,
+        line_endings_normalized: bool = False,
     ) -> str:
         return json.dumps(
             {
@@ -247,6 +250,7 @@ Update version string:
                 "suggestions_total": suggestions_total,
                 "sha256": sha256,
                 "encoding_used": encoding_used,
+                "line_endings_normalized": line_endings_normalized,
                 "error": error,
                 "message": message,
             },
@@ -562,6 +566,10 @@ Update version string:
             )
         content = decoded.text or ""
         encoding_used = decoded.encoding_used
+        resolved = resolve_edit_line_endings(content, search, replace)
+        search = resolved.search
+        replace = resolved.replace
+        _result = functools.partial(_result, line_endings_normalized=resolved.normalized)
         actual_sha256 = sha256_hex_of_bytes(raw)
         stale_error = check_expected_file_sha256(actual_sha256, expected_file_sha256)
         if stale_error is not None:
