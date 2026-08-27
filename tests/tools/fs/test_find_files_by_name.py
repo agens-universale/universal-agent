@@ -282,3 +282,20 @@ def test_walk_prunes_hard_excludes_in_the_backend(tmp_path, monkeypatch):
     assert data["ok"] is True
     assert "node_modules" in seen["prune_names"]
     assert seen["prune_dot_dirs"] is True
+
+
+def test_find_lists_excluded_dirs_by_name_but_not_their_contents(tmp_path: Path):
+    """Жёсткие исключения — «не спускаться», а не «не показывать»: сам каталог
+    находится по имени (как на develop), его содержимое — нет."""
+    (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / "src").mkdir()
+
+    for query, expected in (("node_modules", "node_modules"), (".github", ".github")):
+        res = json.loads(_tool()(path=str(tmp_path), query=query))
+        assert res["ok"] is True, query
+        assert [Path(m["path"]).name for m in res["matches"]] == [expected]
+        assert res["matches"][0]["type"] == "directory"
+
+    inside = json.loads(_tool()(path=str(tmp_path), query="workflows"))
+    assert inside["count"] == 0

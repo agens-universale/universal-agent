@@ -317,7 +317,9 @@ def test_walk_entries_prunes_in_find_and_parses_sizes(loop_in_thread):
 
     assert [(e.rel, e.is_dir, e.size) for e in entries] == [("src", True, None), ("src/a.py", False, 12)]
     cmd = env.calls[-1]
-    assert "'(' -type d -name node_modules -o -type d -name '.*' ')' -prune -o" in cmd
+    # -H: паритет с os.walk по симлинк-вершине; -printf ДО -prune: сам каталог в листинге остаётся.
+    assert cmd.startswith("find -H /work -mindepth 1 '(' -type d -name node_modules -o -type d -name '.*' ')' -printf")
+    assert " -prune -o -printf" in cmd
     assert cmd.endswith(r"-printf '%P\t%y\t%s\n'")
 
 

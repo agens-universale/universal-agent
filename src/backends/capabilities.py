@@ -76,7 +76,9 @@ def _which_bin(backend: "FsBackend", name: str) -> Optional[str]:
 def parse_find_printf_entries(stdout: str) -> List[WalkEntry]:
     """Parse the walk wire (``%P\\t%y\\t%s\\n``; the two-column form is tolerated).
 
-    Size is kept for files only; a missing or malformed third column → None.
+    Size is kept for regular files only; a missing or malformed third column → None.
+    A symlink (``%y`` = ``l``) reports the link's own length — not the target's —
+    so its size is unknown here and the consumer stats the target itself.
     """
     out: List[WalkEntry] = []
     for line in (stdout or "").splitlines():
@@ -91,7 +93,7 @@ def parse_find_printf_entries(stdout: str) -> List[WalkEntry]:
         # %y: f=file, d=directory, l=symlink, …
         is_dir = kind[:1] == "d"
         size: Optional[int] = None
-        if not is_dir and size_text.strip():
+        if kind[:1] == "f" and size_text.strip():
             try:
                 size = int(size_text.strip())
             except ValueError:

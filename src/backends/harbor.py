@@ -30,6 +30,7 @@ from utils.file_text import (
     encode_text_for_append,
     encode_text_for_write,
 )
+from utils.native_fs_search import find_prune_group, find_walk_head
 
 
 def _build_find_walk_command(
@@ -38,18 +39,15 @@ def _build_find_walk_command(
     prune_names: Sequence[str] = (),
     prune_dot_dirs: bool = False,
 ) -> str:
-    """``find PATH -mindepth 1 [( prunes ) -prune -o] -printf FORMAT`` — the walk wire."""
-    argv = ["find", path, "-mindepth", "1"]
-    prune_parts = [["-type", "d", "-name", name] for name in prune_names if name]
-    if prune_dot_dirs:
-        prune_parts.append(["-type", "d", "-name", ".*"])
-    if prune_parts:
-        argv.append("(")
-        for i, part in enumerate(prune_parts):
-            if i:
-                argv.append("-o")
-            argv.extend(part)
-        argv.extend([")", "-prune", "-o"])
+    """``find -H PATH -mindepth 1 [( prunes ) -printf FMT -prune -o] -printf FMT``.
+
+    A pruned directory is printed BEFORE ``-prune``: the walk lists it (name
+    search finds ``node_modules`` itself), only its subtree is cut.
+    """
+    argv = find_walk_head(path)
+    group = find_prune_group(exclude_dir_names=prune_names, exclude_nested_dot_dirs=prune_dot_dirs)
+    if group:
+        argv.extend(group + ["-printf", FIND_PRINTF_FORMAT, "-prune", "-o"])
     argv.extend(["-printf", FIND_PRINTF_FORMAT])
     return " ".join(shlex.quote(a) for a in argv)
 

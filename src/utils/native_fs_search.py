@@ -141,6 +141,44 @@ def _fnmatch_escape(path: str) -> str:
     return "".join("\\" + ch if ch in "\\*?[]" else ch for ch in path)
 
 
+def find_walk_head(path: str) -> List[str]:
+    """``find -H PATH -mindepth 1`` — the head of every ``find`` we build.
+
+    ``-H`` resolves a symlinked START path only (parity with ``os.walk``, which
+    always follows its top); links met inside the tree stay unfollowed.
+    ``-mindepth 1`` keeps the start path itself out of the prunes (search inside
+    a junk dir is allowed).
+    """
+    return ["find", "-H", path, "-mindepth", "1"]
+
+
+def find_prune_group(
+    *,
+    exclude_dir_names: Sequence[str],
+    exclude_nested_dot_dirs: bool,
+    exclude_paths: Sequence[str] = (),
+) -> List[str]:
+    """``( -type d -name A -o -type d -name .* -o -type d -path P )`` — the one prune
+    recipe (twin of ``walk_util.pruned_dir_predicate``); ``[]`` when nothing is pruned.
+
+    ``exclude_paths``: call-time absolute directories, pruned with the POSIX
+    ``-path`` primary (escaped, so a literal path never acts as a glob).
+    """
+    parts: List[List[str]] = [["-type", "d", "-name", n] for n in exclude_dir_names if n]
+    if exclude_nested_dot_dirs:
+        parts.append(["-type", "d", "-name", ".*"])
+    parts.extend(["-type", "d", "-path", _fnmatch_escape(p)] for p in exclude_paths if p)
+    if not parts:
+        return []
+    group: List[str] = ["("]
+    for i, part in enumerate(parts):
+        if i:
+            group.append("-o")
+        group.extend(part)
+    group.append(")")
+    return group
+
+
 def _build_find_prune_argv(
     path: str,
     *,
@@ -150,34 +188,16 @@ def _build_find_prune_argv(
     print0: bool = True,
     exclude_paths: Sequence[str] = (),
 ) -> List[str]:
-    """find PATH with basename prunes → file paths.
-
-    ``-mindepth 1`` ensures the start path itself is never pruned when its
-    basename is a hard-exclude name (search-inside-junk-dir is allowed).
-    ``-H`` resolves a symlinked START path only (parity with ``os.walk``, which
-    always follows its top); links met inside the tree stay unfollowed.
-    ``exclude_paths``: call-time absolute directories, pruned with the POSIX
-    ``-path`` primary (escaped, so a literal path never acts as a glob).
-    """
-    argv: List[str] = ["find", "-H", path, "-mindepth", "1"]
-    prune_parts: List[List[str]] = []
-    for name in exclude_dir_names:
-        if not name:
-            continue
-        prune_parts.append(["-type", "d", "-name", name])
-    if exclude_nested_dot_dirs:
-        prune_parts.append(["-type", "d", "-name", ".*"])
-    for abs_dir in exclude_paths:
-        if abs_dir:
-            prune_parts.append(["-type", "d", "-path", _fnmatch_escape(abs_dir)])
-
-    if prune_parts:
-        argv.append("(")
-        for i, part in enumerate(prune_parts):
-            if i:
-                argv.append("-o")
-            argv.extend(part)
-        argv.extend([")", "-prune", "-o"])
+    """find PATH with basename prunes → file paths (pruned dirs are not printed:
+    ``-type f`` — this listing feeds grep)."""
+    argv = find_walk_head(path)
+    group = find_prune_group(
+        exclude_dir_names=exclude_dir_names,
+        exclude_nested_dot_dirs=exclude_nested_dot_dirs,
+        exclude_paths=exclude_paths,
+    )
+    if group:
+        argv.extend(group + ["-prune", "-o"])
 
     argv.extend(["-type", "f"])
     if file_pattern:

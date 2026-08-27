@@ -14,8 +14,24 @@ from backends.protocol import (
     ExecResult,
     FsBackend,
 )
-from backends.walk_util import WalkEntry
+from backends.walk_util import WalkEntry, pruned_dir_predicate
 from utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
+
+
+def _is_real_dir(entry: os.DirEntry) -> bool:
+    try:
+        return entry.is_dir(follow_symlinks=False)
+    except OSError:
+        return False
+
+
+def _size_without_following(entry: os.DirEntry) -> Optional[int]:
+    try:
+        if entry.is_symlink():
+            return None
+        return entry.stat(follow_symlinks=False).st_size
+    except OSError:
+        return None
 
 
 class LocalFsBackend(FsBackend):
@@ -155,30 +171,9 @@ class LocalFsBackend(FsBackend):
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
-        """Stream top-down DFS via ``os.walk`` (dirs first, then files per level)."""
-        for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
-            dirnames.sort()
-            filenames.sort()
-            rel_dir = os.path.relpath(dirpath, path)
-            prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
-
-            for d in dirnames:
-                full = os.path.join(dirpath, d)
-                try:
-                    st = os.lstat(full)
-                    is_dir = stat_module.S_ISDIR(st.st_mode)
-                except OSError:
-                    is_dir = False
-                yield (prefix + d, is_dir)
-
-            for f in filenames:
-                yield (prefix + f, False)
-
-            if should_descend is not None:
-                dirnames[:] = [
-                    d for d in dirnames
-                    if should_descend(os.path.join(dirpath, d))
-                ]
+        """``iter_walk_entries`` without sizes (dirs first, then files per level)."""
+        for entry in self.iter_walk_entries(path, should_descend=should_descend):
+            yield entry.rel, entry.is_dir
 
     def iter_files(
         self,
@@ -212,39 +207,37 @@ class LocalFsBackend(FsBackend):
         prune_names: Sequence[str] = (),
         prune_dot_dirs: bool = False,
     ) -> Iterable[WalkEntry]:
-        """``iter_walk`` with sizes (``lstat``) and prune applied before descent."""
-        names = frozenset(n for n in prune_names if n)
+        """Top-down DFS over ``os.scandir``: dirs first, then files per level (sorted).
 
-        def _pruned(name: str) -> bool:
-            return name in names or (prune_dot_dirs and name.startswith("."))
+        Sizes come from the directory listing (``DirEntry.stat(follow_symlinks=False)``:
+        free on Windows, one ``lstat`` elsewhere) — no second stat per file. A
+        symlink's size is unknown (``None``), never the link's own length. A pruned
+        or non-descendable directory is still listed; only its subtree is skipped.
+        Symlinks are never followed (``os.walk(followlinks=False)`` parity).
+        """
+        pruned = pruned_dir_predicate(prune_names, prune_dot_dirs)
 
-        for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
-            dirnames[:] = sorted(d for d in dirnames if not _pruned(d))
-            filenames.sort()
-            rel_dir = os.path.relpath(dirpath, path)
-            prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
+        def _level(abs_dir: str, prefix: str) -> Iterable[WalkEntry]:
+            try:
+                with os.scandir(abs_dir) as it:
+                    children = sorted(it, key=lambda e: e.name)
+            except OSError:
+                return
+            dirs = [e for e in children if _is_real_dir(e)]
+            files = [e for e in children if not _is_real_dir(e)]
+            for d in dirs:
+                yield WalkEntry(prefix + d.name, True)
+            for f in files:
+                yield WalkEntry(prefix + f.name, False, _size_without_following(f))
+            for d in dirs:
+                if pruned(d.name):
+                    continue
+                full = os.path.join(abs_dir, d.name)
+                if should_descend is not None and not should_descend(full):
+                    continue
+                yield from _level(full, prefix + d.name + "/")
 
-            for d in dirnames:
-                full = os.path.join(dirpath, d)
-                try:
-                    st = os.lstat(full)
-                    is_dir = stat_module.S_ISDIR(st.st_mode)
-                except OSError:
-                    is_dir = False
-                yield WalkEntry(prefix + d, is_dir)
-
-            for f in filenames:
-                try:
-                    size: Optional[int] = os.lstat(os.path.join(dirpath, f)).st_size
-                except OSError:
-                    size = None
-                yield WalkEntry(prefix + f, False, size)
-
-            if should_descend is not None:
-                dirnames[:] = [
-                    d for d in dirnames
-                    if should_descend(os.path.join(dirpath, d))
-                ]
+        yield from _level(path, "")
 
     def walk_entries(
         self,
