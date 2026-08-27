@@ -18,6 +18,7 @@ from gc_tui.diff_tui.tracking import TrackingFsBackend, wrap_local_for_tui
 from gc_core.execution_workspace import build_execution_workspace
 from gc_testkit.helpers.tool_ctx import local_ctx
 from gc_core.backends.local import LocalFsBackend
+from gc_core.backends.protocol import FsBackend
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
@@ -273,3 +274,57 @@ def test_tools_do_not_import_diff_tui():
     for mod in (w, a, s, e):
         src = Path(mod.__file__).read_text(encoding="utf-8")
         assert "diff_tui" not in src
+
+
+# --- wrapper parity with the FsBackend port ---------------------------------
+
+# Members of FsBackend the wrapper is allowed NOT to expose. Keep it empty:
+# TrackingFsBackend is a decorator, so every public member of the port must be
+# reachable through it (it is not an FsBackend subclass, so ABC cannot enforce).
+TRACKING_NOT_FORWARDED: set[str] = set()
+
+
+def _fsbackend_public_members() -> set[str]:
+    """Public methods/properties/attrs declared on the FsBackend port itself."""
+    return {name for name in vars(FsBackend) if not name.startswith("_")}
+
+
+def test_tracking_fs_backend_mirrors_fsbackend_public_surface():
+    """Structural guard: adding a member to FsBackend must fail until the
+    TUI decorator forwards it.
+
+    Method-specific regressions (exec_argv, then has_grep/has_find) kept
+    slipping through because nothing enumerated the port's surface.
+    """
+    wrapper = TrackingFsBackend(LocalFsBackend(), local_ctx())
+    # Class dict covers methods/properties; instance dict covers attrs copied
+    # in __init__ (is_sandbox, default_exec_timeout). Neither reads a property.
+    exposed = set(dir(type(wrapper))) | set(vars(wrapper))
+    missing = sorted(_fsbackend_public_members() - exposed - TRACKING_NOT_FORWARDED)
+    assert missing == []
+
+
+class _CapStub:
+    """Inner backend with fixed capability flags (no subprocess probes)."""
+
+    def __init__(self, value: bool) -> None:
+        self.has_find = value
+        self.has_grep = value
+        self.grep_exclude_dir = value
+        self.grep_include = value
+
+
+def test_capability_flags_true_are_visible_through_wrapper():
+    wrapper = TrackingFsBackend(_CapStub(True), local_ctx())
+    assert wrapper.has_find is True
+    assert wrapper.has_grep is True
+    assert wrapper.grep_exclude_dir is True
+    assert wrapper.grep_include is True
+
+
+def test_capability_flags_false_stay_false_through_wrapper():
+    wrapper = TrackingFsBackend(_CapStub(False), local_ctx())
+    assert wrapper.has_find is False
+    assert wrapper.has_grep is False
+    assert wrapper.grep_exclude_dir is False
+    assert wrapper.grep_include is False

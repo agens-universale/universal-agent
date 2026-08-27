@@ -161,7 +161,6 @@ Usage:
 Important Usage Rules
 - **ALWAYS** use absolute paths for `path`.
 - The `search` string is treated as **literal text**, not regex.
-- To perform regex replacements, use `fs_search_files` first to locate, then decide on literal replacement.
 - If the file does not contain the `search` string, no changes are made.
 - If the file is empty or unreadable, an error is raised.
 - This tool ALWAYS returns a JSON string with fields:

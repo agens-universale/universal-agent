@@ -32,3 +32,38 @@ class PermissionStore:
 
     def session_rules(self) -> dict:
         return self._session_rules
+
+    _INSESSION_PREFIX = "command:"
+    _MAX_ALLOWED = 12
+    _MAX_DENIED = 8
+    _MAX_EXAMPLE_CHARS = 280
+
+    def insession_examples(self) -> dict[str, list[str]]:
+        """Few-shot примеры для судьи из remembered human Y/N решений.
+
+        Только session_rules с ключами command:* (Y=allow_remember, N=deny_remember).
+        run_rules (O/T) никогда не попадают сюда.
+        Возвращает {"allowed": [...], "denied": [...]} — последние 12/8,
+        усечённые до 280 символов + «…», с убранным префиксом ``command:``.
+        """
+        allowed: list[str] = []
+        denied: list[str] = []
+        for key, val in self._session_rules.items():
+            if not key.startswith(self._INSESSION_PREFIX):
+                continue
+            payload = key[len(self._INSESSION_PREFIX):]
+            payload = self._truncate_example(payload)
+            if val:
+                allowed.append(payload)
+            else:
+                denied.append(payload)
+        return {
+            "allowed": allowed[-self._MAX_ALLOWED:],
+            "denied": denied[-self._MAX_DENIED:],
+        }
+
+    def _truncate_example(self, payload: str) -> str:
+        limit = self._MAX_EXAMPLE_CHARS
+        if len(payload) <= limit:
+            return payload
+        return payload[:limit] + "…"

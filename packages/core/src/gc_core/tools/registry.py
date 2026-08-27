@@ -1,3 +1,4 @@
+import copy
 from typing import Any, Dict
 
 from gc_core.tools.fs.append_to_file import AppendToFile
@@ -7,7 +8,8 @@ from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.save_base64_file import SaveBase64File
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
-from gc_core.tools.fs.search_files import SearchFiles
+from gc_core.tools.fs.find_files_by_name import FindFilesByName
+from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
 from gc_core.tools.exec.download_file import DownloadFile
 from gc_core.tools.exec.calculator import Calculator
@@ -32,9 +34,15 @@ except ModuleNotFoundError:
 
 
 def _tool_entry(tool_cls: type) -> Dict[str, Any]:
+    # Deep-copy: inject_tool_fields / strict schema mutate the spec in place.
+    # Several tools return a shared class-level parameters dict from
+    # tool_description(); without a copy the second build_tools_data() in the
+    # same process sees the field already present, skips inject, leaves
+    # injected_fields empty, and strip_injected_tool_args never removes it
+    # (TypeError: unexpected keyword argument 'reason').
     return {
         "tool_fabric": tool_cls,
-        "spec": tool_cls.tool_description(),
+        "spec": copy.deepcopy(tool_cls.tool_description()),
         "description": tool_cls.prompt_description(),
     }
 
@@ -47,7 +55,8 @@ def _fs_registry() -> Dict[str, Dict[str, Any]]:
         "fs_read_file": _tool_entry(ReadFile),
         "fs_file_info": _tool_entry(FileInfo),
         "fs_list_files": _tool_entry(ListFiles),
-        "fs_search_files": _tool_entry(SearchFiles),
+        "fs_find_files_by_name": _tool_entry(FindFilesByName),
+        "fs_find_in_files": _tool_entry(FindInFiles),
         "fs_search_and_replace": _tool_entry(SearchAndReplace),
         "fs_save_base64_file": _tool_entry(SaveBase64File),
     }

@@ -55,7 +55,7 @@ def test_tui_confirm_denies_without_wait_when_present_fails():
 
     runner._confirm_event.wait = counting_wait  # type: ignore[method-assign]
     confirm = runner.make_tui_confirm(lambda *_a: False)
-    assert confirm(title="t", question="q", fields=[]) == "deny"
+    assert confirm(title="t", question="q", fields=[]) == "deny_once"
     assert waited["n"] == 0
 
 
@@ -68,7 +68,7 @@ def test_tui_confirm_waits_only_after_mounted_ack():
     result: list[str] = []
 
     def present(_t, _q, _f) -> bool:
-        threading.Timer(0.05, lambda: runner.submit_confirm_reply("once")).start()
+        threading.Timer(0.05, lambda: runner.submit_confirm_reply("allow_once")).start()
         return True
 
     confirm = runner.make_tui_confirm(present)
@@ -80,11 +80,11 @@ def test_tui_confirm_waits_only_after_mounted_ack():
     t.start()
     t.join(timeout=3.0)
     assert not t.is_alive()
-    assert result == ["once"]
+    assert result == ["allow_once"]
 
 
 def test_tui_confirm_timeout_auto_deny():
-    """O11: нет ответа за timeout → deny, поток не висит вечно."""
+    """O11: нет ответа за timeout → deny_once, поток не висит вечно."""
     from gc_tui.services.agent_runner import AgentRunner
 
     runner = AgentRunner(
@@ -100,11 +100,11 @@ def test_tui_confirm_timeout_auto_deny():
     t.start()
     t.join(timeout=3.0)
     assert not t.is_alive()
-    assert result == ["deny"]
+    assert result == ["deny_once"]
 
 
 def test_tui_confirm_stop_requested_denies_without_full_wait():
-    """stop_requested во время wait → deny быстрее полного timeout."""
+    """stop_requested во время wait → deny_once быстрее полного timeout."""
     from gc_tui.services.agent_runner import AgentRunner
 
     runner = AgentRunner(
@@ -122,7 +122,7 @@ def test_tui_confirm_stop_requested_denies_without_full_wait():
     runner._stop_requested = True
     t.join(timeout=3.0)
     assert not t.is_alive()
-    assert result == ["deny"]
+    assert result == ["deny_once"]
 
 
 @pytest.mark.asyncio
@@ -147,6 +147,7 @@ async def test_cancel_confirm_always_on_reset_even_without_banner():
 def test_tui_without_tui_confirm_denies_not_cli_input(monkeypatch):
     """is_tui без рабочего present → deny, не CLI input() за Textual."""
     from gc_core.security import confirm_port as cp
+    from gc_core.security import path_policy as pp
 
     prompted = {"n": 0}
 
@@ -154,7 +155,8 @@ def test_tui_without_tui_confirm_denies_not_cli_input(monkeypatch):
         prompted["n"] += 1
         return "once"
 
-    monkeypatch.setattr(cp, "prompt_user_confirmation_choice", boom)
+    # CLI fallback lives in path_policy; confirm_port imports it lazily.
+    monkeypatch.setattr(pp, "prompt_user_confirmation_choice", boom)
     ctx = types.SimpleNamespace(is_tui=True, tui_confirm=None, config_dict={})
     assert cp.request_confirm(title="t", question="q?", fields=[], ctx=ctx) is False
     assert prompted["n"] == 0

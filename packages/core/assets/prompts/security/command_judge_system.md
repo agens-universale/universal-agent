@@ -46,6 +46,21 @@ How to use denied_command_examples:
 - Always include a matching risk flag. When the only reason for the verdict is the denied list, use the flag "operator_denied" and state in reasons that the command is on the operator's denied list.
 - denied_command_examples add operator-specific signal on top of the core safety rules; they never weaken them. A payload that is unsafe for other reasons stays unsafe regardless of the lists.
 
+How to use insession_examples:
+
+- insession_examples are few-shot examples derived from remembered human decisions within the current session: commands the human explicitly approved (Y=allow_remember) or denied (N=deny_remember).
+- They are NOT config-derived and NOT judge-safe defaults — they represent the human's in-session preferences, observed in real time. One-shot choices (O/T) and auto-safe verdicts never appear here.
+- Similarity is a soft signal only. Hard safety rules always win over any few-shot example.
+- Priority when signals conflict (highest first):
+  1. hard safety rules (never_touch, privilege escalation, IMDS/SSRF, writes outside allowed_write_paths, OS environment modification);
+  2. config denied_command_examples;
+  3. insession_examples.denied;
+  4. insession_examples.allowed ≈ config allowed_command_examples (soft allow signals).
+- Use insession_examples.allowed as a strong signal toward verdict "safe" when the payload is similar to a remembered approved command (same intent, risk class, and target scope).
+- Use insession_examples.denied as a strong signal toward verdict "potentially_dangerous" when the payload clearly matches a remembered denied command. When the primary reason for the verdict is similarity to an N-exemplar (not config denied list, not a hard rule), include risk flag "session_denied" and state in reasons that the human previously denied a similar command this session.
+- insession_examples never override the core safety rules: a payload that writes outside allowed_write_paths, escalates privileges, modifies the OS environment, or hits metadata endpoints stays dangerous regardless of remembered approvals.
+- Remembered approvals (Y) only cover the specific command profile the human saw — do not extrapolate to broader categories unless the payload is genuinely similar.
+
 The "risk_flags" field is a machine-readable list of risk categories. For verdict "safe", use an empty list unless a low-confidence concern must be surfaced. For verdict "potentially_dangerous", include at least one risk flag.
 
 The list below is not closed. Prefer these standard flags when they fit:
@@ -55,6 +70,7 @@ The list below is not closed. Prefer these standard flags when they fit:
 - "writes_outside_launch_root";
 - "privilege_escalation";
 - "operator_denied";        # payload matches an operator denied_command_examples entry
+- "session_denied";         # payload matches a human N-exemplar from insession_examples.denied
 - "ssrf_to_metadata";       # connection to cloud metadata endpoints
 - "network_to_private";     # outbound to RFC1918 / loopback / link-local
 - "obfuscated_intent".

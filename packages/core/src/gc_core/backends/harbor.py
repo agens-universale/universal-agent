@@ -14,7 +14,15 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, ExecResult, FsBackend, bound_exec_result
+from gc_core.backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    WALK_OUTPUT_MAX_CHARS,
+    ExecResult,
+    FsBackend,
+    WalkOutputTooLargeError,
+    bound_exec_result,
+)
+from gc_core.backends.capabilities import parse_find_printf_lines
 from gc_core.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 from gc_core.utils.file_text import decode_text_best_effort, encode_text_for_append, encode_text_for_write
 
@@ -30,16 +38,25 @@ class HarborBackend(FsBackend):
         loop: asyncio.AbstractEventLoop,
         *,
         exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+        walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
     ) -> None:
         self._env = environment
         self._loop = loop
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
+        self.walk_output_max_chars = walk_output_max_chars
 
     def _await(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
 
-    def _bound(self, result: ExecResult) -> ExecResult:
-        return bound_exec_result(result, self.exec_output_capture_max_chars)
+    def _bound(
+        self, result: ExecResult, *, max_chars: Optional[int] = None
+    ) -> ExecResult:
+        cap = (
+            self.exec_output_capture_max_chars
+            if max_chars is None
+            else max_chars
+        )
+        return bound_exec_result(result, cap)
 
     @staticmethod
     def _is_exec_timeout(exc: BaseException) -> bool:
@@ -55,11 +72,21 @@ class HarborBackend(FsBackend):
         return val if isinstance(val, str) else ""
 
     # --- shell ---
-    def exec(self, command: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
-              env: Optional[dict] = None) -> ExecResult:
+    def _exec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        """Internal exec. ``capture_max_chars=None`` → tool D2 cap (60k)."""
         # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
         if env:
-            prefix = "env " + " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
+            prefix = "env " + " ".join(
+                f"{k}={shlex.quote(str(v))}" for k, v in env.items()
+            )
             command = f"{prefix} {command}"
         full = f"cd {shlex.quote(cwd)} && {command}" if cwd else command
         try:
@@ -73,7 +100,8 @@ class HarborBackend(FsBackend):
                     stderr=self._partial_stream(exc, "stderr"),
                     return_code=None,
                     timed_out=True,
-                )
+                ),
+                max_chars=capture_max_chars,
             )
         return self._bound(
             ExecResult(
@@ -81,8 +109,19 @@ class HarborBackend(FsBackend):
                 stderr=res.stderr or "",
                 return_code=res.return_code,
                 timed_out=bool(getattr(res, "timed_out", False)),
-            )
+            ),
+            max_chars=capture_max_chars,
         )
+
+    def exec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+    ) -> ExecResult:
+        return self._exec(command, cwd=cwd, timeout=timeout, env=env)
 
     def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
                     env: Optional[dict] = None) -> ExecResult:
@@ -196,28 +235,40 @@ class HarborBackend(FsBackend):
         }
 
     def walk(self, path: str) -> list:
-        """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path)."""
-        res = self.exec(f"find {shlex.quote(path)} -mindepth 1 -printf '%P\\t%y\\n'")
+        """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path).
+
+        Uses private traverse channel (50M chars). Hit ceiling → fail-closed.
+        """
+        res = self._exec(
+            f"find {shlex.quote(path)} -mindepth 1 -printf '%P\\t%y\\n'",
+            capture_max_chars=self.walk_output_max_chars,
+        )
         if res.return_code != 0:
             raise FileNotFoundError(path)
-        out = []
-        for line in (res.stdout or "").splitlines():
-            if not line.strip():
-                continue
-            rel, _, kind = line.partition("\t")
-            out.append((rel, kind == "d"))
-        return out
+        if res.stdout_hit_capture_cap:
+            raise WalkOutputTooLargeError(
+                path, ceiling_chars=self.walk_output_max_chars
+            )
+        return parse_find_printf_lines(res.stdout or "")
 
     def listdir(self, path: str) -> list:
-        res = self.exec(f"find {shlex.quote(path)} -mindepth 1 -maxdepth 1 -printf '%f\\t%y\\n'")
+        """Immediate children via private traverse channel (same ceiling as walk)."""
+        res = self._exec(
+            f"find {shlex.quote(path)} -mindepth 1 -maxdepth 1 -printf '%f\\t%y\\n'",
+            capture_max_chars=self.walk_output_max_chars,
+        )
         if res.return_code != 0:
             raise FileNotFoundError(path)
+        if res.stdout_hit_capture_cap:
+            raise WalkOutputTooLargeError(
+                path, ceiling_chars=self.walk_output_max_chars
+            )
         out = []
         for line in (res.stdout or "").splitlines():
             if not line.strip():
                 continue
             name, _, kind = line.partition("\t")
-            out.append((name, kind == "d"))
+            out.append((name, kind[:1] == "d" if kind else False))
         return sorted(out)
 
     def iter_walk(
@@ -253,6 +304,10 @@ class HarborBackend(FsBackend):
 
     def join(self, base: str, name: str) -> str:
         return base.rstrip("/") + "/" + name
+
+    def isabs(self, path: str) -> bool:
+        """Container paths are POSIX whatever the host is."""
+        return path.startswith("/")
 
     def default_cwd(self) -> Optional[str]:
         return None  # container's own workdir

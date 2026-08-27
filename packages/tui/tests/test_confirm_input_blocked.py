@@ -39,7 +39,7 @@ async def test_confirm_y_answers_when_input_was_focused(tmp_path):
         await pilot.press("y")
         await pilot.pause()
 
-        assert answered == ["once"], f"'y' должен ОТВЕТИТЬ confirm, а не уйти в инпут; answered={answered}"
+        assert answered == ["allow_remember"], f"'y' должен ОТВЕТИТЬ confirm, а не уйти в инпут; answered={answered}"
         assert inp.text == "", f"'y' не должен печататься в инпут; text={inp.text!r}"
 
 

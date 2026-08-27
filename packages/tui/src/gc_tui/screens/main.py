@@ -1708,7 +1708,12 @@ class TraceScreen(Screen):
         """Потолок sticky-баннера: длинный вопрос не выдавливает input/footer.
 
         Как у input-оверлея — ≤ половины экрана и оставляет min строк трейса.
-        Возвращает желаемую (уже ужатую) высоту баннера для расчёта #trace."""
+        Возвращает желаемую (уже ужатую) высоту баннера для расчёта #trace.
+
+        ConfirmBanner (docked Y/O/N/T + scroll body): одного max_height мало —
+        Textual клипает box, а дети layout'ятся полной высотой и опции уезжают
+        за клип. При overflow ставим height=cap, чтобы dock/scroll работали
+        внутри реальной высоты (см. needs_height_when_capped)."""
         cap = min(self.size.height // 2,
                   self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY)
         if cap <= 0:
@@ -1717,14 +1722,34 @@ class TraceScreen(Screen):
         # После layout region уже включает round-border и ≤ cap — самый точный замер.
         # До layout / пока region ещё не ужат: virtual_size = контент без рамки (+2),
         # иначе chrome занижается на 2 и футер уезжает за край экрана.
-        region_h = banner.region.height
-        if 0 < region_h <= cap:
-            return region_h
         try:
             content_h = banner.virtual_size.height
         except Exception:
             content_h = 0
-        estimated = (content_h + 2) if content_h > 0 else (len(banner.children) + 2)
+        desired = getattr(banner, "desired_height", None)
+        if isinstance(desired, int) and desired > 0:
+            estimated = desired
+        elif content_h > 0:
+            estimated = content_h + 2
+        else:
+            estimated = len(banner.children) + 2
+        # Force real height when content exceeds cap and banner needs it
+        # (ConfirmBanner docked options). AskHuman is VerticalScroll — max_height
+        # alone is enough; clearing height keeps hug-content behaviour.
+        if getattr(banner, "needs_height_when_capped", False):
+            capped = estimated > cap
+            if capped:
+                banner.styles.height = cap
+            else:
+                banner.styles.height = None  # auto / hug content
+            # Тело растягиваем только при зафиксированной высоте: иначе
+            # height:1fr у ребёнка отменяет hug-content у родителя.
+            hug = getattr(banner, "set_hug_content", None)
+            if callable(hug):
+                hug(not capped)
+        region_h = banner.region.height
+        if 0 < region_h <= cap:
+            return region_h
         return min(estimated, cap)
 
     def _sync_trace_max_height(self) -> None:
@@ -2594,15 +2619,15 @@ class TraceScreen(Screen):
         self.query_one("#root", Vertical).mount(banner, before=inp_row)
         self.call_after_refresh(self._sync_trace_max_height)
         inp_row.add_class("hidden")
-        # Инпут на время confirm: blur + СИНХРОННО disabled. Одного set_focus(None)
-        # мало — он применяется асинхронно (след. цикл pump), и под нагрузкой первый
-        # «y» успевает уйти в ещё-сфокусированную TextArea ДО blur (плавающий баг).
-        # disabled=True снимает виджет с обработки клавиш немедленно — гонки нет.
+        # Инпут на время confirm: СИНХРОННО disabled (иначе «y» утекает в TextArea).
+        # Фокус — на сам баннер, не set_focus(None): при None следующий Tab/клик
+        # по running ToolCallRow перехватывает Enter и открывает tool detail
+        # вместо _answer_confirm (Key идёт focused→bubble, Screen.on_key позже).
         try:
             self.query_one("#cmdinput", CommandTextArea).disabled = True
         except Exception:
             pass
-        self.set_focus(None)
+        self.set_focus(banner)
         if self._stick_bottom:
             self._scroll_trace_end()
 
@@ -3495,13 +3520,23 @@ class TraceScreen(Screen):
                 banner.move_selection(1)
             elif key == "enter":
                 from gc_tui.widgets.confirm_banner import choice_for
-                self._answer_confirm(choice_for(banner.selected) if banner is not None else "deny")
-            elif key in ("y", "Y"):
-                self._answer_confirm("once")
-            elif key in ("s", "S"):
-                self._answer_confirm("session")
-            elif key in ("n", "N", "escape"):
-                self._answer_confirm("deny")
+                self._answer_confirm(choice_for(banner.selected) if banner is not None else "deny_remember")
+            elif banner is not None and banner.scroll_body(key):
+                pass  # прокрутка тела — не ответ на вопрос
+            else:
+                # Same physical-key sets as CLI / confirm_port (QWERTY + ЙЦУКЕН).
+                from gc_core.security.confirm_port import (
+                    CONFIRM_DENY_REMEMBER,
+                    CONFIRM_KEY_N,
+                    CONFIRM_KEY_O,
+                    CONFIRM_KEY_T,
+                    CONFIRM_KEY_Y,
+                    normalize_confirm_key,
+                )
+                if key == "escape" or key in CONFIRM_KEY_N:
+                    self._answer_confirm(CONFIRM_DENY_REMEMBER)
+                elif key in CONFIRM_KEY_Y or key in CONFIRM_KEY_O or key in CONFIRM_KEY_T:
+                    self._answer_confirm(normalize_confirm_key(key))
             # иначе — проглотить без действия (нет случайного ввода)
             event.stop()
             event.prevent_default()

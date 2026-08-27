@@ -549,6 +549,10 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         # error может быть dict {type, message, ...} — извлекаем message/type.
         if isinstance(err, dict):
             err = err.get("message") or err.get("type") or json.dumps(err, ensure_ascii=False)
+        elif isinstance(err, str) and data.get("message"):
+            # Плоский код ошибки (напр. internal_tool_error) сам по себе ничего
+            # не сообщает, а человекочитаемый текст лежит рядом в "message".
+            err = data["message"]
         return str(err)[:160]
 
     bits: list[str] = []

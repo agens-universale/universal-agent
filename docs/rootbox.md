@@ -330,6 +330,7 @@ gc-cli -q "..." --command_moderation "{enabled: true, mode: deny}"
 }
 
 // command_moderation fail-closed (judge offline, mode=deny)
+// (no command/code preview — model already has full args in the tool call)
 {
   "tool": "run_python_code",
   "ok": false,
@@ -338,7 +339,7 @@ gc-cli -q "..." --command_moderation "{enabled: true, mode: deny}"
     "mode": "deny",
     "reason": "Judge is unavailable; fail-closed policy blocks execution.",
     "guidance": "Do NOT retry the same command, and do NOT run a rewritten, split-up or otherwise equivalent command that reaches the same result …",
-    "code_preview": "print(open('/etc/passwd').read()[:200])"
+    "risk_flags": []
   }
 }
 

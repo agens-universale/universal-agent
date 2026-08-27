@@ -84,8 +84,12 @@ def test_no_decision_key_always_asks():
 
 def test_headless_fail_closed_without_tty(monkeypatch):
     monkeypatch.setattr(cp.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
-    ctx = types.SimpleNamespace(config_dict={}, permission_store=PermissionStore())
+    store = PermissionStore()
+    ctx = types.SimpleNamespace(config_dict={}, permission_store=store)
     assert cp.request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="write:/x") is False
+    # unavailable → deny_once: run cache only, no session / few-shot poison
+    assert store.session_rules() == {}
+    assert store.decision_for("write:/x") is False
 
 
 def test_invalid_tui_confirm_return_maps_to_deny():

@@ -75,6 +75,14 @@ class FetchUrl(AbstractSimpleTool):
                         "type": "integer",
                         "description": f"Maximum number of characters to return in content. Default {cls.max_content_chars}.",
                     },
+                    "proxy": {
+                        "type": "string",
+                        "description": (
+                            "Optional proxy URL for this request "
+                            "(http://, https://, socks5://, socks5h://, socks4://). "
+                            "Empty string or omit = no proxy."
+                        ),
+                    },
                 },
                 "required": ["url"],
                 "additionalProperties": False,
@@ -86,12 +94,13 @@ class FetchUrl(AbstractSimpleTool):
     def prompt_description(cls):
         return f"""Tool name: exec_fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
-Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout_seconds": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}}}, "required": ["url"], "additionalProperties": false}}
+Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout_seconds": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}, "proxy": {{"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}}}, "required": ["url"], "additionalProperties": false}}
 
 Usage:
 - Use this tool when you need readable text from a web page.
 - The tool sends a GET request with a realistic browser-like User-Agent.
 - Supports only http/https URLs.
+- Optional proxy routes this request; empty string or omit means direct (no proxy).
 - On success stores full extracted page text in session cache keyed by URL.
 - Use offset/limit to read long pages in chunks from cache.
 - If extraction fails, returns preview with HTML tags removed (truncated to max_preview_chars).
@@ -272,36 +281,74 @@ Usage:
             setattr(shared, "fetch_url_cache", cache)
         return cache
 
-    def _get_from_cache(
-        self, url: str
-    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
-        """Возвращает (content, meta) для закэшированного URL или None.
+    @staticmethod
+    def _cache_key(url: str, proxy: Optional[str] = None) -> str:
+        """Ключ кэша: URL, при наличии proxy — URL+proxy (разные маршруты не смешиваются)."""
+        if proxy:
+            return f"{url}||proxy={proxy}"
+        return url
 
-        При cache-hit обновляет LRU-порядок: только что читанный URL становится
+    _PROXY_SCHEMES = ("http://", "https://", "socks5://", "socks5h://", "socks4://", "socks4a://")
+
+    @classmethod
+    def _normalize_proxy(cls, proxy: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Возвращает (normalized_proxy | None, error | None)."""
+        if proxy is None:
+            return None, None
+        if not isinstance(proxy, str):
+            return None, {"type": "invalid_argument", "field": "proxy"}
+        normalized = proxy.strip()
+        if not normalized:
+            # Пустая / whitespace-only строка = прокси не задан.
+            return None, None
+        lower = normalized.lower()
+        if not lower.startswith(cls._PROXY_SCHEMES):
+            return None, {
+                "type": "invalid_argument",
+                "field": "proxy",
+                "message": (
+                    "proxy must start with http://, https://, socks5://, "
+                    "socks5h://, socks4://, or socks4a://."
+                ),
+            }
+        return normalized, None
+
+    @staticmethod
+    def _proxies_dict(proxy: Optional[str]) -> Optional[Dict[str, str]]:
+        if not proxy:
+            return None
+        return {"http": proxy, "https": proxy}
+
+    def _get_from_cache(
+        self, cache_key: str
+    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
+        """Возвращает (content, meta) для закэшированного ключа или None.
+
+        При cache-hit обновляет LRU-порядок: только что читанный ключ становится
         самым свежим и не вытесняется следующими записями.
         """
         cache = self._get_cache()
-        if cache is None or url not in cache:
+        if cache is None or cache_key not in cache:
             return None
-        cached = cache[url]
+        cached = cache[cache_key]
         if isinstance(cached, dict):
             content = cached.get("content", "")
             meta = self._normalize_meta(cached.get("meta"))
         else:
             content = cached if isinstance(cached, str) else ""
             meta = self._normalize_meta(None)
-        cache.move_to_end(url)
+        cache.move_to_end(cache_key)
         return content, meta
 
     def _put_to_cache(
-        self, url: str, content: str, meta: Dict[str, Optional[str]]
+        self, cache_key: str, content: str, meta: Dict[str, Optional[str]]
     ) -> None:
         """Записывает страницу в кэш и эвиктирует самые старые при превышении лимита."""
         cache = self._get_cache()
         if cache is None:
             return
-        cache[url] = {"content": content, "meta": meta}
-        cache.move_to_end(url, last=True)
+        cache[cache_key] = {"content": content, "meta": meta}
+        cache.move_to_end(cache_key, last=True)
         while len(cache) > self.fetch_url_cache_max_size:
             cache.popitem(last=False)
 
@@ -387,6 +434,7 @@ Usage:
         max_preview_chars: int = 1200,
         offset: int = 0,
         limit: Optional[int] = None,
+        proxy: Optional[str] = None,
         **kwargs,
     ) -> str:
         if not isinstance(url, str):
@@ -424,6 +472,10 @@ Usage:
                 error={"type": "invalid_argument", "field": "limit"},
             )
 
+        normalized_proxy, proxy_error = self._normalize_proxy(proxy)
+        if proxy_error is not None:
+            return _result(ok=False, error=proxy_error)
+
         normalized_url = url.strip()
         if not normalized_url:
             return _result(
@@ -444,7 +496,10 @@ Usage:
                 error={"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."},
             )
 
-        cached = self._get_from_cache(normalized_url)
+        cache_key = self._cache_key(normalized_url, normalized_proxy)
+        proxies = self._proxies_dict(normalized_proxy)
+
+        cached = self._get_from_cache(cache_key)
         if cached is not None:
             cached_content, cached_meta = cached
             sliced = self._slice_content(cached_content, offset, limit)
@@ -495,12 +550,14 @@ Usage:
         attempts = 1 + self.max_retries
         for attempt in range(1, attempts + 1):
             try:
-                response = requests.get(
-                    normalized_url,
-                    headers=headers,
-                    timeout=effective_timeout,
-                    allow_redirects=True,
-                )
+                request_kwargs: Dict[str, Any] = {
+                    "headers": headers,
+                    "timeout": effective_timeout,
+                    "allow_redirects": True,
+                }
+                if proxies is not None:
+                    request_kwargs["proxies"] = proxies
+                response = requests.get(normalized_url, **request_kwargs)
                 response.raise_for_status()
                 break
             except requests.RequestException as exc:
@@ -596,7 +653,7 @@ Usage:
         if extracted_text and extracted_text.strip():
             c = extracted_text.strip()
             if not self._looks_like_garbled_text(c):
-                self._put_to_cache(normalized_url, c, page_meta)
+                self._put_to_cache(cache_key, c, page_meta)
                 sliced = self._slice_content(c, offset, limit)
                 return _result(
                     ok=True,
@@ -633,7 +690,7 @@ Usage:
             if fallback_text and fallback_text.strip():
                 c = fallback_text.strip()
                 if not self._looks_like_garbled_text(c):
-                    self._put_to_cache(normalized_url, c, page_meta)
+                    self._put_to_cache(cache_key, c, page_meta)
                     sliced = self._slice_content(c, offset, limit)
                     return _result(
                         ok=True,
@@ -659,7 +716,7 @@ Usage:
             cleaned_summary = self._strip_html_tags(summary_html)
             if cleaned_summary and not self._looks_like_garbled_text(cleaned_summary):
                 c = cleaned_summary
-                self._put_to_cache(normalized_url, c, page_meta)
+                self._put_to_cache(cache_key, c, page_meta)
                 sliced = self._slice_content(c, offset, limit)
                 return _result(
                     ok=True,

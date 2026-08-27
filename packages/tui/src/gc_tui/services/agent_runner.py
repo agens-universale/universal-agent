@@ -54,7 +54,7 @@ class AgentRunner:
         # чтобы ручной /compact не перетирал прежний терминал-статус на completed.
         self._thread_kind: str = ""
         self._confirm_event = threading.Event()
-        self._confirm_choice: str = "deny"
+        self._confirm_choice: str = "deny_once"
 
     def _emit_error(self, exc: BaseException) -> None:
         """Сообщить об ошибке в TUI, если runner ещё «актуальный».
@@ -279,10 +279,10 @@ class AgentRunner:
         только после sync ack mounted. present(...) → True|False|None; при
         False — сразу deny без wait() (I2). None — legacy present без ack;
         поддерживается опциональный ``via`` для метки child HITL.
-        Возвращает ConfirmChoice: 'once'|'session'|'deny'.
+        Возвращает ConfirmChoice: 'allow_remember'|'allow_once'|'deny_remember'|'deny_once'.
 
         ``timeout_sec`` — макс. ожидание ответа (default ``CONFIRM_WAIT_TIMEOUT_SEC``).
-        По таймауту / stop → fail-closed ``deny`` (O11).
+        По таймауту / stop → fail-closed ``deny_once`` (O11).
         """
         wait_timeout = (
             CONFIRM_WAIT_TIMEOUT_SEC if timeout_sec is None else float(timeout_sec)
@@ -296,55 +296,56 @@ class AgentRunner:
             via: str | None = None,
         ) -> str:
             self._confirm_event.clear()
-            self._confirm_choice = "deny"
+            self._confirm_choice = "deny_once"
             try:
                 mounted = present(title, question, fields, via=via)
             except TypeError:
                 try:
                     mounted = present(title, question, fields)
                 except Exception:
-                    return "deny"
+                    return "deny_once"
             except Exception:
-                return "deny"
+                return "deny_once"
             # False = explicit fail; None/True — mounted (None = legacy present без ack).
             if mounted is False:
-                return "deny"
+                return "deny_once"
             if self._stop_requested or self._marked_stopped:
-                return "deny"
+                return "deny_once"
             started = time.monotonic()
             # Короткие wait-слойсы: реагируем на stop/cancel без полного timeout.
             deadline = started + max(0.0, wait_timeout)
             while True:
                 if self._stop_requested or self._marked_stopped:
-                    self._confirm_choice = "deny"
-                    return "deny"
+                    self._confirm_choice = "deny_once"
+                    return "deny_once"
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     elapsed = time.monotonic() - started
                     _log.warning(
                         "tui_confirm_timeout title=%r elapsed_sec=%.1f "
-                        "timeout_sec=%.1f → deny",
+                        "timeout_sec=%.1f → deny_once",
                         title,
                         elapsed,
                         wait_timeout,
                     )
-                    self._confirm_choice = "deny"
-                    return "deny"
+                    self._confirm_choice = "deny_once"
+                    return "deny_once"
                 if self._confirm_event.wait(timeout=min(remaining, 1.0)):
                     return self._confirm_choice
 
         return _tui_confirm
 
     def submit_confirm_reply(self, choice: str) -> None:
-        """UI кладёт выбор: once|session|deny. Разблокирует агент-поток."""
+        """UI кладёт выбор: allow_remember|allow_once|deny_remember|deny_once.
+        Разблокирует агент-поток."""
         self._confirm_choice = choice
         self._confirm_event.set()
 
     def cancel_confirm(self) -> None:
-        """Fail-closed разблокировка confirm (выбор 'deny').
+        """Fail-closed разблокировка confirm (выбор 'deny_once').
 
         Используется в stop() и в тестах; симметрично cancel_ask_human."""
-        self._confirm_choice = "deny"
+        self._confirm_choice = "deny_once"
         self._confirm_event.set()
 
     def cancel_ask_human(self) -> None:

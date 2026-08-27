@@ -471,7 +471,7 @@ def test_every_refusal_carries_no_workaround_guidance(
     """Любой отказ доезжает до модели с явным запретом эквивалентной команды."""
     decision = decide_command_execution(mode, judge_result, judge_available, user_confirmation)
     assert decision.allowed is False
-    error = make_block_error(decision, "rm -rf victim", "exec_command", mode)
+    error = make_block_error(decision, mode)
     assert error["guidance"] == NO_WORKAROUND_NOTICE
     assert "Do NOT retry" in error["guidance"]
     assert "equivalent" in error["guidance"]
@@ -481,7 +481,7 @@ def test_guidance_is_separate_from_judge_reason():
     """reason остаётся причинами судьи: его же показывают пользователю в диалоге
     подтверждения, и он зафиксирован примерами в доке."""
     decision = decide_command_execution("deny", _dangerous(), True, None)
-    error = make_block_error(decision, "rm -rf victim", "exec_command", "deny")
+    error = make_block_error(decision, "deny")
     assert error["reason"] == "bad"
     assert error["guidance"] != error["reason"]
 

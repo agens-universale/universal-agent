@@ -1,6 +1,7 @@
 import json
+from pathlib import Path
 
-from gc_core.tools.fs.search_files import SearchFiles
+from gc_core.tools.deprecated.search_files import SearchFiles
 
 
 from gc_testkit.helpers.tool_ctx import with_local_ctx
@@ -439,3 +440,21 @@ def test_search_encoding_does_not_break_utf8_files(tmp_path):
     data = json.loads(tool(path=str(tmp_path), regex="hello"))
     assert data["ok"] is True
     assert data["total_matches"] == 1
+
+
+def test_search_files_skips_gc_contents(tmp_path):
+    (tmp_path / "a.txt").write_text("needle here", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("x", encoding="utf-8")
+    gc = tmp_path / ".gc"
+    gc.mkdir()
+    (gc / "config.yml").write_text("needle here", encoding="utf-8")
+    skills = gc / "skills"
+    skills.mkdir()
+    (skills / "s.md").write_text("needle here", encoding="utf-8")
+
+    res = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="needle"))
+    assert res["ok"] is True
+    files = {Path(m["file"]).name for m in res["matches"]}
+    assert "a.txt" in files
+    assert "config.yml" not in files
+    assert "s.md" not in files
