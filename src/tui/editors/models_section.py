@@ -81,8 +81,6 @@ _FOOTER_FORM_FIELD = ("↑/↓ · Enter — сохранить · Ctrl+Space —
 _FOOTER_FORM_URL_PAIR = ("Enter — сохранить · Alt+↓ — показать список · "
                          f"{CTRL_U_PAIR} · Ctrl+Space — проверить связь · "
                          "Esc — к списку")
-_FOOTER_FORM_TOKEN_PAIR = (f"↑/↓ · Enter — сохранить · {CTRL_U_PAIR} · "
-                           "Ctrl+Space — проверить связь · Esc — к списку")
 _FOOTER_FORM_LIST = ("↑/↓ — выбор · Enter — подставить · Esc — свернуть · "
                      "Ctrl+Space — проверить связь")
 _FOOTER_FORM_LIST_NO_MATCH = ("↑/↓ · Enter — оставить своё · Esc — свернуть · "
@@ -1323,9 +1321,9 @@ class ModelsSectionEditor(Vertical):
         источник данных, а не то, какой файл правится (долг веток `is_profile`
         §11b не наращиваем)."""
         if kind == "entry":
-            from tui.editors.model import _plural_models
+            from tui.services.probe_presentation import plural_models
             n = len(self._effective_aliases)
-            t = Text(f"{n} {_plural_models(n)}", style=DEEP_DIM)
+            t = Text(f"{n} {plural_models(n)}", style=DEEP_DIM)
             if self._shadowed:
                 # K — записи ФАЙЛА профиля (в том числе заслоняющие записи
                 # основного конфига). Ноль хвоста не получает: «0 в профиле» на
@@ -1524,7 +1522,7 @@ class ModelsSectionEditor(Vertical):
                                 form.can_return_shared_pair)
         if form.list_open:
             return _list_footer(form.list_has_selection, form.can_return_shared_pair)
-        # Обещание «вернуть общие» гейтится ТЕМ ЖЕ предикатом, что и сама клавиша
+        # Обещание «вернуть наследование» гейтится ТЕМ ЖЕ предикатом, что и сама клавиша
         # (`can_return_shared_pair`): свой гейт витрины разошёлся бы с клавишей на
         # первой правке правила — ложь того же рода, что стережёт `test_footer_contract`.
         if form.on_url_field:
@@ -1534,10 +1532,14 @@ class ModelsSectionEditor(Vertical):
             return _FOOTER_FORM_MODEL
         if form.on_no_auth_row:
             return _FOOTER_FORM_NOAUTH
-        # Остались поле токена и поле алиаса: у первого клавиша есть, пока пара своя,
-        # у второго — своё штатное `delete_left_all`, и предикат их различает сам.
-        return (_FOOTER_FORM_TOKEN_PAIR if form.can_return_shared_pair
-                else _FOOTER_FORM_FIELD)
+        # Остались поле токена и поле алиаса. Ни одному из них футер клавишу не
+        # обещает: у токена её называет ПОДПИСЬ ПОЛЯ (`_TOKEN_LABEL_INHERIT`, канон
+        # `ConnectionEditor._token_label`) — повторять то же обещание в одном кадре
+        # значит шуметь, а место в футере секции считанное; у алиаса работает штатный
+        # `delete_left_all`, обещать который нечего. Футер о клавише говорит там, где
+        # подписи с ней нет, — на адресе (`_FOOTER_FORM_URL_PAIR`) и в футерах
+        # раскрытого списка, который поднимают над ним.
+        return _FOOTER_FORM_FIELD
 
     # --- клавиши --------------------------------------------------------------
     def move(self, delta: int) -> None:
@@ -1659,7 +1661,7 @@ class ModelsSectionEditor(Vertical):
         return False
 
     def clear_token(self) -> bool:
-        """`Ctrl+U` — вернуть записи общее подключение: снять её адрес, токен и галку
+        """`Ctrl+U` — вернуть записи наследование: снять её адрес, токен и галку
         разом (§5). Клавиша есть только у формы записи и только на полях её пары
         (решает сама форма). False — состояние не наше, и клавишу съедать нельзя: в
         полях легаси-редактора её штатный `delete_left_all` работает как обычно."""

@@ -59,7 +59,12 @@ def _base_dict() -> dict:
 
 
 def _fake_probe(endpoint, auth, verify, model, **kw):
-    return None
+    """Успешный результат, а не None: `_start_config_probe` разыменовывает
+    `result.models`, и стаб-`None` ронял монтирование экрана ещё до предмета
+    теста. Эталон — `_probe_ok` в `test_settings_screen`."""
+    from model_picker import ModelInfo
+    from tui.services.settings_probe import ProbeResult
+    return ProbeResult("ok", 200, [ModelInfo(id="test-model")], 118, "доступен")
 
 
 def _mk_screen(config=None, config_path=None, on_apply=None):

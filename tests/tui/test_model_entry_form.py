@@ -261,7 +261,7 @@ async def test_inherit_preset_is_offered_when_editing_a_record_with_its_own_url(
         assert form.reload_presets() is True           # Alt+↓ раскрывает явно
         await pilot.pause()
         rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
-        assert rows and "основной конфиг · наследовать" in rows[0], rows
+        assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
         # Слово «наследовать» несущее: адрес пункта часто совпадает с
         # обычным пресетом, и без него строка читалась бы дублем.
         # Раскрытие поверх СВОЕГО адреса никого не подсвечивает (канон §2.4) — иначе
@@ -288,7 +288,7 @@ async def test_inherit_preset_leaves_the_field_empty():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()                            # курсор на адресе, список раскрыт
         rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
-        assert rows and "основной конфиг · наследовать" in rows[0], rows
+        assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
         # Слово «наследовать» несущее: адрес пункта часто совпадает с
         # обычным пресетом, и без него строка читалась бы дублем.
         assert form.enter() is True                    # Enter по пункту наследования
@@ -342,7 +342,7 @@ async def test_the_pair_row_says_where_the_address_and_token_come_from():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         row = form.query_one("#mef-pair", Static)
-        assert str(row.render()) == "Адрес и токен: общие — из раздела «Подключение»"
+        assert str(row.render()) == "Адрес и токен: наследуются из раздела «Подключение»"
         form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         assert str(row.render()) == "Адрес и токен: свои"
@@ -407,7 +407,7 @@ async def test_the_form_refuses_to_save_a_token_without_an_address():
         assert ok is False
         assert str(form.query_one("#mef-error", Static).render()) == (
             "задан свой токен, но не задан адрес — укажите адрес "
-            "или верните общее подключение")
+            "или верните наследование")
 
 
 async def test_the_checkbox_is_inert_while_the_connection_is_shared():
@@ -431,7 +431,7 @@ async def test_erasing_the_address_leaves_the_own_token_reachable():
     """Тупик, который правило могло бы построить само: набрали свою пару, стёрли адрес.
     Состояние на лету не переключается (§4, краевые случаи) — иначе поле токена
     замёрзло бы вместе с набранным ключом, курсор на него не встаёт, и совет отказа
-    («укажите адрес или верните общее подключение») стал бы неисполним."""
+    («укажите адрес или верните наследование») стал бы неисполним."""
     form = _form(initial=None, existing_aliases=set(),
                  effective_url="https://openrouter.ai/api/v1/chat/completions",
                  effective_auth="Bearer sk-COMMON")
@@ -461,7 +461,7 @@ async def test_erasing_the_address_leaves_the_own_token_reachable():
 
 
 async def test_the_inherit_preset_returns_the_whole_pair_not_just_the_address():
-    """Пункт «основной конфиг · наследовать» — «вернуть общие», а не «очистить адрес»
+    """Пункт «раздел «Подключение» · наследовать» — «вернуть общие», а не «очистить адрес»
     (§5): оставленный токен был бы ровно запрещённой половиной, снять которую в общей
     паре нечем. Уходят оба ключа разом."""
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
@@ -481,7 +481,7 @@ async def test_the_inherit_preset_returns_the_whole_pair_not_just_the_address():
         assert form.own_connection() is False
         assert form.query_one("#mef-token", Input).disabled is True
         assert str(form.query_one("#mef-pair", Static).render()) == (
-            "Адрес и токен: общие — из раздела «Подключение»")
+            "Адрес и токен: наследуются из раздела «Подключение»")
         ok, _alias, fields = form.submit()
         assert ok is True
         assert fields["url"] is None and fields["token"] is None
@@ -709,7 +709,7 @@ async def test_ctrl_u_returns_the_whole_pair_from_either_field(field_id):
         assert form.query_one("#mef-url", Input).value == ""
         assert form.query_one("#mef-token", Input).disabled is True
         assert str(form.query_one("#mef-pair", Static).render()) == (
-            "Адрес и токен: общие — из раздела «Подключение»")
+            "Адрес и токен: наследуются из раздела «Подключение»")
         ok, _alias, fields = form.submit()
         assert ok is True and fields["url"] is None and fields["token"] is None
 
@@ -847,7 +847,7 @@ async def test_ctrl_u_is_neither_promised_nor_taken_over_a_pair_in_backend():
 
 
 async def test_the_inherit_preset_is_gated_like_the_key_that_does_the_same():
-    """§5: пункт «основной конфиг · наследовать» и Ctrl+U — два входа в ОДНО действие,
+    """§5: пункт «раздел «Подключение» · наследовать» и Ctrl+U — два входа в ОДНО действие,
     значит и гейт у них один. Пара во втором написании (секция `backend`) форме не
     подвластна: клавиша честно отказывает, а пункт проходил — снимал токен и оставлял
     запись с адресом из `backend` без своего токена, то есть запрещённой половиной,
@@ -881,7 +881,7 @@ async def test_the_inherit_preset_is_gated_like_the_key_that_does_the_same():
         assert own.reload_presets() is True
         await pilot.pause()
         rows = [str(w.render()) for w in own.query(".mef-preset-row") if w.display]
-        assert rows and "основной конфиг · наследовать" in rows[0], rows
+        assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
 
 
 async def test_ctrl_u_is_not_ours_off_the_pair_fields_or_over_a_shared_pair():
@@ -932,7 +932,7 @@ async def test_the_token_label_promises_ctrl_u_only_when_there_is_something_to_d
     async with _harness(own).run_test() as pilot:
         await pilot.pause()
         label = own.query_one("#mef-token-label", Static)
-        assert str(label.render()) == "Токен   Ctrl+U — вернуть общие"
+        assert str(label.render()) == "Токен   Ctrl+U — вернуть наследование"
         own.move(1)
         await pilot.pause()
         assert own.clear_token() is True
@@ -949,7 +949,7 @@ async def test_the_token_label_promises_ctrl_u_only_when_there_is_something_to_d
         half.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         assert str(half.query_one("#mef-token-label", Static).render()) == (
-            "Токен   Ctrl+U — вернуть общие")
+            "Токен   Ctrl+U — вернуть наследование")
 
 
 async def test_typing_after_ctrl_u_cancels_the_mark(tmp_path):
@@ -981,7 +981,7 @@ async def test_typing_after_ctrl_u_cancels_the_mark(tmp_path):
         assert form.token_cleared is False
         # Клавиша снова работает — и подпись снова о ней говорит.
         assert str(form.query_one("#mef-token-label", Static).render()) == (
-            "Токен   Ctrl+U — вернуть общие")
+            "Токен   Ctrl+U — вернуть наследование")
         ok, _alias, fields = form.submit()
         assert ok is True and fields["token"] == "sk-NEW"
         assert fields["url"] == "https://my-host/v1/chat/completions"
@@ -1439,3 +1439,26 @@ async def test_submit_after_url_edit_keeps_pricing(tmp_path):
     assert entry["url"] == "https://new/v1/chat/completions"
     assert entry["pricing"] == {"input": 0.3, "output": 1.2}
     assert entry["token"] == "sk-secret"               # нетронутое поле не стёрло секрет
+
+
+async def test_the_cursor_does_not_call_a_typed_address_inherited():
+    """Пункт наследования и обычный пресет часто несут ОДИН url, а пункт стоит первым:
+    поиск «первого совпадения» подсвечивал его и над своим, набранным адресом — курсор
+    говорил «наследуете», когда запись задала адрес сама (находка владельца по смоку).
+
+    Пункт наследования означает ровно одно состояние — поле ПУСТОЕ. При заполненном
+    поле текущим может быть только обычный пресет."""
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    presets = [EndpointPreset(name="OpenRouter", url=url)]
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": url, "token": "sk-own"},
+                 existing_aliases={"flash"}, presets=presets,
+                 effective_url=url)                    # общий адрес — тот же самый
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.reload_presets() is True           # Alt+↓ поверх своего адреса
+        await pilot.pause()
+        rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
+        selected = [r for r in rows if r.startswith("▸")]
+        assert selected and "OpenRouter" in selected[0], rows
+        assert "наследовать" not in selected[0], rows

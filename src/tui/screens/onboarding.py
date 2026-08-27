@@ -874,8 +874,8 @@ class OnboardingScreen(Screen):
     def _on_auto_probe_done(self, result, gen: int) -> None:
         if gen != self._probe_gen or not self.is_mounted:
             return                       # протухший результат (правка/переход обесценили)
-        from tui.services.probe_presentation import probe_line_text
-        self._set_conn_probe_line(probe_line_text(result))
+        from tui.services.probe_presentation import connection_line_text
+        self._set_conn_probe_line(connection_line_text(result))
 
     def _set_conn_probe_line(self, text) -> None:
         for w in self.query(".onb-conn-probe"):

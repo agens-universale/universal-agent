@@ -416,6 +416,11 @@ _HAND_EDITED = 'backend:\n  completions_url: "http://real/v1"\nprofile: "corp"' 
 def _default_template_text() -> str:
     from pathlib import Path
 
+    from config import _default_config_path
+    return Path(_default_config_path()).read_text(encoding="utf-8")
+
+
+
 def test_uncomment_template_block_reads_the_tight_comment_form_too():
     """Форма без пробела после решётки тоже понимается — шаблоны бывают и такие."""
     tpl = "#gizmo:\n#  provider: openai\n"

@@ -754,7 +754,7 @@ async def test_form_footer_follows_the_filter_of_the_address_list(tmp_path):
 
 
 async def test_the_form_footer_promises_returning_the_shared_pair_where_the_key_works(tmp_path):
-    """§5: футер обещает `Ctrl+U — вернуть общие` ровно там, где клавиша работает —
+    """§5: футер обещает `Ctrl+U — вернуть наследование` ровно там, где клавиша работает —
     гейт у обоих один (`can_return_shared_pair`): поля ПАРЫ своей записи. На алиасе у
     Ctrl+U своё штатное дело (поле предзаполнено, стирать есть что), и «вернуть общие»
     там было бы обещанием чужого действия; после возврата пары обещать уже нечего.
@@ -776,17 +776,23 @@ slots:
         await pilot.press("enter")
         await pilot.pause()
         form = scr.query(ModelEntryForm).last()
-        assert "Ctrl+U — вернуть общие" in _footer(scr)   # курсор на адресе
+        assert "Ctrl+U — вернуть наследование" in _footer(scr)   # курсор на адресе
         await pilot.press("down")                         # адрес → токен
         await pilot.pause()
-        assert "Ctrl+U — вернуть общие" in _footer(scr)
+        # У токена клавиша названа В ПОДПИСИ ПОЛЯ (канон `ConnectionEditor._token_label`),
+        # и футер её не повторяет: два обещания одного действия в одном кадре — шум,
+        # а место в футере секции считанное. У адреса подписи нет — там футер и говорит.
+        from textual.widgets import Static
+        label = scr.query_one("#mef-token-label", Static)
+        assert "Ctrl+U — вернуть наследование" in str(label.render())
+        assert "Ctrl+U" not in _footer(scr)
         await pilot.press("up")                           # назад на адрес
         await pilot.press("alt+down")                     # раскрыть пресет-лист
         await pilot.pause()
         # Футер раскрытого списка не модальный: под ним работает Ctrl+Space, работает и
         # Ctrl+U — молчание о работающей клавише такая же ложь, как обещание мёртвой.
         assert form.presets_open is True
-        assert "Ctrl+U — вернуть общие" in _footer(scr)
+        assert "Ctrl+U — вернуть наследование" in _footer(scr)
         await pilot.press("escape")                       # свернуть список
         await pilot.pause()
         await pilot.press("up")                           # адрес → алиас (по кольцу)

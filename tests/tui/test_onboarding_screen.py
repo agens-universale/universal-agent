@@ -1703,10 +1703,11 @@ async def test_auto_probe_reports_missing_env_var_instead_of_probing(tmp_path, m
 
 @pytest.mark.asyncio
 async def test_ctrl_u_clears_the_saved_token_and_probes_without_it(tmp_path):
-    """Ctrl+U на шаге «Подключение» стирает СОХРАНЁННЫЙ токен — ту же клавишу мастер
-    держит, что и /settings. Поле токена пустое (секрет живёт маской в placeholder),
-    так что штатный `delete_left_all` у Input здесь вхолостую, и обработчик экрана
-    обязан перехватить клавишу сам.
+    """Ctrl+U на поле токена шага «Подключение» стирает СОХРАНЁННЫЙ токен — ту же
+    клавишу мастер держит, что и /settings, и гейтит её тем же `clear_token()` ровно
+    на этом поле (на адресе она молчит). Поле токена пустое (секрет живёт маской в
+    placeholder), так что штатный `delete_left_all` у Input здесь вхолостую, и
+    обработчик экрана обязан перехватить клавишу сам.
 
     Второе — проба: раз токен помечен к удалению, она обязана уйти БЕЗ него ещё до
     сохранения (`_auto_probe`, ветка `token_cleared`). Иначе мастер показывал бы
@@ -1742,6 +1743,7 @@ async def test_ctrl_u_clears_the_saved_token_and_probes_without_it(tmp_path):
         assert "REALSECRET" not in token.placeholder      # маска, а не секрет
         assert token.placeholder != _TOKEN_PH_CLEARED     # …но маска сохранённого есть
 
+        ed.move(1)                                        # → поле токена: там клавиша и обещана
         await pilot.press("ctrl+u")
         await pilot.pause()
         assert ed.token_cleared is True

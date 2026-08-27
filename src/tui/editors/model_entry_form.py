@@ -48,10 +48,9 @@ from tui.editors.field_list import (
     FieldListController,
     write_field,
 )
-from tui.editors.model import _plural_models
 from tui.editors.preset_list import PRESET_HINT as _PRESET_HINT, preset_list_controller
 from tui.palette import ACCENT, DEEP_DIM, INK, WARN
-from tui.services.probe_presentation import probe_line_text
+from tui.services.probe_presentation import connection_line_text, plural_models
 from tui.widgets.paste_input import PasteInput
 
 # Хинты списков формы. Клавиши названы канон-словарём (спека 2026-08-06 §2.1):
@@ -91,14 +90,14 @@ _URL_LABEL = "Адрес API-сервера"
 # одному провайдеру, и половина пары либо уносит общий ключ на чужой хост, либо уезжает
 # вслед за сменой общего адреса. Состояние пары не переключается отдельным элементом —
 # оно ВЫВОДИТСЯ из полей, а строка над ними называет, откуда пара взята (§4).
-_PAIR_SHARED = "Адрес и токен: общие — из раздела «Подключение»"
+_PAIR_SHARED = "Адрес и токен: наследуются из раздела «Подключение»"
 _PAIR_OWN = "Адрес и токен: свои"
 # Второе написание пары (§2): она живёт в секции `backend` записи, и форма её НЕ правит
-# — ни поля, ни клавиша «вернуть общие» до неё не достают. Молчать об этом нельзя:
+# — ни поля, ни клавиша «вернуть наследование» до неё не достают. Молчать об этом нельзя:
 # «свои» без уточнения обещали бы правку теми полями, которые к этой паре отношения не
 # имеют, и человеку негде было бы узнать, куда идти.
 _PAIR_OWN_BACKEND = "Адрес и токен: свои — заданы секцией backend, правятся в файле"
-# Поля пары — те, на которых работает «вернуть общие» (§5). Галка в набор не входит:
+# Поля пары — те, на которых работает «вернуть наследование» (§5). Галка в набор не входит:
 # она не поле, и её собственная клавиша (Space) на этой строке уже занята.
 _PAIR_FIELDS = ("mef-url", "mef-token")
 _TOKEN_SHARED_HINT = "токен приходит из раздела «Подключение»"
@@ -113,12 +112,12 @@ _COMMON_TOKEN_EMPTY = "общий токен не задан — запросы 
 _PAIR_NEEDS_TOKEN = ("задан свой адрес, но не задан токен — укажите токен "
                      "или отметьте «без авторизации»")
 _PAIR_NEEDS_URL = ("задан свой токен, но не задан адрес — укажите адрес "
-                   "или верните общее подключение")
+                   "или верните наследование")
 _TOKEN_LABEL = "Токен"
 # Слова клавиши — ОДНА константа на подпись поля и на футер секции (канон
 # `onboarding_fields.URL_ERROR`): списанные заново, они разойдутся на первой
 # самостоятельной правке одной из витрин, а обещают они одно и то же действие.
-CTRL_U_PAIR = "Ctrl+U — вернуть общие"
+CTRL_U_PAIR = "Ctrl+U — вернуть наследование"
 # Ctrl+U называется В ПОДПИСИ ПОЛЯ, а не в футере (канон `ConnectionEditor.
 # _token_label`): подсказка нужна там, куда смотрят, как «Space — переключить» у
 # галки. Глагол ДРУГОЙ, и это не синонимы: у «Подключения» над токеном слоя нет и
@@ -127,12 +126,14 @@ CTRL_U_PAIR = "Ctrl+U — вернуть общие"
 # правилом §2. Обещаем ровно в том состоянии, где клавише есть что возвращать.
 _TOKEN_LABEL_INHERIT = f"{_TOKEN_LABEL}   {CTRL_U_PAIR}"
 # Первый пункт пресет-листа адреса — не «ещё один адрес», а РЕШЕНИЕ не задавать
-# свой: поле остаётся пустым, связь живая (сменится адрес в основном конфиге —
-# сменится и здесь). Адрес рядом с ним часто совпадает с адресом обычного
+# свой: поле остаётся пустым, связь живая (сменится адрес в «Подключении» —
+# сменится и здесь). Назван РАЗДЕЛОМ, а не файлом: над профилем наследуется
+# действующее «Подключение», а профиль вправе нести свой `backend` — «основной
+# конфиг» там врало бы (ревизия владельца по смоку). Адрес рядом с ним часто совпадает с адресом обычного
 # пресета, и без слова «наследовать» строка читалась бы дублем: одинаковый url,
 # разные последствия — литерал в файле против пустого поля (ревизия владельца
 # по смоку).
-_INHERIT_PRESET_NAME = "основной конфиг · наследовать"
+_INHERIT_PRESET_NAME = "раздел «Подключение» · наследовать"
 _PROBE_RUNNING = "проверяю…"
 _PROBE_NO_URL = "сначала укажите адрес — проверка стучится на него"
 _LIST_NO_URL = "сначала укажите адрес — список приходит с него"
@@ -368,7 +369,7 @@ class ModelEntryForm(Vertical):
 
     def own_connection(self) -> bool:
         """Пара своя: запись задаёт своим хоть что-то из пары — адрес или токен.
-        Токен, галка ● и клавиша «вернуть общие» живут ровно в этом состоянии.
+        Токен, галка ● и клавиша «вернуть наследование» живут ровно в этом состоянии.
 
         По СОВОКУПНОСТИ, а не по одному адресу: стёртый до пустоты адрес — ещё не
         решение (§4, краевые случаи), решением он становится при сохранении. Считай
@@ -487,7 +488,7 @@ class ModelEntryForm(Vertical):
                          placeholder=self._alias_placeholder(self._model0),
                          id="mef-alias", classes=icls)
         yield Static(self._alias_hint(), classes="onb-hint onb-dyn")
-        yield Static(probe_line_text(None), id="mef-probe-line",
+        yield Static(connection_line_text(None), id="mef-probe-line",
                      classes="set-hint set-dyn")
         # Строка ошибки монтируется сразу и пустой (display гасит место под неё):
         # remove()+mount() с тем же id в одном такте даёт DuplicateIds, если форма
@@ -647,7 +648,7 @@ class ModelEntryForm(Vertical):
         (`Input.delete_left_all`), и там оно настоящее — поля предзаполнены.
 
         Пара во втором написании (секция `backend`) исключена `_pair_returnable`: форма
-        её не правит, вернуть общее подключение отсюда нечем — и «сделал» не должно
+        её не правит, вернуть наследование отсюда нечем — и «сделал» не должно
         выглядеть так же, как «не сделал».
 
         Отдельным предикатом, а не веткой внутри действия (эталон — `ConnectionEditor.
@@ -680,8 +681,8 @@ class ModelEntryForm(Vertical):
         return True
 
     def _return_shared_pair(self) -> None:
-        """Само действие «вернуть общие» — у него ДВА входа (§5): клавиша `Ctrl+U` и
-        пункт `основной конфиг · наследовать` первым в списке адресов. Разъедься они —
+        """Само действие «вернуть наследование» — у него ДВА входа (§5): клавиша `Ctrl+U` и
+        пункт `раздел «Подключение» · наследовать` первым в списке адресов. Разъедься они —
         два пути к одному состоянию оставляли бы разные записи.
 
         Токен помечается снятым только если в записи он есть: `None` в `submit()` —
@@ -803,7 +804,7 @@ class ModelEntryForm(Vertical):
         self._list.close()                   # прошлое раскрытие больше не наше
         self._list.open(forced=True, filter_text=self._model_value())
         n = len(self._models)
-        self._set_status(f"{n} {_plural_models(n)}")
+        self._set_status(f"{n} {plural_models(n)}")
 
     def _set_status(self, text: str) -> None:
         """Строка состояния списка ПОД рамкой (§3.2.2: внутри рамки только выбор).
@@ -878,9 +879,9 @@ class ModelEntryForm(Vertical):
     def _invalidate_probe(self) -> None:
         """Значения, по которым ходила проба, изменились — прежний вердикт больше не
         про эту связь. Молчание честнее залипшего ✓; текст «не проверено» — тот же
-        общий рендер, что и все прочие вердикты (`probe_line_text(None)`)."""
+        общий рендер, что и все прочие вердикты (`connection_line_text(None)`)."""
         self._probe_gen += 1                 # летящая проба тоже устарела
-        self._set_probe_line(probe_line_text(None))
+        self._set_probe_line(connection_line_text(None))
 
     # --- проба (Ctrl+Space) ---
     def _current_url(self) -> str:
@@ -926,7 +927,7 @@ class ModelEntryForm(Vertical):
         токеном, и совпавший с ним ответ значит, что сервер токены не различает и
         «принят» заявлять нельзя. Своя копия этого танца здесь и жила до синка —
         без канарейки, то есть врала ровно там, где канон 2026-08-17 научился
-        молчать. Текст вердикта — общий `probe_line_text`."""
+        молчать. Текст вердикта — общий `connection_line_text`."""
         url = self._current_url()
         if not url:
             self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
@@ -950,12 +951,12 @@ class ModelEntryForm(Vertical):
         except Exception as exc:
             result = ProbeResult("unknown", None, None, 0,
                                  f"внутренняя ошибка проверки: {exc}")
-        self.app.call_from_thread(self._on_probe, result, model, gen)
+        self.app.call_from_thread(self._on_probe, result, gen)
 
-    def _on_probe(self, result, model: str, gen: int) -> None:
+    def _on_probe(self, result, gen: int) -> None:
         if gen != self._probe_gen or not self.is_mounted:
             return
-        self._set_probe_line(probe_line_text(result, model_id=model))
+        self._set_probe_line(connection_line_text(result))
 
     def _set_probe_line(self, text: Text) -> None:
         for w in self.query("#mef-probe-line"):

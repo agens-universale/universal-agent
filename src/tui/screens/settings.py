@@ -17,6 +17,7 @@ from rich.text import Text
 
 from tui.editors.models_section import _FOOTER_PROFILE_BACK
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
+from tui.services.probe_presentation import connection_line_text
 from tui.form_frame import (EPHEMERAL, KEEP_IN_VIEW, KEEP_UNTIL_DISMISSED,
                             cap_frame_height, reveal, reveal_focus)
 from tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
@@ -93,36 +94,32 @@ _FOOTER_PRESET_LIST_NO_MATCH = ("↑/↓  ·  Enter — оставить сво�
 # финального ревью 2026-08-06, D). Тот же текст без сегмента про Alt+↓.
 _FOOTER_CONNECTION_FIELD = ("Enter — сохранить  ·  "
                             "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню")
-# Строка уровня (последняя в секции «Профили») — тот же позиционный приём, что и
-# «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Enter —
-# активировать» там, где Enter (и ←/→) на самом деле переключают уровень —
-# ложь того же рода, что нашёл финальный обзор 2026-08-06, D.
-# Строка «— без профиля» — не объект, а действие «снять текущий выбор», и глагол
-# у неё СВОЙ. Общий футер секции обещал здесь «активировать», пока подсказка под
-# списком в том же кадре говорила «деактивировать»; курсор при входе в секцию
-# стоит ровно на этой строке, так что противоречие было первым, что видит глаз.
-# Тот же позиционный приём, что у «Подключения» (_FOOTER_CONNECTION_FIELD).
-_FOOTER_PROFILES_NONE = ("↑/↓ — выбор  ·  Space — деактивировать  ·  n — создать  ·  "
-                         "PgUp/PgDn — секции  ·  Esc — меню")
-# Профиль не выбран — снимать нечего, и футер молчит о действии вовсе: обещать
-# «деактивировать» там, где деактивировать некого, — та же ложь другим глаголом.
-_FOOTER_PROFILES_NONE_EMPTY = "↑/↓ — выбор  ·  n — создать  ·  PgUp/PgDn — секции  ·  Esc — меню"
 # Курсор на токене и есть что стирать. Сегмент занимает место «Alt+↓ — показать
 # список» — тот обещается только на адресе, эти двое на разных полях и в одной
 # строке не встречаются, поэтому бюджету ширины ничего не грозит.
 _FOOTER_CONNECTION_TOKEN = ("Enter — сохранить  ·  Ctrl+U — очистить  ·  "
                             "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню")
+# Строка «— без профиля» — не объект, а действие «снять текущий выбор», и глагол
+# у неё СВОЙ. Общий футер секции обещал здесь «активировать», пока подсказка под
+# списком в том же кадре говорила «деактивировать»; курсор при входе в секцию
+# стоит ровно на этой строке, так что противоречие было первым, что видит глаз.
+# Тот же позиционный приём, что у «Подключения» (_FOOTER_CONNECTION_FIELD).
+# «n — создать» здесь и в пустом варианте ниже остаётся: клавиша секционная (не
+# про строку под курсором) и работает на любой строке, включая ПУСТОЕ состояние,
+# где создавать первый профиль больше нечем. Футер, промолчавший о работающей
+# клавише, — второй класс лжи, и стоит он дороже сэкономленного места.
+_FOOTER_PROFILES_NONE = ("↑/↓ — выбор  ·  Space — деактивировать  ·  n — создать  ·  "
+                         "PgUp/PgDn — секции  ·  Esc — меню")
+# Профиль не выбран — снимать нечего, и футер молчит о деактивации: обещать
+# «деактивировать» там, где деактивировать некого, — та же ложь другим глаголом.
+_FOOTER_PROFILES_NONE_EMPTY = "↑/↓ — выбор  ·  n — создать  ·  PgUp/PgDn — секции  ·  Esc — меню"
+# Строка-действие «+ добавить профиль…»: обещаем только то, что на ней работает.
+_FOOTER_PROFILES_ADD = ("↑/↓ — выбор  ·  Enter — создать  ·  "
+                        "PgUp/PgDn — секции  ·  Esc — меню")
 # Строка уровня (последняя в секции «Профили») — тот же позиционный приём, что и
 # «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Space —
 # активировать» там, где ←/→/Enter на самом деле переключают уровень — ложь того
 # же рода, что нашёл финальный обзор 2026-08-06, D.
-# «n — создать» здесь остаётся: клавиша секционная (не про строку под курсором) и
-# работает в том числе в ПУСТОМ состоянии, где строка уровня — единственная.
-# Футер, промолчавший о ней там, оставил бы создание первого профиля без входа —
-# это второй класс лжи футера («молчание о работающей клавише»).
-# Строка-действие «+ добавить профиль…»: обещаем только то, что на ней работает.
-_FOOTER_PROFILES_ADD = ("↑/↓ — выбор  ·  Enter — создать  ·  "
-                        "PgUp/PgDn — секции  ·  Esc — меню")
 _FOOTER_PROFILES_LEVEL = ("↑/↓ — выбор  ·  ←/→/Enter — переключить  ·  n — создать  ·  "
                           "PgUp/PgDn — секции  ·  Esc — меню")
 # Инлайн-ввод имени профиля забирает клавиши себе (контракт п.5 волны B) — футер
@@ -958,49 +955,6 @@ class SettingsScreen(Screen):
             self._start_wave()      # пока идёт probe — крутим волну (стоп в _wave_tick)
 
     # --- draft-probe секции (Ctrl+Space / умный Enter, спека v2 §3.1) ---
-    def _probe_line_text(self, r, section: int) -> Text:
-        """Текст probe-строки по канону §3.1. «Подключение» — совокупный вердикт
-        сервер+токен одной строкой (спек A4); прочие секции — общий формат из
-        r.detail (его формирует interpret_auth: «доступен» / «доступ без токена» /
-        «токен принят» / «сервер требует авторизацию»)."""
-        if r is None:
-            return Text("— не проверено", style=DEEP_DIM)
-        if section == _CONNECTION:
-            # Смысл авторизации — из r.auth_state (ставит interpret_auth); r.detail —
-            # только текст. Сырой config-probe (auth_state=None, без differential
-            # auth) «ok» читаем нейтрально — токен не проверяли, утверждать
-            # «принят» нечестно.
-            if r.verdict == "ok":
-                if r.auth_state == "accepted":
-                    t = Text("✓ сервер доступен · ", style=OK)
-                    t.append("✓ токен принят", style=OK)
-                    return t
-                if r.auth_state == "not_required":
-                    return Text("✓ сервер доступен · авторизация не требуется", style=OK)
-                return Text("✓ сервер доступен", style=OK)
-            if r.verdict == "rejected" and r.http_status == 401:
-                if r.auth_state == "required":
-                    # токена не было вовсе (сервер отклонил control-запрос без него) —
-                    # не «токен отклонён» (нечего было отклонять)
-                    t = Text("✓ сервер доступен · ", style=OK)
-                    t.append(f"⚠ {r.detail}", style=WARN)
-                    return t
-                t = Text("✓ сервер доступен · ", style=OK)
-                t.append("✗ токен отклонён (401)", style=WARN)
-                return t
-            if r.offline:
-                # Винить сервер можно только когда до него не дошли. Раньше сюда
-                # попадал любой unknown без статуса — в том числе наш внутренний
-                # сбой, и причина терялась вместе с detail.
-                return Text("✗ сервер недоступен", style=WARN)
-            return Text(f"? не удалось проверить: {r.detail}", style=WARN)
-        if r.verdict == "ok":
-            msg = f"{r.detail} · {r.latency_ms} ms"
-            return Text(f"✓ {msg}", style=OK)
-        if r.verdict == "rejected":
-            return Text(f"✗ {r.detail}", style=ERR)
-        return Text(f"⚠ не удалось проверить: {r.detail}", style=WARN)
-
     def _start_draft_probe(self, section: int, on_done=None) -> None:
         """Differential-probe «Подключения»: контрольный запрос БЕЗ токена определяет,
         требует ли сервер авторизацию; только при 401 проверяем сам токен. Так
@@ -1054,7 +1008,7 @@ class SettingsScreen(Screen):
         if gen != self._draft_gen or not self.is_mounted or self._view != section:
             return
         self._draft_checked = result
-        self._set_probe_line(self._probe_line_text(result, section))
+        self._set_probe_line(connection_line_text(result))
         if on_done is not None:
             on_done(result)
 
@@ -1208,7 +1162,7 @@ class SettingsScreen(Screen):
             self._mount_field_hints(frame, "Authorization")
             self._mount_field_hints(frame, "proxy")
             self._mount_shadow_hint(frame)
-            frame.mount(Static(self._probe_line_text(self._probe_config, _CONNECTION),
+            frame.mount(Static(connection_line_text(self._probe_config),
                                classes="set-hint set-dyn set-probe"))
         elif section == _MODELS:
             from pathlib import Path
@@ -2506,7 +2460,11 @@ class SettingsScreen(Screen):
         target = self._profile_activation_target(ref)
         lines.append(f"Space — активировать (запись: {target})")
         if row.get("shadow") is not None:
-            lines.append(f"тёзка перекрыта: {row['shadow'].path}")
+            # Имя профиля одно на систему: при совпадении в обоих корнях побеждает
+            # проектный, а второй файл молча не участвует. Подсказка говорит именно
+            # это — «есть, но не работает»: голое слово «тёзка» заставляло гадать,
+            # кто кого перекрыл и в каком из двух файлов править (ревизия владельца).
+            lines.append(f"тот же профиль есть здесь, но перекрыт: {row['shadow'].path}")
         if self._project_sets_profile_pointer() and (self._config.get("profile") or None) == name \
                 and ref.root_kind != "project":
             lines.append("выбор задан .gc/config.yml проекта")
@@ -3879,16 +3837,17 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._level_apply(-1 if event.key == "left" else 1)
                 return
-            # Space — канон базы для смены состояния (MCP «вкл/выкл», отметка в
-            # post-update), и активация профиля именно она. Enter остаётся тихим
-            # алиасом: пока в волне A внутрь профиля входить некуда, отнимать
-            # привычную клавишу не за что — но и обещать её футером нельзя, иначе
-            # закрепим расклад, который сменится вместе с редактором профиля.
-            if event.key in ("space", "enter"):
+            # Две клавиши — два разных глагола (решение В1): Enter «входит внутрь»
+            # объекта под курсором — тот же канон, что у меню секций и списка MCP,
+            # и с приходом редактора профиля внутрь наконец есть куда войти. Смена
+            # состояния остаётся за Space (канон базы: MCP «вкл/выкл», отметка в
+            # post-update) — им профиль активируется ниже. Слить их в один кортеж
+            # значило бы отдать Space открытие и оставить активацию без клавиши,
+            # которую обещает футер.
+            if event.key == "enter":
                 event.stop()
                 if row["kind"] == "level":
-                    if event.key == "enter":
-                        self._level_apply(1)
+                    self._level_apply(1)
                 elif row["kind"] == "profile":
                     self._open_profile(row)
                 elif row["kind"] == "add":
@@ -3969,8 +3928,7 @@ class SettingsScreen(Screen):
                 # в on_done. Ровно поэтому в мастере уход с поля поколение не бампает.
                 self._cancel_env_confirm()   # но подтверждение перезаписи ссылки уход с поля снимает
                 self._update_dirty()
-                if self._view == _CONNECTION:
-                    self._autoprobe_on_leave(ed, leaving_id)
+                self._autoprobe_on_leave(ed, leaving_id)
                 self._refresh_footer()   # состав клавиш зависит от того, раскрыт ли список
             return
         if event.key == "ctrl+u" and self._view == _CONNECTION:

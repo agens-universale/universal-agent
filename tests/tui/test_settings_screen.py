@@ -1765,99 +1765,10 @@ async def test_auth_draft_probe_server_ignores_token(tmp_path):
         assert "токен принят" not in probe_line
 
 
-async def test_connection_line_separates_bad_data_from_dead_server(tmp_path):
-    """Три разных «плохо» не должны схлопываться в «сервер недоступен»: кривой
-    токен (запрос вообще не ушёл), неподтверждённый токен (сервер ответил) и
-    настоящий обрыв связи. Раньше первые два печатались как лежачий сервер."""
-    from tui.screens.settings import SettingsScreen, _CONNECTION
-    from tui.services.settings_probe import ProbeResult
-    import tui.app as app_mod
-    cfg_file = tmp_path / "c.yml"
-    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
-    app = app_mod.TuiApp(config=_cfg())
-    async with app.run_test() as pilot:
-        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
-                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
-        app.push_screen(scr)
-        await pilot.pause()
-
-        bad_token = ProbeResult("rejected", None, None, 0,
-                                "в токене недопустимые символы — нужны только латиница и цифры",
-                                auth_state="rejected")
-        line = str(scr._probe_line_text(bad_token, _CONNECTION))
-        assert "недопустимые символы" in line and "сервер недоступен" not in line
-
-        unconfirmed = ProbeResult("unknown", 400, None, 9,
-                                  "не удалось подтвердить токен: на заведомо неверный "
-                                  "сервер отвечает так же (400)")
-        line = str(scr._probe_line_text(unconfirmed, _CONNECTION))
-        assert "подтвердить токен" in line and "сервер недоступен" not in line
-
-        # Настоящий обрыв — единственный случай, когда сервер можно винить.
-        offline = ProbeResult("unknown", None, None, 9,
-                              "нет соединения (timeout)", offline=True)
-        assert "сервер недоступен" in str(scr._probe_line_text(offline, _CONNECTION))
-
-        # А это — наш собственный сбой (так его заворачивает _work). Статуса нет,
-        # как и при обрыве, но сервер здесь ни при чём: раньше вердикт сваливался
-        # в «сервер недоступен», и причина терялась вместе с detail.
-        internal = ProbeResult("unknown", None, None, 0,
-                               "внутренняя ошибка проверки: boom")
-        line = str(scr._probe_line_text(internal, _CONNECTION))
-        assert "внутренняя ошибка" in line and "сервер недоступен" not in line
-
-
-async def test_connection_probe_line_combined_verdicts(tmp_path):
-    """Строка probe «Подключения» — совокупный вердикт по таблице A4."""
-    from tui.screens.settings import SettingsScreen, _CONNECTION
-    from tui.services.settings_probe import ProbeResult
-    import tui.app as app_mod
-    cfg_file = tmp_path / "c.yml"
-    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
-    app = app_mod.TuiApp(config=_cfg())
-    async with app.run_test() as pilot:
-        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
-                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
-        app.push_screen(scr)
-        await pilot.pause()
-        ok = ProbeResult("ok", 200, [], 10, "токен принят", auth_state="accepted")
-        assert "токен принят" in str(scr._probe_line_text(ok, _CONNECTION))
-        not_required = ProbeResult("ok", 200, [], 10, "доступ без токена — авторизация не требуется",
-                                   auth_state="not_required")
-        assert "не требуется" in str(scr._probe_line_text(not_required, _CONNECTION))
-        rej = ProbeResult("rejected", 401, None, 10, "отклонён", auth_state="rejected")
-        line = str(scr._probe_line_text(rej, _CONNECTION))
-        assert "сервер доступен" in line and "токен отклонён" in line
-        # Вердикт — только из auth_state: литерал в detail сам по себе ничего
-        # не «включает» (раньше паттерн-матч по тексту делал именно это).
-        text_only = ProbeResult("ok", 200, [], 10, "токен принят")
-        assert "токен принят" not in str(scr._probe_line_text(text_only, _CONNECTION))
-        # «Недоступен» теперь включает флаг offline, а не пустой http_status:
-        # без статуса остаются и наши внутренние сбои, а они про сервер не говорят.
-        unk = ProbeResult("unknown", None, None, 10, "нет соединения (timeout)",
-                          offline=True)
-        assert "недоступен" in str(scr._probe_line_text(unk, _CONNECTION)).lower()
-        inconclusive = ProbeResult("unknown", 500, None, 10, "сервер ответил 500")
-        assert "не удалось проверить" in str(scr._probe_line_text(inconclusive, _CONNECTION))
-
-
-async def test_connection_probe_line_neutral_when_token_unknown(tmp_path):
-    """Config-probe (до ручной пробы, detail='доступен') не утверждает «токен принят» — нейтрально."""
-    from tui.screens.settings import SettingsScreen, _CONNECTION
-    from tui.services.settings_probe import ProbeResult
-    import tui.app as app_mod
-    cfg_file = tmp_path / "c.yml"
-    cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
-    app = app_mod.TuiApp(config=_cfg())
-    async with app.run_test() as pilot:
-        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
-                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
-        app.push_screen(scr)
-        await pilot.pause()
-        raw_ok = ProbeResult("ok", 200, [], 10, "доступен")   # сырой config-probe, без токен-инфо
-        line = str(scr._probe_line_text(raw_ok, _CONNECTION))
-        assert "сервер доступен" in line
-        assert "токен принят" not in line                      # НЕ утверждаем непроверенное
+# Таблица слов probe-строки «Подключения» переехала в юниты владельца формата
+# (`tests/tui/test_probe_presentation.py`): строка теперь общая для секции, формы
+# записи модели и мастера, и держать её словарь в тестах одного из потребителей
+# значит проверять два раза одно и расходиться при первой правке.
 
 
 async def test_auth_section_saved_token_is_not_dirty(tmp_path):
@@ -3536,11 +3447,13 @@ async def test_ctrl_u_dismisses_the_pending_env_confirm(tmp_path, monkeypatch):
     его на экране — и следующий Enter сохранит именно тот снимок: очистка токена в него
     не попала, и в файл уехало бы состояние ДО Ctrl+U.
 
-    Ссылка здесь в АДРЕСЕ, а не в токене: страж поднимается правкой адреса, курсор
-    остаётся на нём (стрелка бы confirm сняла сама), а Ctrl+U на позиции адреса всё
-    равно стирает сохранённый токен — `clear_token()` смотрит на маску, не на курсор.
-    Поле токена при этом пустое, `Input.Changed` по очистке не летит, и снять страж
-    некому, кроме самого обработчика клавиши."""
+    Ссылка здесь в АДРЕСЕ, а не в токене: страж поднимается правкой адреса, а снять
+    его потом обязана очистка токена. На поле токена курсор переводим прямым
+    `ed.move(1)` (стрелка сняла бы confirm сама, и проверять стало бы нечего) —
+    `clear_token()` гейтит именно позицию: на адресе Ctrl+U молчит, иначе целившийся
+    в строку адреса пометил бы к удалению сохранённый токен. Поле токена при этом
+    пустое, `Input.Changed` по очистке не летит, и снять страж некому, кроме самого
+    обработчика клавиши."""
     monkeypatch.setenv("GC_URL", "https://from-env/v1/chat/completions")
     cfg_file = _write_cfg(tmp_path, url='"${ENV:GC_URL}"')   # токен — обычный литерал (маска есть)
     import tui.app as app_mod
@@ -3559,6 +3472,7 @@ async def test_ctrl_u_dismisses_the_pending_env_confirm(tmp_path, monkeypatch):
         await pilot.pause(); await pilot.pause()
         assert list(scr.query("#set-envconfirm")), "страж не поднялся — проверять нечего"
 
+        ed.move(1)                                   # → поле токена: там клавиша обещана
         await pilot.press("ctrl+u")
         await pilot.pause()
         assert ed.token_cleared is True              # клавиша дошла и сработала
@@ -3617,7 +3531,7 @@ async def test_hub_judges_the_token_on_the_real_route():
                          auth_probe_fn=auth)
         assert auth.seen, "differential не запускался"
         assert scr._menu_glyph(settings_section_index("Подключение"))[0] == "!"
-        assert scr._menu_glyph(settings_section_index("Модель"))[0] == "✓"   # модели не потеряны
+        assert scr._menu_glyph(settings_section_index("Модели"))[0] == "✓"   # модели не потеряны
 
 
 async def test_hub_shows_the_accepted_token_green():

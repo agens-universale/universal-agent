@@ -137,6 +137,10 @@ async def test_profiles_section_tie_break_one_row_shadow_in_hint(tmp_path, monke
             i for i, r in enumerate(rows) if r["kind"] == "profile")
         hint = scr._profiles_hint_text(rows)
         assert str(base_profile) in hint
+        # Путь без объяснения оставлял человека гадать, кто кого перекрыл и правки в
+        # каком из двух файлов что-то изменят: подсказка обязана СКАЗАТЬ, что этот
+        # файл есть, но не работает (ревизия владельца по смоку).
+        assert f"тот же профиль есть здесь, но перекрыт: {base_profile}" in hint
 
 
 async def test_profiles_section_overlay_suffix_shows_plus_security(tmp_path, monkeypatch):
@@ -1437,30 +1441,3 @@ async def test_space_activates_profile(tmp_path, monkeypatch):
         await pilot.press("space")
         await pilot.pause(0.1)
         assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
-
-
-async def test_enter_still_activates_as_quiet_alias(tmp_path, monkeypatch):
-    """Enter продолжает активировать, но футер о нём молчит: пока волна B не
-    привезла «вход в профиль», отнимать привычную клавишу не за что, а обещать
-    её — значит закреплять расклад, который вот-вот сменится."""
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_profiles(pilot, scr)
-        await _cursor_to(scr, "profile", "home")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause(0.1)
-        assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
-
-
-# ── перенесено из feat/profiles-a при синке 2026-08-25 ──
