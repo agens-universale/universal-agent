@@ -40,6 +40,7 @@ from textual.widgets import Rule, Static
 
 from config_modules.model_registry import LEVEL_FALLBACK, LEVELS
 from config_modules.model_sections_validation import SUBAGENT_NAMES
+from tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
 
 # --- футеры секции (позиционные: Enter значит разное на разных строках) --------
@@ -581,11 +582,13 @@ class ModelsSectionEditor(Vertical):
             widget.set_class(i == self._idx, "selected")
         for widget in self.query(".models-hint"):
             widget.update(self._hint_text())
-        # Подсвеченную строку подводим сами (канон `field_list`/`sessions`): фокуса у
-        # строк нет, за курсором Textual не следит, а список секции длиннее экрана —
-        # записи, три слота и полтора десятка привязок.
+        # Подсвеченную строку подводим сами: фокуса у строк нет, за курсором Textual
+        # не следит, а список секции длиннее экрана — записи, три слота и полтора
+        # десятка привязок. Через общий резолвер, а не напрямую: висящий вопрос
+        # (confirm-баннер) обязан перебить курсор, кто бы из них ни заказал подводку
+        # последним (см. `form_frame.reveal_focus`).
         if 0 <= self._idx < len(widgets):
-            self.call_after_refresh(widgets[self._idx].scroll_visible, animate=False)
+            reveal_focus(self)
 
     def _reload(self) -> None:
         """Файл изменился нами же — перечитать состояние цели и пересобрать тело.
@@ -873,8 +876,13 @@ class ModelsSectionEditor(Vertical):
             return False
         last = len(self._aliases) == 1
         self._pending = {"alias": alias, "references": references, "last": last}
-        self.mount(Static(Text(self._confirm_text(alias, references, last), style=WARN),
-                          classes="models-confirm onb-dyn", markup=False))
+        banner = Static(Text(self._confirm_text(alias, references, last), style=WARN),
+                        classes=f"models-confirm onb-dyn {KEEP_IN_VIEW}", markup=False)
+        self.mount(banner)
+        # Вопрос монтируется в КОНЕЦ тела секции, а тело длиннее вьюпорта рамки: без
+        # подводки футер честно менялся на «Enter — удалить», а самого вопроса на
+        # экране не было — Enter приходилось жать вслепую.
+        reveal_focus(self)
         return True
 
     @staticmethod

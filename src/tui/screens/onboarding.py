@@ -17,6 +17,7 @@ from rich.text import Text
 import onboarding
 from tui import branding
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
+from tui.form_frame import cap_frame_height
 
 # Именованные шаги мастера. Состав считается на входе и от прогона к прогону
 # разный: шаг «Профили» есть, только если дискавери нашёл профили (спека §11), —
@@ -394,6 +395,12 @@ class OnboardingScreen(Screen):
 
     def on_mount(self) -> None:
         self._mount_step_body()
+        self.call_after_refresh(cap_frame_height, self, "#onb-scroll")
+
+    def on_resize(self, event: events.Resize) -> None:
+        # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
+        # ресайз, а не на каждый кадр шага (см. form_frame).
+        cap_frame_height(self, "#onb-scroll")
 
     def _mount_step_body(self) -> None:
         """Смонтировать виджеты текущего шага в #onb-frame (после #onb-body)."""

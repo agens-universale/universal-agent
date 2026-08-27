@@ -16,6 +16,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
+from tui.form_frame import cap_frame_height
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
 
 _FOOTER = "Space — отметить · Enter — выполнить отмеченное · Esc — позже (доступно в /settings)"
@@ -54,8 +55,13 @@ class PostUpdateScreen(Screen):
         self._stamped = False
 
     def on_mount(self) -> None:
+        self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
         if self._wired:
             self.run_worker(self._scan_mcp_updates, thread=True, name="post-update-mcp-scan")
+
+    def on_resize(self, event: events.Resize) -> None:
+        # Потолок рамки зависит только от высоты окна и хрома (см. form_frame).
+        cap_frame_height(self, "#pu-scroll")
 
     def _scan_mcp_updates(self) -> None:
         """Фоновый воркер: у кого из подключённых версия отстала от рецепта."""

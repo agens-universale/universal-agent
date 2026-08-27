@@ -427,9 +427,15 @@ TextArea.ask-human-mode { border: solid $run-color; }
    teal-карточка (лого+тэглайн+степпер+шаг) — контент между ними, по размеру. */
 #onb-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
 #header-left { width: 1fr; color: $deep-dim; }
-#onb-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
+/* Рамку рисует САМ скроллящий контейнер (канон раскладки форм, см.
+   `tui/form_frame.py`): граница — часть его коробки и потому стоит на месте,
+   а внутри неё едет содержимое. Пока рамка сидела ВНУТРИ скролла, её концы уезжали
+   за вьюпорт — рамка выглядела разорванной. Потолок высоты ставится из кода
+   (`cap_frame_height`): `max-height: 100%` меряется по всему `#root` вместе с шапкой
+   и футером и выдавливал футер за нижний край экрана. */
+#onb-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
 #onb-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
-#onb-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+#onb-frame { height: auto; width: 1fr; }
 #onb-logo { height: auto; padding: 0; }
 #onb-tagline { height: auto; color: $deep-dim; margin-top: 1; padding: 0; }
 #onb-stepper { height: auto; padding: 2 0; }
@@ -457,9 +463,10 @@ TextArea.ask-human-mode { border: solid $run-color; }
 
 /* /settings — хаб настроек (визуальный контракт §2-3; идиомы = onb-*) */
 #set-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
-#set-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
+/* Рамка — на скроллящем контейнере (тот же канон, что у мастера выше). */
+#set-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
 #set-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
-#set-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+#set-frame { height: auto; width: 1fr; }
 /* Единая левая граница контента = padding 0 1 у ВСЕХ элементов секции/меню
    (frame даёт +2, элементы +1 → всё на 3 от рамки; рассинхрон отступов был
    причиной «адрес левее / авторизация поехала»). */
@@ -485,9 +492,11 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-probe { margin-top: 1; }               /* воздух перед строкой статуса probe */
 
 /* Пост-апдейт (D4) — карточка по контенту, как #set-frame (визуальный контракт §6);
-   раньше сидел в #trace{height:1fr} и раскатывался на весь пустой экран. */
-#pu-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
-#pu-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+   раньше сидел в #trace{height:1fr} и раскатывался на весь пустой экран.
+   Рамка — на скроллящем контейнере, потолок из кода: тот же канон, что у мастера
+   и /settings (см. `tui/form_frame.py`). */
+#pu-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+#pu-frame { height: auto; width: 1fr; }
 .pu-title { height: auto; padding: 0 0 1 0; border-bottom: solid $deep-dim; margin-bottom: 1; }
 .pu-title.solo { padding: 0; border-bottom: none; margin-bottom: 0; }   /* нечего обновлять — линии под заголовком нет */
 .post-update-hint { height: auto; color: $deep-dim; padding: 0; }

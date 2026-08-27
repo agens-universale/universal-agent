@@ -15,6 +15,8 @@ from rich.text import Text
 
 from tui.editors.models_section import _FOOTER_PROFILE_BACK
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
+from tui.form_frame import (KEEP_IN_VIEW, cap_frame_height, reveal,
+                            reveal_focus)
 from tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
 SECTIONS = ("Подключение", "Модели", "Профили", "MCP-серверы", "Режимы работы", "Обновление")
@@ -318,6 +320,12 @@ class SettingsScreen(Screen):
         self._probe_in_flight = bool(endpoint)   # первый кадр меню сразу с …, без — → ✓ мелькания
         self._render_view()
         self._start_config_probe()
+        self.call_after_refresh(cap_frame_height, self, "#set-scroll")
+
+    def on_resize(self, event: events.Resize) -> None:
+        # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
+        # ресайз, а не на каждый кадр секции (см. form_frame).
+        cap_frame_height(self, "#set-scroll")
 
     # --- сырые значения полей (файл — источник для редакторов и сверки «не изменено») ---
     def _read_raw(self) -> dict:
@@ -644,6 +652,11 @@ class SettingsScreen(Screen):
         # Футер — про тело, поэтому считается ПОСЛЕ него (канон мастера
         # `_mount_step_body`): состав тела задаёт и состав обещаний.
         self._refresh_footer()
+        # И подводка — тоже про тело и тоже после него: секция бывает длиннее вьюпорта
+        # рамки, и без неё экран отвечал на курсор, которого не видно, и просил Enter
+        # на вопрос, которого не видно. Одна точка на весь экран (см. form_frame):
+        # ярусы приоритета родовые, перечня конкретных баннеров здесь нет.
+        reveal_focus(self)
         if self._view == _CONNECTION:
             # И ещё раз, когда дерево устоялось: `ConnectionEditor` раскрывает пресет-лист
             # в СВОЁМ on_mount — это уже после вызова выше, и первый кадр секции обещал бы
@@ -2352,7 +2365,7 @@ class SettingsScreen(Screen):
                            classes="set-hint set-dyn set-profiles-hint"))
         if self._profiles_delete_name is not None:
             frame.mount(Static(Text(self._profile_delete_confirm_text(), style=WARN),
-                               classes="set-confirm set-dyn", markup=False))
+                               classes=f"set-confirm set-dyn {KEEP_IN_VIEW}", markup=False))
 
     def _name_prompt_belongs_to(self, row: dict) -> bool:
         """Строка, под которой раскрывается инлайн-ввод имени: своя строка профиля
@@ -2368,7 +2381,8 @@ class SettingsScreen(Screen):
         prompt = self._profiles_name_prompt
         prefill = prompt["original"] if prompt["mode"] == "rename" else ""
         inp = PasteInput(value=prefill or "", placeholder="имя профиля",
-                         id="set-profile-name", classes="set-dyn set-spaced set-framed")
+                         id="set-profile-name",
+                         classes=f"set-dyn set-spaced set-framed {KEEP_IN_VIEW}")
         frame.mount(inp)
         inp.focus()
 
@@ -2596,10 +2610,10 @@ class SettingsScreen(Screen):
             frame.mount(Static(row, classes=cls))
         if self._update_awaiting_confirm:
             frame.mount(Static(Text(self._update_confirm_text(), style=WARN),
-                               classes="set-confirm set-dyn"))
+                               classes=f"set-confirm set-dyn {KEEP_IN_VIEW}"))
         elif self._reset_awaiting_confirm:
             frame.mount(Static(Text(self._reset_confirm_text(), style=WARN),
-                               classes="set-confirm set-dyn"))
+                               classes=f"set-confirm set-dyn {KEEP_IN_VIEW}"))
         else:
             frame.mount(Static(
                 self._update_hint_text(actions[self._update_idx], resolved),
@@ -2873,15 +2887,23 @@ class SettingsScreen(Screen):
         input_value=[], input_type=list]` от pydantic) — данные, а не разметка, и
         разбор их роняет приложение `MarkupError`. Единственный вызов с готовым
         `Text` (`set-envconfirm`) флаг не задевает — у `Text` разметки нет вовсе."""
+        # Плашка приезжает БЕЗ пересборки тела (значит, без `reveal_focus` из
+        # `_render_view`), а тело длиннее вьюпорта: и вопрос о перезаписи ${ENV:VAR},
+        # и итог записи внизу секции оказывались за краем. Подводим РАЗОВО, приоритета
+        # вопроса не выдаём: `#set-notice` живёт до пересборки тела и, получив ярус
+        # `KEEP_IN_VIEW`, навсегда перебивал бы курсор. Кто из зовущих показывает
+        # вопрос, а не сообщение, тот сам кладёт маркер в `cls` (см. `set-envconfirm`).
         for w in self.query(f"#{wid}"):
             if w._pruning:
                 continue
             w.update(text)
             w.set_classes(cls)
+            reveal(w)
             return
-        self.query_one("#set-frame", Vertical).mount(
-            Vertical(Static(text, id=wid, classes=cls, markup=False),
-                     classes="set-dyn set-slot"))
+        slot = Vertical(Static(text, id=wid, classes=cls, markup=False),
+                        classes="set-dyn set-slot")
+        self.query_one("#set-frame", Vertical).mount(slot)
+        reveal(slot)
 
     def _notice(self, text: str) -> None:
         self._singleton("set-notice", text, "set-hint set-dyn")
@@ -2963,7 +2985,7 @@ class SettingsScreen(Screen):
             if refs:
                 self._pending_env_save = (section, values, warn_detail)
                 self._singleton("set-envconfirm", Text(self._env_confirm_text(refs), style=WARN),
-                                "set-confirm set-dyn")
+                                f"set-confirm set-dyn {KEEP_IN_VIEW}")
                 return
         dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in values.items()}
         try:
@@ -3033,6 +3055,10 @@ class SettingsScreen(Screen):
     def _move_menu(self, delta: int) -> None:
         self._menu_idx = (self._menu_idx + delta) % len(SECTIONS)
         self._refresh_menu_rows()
+        # Меню обновляет строки НА МЕСТЕ, без пересборки тела, — значит и без
+        # `reveal_focus`, который зовёт `_render_view`: на низком окне курсор уезжал
+        # под нижнюю границу рамки. Подводка нужна там же, где двигается курсор.
+        reveal_focus(self)
 
     def _sync_config_from_app(self) -> None:
         """Подтянуть self._config из app при входе в секцию (см. _open_section):
