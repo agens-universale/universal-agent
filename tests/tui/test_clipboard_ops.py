@@ -28,8 +28,9 @@ def _app(*, notify=None):
 
 
 def test_copy_out_uses_native_and_skips_osc(monkeypatch):
-    """Нативная запись удалась — OSC 52 не шлём: на Windows он подвешивает
-    терминал на секунды (замер 2026-08-04, см. test_clipboard_transport)."""
+    """Windows: нативная запись удалась — OSC 52 не шлём (подвешивает терминал,
+    замер 2026-08-04, см. test_clipboard_transport). Linux шлёт OSC всегда —
+    см. test_copy_out_linux_keeps_osc_on_native_success."""
     app = _app()
     seen = {}
 
@@ -37,11 +38,22 @@ def test_copy_out_uses_native_and_skips_osc(monkeypatch):
         seen["text"] = text
         return True
 
+    monkeypatch.setattr(clipboard_ops.sys, "platform", "win32")
     monkeypatch.setattr(clipboard_ops, "write_clipboard", fake_write)
     monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: False)
     assert clipboard_ops.copy_out(app, "hello", toast=True) is True
     assert app._calls["osc"] == []
     assert seen["text"] == "hello"
+
+
+def test_copy_out_linux_keeps_osc_on_native_success(monkeypatch):
+    """Linux: native ok — OSC 52 всё равно уходит (страховка от xclip -loops 1)."""
+    app = _app()
+    monkeypatch.setattr(clipboard_ops.sys, "platform", "linux")
+    monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda t: True)
+    monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: False)
+    assert clipboard_ops.copy_out(app, "hello", toast=True) is True
+    assert app._calls["osc"] == ["hello"]
 
 
 def test_copy_out_returns_false_when_native_fails(monkeypatch):
@@ -107,6 +119,7 @@ def test_native_fail_macos_silent(monkeypatch):
 
 
 def test_copy_out_async_schedules_worker(monkeypatch):
+    """Windows async: worker пишет native, OSC не трогаем."""
     app = _app()
     workers: list = []
     written: list = []
@@ -118,6 +131,7 @@ def test_copy_out_async_schedules_worker(monkeypatch):
 
     app.run_worker = fake_worker
     app.call_from_thread = lambda fn, *a, **k: fn(*a, **k)
+    monkeypatch.setattr(clipboard_ops.sys, "platform", "win32")
     monkeypatch.setattr(
         clipboard_ops, "write_clipboard", lambda t: written.append(t) or True
     )
@@ -129,6 +143,30 @@ def test_copy_out_async_schedules_worker(monkeypatch):
     assert app._calls["notify"] == [
         (clipboard_ops.MSG_COPIED, {"severity": "information"})
     ]
+
+
+def test_copy_out_async_linux_sends_osc_before_worker(monkeypatch):
+    """Linux async: OSC уходит сразу, native — в worker (как sync-политика)."""
+    app = _app()
+    workers: list = []
+    written: list = []
+
+    def fake_worker(fn, **kw):
+        workers.append(kw.get("name"))
+        fn()
+        return None
+
+    app.run_worker = fake_worker
+    app.call_from_thread = lambda fn, *a, **k: fn(*a, **k)
+    monkeypatch.setattr(clipboard_ops.sys, "platform", "linux")
+    monkeypatch.setattr(
+        clipboard_ops, "write_clipboard", lambda t: written.append(t) or True
+    )
+    monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: False)
+    assert clipboard_ops.copy_out(app, "hello", toast=True, blocking=False) is True
+    assert app._calls["osc"] == ["hello"]
+    assert written == ["hello"]
+    assert workers == ["clipboard-write"]
 
 
 def test_is_ssh_session_env(monkeypatch):
