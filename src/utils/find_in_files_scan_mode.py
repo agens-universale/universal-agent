@@ -199,9 +199,13 @@ def classify_scan_pattern(
     grouped = _split_single_group(body)
     if grouped is not None:
         pre, inner, suf = grouped
+        # A top-level ``|`` outside the group has the lowest precedence:
+        # ``foo(bar|baz)|qux`` is ``(foo(bar|baz))|(qux)``, so no affix is
+        # required by the whole pattern. Disqualifying, not merely impure.
+        has_top_level_or = "|" in pre or "|" in suf
         pre_ok = is_literal_string(pre) if pre else False
         suf_ok = is_literal_string(suf) if suf else False
-        if pre_ok or suf_ok:
+        if not has_top_level_or and (pre_ok or suf_ok):
             req = _pick_longer(pre if pre_ok else None, suf if suf_ok else None)
             # or_group only when every inner branch is pure
             inner_ors = _pure_or_branches(inner)

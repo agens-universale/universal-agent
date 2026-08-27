@@ -36,3 +36,38 @@ def test_safe_include():
     assert not is_safe_grep_include("**/*.py")
     assert not is_safe_grep_include("*[ab].py")
     assert not is_safe_grep_include("")
+
+
+def test_text_mode_newline_pattern_forbidden():
+    assert is_grep_native_safe("};\n}", query_mode="text") is None
+
+
+def test_python_re_literal_with_newline_forbidden():
+    assert is_grep_native_safe("foo\nbar", query_mode="python-re") is None
+
+
+def test_carriage_return_forbidden_in_every_mode():
+    assert is_grep_native_safe("foo\rbar", query_mode="text") is None
+    assert is_grep_native_safe("foo\rbar", query_mode="python-re") is None
+
+
+def test_nul_byte_forbidden_in_every_mode():
+    assert is_grep_native_safe("foo\x00bar", query_mode="text") is None
+    assert is_grep_native_safe("foo\x00bar", query_mode="python-re") is None
+
+
+def test_tab_and_other_control_chars_forbidden_in_text_mode():
+    assert is_grep_native_safe("foo\tbar", query_mode="text") is None
+    assert is_grep_native_safe("foo\x01bar", query_mode="text") is None
+    assert is_grep_native_safe("foo\x7fbar", query_mode="text") is None
+
+
+def test_ordinary_patterns_keep_their_plans():
+    text = is_grep_native_safe("a.b", query_mode="text")
+    assert text is not None and text.fixed is True
+
+    lit = is_grep_native_safe("TODO", query_mode="python-re")
+    assert lit is not None and lit.fixed is True
+
+    ere = is_grep_native_safe("foo.*bar", query_mode="python-re")
+    assert ere is not None and ere.fixed is False

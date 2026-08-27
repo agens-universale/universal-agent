@@ -214,6 +214,10 @@ def test_quoted_subagent_is_or_simple():
         r"foo\s+bar|baz",
         r"(foo.*bar|baz)",
         r"(a+|b+)",
+        # top-level | outside the single group: the affix is not required
+        "foo(bar|baz)|qux",
+        "qux|foo(bar|baz)_suf",
+        "a|b(c|d)",
     ],
 )
 def test_complex(pattern):
@@ -293,6 +297,40 @@ def test_affix_or_dirty_suffix_still_uses_pure_prefix():
     assert sp.mode is PatternMode.AFFIX_OR
     assert sp.required_literal == "def "
     assert sp.or_group == ("a", "b")
+
+
+def test_top_level_or_in_suffix_is_complex_not_affix_or():
+    """``foo(bar|baz)|qux`` means ``(foo(bar|baz))|(qux)`` — ``foo`` is not required."""
+    sp = classify_scan_pattern("foo(bar|baz)|qux")
+    assert sp.mode is PatternMode.COMPLEX
+    assert sp.required_literal is None
+    assert sp.or_group is None
+    assert sp.has_prefilter is False
+
+
+def test_top_level_or_in_prefix_is_complex_not_affix_or():
+    """Same on the other side: ``_suf`` is not required by ``qux|foo(bar|baz)_suf``."""
+    sp = classify_scan_pattern("qux|foo(bar|baz)_suf")
+    assert sp.mode is PatternMode.COMPLEX
+    assert sp.required_literal is None
+    assert sp.or_group is None
+    assert sp.has_prefilter is False
+
+
+@pytest.mark.parametrize(
+    "pattern,mode,req",
+    [
+        ("foo(bar|baz)", PatternMode.AFFIX_OR, "foo"),
+        ("def (a|b).*x", PatternMode.AFFIX_OR, "def "),
+        ("a|b|c", PatternMode.OR_SIMPLE, None),
+        ("TODO", PatternMode.LIKE, "TODO"),
+    ],
+)
+def test_no_top_level_or_keeps_previous_classification(pattern, mode, req):
+    """Patterns without a top-level ``|`` outside the group are untouched."""
+    sp = classify_scan_pattern(pattern)
+    assert sp.mode is mode
+    assert sp.required_literal == req
 
 
 def test_complex_has_no_needles():
