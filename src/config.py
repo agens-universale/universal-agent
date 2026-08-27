@@ -526,14 +526,10 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return config_dict
 
 
-def validate_config_text(text: str) -> None:
-    """Контрольная валидация текста config.yml перед записью (writer/sync).
-
-    Конвейер тот же, что в load_config_ex: ${ENV:VAR} → compat → схема. Иначе файл со
-    старым (переименованным) ключом или с плейсхолдером в нестроковом поле проходил бы
-    загрузку, но отвергался при записи — и юзер оказывался заблокирован в /settings.
-    Бросает ValueError с человекочитаемой причиной.
-    """
+def _app_config_from_text(text: str) -> AppConfig:
+    """Общий шаг фазы 1 (${ENV:VAR} → compat → схема) для validate_config_text и
+    validate_config_text_with_sections — не дублировать парсинг/интерполяцию/
+    compat на каждый вызов, отдаёт готовый AppConfig для фазы 2 второй функции."""
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
@@ -543,9 +539,38 @@ def validate_config_text(text: str) -> None:
     raw = resolve_env_placeholders(raw)
     apply_compat(raw)
     try:
-        AppConfig.model_validate(raw)
+        return AppConfig.model_validate(raw)
     except Exception as exc:
         raise ValueError(f"конфиг не проходит схему: {exc}") from exc
+
+
+def validate_config_text(text: str) -> None:
+    """Контрольная валидация текста config.yml перед записью (writer/sync).
+
+    Конвейер тот же, что в load_config_ex: ${ENV:VAR} → compat → схема. Иначе файл со
+    старым (переименованным) ключом или с плейсхолдером в нестроковом поле проходил бы
+    загрузку, но отвергался при записи — и юзер оказывался заблокирован в /settings.
+    Бросает ValueError с человекочитаемой причиной.
+    """
+    _app_config_from_text(text)
+
+
+def validate_config_text_with_sections(text: str) -> None:
+    """Как validate_config_text (фаза 1), плюс фаза 2 — ссылочная целостность и
+    правило резолвимости секций models/slots/assign (config_modules.
+    model_sections_validation.validate_model_sections) НА ЭТОМ ЖЕ файле (без
+    мержа прочих слоёв — та же упрощённая модель одного файла, что и у фазы 1
+    здесь; полный мульти-слойный мерж — только у настоящего load_config_ex).
+
+    Нужна там, где запись меняет реестр/слоты/привязки (слой записи
+    `config_modules/registry_write.py`): иначе честный, но нерезолвимый после
+    записи config.yml (например, снят единственный заданный слот при 2+ моделях
+    в реестре) ушёл бы на диск, а следующий запуск gc-cli/gc-ua падал бы
+    необработанным ValueError при перечитке. Точечные записи плоских полей
+    (`_do_save` и т.п.) slots/assign не трогают — им остаётся обычный
+    validate_config_text. Бросает ValueError с текстом ошибки валидатора
+    (координата ключа)."""
+    validate_model_sections(_app_config_from_text(text))
 
 
 if __name__ == "__main__":

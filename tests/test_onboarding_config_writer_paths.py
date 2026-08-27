@@ -113,6 +113,27 @@ def test_validate_config_text_rejects_broken_yaml():
         validate_config_text("backend: [незакрытый\n  список")
 
 
+def test_validate_config_text_ignores_unresolvable_sections():
+    """Фаза 1 ссылочную целостность не проверяет — слот на несуществующий алиас
+    проходит (её ловит только `validate_config_text_with_sections`)."""
+    from config import validate_config_text
+    validate_config_text('models:\n  flash:\n    url: "http://x"\nslots:\n  default: "нет-такого"\n')
+
+
+def test_validate_config_text_with_sections_rejects_dangling_slot():
+    from config import validate_config_text_with_sections
+    import pytest
+    with pytest.raises(ValueError):
+        validate_config_text_with_sections(
+            'models:\n  flash:\n    url: "http://x"\nslots:\n  default: "нет-такого"\n')
+
+
+def test_validate_config_text_with_sections_accepts_resolvable_registry():
+    from config import validate_config_text_with_sections
+    validate_config_text_with_sections(
+        'models:\n  flash:\n    url: "http://x"\nslots:\n  default: "flash"\n')
+
+
 def test_field_anchor_paths_resolve_in_real_template():
     from pathlib import Path
     from config import _default_config_path

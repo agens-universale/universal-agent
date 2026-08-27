@@ -21,6 +21,23 @@ from config_modules.model_registry import RESERVED_WORDS
 from config_modules.root import AppConfig
 
 
+# Бланк нового файла профиля (`onboarding_config_writer.create_profile_file`):
+# шапка-инструкция + пустые якоря секций. Именно бланк, а не учебный пример с
+# готовой записью: пример нёс бы литеральный токен и висячие ссылки слотов на
+# алиас, которого у пользователя нет. Пустая строка перед `models:` рвёт цепочку
+# «прикреплённых комментариев» (`onboarding_config_writer._attached_comment_start`)
+# — иначе шапка приклеилась бы к `models:` и уехала вместе с ним при первой же
+# точечной правке записи, перестав описывать файл целиком.
+PROFILE_SKELETON = (
+    "# Профиль — отдельный файл-конфиг: переключаемый набор любых настроек\n"
+    "# (модели, уровни, гварды и другие секции). Впишите здесь только то, что\n"
+    "# должно отличаться, — незаданное наследуется от основного конфига.\n"
+    "\n"
+    "models: {}\n"
+    "slots: {}\n"
+)
+
+
 @dataclass(frozen=True)
 class ProfileRef:
     name: str
@@ -136,6 +153,21 @@ def find_literal_tokens(raw: dict) -> list[str]:
     return aliases
 
 
+def _validate_profile_document(raw: dict, *, source: Optional[str] = None) -> None:
+    """Общая фаза-1 валидация документа профиля: схема `AppConfig` (резерв-имена
+    алиасов моделей проверяет её field_validator) + запрет ключа `profile`
+    (анти-рекурсия, спека §3.2). Переиспользуется `load_profile_document`
+    (документ уже прочитан с диска, `source` — путь файла для сообщения) и
+    `validate_profile_text` (документ ещё не записан на диск, `source` не задан —
+    сообщение без привязки к пути, как `config.validate_config_text`)."""
+    AppConfig.model_validate(raw)
+    if "profile" in raw:
+        prefix = f"{source}: " if source else ""
+        raise ValueError(
+            f'{prefix}ключ "profile" внутри профиля запрещён — цепочки профилей запрещены'
+        )
+
+
 def load_profile_document(
     path: Path,
     *,
@@ -164,12 +196,31 @@ def load_profile_document(
     for fact in apply_compat(raw):
         if notices is not None:
             notices.append(f"{path}: {fact}")
-    AppConfig.model_validate(raw)
-    if "profile" in raw:
-        raise ValueError(
-            f'{path}: ключ "profile" внутри профиля запрещён — цепочки профилей запрещены'
-        )
+    _validate_profile_document(raw, source=str(path))
     return raw
+
+
+def validate_profile_text(text: str) -> None:
+    """Контрольная валидация текста профиля перед записью (writer/Settings).
+
+    Тот же конвейер, что `load_profile_document`, но от строки, ещё не записанной
+    на диск: YAML → env-интерполяция → compat → фаза-1 схема → запрет ключа
+    `profile`. Факты compat здесь отбрасываются (канала notices у pre-write
+    валидатора нет, а докладывает их загрузчик при следующем чтении файла) —
+    важно, что вердикт «валидно» совпадает с вердиктом загрузчика. Инъецируется
+    в `onboarding_config_writer.write_text/write_values(..., validate=)` — та же
+    роль, что `config.validate_config_text` у config.yml. Бросает `ValueError`
+    (на кривом YAML — с координатой строки/столбца из парсера).
+    """
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"невалидный YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("профиль должен быть YAML-документом (словарём)")
+    raw = resolve_env_placeholders(raw)
+    apply_compat(raw)
+    _validate_profile_document(raw)
 
 
 def mtime_or_none(path: Path) -> Optional[float]:
@@ -252,6 +303,7 @@ __all__ = [
     "ProfileRef",
     "ProfileMeta",
     "ProfileDisplaySummary",
+    "PROFILE_SKELETON",
     "mtime_or_none",
     "profile_roots",
     "discover_profiles",
@@ -260,5 +312,6 @@ __all__ = [
     "resolve_profile",
     "find_literal_tokens",
     "load_profile_document",
+    "validate_profile_text",
     "profile_display_summary",
 ]
