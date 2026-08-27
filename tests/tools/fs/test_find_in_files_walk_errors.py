@@ -26,6 +26,11 @@ class _RaisingWalkBackend(FakeBackend):
         raise self._exc
         yield  # pragma: no cover - генератор
 
+    def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+        # find_in_files обходит дерево через iter_walk_entries (размеры + prune).
+        raise self._exc
+        yield  # pragma: no cover - генератор
+
 
 def _run(exc):
     tool = FindInFiles.__new__(FindInFiles)

@@ -12,7 +12,14 @@ _FILES = {"/work/app.py": "print(1)\n"}
 
 
 class _OverflowingBackend(FakeBackend):
+    """Every traversal entry point overflows: iter_walk (list_files),
+    iter_walk_entries (find_in_files / find_files_by_name), listdir (depth 0)."""
+
     def iter_walk(self, path, *, should_descend=None):
+        raise WalkOutputTooLargeError(path, ceiling_chars=50_000_000)
+        yield  # pragma: no cover
+
+    def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
         raise WalkOutputTooLargeError(path, ceiling_chars=50_000_000)
         yield  # pragma: no cover
 

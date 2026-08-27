@@ -276,14 +276,20 @@ class FindFilesByName(AbstractSimpleTool):
 
         return _match_sub
 
-    def _probe_file_meta(self, filepath: str) -> Dict[str, Any]:
-        """size / binary for a matched file; never raises."""
-        size_bytes: Optional[int] = None
+    def _probe_file_meta(
+        self, filepath: str, size_bytes: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """size / binary for a matched file; never raises.
+
+        ``size_bytes`` comes with the walk row when the backend knows it
+        (find -printf %s / lstat) — no second round trip per match.
+        """
         is_binary: Optional[bool] = None
-        try:
-            size_bytes = int(self._backend.getsize(filepath))
-        except OSError:
-            size_bytes = None
+        if size_bytes is None:
+            try:
+                size_bytes = int(self._backend.getsize(filepath))
+            except OSError:
+                size_bytes = None
         try:
             sample = self._backend.read_head_bytes(filepath, BINARY_SAMPLE_BYTES)
             classification = classify_content_from_sample(filepath, sample)
@@ -295,7 +301,9 @@ class FindFilesByName(AbstractSimpleTool):
             "is_binary": is_binary,
         }
 
-    def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
+    def _entry(
+        self, filepath: str, is_dir: bool, size: Optional[int] = None
+    ) -> Dict[str, Any]:
         entry: Dict[str, Any] = {
             "path": tool_report_abspath(filepath, workspace=self._workspace),
             "type": "directory" if is_dir else "file",
@@ -303,7 +311,7 @@ class FindFilesByName(AbstractSimpleTool):
         }
         # Directories have no file meta; omit null size/binary fields.
         if not is_dir:
-            entry.update(self._probe_file_meta(filepath))
+            entry.update(self._probe_file_meta(filepath, size))
         return entry
 
     @enforce_read_guard(path_arg="path")
@@ -403,10 +411,14 @@ class FindFilesByName(AbstractSimpleTool):
             return True
 
         try:
-            walk_iter = self._backend.iter_walk(
-                path, should_descend=_should_descend
+            walk_iter = self._backend.iter_walk_entries(
+                path,
+                should_descend=_should_descend,
+                prune_names=tuple(sorted(exclude_names)),
+                prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
             )
-            for rel, is_d in walk_iter:
+            for entry in walk_iter:
+                rel, is_d = entry.rel, entry.is_dir
                 base = os.path.basename(rel)
                 if is_agent_hidden(base):
                     continue
@@ -423,7 +435,7 @@ class FindFilesByName(AbstractSimpleTool):
                     continue
                 if not matcher(rel, base):
                     continue
-                matches.append(self._entry(abs_path, is_d))
+                matches.append(self._entry(abs_path, is_d, size=entry.size))
                 if len(matches) >= max_matches:
                     truncated = True
                     stop_reason = "max_matches"

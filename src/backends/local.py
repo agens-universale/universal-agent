@@ -7,13 +7,14 @@ import stat as stat_module
 import subprocess
 import sys
 import threading
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 from backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
     ExecResult,
     FsBackend,
 )
+from backends.walk_util import WalkEntry
 from utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
 
 
@@ -202,6 +203,59 @@ class LocalFsBackend(FsBackend):
 
     def walk(self, path: str) -> list:
         return list(self.iter_walk(path))
+
+    def iter_walk_entries(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> Iterable[WalkEntry]:
+        """``iter_walk`` with sizes (``lstat``) and prune applied before descent."""
+        names = frozenset(n for n in prune_names if n)
+
+        def _pruned(name: str) -> bool:
+            return name in names or (prune_dot_dirs and name.startswith("."))
+
+        for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+            dirnames[:] = sorted(d for d in dirnames if not _pruned(d))
+            filenames.sort()
+            rel_dir = os.path.relpath(dirpath, path)
+            prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
+
+            for d in dirnames:
+                full = os.path.join(dirpath, d)
+                try:
+                    st = os.lstat(full)
+                    is_dir = stat_module.S_ISDIR(st.st_mode)
+                except OSError:
+                    is_dir = False
+                yield WalkEntry(prefix + d, is_dir)
+
+            for f in filenames:
+                try:
+                    size: Optional[int] = os.lstat(os.path.join(dirpath, f)).st_size
+                except OSError:
+                    size = None
+                yield WalkEntry(prefix + f, False, size)
+
+            if should_descend is not None:
+                dirnames[:] = [
+                    d for d in dirnames
+                    if should_descend(os.path.join(dirpath, d))
+                ]
+
+    def walk_entries(
+        self,
+        path: str,
+        *,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> list:
+        return list(
+            self.iter_walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
+        )
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:

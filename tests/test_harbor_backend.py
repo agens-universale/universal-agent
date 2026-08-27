@@ -304,3 +304,37 @@ def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
     assert sample == raw
     assert b"\x00" in sample
     assert sample[0] == 0xCF
+
+
+# --- walk_entries: prune внутри find, размер из -printf %s ----------------------
+
+def test_walk_entries_prunes_in_find_and_parses_sizes(loop_in_thread):
+    env = FakeEnv()
+    env.exec = _make_exec_returning(env, "src\td\t4096\nsrc/a.py\tf\t12\n")
+    backend = HarborBackend(env, loop_in_thread)
+
+    entries = backend.walk_entries("/work", prune_names=("node_modules",), prune_dot_dirs=True)
+
+    assert [(e.rel, e.is_dir, e.size) for e in entries] == [("src", True, None), ("src/a.py", False, 12)]
+    cmd = env.calls[-1]
+    assert "'(' -type d -name node_modules -o -type d -name '.*' ')' -prune -o" in cmd
+    assert cmd.endswith(r"-printf '%P\t%y\t%s\n'")
+
+
+def test_walk_keeps_tuples_and_never_prunes(loop_in_thread):
+    env = FakeEnv()
+    env.exec = _make_exec_returning(env, "src\td\t4096\nsrc/a.py\tf\t12\n")
+    backend = HarborBackend(env, loop_in_thread)
+
+    assert backend.walk("/work") == [("src", True), ("src/a.py", False)]
+    assert "-prune" not in env.calls[-1]
+
+
+def test_walk_entries_hit_ceiling_raises(loop_in_thread):
+    from backends.protocol import WalkOutputTooLargeError
+
+    env = FakeEnv()
+    env.exec = _make_exec_returning(env, "x\tf\t1\n" * 200)
+    backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=500)
+    with pytest.raises(WalkOutputTooLargeError):
+        backend.walk_entries("/work")

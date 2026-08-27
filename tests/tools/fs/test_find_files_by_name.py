@@ -230,3 +230,55 @@ def test_glob_auto_detection_rule_is_documented():
     for text in (schema_desc, prompt_desc):
         assert "* ? [ ]" in text
         assert "config[1].yml" in text or "config1.yml" in text
+
+
+# --- размер из обхода вместо getsize на совпадение ------------------------------
+
+def test_size_from_walk_spares_getsize():
+    import json
+
+    from tests.harbor_support.fakes import FakeBackend, bind_os_backend
+    from tools.fs.find_files_by_name import FindFilesByName
+
+    class _Counting(FakeBackend):
+        def __init__(self, files):
+            super().__init__(files)
+            self.getsize_calls = 0
+
+        def getsize(self, p):
+            self.getsize_calls += 1
+            return super().getsize(p)
+
+    backend = _Counting({"/work/app.py": "print(1)\n"})
+    tool = FindFilesByName.__new__(FindFilesByName)
+    bind_os_backend(tool, backend)
+
+    data = json.loads(tool(path="/work", query="app"))
+
+    assert data["matches"][0]["size_bytes"] == 9
+    assert backend.getsize_calls == 0
+
+
+def test_walk_prunes_hard_excludes_in_the_backend(tmp_path, monkeypatch):
+    import json
+
+    from tests.helpers.tool_ctx import with_local_ctx
+    from tools.fs.find_files_by_name import FindFilesByName
+
+    (tmp_path / "app.py").write_text("x\n", encoding="utf-8")
+    tool = with_local_ctx(FindFilesByName, config_dict={"launch_root": str(tmp_path)})
+    backend_cls = type(tool._backend)
+    seen = {}
+    original = backend_cls.iter_walk_entries
+
+    def spy(self, path, **kwargs):
+        seen.update(kwargs)
+        return original(self, path, **kwargs)
+
+    monkeypatch.setattr(backend_cls, "iter_walk_entries", spy)
+
+    data = json.loads(tool(path=str(tmp_path), query="app"))
+
+    assert data["ok"] is True
+    assert "node_modules" in seen["prune_names"]
+    assert seen["prune_dot_dirs"] is True

@@ -123,8 +123,8 @@ def test_show_excluded_dirs_is_answered_not_dropped(tmp_path, monkeypatch):
     assert any(e["path"].endswith("node_modules") for e in data["excluded_dirs"])
 
 
-def test_file_size_is_probed_once_per_file(tmp_path, monkeypatch):
-    """Python walk: размер уже посчитан при обходе — второй запрос лишний round-trip."""
+def test_file_size_is_never_probed_twice(tmp_path, monkeypatch):
+    """Размер приезжает с обходом; если бэкенд его не знает — один getsize, не два."""
     (tmp_path / "a.py").write_text("needle here\n", encoding="utf-8")
     (tmp_path / "b.py").write_text("needle there\n", encoding="utf-8")
 
@@ -143,7 +143,7 @@ def test_file_size_is_probed_once_per_file(tmp_path, monkeypatch):
     assert data.get("search_backend") == "python"
     assert data["count"] == 2
     per_file = Counter(seen)
-    assert per_file and all(n == 1 for n in per_file.values()), per_file
+    assert all(n <= 1 for n in per_file.values()), per_file
 
 
 def test_config_default_limit_applies_when_caller_omits_limit(tmp_path):
@@ -432,3 +432,69 @@ def test_prefiltered_candidates_still_honour_file_pattern(tmp_path, monkeypatch)
     assert data["prefilter"] == "grep"
     assert data["count"] == 1
     assert calls[0]["file_pattern"] == "*.py"
+
+
+# --- обход с размерами и prune на стороне бэкенда ------------------------------
+
+def test_walk_sizes_spare_the_per_file_stat():
+    """Размер известен из обхода (find -printf %s) — getsize на каждый файл лишний."""
+    from tests.harbor_support.fakes import FakeBackend, bind_os_backend
+
+    class _Counting(FakeBackend):
+        def __init__(self, files):
+            super().__init__(files)
+            self.getsize_calls = 0
+
+        def getsize(self, p):
+            self.getsize_calls += 1
+            return super().getsize(p)
+
+    backend = _Counting({"/work/a.py": "needle here\n", "/work/b.py": "needle there\n"})
+    tool = FindInFiles.__new__(FindInFiles)
+    bind_os_backend(tool, backend)
+
+    data = json.loads(tool(path="/work", pattern="needle", query_mode="text"))
+
+    assert data["count"] == 2
+    assert backend.getsize_calls == 0
+
+
+def _spy_walk(tool, monkeypatch):
+    backend_cls = type(tool._backend)
+    monkeypatch.setattr(backend_cls, "has_grep", False, raising=False)
+    seen = {}
+    original = backend_cls.iter_walk_entries
+
+    def spy(self, path, **kwargs):
+        seen.update(kwargs)
+        return original(self, path, **kwargs)
+
+    monkeypatch.setattr(backend_cls, "iter_walk_entries", spy)
+    return seen
+
+
+def test_walk_prunes_hard_excludes_in_the_backend(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("KEY\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    seen = _spy_walk(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["count"] == 1
+    assert "node_modules" in seen["prune_names"]
+    assert seen["prune_dot_dirs"] is True
+
+
+def test_show_excluded_dirs_keeps_the_walk_unpruned(tmp_path, monkeypatch):
+    """Список пропущенных каталогов собирает хост — бэкенд не должен их скрывать."""
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "x.js").write_text("KEY\n", encoding="utf-8")
+    (tmp_path / "a.py").write_text("KEY\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    seen = _spy_walk(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", show_excluded_dirs=True)
+
+    assert seen["prune_names"] == ()
+    assert seen["prune_dot_dirs"] is False
+    assert any(e["path"].endswith("node_modules") for e in data["excluded_dirs"])

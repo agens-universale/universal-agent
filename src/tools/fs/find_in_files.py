@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from backends.protocol import WalkOutputTooLargeError
+from backends.walk_util import WalkEntry
 from config_modules.fs_tools import FsFindInFilesConfig
 from utils.find_in_files_scan_mode import (
     Needles,
@@ -1204,7 +1205,7 @@ class FindInFiles(AbstractSimpleTool):
                 rel = abs_n[len(root_n):].lstrip("/\\")
             else:
                 rel = os.path.basename(abs_n)
-            yield (rel or "."), False
+            yield WalkEntry(rel or ".", False)
 
     def _try_native_grep_directory(
         self,
@@ -1530,25 +1531,40 @@ class FindInFiles(AbstractSimpleTool):
         )
         prefilter = "grep" if prefilter_paths is not None else None
 
+        # Hard-floor prune runs inside the backend traversal (find -prune / os.walk);
+        # show_excluded_dirs needs the host walk to see and report those dirs.
+        prune_names = () if show_excluded_dirs else tuple(sorted(exclude_names))
+        prune_dot = bool(exclude_dot) and not show_excluded_dirs
+
         try:
             entries = (
                 self._prefiltered_entries(path, prefilter_paths)
                 if prefilter_paths is not None
-                else backend.iter_walk(path, should_descend=_should_descend)
+                else backend.iter_walk_entries(
+                    path,
+                    should_descend=_should_descend,
+                    prune_names=prune_names,
+                    prune_dot_dirs=prune_dot,
+                )
             )
-            for relpath, is_dir in entries:
-                if is_dir:
+            for entry in entries:
+                if entry.is_dir:
                     continue
+                relpath = entry.rel
                 abs_path = backend.join(path, relpath)
 
                 if glob_matcher is not None and not glob_matcher(relpath):
                     continue
                 if not _rg_pass(abs_path):
                     continue
-                try:
-                    fsize = backend.getsize(abs_path)
-                except OSError:
-                    continue
+                # Size travels with the walk (find -printf %s / lstat); stat only
+                # when the backend did not know it.
+                fsize = entry.size
+                if fsize is None:
+                    try:
+                        fsize = backend.getsize(abs_path)
+                    except OSError:
+                        continue
                 if fsize > max_bytes:
                     # Single-file mode answers file_too_large here; the directory
                     # walk must not swallow it (empty matches ≠ absent).

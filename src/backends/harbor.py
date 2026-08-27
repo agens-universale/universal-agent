@@ -12,23 +12,46 @@ import shlex
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 from backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    FIND_PRINTF_FORMAT,
     WALK_OUTPUT_MAX_CHARS,
     ExecResult,
     FsBackend,
     WalkOutputTooLargeError,
     bound_exec_result,
 )
-from backends.capabilities import parse_find_printf_lines
+from backends.capabilities import parse_find_printf_entries
 from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 from utils.file_text import (
     decode_text_best_effort,
     encode_text_for_append,
     encode_text_for_write,
 )
+
+
+def _build_find_walk_command(
+    path: str,
+    *,
+    prune_names: Sequence[str] = (),
+    prune_dot_dirs: bool = False,
+) -> str:
+    """``find PATH -mindepth 1 [( prunes ) -prune -o] -printf FORMAT`` — the walk wire."""
+    argv = ["find", path, "-mindepth", "1"]
+    prune_parts = [["-type", "d", "-name", name] for name in prune_names if name]
+    if prune_dot_dirs:
+        prune_parts.append(["-type", "d", "-name", ".*"])
+    if prune_parts:
+        argv.append("(")
+        for i, part in enumerate(prune_parts):
+            if i:
+                argv.append("-o")
+            argv.extend(part)
+        argv.extend([")", "-prune", "-o"])
+    argv.extend(["-printf", FIND_PRINTF_FORMAT])
+    return " ".join(shlex.quote(a) for a in argv)
 
 
 class HarborBackend(FsBackend):
@@ -238,13 +261,21 @@ class HarborBackend(FsBackend):
             "is_file": st["is_file"], "is_dir": st["is_dir"], "is_symlink": st["is_symlink"],
         }
 
-    def walk(self, path: str) -> list:
-        """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path).
-
-        Uses private traverse channel (50M chars). Hit ceiling → fail-closed.
+    def walk_entries(
+        self,
+        path: str,
+        *,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> list:
+        """Recursive listing with sizes (``find -printf %s``) via the private
+        traverse channel (50M chars). Pruned dirs are cut inside ``find`` so the
+        channel is not spent on junk trees. Hit ceiling → fail-closed.
         """
         res = self._exec(
-            f"find {shlex.quote(path)} -mindepth 1 -printf '%P\\t%y\\n'",
+            _build_find_walk_command(
+                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+            ),
             capture_max_chars=self.walk_output_max_chars,
         )
         if res.return_code != 0:
@@ -253,7 +284,11 @@ class HarborBackend(FsBackend):
             raise WalkOutputTooLargeError(
                 path, ceiling_chars=self.walk_output_max_chars
             )
-        return parse_find_printf_lines(res.stdout or "")
+        return parse_find_printf_entries(res.stdout or "")
+
+    def walk(self, path: str) -> list:
+        """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path)."""
+        return [(e.rel, e.is_dir) for e in self.walk_entries(path)]
 
     def listdir(self, path: str) -> list:
         """Immediate children via private traverse channel (same ceiling as walk)."""

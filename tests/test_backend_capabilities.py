@@ -366,3 +366,22 @@ def test_capable_box_reports_all_capabilities():
     assert box.has_grep is True
     assert box.grep_exclude_dir is True
     assert box.grep_include is True
+
+
+# --- wire format обхода: rel, type, size --------------------------------------
+
+def test_parse_find_printf_entries_reads_sizes_and_tolerates_two_columns():
+    from backends.capabilities import parse_find_printf_entries
+
+    rows = parse_find_printf_entries("src\td\t4096\nsrc/a.py\tf\t12\nold.txt\tf\n")
+    assert [(e.rel, e.is_dir, e.size) for e in rows] == [
+        ("src", True, None),
+        ("src/a.py", False, 12),
+        ("old.txt", False, None),
+    ]
+
+
+def test_find_printf_wire_format_carries_size():
+    from backends.protocol import FIND_PRINTF_FORMAT
+
+    assert FIND_PRINTF_FORMAT == r"%P\t%y\t%s\n"

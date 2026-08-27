@@ -331,6 +331,26 @@ class TrackingFsBackend:
     ) -> Iterable[tuple[str, bool]]:
         return self._inner.iter_walk(path, should_descend=should_descend)
 
+    def walk_entries(self, path: str, *, prune_names=(), prune_dot_dirs: bool = False) -> list:
+        return self._inner.walk_entries(
+            path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+        )
+
+    def iter_walk_entries(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+        prune_names=(),
+        prune_dot_dirs: bool = False,
+    ):
+        return self._inner.iter_walk_entries(
+            path,
+            should_descend=should_descend,
+            prune_names=prune_names,
+            prune_dot_dirs=prune_dot_dirs,
+        )
+
     def iter_files(
         self,
         path: str,

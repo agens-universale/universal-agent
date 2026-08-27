@@ -6,7 +6,9 @@ import shlex
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional, Sequence
+
+from backends.walk_util import WalkEntry, iter_walk_entries_from_flat, prune_flat_entries
 
 # Потолок captured-буфера на поток (decoded UTF-8 chars). Spec D2 / D8.
 DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS = 60_000
@@ -14,8 +16,9 @@ DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS = 60_000
 # Harbor walk/listdir private channel (B1). Not tool exec; fail-closed on hit.
 WALK_OUTPUT_MAX_CHARS = 50_000_000
 
-# Wire format for find listing (smoke ≡ production ≡ harbor walk).
-FIND_PRINTF_FORMAT = "%P\\t%y\\n"
+# Wire format of the harbor walk/listdir listing (find -printf): relpath, type, size.
+# Shell form for ``-printf '…'`` — find itself interprets the escapes.
+FIND_PRINTF_FORMAT = "%P\\t%y\\t%s\\n"
 
 
 class WalkOutputTooLargeError(OSError):
@@ -262,6 +265,40 @@ class FsBackend(ABC):
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[str]: ...
+
+    def walk_entries(
+        self,
+        path: str,
+        *,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> list:
+        """Flat recursive listing as ``WalkEntry`` rows, sizes when the backend
+        learns them during the traversal.
+
+        Default: from ``walk()`` — no sizes (tools fall back to ``getsize``) and
+        host-side prune, so every backend yields the same tree for the same rules.
+        """
+        entries = [WalkEntry(rel, is_dir) for rel, is_dir in self.walk(path)]
+        return prune_flat_entries(
+            entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+        )
+
+    def iter_walk_entries(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> Iterable[WalkEntry]:
+        """``iter_walk`` order over ``walk_entries`` (sizes preserved)."""
+        yield from iter_walk_entries_from_flat(
+            self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        )
 
     # --- path semantics ---
     @abstractmethod

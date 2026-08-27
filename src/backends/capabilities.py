@@ -14,6 +14,7 @@ import tempfile
 import uuid
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
+from backends.walk_util import WalkEntry
 from utils.native_fs_search import (
     build_find_xargs_grep_command,
     build_grep_argv_flags,
@@ -72,20 +73,32 @@ def _which_bin(backend: "FsBackend", name: str) -> Optional[str]:
     return name  # try bare name in recipe; smoke decides
 
 
-def parse_find_printf_lines(stdout: str) -> List[tuple[str, bool]]:
-    """Parse ``%P\\t%y\\n`` lines → [(relpath, is_dir), ...]."""
-    out: List[tuple[str, bool]] = []
+def parse_find_printf_entries(stdout: str) -> List[WalkEntry]:
+    """Parse the walk wire (``%P\\t%y\\t%s\\n``; the two-column form is tolerated).
+
+    Size is kept for files only; a missing or malformed third column → None.
+    """
+    out: List[WalkEntry] = []
     for line in (stdout or "").splitlines():
         if not line.strip():
             continue
         if "\t" not in line:
             continue
-        rel, _, kind = line.partition("\t")
+        rel, _, tail = line.partition("\t")
+        kind, _, size_text = tail.partition("\t")
         if not kind:
             continue
         # %y: f=file, d=directory, l=symlink, …
-        out.append((rel, kind[:1] == "d"))
+        is_dir = kind[:1] == "d"
+        size: Optional[int] = None
+        if not is_dir and size_text.strip():
+            try:
+                size = int(size_text.strip())
+            except ValueError:
+                size = None
+        out.append(WalkEntry(rel, is_dir, size))
     return out
+
 
 
 def probe_has_find(backend: "FsBackend") -> bool:
