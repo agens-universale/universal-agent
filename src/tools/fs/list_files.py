@@ -204,7 +204,7 @@ Examples:
                 ok=False,
                 error={"type": "invalid_argument", "field": "path"},
             )
-        if not os.path.isabs(path):
+        if not self._backend.isabs(path):
             return _result(
                 ok=False,
                 error={

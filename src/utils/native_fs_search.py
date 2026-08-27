@@ -88,9 +88,15 @@ def parse_grep_match_lines(
     *,
     root: str,
     join: Callable[[str, str], str],
+    isabs: Callable[[str], bool],
     report_path: Callable[[str], str],
 ) -> Optional[List[Dict[str, Any]]]:
-    """Parse ``PATH:LINENO:TEXT``. Unparseable → None (fallback)."""
+    """Parse ``PATH:LINENO:TEXT``. Unparseable → None (fallback).
+
+    ``isabs`` comes from the backend: grep prints paths in the BACKEND's syntax,
+    and a host answer mis-classifies them — CPython 3.13 stopped calling ``/x``
+    absolute on Windows, so the root was joined a second time.
+    """
     matches: List[Dict[str, Any]] = []
     for raw in (stdout or "").splitlines():
         if not raw:
@@ -108,7 +114,7 @@ def parse_grep_match_lines(
         except ValueError:
             return None
         text = m.group("text")
-        if not os.path.isabs(path):
+        if not isabs(path):
             abs_p = join(root, path)
         else:
             abs_p = path
@@ -136,8 +142,10 @@ def _build_find_prune_argv(
 
     ``-mindepth 1`` ensures the start path itself is never pruned when its
     basename is a hard-exclude name (search-inside-junk-dir is allowed).
+    ``-H`` resolves a symlinked START path only (parity with ``os.walk``, which
+    always follows its top); links met inside the tree stay unfollowed.
     """
-    argv: List[str] = ["find", path, "-mindepth", "1"]
+    argv: List[str] = ["find", "-H", path, "-mindepth", "1"]
     prune_parts: List[List[str]] = []
     for name in exclude_dir_names:
         if not name:
@@ -162,6 +170,61 @@ def _build_find_prune_argv(
     else:
         argv.append("-print")
     return argv
+
+
+def build_grep_argv_flags(
+    *,
+    grep_bin: str = "grep",
+    recursive: bool = False,
+    case_insensitive: bool = False,
+    fixed: bool = False,
+    include: Optional[str] = None,
+) -> List[str]:
+    """Grep flags up to (not including) ``--`` — the one source for every caller.
+
+    Production recipes below and the ``backends.capabilities`` probes both build
+    from here, so a flag can never be smoked in one and emitted in the other.
+
+    ``-H``: always print the file name. Without it a chunk holding a single file
+    yields ``LINENO:TEXT`` and parse_grep_match_lines reads the line number as a
+    path (phantom files, wrong line numbers).
+    """
+    argv: List[str] = [grep_bin, "-H"]
+    if recursive:
+        argv.append("-R")
+    argv.extend(["-n", "--color=never", "--no-messages", "--binary-files=without-match"])
+    if case_insensitive:
+        argv.append("-i")
+    argv.append("-F" if fixed else "-E")
+    if include:
+        argv.append(f"--include={include}")
+    return argv
+
+
+def build_find_xargs_grep_command(
+    path: str,
+    *,
+    exclude_dir_names: Sequence[str],
+    exclude_nested_dot_dirs: bool,
+    file_pattern: Optional[str],
+    grep_argv: Sequence[str],
+) -> str:
+    """``find -print0 | xargs -0 -r grep …`` — one wire for probe and production.
+
+    Needs GNU-ish ``find -print0`` plus ``xargs -0`` and ``xargs -r`` (without
+    ``-r`` empty input may still call grep once). ``backends.capabilities``
+    smokes this exact command, so a box that cannot run it never reports the
+    capability gating the recipe.
+    """
+    find_argv = _build_find_prune_argv(
+        path,
+        exclude_dir_names=exclude_dir_names,
+        exclude_nested_dot_dirs=exclude_nested_dot_dirs,
+        file_pattern=file_pattern,
+    )
+    find_s = " ".join(shlex.quote(a) for a in find_argv)
+    grep_s = " ".join(shlex.quote(a) for a in grep_argv)
+    return f"{find_s} | xargs -0 -r {grep_s}"
 
 
 def count_native_candidates(
@@ -206,47 +269,40 @@ def run_native_grep(
     max_matches: int,
     report_path: Callable[[str], str],
     is_dir_target: bool,
+    allow_path: Optional[Callable[[str], bool]] = None,
 ) -> Optional[NativeGrepResult]:
-    """Execute grep recipe (optionally via find prune). None → Python fallback."""
+    """Execute grep recipe (optionally via find prune). None → Python fallback.
+
+    ``allow_path``: optional per-hit path predicate owned by the caller (this
+    module knows no policy). Applied BEFORE the ``max_matches`` cut — otherwise
+    rejected hits eat the budget and accepted ones are silently dropped.
+    """
     names = [n for n in exclude_dir_names if n]
     need_prune = is_dir_target and (bool(names) or exclude_nested_dot_dirs)
 
-    grep_argv: List[str] = ["grep", "-n", "--color=never"]
-    grep_argv.extend(["--no-messages", "--binary-files=without-match"])
-    if plan.case_insensitive:
-        grep_argv.append("-i")
-    if plan.fixed:
-        grep_argv.append("-F")
-    else:
-        grep_argv.append("-E")
+    grep_argv: List[str] = build_grep_argv_flags(
+        case_insensitive=plan.case_insensitive, fixed=plan.fixed
+    )
     grep_argv.extend(["--", plan.pattern])
 
     try:
         if need_prune:
-            # find -print0 | xargs -0 -r grep ...  (GNU xargs -r: no run if empty)
-            find_argv = _build_find_prune_argv(
+            # Single shell pipeline with quoted argv pieces — Harbor/local POSIX.
+            cmd = build_find_xargs_grep_command(
                 path,
                 exclude_dir_names=names,
                 exclude_nested_dot_dirs=exclude_nested_dot_dirs,
                 file_pattern=file_pattern,
+                grep_argv=grep_argv,
             )
-            # Single shell pipeline with quoted argv pieces — Harbor/local POSIX.
-            find_s = " ".join(shlex.quote(a) for a in find_argv)
-            grep_s = " ".join(shlex.quote(a) for a in grep_argv)
-            # xargs -r is GNU; on macOS without -r empty input may still call grep once.
-            cmd = f"{find_s} | xargs -0 -r {grep_s}"
             res = backend.exec(cmd, timeout=120, env=dict(_GREP_CLEAN_ENV))
         elif is_dir_target:
-            argv = ["grep", "-R", "-n", "--color=never"]
-            argv.extend(["--no-messages", "--binary-files=without-match"])
-            if plan.case_insensitive:
-                argv.append("-i")
-            if plan.fixed:
-                argv.append("-F")
-            else:
-                argv.append("-E")
-            if file_pattern:
-                argv.append(f"--include={file_pattern.strip()}")
+            argv = build_grep_argv_flags(
+                recursive=True,
+                case_insensitive=plan.case_insensitive,
+                fixed=plan.fixed,
+                include=file_pattern.strip() if file_pattern else None,
+            )
             argv.extend(["--", plan.pattern, path])
             res = backend.exec_argv(argv, timeout=120, env=dict(_GREP_CLEAN_ENV))
         else:
@@ -288,22 +344,30 @@ def run_native_grep(
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
 
     lines = stdout.splitlines()
-    need = max_matches + 1
     truncated = False
-    if len(lines) > need:
-        lines = lines[:need]
-        truncated = True
+    if allow_path is None:
+        need = max_matches + 1
+        if len(lines) > need:
+            lines = lines[:need]
+            truncated = True
+        elif hit_cap:
+            truncated = True
     elif hit_cap:
+        # With a filter the pre-parse cut is unsafe: allowed hits may sit past it.
         truncated = True
 
     parsed = parse_grep_match_lines(
         "\n".join(lines),
         root=path,
         join=backend.join,
+        isabs=backend.isabs,
         report_path=report_path,
     )
     if parsed is None:
         return None
+
+    if allow_path is not None:
+        parsed = [m for m in parsed if allow_path(m["file"])]
 
     if len(parsed) > max_matches:
         parsed = parsed[:max_matches]

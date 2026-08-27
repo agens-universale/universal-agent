@@ -1,7 +1,9 @@
 """Usable-capability probes for FsBackend (find/grep).
 
-Probes run production-shaped recipes (not ``command -v`` / ``--version`` alone).
-Any step failure → False; never raise to tool callers.
+Probes run production-shaped recipes (not ``command -v`` / ``--version`` alone):
+the grep argv and the ``find | xargs | grep`` wire are built by the very helpers
+production uses (``utils.native_fs_search``), so probe and production cannot
+drift apart. Any step failure → False; never raise to tool callers.
 """
 from __future__ import annotations
 
@@ -12,11 +14,13 @@ import tempfile
 import uuid
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
+from utils.native_fs_search import (
+    build_find_xargs_grep_command,
+    build_grep_argv_flags,
+)
+
 if TYPE_CHECKING:
     from backends.protocol import FsBackend
-
-# Shared find wire (smoke ≡ production ≡ harbor walk).
-FIND_PRINTF_TEMPLATE = "%P\\t%y\\n"
 
 _GREP_CLEAN_ENV = {
     "GREP_OPTIONS": "",
@@ -85,6 +89,17 @@ def parse_find_printf_lines(stdout: str) -> List[tuple[str, bool]]:
 
 
 def probe_has_find(backend: "FsBackend") -> bool:
+    """True only if the whole prune recipe runs, not just one of its flags.
+
+    ``has_find`` exists to gate ``find -print0 | xargs -0 -r grep``
+    (``utils.native_fs_search.can_native_grep_content`` is its only consumer),
+    so the pipeline is smoked too — the ``-printf`` wire proves a different flag
+    and would let a box that dies on ``-print0``/``xargs -r`` cache True forever.
+    """
+    return _probe_find_printf(backend) and probe_find_xargs_grep(backend)
+
+
+def _probe_find_printf(backend: "FsBackend") -> bool:
     """True only if find -printf production wire parses a known row."""
     find_bin = _which_bin(backend, "find")
     if not find_bin:
@@ -162,19 +177,20 @@ def probe_has_find(backend: "FsBackend") -> bool:
 
 
 def probe_has_grep(backend: "FsBackend") -> bool:
-    """Smoke: -E -n pipe + -R -E -n on a temp file."""
+    """Smoke the production argv: -E pipe, -R tree, and the -F/-i single file."""
     grep_bin = _which_bin(backend, "grep")
     if not grep_bin:
         return False
     try:
         res = _run_argv(
             backend,
-            [grep_bin, "-E", "-n", "--color=never", "b[ae]ta"],
+            build_grep_argv_flags(grep_bin=grep_bin) + ["--", "b[ae]ta"],
             stdin="alpha\nbeta\n",
             timeout=10,
         )
         out = res.stdout or ""
-        if "beta" not in out or not re.search(r"^\d+:", out, re.M):
+        # -H labels stdin ``(standard input)``; accept labelled and bare rows.
+        if "beta" not in out or not re.search(r"(?:^|:)\d+:", out, re.M):
             return False
     except Exception:
         return False
@@ -207,16 +223,8 @@ def probe_has_grep(backend: "FsBackend") -> bool:
 
         res = _run_argv(
             backend,
-            [
-                grep_bin,
-                "-R",
-                "-E",
-                "-n",
-                "--color=never",
-                "--",
-                "b[ae]ta",
-                root,
-            ],
+            build_grep_argv_flags(grep_bin=grep_bin, recursive=True)
+            + ["--", "b[ae]ta", root],
             timeout=15,
         )
         if res.return_code not in (0, 1):
@@ -227,7 +235,19 @@ def probe_has_grep(backend: "FsBackend") -> bool:
         # Expect path:line:text shape
         if not re.search(r":\d+:", text):
             return False
-        return True
+
+        # Production takes -F for every literal/text-mode call and -i whenever
+        # the call is case-insensitive: smoke both on the single-file recipe.
+        res = _run_argv(
+            backend,
+            build_grep_argv_flags(grep_bin=grep_bin, fixed=True, case_insensitive=True)
+            + ["--", "BETA", fpath],
+            timeout=15,
+        )
+        if res.return_code != 0:
+            return False
+        text = res.stdout or ""
+        return "beta" in text and bool(re.search(r":\d+:", text))
     except Exception:
         return False
     finally:
@@ -305,17 +325,8 @@ def probe_grep_exclude_dir(backend: "FsBackend") -> bool:
             return False
         res = _run_argv(
             backend,
-            [
-                grep_bin,
-                "-R",
-                "-E",
-                "-n",
-                "--color=never",
-                "--exclude-dir=skip",
-                "--",
-                "secret",
-                root,
-            ],
+            build_grep_argv_flags(grep_bin=grep_bin, recursive=True)
+            + ["--exclude-dir=skip", "--", "secret", root],
             timeout=15,
         )
         text = res.stdout or ""
@@ -348,17 +359,8 @@ def probe_grep_include(backend: "FsBackend") -> bool:
             return False
         res = _run_argv(
             backend,
-            [
-                grep_bin,
-                "-R",
-                "-E",
-                "-n",
-                "--color=never",
-                "--include=*.py",
-                "--",
-                "secret",
-                root,
-            ],
+            build_grep_argv_flags(grep_bin=grep_bin, recursive=True, include="*.py")
+            + ["--", "secret", root],
             timeout=15,
         )
         text = res.stdout or ""
@@ -367,6 +369,59 @@ def probe_grep_include(backend: "FsBackend") -> bool:
         if "other.txt" in text:
             return False
         return res.return_code in (0, 1)
+    except Exception:
+        return False
+    finally:
+        cleanup()
+
+
+def probe_find_xargs_grep(backend: "FsBackend") -> bool:
+    """Smoke ``find -print0 | xargs -0 -r grep`` — the prune recipe, whole.
+
+    Two steps, because ``-r`` cannot be seen from the first: a box that ignores
+    it still returns hits on a non-empty tree and only misbehaves when find
+    matches nothing (grep runs once on the pipe instead of not running at all).
+    """
+    grep_bin = _which_bin(backend, "grep")
+    if not grep_bin:
+        return False
+    grep_argv = build_grep_argv_flags(grep_bin=grep_bin) + ["--", "secret"]
+    root, cleanup = _make_probe_tree(backend)
+    try:
+        if not root:
+            return False
+        res = backend.exec(
+            build_find_xargs_grep_command(
+                root,
+                exclude_dir_names=["skip"],
+                exclude_nested_dot_dirs=True,
+                file_pattern=None,
+                grep_argv=grep_argv,
+            ),
+            timeout=30,
+            env=dict(_GREP_CLEAN_ENV),
+        )
+        if res.return_code != 0:
+            return False
+        text = (res.stdout or "").replace("\\", "/")
+        if not re.search(r":\d+:secret", text):
+            return False
+        if re.search(r"(^|/)skip/", text, re.M):
+            return False
+
+        # -r step: find matches nothing → xargs must not invoke grep at all.
+        res = backend.exec(
+            build_find_xargs_grep_command(
+                root,
+                exclude_dir_names=["skip"],
+                exclude_nested_dot_dirs=True,
+                file_pattern="gc_probe_no_such_file.*",
+                grep_argv=grep_argv,
+            ),
+            timeout=30,
+            env=dict(_GREP_CLEAN_ENV),
+        )
+        return res.return_code == 0 and not (res.stdout or "").strip()
     except Exception:
         return False
     finally:

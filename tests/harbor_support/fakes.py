@@ -174,6 +174,9 @@ class FakeBackend:
     def join(self, base, name):
         return base.rstrip("/") + "/" + name
 
+    def isabs(self, p):
+        return p.startswith("/")
+
     def default_cwd(self):
         return None
 

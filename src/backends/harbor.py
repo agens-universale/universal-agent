@@ -309,6 +309,10 @@ class HarborBackend(FsBackend):
     def join(self, base: str, name: str) -> str:
         return base.rstrip("/") + "/" + name
 
+    def isabs(self, path: str) -> bool:
+        """Container paths are POSIX whatever the host is."""
+        return path.startswith("/")
+
     def default_cwd(self) -> Optional[str]:
         return None  # container's own workdir
 

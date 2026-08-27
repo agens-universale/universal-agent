@@ -1,6 +1,7 @@
 """Physical I/O port for the tool layer: LocalFsBackend (host) and HarborBackend
 (task container). Tools keep validation/envelopes; backends only answer "where
 does this byte live / where does this command run"."""
+import os
 import shlex
 import threading
 from abc import ABC, abstractmethod
@@ -104,7 +105,12 @@ class FsBackend(ABC):
 
     @property
     def has_find(self) -> bool:
-        """Usable GNU-style find with ``-printf '%P\\t%y\\n'`` (list / by-name / walk)."""
+        """Usable ``find -print0 | xargs -0 -r grep`` wire (content search only).
+
+        Gates exactly one thing — the native prune path in
+        ``can_native_grep_content``. Listing / by-name / walk go through
+        ``backend.walk`` / ``iter_walk`` and never consult this flag.
+        """
         ov = self._cap_override("has_find")
         if ov is not None:
             return ov
@@ -148,12 +154,14 @@ class FsBackend(ABC):
             return ov
         if self._grep_exclude_dir_cache is not None:
             return self._grep_exclude_dir_cache
+        # Read the dependency BEFORE taking the lock: has_grep takes the same
+        # non-reentrant lock, so reading it inside would deadlock on a cold cache.
+        if not self.has_grep:
+            self._grep_exclude_dir_cache = False
+            return False
         with self._ensure_cap_lock():
             if self._grep_exclude_dir_cache is not None:
                 return self._grep_exclude_dir_cache
-            if not self.has_grep:
-                self._grep_exclude_dir_cache = False
-                return False
             try:
                 from backends.capabilities import probe_grep_exclude_dir
 
@@ -170,12 +178,13 @@ class FsBackend(ABC):
             return ov
         if self._grep_include_cache is not None:
             return self._grep_include_cache
+        # Same reason as grep_exclude_dir: has_grep must not be read under the lock.
+        if not self.has_grep:
+            self._grep_include_cache = False
+            return False
         with self._ensure_cap_lock():
             if self._grep_include_cache is not None:
                 return self._grep_include_cache
-            if not self.has_grep:
-                self._grep_include_cache = False
-                return False
             try:
                 from backends.capabilities import probe_grep_include
 
@@ -259,6 +268,17 @@ class FsBackend(ABC):
     def normpath(self, path: str) -> str: ...
     @abstractmethod
     def join(self, base: str, name: str) -> str: ...
+
+    def isabs(self, path: str) -> bool:
+        """Is ``path`` absolute in THIS backend's path syntax.
+
+        Tools validate the argument before touching the backend, so the answer
+        must come from the backend, not from the host: a sandbox speaks POSIX
+        regardless of where the agent process runs (and CPython 3.13 stopped
+        calling ``/x`` absolute on Windows). Host default; override where the
+        syntax differs.
+        """
+        return os.path.isabs(path)
 
     # --- exec ---
     @abstractmethod

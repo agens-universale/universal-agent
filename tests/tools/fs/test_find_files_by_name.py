@@ -214,3 +214,19 @@ def test_find_validation(tmp_path: Path):
 
 def test_registered_name():
     assert FindFilesByName.registered_tool_name() == "fs_find_files_by_name"
+
+
+def test_glob_auto_detection_rule_is_documented():
+    """Правило вывода режима не было объявлено нигде — модель не могла его знать.
+
+    Само поведение (скобки = класс символов) осознанное, литерального режима у
+    тула нет; значит модель должна хотя бы знать об этом из описания.
+    """
+    schema_desc = FindFilesByName.tool_description()["parameters"]["properties"]["query"][
+        "description"
+    ]
+    prompt_desc = FindFilesByName.prompt_description()
+
+    for text in (schema_desc, prompt_desc):
+        assert "* ? [ ]" in text
+        assert "config[1].yml" in text or "config1.yml" in text
