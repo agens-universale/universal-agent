@@ -50,6 +50,27 @@ class _Layers(NamedTuple):
     base_voice: Dict[str, Any]
 
 
+def _layer_document(path, subject: str) -> Dict[str, Any]:
+    """Сырой документ файла-слоя (до env-интерполяции — её вызывающий делает сам,
+    ему нужен и документ ДО неё).
+
+    Негодный файл отдаётся `ValueError` — тем же классом, каким `_raw_from_text`
+    отвечает за текст. Контракт общий на всё чтение слоёв: слои читает и загрузчик,
+    и pre-write валидация, а она ловит `(OSError, ValueError)` и откатывается к
+    одному файлу. Голый `yaml.safe_load` возвращал сюда `yaml.YAMLError` на
+    неразбираемом файле и `dict`-подобное ничто на «- a\\n- b» — обе ошибки шли
+    мимо отката и роняли /settings прямо на рендере меню. Не-модельные секции
+    правятся руками, так что негодный слой — рабочий сценарий, а не экзотика."""
+    with open(path, "r", encoding="utf-8") as file:
+        try:
+            raw = yaml.safe_load(file) or {}
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{path}: невалидный YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: {subject} должен быть YAML-объектом")
+    return raw
+
+
 def _merge_layers(
     raw_config: Dict[str, Any],
     path: str,
@@ -88,8 +109,7 @@ def _merge_layers(
     managed_path = mcp_paths.managed_config_path()
     managed_raw: Dict[str, Any] = {}
     if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
-        with open(managed_path, "r", encoding="utf-8") as file:
-            managed_raw = yaml.safe_load(file) or {}
+        managed_raw = _layer_document(managed_path, "config.local.yml")
         managed_before_env = managed_raw
         managed_raw = resolve_env_placeholders(managed_raw)
         validate_registry_pairs(managed_raw, source=str(managed_path),
@@ -99,8 +119,7 @@ def _merge_layers(
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     project_path = env_vars.project_local_config_path()
     if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
-        with open(project_path, "r", encoding="utf-8") as file:
-            project_raw = yaml.safe_load(file) or {}
+        project_raw = _layer_document(project_path, "проектный config.yml")
         project_before_env = project_raw
         project_raw = resolve_env_placeholders(project_raw)
         validate_registry_pairs(project_raw, source=project_path,
@@ -329,11 +348,3 @@ def validate_profile_text_with_sections(text: str, *, target, base_path) -> None
                                   is_profile=True)
     if app_cfg is not None:
         validate_model_sections(app_cfg)
-
-
-if __name__ == "__main__":
-    cfg = load_config()
-    print(cfg)
-    auth = build_auth_connector(cfg)
-    if auth:
-        print(auth.get_token())

@@ -128,8 +128,15 @@ def resolve_profile(
 
 
 def _read_yaml_document(path: Path) -> dict:
+    # Неразбираемый файл — `ValueError`, как и не-словарь ниже: `validate_profile_text`
+    # тот же перевод уже держит для текста, а на файл его не распространили, и
+    # `yaml.YAMLError` уходил мимо `except (OSError, ValueError)` у pre-write
+    # валидации стека — то есть ронял UI вместо отката к одному файлу.
     with open(path, "r", encoding="utf-8") as file:
-        raw = yaml.safe_load(file) or {}
+        try:
+            raw = yaml.safe_load(file) or {}
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{path}: невалидный YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: профиль должен быть YAML-документом (словарём)")
     return raw

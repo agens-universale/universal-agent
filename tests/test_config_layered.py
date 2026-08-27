@@ -278,14 +278,21 @@ def test_cli_extra_overrides_win_over_layered(global_config_file, isolated_cwd):
 
 
 def test_invalid_yaml_in_project_loud_error(global_config_file, isolated_cwd):
-    """Невалидный YAML в project config → yaml.YAMLError, не silent fallback."""
+    """Невалидный YAML в project config → громкая ошибка, не silent fallback.
+
+    Класс — `ValueError` (с путём файла и координатой из парсера), а не сырой
+    `yaml.YAMLError`: чтение слоёв держит тот же контракт, что `_raw_from_text`
+    для текста и `validate_profile_text` для профиля. Не косметика — pre-write
+    валидация стека ловит `(OSError, ValueError)` и откатывается к одному файлу,
+    а `yaml.YAMLError` уходил мимо этого отката и ронял /settings на рендере
+    меню. Предмет стража прежний: молчания здесь быть не должно."""
     from config import load_config
 
     _write_project_config(
         isolated_cwd,
         "this is: : : not [valid yaml }\n",
     )
-    with pytest.raises(yaml.YAMLError):
+    with pytest.raises(ValueError, match="невалидный YAML"):
         load_config(str(global_config_file))
 
 

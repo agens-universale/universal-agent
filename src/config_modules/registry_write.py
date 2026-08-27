@@ -181,17 +181,31 @@ def _assign_present(document: dict, consumer: str) -> bool:
     return True
 
 
+def _mapping(document: dict, name: str) -> dict:
+    """Секция документа словарём; негодная форма — пусто, без отказа.
+
+    Форму секций цели сторожит `_document` и отказывает — там опечатка мешает
+    писать. Сюда же приходят и ЧУЖИЕ файлы стека (`references_broken_by_removal`),
+    которых мы не правим: отказать из-за соседской опечатки значило бы запретить
+    правку своего файла, а `slots: [light]` в неактивном профиле не проверял никто —
+    указатель резолвится из базы, и файл, который старт не грузил, попадает сюда
+    как есть. Негодная секция ссылок не содержит — ровно тем же правилом, каким
+    `stack_documents` молча пропускает нечитаемый файл."""
+    section = document.get(name)
+    return section if isinstance(section, dict) else {}
+
+
 def _references(document: dict, alias: str) -> list[str]:
     """Координаты слотов и привязок, ссылающихся на алиас реестра."""
     refs: list[str] = []
-    slots = document.get("slots") or {}
+    slots = _mapping(document, "slots")
     for level in LEVELS:
         if slots.get(level) == alias:
             refs.append(f"slots.{level}")
-    assign = document.get("assign") or {}
+    assign = _mapping(document, "assign")
     for consumer, value in assign.items():
         if consumer == "subagents":
-            for name, nested in (value or {}).items():
+            for name, nested in _mapping(assign, "subagents").items():
                 if nested == alias:
                     refs.append(f"assign.subagents.{name}")
         elif value == alias:

@@ -203,7 +203,7 @@ def test_fit_overlay_suffix_whole_names_only():
 
 # --- пустое состояние (текст §12.3 дословно + скелет + путь) ---
 
-async def test_profiles_section_empty_state_shows_spec_text_and_level_row(tmp_path, monkeypatch):
+async def test_profiles_section_empty_state_shows_spec_text(tmp_path, monkeypatch):
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -225,9 +225,11 @@ async def test_profiles_section_empty_state_shows_spec_text_and_level_row(tmp_pa
         assert "models:" not in body and "slots:" not in body
         assert "~/.gc/profiles" not in body
         assert "клавишей n" not in body
-        # строка уровня живёт и в пустом состоянии
+        # Строки уровня здесь больше нет: `level` правит глобальный ключ конфига и
+        # переехал в «Режимы работы» (2026-08-27). В пустом состоянии остаётся
+        # ровно одно действие — «+ добавить профиль».
         rows = _profiles_rows_text(scr)
-        assert any("уровень модели по умолчанию" in l for l in rows)
+        assert not any("уровень модели" in l for l in rows)
 
 
 # --- активация: единое правило записи, все три случая + создание файла + no-op ---
@@ -826,9 +828,11 @@ def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
 
 # --- «— без профиля» + черта + хвост (спека §12.3, ревизия 2026-07-28) -------
 
-async def test_none_row_first_active_marker_and_separator(tmp_path, monkeypatch):
-    """«— без профиля» — первая строка; при пустом указателе `● активен` на ней;
-    черта-разделитель перед строкой уровня."""
+async def test_none_row_first_active_marker(tmp_path, monkeypatch):
+    """«— без профиля» — первая строка; при пустом указателе `● активен` на ней.
+
+    Черты в секции больше нет: она отделяла строку уровня, а уровень переехал в
+    «Режимы работы» (2026-08-27) — секция снова однородный список профилей."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -846,16 +850,15 @@ async def test_none_row_first_active_marker_and_separator(tmp_path, monkeypatch)
         assert rows[0]["kind"] == "none"
         lines = _profiles_rows_text(scr)
         assert "без профиля" in lines[0] and "● активен" in lines[0]
-        seps = list(scr.query(".set-group-sep"))
-        assert seps, "черта перед строкой уровня отсутствует"
+        assert not list(scr.query(".set-group-sep"))   # отделять больше нечего
         hint = scr._profiles_hint_text(rows)
         assert hint == "профиль не выбран — действует чистый конфиг"
 
 
 async def test_none_row_absent_in_empty_state(tmp_path, monkeypatch):
     """Профилей нет — деактивировать нечего: none-строки нет. Строка-действие
-    «+ добавить профиль…» есть и в пустом состоянии (единственный вход кроме n),
-    строка уровня — как всегда, последняя."""
+    «+ добавить профиль…» есть и в пустом состоянии (единственный вход кроме n) —
+    и теперь она единственная: уровень уехал в «Режимы работы»."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -869,7 +872,7 @@ async def test_none_row_absent_in_empty_state(tmp_path, monkeypatch):
         await pilot.pause()
         await _open_profiles(pilot, scr)
         rows = scr._profiles_rows()
-        assert [r["kind"] for r in rows] == ["add", "level"]
+        assert [r["kind"] for r in rows] == ["add"]
 
 
 async def test_deactivate_writes_empty_pointer_to_base_config(tmp_path, monkeypatch):
@@ -944,234 +947,11 @@ async def test_session_tail_full_form_on_profile_row(tmp_path, monkeypatch):
 # --- строка уровня — редактируемая (←/→/Enter), единый источник TOGGLES,
 # единое правило записи, футер позиционный (задача 7) -------------------------
 
-async def _open_level_row(pilot, scr) -> list[dict]:
-    """Открыть «Профили» и поставить курсор на строку уровня (всегда последняя)."""
-    await _open_profiles(pilot, scr)
-    rows = scr._profiles_rows()
-    scr._profiles_idx = len(rows) - 1
-    scr._render_view()
-    await pilot.pause()
-    return rows
-
-
-async def test_level_row_cycles_through_toggles_order_not_hardcoded(tmp_path, monkeypatch):
-    """Крутка идёт по ПОРЯДКУ `TOGGLES["level"].values`, а не по хардкоду
-    light→default→max, зашитому где-то в settings.py: переставленный порядок
-    значений (тот же приём, что доказывает «источник — TOGGLES», без упора в
-    отдельную схема-валидацию значения `level`) меняет следующее значение."""
-    import dataclasses
-    import tui.app as app_mod
-    from tui.toggles import TOGGLES
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    reordered = tuple(reversed(TOGGLES["level"].values))   # max, default, light
-    monkeypatch.setitem(TOGGLES, "level", dataclasses.replace(TOGGLES["level"], values=reordered))
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        scr._level_apply(1)              # "default" -> следующий ПО НОВОМУ порядку — "light"
-        await pilot.pause()
-        assert scr._config["level"] == "light"
-        assert 'level: "light"' in base_cfg.read_text(encoding="utf-8")
-
-
-async def test_level_right_cycles_writes_base_config_and_optimistic_config(tmp_path, monkeypatch):
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        assert (scr._config.get("level") or "default") == "default"
-        await pilot.press("right")
-        await pilot.pause(0.1)
-        assert scr._config["level"] == "max"          # light -> default -> max
-        assert 'level: "max"' in base_cfg.read_text(encoding="utf-8")
-
-
-async def test_level_left_cycles_backward(tmp_path, monkeypatch):
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        await pilot.press("left")
-        await pilot.pause(0.1)
-        assert scr._config["level"] == "light"         # default -> light
-        assert 'level: "light"' in base_cfg.read_text(encoding="utf-8")
-
-
-async def test_level_enter_cycles_forward_same_as_right(tmp_path, monkeypatch):
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        await pilot.press("enter")
-        await pilot.pause(0.1)
-        assert scr._config["level"] == "max"
-
-
-async def test_level_flash_names_the_target_file(tmp_path, monkeypatch):
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        scr._level_apply(1)
-        await pilot.pause()
-        flash = str(scr.query_one("#set-flash", Static).render())
-        assert str(base_cfg) in flash
-        assert "max" in flash
-
-
-async def test_level_write_redirects_to_project_when_project_sets_pointer(tmp_path, monkeypatch):
-    """Тот же случай, что и активация профиля рядом: проектный `.gc/config.yml`
-    уже несёт указатель `profile:` — запись базового файла была бы перекрыта
-    оверлеем проекта, поэтому уходит туда же."""
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    project_config = _write(project_dir / ".gc" / "config.yml",
-                            'profile: "other"\nlevel: "light"\n')
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        target = scr._level_write_target()
-        assert Path(target) == project_config
-        scr._level_apply(1)
-        assert 'level: "max"' in project_config.read_text(encoding="utf-8")
-        assert 'level: default' in base_cfg.read_text(encoding="utf-8")   # базовый не тронут
-
-
-async def test_level_write_stays_in_base_when_project_sets_only_profile_pointer(tmp_path, monkeypatch):
-    """Указатель `profile:` проекта перекрывает выбор ПРОФИЛЯ, а не уровень —
-    уводить из-за него запись `level` в проектный `.gc/config.yml` нельзя: это
-    дописало бы проекту (и его репозиторию) ключ, которого он не просил, а сама
-    запись в базовый конфиг проектным оверлеем не перекрывается."""
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    project_config = _write(project_dir / ".gc" / "config.yml", 'profile: "other"\n')
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        assert Path(scr._level_write_target()) == base_cfg
-        scr._level_apply(1)
-        await pilot.pause()
-        assert "level" not in project_config.read_text(encoding="utf-8")
-        assert 'level: "max"' in base_cfg.read_text(encoding="utf-8")
-
-
-async def test_level_write_creates_missing_anchor_in_target(tmp_path, monkeypatch):
-    """config.yml без строки `level:` (создан до появления ключа) не запирает
-    переключение: якорь дописывается из пакетного шаблона — тем же приёмом, что
-    у указателя профиля (`_write_profile_pointer`), потому что топ-уровневый
-    скаляр сам `write_values` дописать не умеет."""
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml",
-                      'profile: ""\n'
-                      'backend:\n  completions_url: "http://host/v1/chat/completions"\n'
-                      'agent:\n  model: "test-model"\n')
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        scr._level_apply(1)
-        await pilot.pause()
-        assert 'level: "max"' in base_cfg.read_text(encoding="utf-8")
-        flash = str(scr.query_one("#set-flash", Static).render())
-        assert "max" in flash
-
-
-async def test_level_apply_reports_when_written_value_is_shadowed(tmp_path, monkeypatch):
-    """Записать значение можно всегда, а подействовать оно может не везде: активный
-    профиль задаёт свой `level` и перекрывает базу. Тогда честнее сказать, что
-    действует, чем показать «установлен» и нарисовать строку/футер по значению,
-    которого нет."""
-    import tui.app as app_mod
-    from config import load_config_ex
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("pinned"))
-    _write(tmp_path / "base" / "profiles" / "pinned.yml", "level: light\n")
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        def _reload() -> None:
-            app._config = load_config_ex(str(base_cfg))[0]
-
-        scr = _mk_screen(config=load_config_ex(str(base_cfg))[0],
-                         config_path=base_cfg, on_apply=_reload)
-        app.push_screen(scr)
-        await pilot.pause()
-        await _open_level_row(pilot, scr)
-        scr._level_apply(1)          # переключаем от действующего light, но профиль держит light
-        await pilot.pause()
-        assert 'level: "max"' in base_cfg.read_text(encoding="utf-8")   # база из default стала max
-        notice = " ".join(str(w.render()) for w in scr.query(Static))
-        assert "действует «light»" in notice
-        assert scr._config.get("level") == "light"
-
-
 async def test_profiles_section_refuses_to_write_into_packaged_template(tmp_path, monkeypatch):
     """Запуск без пользовательского конфига (GC_HOME не настроен, `--init-config`
     не запускали): базой стал пакетный config.default.yml — ни активация профиля,
-    ни деактивация, ни переключение уровня не смеют его править. Тот же guard, что
-    у «Режимов работы» (`_modes_apply`), но по ЦЕЛИ записи: у профилей она бывает
-    проектной."""
+    ни деактивация не смеют его править. Тот же guard, что у «Режимов работы»
+    (`_modes_apply`), но по ЦЕЛИ записи: у профилей она бывает проектной."""
     import tui.app as app_mod
     import config as config_mod
     project_dir = tmp_path / "project"
@@ -1188,17 +968,16 @@ async def test_profiles_section_refuses_to_write_into_packaged_template(tmp_path
         scr = _mk_screen(config=cfg, config_path=packaged)
         app.push_screen(scr)
         await pilot.pause()
-        rows = await _open_level_row(pilot, scr)
+        await _open_profiles(pilot, scr)
+        rows = scr._profiles_rows()
 
-        scr._level_apply(1)
-        await pilot.pause()
         home = next(r for r in rows if r.get("name") == "home")
         scr._activate_profile("home", home["ref"])
         scr._deactivate_profile()
         await pilot.pause()
 
         text = packaged.read_text(encoding="utf-8")
-        assert "level: default" in text and 'profile: "home"' in text   # файл не тронут
+        assert 'profile: "home"' in text                        # файл не тронут
         notice = " ".join(str(w.render()) for w in scr.query(Static))
         assert "пакетный шаблон" in notice
 
@@ -1266,173 +1045,22 @@ async def test_profiles_cursor_survives_row_disappearing_under_it(tmp_path, monk
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
         await pilot.pause()
-        rows = await _open_level_row(pilot, scr)
-        assert len(rows) == 5           # без профиля, home, work, «+ добавить», уровень
-
-        (profiles_dir / "home.yml").unlink()
-        scr._profiles_idx = 4                       # строк осталось 4 — курсор за концом
-        await pilot.press("enter")
-        await pilot.pause(0.1)
-        assert scr._profiles_idx == 3
-
-        scr._profiles_idx = 4
-        assert scr._profiles_hint_text(scr._profiles_rows())
-        assert scr._profiles_idx == 3
-
-
-async def test_level_hint_names_action_and_target_file_keeps_session_tail(tmp_path, monkeypatch):
-    """Подсказка больше не «витрина» — называет клавиши, целевой файл и хвост
-    про сессионный `/level` (разделение ролей: секция пишет в файл, палитра —
-    на сессию)."""
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-        rows = await _open_level_row(pilot, scr)
-        hint = scr._profiles_hint_text(rows)
-        assert "витрина" not in hint
-        assert "←/→/Enter — переключить" in hint
-        assert str(base_cfg) in hint
-        assert "на сессию — /level" in hint
-
-
-async def test_level_row_dot_color_matches_current_level_and_updates_on_apply(tmp_path, monkeypatch):
-    """Task 12: между названием и значением строки уровня — КАНОННЫЙ ТРЕК
-    тоггла (тот же приём, что `padded_track` в секции «Режимы работы» и
-    палитре), не одиночная точка. Число позиций трека = числу значений
-    `TOGGLES["level"].values` (единый источник — будущий авто-режим сделает
-    трек четырёхпозиционным сам); горящая позиция окрашена по ТЕКУЩЕМУ
-    уровню тем же языком, что футер; трек и цвет меняются вместе со
-    значением при переключении."""
-    import tui.app as app_mod
-    from tui.toggles import TOGGLES, padded_track
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    spec = TOGGLES["level"]
-    colors = {v.value: v.color for v in spec.values}
-    base_w = 2 * len(spec.values) - 1
-
-    def expected_track(level: str) -> str:
-        return padded_track(spec, level, extra_lit=None, base_w=base_w, extra_w=0).plain
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-
-        text = scr._level_row_text(selected=False)
-        assert f"level · уровень модели по умолчанию" in text.plain
-        assert expected_track("default") in text.plain
-        assert text.plain.index(expected_track("default")) > text.plain.index(
-            "level · уровень модели по умолчанию")
-        assert text.plain.count("●") == 1   # ровно одна горящая позиция в треке
-        styles = [str(s.style) for s in text.spans if "bold" in str(s.style).lower()]
-        assert any(colors["default"].lower() in st.lower() for st in styles)
-
-        await _open_level_row(pilot, scr)
-        scr._level_apply(1)   # default -> max
-        await pilot.pause()
-
-        text2 = scr._level_row_text(selected=False)
-        assert expected_track("max") in text2.plain
-        assert "max" in text2.plain
-        assert text2.plain.count("●") == 1
-        styles2 = [str(s.style) for s in text2.spans if "bold" in str(s.style).lower()]
-        assert any(colors["max"].lower() in st.lower() for st in styles2)
-        assert not any(colors["default"].lower() in st.lower() for st in styles2)
-
-
-async def test_level_row_matches_mode_row_grammar(tmp_path, monkeypatch):
-    """Task 13 (решение живого смока 2026-08-10): строка уровня приведена к
-    ГРАММАТИКЕ СТРОКИ целиком, как у ручек секции «Режимы работы»
-    (`_mode_row_text`) — не по кусочкам (цвет точки/трек по отдельности, как
-    было раньше). Порядок: «level · описание» одним блоком INK (выровнено по
-    детерминированной ширине из `_level_columns`, тот же приём, что
-    `_modes_columns`) -> канонный трек (Task 12) -> значение INK (не DIM,
-    как было до этой задачи)."""
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
-
-        label_w, base_w, extra_w, value_w = scr._level_columns()
-        text = scr._level_row_text(selected=False)
-        plain = text.plain
-        head = "level · уровень модели по умолчанию"
-
-        head_i = plain.index(head)
-        track_i = plain.index("●", head_i)
-        value_i = plain.index("default", track_i)
-        assert head_i < track_i < value_i   # порядок: имя·описание -> трек -> значение
-
-        # голова выровнена по фиксированной ширине формулой (не на глаз) —
-        # тот же контракт, что `label_w` в `_modes_columns`.
-        assert plain[head_i:head_i + (label_w - 2)] == head.ljust(label_w - 2)
-
-        # значение выровнено по value_w — тот же приём, что value_w в _mode_row_text
-        assert plain[value_i:value_i + value_w] == "default".ljust(value_w)
-
-        # стили ядра строки — как у НЕ-дочерней ручки в `_mode_row_text`:
-        # голова и значение простым INK (не bold, не DIM).
-        from tui.palette import DIM, INK
-        head_span = next(s for s in text.spans if s.start == 2 and s.end == 2 + len(head.ljust(label_w - 2)))
-        assert str(head_span.style) == INK
-        value_span = next(
-            s for s in text.spans if s.start == value_i and s.end == value_i + value_w)
-        assert str(value_span.style) == INK
-        assert str(value_span.style) != DIM
-
-
-async def test_profiles_footer_is_positional_toggle_hint_on_level_row(tmp_path, monkeypatch):
-    """Футер секции — позиционный (канон `_CONNECTION`): на строке профиля/«без
-    профиля» — «Space — активировать» (В1 волны B), на строке уровня — вариант с
-    «←/→/Enter — переключить»."""
-    import tui.app as app_mod
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
-        app.push_screen(scr)
-        await pilot.pause()
         await _open_profiles(pilot, scr)
         rows = scr._profiles_rows()
-        scr._profiles_idx = next(i for i, r in enumerate(rows) if r["kind"] == "profile")
-        scr._render_view()
-        await pilot.pause()
-        footer_on_profile = str(scr.query_one("#set-footer", Static).render())
-        assert "Space — активировать" in footer_on_profile
-        assert "←/→/Enter — переключить" not in footer_on_profile
-
+        assert len(rows) == 4           # без профиля, home, work, «+ добавить»
         scr._profiles_idx = len(rows) - 1
         scr._render_view()
         await pilot.pause()
-        footer_on_level = str(scr.query_one("#set-footer", Static).render())
-        assert "←/→/Enter — переключить" in footer_on_level
-        assert "Space — активировать" not in footer_on_level
 
+        (profiles_dir / "home.yml").unlink()
+        scr._profiles_idx = 3                       # строк осталось 3 — курсор за концом
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert scr._profiles_idx == 2
 
+        scr._profiles_idx = 3
+        assert scr._profiles_hint_text(scr._profiles_rows())
+        assert scr._profiles_idx == 2
 # --- Клавиша активации: Space (канон базы), Enter — тихий алиас -----------------
 
 async def _cursor_to(scr, kind, name=None):
@@ -1538,3 +1166,30 @@ async def test_space_activates_profile(tmp_path, monkeypatch):
         await pilot.press("space")
         await pilot.pause(0.1)
         assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_profiles_section_no_longer_carries_the_level_row(tmp_path, monkeypatch):
+    """`level` правит ГЛОБАЛЬНЫЙ `level:` конфига, а не ключ внутри файла профиля —
+    в секции про профили он был гостем. Его дом — «Режимы работы», рядом с
+    равными себе ручками «как работаем» (решение владельца 2026-08-27).
+
+    Секция остаётся списком профилей: строки уровня нет ни в составе, ни в
+    тексте, и черта, что стояла над ней, уходит вместе с ней."""
+    import tui.app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml",
+           "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+
+        assert "level" not in [r["kind"] for r in scr._profiles_rows()]
+        assert not any("уровень модели" in l for l in _profiles_rows_text(scr))

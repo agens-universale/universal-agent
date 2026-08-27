@@ -436,6 +436,13 @@ def _registry_ops(values: Dict[str, Any], existing: Optional[Dict[str, str]] = N
     return ops
 
 
+class PartialWriteError(ValueError):
+    """Отказ ВТОРОЙ записи мастера — записи реестра при этом уже на диске.
+
+    Подкласс `ValueError`: вызывающие ловят его прежними `except ValueError`, и
+    ветку «конфиг не записан» разбирают те, кому есть что сказать иначе."""
+
+
 def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
     """Записать собранное мастером в `config_path` — ОДИН путь записи на обе
     поверхности (CLI-визард и TUI-мастер), политика живёт здесь.
@@ -482,8 +489,20 @@ def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
     flat = {FIELD_ANCHOR_PATHS.get(key, key): value
             for key, value in values.items() if key not in model_keys}
     ops = _registry_ops(values, _aliases_in_file(config_path))
+    registry_written = False
     if ops:
         apply_registry_ops(config_path, ops, template)
-    return ocw.write_values(config_path, flat,
-                            template_path=template_path if template else None,
-                            validate=validate_config_text)
+        registry_written = True
+    try:
+        return ocw.write_values(config_path, flat,
+                                template_path=template_path if template else None,
+                                validate=validate_config_text)
+    except ValueError as exc:
+        # Какая из двух записей отказала — знает только этот код, а решают судьбу
+        # сообщения обе поверхности мастера. Отказ ПЕРВОЙ уходит наружу как был:
+        # файл не тронут, «конфиг не записан» — правда. Отказ ВТОРОЙ после
+        # состоявшейся первой правдой уже не будет, и молча выдать его за неё
+        # значит отправить человека искать нетронутый файл, где лежит новый реестр.
+        if registry_written:
+            raise PartialWriteError(str(exc)) from exc
+        raise

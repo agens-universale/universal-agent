@@ -16,6 +16,7 @@ from config import (
 from config_modules import env_vars
 from config_modules.env_vars import EnvVars
 from config_modules.profiles import validate_profile_text
+from mcp_runtime import paths as mcp_paths
 
 
 @pytest.fixture
@@ -214,3 +215,97 @@ def test_prospective_registry_returns_none_on_unparsable_text(stack):
     base, _profiles = stack
     base.write_text("models: {}\n", encoding="utf-8")
     assert prospective_registry("models: [\n", base_path=base) is None
+
+
+# --- Негодный ЧУЖОЙ файл стека: «стек не собрался», а не крэш ---
+
+# Две формы, которыми чужой файл выводит стек из строя: не разбирается вовсе и
+# разбирается не в словарь. Читаются слои голым `yaml.safe_load`, поэтому первая
+# приходила `yaml.YAMLError`, вторая — `AttributeError` на `.get`, и ОБЕ шли мимо
+# отката `except (OSError, ValueError)`.
+BROKEN = [
+    pytest.param("models:\n  b: {\n", id="unparsable"),
+    pytest.param("- a\n- b\n", id="not-a-mapping"),
+]
+
+
+def _break_layer(layer: str, profiles: Path, content: str) -> None:
+    """Положить негодный документ в указанный слой стека."""
+    if layer == "managed":
+        path = mcp_paths.managed_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    elif layer == "project":
+        gc_dir = Path.cwd() / ".gc"
+        gc_dir.mkdir(parents=True, exist_ok=True)
+        (gc_dir / "config.yml").write_text(content, encoding="utf-8")
+    else:
+        (profiles / "work.yml").write_text(content, encoding="utf-8")
+
+
+def _stack_with_profile(base: Path, profiles: Path) -> str:
+    """Стек, резолвимый И целиком, И одной базой: тесты ниже про КЛАСС ошибки, а не
+    про содержание вердикта. Возьми базу, нерезолвимую в одиночку (2 модели без
+    слотов), — откат к одному файлу дал бы законный отказ, и отличить его от крэша
+    стало бы нечем."""
+    text = 'profile: "work"\nmodels:\n  a:\n    model: "x"\n'
+    base.write_text(text, encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
+    return text
+
+
+@pytest.mark.parametrize("layer", ["managed", "project", "profile"])
+@pytest.mark.parametrize("content", BROKEN)
+def test_a_broken_layer_leaves_the_gate_on_the_file_itself(stack, layer, content):
+    """Негодный ЧУЖОЙ файл стека — тот же случай, что ненайденный профиль: фаза 2
+    отключается, вердикт даёт свой файл.
+
+    Не-модельные секции правятся руками, так что сломанный слой — рабочий
+    сценарий. Утечка мимо отката роняла /settings прямо на рендере меню
+    (`_models_glyph` → `_models_verdict` ловит только ValueError), а запись
+    реестра — вместо нотиса."""
+    base, profiles = stack
+    text = _stack_with_profile(base, profiles)
+    _break_layer(layer, profiles, content)
+
+    validate_config_text_with_sections(text, base_path=base)
+
+
+@pytest.mark.parametrize("content", BROKEN)
+def test_a_broken_layer_does_not_disable_phase_one(stack, content):
+    """Откат к одному файлу — не амнистия: схему своего файла судят по-прежнему.
+    Сторож от «починки» глушением всего подряд."""
+    base, profiles = stack
+    _stack_with_profile(base, profiles)
+    _break_layer("project", profiles, content)
+
+    with pytest.raises(ValueError, match="схему"):
+        validate_config_text_with_sections('models:\n  a:\n    model: 5\n',
+                                           base_path=base)
+
+
+@pytest.mark.parametrize("layer", ["managed", "project"])
+@pytest.mark.parametrize("content", BROKEN)
+def test_a_broken_layer_leaves_the_profile_gate_on_the_file_itself(stack, layer, content):
+    """Тот же откат у второго входа гейта — записи в файл профиля."""
+    base, profiles = stack
+    _stack_with_profile(base, profiles)
+    _break_layer(layer, profiles, content)
+
+    validate_profile_text_with_sections(
+        'slots:\n  default: "a"\n', target=profiles / "work.yml", base_path=base)
+
+
+@pytest.mark.parametrize("layer", ["managed", "project", "profile"])
+@pytest.mark.parametrize("content", BROKEN)
+def test_a_broken_layer_leaves_prospective_registry_on_the_file_itself(stack, layer, content):
+    """Вопрос «каким станет реестр» на битом слое отвечает по своему файлу, а не
+    падает: у него та же ловушка `except (OSError, ValueError)`."""
+    from config import prospective_registry
+
+    base, profiles = stack
+    text = _stack_with_profile(base, profiles)
+    _break_layer(layer, profiles, content)
+
+    models, _slots = prospective_registry(text, base_path=base)
+    assert sorted(models) == ["a"]

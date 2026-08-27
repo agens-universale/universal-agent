@@ -320,8 +320,11 @@ async def test_rename_to_the_same_name_is_a_quiet_cancel(tmp_path, monkeypatch):
 
 
 async def test_rename_and_delete_are_noop_on_service_rows(tmp_path, monkeypatch):
-    """`r`/`Del` работают по объекту под курсором: на «— без профиля» и на строке
-    уровня объекта нет — клавиши молчат (ввод имени не поднимается)."""
+    """`r`/`Del` работают по объекту под курсором: на «— без профиля» объекта нет —
+    клавиши молчат (ввод имени не поднимается).
+
+    Строка уровня из этой секции уехала в «Режимы работы» (2026-08-27), и
+    сервисной строкой здесь осталась одна."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -332,7 +335,7 @@ async def test_rename_and_delete_are_noop_on_service_rows(tmp_path, monkeypatch)
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
-        for kind in ("none", "level"):
+        for kind in ("none",):
             await _put_cursor(pilot, scr, kind)
             await pilot.press("r")
             await pilot.pause()
@@ -674,12 +677,13 @@ async def test_footer_names_the_v1_keys_on_a_profile_row(tmp_path, monkeypatch):
                       "r — переименовать · Del — удалить · PgUp/PgDn — секции")
 
 
-async def test_level_row_footer_still_names_creating(tmp_path, monkeypatch):
+async def test_add_row_footer_names_creating_and_nothing_below_it(tmp_path, monkeypatch):
     """Пустое состояние: курсор стартует на строке «+ добавить профиль…» — её
     футер обещает создание и НЕ обещает клавиш объектов (Space/r/Del на
-    строке-действии не работают: канон «недоступное не обещаем»). Ниже, на
-    строке уровня, футер прежний — с ←/→/Enter и `n`: создание первого профиля
-    видно с обеих строк пустого состояния."""
+    строке-действии не работают: канон «недоступное не обещаем»).
+
+    Ниже неё строк больше нет: уровень уехал в «Режимы работы» (2026-08-27), и
+    ↓ на последней строке никуда не уводит — футер остаётся прежним."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -693,11 +697,11 @@ async def test_level_row_footer_still_names_creating(tmp_path, monkeypatch):
         assert "Enter — создать" in footer          # курсор на «+ добавить профиль…»
         for lie in ("Space", "переименовать", "Del"):
             assert lie not in footer, lie
-        await pilot.press("down")                   # → строка уровня
+        await pilot.press("down")                   # ниже строк нет — курсор стоит
         await pilot.pause()
-        footer = _footer(scr)
-        assert "n — создать" in footer
-        assert "←/→/Enter — переключить" in footer
+        assert _footer(scr) == footer
+        # Переключать в этой секции больше нечего: трек уехал вместе со строкой.
+        assert "←/→/Enter — переключить" not in footer
 
 
 async def test_name_input_footer_is_positional(tmp_path, monkeypatch):

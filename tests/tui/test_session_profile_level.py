@@ -795,3 +795,25 @@ def test_no_source_notice_when_the_profile_name_itself_changed(tmp_path, monkeyp
     assert "profile_source_changed" not in codes, (
         f"смена имени профиля — не смена источника; коды: {codes}"
     )
+
+
+def test_sanitize_does_not_apply_the_probed_profile_to_the_process(tmp_path):
+    """Санация СПРАШИВАЕТ, собирается ли сессионный профиль, и ответ выбрасывает
+    (`load_config_ex` без присваивания) — это проба, а не применение.
+
+    Сбор же не безобиден: `configure_for_model_tags` перепривязывает конвейер
+    проекций всему процессу. Профиль применяет `_profile_remerge` — он и обязан
+    нести побочки; проба, идущая другим поводом (attach треда, перечитка), не
+    должна двигать рантайм ни в какую сторону."""
+    import message_projection
+
+    app = _app_with_base(tmp_path)
+    _write_yaml(tmp_path / "profiles" / "work.yml",
+                {"strip_tags_projection": {"tags": ["scratchpad"]}})
+    app.set_session_override("profile", "work")
+    before = message_projection._DEFAULT_FOR_MODEL
+
+    app.sanitize_session_profile()
+
+    assert "profile" in app._session_overrides   # профиль здоров — санация не сняла
+    assert message_projection._DEFAULT_FOR_MODEL is before

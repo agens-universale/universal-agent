@@ -304,3 +304,49 @@ def test_a_shadowed_alias_survives_its_own_removal_and_breaks_nothing(stack):
 
     assert rw.references_broken_by_removal(target, "gc", stack_base=base) == []
     rw.remove_model(target, "gc", force=True, is_profile=True, stack_base=base)
+
+
+# --- Негодная секция в ЧУЖОМ файле стека: пропуск, а не крэш ---
+
+# Зеркало `test_a_section_shaped_as_a_list_is_refused_not_crashed`: там правило
+# объявлено для файла, в который пишем (`_document` сторожит форму секций), здесь —
+# для остальных файлов стека, куда то же правило не дошло. Отказ тут был бы неверен:
+# чужой файл мы не правим, и запрещать правку своего из-за соседской опечатки — то
+# же самое, что блокировать правку профиля, которого никто не грузит. Негодная
+# секция просто не содержит ссылок.
+
+
+@pytest.mark.parametrize("section", ["slots", "assign"])
+def test_a_broken_section_in_another_stack_file_yields_no_references(stack, section):
+    """`slots: [x]` в профиле роняло `references_broken_by_removal` `AttributeError`
+    мимо `(RegistryWriteError, OSError)`, который ловит секция, — то есть Del на
+    строке модели убивал приложение. Достижимо и без чужих правок: указатель
+    профиля берётся из БАЗЫ, так что сюда попадает и файл, который старт не
+    грузил и схемой не проверял."""
+    base, profiles = stack
+    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text(f"{section}: [x]\n", encoding="utf-8")
+
+    assert rw.references_broken_by_removal(base, "gc") == []
+
+
+def test_broken_nested_subagents_in_another_stack_file_yield_no_references(stack):
+    """Третья форма того же: `assign.subagents` не словарь — `.items()` на списке."""
+    base, profiles = stack
+    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text("assign:\n  subagents: [x]\n", encoding="utf-8")
+
+    assert rw.references_broken_by_removal(base, "gc") == []
+
+
+def test_a_broken_section_does_not_hide_the_sound_one_beside_it(stack):
+    """Пропускается негодная СЕКЦИЯ, а не весь файл: иначе одна опечатка в slots
+    прятала бы живую ссылку из assign — и удаление уходило бы с зелёным «✓»,
+    оставив привязку висеть."""
+    base, profiles = stack
+    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text(
+        'slots: [x]\nassign:\n  summarizer: "gc"\n', encoding="utf-8")
+
+    assert rw.references_broken_by_removal(base, "gc") == [
+        ("work.yml", "assign.summarizer")]

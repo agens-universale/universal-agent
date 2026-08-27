@@ -1048,3 +1048,60 @@ async def test_saving_an_own_entry_reports_a_saved_entry(tmp_path, monkeypatch):
         await pilot.pause()
         await _fill_entry(pilot, scr, "glm", "zhipu/glm-4")
         assert "Запись «glm» сохранена" in _flash(scr)
+
+
+# --- Витрина чужого профиля не применяет его к процессу ---
+
+# База — `_BASE_ONE_MODEL`: на `_base_config_text` стек чужого профиля не собрать
+# (`flash` со своим адресом без токена — правило пары), сбор падает раньше побочек,
+# и дефект тестом было бы не видно.
+
+
+async def test_opening_a_profile_does_not_rebind_the_projection_pipeline(
+        tmp_path, monkeypatch):
+    """Открытый профиль показывают, а не активируют: собрать его стек нужно, но
+    рантайм процесса обязан остаться прежним.
+
+    `_open_profile_config` зовёт `load_config_ex`, а тот не свободен от побочек —
+    `configure_for_model_tags` перепривязывает МОДУЛЬНЫЙ конвейер проекций всему
+    процессу, и никто его не возвращает. То есть достаточно заглянуть в чужой
+    профиль со своими `strip_tags_projection.tags`, чтобы работающий агент начал
+    резать другой набор тегов в исходящих сообщениях — до следующего
+    `reload_config`. И это не разовый эффект: `_mount_open_profile` зовёт сбор на
+    каждом ре-рендере подвида."""
+    import message_projection
+
+    before = message_projection._DEFAULT_FOR_MODEL
+    profile = 'strip_tags_projection:\n  tags: ["scratchpad"]\n'
+    async with _profile_view(tmp_path, monkeypatch, profile=profile,
+                             base=_BASE_ONE_MODEL) as (_p, scr, _ed):
+        scr._open_profile_config("work")
+        assert message_projection._DEFAULT_FOR_MODEL is before
+
+
+async def test_opening_a_profile_does_not_silence_tls_warnings_process_wide(
+        tmp_path, monkeypatch):
+    """Вторая побочка того же вызова: профиль с `use_ssl: false` глушил
+    `InsecureRequestWarning` ВСЕМУ процессу — включая соединения активного
+    профиля, который проверку сертификата не отключал.
+
+    Шпион ставится на имя `urllib3` В МОДУЛЕ `config`, а не на сам пакет: пакет
+    зовут и сторонние библиотеки (courlan, htmldate — прямо на импорте), и по
+    общему счётчику свой вызов от чужого не отличить."""
+    import config as config_mod
+
+    calls = []
+
+    class _Urllib3Spy:
+        exceptions = config_mod.urllib3.exceptions
+
+        @staticmethod
+        def disable_warnings(*args, **kwargs):
+            calls.append(args)
+
+    monkeypatch.setattr(config_mod, "urllib3", _Urllib3Spy)
+    profile = 'backend:\n  use_ssl: false\n'
+    async with _profile_view(tmp_path, monkeypatch, profile=profile,
+                             base=_BASE_ONE_MODEL) as (_p, scr, _ed):
+        scr._open_profile_config("work")
+        assert calls == []

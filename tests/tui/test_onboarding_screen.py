@@ -2766,3 +2766,41 @@ async def test_review_levels_step_shows_the_levels_already_assigned(tmp_path):
         # незаданный уровень работает моделью default, но назначенным от этого не стал
         max_row = [r for r in rows if "max" in r]
         assert max_row and "не задана" in max_row[0], max_row
+
+
+@pytest.mark.asyncio
+async def test_commit_does_not_claim_an_untouched_config_after_the_registry_landed(
+        tmp_path, monkeypatch):
+    """Записей две, и реестр идёт первым (политика в `onboarding.write_wizard_values`).
+    Отказ ВТОРОЙ оставляет записи моделей на диске — «конфиг не записан» тогда
+    отправляет человека искать нетронутый файл, где уже лежит новый реестр.
+
+    Ветка `missing` рядом это правило учитывает, ветка отказа — нет. Отказ
+    инъецируется у самой плоской записи, чтобы политика отработала настоящая."""
+    pytest.importorskip("textual")
+    import onboarding_config_writer
+    from textual.widgets import Static
+    from tui.app import TuiApp
+
+    cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions",
+                               auth="Bearer t", model="m")
+    monkeypatch.setattr(onboarding_config_writer, "write_values",
+                        lambda *a, **kw: (_ for _ in ()).throw(ValueError("схема не валидна")))
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path),
+                      config=_resolved_conn_cfg(cfg_path))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._values["model"] = "qwen/qwen3-coder"     # запись реестра — первая транзакция
+
+        assert scr._commit_config() is False
+
+        import yaml
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        assert raw["models"] == {"qwen3-coder": {"model": "qwen/qwen3-coder"}}
+        body = str(scr.query_one("#onb-body", Static).render())
+        assert "схема не валидна" in body
+        assert "конфиг не записан" not in body
+        assert "модел" in body

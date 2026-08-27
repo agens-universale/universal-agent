@@ -617,7 +617,12 @@ class TuiApp(App):
             return
         from config import load_config_ex
         try:
-            load_config_ex(self._config_path, profile_override=name)
+            # Проба, а не применение: ответ выбрасывается, спрашивается лишь
+            # «собирается ли». Побочки сбора (конвейер проекций, предупреждения
+            # TLS) глобальны — их несёт `_profile_remerge`, который профиль
+            # действительно применяет.
+            load_config_ex(self._config_path, profile_override=name,
+                           apply_to_process=False)
         except Exception:
             acting = base_name or "без профиля"
             self._session_overrides.pop("profile", None)

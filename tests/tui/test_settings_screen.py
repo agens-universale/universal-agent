@@ -2949,7 +2949,7 @@ async def test_modes_row_shows_session_override_note(tmp_path):
     показывают ГЛОБАЛ (секция правит его), не эффективное. Терминал шире (200
     колонок) — общие колонки секции выросли (глиф дерева + возможная 4-я позиция
     трека /rigor), хвост оверрайда проверяется независимо от ширины."""
-    from tui.toggles import group_toggle_names
+    from tui.toggles import modes_section_names
     app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
     async with app.run_test(size=(200, 24)) as pilot:
         scr = await _open_modes_section(pilot)
@@ -2961,7 +2961,7 @@ async def test_modes_row_shows_session_override_note(tmp_path):
         await pilot.pause(0.1)
 
         rows = [str(w.render()) for w in scr.query(".set-row")]
-        assert len(rows) == len(group_toggle_names("rigor"))   # пометка не добавляет строк
+        assert len(rows) == len(modes_section_names())   # пометка не добавляет строк
 
         gate_row = next(r for r in rows if "самопроверка" in r)
         answers_row = next(r for r in rows if "формат ответа" in r)
@@ -3854,3 +3854,275 @@ async def test_the_models_section_names_the_level_that_is_really_acting(tmp_path
         open_settings_section(scr, "Модели")
         await pilot.pause()
         assert scr._models_editor()._active_level == "max"
+
+
+# --- level переехал из «Профилей» в «Режимы работы» отдельным блоком ---
+
+
+def modes_row_index(name: str) -> int:
+    """Позиция строки тоггла в секции «Режимы работы» — состав спрашивается там же,
+    где его строит экран."""
+    from tui.toggles import modes_section_names
+    return modes_section_names().index(name)
+
+
+def test_modes_section_ends_with_the_level_row():
+    """`level` правит ГЛОБАЛЬНЫЙ `level:` конфига, к профилям он отношения не
+    имеет — его дом здесь, рядом с равными себе ручками «как работаем».
+
+    Снизу, под чертой (решение владельца): сначала «как работаем», потом «чем».
+    Состав секции спрашивается у одной функции — секция больше не равна группе
+    `"rigor"`, и знание о её композиции не размазано по шести местам."""
+    from tui.toggles import modes_section_names
+
+    names = modes_section_names()
+    assert names[-1] == "level"
+    assert names[:-1] == ["rigor", "gate", "answers"]
+
+
+async def test_level_row_stands_behind_a_separator(tmp_path):
+    """Отдельный блок = черта на смене группы. Правило родовое: разделитель
+    ставится перед новым preset-родителем ИЛИ на смене `group` — старый
+    2-group страж (обе группы preset, одна `group`) от этого не страдает."""
+    pytest.importorskip("textual")
+
+    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+
+        seps = list(scr.query(".set-group-sep"))
+        rows = list(scr.query(".set-row"))
+        assert len(seps) == 1
+        assert len(rows) == 4
+        assert rows[2].region.y < seps[0].region.y < rows[3].region.y
+
+
+async def test_level_row_keeps_its_default_wording(tmp_path):
+    """Голова строки — `level · уровень модели по умолчанию`. «По умолчанию»
+    отличает файловое значение от сессионного `/level`, и в Настройках оно
+    уместно ровно потому, что здесь правится файл. В палитре тот же тоггл
+    крутит сессию — там это слово соврало бы, поэтому `spec.label` не трогаем:
+    у секции своя подпись."""
+    pytest.importorskip("textual")
+
+    app, _ = _app_with_config(tmp_path, 'level: "max"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+
+        text = scr._mode_row_text("level", selected=False).plain
+        assert "level · уровень модели по умолчанию" in text
+        assert text.rstrip().endswith("max")
+
+
+async def test_modes_hint_uses_the_dynamic_provider(tmp_path, monkeypatch):
+    """Подсказка строки берёт динамический `hint_provider`, если тоггл его
+    объявил. У `level` значения статических подсказок не несут вовсе — их роль
+    играет модель, резолвнутая роутером для этого уровня, — и без провайдера
+    строка уровня осталась бы с пустой подсказкой (тот же приём, которым
+    динамический хинт получает палитра: `dynamic_toggle_hint`)."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    app, _ = _app_with_config(
+        tmp_path,
+        'level: "default"\n'
+        'models:\n  flash:\n    model: "google/gemini-2.5-flash"\n'
+        'slots:\n  default: "flash"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+
+        hint = scr._modes_hint_text()
+
+        assert "flash" in hint            # модель за уровнем, а не пустота
+        assert "основная рабочая" in hint  # роль уровня — канон копирайта
+
+
+async def test_level_row_track_is_lit_in_the_colour_of_the_level(tmp_path, monkeypatch):
+    """Страж переноса: горящая позиция трека окрашена по ТЕКУЩЕМУ уровню — тем же
+    языком, что точка-индикатор футера. Свойство обеспечено общим `padded_track`,
+    но именно ради него строка и переезжала целиком, а не по кусочкам."""
+    pytest.importorskip("textual")
+    from tui.toggles import TOGGLES
+
+    monkeypatch.chdir(tmp_path)
+    app, _ = _app_with_config(tmp_path, 'level: "max"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+
+        text = scr._mode_row_text("level", selected=False)
+        max_colour = next(v.color for v in TOGGLES["level"].values if v.value == "max")
+        assert any(max_colour.lower() in str(s.style).lower() for s in text.spans)
+
+
+# --- Правило записи секции: куда пишем и что действует ---
+
+
+async def test_modes_write_goes_to_the_project_config_that_already_sets_the_key(
+        tmp_path, monkeypatch):
+    """Проектный `.gc/config.yml` уже задаёт этот ключ — пишем ТУДА.
+
+    То же правило, что у `level` и указателя профиля: запись в базовый была бы
+    молчаливым no-op, проектный слой всё равно перекроет. Предикат — по ПОЛНОМУ
+    пути ключа: `deep_merge` рекурсивен, и наличие одного лишь `tui:` в проекте
+    не перекрывает ничего."""
+    pytest.importorskip("textual")
+    import yaml
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    project_config = project_dir / ".gc"
+    project_config.mkdir()
+    project_config = project_config / "config.yml"
+    project_config.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
+
+    app, base_cfg = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "off"\n  text_answer_mode: "allow"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("gate")
+
+        scr._modes_apply(1)
+
+        assert yaml.safe_load(project_config.read_text(encoding="utf-8"))["tui"][
+            "finish_gate_mode"] != "on"
+        assert yaml.safe_load(base_cfg.read_text(encoding="utf-8"))["tui"][
+            "finish_gate_mode"] == "off"          # базовый не тронут
+
+
+async def test_modes_write_goes_to_the_base_config_when_the_project_is_silent(
+        tmp_path, monkeypatch):
+    """Проектный конфиг есть, но про ЭТОТ ключ молчит — пишем в базовый.
+
+    Правило именно «где ключ уже задан», а не «есть ли проектный файл»: он
+    приезжает с клоном репозитория, и класть туда личную настройку значило бы
+    править файл проекта за спиной команды."""
+    pytest.importorskip("textual")
+    import yaml
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    gc_dir = project_dir / ".gc"
+    gc_dir.mkdir()
+    project_config = gc_dir / "config.yml"
+    project_config.write_text('profile: ""\n', encoding="utf-8")
+
+    app, base_cfg = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "off"\n  text_answer_mode: "allow"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("gate")
+
+        scr._modes_apply(1)
+
+        assert yaml.safe_load(base_cfg.read_text(encoding="utf-8"))["tui"][
+            "finish_gate_mode"] != "off"
+        assert "tui" not in yaml.safe_load(project_config.read_text(encoding="utf-8"))
+
+
+async def test_modes_write_says_what_actually_acts_when_a_layer_wins(tmp_path, monkeypatch):
+    """Выбор файла не покрывает случай, когда ключ перекрыт ФАЙЛОМ ПРОФИЛЯ: в
+    профиль секция не пишет вовсе. Значит после записи надо сверить действующее
+    значение и сказать правду — иначе трек показывает выбранное, а работает
+    другое (правило `level` до переезда, теперь общее для секции)."""
+    pytest.importorskip("textual")
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    # Профиль держит "on", а цикл от "off" даёт "smart" — значения РАЗВЕДЕНЫ:
+    # совпади они, тест зеленел бы и без всякой сверки.
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
+
+    app, _ = _app_with_config(
+        tmp_path,
+        'profile: "work"\ntui:\n  finish_gate_mode: "off"\n  text_answer_mode: "allow"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("gate")
+
+        scr._modes_apply(1)
+        await pilot.pause()          # нотис монтируется тактом позже
+
+        notices = [str(w.render()) for w in scr.query("#set-notice")]
+        # Слой НАЗЫВАЕТСЯ поимённо, а не гадается перечислением: «проектный конфиг
+        # или профиль» врало бы в первой половине — проектный, задающий ключ,
+        # перехватывает саму запись (правило выбора файла) и перекрыть её не может.
+        assert any("действует" in n and "on" in n and "профилем work" in n
+                   for n in notices), notices
+
+
+async def test_modes_write_creates_a_missing_top_level_anchor(tmp_path, monkeypatch):
+    """Конфиг без строки `level:` (создан до появления ключа) не запирает
+    переключение: якорь дописывается из пакетного шаблона.
+
+    Правило родовое, не про `level`: топ-уровневый скаляр `write_values` сам
+    дописать не умеет — его фоллбэк на шаблон работает только для dotted-ключей.
+    Переехало сюда вместе со строкой уровня."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    app, base_cfg = _app_with_config(
+        tmp_path,
+        'backend:\n  completions_url: "http://host/v1/chat/completions"\n'
+        'agent:\n  model: "test-model"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+
+        scr._modes_apply(1)
+        await pilot.pause()
+
+        assert 'level: "max"' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_modes_write_flashes_the_file_it_wrote_to(tmp_path, monkeypatch):
+    """Плашка называет ФАЙЛ: теперь запись уходит не всегда в один и тот же
+    конфиг (проектный перехватывает ключ, который сам задаёт), и «сохранено» без
+    имени файла оставляло бы человека гадать, где искать результат."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    app, base_cfg = _app_with_config(
+        tmp_path, 'level: "default"\ntui:\n  finish_gate_mode: "off"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+
+        scr._modes_apply(1)
+        await pilot.pause()
+
+        flashes = [str(w.render()) for w in scr.query("#set-flash")]
+        assert any(str(base_cfg) in f for f in flashes), flashes
+
+
+async def test_modes_flash_names_the_file_absolutely(tmp_path, monkeypatch):
+    """Путь во флеше — абсолютный, каким бы ни был `--config`.
+
+    Живой смоук показал разнобой: проектная цель резолвится в полный путь, а
+    базовая печаталась ровно так, как её передали относительным `--config`, — и
+    две соседние плашки одной секции называли файл по-разному. Отвечают они на
+    один вопрос «куда легло», значит и отвечать обязаны одинаково."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    app, base_cfg = _app_with_config(tmp_path, 'level: "default"\n')
+    app._config_path = "./config.yml"          # так его передаёт относительный --config
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=app._config, config_path="./config.yml",
+                         on_apply=app.reload_config)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Режимы работы")
+        await pilot.pause(0.1)
+        scr._modes_idx = modes_row_index("level")
+
+        scr._modes_apply(1)
+        await pilot.pause()
+
+        flashes = [str(w.render()) for w in scr.query("#set-flash")]
+        assert any(str(base_cfg.resolve()) in f for f in flashes), flashes

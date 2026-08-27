@@ -299,8 +299,6 @@ _FOOTER_PROFILES_ADD = ("↑/↓ — выбор  ·  Enter — создать  �
 # «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Space —
 # активировать» там, где ←/→/Enter на самом деле переключают уровень — ложь того
 # же рода, что нашёл финальный обзор 2026-08-06, D.
-_FOOTER_PROFILES_LEVEL = ("↑/↓ — выбор  ·  ←/→/Enter — переключить  ·  n — создать  ·  "
-                          "PgUp/PgDn — секции  ·  Esc — меню")
 # Инлайн-ввод имени профиля забирает клавиши себе (контракт п.5 волны B) — футер
 # на это время про него, и глагол называет ровно то, что произойдёт.
 _FOOTER_PROFILE_NAME_CREATE = "Enter — создать  ·  Esc — отмена"
@@ -528,8 +526,6 @@ class SettingsScreen(Screen):
                 return (_FOOTER_PROFILE_NAME_RENAME
                         if self._profiles_name_prompt["mode"] == "rename"
                         else _FOOTER_PROFILE_NAME_CREATE)
-            if self._profiles_on_level_row():
-                return _FOOTER_PROFILES_LEVEL
             if self._profiles_on_none_row():
                 return (_FOOTER_PROFILES_NONE if (self._config.get("profile") or None)
                         else _FOOTER_PROFILES_NONE_EMPTY)
@@ -784,14 +780,14 @@ class SettingsScreen(Screen):
                 val = "выключен"
             v.append(val, style=DIM)
         elif i == _MODES:
-            from tui.toggles import TOGGLES, toggle_state_base
+            from tui.toggles import TOGGLES, modes_section_names, toggle_state_base
             # Превью меню — детальные пары (preset-тоггл rigor показывается витриной
-            # в самой секции, не дублируется в одну строку меню). Скоуп — только
-            # "rigor"-семья: тогглы «чем работаем» (/level, /profiles) живут в
-            # своей секции «Профили», не здесь.
-            pairs = [f"{spec.label}: {toggle_state_base(self.app, name)}"
-                     for name, spec in TOGGLES.items()
-                     if spec.group == "rigor" and not spec.preset_keys]
+            # в самой секции, не дублируется в одну строку меню). Скоуп — СОСТАВ
+            # секции: превью обязано перечислять то же, что человек увидит внутри,
+            # и спрашивает его там же, где рендер (`modes_section_names`).
+            pairs = [f"{TOGGLES[name].label}: {toggle_state_base(self.app, name)}"
+                     for name in modes_section_names()
+                     if not TOGGLES[name].preset_keys]
             v.append(fit_mode_pairs(pairs, self._modes_preview_width()), style=DIM)
         else:
             v.append(self._version_text().split("·", 1)[-1].strip(), style=DIM)
@@ -2955,6 +2951,21 @@ class SettingsScreen(Screen):
         return any(spec.dotted in pspec.preset_keys
                    for pspec in TOGGLES.values() if pspec.preset_keys)
 
+    def _modes_head(self, name: str) -> str:
+        """Голова строки секции — `имя команды · подпись`, одинаково для ВСЕХ строк.
+
+        Прежде голое `spec.label` полагалось «прочим» (не пресет и не чей-то
+        ребёнок), но таких в секции не было ни одного, а первый же — `level` —
+        показал, что правило неверное: соседи все с именем команды впереди, и
+        строка без него выпадала бы из ряда.
+
+        Подпись берётся из `settings_label`, если тоггл её объявил: секция правит
+        ФАЙЛ, палитра тем же тогглом крутит сессию, и «по умолчанию» верно только
+        здесь."""
+        from tui.toggles import TOGGLES
+        spec = TOGGLES[name]
+        return f"{name} · {spec.settings_label or spec.label}"
+
     def _modes_columns(self) -> tuple[int, int, int, int]:
         """(label_w, base_w, extra_w, value_w) — общие колонки строк секции
         (выравнивание ревизия 5, спека §4.2/§6: тот же контракт и тот же
@@ -2976,15 +2987,9 @@ class SettingsScreen(Screen):
         сужает колонку ни для одной строки, только потенциально резервирует
         на символ-два больше, чем строго необходимо, зато без разбора
         preset/не-preset)."""
-        from tui.toggles import PRESET_CUSTOM, TOGGLES, group_toggle_names
-        names = group_toggle_names("rigor")
-        widths = []
-        for name in names:
-            spec = TOGGLES[name]
-            if spec.preset_keys or self._modes_is_child(name):
-                widths.append(len(f"{name} · {spec.label}"))
-            else:
-                widths.append(len(spec.label))
+        from tui.toggles import PRESET_CUSTOM, TOGGLES, modes_section_names
+        names = modes_section_names()
+        widths = [len(self._modes_head(name)) for name in names]
         label_w = max(widths) + 3 + 2
         base_w = 0
         extra_w = 0
@@ -3018,17 +3023,8 @@ class SettingsScreen(Screen):
         current = toggle_state_base(self.app, name)   # секция правит глобал → трек = глобал
         label_w, base_w, extra_w, value_w = self._modes_columns()
         is_child = self._modes_is_child(name)
-        if spec.preset_keys:
-            head = f"{name} · {spec.label}"
-            extra = True if current == PRESET_CUSTOM else False
-        elif is_child:
-            # Голова ребёнка несёт СВОЁ имя команды по образцу родителя
-            # («gate · <label>»), не голый label.
-            head = f"{name} · {spec.label}"
-            extra = None
-        else:
-            head = spec.label
-            extra = None
+        head = self._modes_head(name)
+        extra = (True if current == PRESET_CUSTOM else False) if spec.preset_keys else None
         track = padded_track(spec, current, extra_lit=extra, base_w=base_w, extra_w=extra_w)
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)   # курсор — конвенция меню/«Обновления»
@@ -3070,8 +3066,8 @@ class SettingsScreen(Screen):
         return t
 
     def _mount_modes_section(self, frame: Vertical) -> None:
-        from tui.toggles import TOGGLES, group_toggle_names
-        names = group_toggle_names("rigor")
+        from tui.toggles import TOGGLES, modes_section_names
+        names = modes_section_names()
         self._modes_idx = min(self._modes_idx, len(names) - 1)
         for i, name in enumerate(names):
             selected = i == self._modes_idx
@@ -3079,8 +3075,14 @@ class SettingsScreen(Screen):
             # `preset_keys`, ОБЩИЙ приём с палитрой
             # (`command_palette.py::_group_sep_count`/`_build_footer`) — черта
             # перед КАЖДЫМ preset-родителем, который не первая строка секции.
-            # Сегодня в TOGGLES одна preset-группа (`rigor`) → не рисуется.
-            if i > 0 and TOGGLES[name].preset_keys:
+            # Сегодня в TOGGLES одна preset-группа (`rigor`) → по этому признаку
+            # не рисуется. Второй признак — СМЕНА `group`: секция собрана из
+            # нескольких групп (`MODES_SECTION_GROUPS`), и `level` стоит своим
+            # блоком под чертой. Признака два, потому что вопросы разные: один
+            # отделяет пульт пресета, другой — блок секции; ни один не выражается
+            # через другой.
+            if i > 0 and (TOGGLES[name].preset_keys
+                          or TOGGLES[name].group != TOGGLES[names[i - 1]].group):
                 frame.mount(Rule(classes="set-group-sep"))
             # Без set-spaced: плотность B — тогглы группы впритык (общий пульт),
             # воздух даёт разделитель групп (margin-top .set-group-sep).
@@ -3107,14 +3109,20 @@ class SettingsScreen(Screen):
         динамический custom-хинт (спека §5)."""
         from tui.toggles import (
             _fit_value_hint, TOGGLES, toggle_state_base, preset_custom_hint, PRESET_CUSTOM,
-            group_toggle_names,
+            dynamic_toggle_hint, modes_section_names,
         )
-        names = group_toggle_names("rigor")
+        names = modes_section_names()
         if not names:
             return ""
         name = names[self._modes_idx]
         spec = TOGGLES[name]
         current = toggle_state_base(self.app, name)
+        # Динамический хинт вперёд статического — тот же порядок, что у палитры
+        # (`CommandPalette(toggle_dynamic_hint=...)`): у `level` статических
+        # подсказок нет вовсе, их роль играет модель, резолвнутая для уровня.
+        if spec.hint_provider is not None:
+            return _fit_value_hint(current, dynamic_toggle_hint(self.app, name, current),
+                                   self._modes_hint_width())
         if current in spec.names:
             val = spec.values[spec.names.index(current)]
             return _fit_value_hint(val.value, val.hint, self._modes_hint_width())
@@ -3145,11 +3153,58 @@ class SettingsScreen(Screen):
         идут последними)."""
         if self._view != _MODES:
             return
-        from tui.toggles import group_toggle_names
-        names = group_toggle_names("rigor")
+        from tui.toggles import modes_section_names
+        names = modes_section_names()
         widgets = list(self.query(".set-row"))
         for i, row in enumerate(widgets[-len(names):]):
             row.update(self._mode_row_text(names[i], i == self._modes_idx))
+
+    def _overriding_layer_name(self, values: dict) -> str:
+        """Как назвать слой, перекрывший записанное значение.
+
+        Перечислением («проектный конфиг или профиль») эту фразу писать нельзя: она
+        врёт в первой половине. Проектный конфиг, который задаёт ключ, перехватывает
+        саму ЗАПИСЬ (`_keys_write_target`) и перекрыть её уже не может; остаются
+        файл профиля, куда секция не пишет вовсе, и machine-managed оверлей
+        `~/.gc/config.local.yml`, который правит `gc-mcp`, а не человек.
+
+        Слой называется поимённо тем же `config_origin`, которым секция объясняет
+        перекрытие полей визарда и адреса голоса, — второго механизма для того же
+        вопроса не заводим. Не смогли определить — говорим общо: сам факт «действует
+        другое» важнее имени файла и уже сказан."""
+        general = "слоем выше"
+        if not self._config_path:
+            return general
+        try:
+            from config_origin import origins, overlay_label
+            found = origins(self._config_path, list(values))
+        except Exception:
+            return general              # диагностика не обязана ронять запись
+        for origin in found.values():
+            if origin.is_overridden:
+                return overlay_label(origin)
+        return general
+
+    def _keys_write_target(self, values: dict):
+        """Куда пишется набор ключей секции: файл, который их УЖЕ задаёт (проектный
+        `.gc/config.yml`), иначе базовый конфиг запуска.
+
+        Правило именно «где ключ задан», а не «есть ли проектный файл»: он
+        приезжает с клоном репозитория, и класть туда личную настройку значило бы
+        править файл проекта за спиной команды. А писать в базовый ключ, который
+        проект перекрывает, — молчаливый no-op: ручка на глазах «не срабатывает».
+
+        Пара пресета (`/rigor` пишет оба своих ключа) уходит ЦЕЛИКОМ туда, где
+        задан хотя бы один из них: пресет ставит значения согласованно, и разнести
+        их по разным файлам значило бы собрать состояние, которого не выбирали.
+
+        Путь — АБСОЛЮТНЫЙ: он идёт в плашку результата, а проектная цель резолвится
+        сама, тогда как базовая приходит ровно такой, какой её передали в `--config`.
+        Две соседние плашки одной секции отвечают на один вопрос «куда легло» —
+        значит и называть файл обязаны одинаково (живой смоук владельца)."""
+        if any(self._project_config_sets(key) for key in values):
+            return self._project_config_candidate_path()
+        return self._profiles_base_path().resolve()
 
     def _modes_apply(self, direction: int) -> None:
         """←/→/Enter на строке тоггла (канон §1/§3): мгновенно записать
@@ -3160,8 +3215,8 @@ class SettingsScreen(Screen):
         переопределения НЕ трогаем — их перекрытие показывает пометка §6.2."""
         import onboarding_config_writer as w
         from config import _default_config_path, validate_config_text
-        from tui.toggles import cycle_value, TOGGLES, toggle_state_base, PRESETS, group_toggle_names
-        names = group_toggle_names("rigor")
+        from tui.toggles import cycle_value, TOGGLES, toggle_state_base, PRESETS, modes_section_names
+        names = modes_section_names()
         name = names[self._modes_idx]
         spec = TOGGLES[name]
         current = toggle_state_base(self.app, name)
@@ -3171,9 +3226,20 @@ class SettingsScreen(Screen):
                          "пакетный шаблон (настройте GC_HOME или запустите gc-ua --init-config)")
             return
         values = PRESETS[new_value] if spec.preset_keys else {spec.dotted: new_value}
+        target = self._keys_write_target(values)
+        if not self._target_writable(target):
+            self._notice(self._TEMPLATE_WRITE_REFUSAL)
+            return
         try:
+            for key in values:
+                if "." not in key:
+                    # Топ-уровневый скаляр (`level:`) `write_values` сам дописать не
+                    # умеет — его фоллбэк на шаблон работает только для dotted-ключей,
+                    # а конфиг, созданный до появления ключа, этой строки не содержит.
+                    w.ensure_pointer_anchor(
+                        target, template_path=_default_config_path(), key=key)
             missing = w.write_values(
-                self._config_path, values,
+                target, values,
                 template_path=_default_config_path(),
                 validate=validate_config_text,
             )
@@ -3195,6 +3261,19 @@ class SettingsScreen(Screen):
             self._notice(f"сохранено, но конфиг не перечитан: {exc}")
             return
         self._render_view()
+        # Записанное значение может быть перекрыто слоем выше (файл профиля —
+        # туда секция не пишет вовсе, и выбором целевого файла случай не
+        # закрывается). Честнее сказать, что действует, чем оставить трек стоять
+        # на выбранном значении, которого нет.
+        effective = toggle_state_base(self.app, name)
+        if effective != new_value:
+            self._notice(f"записано в {target}, но действует «{effective}» — "
+                         f"значение перекрыто {self._overriding_layer_name(values)}")
+            return
+        # Плашка называет ФАЙЛ: запись уходит не всегда в один и тот же конфиг
+        # (проектный перехватывает ключ, который сам задаёт), и «сохранено» без
+        # имени оставляло бы человека гадать, где искать результат.
+        self._flash(f"«{self._modes_head(name)}» — {new_value}, записано в {target}")
 
     # --- секция «Профили» (витрина обоих корней + единое правило записи) ---
     def _profiles_base_path(self):
@@ -3225,17 +3304,9 @@ class SettingsScreen(Screen):
             rows.insert(0, {"kind": "none"})
         # «+ добавить профиль» — последней строкой списка (перенос паттерна
         # «Моделей», ревизия владельца): Enter = клавиша n. Есть и в пустом
-        # состоянии — там это единственная строка-действие над строкой уровня.
+        # состоянии — там это единственная строка-действие.
         rows.append({"kind": "add"})
-        rows.append({"kind": "level"})
         return rows
-
-    def _profiles_on_level_row(self) -> bool:
-        """Курсор секции «Профили» — на строке уровня (последняя, всегда есть):
-        футер тогда обещает ←/→/Enter вместо Enter-активации (позиционный
-        футер, тот же приём, что у `_CONNECTION`)."""
-        rows = self._profiles_rows()
-        return bool(rows) and self._profiles_idx == len(rows) - 1
 
     def _profiles_on_add_row(self) -> bool:
         """Курсор — на строке «+ добавить профиль…» (предпоследняя): у неё свой
@@ -3287,11 +3358,22 @@ class SettingsScreen(Screen):
         return cache["project_doc"]
 
     def _project_config_sets(self, key: str) -> bool:
-        """Проектный `.gc/config.yml` уже несёт топ-уровневый ключ `key` (любое
-        значение, даже пустую строку — deep-merge отдаёт победу оверлею по факту
-        наличия ключа, не по его «истинности») — тогда запись ЭТОГО ключа в базовый
-        конфиг была бы молчаливым no-op: проектный слой всё равно перекроет её."""
-        return key in self._project_config_doc()
+        """Проектный `.gc/config.yml` уже несёт ключ `key` (любое значение, даже
+        пустую строку — deep-merge отдаёт победу оверлею по факту наличия ключа, не
+        по его «истинности») — тогда запись ЭТОГО ключа в базовый конфиг была бы
+        молчаливым no-op: проектный слой всё равно перекроет её.
+
+        Ключ — ПОЛНЫЙ путь (`tui.finish_gate_mode`), не только топ-уровневый:
+        `deep_merge` рекурсивен, и наличие одного лишь `tui:` в проекте не
+        перекрывает ничего — перекрыт ровно тот лист, который проект назвал.
+        Судить по верхнему ключу значило бы уводить в проектный файл записи,
+        которые прекрасно легли бы в базовый."""
+        node = self._project_config_doc()
+        for part in key.split("."):
+            if not isinstance(node, dict) or part not in node:
+                return False
+            node = node[part]
+        return True
 
     def _project_sets_profile_pointer(self) -> bool:
         return self._project_config_sets("profile")
@@ -3401,70 +3483,6 @@ class SettingsScreen(Screen):
             effect = "применится со следующего хода агента"
         self._render_view()
         self._flash(f"Профиль «{name}» активирован — {target}. {effect}")
-
-    def _level_write_target(self):
-        """Куда пишется `level` — то же единое правило, что у активации/деактивации
-        профиля рядом (`_deactivation_target`), но по СВОЕМУ ключу: проектный
-        `.gc/config.yml` уже несёт `level:` → пишем туда (запись в базовый была бы
-        перекрыта оверлеем проекта); иначе — базовый конфиг запуска. Указатель
-        `profile:` проекта тут ни при чём — он перекрывает выбор профиля, а не
-        уровень; прочие перекрытия (`level` внутри самого файла профиля) ловятся
-        по факту — `_level_apply` сверяет действующее значение после перечитки."""
-        if self._project_config_sets("level"):
-            return self._project_config_candidate_path()
-        return self._profiles_base_path()
-
-    def _level_apply(self, direction: int) -> None:
-        """←/→/Enter на строке уровня (канон «Режимов работы» — `_modes_apply`):
-        переключить уровень по кругу от ТЕКУЩЕГО значения (`TOGGLES["level"].values`
-        — единый источник, будущие значения подхватятся сами) и записать в файл
-        (`_level_write_target` — то же правило, что у активации профиля рядом).
-        `self._config["level"]` выставляется сразу — строка/подсказка/футер
-        отражают новое значение без ожидания реального reload."""
-        import onboarding_config_writer as w
-        from config import _default_config_path, validate_config_text
-        from tui.toggles import cycle_value
-        current = str(self._config.get("level") or "default")
-        new_value = cycle_value("level", current, direction)
-        target = self._level_write_target()
-        if not self._target_writable(target):
-            self._notice(self._TEMPLATE_WRITE_REFUSAL)
-            return
-        try:
-            # Якорь `level:` — как у указателя профиля рядом (`_write_profile_pointer`):
-            # в конфигах, созданных до появления ключа, строки нет, а сам write_values
-            # топ-уровневый скаляр не дописывает.
-            w.ensure_pointer_anchor(target, template_path=_default_config_path(), key="level")
-            missing = w.write_values(
-                target, {"level": new_value},
-                template_path=_default_config_path(),
-                validate=validate_config_text,
-            )
-            if missing:
-                raise ValueError(f"не удалось записать: {', '.join(missing)}")
-        except (ValueError, OSError) as exc:
-            self._notice(f"✗ не сохранено: {exc}")
-            return
-        self._config["level"] = new_value
-        self._raw = self._read_raw()
-        try:
-            self._on_apply()
-            fresh = getattr(self.app, "_config", None)
-            if fresh is not None:
-                self._config = fresh
-        except Exception as exc:
-            self._notice(f"записано в {target}, но конфиг не перечитан: {exc}")
-            return
-        self._render_view()
-        # Записанное значение может быть перекрыто слоем выше (проектный конфиг,
-        # файл профиля) — тогда честнее сказать, что действует, чем показывать
-        # «установлен» и рисовать строку/футер по значению, которого нет.
-        effective = str(self._config.get("level") or "default")
-        if effective != new_value:
-            self._notice(f"записано в {target}, но действует «{effective}» — "
-                         "значение перекрыто слоем выше (проектный конфиг или профиль)")
-            return
-        self._flash(f"Уровень «{new_value}» установлен — {target}")
 
     # --- CRUD файлов профилей (волна B, Task 5) ---
     def _profiles_base_root(self):
@@ -3884,45 +3902,6 @@ class SettingsScreen(Screen):
             return 0
         return max(0, widgets[-1].region.width - 2)
 
-    _LEVEL_HEAD = "level · уровень модели по умолчанию"
-
-    def _level_columns(self) -> tuple[int, int, int, int]:
-        """(label_w, base_w, extra_w, value_w) — тот же приём и те же формулы,
-        что `_modes_columns` (Task 13: канон «Режимов работы» переносится
-        строкой целиком, не по элементам — урок живого смока 2026-08-10). В
-        этой секции строка одна, но паддинг всё равно считается формулой, а
-        не подбирается на глаз."""
-        from tui.toggles import TOGGLES
-        spec = TOGGLES["level"]
-        label_w = len(self._LEVEL_HEAD) + 3 + 2
-        base_w = 2 * len(spec.values) - 1
-        extra_w = 0
-        value_w = max(len(v) for v in spec.names)
-        return label_w, base_w, extra_w, value_w
-
-    def _level_row_text(self, selected: bool) -> Text:
-        """Task 13: грамматика строки — целиком по канону `_mode_row_text`
-        (не по кусочкам, как переносили раньше): «имя ручки · описание» одним
-        выровненным блоком INK -> канонный трек (Task 12, `padded_track`,
-        tui/toggles.py) -> значение INK. «по умолчанию» в описании сохранено
-        — отличает постоянное значение (пишется в файл) от сессионного
-        `/level`. Число позиций трека — из `TOGGLES["level"].values` (единый
-        источник, будущий авто-режим сделает трек четырёхпозиционным сам);
-        цвет горящей позиции — тот же визуальный язык, что точка-индикатор
-        футера (`main.py::_footer_level_color`)."""
-        from tui.toggles import TOGGLES, padded_track
-        spec = TOGGLES["level"]
-        level = str(self._config.get("level") or "default")
-        label_w, base_w, extra_w, value_w = self._level_columns()
-        track = padded_track(spec, level, extra_lit=None, base_w=base_w, extra_w=extra_w)
-        t = Text()
-        t.append("▸ " if selected else "  ", style=ACCENT)
-        t.append(self._LEVEL_HEAD.ljust(label_w - 2), style=INK)
-        t.append_text(track)
-        t.append("  ")
-        t.append(level.ljust(value_w), style=INK)
-        return t
-
     def _profile_row_text(self, row: dict, rows: list[dict], selected: bool) -> Text:
         name, ref = row["name"], row["ref"]
         config_active = self._config.get("profile") or None
@@ -4004,15 +3983,6 @@ class SettingsScreen(Screen):
             # Полный путь — то же правило, что у «запись:» секции «Модели»: одно
             # имя не говорит, куда именно ляжет файл.
             return f"Enter — создать файл {self._profiles_base_root() / '<имя>.yml'}"
-        if row["kind"] == "level":
-            from tui.toggles import LEVEL_ROLE_TEXT
-            level = str(self._config.get("level") or "default")
-            role = LEVEL_ROLE_TEXT.get(level, "")
-            head = f"{level} — {role}" if role else level
-            target = self._level_write_target()
-            lines = [head, f"←/→/Enter — переключить (запись: {target})",
-                    "на сессию — /level"]
-            return "\n".join(lines)
         if row["kind"] == "none":
             if (self._config.get("profile") or None) is None:
                 return "профиль не выбран — действует чистый конфиг"
@@ -4057,11 +4027,9 @@ class SettingsScreen(Screen):
             # `--config`. Пример YAML снят следом: пустая секция — место для одного
             # действия, а не для справочника формата (он есть в
             # docs/configuration.md и demo_profile.yml).
-        # Цикл идёт и в пустом состоянии: там из строк-нелевелов остаётся одна
-        # «+ добавить профиль» — строка-действие под подсказкой о сути профиля.
+        # Цикл идёт и в пустом состоянии: там остаётся одна «+ добавить профиль» —
+        # строка-действие под подсказкой о сути профиля.
         for i, row in enumerate(rows):
-            if row["kind"] == "level":
-                continue
             selected = i == self._profiles_idx
             cls = "set-row set-dyn set-profiles-row" + (" selected" if selected else "")
             if row["kind"] == "none":
@@ -4078,19 +4046,6 @@ class SettingsScreen(Screen):
             # (контракт п.5): строка «+ добавить» последняя, и поле встаёт ровно
             # под ней; в пустом состоянии — под подсказкой-примером.
             self._mount_profile_name_prompt(frame)
-        if profile_rows:
-            # Черта перед строкой уровня: уровень — не «ещё один профиль»,
-            # отделяем как группы «Режимов работы».
-            frame.mount(Rule(classes="set-group-sep"))
-        level_idx = len(rows) - 1
-        selected = level_idx == self._profiles_idx
-        # Плотность B: при живом списке воздух строке уровня даёт черта над ней
-        # (margin-top .set-group-sep), свой класс не нужен. В пустом состоянии
-        # черты нет — set-spaced-gap даёт воздух сверху и снизу (не пара
-        # раздельных классов: longhand-margins в Textual перетирают друг друга).
-        spacing = "" if profile_rows else "set-spaced-gap "
-        cls = f"set-row set-dyn {spacing}set-profiles-row" + (" selected" if selected else "")
-        frame.mount(Static(self._level_row_text(selected), classes=cls))
         frame.mount(Static(self._profiles_hint_text(rows),
                            classes="set-hint set-dyn set-profiles-hint"))
         if self._profiles_delete_name is not None:
@@ -4128,9 +4083,7 @@ class SettingsScreen(Screen):
         fresh = widgets[-len(rows):]
         for i, row in enumerate(rows):
             selected = i == self._profiles_idx
-            if row["kind"] == "level":
-                fresh[i].update(self._level_row_text(selected))
-            elif row["kind"] == "none":
+            if row["kind"] == "none":
                 fresh[i].update(self._none_row_text(rows, selected))
             elif row["kind"] == "add":
                 fresh[i].update(self._add_profile_row_text(selected))
@@ -4311,14 +4264,22 @@ class SettingsScreen(Screen):
 
         Представление готовое: тем же `load_config_ex(..., profile_override=...)`
         приложение собирает базу при сессионном переключении профиля
-        (`tui/app.py::_profile_remerge`). Стек не собрался — отвечают ДОКУМЕНТЫ
+        (`tui/app.py::_profile_remerge`) — с той разницей, что там профиль
+        применяют, а здесь показывают, и побочки сбора витрине не нужны
+        (`apply_to_process=False`). Стек не собрался — отвечают ДОКУМЕНТЫ
         (`_open_profile_connection_by_documents`), и в ответе тогда одно только
         подключение: чужой runtime витрине не подходит ничем."""
         if not self._config_path or name == (self._config or {}).get("profile"):
             return None
         from config import load_config_ex
         try:
-            cfg, _meta = load_config_ex(self._config_path, profile_override=name)
+            # `apply_to_process=False` — витрина ПОКАЗЫВАЕТ чужой профиль, а не
+            # активирует его: сбор сам по себе перепривязывает конвейер проекций
+            # всему процессу и глушит предупреждения TLS, и обратно их никто не
+            # ставит. Заглянуть в соседний профиль не должно менять того, как
+            # работающий агент режет теги и проверяет сертификаты.
+            cfg, _meta = load_config_ex(self._config_path, profile_override=name,
+                                        apply_to_process=False)
         except Exception:
             return self._open_profile_connection_by_documents(name)
         return cfg
@@ -5543,8 +5504,8 @@ class SettingsScreen(Screen):
                 self._voice_enter()
                 return
         if self._view == _MODES:
-            from tui.toggles import group_toggle_names
-            rows = group_toggle_names("rigor")
+            from tui.toggles import modes_section_names
+            rows = modes_section_names()
             if event.key in ("up", "down"):
                 step = -1 if event.key == "up" else 1
                 self._modes_idx = (self._modes_idx + step) % len(rows)
@@ -5590,10 +5551,6 @@ class SettingsScreen(Screen):
                 self._render_view()
                 return
             row = self._profiles_row_under_cursor(rows)
-            if event.key in ("left", "right") and row["kind"] == "level":
-                event.stop()
-                self._level_apply(-1 if event.key == "left" else 1)
-                return
             # Две клавиши — два разных глагола (решение В1): Enter «входит внутрь»
             # объекта под курсором — тот же канон, что у меню секций и списка MCP,
             # и с приходом редактора профиля внутрь наконец есть куда войти. Смена
@@ -5603,9 +5560,7 @@ class SettingsScreen(Screen):
             # которую обещает футер.
             if event.key == "enter":
                 event.stop()
-                if row["kind"] == "level":
-                    self._level_apply(1)
-                elif row["kind"] == "profile":
+                if row["kind"] == "profile":
                     self._open_profile(row)
                 elif row["kind"] == "add":
                     self._begin_profile_name_prompt("create")

@@ -109,6 +109,10 @@ class ToggleSpec:
     palette_default: bool = True
     preset_keys: Tuple[str, ...] = ()
     group: str = "rigor"
+    # Подпись строки в Настройках, когда она обязана отличаться от `label`.
+    # Палитра и Настройки правят РАЗНОЕ: `/level` крутит сессию, секция пишет в
+    # файл — уточнение «по умолчанию» верно только во втором и соврало бы в первой.
+    settings_label: str = ""
     show_track: bool = True
     # Trackless: чем показать пустое значение (у /profiles «без профиля» —
     # осмысленное состояние, не «не задано», ревизия 2026-07-28).
@@ -323,10 +327,24 @@ def profile_picker_hint(app: Any, value: Any) -> str:
 
 
 def group_toggle_names(group: str) -> list:
-    """Имена тогглов данной группы, в порядке реестра `TOGGLES` (Settings
-    «Режимы работы» рендерит ТОЛЬКО `"rigor"` — модели живут в отдельных
-    секциях «Профили»/«Модели», не здесь, спека §12.1/§12.3b)."""
+    """Имена тогглов данной группы, в порядке реестра `TOGGLES`."""
     return [n for n, s in TOGGLES.items() if s.group == group]
+
+
+# Состав секции «Режимы работы» — упорядоченный список ГРУПП, а не одна группа.
+# Порядок блоков читается сверху вниз: сначала «как работаем» (строгость,
+# самопроверка, формат ответа), потом «чем» (уровень модели) — решение владельца.
+MODES_SECTION_GROUPS: Tuple[str, ...] = ("rigor", "level")
+
+
+def modes_section_names() -> list:
+    """Имена строк секции «Режимы работы» в порядке показа.
+
+    Секция НЕ равна одной группе: `level` правит глобальный `level:` конфига и
+    стоит здесь же, отдельным блоком под чертой (к профилям он отношения не
+    имеет — там правился чужой ключ). Знание о композиции секции живёт в одном
+    месте: и рендер, и навигация, и запись, и превью меню спрашивают отсюда."""
+    return [n for group in MODES_SECTION_GROUPS for n in group_toggle_names(group)]
 
 
 def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
@@ -349,7 +367,8 @@ TOGGLES: Dict[str, ToggleSpec] = {
         state=lambda cfg: str(cfg.get("level") or "default"),
         label="уровень модели",
         summary="от лёгкой до максимальной сложности задачи",
-        group="models",
+        group="level",
+        settings_label="уровень модели по умолчанию",
         hint_provider=level_value_hint,
         rebuild_on_apply=False,
         palette_default=True,

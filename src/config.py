@@ -460,6 +460,7 @@ def load_config_ex(
     config_path: Optional[str] = None,
     *,
     profile_override: Optional[str] = None,
+    apply_to_process: bool = True,
 ) -> tuple[Dict[str, Any], ProfileMeta]:
     """Загрузить эффективный конфиг + метаданные резолва профиля (спека §2, §3).
 
@@ -468,7 +469,14 @@ def load_config_ex(
     (либо `profile_override`) → контент профиля мержится ПОВЕРХ → compat →
     `AppConfig.model_validate` → `validate_model_sections` → resolve_paths/flatten.
     `load_config` (ниже) — тонкая обёртка для обратной совместимости.
-    """
+
+    `apply_to_process=False` — собрать конфиг, НЕ применяя его к процессу. Сбор
+    сам по себе не безобиден: он перепривязывает конвейер проекций
+    (`configure_for_model_tags`) и глушит предупреждения TLS — оба эффекта
+    глобальные и необратимые. Тому, кто конфиг ПРИМЕНЯЕТ (старт, reload, выбор
+    профиля в сессии), это и нужно; тому, кто его ПОКАЗЫВАЕТ (витрина чужого
+    профиля в Настройках), — нет: заглянуть в соседний профиль не должно менять
+    того, как работающий агент режет теги и проверяет сертификаты."""
     if config_path is None and _xdg_config_path() is None:
         _bootstrap_user_config()
     path = resolve_config_path(config_path)
@@ -520,7 +528,8 @@ def load_config_ex(
     _model_section_notices = validate_model_sections(app_cfg)
     resolve_paths(app_cfg, config_dir)
     # Bootstrap for_model strip tags after validate/normalize (no hot-path yaml reads).
-    configure_for_model_tags(app_cfg.strip_tags_projection.tags)
+    if apply_to_process:
+        configure_for_model_tags(app_cfg.strip_tags_projection.tags)
 
     config_dict = flatten_app_config(app_cfg)
     config_dict["level"] = app_cfg.level
@@ -541,7 +550,7 @@ def load_config_ex(
     sync_logging_flat_and_params(config_dict)
 
     verify = config_dict["use_ssl"]
-    if verify is False:
+    if verify is False and apply_to_process:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     meta = ProfileMeta(active_name=active_name, ref=ref, mtime_set=mtime_set, notices=notices)
@@ -552,3 +561,10 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     config_dict, _meta = load_config_ex(config_path)
     return config_dict
 
+
+if __name__ == "__main__":
+    cfg = load_config()
+    print(cfg)
+    auth = build_auth_connector(cfg)
+    if auth:
+        print(auth.get_token())

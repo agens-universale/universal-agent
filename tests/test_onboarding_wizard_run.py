@@ -200,3 +200,46 @@ def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
     output = "\n".join(printed)
     assert "конфиг не записан" in output
     assert "схема не валидна" in output
+
+
+def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
+        tmp_path, monkeypatch):
+    """Брат теста выше, второй полюс: там плоская запись — единственная, и «конфиг
+    не записан» правда; здесь ей предшествует запись реестра, которая УЖЕ на диске.
+
+    Записей две, и реестр идёт первым (политика в `onboarding.write_wizard_values`).
+    Отказ второй оставляет модели в файле — сказать «конфиг не записан» значит
+    отправить человека искать нетронутый файл, а там уже новый реестр."""
+    import config as cfg_mod
+    from bundled_assets import bundled_root
+    from config_modules import env_vars
+
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
+        "config": tmp_path / "gc", "state": tmp_path / "s",
+        "data": tmp_path / "d", "cache": tmp_path / "c",
+    })
+    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: None)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("model_picker.fetch_models", lambda *a, **k: None)
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    monkeypatch.setattr(wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file)))
+
+    def failing_write_values(*args, **kwargs):
+        raise ValueError("схема не валидна")
+
+    monkeypatch.setattr(onboarding_config_writer, "write_values", failing_write_values)
+
+    printed = []
+    it = iter(["https://x/v1/chat/completions", "1", "sk-1", "qwen/qwen3-coder"])
+    io = wz.WizardIO(reader=lambda p, s: next(it), printer=printed.append)
+    wz.run(cfg_mod.load_config(str(cfg_file)), cfg_file, review_all=False, io=io, mcp=None)
+
+    raw = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+    assert raw["models"] == {"qwen3-coder": {"model": "qwen/qwen3-coder"}}
+    output = "\n".join(printed)
+    assert "схема не валидна" in output
+    assert "конфиг не записан" not in output
+    assert "модел" in output          # сказано, что записи моделей уже в файле

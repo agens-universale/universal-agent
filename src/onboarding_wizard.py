@@ -253,6 +253,11 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) 
                 # о том, чего не хватает, а не о судьбе всего конфига.
                 io.printer("\n  [ошибка] не записаны поля: "
                            f"{', '.join(missing)} — впишите их в конфиг вручную")
+    except onboarding.PartialWriteError as exc:
+        # Записи реестра ушли первой транзакцией и уже на диске — обещать
+        # нетронутый файл нельзя (то же правило, что у ветки `missing` выше).
+        io.printer(f"\n  [ошибка] поля не записаны: {exc} — записи моделей "
+                   "при этом уже в конфиге")
     except ValueError as exc:
         io.printer(f"\n  [ошибка] конфиг не записан: {exc}")
     except (KeyboardInterrupt, EOFError):

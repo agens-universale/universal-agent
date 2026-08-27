@@ -1563,6 +1563,12 @@ class OnboardingScreen(Screen):
             values["voice.model"] = self._voice_cloud["model"]
         try:
             missing = onboarding.write_wizard_values(self._config_path, values)
+        except onboarding.PartialWriteError as exc:
+            # Записи реестра ушли первой транзакцией и уже на диске — то же
+            # правило, что у ветки `missing` ниже: нетронутый файл не обещаем.
+            self.query_one("#onb-body", Static).update(
+                f"✗ поля не записаны: {exc} — записи моделей при этом уже в конфиге")
+            return False
         except ValueError as exc:
             self.query_one("#onb-body", Static).update(f"✗ конфиг не записан: {exc}")
             return False
