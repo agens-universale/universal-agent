@@ -1,6 +1,8 @@
 """TuiApp — Textual application."""
 from __future__ import annotations
 
+import os
+import threading
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -180,6 +182,8 @@ class TuiApp(App):
         self._circuit_breaker = CircuitBreaker()
         self._onboarding_config_path = None   # куда писать конфиг (user_config_path)
         self._upgrade_info = None             # upgrade_gate.UpgradeInfo | None; ставит tui/__init__.py
+        self._voice_autostart_pending = False  # спавн voice-сервиса уже пошёл, вердикт ждём фоном; ставит tui/__init__.py
+        self._voice_autostart_failed = False  # вердикт фонового подъёма — не поднялся; ставит _on_voice_autostart_done
         self._update_available = False        # async авто-чек нашёл новую версию (brand-строка + /notices)
         self._update_check_result = None      # CheckResult сессии: питает глиф хаба и секцию «Обновление»
         self._update_checking = False         # стартовый авто-чек в полёте (глиф хаба — «…»)
@@ -206,9 +210,54 @@ class TuiApp(App):
     def on_mount(self) -> None:
         from tui.services.terminal_title import format_terminal_title, set_terminal_title
         set_terminal_title(format_terminal_title())
+        if self._voice_autostart_pending:
+            self._start_voice_autostart()
         self._start_auto_update_check()
         if not self._needs_onboarding():
             self._show_post_update_if_needed()
+
+    def _start_voice_autostart(self) -> None:
+        """Довести подъём voice-сервиса до вердикта — ФОНОМ, отдельным daemon-потоком,
+        а не через `run_worker(thread=True)`: тот идёт через дефолтный executor
+        event-loop'а, и `asyncio.run()` на выходе из `app.run()` дожидается его
+        завершения — для 90-секундного бюджета `ensure_voice_service` это заново
+        подвесило бы терминал, только уже на выход, а не на старт (тот же баг, что
+        чинили, в другом моменте). Daemon-поток (как `_preheat_bg` в
+        voice_runtime.autostart) процесс не держит.
+
+        Спавн (`start_if_needed`) делает сам `ensure_voice_service` — вот этот вызов,
+        в этом потоке; main() только считает флаг `_voice_autostart_pending` и ничего
+        не поднимает. Раньше main() ждал СИНХРОННО перед `app.run()`, и пустой терминал перед
+        первым кадром рос вместе с бюджетом (было 15 с, стало 90 — живая приёмка
+        поймала «программа зависла»). Ждать тут незачем: сервис поднимается сам, TUI
+        открывается сразу, а вердикт (и честный toast «не запустился») приходит,
+        когда будет готов — с полным бюджетом `ensure_voice_service`, без урезания:
+        иначе тост мог бы соврать «не запустился» про сервис, который просто ещё
+        поднимается."""
+        from voice_runtime.autostart import ensure_voice_service
+        cfg = self._config
+
+        def _work() -> None:
+            try:
+                ok = ensure_voice_service(cfg)
+            except Exception:
+                ok = False
+            try:
+                self.call_from_thread(self._on_voice_autostart_done, ok)
+            except Exception:
+                pass   # приложение уже закрылось — некому показывать тост
+
+        threading.Thread(target=_work, daemon=True, name="voice-autostart").start()
+
+    def _on_voice_autostart_done(self, ok: bool) -> None:
+        """Вердикт фонового подъёма — на UI-потоке. Гейт онбордингом, как у соседних
+        сигналов: технический toast поверх мастера первого запуска сбивает с толку."""
+        self._voice_autostart_failed = not ok
+        if not ok and not self._needs_onboarding():
+            self.notify(
+                "voice-сервис не поднялся — подробности: gc-voice status",
+                severity="warning",
+            )
 
     def _start_auto_update_check(self) -> None:
         """Тонкая обёртка над `_maybe_auto_check`: реальные зависимости
@@ -403,6 +452,15 @@ class TuiApp(App):
             self._circuit_breaker.reset()
         self._notice_profile_source_change(old_source)
         self._notice_boot_frozen_diff(old_effective, self.effective_config())
+        # Экран мог закэшировать куски конфига (голосовой flow строится один раз на
+        # voice-секцию) — без сигнала правка из /settings подействовала бы только со
+        # следующего запуска. Снимок mtime здесь больше не трогаем: одиночный
+        # `_config_mtime` сменился набором `_config_mtime_set`, его считает
+        # `_compute_mtime_set()` строкой выше.
+        if self.is_running:
+            main = self._main_screen()
+            if main is not None and hasattr(main, "config_reloaded"):
+                main.config_reloaded()
         self.invalidate_runner()
 
     def reload_config_if_changed(self) -> None:

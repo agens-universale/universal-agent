@@ -283,6 +283,15 @@ pricing:
 #   - name: RouterAI
 #     url: https://routerai.ru/api/v1/chat/completions
 
+# Пресеты выпадающего списка в поле «URL» голосового ввода (можно дополнять своими).
+voice_endpoint_presets:
+  - name: OpenAI
+    url: https://api.openai.com/v1/audio/transcriptions
+  - name: Groq
+    url: https://api.groq.com/openai/v1/audio/transcriptions
+  - name: Mistral
+    url: https://api.mistral.ai/v1/audio/transcriptions
+
 # -----------------------------------------------------------------------------
 # Сборка мусора (gc.collect) — точки C1/C2/C3.
 # C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
@@ -291,3 +300,17 @@ pricing:
 # Явное значение перекрывает режимный default.
 # gc:
 #   force_collect: false
+
+# Голосовой ввод в TUI (Ctrl+T). Зависимости ставятся вместе с агентом
+# (Linux дополнительно: системный libportaudio2).
+# Подходит любой /v1/audio/transcriptions-совместимый сервис.
+# Локальный приватный сервис одной командой: gc-voice install (см. инструкцию).
+# voice:
+#   provider: openai
+#   url: https://stt.example.com/v1/audio/transcriptions
+#   token: "sk-..."
+#   model: whisper-1
+#   language: ru
+#   max_seconds: 120
+#   timeout_seconds: 60
+#   verify-ssl: true

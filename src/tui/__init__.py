@@ -131,9 +131,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if auto_mcp:
         ensure_mcp_daemons(config_dict)
 
+    voice_expected = False
+    _release_voice = None
+    try:
+        from voice_runtime.autostart import release_voice_service, url_is_ours
+        from voice_runtime.state import load_state as _voice_state
+
+        _release_voice = release_voice_service
+        _vs = _voice_state()
+        voice_expected = _vs is not None and url_is_ours(config_dict, _vs.port)
+    except Exception:
+        voice_expected = False
+
     app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict)
     app.set_config_path(onb_write_path if onboarding_mode else resolve_config_path(args.config))
     app._config_project_local = _project_local_config_path()  # str | None
+    # Подъём (`ensure_voice_service`: spawn + ожидание готовности, до 90 с на холодном
+    # старте) идёт ЦЕЛИКОМ фоном: TuiApp запускает его после первого кадра
+    # (on_mount → _start_voice_autostart), а main() только считает флаг ожидания —
+    # спавна здесь нет вовсе. Раньше вызов стоял тут СИНХРОННО и держал пустой терминал
+    # перед `app.run()` весь бюджет ожидания (было 15 с, стало 90 — живая приёмка
+    # поймала «программа зависла»).
+    app._voice_autostart_pending = voice_expected
     # Спека §3.5: холодный старт с проектным профилем, выбранным самим config.yml
     # (не сессионным переключением) — тот же notice, что и сессионный путь
     # (`TuiApp._profile_remerge`), но здесь ProfileMeta есть только на этом
@@ -153,6 +172,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         app.run()
     finally:
+        # Осознанно две РАЗНЫЕ модели гашения демонов: voice — light-switch
+        # (lease-файлы, гасит последний живой клиент, безопасно при N TUI);
+        # MCP — per-process («гашу только то, что сам поднял»). Не унифицировано:
+        # lease-модель для MCP — кандидат в апстрим (develop).
+        # release всегда (не только при voice_ok): прибирает «опоздавший» сервис,
+        # поднявшийся после таймаута, и мёртвые lease прошлых запусков. Безусловность
+        # безопасна ровно потому, что гасит он только ПОМЕЧЕННЫЙ агентский сервис
+        # (`leases.is_agent_owned`): форграундный `gc-voice serve` человека переживёт
+        # выход из TUI, который голоса и не касался.
+        if _release_voice is not None:
+            try:
+                _release_voice()
+            except Exception:
+                pass
         if auto_mcp:
             shutdown_mcp_daemons()
     return 0

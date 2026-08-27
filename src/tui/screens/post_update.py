@@ -47,7 +47,14 @@ class PostUpdateScreen(Screen):
         # обновить (версия в рецепте новой версии агента ≠ установленной). Опрос версий —
         # subprocess на сервер, поэтому в фоновом воркере (on_mount), а не в __init__.
         self._mcp_outdated: list[str] = []
+        # Голосовой движок — такой же «поставленный рядом» компонент, как MCP: версия
+        # приколота в коде агента, и после апгрейда на диске остаётся прежняя. Проверка
+        # дешёвая (чтение state.json), поэтому без воркера — в отличие от MCP, где опрос
+        # версий это subprocess на сервер.
+        self._voice_update = self._compute_voice_update()
         self._items: list[str] = []
+        if self._voice_update is not None:
+            self._items.append("voice")
         if self._needs_sync:
             self._items.append("config")
         self._marked = set(self._items)   # default-ON
@@ -84,6 +91,18 @@ class PostUpdateScreen(Screen):
         self._remount_items()
 
     # --- расчёт состояния ---
+
+    def _compute_voice_update(self):
+        """(стоит, нужно) — если локальный голосовой движок отстал от пина новой версии
+        агента; None — обновлять нечего.
+
+        Правило сверки одно на весь продукт и живёт в фасаде (`voice_setup`): его же
+        читают строка режима и клавиша обновления в /settings."""
+        try:
+            from tui.services.voice_setup import engine_update
+        except Exception:
+            return None
+        return engine_update()
 
     def _compute_needs_sync(self) -> bool:
         from config import _default_config_path
@@ -142,6 +161,11 @@ class PostUpdateScreen(Screen):
             t.append("Обновить подключённые MCP")
             t.append("   ")
             t.append(", ".join(self._mcp_outdated), style=DIM)
+        elif key == "voice":
+            have, want = self._voice_update
+            t.append("Обновить голосовой движок")
+            t.append("   ")
+            t.append(f"{have} → {want}", style=DIM)
         else:
             t.append("Обновить config.yml до текущей версии")
         return t
@@ -197,6 +221,15 @@ class PostUpdateScreen(Screen):
                         print(f"[{'ok' if rc == 0 else 'fail'}] {name}")
                     except Exception as exc:
                         print(f"[fail] {name}: {exc}")
+            if "voice" in self._marked and self._voice_update is not None:
+                have, want = self._voice_update
+                print(f"\nОбновляю голосовой движок: {have} -> {want} ...\n")
+                from tui.services import voice_setup
+                try:
+                    ok = voice_setup.update_local(self._config, echo=print)
+                    print(f"[{'ok' if ok else 'fail'}] голосовой движок")
+                except Exception as exc:
+                    print(f"[fail] голосовой движок: {exc}")
             if "config" in self._marked and self._needs_sync:
                 try:
                     report = self._config_sync.sync_config(self._config_path)

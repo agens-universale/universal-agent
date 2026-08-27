@@ -25,6 +25,9 @@ dependencies = [
     "pytest-asyncio>=0.23",
     "textual>=0.55",
     "rich>=13",
+    "sounddevice>=0.4",
+    "truststore>=0.9",
+    "huggingface_hub>=0.30",
     "chardet>=7.4.3",
 ]
 
@@ -33,6 +36,7 @@ gc-cli = "cli:main"
 gc-ua = "tui:main"
 gc-mcp-install = "mcp_runtime.install_cli:main"
 gc-mcp = "mcp_runtime.cli:main"
+gc-voice = "voice_runtime.cli:main"
 
 [project.optional-dependencies]
 dev-tui = [

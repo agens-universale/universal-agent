@@ -22,8 +22,9 @@ class _FakeMcp:
 
 def _write_conn_cfg(tmp_path, *, url=None, auth=None, proxy=None, model=None):
     """Настоящий config.yml из шаблона (гарантированно валиден) + write_values по
-    dotted-путям. Шаг «Подключение» берёт поля ИЗ ФАЙЛА (сырыми, без резолва
-    ${ENV:...}) — на мок-пути ссылку было бы не увидеть."""
+    dotted-путям — тот же приём, что _write_cloud_config в test_onboarding_voice_step.py.
+    Шаг «Подключение» берёт поля ИЗ ФАЙЛА (сырыми, без резолва ${ENV:...}) — на
+    мок-пути ссылку было бы не увидеть."""
     from pathlib import Path
     import onboarding_config_writer as w
     from config import _default_config_path, validate_config_text
@@ -79,16 +80,20 @@ def _profiles_cfg(tmp_path, *names, active=None):
 
 
 def test_wizard_steps_are_named_and_static():
-    """Шаги адресуются именами, состав один и тот же всегда (спека §2)."""
+    """Шаги адресуются именами, состав один и тот же всегда (спека §2).
+
+    «Голосовой ввод» стоит между MCP и подтверждением — тем же местом, что и в
+    install.html, readme и шапке `/settings`: порядок шагов человек читает раньше,
+    чем видит, и расходиться эти два описания не имеют права."""
     from tui.screens.onboarding import (_BASE_STEPS, STEP_CONFIRM, STEP_CONNECTION,
-                                        STEP_LEVELS, STEP_MCP, STEP_MODEL)
+                                        STEP_LEVELS, STEP_MCP, STEP_MODEL, STEP_VOICE)
     scr = _screen()
     assert scr._steps == _BASE_STEPS == (STEP_CONNECTION, STEP_MODEL, STEP_LEVELS,
-                                         STEP_MCP, STEP_CONFIRM)
+                                         STEP_MCP, STEP_VOICE, STEP_CONFIRM)
 
 
 def test_header_counter_names_the_position_and_the_finale():
-    """Шапка называет позицию человека в мастере: «N/4» по всем шагам подряд
+    """Шапка называет позицию человека в мастере: «N/5» по всем шагам подряд
     (знаменатель — шаги БЕЗ финального) и «подтверждение» вместо счётчика на
     финале. Сверяется весь список заголовков разом — сдвиг на единицу, лишний
     шаг в знаменателе или счётчик на финале ломают его."""
@@ -98,8 +103,8 @@ def test_header_counter_names_the_position_and_the_finale():
     for position in range(len(scr._steps)):
         scr._step = position
         titles.append(scr._title_text())
-    assert titles == ["Настройка · 1/4", "Настройка · 2/4", "Настройка · 3/4",
-                      "Настройка · 4/4", "Настройка · подтверждение"]
+    assert titles == ["Настройка · 1/5", "Настройка · 2/5", "Настройка · 3/5",
+                      "Настройка · 4/5", "Настройка · 5/5", "Настройка · подтверждение"]
     assert scr._steps[len(titles) - 1] == STEP_CONFIRM   # без счётчика — именно финал
 
 
@@ -170,6 +175,19 @@ def test_summary_hides_template_sentinels():
     line = scr._summary_text()
     assert "your-backend" not in line and "ВПИШИТЕ" not in line
     assert "сервер: —" in line and "модель: —" in line
+
+
+def test_summary_includes_voice_segment_once_chosen():
+    """Верхняя сводка добавляет сегмент «голосовой ввод: …» по мере выбора на шаге
+    голоса; пока выбора нет — сегмента нет вовсе (не «голосовой ввод: —»)."""
+    scr = _screen()
+    assert "голосовой ввод" not in scr._summary_text()
+    scr._voice_choice = "local"
+    assert "голосовой ввод: локальный сервис" in scr._summary_text()
+    scr._voice_choice = "cloud"
+    assert "голосовой ввод: свой endpoint" in scr._summary_text()
+    scr._voice_choice = "skip"
+    assert "голосовой ввод: нет" in scr._summary_text()
 
 
 @pytest.mark.asyncio
@@ -351,6 +369,46 @@ async def test_final_summary_shows_mcp_when_selected(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_final_summary_notice_combines_mcp_and_voice(tmp_path, monkeypatch):
+    """Одна служебная строка без скобок объединяет обе части (какие применимы),
+    воздух — одна пустая строка после строк сводки."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from voice_runtime import paths as vpaths
+    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
+    monkeypatch.setattr("voice_runtime.state.voice_state_path",
+                        lambda: tmp_path / "voice_data" / "state.json")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._voice_choice = "local"
+        blob = await _final_blob(pilot, scr, mcp=["office", "ddgs"])
+        assert ("Установятся после подтверждения: MCP (ddgs, office) · "
+                "локальный голосовой сервис (~0.9 ГБ)") in blob
+
+
+@pytest.mark.asyncio
+async def test_final_summary_notice_voice_only(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from voice_runtime import paths as vpaths
+    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
+    monkeypatch.setattr("voice_runtime.state.voice_state_path",
+                        lambda: tmp_path / "voice_data" / "state.json")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._voice_choice = "local"
+        blob = await _final_blob(pilot, scr, mcp=[])
+        assert "Установятся после подтверждения: локальный голосовой сервис (~0.9 ГБ)" in blob
+        assert "MCP (" not in blob
+
+
+@pytest.mark.asyncio
 async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
     # уже подключённый MCP помечен «установлен» и не переключается Space
     pytest.importorskip("textual")
@@ -414,7 +472,7 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
 @pytest.mark.asyncio
 async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     """Свернув пресет-лист адреса `Esc`, человек должен видеть, чем его вернуть
-    (спека 2026-08-06 §4.4) — общий хинт-механизм списков (`show_closed_hint`,
+    (спека 2026-08-06 §4.4) — тот же хинт, что у голосовых списков (`show_closed_hint`,
     дословно `LIST_CLOSED_HINT`). До правки `escape_presets` сворачивал список молча.
 
     Канон 2026-08-17: строка под адресом ПОСТОЯННА — уход курсора её не снимает.
@@ -1091,11 +1149,26 @@ async def test_pagedown_keeps_validation_of_connection_step(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_pagedown_advances_from_mcp_step(tmp_path):
-    """PgDn работает и на шагах без пометки (MCP) — зеркало PgUp. MCP → «Подтверждение»."""
+async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
+    """PgDn работает и на шагах без пометки (MCP) — зеркало PgUp.
+
+    MCP → «Голосовой ввод»: тело шага голоса зовёт voice_setup.status_cheap, а
+    _screen() не инжектит voice= — без изоляции тест стучался бы в РЕАЛЬНЫЙ каталог
+    данных агента (voice_runtime.state.load_state); в сеть снимок не ходит
+    (канон дешёвых снимков) — тот же приём, что у соседних тестов файла
+    (test_final_summary_notice_*). Список вызовов подтверждает, что подмена
+    реально сработала на этом прогоне, а не осталась мёртвым кодом."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.onboarding import STEP_CONFIRM, STEP_MCP
+    from voice_runtime import paths as vpaths
+    calls = []
+
+    def _fake_state_path():
+        calls.append(1)
+        return tmp_path / "voice_data" / "state.json"
+    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
+    monkeypatch.setattr("voice_runtime.state.voice_state_path", _fake_state_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -1104,6 +1177,7 @@ async def test_pagedown_advances_from_mcp_step(tmp_path):
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._step_id() == STEP_CONFIRM
+        assert calls, "изоляция не сработала — voice_runtime.state обошёл подмену"
 
 
 @pytest.mark.asyncio
@@ -1127,10 +1201,10 @@ async def test_pagedown_does_not_commit_on_confirm_step(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pgup_from_confirm_returns_to_mcp_step(tmp_path):
-    """С финала PgUp — обычный шаг назад, на предыдущий по составу шаг «MCP»."""
+    """С финала PgUp — обычный шаг назад, на предыдущий по составу шаг."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONFIRM, STEP_MCP
+    from tui.screens.onboarding import STEP_CONFIRM, STEP_VOICE
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -1138,7 +1212,7 @@ async def test_pgup_from_confirm_returns_to_mcp_step(tmp_path):
         scr._goto(STEP_CONFIRM); await pilot.pause()
         await pilot.press("pageup")
         await pilot.pause()
-        assert scr._step_id() == STEP_MCP
+        assert scr._step_id() == STEP_VOICE
 
 
 @pytest.mark.asyncio

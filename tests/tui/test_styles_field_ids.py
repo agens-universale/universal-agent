@@ -7,7 +7,8 @@ _STYLES = Path(__file__).resolve().parents[2] / "src" / "tui" / "styles.tcss"
 # id полей, которые обязаны иметь и плоский, и framed-стиль
 _FRAMED_FIELD_IDS = ("conn-url", "conn-token", "conn-proxy", "onb-model",
                      "onb-level-model", "mef-alias", "mef-model", "mef-url",
-                     "mef-token", "set-profile-name")
+                     "mef-token", "set-profile-name",
+                     "voice-url", "voice-token", "voice-model", "voice-lang")
 
 
 def _css() -> str:
@@ -49,9 +50,9 @@ def test_disabled_token_border_is_dimmed():
 
 
 def test_dropdown_scroll_rule_exists():
-    """Потолок высоты выпадающих списков (пресеты адреса, список моделей) — без
-    него длинный список раскатывает страницу (§3.4 спеки). Тест держит его на
-    месте."""
+    """Потолок высоты выпадающих списков. Правило принесла голосовая фича, в develop
+    его нет — при разносе на ветки оно обязано уехать в ux-polish, иначе список
+    моделей там раскатает страницу (§3.4 спеки). Тест держит его на месте."""
     assert ".dropdown-scroll" in _css()
     assert "max-height: 14" in _css()
 

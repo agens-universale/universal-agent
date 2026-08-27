@@ -246,8 +246,12 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) 
     try:
         values = collect_fields(io, config, review_all=review_all)
         if values:
-            for missing in onboarding.write_wizard_values(config_path, values):
-                io.printer(f"  [warn] поле {missing} не найдено в конфиге — пропущено")
+            missing = onboarding.write_wizard_values(config_path, values)
+            if missing:
+                # Запись идёт по правилу «всё или ничего», поэтому непустой список —
+                # это «файл не тронут», а не «часть полей пропущена» (канон 2026-08-20).
+                io.printer("\n  [ошибка] конфиг не записан: не нашлись поля "
+                           f"{', '.join(missing)} — впишите их вручную")
     except ValueError as exc:
         io.printer(f"\n  [ошибка] конфиг не записан: {exc}")
     except (KeyboardInterrupt, EOFError):

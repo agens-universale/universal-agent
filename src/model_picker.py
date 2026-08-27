@@ -68,8 +68,12 @@ def parse_models_list(payload: dict) -> list:
 
 
 def api_base(completions_url: str) -> str:
+    """Корень API по адресу конкретного метода. Аудио-методы (STT-endpoint голосового
+    ввода — тот же OpenAI-совместимый `/v1`) режутся так же, как chat: без них
+    `fetch_models` стучался бы в `…/audio/transcriptions/models` — мёртвый путь."""
     u = (completions_url or "").rstrip("/")
-    for suffix in ("/chat/completions", "/completions"):
+    for suffix in ("/chat/completions", "/completions",
+                   "/audio/transcriptions", "/audio/translations"):
         if u.endswith(suffix):
             return u[: -len(suffix)]
     return u
