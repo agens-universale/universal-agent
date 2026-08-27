@@ -133,7 +133,92 @@ _NO_ADDRESS_HINT = ("адрес не задан ни у записи, ни в «
                     "по такой записи запрос не уйдёт")
 _PICKER_DEFAULT_HINT = ("в реестре станет больше одной модели — выберите, какая "
                         "работает по умолчанию")
-_DEFAULT_TAIL = "← default"
+# Хвост записи называет ВСЕ уровни, которыми она работает, а не один `default`:
+# «одна модель на двух уровнях» — обычная раскладка (light+max на быстрой), и
+# показывать из неё половину значит врать про вторую.
+_LEVEL_TAIL_LEAD = "←"
+_LEVEL_TAIL_SEP = ", "
+# Хвост ячейки адреса у записи без своего `url`: адрес ей достаётся от «Подключения»,
+# и это факт про запись, а не про колонку. Режется он первым (см. `_entry_row_text`) —
+# хост переживает усечение, происхождение адреса можно дочитать в подсказке строки.
+_INHERITED_TAIL = " · из основного конфига"
+_ELLIPSIS = "…"
+# Уже колонки адрес перестаёт быть адресом («o…») — такую колонку честнее убрать
+# целиком и отдать место остальным.
+_MIN_ADDRESS_COLS = 4
+# Голова строки слота/привязки — «имя · описание роли» (грамматика `_mode_row_text`).
+# Под узкую рамку жертвуют описанием: уже `_MIN_ROLE_COLS` оно перестаёт быть
+# описанием и уходит целиком вместе с разделителем. Имя — ядро строки, режется
+# последним. `_MIN_HEAD_COLS` — предел и для него.
+_HEAD_SEP = " · "
+_MIN_ROLE_COLS = 4
+_MIN_HEAD_COLS = 4
+
+# Подписи блоков секции, вписанные в черту-разделитель. Заголовка «Модели» внутри
+# рамки нет: его слово уже стоит в шапке экрана («Настройки · Модели»), а строк на
+# экране и без повтора много.
+_BLOCK_CAPTIONS = {
+    "entry": "реестр",
+    "slot": "уровни",
+    "assign": "назначения: кто чем работает",
+}
+_BLOCK_LEAD = "────"
+# Подписи короче этой ширины дочерчиваются до неё, длинная — оставляет хвост в
+# четыре черты: подпись-строка узнаётся по форме, а не по одинаковой длине.
+_BLOCK_CAPTION_WIDTH = 32
+_BLOCK_TAIL_MIN = 4
+
+
+def block_caption(text: str) -> str:
+    """Подпись блока в виде черты-разделителя: `──── реестр ────────`.
+
+    Не симметричный `f"──── {label} ────"` маркера сжатия (`trace_render.py:190`,
+    `main.py:1862`) — и это осознанно: тот маркер ИНЛАЙНОВЫЙ, он метит точку в потоке
+    событий и потому одинаково короток с обеих сторон. Здесь строка стоит там, где
+    стояла бы черта-разделитель блока (и класс несёт её же, `set-group-sep`), поэтому
+    она дочерчивается вправо: слева — метка, справа — сама черта. Форма — макет
+    владельца из ревизии Task 12; если решат унифицировать с маркером, это правка
+    одной строки."""
+    head = f"{_BLOCK_LEAD} {text} "
+    return head + "─" * max(_BLOCK_TAIL_MIN, _BLOCK_CAPTION_WIDTH - len(head))
+
+
+def fit_cell(text: str, width: int) -> str:
+    """Содержимое колонки под её ширину: не влезло — многоточие в хвосте (канон
+    усечения базы; целыми словами здесь резать нечего — хвост ячейки адреса и есть
+    то, чем жертвуют, а хост стоит в начале и переживает срез)."""
+    if width <= 0 or len(text) <= width:
+        return text
+    return _ELLIPSIS if width == 1 else text[:width - 1] + _ELLIPSIS
+
+
+def fit_head(head: str, width: int) -> str:
+    """Голова строки слота/привязки под ширину колонки — та же лестница жертв
+    all-or-nothing, что у колонок строки реестра, только сверху вниз по одной строке:
+
+    1. описание роли ужимается многоточием, пока в нём остаётся ≥ `_MIN_ROLE_COLS`;
+    2. не осталось — описание уходит ЦЕЛИКОМ вместе с разделителем «·» (огрызок
+       «о…» описанием уже не является, а место занимает);
+    3. не влезает и имя — ужимается оно: строка не имеет права переноситься ни на
+       какой ширине, но имя уровня/потребителя видно до последнего.
+
+    У служебных потребителей («суммаризация», «судья finish_gate») разделителя нет —
+    вся голова считается именем и режется только на третьей ступени."""
+    if width <= 0 or len(head) <= width:
+        return head
+    name, sep, role = head.partition(_HEAD_SEP)
+    if sep and width >= len(name) + len(sep) + _MIN_ROLE_COLS:
+        return name + sep + fit_cell(role, width - len(name) - len(sep))
+    return fit_cell(name, width)
+
+
+def address_host(url: str) -> str:
+    """Хост адреса — то, чем записи РАЗЛИЧАЮТСЯ: путь у них один и тот же
+    (`/v1/chat/completions`), и колонку он бы только съел. Полный адрес остаётся в
+    подсказке строки."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    return parsed.netloc or parsed.path.split("/")[0] or url
 
 # --- нижняя половина секции: слоты (уровень → алиас) и привязки потребителей ---
 _SLOT_UNSET = "не задан"
@@ -150,12 +235,19 @@ _ASSIGN_ACTIVE_HINT = "работает активной моделью сесс
 _AUTO_JUDGE_HINT = "активен с функцией авто-выбора"
 _AUTO_JUDGE_UNBOUND_HINT = "без привязки идёт уровнем default, не активной моделью"
 
+# `*` — не «те, кого нет в списке»: в списке перечислены ВСЕ канонические имена, и
+# поимённо чужое имя вписать нельзя (валидатор фазы 2 отвергает ключ). Реальный смысл
+# ровно два: единственный способ привязать кастомных субагентов из `.md`-файлов и
+# общая привязка «всем сразу, кому своя не задана» (`ModelRouter._lookup_binding`:
+# точное имя → `*`).
+_WILDCARD_HINT = ("действует на субагентов из .md-файлов и на тех, кому не задана "
+                  "своя привязка")
 # Подписи потребителей, которых НЕТ в транспортном словаре `_CONSUMER_RU_LABEL`
 # (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
 # собственностью — здесь только UI-добавка (контракт п.2 волны B).
 _UI_CONSUMER_LABEL = {
     "auto_judge": "судья auto_judge",
-    "*": "* · остальные субагенты",
+    "*": "* · кастомные и будущие субагенты",
 }
 # Роль субагента рядом с его именем — грамматика «имя · описание» канона
 # `_mode_row_text`: имя ключа в файле человеку нужно (он его там и увидит),
@@ -203,6 +295,23 @@ def slot_head(level: str) -> str:
     (`tui/toggles.py`, там же его берут хинты `/level`)."""
     from tui.toggles import _LEVEL_ROLE_TEXT
     return f"{level} · {_LEVEL_ROLE_TEXT.get(level, '')}"
+
+
+def slot_head_text(level: str, width: int = 0) -> Text:
+    """Голова строки слота: имя уровня — ЦВЕТОМ уровня (тот же `TOGGLES["level"]`, что
+    красит уровни в раскрытом списке: одна сущность не имеет права выглядеть на одном
+    экране двумя способами), роль после «·» — обычным INK.
+
+    Текст берётся у `slot_head` целиком, а не собирается заново: ширину колонки
+    считают по нему же, и вторая сборка развела бы витрину с сеткой. Под колонку он
+    подгоняется ДО раскраски (`width`, 0 — не ограничивать): красить обрезки уже
+    готового `Text` значило бы держать правило цвета в двух местах. Срез имени цвет
+    переживает — режется хвост, а не начало."""
+    head = fit_head(slot_head(level), width)
+    t = Text()
+    t.append(head[:len(level)], style=value_style(level))
+    t.append(head[len(level):], style=INK)
+    return t
 
 
 def value_style(value: str) -> str:
@@ -300,6 +409,7 @@ class ModelsSectionEditor(Vertical):
         # ссылки давало пустое тело секции.
         self._legacy_open = self._legacy_default()
         self._legacy = None
+        self._measured_width = None       # ширина рамки, под которую посчитаны колонки
         self._picker = None               # {"items", "idx", "on_pick"}
         self._pending = None              # {"alias", "references", "last"} — confirm удаления
 
@@ -393,66 +503,245 @@ class ModelsSectionEditor(Vertical):
         labels = [] if self._is_profile else [_RESERVE_LABEL]
         return max([len(a) for a in self._aliases] + [len(label) for label in labels] + [0])
 
-    def _entry_row_text(self, alias: str, selected: bool) -> Text:
+    def _model_width(self) -> int:
+        """Колонка провайдерского id — по записям реестра. Строка «резервная модель»
+        её не расширяет: её значение — последнее в строке, за ним только собственный
+        хинт, и выравнивать там нечего."""
+        return max([len(self._entry_model(a)) for a in self._aliases] + [0])
+
+    def _entry_model(self, alias: str) -> str:
         entry = self._entries.get(alias)
         entry = entry if isinstance(entry, dict) else {}
+        return str(entry.get("model") or alias)
+
+    def _address_cell(self, alias: str) -> str:
+        """Ячейка адреса: хост, куда реально уйдёт запрос, плюс происхождение адреса,
+        если он унаследован. Адрес не резолвится вовсе — ячейка пуста, а причину
+        называет подсказка строки (прежнее поведение мёртвой записи)."""
+        address = self._entry_address(alias)
+        if not address:
+            return ""
+        own = (self._entries.get(alias) or {}).get("url")
+        return address_host(address) + ("" if own else _INHERITED_TAIL)
+
+    def _entry_levels(self, alias: str) -> list:
+        """Уровни, которые указывают на эту запись, — в каноническом порядке `LEVELS`,
+        а не в порядке ключей файла: колонка читается как трек уровней."""
+        return [level for level in LEVELS if self._slots.get(level) == alias]
+
+    def _pointer_text(self, alias: str, *, dead: bool = False) -> Text:
+        """Указатель уровней: `← light, max`. Каждое слово — цветом своего уровня
+        (§12.4, тот же источник, что у колонки значения), стрелка и запятые — DIM.
+        У мёртвой записи гаснет и он: цвет уровня здесь означает «работает», а такая
+        запись не работает (слот на неё смотрит, но адреса у неё нет)."""
+        levels = self._entry_levels(alias)
+        t = Text()
+        if not levels:
+            return t
+        t.append(_LEVEL_TAIL_LEAD + " ", style=DEEP_DIM if dead else DIM)
+        for i, level in enumerate(levels):
+            if i:
+                t.append(_LEVEL_TAIL_SEP, style=DEEP_DIM if dead else DIM)
+            t.append(level, style=DEEP_DIM if dead else value_style(level))
+        return t
+
+    def _pointer_width(self) -> int:
+        """Ширина столбца указателя — по самому длинному в списке: столбец крайний
+        правый, и все указатели стоят в нём друг под другом.
+
+        Усечения у него нет — «← light, default» пополам не режут: на узкой рамке он
+        уходит целиком, третьей ступенью лестницы `_entry_columns` (второй жертвой
+        после адреса). Ширина, при которой это происходит, — в докстринге лестницы,
+        здесь только сам замер."""
+        return max([len(self._pointer_text(a).plain) for a in self._aliases] + [0])
+
+    def _row_width(self) -> int:
+        """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же рода,
+        что `_modes_row_width` экрана: региона нет до layout-прохода, 0 читается как
+        «не измерено» и усечения не даёт. Последний матч — свежесмонтированная строка."""
+        widgets = list(self.query(".models-row"))
+        if not widgets:
+            return 0
+        return max(0, widgets[-1].region.width - 2)
+
+    def _entry_columns(self) -> tuple:
+        """Раскладка колонок строки записи под ТЕКУЩУЮ ширину рамки:
+        `(alias_w, model_w, address_w, pointer_w)`.
+
+        Порядок жертв — канон all-or-nothing `_mode_row_text` («не влезло — хвост
+        уходит целиком, ядро строки видимо всегда»), только ступеней здесь четыре:
+
+        1. адрес ужимается многоточием до `_MIN_ADDRESS_COLS`;
+        2. не осталось и этого — колонка адреса уходит ЦЕЛИКОМ вместе со своим
+           зазором (иначе строка длиннее рамки: Static её перенесёт, а перенос рвёт
+           указатель пополам и ставит хвост к левому краю без отступа);
+        3. не хватает и на указатель — уходит и он;
+        4. ядро (алиас + id) шире рамки — ужимается id, в пределе и алиас: строка не
+           имеет права переноситься НИ на какой ширине.
+
+        `address_w is None` — рамка ещё не измерена (первый кадр): усечения нет,
+        досчитает carry-fix `_refresh_rows`. `0` — колонки нет.
+
+        Раскладка ОДНА на список, а не своя у каждой строки: колонки стоят друг под
+        другом, и посчитанная построчно она бы их развалила."""
+        alias_w, model_w = self._alias_width(), self._model_width()
+        pointer_w = self._pointer_width()
+        width = self._row_width()
+        if width <= 0:
+            return alias_w, model_w, None, pointer_w
+        core = 2 + alias_w + (2 + model_w if model_w else 0)
+        tail = (2 + pointer_w) if pointer_w else 0
+        address_w = width - core - 2 - tail
+        if address_w >= _MIN_ADDRESS_COLS:
+            return alias_w, model_w, address_w, pointer_w
+        if core + tail <= width:
+            return alias_w, model_w, 0, pointer_w
+        if core <= width:
+            return alias_w, model_w, 0, 0
+        model_w = max(0, width - 2 - alias_w - 2)
+        if model_w:
+            return alias_w, model_w, 0, 0
+        return max(0, width - 2), 0, 0, 0
+
+    def _entry_row_text(self, alias: str, selected: bool) -> Text:
+        """Строка записи: алиас · провайдерский id · адрес · указатель уровней.
+        Иерархия колонок читается цветом (INK → DIM → DEEP_DIM): чем правее, тем
+        служебнее. Мёртвая запись (адрес не резолвится) гаснет ЦЕЛИКОМ — вместе с
+        указателем: «работает уровнем max» и «по этой записи запрос не уйдёт» в одной
+        строке спорили бы друг с другом.
+
+        Колонок, не поместившихся в рамку, в строке просто нет (см. `_entry_columns`)
+        — каждая приписывается вместе со СВОИМ зазором."""
         dead = not self._entry_address(alias)
+        alias_w, model_w, address_w, pointer_w = self._entry_columns()
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
-        t.append(f"{alias:<{self._alias_width()}}", style=DEEP_DIM if dead else INK)
-        t.append("  ")
-        t.append(str(entry.get("model") or alias), style=DEEP_DIM if dead else DIM)
-        if self._slots.get("default") == alias:
-            t.append("  " + _DEFAULT_TAIL, style=DIM)
+        t.append(fit_cell(alias, alias_w).ljust(alias_w),
+                 style=DEEP_DIM if dead else INK)
+        if model_w:
+            t.append("  ")
+            t.append(fit_cell(self._entry_model(alias), model_w).ljust(model_w),
+                     style=DEEP_DIM if dead else DIM)
+        if address_w is None or address_w:
+            cell = self._address_cell(alias)
+            t.append("  ")
+            t.append(cell if address_w is None else fit_cell(cell, address_w).ljust(address_w),
+                     style=DEEP_DIM)
+        if pointer_w:
+            pointer = self._pointer_text(alias, dead=dead)
+            if pointer.plain:
+                t.append("  ")
+                t.append_text(pointer)
         return t
 
     def _reserve_row_text(self, selected: bool) -> Text:
-        model = self._reserve_model()
+        """Строка резервной модели — DEEP_DIM ЦЕЛИКОМ: тем же приёмом «есть, но сейчас
+        не работает» помечены нерабочие записи реестра. В списке она появляется только
+        рядом с непустым реестром (`_rows`), а при пустом её место занимает сам
+        легаси-редактор — значит равноправной она не бывает никогда.
+
+        Колонка подписи — ТА ЖЕ, что колонка алиасов реестра (`_entry_columns`), а не
+        своя по `_alias_width`: строка относится к списку над ней и обязана стоять в
+        его сетке — в том числе когда лестница реестра эту колонку ужимает. Двойного
+        учёта нет: подпись подпирает колонку снизу ВНУТРИ `_alias_width`, и отсюда
+        берётся ровно та же величина.
+
+        Ширина — канон all-or-nothing `_mode_row_text`: хвост-подсказка уходит ЦЕЛИКОМ
+        (дословно та же фраза стоит в подсказке под курсором — терять нечего), дальше
+        ужимается сама модель, в пределе остаётся одна подпись."""
+        label_w = self._entry_columns()[0]
+        width = self._row_width()
+        model = self._reserve_model() or _RESERVE_UNSET
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
-        t.append(f"{_RESERVE_LABEL:<{self._alias_width()}}", style=INK)
-        t.append("  ")
-        t.append(model or _RESERVE_UNSET, style=DIM if model else DEEP_DIM)
-        t.append("  " + _RESERVE_HINT, style=DEEP_DIM)
+        if label_w:
+            t.append(fit_cell(_RESERVE_LABEL, label_w).ljust(label_w), style=DEEP_DIM)
+        model_w = len(model) if width <= 0 else max(0, width - 2 - label_w - 2)
+        if model_w:
+            t.append("  ")
+            t.append(fit_cell(model, model_w), style=DEEP_DIM)
+        tail = "  " + _RESERVE_HINT
+        if width <= 0 or len(t.plain) + len(tail) <= width:
+            t.append(tail, style=DEEP_DIM)
         return t
 
     def _binding_columns(self) -> tuple:
-        """(label_w, value_w) — общие колонки нижней половины секции: слоты и
-        привязки живут одной сеткой, значения стоят друг под другом. Формулы — канон
-        `_modes_columns` (`settings.py`): +3 зазор, +2 на курсор, ширина значения по
-        макс. длине ВСЕХ имён, которые строка может показать."""
+        """(head_w, value_w) — колонки нижней половины секции под ТЕКУЩУЮ ширину
+        рамки. Сетка у слотов и привязок ОДНА (значения стоят друг под другом сквозь
+        оба блока: вопрос у них общий — «чем работает»), формулы — канон
+        `_modes_columns` (`settings.py`): +3 воздуха к самой длинной голове, +2 зазора
+        перед значением, ширина значения по макс. длине ВСЕХ имён, которые строка
+        может показать.
+
+        Под узкой рамкой — та же лестница жертв all-or-nothing, что у строки реестра
+        (`_entry_columns`), тремя ступенями:
+
+        1. `head_w` ужимается — сперва за счёт воздуха, потом самих голов (описание
+           роли режется первым, см. `fit_head`), пока в колонке ≥ `_MIN_HEAD_COLS`;
+        2. не осталось и этого — ужимается колонка ЗНАЧЕНИЯ, а голове остаётся
+           минимум: без имени строка перестаёт быть строкой;
+        3. не влезает и это — колонка значения уходит целиком вместе со своим
+           зазором, голова занимает всю рамку.
+
+        Раскладка ОДНА на список: колонки стоят друг под другом, посчитанная построчно
+        она бы их развалила. Ширина 0 (рамка ещё не измерена) — колонки натуральные,
+        досчитает carry-fix `_refresh_rows`."""
         labels = consumer_labels()
         heads = [slot_head(level) for level in LEVELS]
         heads += [labels[consumer] for consumer in assign_consumers()]
         values = [_SLOT_UNSET, _ASSIGN_ACTIVE, *LEVELS, *self._aliases]
-        return max(len(h) for h in heads) + 3 + 2, max(len(v) for v in values)
+        head_w = max(len(h) for h in heads) + 3
+        value_w = max(len(v) for v in values)
+        width = self._row_width()
+        if width <= 0:
+            return head_w, value_w
+        head_w = min(head_w, width - 2 - 2 - value_w)
+        if head_w >= _MIN_HEAD_COLS:
+            return head_w, value_w
+        value_w = width - 2 - 2 - _MIN_HEAD_COLS
+        if value_w > 0:
+            return _MIN_HEAD_COLS, value_w
+        return max(0, width - 2), 0
 
-    def _binding_row_text(self, head: str, value, unset_label: str,
+    def _binding_row_text(self, head_for, value, unset_label: str,
                           selected: bool) -> Text:
         """Строка слота/привязки — грамматика `_mode_row_text`: курсор, голова
-        выровненным блоком INK, колонка значения своим цветом (§12.4). Трека здесь
+        выровненным блоком, колонка значения своим цветом (§12.4). Трека здесь
         нет — список значений произвольный (алиасы реестра), фиксированных позиций
         под него не существует.
 
+        Голову строит ВЫЗЫВАЮЩИЙ (`head_for(head_w) -> Text`): у слота её первое слово
+        несёт цвет уровня, у привязки вся голова обычная — раскраску решает тот, кто
+        знает, ЧТО за строка, а ширину колонки знает только сетка, и она же её отдаёт.
+
+        Колонки значения может не быть вовсе (последняя ступень лестницы) — тогда нет
+        и её зазора, ровно как у колонок строки реестра.
+
         `value is None` — ключа в файле нет: подпись `unset_label` и DEEP_DIM по
         ФАКТУ отсутствия, а не по совпадению значения с этой подписью."""
-        label_w, value_w = self._binding_columns()
+        head_w, value_w = self._binding_columns()
         shown = unset_label if value is None else value
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
-        t.append(head.ljust(label_w - 2), style=INK)
-        t.append("  ")
-        t.append(shown.ljust(value_w),
-                 style=DEEP_DIM if value is None else value_style(value))
+        if head_w:
+            head = head_for(head_w)
+            head.pad_right(max(0, head_w - len(head.plain)))
+            t.append_text(head)
+        if value_w:
+            t.append("  ")
+            t.append(fit_cell(shown, value_w).ljust(value_w),
+                     style=DEEP_DIM if value is None else value_style(value))
         return t
 
     def _slot_row_text(self, level: str, selected: bool) -> Text:
         return self._binding_row_text(
-            slot_head(level), self._slot_value(level), _SLOT_UNSET, selected)
+            lambda w: slot_head_text(level, w), self._slot_value(level),
+            _SLOT_UNSET, selected)
 
     def _assign_row_text(self, consumer: str, selected: bool) -> Text:
+        label = consumer_labels()[consumer]
         return self._binding_row_text(
-            consumer_labels()[consumer], self._assign_value(consumer),
+            lambda w: Text(fit_head(label, w), style=INK), self._assign_value(consumer),
             _ASSIGN_ACTIVE, selected)
 
     def _row_text(self, row: dict, selected: bool) -> Text:
@@ -491,6 +780,11 @@ class ModelsSectionEditor(Vertical):
             base = f"жёсткий пин модели «{value}»"
         if consumer == "auto_judge":
             return f"{_AUTO_JUDGE_HINT} · {base}"
+        if consumer == "*":
+            # У wildcard'а спрашивают не «что будет без него», а «кого он вообще
+            # накрывает» — про «активную» строка молчит, это общий факт всех
+            # непривязанных потребителей, а не смысл этой строки.
+            return _WILDCARD_HINT if value is None else f"{_WILDCARD_HINT} · {base}"
         return base
 
     def _hint_text(self) -> str:
@@ -543,12 +837,28 @@ class ModelsSectionEditor(Vertical):
             # Черта на СМЕНЕ группы (записи → слоты → привязки → резервная) — то же
             # правило, что у «Режимов работы»/«Профилей»: группы разделены, внутри
             # группы строки идут сплошняком.
-            if previous is not None and row["kind"] != previous:
-                yield Rule(classes="set-group-sep")
+            if row["kind"] != previous:
+                yield from self._block_head(row["kind"], first=previous is None)
             previous = row["kind"]
             cls = "models-row set-row set-dyn set-spaced" + (" selected" if i == self._idx else "")
             yield Static(self._row_text(row, i == self._idx), classes=cls, markup=False)
         yield Static(self._hint_text(), classes="set-hint set-dyn models-hint", markup=False)
+
+    def _block_head(self, kind: str, *, first: bool):
+        """Шапка блока — подпись, ВПИСАННАЯ в черту-разделителя: отдельной строки
+        заголовка блок не получает, лишних строк на экране и так хватает. Первый блок
+        подписан так же, как остальные: заголовка «Модели» внутри рамки больше нет
+        (его слово стоит в шапке экрана), и подпись встаёт на освободившееся место.
+
+        «Резервная модель» подписи не имеет — это одна строка, объясняющая себя сама,
+        и там остаётся прежняя голая черта."""
+        caption = _BLOCK_CAPTIONS.get(kind)
+        if caption is None:
+            if not first:
+                yield Rule(classes="set-group-sep")
+            return
+        yield Static(block_caption(caption), markup=False,
+                     classes="set-group-sep models-block set-dyn")
 
     def _legacy_hint_widgets(self):
         for text, cls in self._legacy_hints:
@@ -560,6 +870,31 @@ class ModelsSectionEditor(Vertical):
         экземпляр на каждую сборку тела."""
         return self._legacy_editor_factory()
 
+    def on_mount(self) -> None:
+        self._schedule_layout_pass()
+
+    def on_resize(self) -> None:
+        """Живой ресайз меняет рамку — значит и раскладку колонок. Потолок высоты за
+        экраном (`cap_frame_height`), ширина колонок — за секцией: её знает только
+        она."""
+        self._refresh_rows()
+
+    def _schedule_layout_pass(self) -> None:
+        """Досчитать строки ПОСЛЕ layout-прохода: ширина колонок выводится из региона
+        строки, а региона у только что смонтированного виджета ещё нет — первый кадр
+        рисует колонки без усечения, второй досчитывает (тот же carry-fix, что
+        `_refresh_modes_rows` экрана)."""
+        self.call_after_refresh(self._refresh_rows)
+
+    def _confirm_width(self) -> None:
+        """Самоподтверждение замера: одного прохода после раскладки мало — регион
+        строки уезжает ещё раз, когда список перерастает вьюпорт и появляется
+        скроллбар (минус колонка). Замер повторяется, пока не совпадёт сам с собой;
+        сходимость гарантирована тем, что высота строк от их ширины не зависит —
+        строка теперь не переносится ни на какой ширине (`_entry_columns`)."""
+        if self._measured_width is not None and self._row_width() != self._measured_width:
+            self._refresh_rows()
+
     def _rebuild(self) -> None:
         """Пересобрать тело под текущее состояние. Снос + монтаж в один такт легален
         ровно потому, что состояния не делят id (форма — `mef-*`, легаси-редактор —
@@ -568,6 +903,7 @@ class ModelsSectionEditor(Vertical):
         self.remove_children()
         for widget in self._body():
             self.mount(widget)
+        self._schedule_layout_pass()
 
     def _refresh_rows(self) -> None:
         if self._form is not None or self._legacy_open:
@@ -577,6 +913,10 @@ class ModelsSectionEditor(Vertical):
         if len(widgets) != len(rows):
             self._rebuild()
             return
+        # Ширина, под которую посчитаны колонки этого прохода: `_confirm_width`
+        # сверится с ней после раскладки и перерисует, если регион успел уехать.
+        self._measured_width = self._row_width()
+        self.call_after_refresh(self._confirm_width)
         for i, (widget, row) in enumerate(zip(widgets, rows)):
             widget.update(self._row_text(row, i == self._idx))
             widget.set_class(i == self._idx, "selected")

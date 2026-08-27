@@ -629,7 +629,7 @@ class SettingsScreen(Screen):
             if w is not title:
                 w.remove()
         if self._view == "menu":
-            title.update("Настройки")
+            self._set_title("Настройки")
             for i in range(len(SECTIONS)):
                 self._mount_menu_row(frame, i)
             # Carry-fix (ревью T2, Low): строки монтируются в ЭТОМ же такте — региона
@@ -671,40 +671,50 @@ class SettingsScreen(Screen):
         """Имя секции в заголовке рамки — с хвостом под-вида, если он открыт: внутри
         профиля тело секции чужое (редактор форм), и заголовок обязан сказать, ЧЕЙ
         файл правится. Спрашивают его два места (`_update_dirty` и `_title_note`) —
-        значит считает одно."""
+        значит считает одно.
+
+        У секции «Модели» заголовка внутри рамки НЕТ: её имя уже стоит в шапке экрана
+        («Настройки · Модели»), а тело подписывает свои блоки само (`models_section.
+        block_caption`) — третий повтор того же слова стоил бы двух строк экрана. В
+        под-виде открытого профиля заголовок остаётся: он называет не секцию, а файл."""
         name = SECTIONS[self._view]
         if self._view == _PROFILES and self._profiles_open is not None:
             return f"{name} · профиль {self._profiles_open}"
-        return name
+        return "" if self._view == _MODELS else name
+
+    def _set_title(self, content) -> None:
+        """Единственная точка записи в `#set-title`. Пустой заголовок — это не пустая
+        строка на экране, а её ОТСУТСТВИЕ (`display: False`): секция без заголовка не
+        должна платить за него ни строкой текста, ни отступом под ним. Обратный переход
+        — оттуда же: слот заголовка занимают и кратковременные реплики (`_title_note`),
+        и они обязаны быть видны в любой секции."""
+        try:
+            title = self.query_one("#set-title", Static)
+        except NoMatches:
+            return
+        title.update(content)
+        title.display = bool(content.plain if isinstance(content, Text) else content)
 
     def _update_dirty(self) -> None:
         """Обновляет #set-title: имя секции (+ dirty-маркер « изменено» для редакторов 0–2)."""
         if self._view == "menu":
             return
-        try:
-            title = self.query_one("#set-title", Static)
-        except NoMatches:
-            return
         name = self._section_title()
         if self._view in _EDITOR_SECTIONS and self._is_dirty(self._view):
             t = Text(name)
             t.append("  изменено", style=WARN)
-            title.update(t)
+            self._set_title(t)
         else:
-            title.update(name)
+            self._set_title(name)
 
     def _title_note(self, text: str) -> None:
         """Кратковременная спокойная реплика в слоте заголовка (там же, где «изменено»).
         Гаснет через _TITLE_NOTE_SEC; повторный вызов перезапускает таймер."""
         if self._view == "menu":
             return
-        try:
-            title = self.query_one("#set-title", Static)
-        except NoMatches:
-            return
         t = Text(self._section_title())
         t.append("  " + text, style=DEEP_DIM)
-        title.update(t)
+        self._set_title(t)
         if self._note_timer is not None:
             self._note_timer.stop()
         self._note_timer = self.set_timer(_TITLE_NOTE_SEC, self._clear_title_note)
@@ -1217,7 +1227,12 @@ class SettingsScreen(Screen):
         if values is None:
             return
         if not values:
-            self._title_note("ничего не изменено")
+            # Своим каналом секции, а не репликой в слоте заголовка: заголовка у
+            # «Моделей» нет (`_section_title`), и трёхсекундная реплика поднимала бы
+            # его вместе с отступом — тело прыгнуло бы на два ряда вниз и обратно
+            # прямо под курсором, которым только что нажали Enter. Отказом записи
+            # двумя строками выше секция отвечает тем же `_notice`.
+            self._notice("ничего не изменено")
             return
         # Пустое состояние — это САМА секция, и запись из неё завершает работу с ней
         # (возврат в хаб, как у прежней «Модели»). Под-форма резервной открыта из

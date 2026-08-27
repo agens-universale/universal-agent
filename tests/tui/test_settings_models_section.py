@@ -89,11 +89,15 @@ def _footer(scr) -> str:
 
 @asynccontextmanager
 async def _section(tmp_path, body: str = "", *, models=("test-model",),
-                   model: str = '"test-model"'):
+                   model: str = '"test-model"', size=None):
     """/settings → секция «Модели» на настоящем config.yml во временном каталоге.
 
     Список моделей легаси-редактора подменён на месте источника (`model_picker.
-    fetch_models`) — инъекции у секции нет, как и у прежней «Модели»."""
+    fetch_models`) — инъекции у секции нет, как и у прежней «Модели».
+
+    `size` — размер терминала для тестов ГЕОМЕТРИИ (свипы ширины): по умолчанию
+    Textual даёт 80×24, и высоты не хватает, чтобы нижняя половина секции вообще
+    попала в раскладку."""
     from unittest import mock
 
     import model_picker
@@ -106,7 +110,7 @@ async def _section(tmp_path, body: str = "", *, models=("test-model",),
     with _isolated_config_layers(tmp_path), \
          mock.patch.object(model_picker, "fetch_models",
                            lambda *a, **k: [ModelInfo(id=i) for i in models]):
-        async with app.run_test() as pilot:
+        async with app.run_test(**({"size": size} if size else {})) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))
             app.push_screen(scr)
             await pilot.pause()
@@ -1026,3 +1030,450 @@ async def test_footer_is_positional_on_slot_and_assign_rows(tmp_path):
         await pilot.pause()
         assert "Enter — выбрать" in scr._footer_text()   # раскрытый список — свой футер
         assert "Esc — отмена" in scr._footer_text()
+
+
+# --- вид секции: подписи блоков, столбцы записи, приглушённая резервная -------
+#
+# Пять правок вида, согласованных с владельцем на живом смоке (Task 12): честная
+# подпись wildcard-строки, приглушённая резервная модель, подписи блоков в чертах
+# вместо дублирующего заголовка рамки, цвет уровня в голове строки слота и два
+# новых столбца строки реестра — адрес и указатель уровней.
+
+
+def _spans_style(text, *, skip_cursor: bool = True) -> set:
+    """Цвета ВСЕХ содержательных спанов строки (курсор — не содержимое): «строка
+    целиком приглушена» — утверждение про все спаны сразу, а не про один найденный."""
+    from rich.style import Style
+    return {Style.parse(str(s.style)).color.get_truecolor()
+            for s in text.spans if not (skip_cursor and s.start == 0)}
+
+
+_ADDRESSED = (
+    "models:\n"
+    "  flash:\n"
+    '    model: "qwen/qwen-flash"\n'
+    '    url: "https://openrouter.ai/api/v1/chat/completions"\n'
+    "  opus:\n"
+    '    model: "anthropic/claude-opus"\n'
+    "slots:\n"
+    '  light: "flash"\n'
+    '  default: "opus"\n'
+    '  max: "flash"\n'
+)
+
+
+async def test_wildcard_row_names_the_subagents_it_really_covers(tmp_path):
+    """`*` — не «остальные из списка» (в списке перечислены ВСЕ канонические): это
+    единственный способ привязать кастомных субагентов, которых валидатор поимённо
+    отвергает, и общая привязка для тех, кому своя не задана."""
+    from tui.editors.models_section import consumer_labels
+    assert consumer_labels()["*"] == "* · кастомные и будущие субагенты"
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="*")
+        await pilot.pause()
+        hint = ed._hint_text()
+        assert ".md" in hint
+        assert "привязк" in hint
+        assert "остальные субагенты" not in " ".join(_rows(scr))
+
+
+async def test_reserve_row_is_dimmed_while_the_registry_works(tmp_path):
+    """Резервная модель при живом реестре не работает — и выглядит так же, как
+    прочие нерабочие записи (DEEP_DIM целиком), а не равноправной строкой."""
+    from tui.palette import DEEP_DIM
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        text = _editor(scr)._row_text({"kind": "reserve"}, False)
+        assert "test-model" in text.plain
+        assert "действует только без реестра" in text.plain
+        assert _spans_style(text) == {_rgb(DEEP_DIM)}
+
+
+async def test_block_captions_stand_in_the_separators_instead_of_the_frame_title(tmp_path):
+    """Заголовок «Модели» внутри рамки дублировал шапку экрана — вместо него блоки
+    подписаны сами, подписью, вписанной в черту-разделитель."""
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        title = scr.query_one("#set-title", Static)
+        assert str(title.render()) == ""
+        assert title.display is False
+        assert [str(w.render()) for w in scr.query(".models-block")] == [
+            "──── реестр ────────────────────",
+            "──── уровни ────────────────────",
+            "──── назначения: кто чем работает ────"]
+        ed = _editor(scr)
+        assert "реестр" in str(list(ed.children)[0].render())
+
+
+async def test_slot_row_head_carries_the_colour_of_its_level(tmp_path):
+    """Одна сущность — один вид: уровень в голове строки красится тем же цветом, что
+    и в раскрытом списке (§12.4), роль после «·» остаётся прежней."""
+    from tui.palette import ACCENT, INK, RUN_COLOR
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        ed = _editor(scr)
+
+        def head(level):
+            return ed._row_text({"kind": "slot", "level": level}, False)
+
+        assert _value_color(head("light"), "light") == _rgb(INK)
+        assert _value_color(head("default"), "default") == _rgb(RUN_COLOR)
+        assert _value_color(head("max"), "max") == _rgb(ACCENT)
+        assert _value_color(head("max"), " · самая сильная") == _rgb(INK)
+
+
+async def test_entry_row_shows_the_address_and_every_level_that_points_at_it(tmp_path):
+    """Строка записи отвечает на два вопроса разом: КУДА уйдёт запрос (хост) и КЕМ
+    она работает (все уровни, а не один default). Указатель — крайний правый столбец
+    и стоит у всех записей в одной колонке."""
+    from tui.palette import ACCENT, INK, RUN_COLOR
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        # Ширину строка берёт у живого виджета; здесь проверяется ГРАММАТИКА, а не
+        # геометрия окна — задаём её явно, чтобы колонки не спорили с шириной
+        # терминала, на котором гоняются TUI-тесты (80 колонок).
+        ed._row_width = lambda: 100
+        flash = ed._row_text({"kind": "entry", "alias": "flash"}, False)
+        opus = ed._row_text({"kind": "entry", "alias": "opus"}, False)
+        assert "openrouter.ai" in flash.plain
+        assert "/api/v1" not in flash.plain          # в колонке — хост, не путь
+        assert flash.plain.rstrip().endswith("← light, max")
+        assert opus.plain.rstrip().endswith("← default")
+        assert _value_color(flash, "light") == _rgb(INK)
+        assert _value_color(flash, "max") == _rgb(ACCENT)
+        assert _value_color(opus, "default") == _rgb(RUN_COLOR)
+        assert flash.plain.index("←") == opus.plain.index("←")
+
+
+async def test_inherited_address_says_where_it_came_from(tmp_path):
+    """Запись без своего `url` работает адресом основного конфига — и говорит об этом
+    в хвосте ячейки (усечётся он первым, хост уцелеет)."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        cell = ed._address_cell("opus")
+        assert cell.startswith("host")
+        assert cell.endswith("· из основного конфига")
+
+
+async def test_the_address_column_shrinks_but_the_pointer_stays_whole(tmp_path):
+    """Узкая рамка жертвует АДРЕСОМ, а не указателем: сперва колонка адреса ужимается
+    многоточием, потом схлопывается вместе со своим зазором — и на каждой из ширин
+    строка помещается в рамку целиком, а указатель цел.
+
+    Ширины сняты с живого дефекта: на 56 и 60 колонках адресу не остаётся места
+    вовсе, на 64 он ещё жив и усечён."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        for width in (56, 60, 64):
+            ed._row_width = lambda w=width: w
+            flash = ed._row_text({"kind": "entry", "alias": "flash"}, False)
+            opus = ed._row_text({"kind": "entry", "alias": "opus"}, False)
+            assert len(flash.plain) <= width, width
+            assert len(opus.plain) <= width, width
+            assert flash.plain.rstrip().endswith("← light, max"), width
+            assert opus.plain.rstrip().endswith("← default"), width
+        ed._row_width = lambda: 64
+        opus = ed._row_text({"kind": "entry", "alias": "opus"}, False)
+        assert "…" in opus.plain
+        assert "host" in opus.plain                  # хост уцелел, отрезан хвост
+
+
+async def test_the_row_never_outgrows_the_frame(tmp_path):
+    """Строка записи не переносится НИ НА КАКОЙ ширине: перенос рвёт указатель и
+    ставит его продолжение к левому краю без отступа. Порядок жертв — канон
+    all-or-nothing `_mode_row_text`: адрес (с зазором) → указатель → ядро."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "vendor/some-extremely-long-model-identifier-2026-08-preview"\n'
+            "slots:\n"
+            '  light: "flash"\n'
+            '  default: "flash"\n'
+            '  max: "flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        for width in range(12, 140):
+            ed._row_width = lambda w=width: w
+            row = ed._row_text({"kind": "entry", "alias": "flash"}, False)
+            assert len(row.plain) <= width, (width, row.plain)
+            assert row.plain.strip(), width          # ядро строки видимо всегда
+
+
+async def test_a_long_model_id_is_cut_not_wrapped(tmp_path):
+    """Ядро строки (алиас + провайдерский id) тоже имеет предел: id в 62 символа
+    раздувал строку до 110 колонок и переносил её даже на широком окне."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "vendor/some-extremely-long-model-identifier-2026-08-preview"\n')
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        ed._row_width = lambda: 60
+        row = ed._row_text({"kind": "entry", "alias": "flash"}, False)
+        assert len(row.plain) <= 60
+        assert "flash" in row.plain                  # алиас цел
+        assert row.plain.rstrip().endswith("…")      # срезан id, а не строка
+
+
+async def test_the_address_column_collapses_instead_of_a_two_letter_stub(tmp_path):
+    """Ступень `_MIN_ADDRESS_COLS`: колонка, в которой осталось три места, показывает
+    не адрес, а огрызок «ho…» — такую колонку честнее убрать целиком и отдать место
+    остальным. Ширина 60 подобрана так, чтобы адресу оставалось РОВНО 3 колонки."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        ed._row_width = lambda: 61
+        assert ed._entry_columns()[2] == 4        # ступенью выше колонка ещё жива
+        ed._row_width = lambda: 60
+        assert ed._entry_columns()[2] == 0
+        row = ed._row_text({"kind": "entry", "alias": "opus"}, False)
+        assert "…" not in row.plain               # огрызка на месте адреса нет
+        assert "host" not in row.plain
+        assert row.plain.rstrip().endswith("← default")
+
+
+# --- нижняя половина: строки слотов и привязок тоже не переносятся ------------
+#
+# Ширины сняты с живого смока владельца: на терминале 60 переносились все 19 строк
+# нижней половины, на 72 — 15 из 19 (слоты выживали только за счёт хвостовых
+# пробелов колонки значения, которые Rich при переносе не считает).
+_LONG_ALIAS = (
+    "models:\n"
+    "  gigachat-corp-preview-08-26:\n"           # 27 колонок — крайний случай смока
+    '    model: "gigachat/pro"\n'
+    "slots:\n"
+    '  default: "gigachat-corp-preview-08-26"\n'  # light и max остаются «не задан»
+)
+
+
+def _lower_rows(ed) -> list:
+    """Виджеты нижней половины секции: строки слотов, привязок и резервной модели —
+    всё, что идёт в списке после записей реестра."""
+    return list(ed.query(".models-row"))[len(ed._aliases):]
+
+
+def _grid_rows(ed) -> list:
+    """Из нижней половины — только строки ОДНОЙ сетки (слоты и привязки): у резервной
+    строки сетка другая, она стоит в колонках реестра."""
+    from config_modules.model_registry import LEVELS
+    from tui.editors.models_section import assign_consumers
+    return _lower_rows(ed)[:len(LEVELS) + len(assign_consumers())]
+
+
+@pytest.mark.parametrize("body,model", [(_ADDRESSED, '"test-model"'),
+                                        (_LONG_ALIAS, '""')],
+                         ids=["типовой реестр", "длинный алиас, резервная не задана"])
+async def test_the_lower_half_never_wraps_at_any_width(tmp_path, body, model):
+    """Ни одна строка нижней половины — слоты, привязки и резервная модель — не
+    переносится НИ НА КАКОЙ ширине; слоты и привязки при этом стоят одной колонкой.
+
+    Замер живой: `region.height` смонтированной строки, а не длина текста (перенос
+    решает Rich, и хвостовые пробелы колонки значения он не считает — на длину строки
+    это не похоже).
+
+    Терминал 12 колонок пропущен осознанно: рамка оставляет строке одну колонку, в
+    которой не помещается сам курсор («▸ ») — там не спасает никакая лестница."""
+    async with _section(tmp_path, body, model=model, size=(80, 40)) as (pilot, scr, _cfg):
+        ed = _editor(scr)
+        for width in range(12, 140):
+            await pilot.resize_terminal(width, 40)
+            await pilot.pause()
+            if ed._row_width() < 2:
+                continue
+            rows = _lower_rows(ed)
+            wrapped = [str(w.render()) for w in rows if w.region.height != 1]
+            assert not wrapped, (width, ed._row_width(), wrapped[:2])
+            grid = _grid_rows(ed)
+            assert len({len(str(w.render())) for w in grid}) == 1, (width, ed._row_width())
+
+
+async def test_the_reserve_row_stands_in_the_registry_grid(tmp_path):
+    """Строка «резервная модель» стоит в сетке РЕЕСТРА, к которому относится: её
+    подпись занимает ту же колонку, что алиасы записей, и ужимается вместе с ними —
+    иначе на узкой рамке записи съезжают влево, а она остаётся стоять сама по себе.
+
+    Колонка алиаса подпёрта снизу длиной этой подписи (16) — и ровно один раз: это
+    та же колонка, а не своя плюс подпёртая."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        ed._row_width = lambda: 100
+        assert ed._entry_columns()[0] == len("резервная модель")
+        entry = ed._row_text({"kind": "entry", "alias": "opus"}, False)
+        reserve = ed._row_text({"kind": "reserve"}, False)
+        assert reserve.plain.index("test-model") == entry.plain.index("anthropic")
+        ed._row_width = lambda: 19          # лестница реестра ужала саму колонку алиаса
+        assert ed._entry_columns()[0] == 17
+        entry = ed._row_text({"kind": "entry", "alias": "opus"}, False)
+        reserve = ed._row_text({"kind": "reserve"}, False)
+        assert len(reserve.plain) == len(entry.plain) == 19
+
+
+async def test_the_reserve_row_drops_its_hint_whole(tmp_path):
+    """Хвост строки — подсказка «действует только без реестра» — уходит ЦЕЛИКОМ
+    (канон `_mode_row_text`), а не режется многоточием: она дословно повторена в
+    подсказке под курсором, и терять там нечего. Ядро строки — подпись и сама модель."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        ed._row_width = lambda: 60          # натуральная ширина строки — ровно она
+        assert ed._row_text({"kind": "reserve"}, False).plain.endswith(
+            "действует только без реестра")
+        ed._row_width = lambda: 59
+        row = ed._row_text({"kind": "reserve"}, False)
+        assert "действует" not in row.plain
+        assert row.plain.rstrip().endswith("test-model")
+        _goto(ed, "reserve")                # то же самое — в подсказке под курсором
+        assert ed._hint_text().startswith("действует только без реестра")
+
+
+async def test_the_reserve_row_never_outgrows_the_frame(tmp_path):
+    """Тот же свип ступенями, что у строк реестра и привязок: ширины 12…139, строка не
+    длиннее рамки, ядро видимо всегда."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        for width in range(12, 140):
+            ed._row_width = lambda w=width: w
+            row = ed._row_text({"kind": "reserve"}, False)
+            assert len(row.plain) <= width, (width, row.plain)
+            assert row.plain.strip(), width
+
+
+async def test_the_binding_row_never_outgrows_the_frame(tmp_path):
+    """Тот же инвариант ступенями лестницы: строка слота/привязки не длиннее рамки на
+    ширинах 12…139, и ядро строки (имя строки) видимо всегда."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        for width in range(12, 140):
+            ed._row_width = lambda w=width: w
+            for row in ({"kind": "slot", "level": "default"},
+                        {"kind": "assign", "consumer": "subagents.subagent_special_agent"},
+                        {"kind": "assign", "consumer": "*"}):
+                text = ed._row_text(row, False)
+                assert len(text.plain) <= width, (width, row, text.plain)
+                assert text.plain.strip(), (width, row)
+
+
+async def test_a_wide_frame_shows_the_longest_value_whole(tmp_path):
+    """Колонка значения — ядро строки: на широкой рамке она обязана показывать самый
+    длинный алиас реестра ЦЕЛИКОМ. Стережёт обе стороны новой лестницы: и ширину
+    колонки (считается по алиасам, а не по одним подписям), и усечение значения (его
+    очередь — последняя)."""
+    async with _section(tmp_path, _LONG_ALIAS) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        ed._row_width = lambda: 100
+        row = ed._row_text({"kind": "slot", "level": "default"}, False)
+        assert row.plain.rstrip().endswith("gigachat-corp-preview-08-26")
+        assert row.plain.startswith("  default · основная рабочая: повседневные задачи")
+
+
+async def test_the_role_is_cut_before_the_name_of_the_level(tmp_path):
+    """Порядок жертв: первым ужимается ОПИСАНИЕ роли, имя уровня и его значение —
+    последнее, что уходит. Цвет уровня усечение переживает."""
+    from tui.palette import RUN_COLOR
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        ed._row_width = lambda: 55
+        row = ed._row_text({"kind": "slot", "level": "default"}, False)
+        assert row.plain.startswith("  default · основная рабочая: повс")
+        assert "…" in row.plain                       # ужато описание, не строка
+        assert row.plain.rstrip().endswith("opus")    # значение цело
+        assert _value_color(row, "default") == _rgb(RUN_COLOR)
+
+
+async def test_a_narrow_frame_drops_the_role_whole(tmp_path):
+    """Уже `_MIN_ROLE_COLS` описание перестаёт быть описанием — и уходит ЦЕЛИКОМ
+    вместе с разделителем «·», а не оставляет огрызок «о…». Имя уровня и значение
+    остаются: без них строка бессмысленна."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        ed._row_width = lambda: 26
+        assert ed._row_text({"kind": "slot", "level": "default"}, False).plain.startswith(
+            "  default · осн…")                       # ступенью выше огрызок ещё жив
+        ed._row_width = lambda: 25
+        row = ed._row_text({"kind": "slot", "level": "default"}, False)
+        assert "·" not in row.plain
+        assert "…" not in row.plain
+        assert row.plain.startswith("  default ")
+        assert row.plain.rstrip().endswith("opus")
+
+
+def _entry_rows(ed) -> list:
+    """Отрисованные строки ЗАПИСЕЙ (первые в списке): у слотов и привязок сетка своя
+    (`_binding_columns`), и стерегут её свои тесты выше."""
+    widgets = [str(w.render()) for w in ed.query(".models-row")]
+    return widgets[:len(ed._aliases)]
+
+
+async def test_a_live_resize_recomputes_the_columns(tmp_path):
+    """Ширина колонок зависит от рамки, а рамка меняется живым ресайзом — значит
+    строки пересчитывает и он, а не только первый кадр."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        box = {"w": 100}
+        ed._row_width = lambda: box["w"]
+        ed._refresh_rows()
+        box["w"] = 56
+        ed.on_resize()
+        assert max(len(r) for r in _entry_rows(ed)) <= 56
+
+
+async def test_the_measurement_confirms_itself(tmp_path, monkeypatch):
+    """Замер после раскладки одноразовым быть не может: появление скроллбара сужает
+    регион на колонку УЖЕ после того, как строки посчитаны, и без второго прохода
+    строка стабильно вылезала за рамку на единицу."""
+    async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
+        await pilot.pause()
+        ed = _editor(scr)
+        # Ресайз глушим НА КЛАССЕ (Textual зовёт обработчик через тип, инстансный
+        # атрибут он не увидит): иначе он подменил бы собой проверяемый механизм —
+        # регион строки уезжает и без ресайза виджета, самим появлением скроллбара.
+        monkeypatch.setattr(type(ed), "on_resize", lambda self: None)
+        box = {"w": 72}
+        ed._row_width = lambda: box["w"]
+        ed._refresh_rows()
+        box["w"] = 71                       # «появился скроллбар» — регион уехал
+        await pilot.pause()
+        assert max(len(r) for r in _entry_rows(ed)) <= 71
+
+
+async def test_a_dead_entry_dims_its_level_pointer_too(tmp_path):
+    """Мёртвая запись гаснет ЦЕЛИКОМ: указатель уровня в полной яркости спорил бы с
+    погашенными алиасом и id — «эта строка работает» и «эта строка не работает» в
+    одной строке."""
+    from tui.palette import DEEP_DIM
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('agent:\n  model: "test-model"\n'
+                        "models:\n  flash:\n    model: \"m\"\n"
+                        "slots:\n  default: \"flash\"\n", encoding="utf-8")
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config={"model": "test-model"})
+    with _isolated_config_layers(tmp_path):
+        async with app.run_test() as pilot:
+            scr = _mk_screen(config={"model": "test-model"}, config_path=str(cfg_file))
+            app.push_screen(scr)
+            await pilot.pause()
+            open_settings_section(scr, _SECTION)
+            await pilot.pause()
+            row = _editor(scr)._row_text({"kind": "entry", "alias": "flash"}, False)
+            assert "← default" in row.plain
+            assert _spans_style(row) == {_rgb(DEEP_DIM)}
+
+
+async def test_a_no_change_reply_does_not_resurrect_the_hidden_title(tmp_path):
+    """Ответ «ничего не изменено» идёт СВОИМ каналом секции: слот заголовка в
+    «Моделях» скрыт, и поднимать его на три секунды значит дёргать тело на два ряда
+    вниз и обратно — прямо под курсором, которым только что нажали Enter."""
+    async with _section(tmp_path) as (pilot, scr, _cfg_file):
+        await _wait_legacy_list(pilot, scr)
+        await pilot.press("enter")                   # сохранение без единой правки
+        await pilot.pause()
+        assert scr.query_one("#set-title", Static).display is False
+        assert "ничего не изменено" in _texts(scr)

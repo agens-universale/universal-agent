@@ -652,3 +652,20 @@ def test_profile_footers_mirror_the_config_ones():
         assert base.endswith(" · Esc")
         assert profile.endswith(" · Esc — к списку")
         assert profile[:-len(" — к списку")] == base
+
+async def test_the_first_block_caption_stands_under_the_profile_title(tmp_path, monkeypatch):
+    """В под-виде заголовок рамки свой («профиль work») и дублирования нет — подпись
+    первого блока встаёт ПОД ним, а не вместо него."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        title = scr.query_one("#set-title", Static)
+        assert title.display is True
+        assert "профиль work" in str(title.render())
+        assert str(list(ed.children)[0].render()) == m.block_caption("реестр")
