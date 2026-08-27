@@ -179,3 +179,126 @@ def test_limit_is_still_validated_when_given(tmp_path):
         data = _call(tool, tmp_path, pattern="needle", query_mode="text", limit=bad)
         assert data["ok"] is False, bad
         assert data["error"]["field"] == "limit", bad
+
+
+# --- честность движка: fallback_reason и output_capped -----------------------
+
+def _native_ready(tool, monkeypatch, *, has_grep=True):
+    import utils.native_fs_search as native_fs_search
+
+    backend_cls = type(tool._backend)
+    monkeypatch.setattr(backend_cls, "has_grep", has_grep, raising=False)
+    monkeypatch.setattr(backend_cls, "has_find", has_grep, raising=False)
+    monkeypatch.setattr(native_fs_search, "count_native_candidates", lambda *a, **k: 1)
+
+
+def _native_result(tmp_path, *, truncated=False, hit_cap=False, failure=None):
+    from utils.native_fs_search import NativeGrepResult
+
+    return NativeGrepResult(
+        matches=[{
+            "file": str(tmp_path / "a.py"), "line": 1, "end_line": 1,
+            "line_content": "KEY = 1", "context": "KEY = 1\n",
+        }],
+        truncated=truncated,
+        hit_capture_cap=hit_cap,
+        failure=failure,
+    )
+
+
+def test_python_path_names_the_missing_grep(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch, has_grep=False)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["search_backend"] == "python"
+    assert data["fallback_reason"] == "no_grep"
+
+
+def test_python_path_names_a_non_native_pattern(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("foobar\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="foo(bar|baz)", query_mode="python-re")
+
+    assert data["search_backend"] == "python"
+    assert data["fallback_reason"] == "pattern_not_native"
+
+
+def test_python_path_names_show_excluded_dirs(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", show_excluded_dirs=True)
+
+    assert data["fallback_reason"] == "show_excluded_dirs"
+
+
+def test_python_path_names_a_native_failure(tmp_path, monkeypatch):
+    import utils.native_fs_search as native_fs_search
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        native_fs_search, "run_native_grep",
+        lambda *a, **k: _native_result(tmp_path, failure="native_timeout"),
+    )
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["search_backend"] == "python"
+    assert data["count"] == 1
+    assert data["fallback_reason"] == "native_timeout"
+
+
+def test_single_file_names_its_python_path(tmp_path):
+    f = tmp_path / "a.py"
+    f.write_text("KEY = 1\n", encoding="utf-8")
+
+    data = json.loads(_tool(tmp_path)(path=str(f), pattern="KEY", query_mode="text"))
+
+    assert data["search_backend"] == "python"
+    assert data["fallback_reason"] == "single_file"
+
+
+def test_native_answer_carries_no_fallback_reason(tmp_path, monkeypatch):
+    import utils.native_fs_search as native_fs_search
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    monkeypatch.setattr(native_fs_search, "run_native_grep", lambda *a, **k: _native_result(tmp_path))
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    assert "fallback_reason" not in data
+
+
+def test_capture_cap_below_limit_is_reported_as_output_capped(tmp_path, monkeypatch):
+    """Потолок вывода grep — не лимит совпадений и не повод молча читать всё
+    заново с хоста: честный стоп с советом сузить запрос."""
+    import utils.native_fs_search as native_fs_search
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        native_fs_search, "run_native_grep",
+        lambda *a, **k: _native_result(tmp_path, truncated=True, hit_cap=True),
+    )
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", limit=50)
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 1
+    assert data["stop_reason"] == "output_capped"
+    assert data["scan_complete"] is False
+    assert data["more_matches_may_exist"] is True
+    assert "narrow" in data["guidance"].lower()
+    assert "fallback_reason" not in data

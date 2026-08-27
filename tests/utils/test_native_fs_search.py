@@ -147,3 +147,69 @@ def test_absoluteness_of_grep_paths_is_decided_by_the_backend():
     )
 
     assert [m["file"] for m in res.matches] == ["@root/app.py"]
+
+
+# --- причины отказа и виды сбоев: нативный путь называет, почему ответит Python ---
+
+from utils.native_fs_search import native_grep_refusal
+
+
+def _ready(stdout="", rc=0):
+    b = _Backend(stdout, rc)
+    b.has_grep = True
+    b.has_find = True
+    return b
+
+
+def _refusal(backend, *, plan=PLAN, call_exclude_dirs=None):
+    return native_grep_refusal(
+        backend,
+        plan=plan,
+        exclude_dir_names=[".git"],
+        call_exclude_dirs=call_exclude_dirs,
+        file_pattern=None,
+    )
+
+
+def test_refusal_names_the_missing_grep():
+    b = _Backend()
+    b.has_grep = False
+    assert _refusal(b) == "no_grep"
+
+
+def test_refusal_names_call_time_exclude_dirs():
+    assert _refusal(_ready(), call_exclude_dirs=["/work/vendor"]) == "exclude_dirs"
+
+
+def test_refusal_names_a_non_native_pattern():
+    assert _refusal(_ready(), plan=None) == "pattern_not_native"
+
+
+def test_no_refusal_when_the_recipe_is_available():
+    assert _refusal(_ready()) is None
+
+
+def test_timeout_is_a_named_failure_not_none():
+    b = _ready()
+    b._res.timed_out = True
+    res = _run(b)
+    assert res.failure == "native_timeout"
+    assert res.matches == []
+
+
+def test_exec_exception_is_a_named_failure():
+    class _Boom(_Backend):
+        def exec(self, cmd, timeout=None, env=None):
+            raise RuntimeError("no shell")
+
+    assert _run(_Boom()).failure == "native_error"
+
+
+def test_unparseable_output_is_a_named_failure():
+    assert _run(_Backend(stdout="garbage without separators\n")).failure == "native_error"
+
+
+def test_successful_run_has_no_failure():
+    res = _run(_Backend(stdout="/work/a.py:1:KEY\n"))
+    assert res.failure is None
+    assert [m["file"] for m in res.matches] == ["/work/a.py"]

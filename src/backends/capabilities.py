@@ -92,7 +92,7 @@ def probe_has_find(backend: "FsBackend") -> bool:
     """True only if the whole prune recipe runs, not just one of its flags.
 
     ``has_find`` exists to gate ``find -print0 | xargs -0 -r grep``
-    (``utils.native_fs_search.can_native_grep_content`` is its only consumer).
+    (``utils.native_fs_search.native_grep_refusal`` is its only consumer).
     GNU ``-printf`` is Harbor walk/listdir, not this recipe — requiring it
     would fail-closed a BSD find that can still run the pipeline.
     """

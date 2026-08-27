@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from backends.protocol import WalkOutputTooLargeError
 from config_modules.fs_tools import FsFindInFilesConfig
 from utils.find_in_files_scan_mode import (
     Needles,
@@ -192,7 +193,11 @@ class FindInFiles(AbstractSimpleTool):
                 f"Does not enter nested `.gc`, dirs named {skip}, or nested dot-dirs "
                 "(path itself is still searched if it is one of those). "
                 "Empty matches ≠ absent if the scan stopped early — check "
-                "scan_complete / stop_* / guidance."
+                "scan_complete / stop_* / guidance. "
+                "search_backend=grep ran inside the sandbox; python read each "
+                "candidate file from the host (fallback_reason says why). "
+                "stop_reason=output_capped: grep output hit the transport ceiling — "
+                "narrow pattern/path/file_pattern, not limit."
             ),
             # Copy: callers (inject_tool_fields) mutate parameters in place.
             "parameters": copy.deepcopy(cls._PARAM_SCHEMA),
@@ -218,6 +223,9 @@ class FindInFiles(AbstractSimpleTool):
             "no .gitignore. If path itself is a skipped-name dir, it is still searched.\n"
             "Empty matches ≠ proof the text is absent when the scan stops early — "
             "read scan_complete, stop_*, guidance; narrow path/file_pattern/pattern.\n"
+            "search_backend=grep ran inside the sandbox; python read each candidate "
+            "file from the host (fallback_reason says why). stop_reason=output_capped: "
+            "grep output hit the transport ceiling — narrow the query, not limit.\n"
         )
 
     @enforce_read_guard(path_arg="path")
@@ -656,6 +664,14 @@ class FindInFiles(AbstractSimpleTool):
         )
 
     @staticmethod
+    def _output_capped_guidance() -> str:
+        return (
+            "grep output hit the sandbox transport ceiling before the match limit: "
+            "the matches above are a prefix, not the full set. Raising limit cannot "
+            "help — narrow pattern, path or file_pattern instead."
+        )
+
+    @staticmethod
     def _match_limit_guidance(
         limit_eff: int,
         *,
@@ -900,6 +916,7 @@ class FindInFiles(AbstractSimpleTool):
             mode="file",
             effective_ci=effective_ci,
             search_backend="python",
+            fallback_reason="single_file",
         )
 
     # ------------------------------------------------------------------
@@ -1140,40 +1157,45 @@ class FindInFiles(AbstractSimpleTool):
         report_path: str,
         show_excluded_dirs: bool,
         rg_pass: Callable[[str], bool],
-    ) -> Optional[str]:
-        """Attempt native grep. None → continue Python path."""
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Attempt native grep → (response, None); (None, reason) → Python path.
+
+        The reason is the agent-facing ``fallback_reason``: the Python path reads
+        every candidate file from the host, so the switch is never silent.
+        """
         from utils.native_fs_search import (
-            can_native_grep_content,
             count_native_candidates,
             hard_exclude_names_for_grep,
+            native_grep_refusal,
             run_native_grep,
         )
         from utils.pattern_native_gate import is_grep_native_safe
 
         # Affix/complex open budgets and multi-hit regex semantics stay on Python.
         if pattern_mode in (PatternMode.AFFIX_OR, PatternMode.COMPLEX):
-            return None
+            return None, "pattern_not_native"
 
         # find prunes directories itself, so this path has no list of skipped
         # dirs to report. Answer such calls from the Python walk instead of
         # accepting the flag and dropping it.
         if show_excluded_dirs:
-            return None
+            return None, "show_excluded_dirs"
 
         plan = is_grep_native_safe(
             pattern, query_mode=query_mode, case_insensitive=effective_ci
         )
         exclude_names = hard_exclude_names_for_grep(config.exclude_dir_names)
         exclude_dot = True
-        if not can_native_grep_content(
+        refusal = native_grep_refusal(
             self._backend,
             plan=plan,
             exclude_dir_names=exclude_names,
             call_exclude_dirs=accepted_excludes,
             file_pattern=file_pattern,
             exclude_nested_dot_dirs=exclude_dot,
-        ):
-            return None
+        )
+        if refusal is not None:
+            return None, refusal
         assert plan is not None
 
         # Same candidate ceiling as Python path (scan automaton refuse).
@@ -1185,11 +1207,11 @@ class FindInFiles(AbstractSimpleTool):
             file_pattern=file_pattern,
         )
         if n is None:
-            return None
+            return None, "native_error"
         candidate_limit = self._candidate_limit_for_mode(pattern_mode, config)
         if n > candidate_limit:
             # Fall through to Python so refuse envelope/breakdown stay identical.
-            return None
+            return None, "candidate_limit"
 
         # Per-hit guard, memoized: one policy evaluation per file, not per hit.
         allowed_cache: Dict[str, bool] = {}
@@ -1213,14 +1235,8 @@ class FindInFiles(AbstractSimpleTool):
             is_dir_target=True,
             allow_path=_hit_allowed,
         )
-        if result is None:
-            return None
-
-        if result.hit_capture_cap and len(result.matches) < limit_eff:
-            # grep output was cut by the transport ceiling, not by the match
-            # limit: "match_limit / increase limit" would misname the cause and
-            # cannot help. Answer from the Python path instead.
-            return None
+        if result is None or result.failure:
+            return None, (result.failure if result is not None else "native_error")
 
         shown = result.matches
         for m in shown:
@@ -1230,6 +1246,30 @@ class FindInFiles(AbstractSimpleTool):
             m["context"] = clipped if clipped.endswith("\n") else clipped + "\n"
 
         count = len(shown)
+        if result.hit_capture_cap and count < limit_eff:
+            # grep output was cut by the transport ceiling, not by the match
+            # limit: "increase limit" cannot help, and a host-side rescan of
+            # every candidate is exactly the cost this path exists to avoid —
+            # report the prefix honestly instead.
+            return self._build_response(
+                matches=shown,
+                count=count,
+                stop_reason="output_capped",
+                guidance=self._output_capped_guidance(),
+                scan_complete=False,
+                more_matches_may_exist=True,
+                limit_requested=limit_requested,
+                limit_eff=limit_eff,
+                limit_capped=limit_capped,
+                path=report_path,
+                pattern=pattern,
+                query_mode=query_mode,
+                mode="dir",
+                effective_ci=effective_ci,
+                file_pattern=file_pattern,
+                exclude_dir_errors=exclude_soft_errors or None,
+                search_backend="grep",
+            ), None
         # Parity with Python path: count >= limit_eff → match_limit (A boundary).
         hit_limit = bool(result.truncated) or count >= limit_eff
         scan_complete = not hit_limit
@@ -1265,7 +1305,7 @@ class FindInFiles(AbstractSimpleTool):
             file_pattern=file_pattern,
             exclude_dir_errors=exclude_soft_errors or None,
             search_backend="grep",
-        )
+        ), None
 
     # ------------------------------------------------------------------
     # directory (§3 / §5 / §6)
@@ -1330,7 +1370,7 @@ class FindInFiles(AbstractSimpleTool):
             return True
 
         # --- native grep (gates) before Python pipeline ---
-        native_resp = self._try_native_grep_directory(
+        native_resp, fallback_reason = self._try_native_grep_directory(
             path=path,
             pattern=pattern,
             query_mode=query_mode,
@@ -1430,6 +1470,8 @@ class FindInFiles(AbstractSimpleTool):
 
                 depth = relpath.count("/") if relpath != "." else 0
                 candidates.append((abs_path, depth, relpath, fsize))
+        except WalkOutputTooLargeError as exc:
+            return self._error("walk_too_large", message=str(exc))
         except PermissionError as exc:
             return self._error("permission_denied", message=str(exc))
         except Exception as exc:
@@ -1466,6 +1508,7 @@ class FindInFiles(AbstractSimpleTool):
                 effective_ci=effective_ci,
                 file_pattern=file_pattern,
                 exclude_dir_errors=exclude_soft_errors or None,
+                fallback_reason=fallback_reason,
                 candidate_count=n,
                 candidate_limit=candidate_limit,
                 breakdown=breakdown,
@@ -1661,6 +1704,7 @@ class FindInFiles(AbstractSimpleTool):
                 else None
             ),
             search_backend="python",
+            fallback_reason=fallback_reason,
         )
 
     # ------------------------------------------------------------------
@@ -1719,6 +1763,7 @@ class FindInFiles(AbstractSimpleTool):
         excluded_dirs: Optional[List[Dict[str, str]]] = None,
         search_backend: Optional[str] = None,
         files_too_large: Optional[int] = None,
+        fallback_reason: Optional[str] = None,
     ) -> str:
         """Slim agent-facing payload (RESPONSE-CONTRACT). Omit-if-absent."""
         payload: Dict[str, Any] = {
@@ -1757,6 +1802,9 @@ class FindInFiles(AbstractSimpleTool):
             payload["files_too_large"] = files_too_large
         if search_backend is not None:
             payload["search_backend"] = search_backend
+        # Why the host-side Python path answered instead of in-sandbox grep.
+        if fallback_reason is not None:
+            payload["fallback_reason"] = fallback_reason
 
         # Refuse breakdown only (too_many_candidate_files).
         if stop_reason == "too_many_candidate_files":

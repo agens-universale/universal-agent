@@ -108,7 +108,7 @@ class FsBackend(ABC):
         """Usable ``find -print0 | xargs -0 -r grep`` wire (content search only).
 
         Gates exactly one thing — the native prune path in
-        ``can_native_grep_content``. Listing / by-name / walk go through
+        ``native_grep_refusal``. Listing / by-name / walk go through
         ``backend.walk`` / ``iter_walk`` and never consult this flag.
         """
         ov = self._cap_override("has_find")

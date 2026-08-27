@@ -8,6 +8,7 @@ import os
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from backends.protocol import WalkOutputTooLargeError
 from security.path_policy import resolve_tool_context, _extract_config_dict
 from security.read_guard import (
     ReadGuardViolation,
@@ -427,6 +428,11 @@ class FindFilesByName(AbstractSimpleTool):
                     truncated = True
                     stop_reason = "max_matches"
                     break
+        except WalkOutputTooLargeError as e:
+            return _result(
+                ok=False,
+                error={"type": "walk_too_large", "message": str(e)},
+            )
         except PermissionError as e:
             return _result(
                 ok=False,

@@ -34,9 +34,12 @@ class NativeGrepResult:
     truncated: bool
     hit_capture_cap: bool
     backend: str = "grep"
+    # Why the recipe could not answer (``native_error`` / ``native_timeout``);
+    # None on success. Callers fall back to the Python path and tell the agent.
+    failure: Optional[str] = None
 
 
-def can_native_grep_content(
+def native_grep_refusal(
     backend: Any,
     *,
     plan: Optional[NativeGrepPlan],
@@ -44,19 +47,24 @@ def can_native_grep_content(
     call_exclude_dirs: Optional[Sequence[str]],
     file_pattern: Optional[str],
     exclude_nested_dot_dirs: bool = True,
-) -> bool:
-    """Filters-in-recipe gate (I1–I4). Partial excludes → False."""
+) -> Optional[str]:
+    """Filters-in-recipe gate (I1–I4): why native cannot answer, None when it can.
+
+    The reason travels to the agent as ``fallback_reason`` — the Python path
+    reads every candidate file from the host, and silence would hide that cost.
+    Partial excludes → refuse.
+    """
     if plan is None:
-        return False
+        return "pattern_not_native"
     try:
         if not getattr(backend, "has_grep", False):
-            return False
+            return "no_grep"
     except Exception:
-        return False
+        return "no_grep"
 
     # Call-time abs excludes cannot be expressed as basename prune/--exclude-dir.
     if call_exclude_dirs:
-        return False
+        return "exclude_dirs"
 
     names = [n for n in (exclude_dir_names or []) if n]
     need_prune = bool(names) or bool(exclude_nested_dot_dirs)
@@ -64,23 +72,23 @@ def can_native_grep_content(
         # Express hard/nested-dot skips via find -prune (needs usable find).
         try:
             if not getattr(backend, "has_find", False):
-                return False
+                return "no_find"
         except Exception:
-            return False
+            return "no_find"
 
     if file_pattern is not None:
         if not is_safe_grep_include(file_pattern):
-            return False
+            return "file_pattern_not_native"
         # With find prune path we use find -name for include (no grep_include required).
         # Plain grep -R path still needs grep_include when no find prune.
         if not need_prune:
             try:
                 if not getattr(backend, "grep_include", False):
-                    return False
+                    return "no_grep_include"
             except Exception:
-                return False
+                return "no_grep_include"
 
-    return True
+    return None
 
 
 def parse_grep_match_lines(
@@ -270,13 +278,23 @@ def run_native_grep(
     report_path: Callable[[str], str],
     is_dir_target: bool,
     allow_path: Optional[Callable[[str], bool]] = None,
-) -> Optional[NativeGrepResult]:
-    """Execute grep recipe (optionally via find prune). None → Python fallback.
+) -> NativeGrepResult:
+    """Execute grep recipe (optionally via find prune).
+
+    Never answers with a silent ``None``: an anomaly (exception, timeout, odd
+    exit code, unparseable output) comes back as ``failure`` so the caller can
+    fall back to the Python path AND name the reason to the agent.
 
     ``allow_path``: optional per-hit path predicate owned by the caller (this
     module knows no policy). Applied BEFORE the ``max_matches`` cut — otherwise
     rejected hits eat the budget and accepted ones are silently dropped.
     """
+
+    def _failed(kind: str, *, hit_cap: bool = False) -> NativeGrepResult:
+        return NativeGrepResult(
+            matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind
+        )
+
     names = [n for n in exclude_dir_names if n]
     need_prune = is_dir_target and (bool(names) or exclude_nested_dot_dirs)
 
@@ -311,10 +329,10 @@ def run_native_grep(
             res = backend.exec_argv(argv, timeout=120, env=dict(_GREP_CLEAN_ENV))
     except Exception as exc:
         log.debug("native grep failed: %s", exc)
-        return None
+        return _failed("native_error")
 
     if getattr(res, "timed_out", False):
-        return None
+        return _failed("native_timeout")
 
     rc = res.return_code
     stdout = res.stdout or ""
@@ -325,20 +343,20 @@ def run_native_grep(
     if rc is not None and rc >= 2:
         # 123 from xargs: some invocations failed
         if rc not in (123,):
-            return None
+            return _failed("native_error", hit_cap=hit_cap)
         # still try parse if stdout looks clean
         if stderr.strip() and "Binary" not in stderr:
-            return None
+            return _failed("native_error", hit_cap=hit_cap)
 
     if rc == 1:
         if stderr.strip():
-            return None
+            return _failed("native_error", hit_cap=hit_cap)
         if stdout.strip():
-            return None
+            return _failed("native_error", hit_cap=hit_cap)
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
 
     if rc not in (0, 123, None):
-        return None
+        return _failed("native_error", hit_cap=hit_cap)
     if rc == 0 and not stdout.strip() and not hit_cap:
         # empty success — ok for xargs -r with zero files
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
@@ -364,7 +382,7 @@ def run_native_grep(
         report_path=report_path,
     )
     if parsed is None:
-        return None
+        return _failed("native_error", hit_cap=hit_cap)
 
     if allow_path is not None:
         parsed = [m for m in parsed if allow_path(m["file"])]

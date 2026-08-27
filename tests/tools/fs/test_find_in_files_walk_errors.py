@@ -46,7 +46,7 @@ def test_walk_output_too_large_keeps_its_actionable_message():
     data = _run(exc)
 
     assert data["ok"] is False
-    assert data["error"]["type"] == "unexpected_error"
+    assert data["error"]["type"] == "walk_too_large"
     assert "narrow the path" in data["error"]["message"]
 
 

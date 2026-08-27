@@ -2,6 +2,7 @@ import json
 import functools
 import os
 from typing import List, Dict, Any, Optional
+from backends.protocol import WalkOutputTooLargeError
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
@@ -283,6 +284,11 @@ Examples:
                     max_entries=scan_max_entries,
                     rg_cfg=_rg_cfg, rg_root=_rg_root, rg_extra=_rg_extra,
                 )
+        except WalkOutputTooLargeError as e:
+            return _result(
+                ok=False,
+                error={"type": "walk_too_large", "message": str(e)},
+            )
         except PermissionError as e:
             return _result(
                 ok=False,
@@ -347,6 +353,8 @@ Examples:
         """List only immediate children of the directory."""
         try:
             entries = self._backend.listdir(root_path)
+        except WalkOutputTooLargeError:
+            raise  # domain envelope (walk_too_large) is built by the caller
         except PermissionError:
             raise PermissionError(f"Permission denied: cannot list contents of '{root_path}'")
         except Exception as e:
