@@ -190,6 +190,14 @@ def test_release_last_stops_service(monkeypatch):
     monkeypatch.setattr(auto, "terminate_pid", lambda pid, **kw: killed.append(pid))
     monkeypatch.setattr(auto, "remove_pid", lambda name, pids_dir=None: None)
     monkeypatch.setattr(auto, "clear_agent_owned", lambda name: cleared.append(name))
+    # Без этой подмены тест читал НАСТОЯЩИЙ каталог lease на машине разработчика:
+    # release_voice_service перечитывает его перед самым гашением (autostart.py:114).
+    # Стоило держать открытым живой gc-ua — и его lease делал ветку «кто-то стартовал,
+    # пока мы шли гасить», terminate_pid не вызывался, тест падал. В одиночку и в
+    # наборе TUI проходил, в полном прогоне мигал: зависимость не от порядка тестов,
+    # а от состояния машины. Сосед test_release_rereads_leases_right_before_killing
+    # подменял live_leases с самого начала — здесь просто забыли.
+    monkeypatch.setattr(auto, "live_leases", lambda: [])   # других клиентов нет
     auto.release_voice_service()
     assert killed == [4242]
     assert cleared == ["speaches"]                 # пометка уходит вместе с сервисом
