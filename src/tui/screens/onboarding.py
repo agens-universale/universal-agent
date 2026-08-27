@@ -125,7 +125,7 @@ _FOOTER_URL_LIST_NO_MATCH = ("Enter — оставить свой адрес  ·
 _FOOTER_PRESET_LIST = ("↑↓ — выбор провайдера  ·  Enter — подставить  ·  Esc — свернуть"
                        "  ·  Ctrl+Space — проверить связь  ·  PgDn — далее")
 # Список раскрыт, но подсветки нет: в редакции канона 2026-08-18 печать без совпадений
-# СВОРАЧИВАЕТ список (`connection._PRESET_NO_MATCH_CLOSED`), так что состояние достижимо
+# СВОРАЧИВАЕТ список (`connection.PRESET_NO_MATCH_CLOSED`), так что состояние достижимо
 # только форсированным `Alt+↓` поверх своего адреса. Подставлять нечего (`pick()` вернёт
 # None), Enter лишь сворачивает список, оставляя набранное, — а вот ↑↓ работают: первая
 # же стрелка подсвечивает строку. Раз работают — обязаны быть названы (тот же сегмент
@@ -901,12 +901,16 @@ class OnboardingScreen(Screen):
         self._append_desc(t, desc)
         return t
 
-    def _append_desc(self, t: Text, desc: str) -> None:
+    def _append_desc(self, t: Text, desc: str, col: int | None = None) -> None:
         """Дописать приглушённое описание с выравниванием на колонку (приём — как
-        McpSectionEditor._row_text в /settings)."""
+        McpSectionEditor._row_text в /settings).
+
+        `col` — своя колонка шага, когда левые части там длиннее общей: строки
+        голосовых режимов считают её от пометки установки (`_voice_desc_col`).
+        Без аргумента работает общая `_DESC_COL` — второго дома у паддинга нет."""
         if not desc:
             return
-        pad = self._DESC_COL - t.cell_len
+        pad = (col or self._DESC_COL) - t.cell_len
         t.append(" " * pad if pad > 0 else "  ")
         t.append(desc, style=DEEP_DIM)
 
@@ -975,7 +979,7 @@ class OnboardingScreen(Screen):
             desc = f"{desc}; {_VOICE_LOCAL_DISK[installed]}"
         # Модель — во вторую строку, к остальной цене сервиса: в первой она уводила
         # строку за 128 колонок, и на узком окне описание обрывалось многоточием.
-        self._append_mcp_desc(t, desc, self._voice_desc_col(installed))
+        self._append_desc(t, desc, self._voice_desc_col(installed))
         return t
 
     def _voice_second_line(self, text: str, col: int) -> Static:

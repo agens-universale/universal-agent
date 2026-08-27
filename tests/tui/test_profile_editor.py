@@ -417,7 +417,7 @@ async def test_an_empty_profile_shows_its_own_empty_state(tmp_path, monkeypatch)
         assert ed._rows() == []
         assert not scr.query(ModelEditor)
         assert m._PROFILE_EMPTY_HINT in _texts(scr)
-        assert _footer(scr) == m._FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_EMPTY]
+        assert _footer(scr) == m.FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_EMPTY]
         await pilot.press("n")
         await pilot.pause()
         assert scr.query(ModelEntryForm), "вход в реестр из пустого состояния не работает"
@@ -636,23 +636,23 @@ async def test_the_editor_footer_leads_back_to_the_list(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
-        assert _footer(scr) == m._FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_ENTRY]
+        assert _footer(scr) == m.FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_ENTRY]
         _cursor_to(ed, "slot", level="light")
         scr._refresh_footer()
-        assert _footer(scr) == m._FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_SLOT]
+        assert _footer(scr) == m.FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_SLOT]
         _cursor_to(ed, "assign", consumer="*")
         scr._refresh_footer()
-        assert _footer(scr) == m._FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_ASSIGN]
+        assert _footer(scr) == m.FOOTERS_WITH_VIEW[m._FOOTER_PROFILE_ASSIGN]
 
 
 def test_the_way_back_is_named_one_way_everywhere():
     """Фолбэк футера (тело под-вида ещё не смонтировано — первый кадр) обещает
     возврат К СПИСКУ, а не «Esc — меню»: недостижимость обещания его правдой не
     делает. Формулировка при этом ОДНА на оба модуля — импорт, не копия."""
-    from tui.editors.models_section import _FOOTER_PROFILE_BACK
-    assert s._FOOTER_PROFILE_BACK is _FOOTER_PROFILE_BACK
-    assert "меню" not in s._FOOTER_PROFILE_BACK
-    assert m._FOOTER_PROFILE_ENTRY.endswith(s._FOOTER_PROFILE_BACK)
+    from tui.editors.models_section import FOOTER_PROFILE_BACK
+    assert s.FOOTER_PROFILE_BACK is FOOTER_PROFILE_BACK
+    assert "меню" not in s.FOOTER_PROFILE_BACK
+    assert m._FOOTER_PROFILE_ENTRY.endswith(s.FOOTER_PROFILE_BACK)
 
 
 def test_profile_footers_mirror_the_config_ones():

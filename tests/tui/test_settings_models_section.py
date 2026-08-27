@@ -1263,12 +1263,12 @@ def test_consumer_labels_reuse_the_transport_dictionary():
     """6 готовых подписей берутся ИЗ транспортного словаря, а не копируются в UI
     (копия разошлась бы с ним на первой же правке); свой UI-словарь — только для
     остальных: `auto_judge`, субагенты поимённо, wildcard."""
-    from utils.llm_chat_client import _CONSUMER_RU_LABEL
+    from utils.llm_chat_client import CONSUMER_RU_LABEL
     from tui.editors import models_section
     labels = models_section.consumer_labels()
-    for consumer, label in _CONSUMER_RU_LABEL.items():
+    for consumer, label in CONSUMER_RU_LABEL.items():
         assert labels[consumer] == label
-    assert not set(models_section._UI_CONSUMER_LABEL) & set(_CONSUMER_RU_LABEL)
+    assert not set(models_section._UI_CONSUMER_LABEL) & set(CONSUMER_RU_LABEL)
     assert set(labels) == set(models_section.assign_consumers())
 
 

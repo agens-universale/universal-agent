@@ -45,6 +45,9 @@ from pathlib import Path
 import yaml
 
 import onboarding_config_writer as ocw
+from config_modules.layers import (prospective_registry, stack_documents,
+                                   validate_config_text_with_sections,
+                                   validate_profile_text_with_sections)
 from config_modules.model_registry import LEVELS
 from config_modules.profiles import validate_profile_text
 
@@ -122,13 +125,11 @@ def _commit(target, text: str, is_profile: bool, label: str, stack_base=None) ->
     if is_profile and stack_base is None:
         validate = validate_profile_text
     elif is_profile:
-        from config import validate_profile_text_with_sections
 
         def validate(candidate: str) -> None:
             validate_profile_text_with_sections(
                 candidate, target=target, base_path=stack_base)
     else:
-        from config import validate_config_text_with_sections
 
         def validate(candidate: str) -> None:
             validate_config_text_with_sections(candidate, base_path=target)
@@ -433,7 +434,6 @@ def references_broken_by_removal(target, alias: str, *, stack_base=None) -> list
     через файлы у слоя записи нет, — и спросить «точно удалить?» значило бы пообещать
     то, чего не случится ни при каком ответе. То же действующее правило, что и для
     унаследованной записи, распространённое на другой слой."""
-    from config import stack_documents
     target_path = Path(target).resolve()
     others = [(path, document)
               for path, document in stack_documents(stack_base or target)
@@ -463,7 +463,6 @@ def needs_default_slot(target, ops, template: str, *, is_profile: bool = False,
     `stack_base` — как у `apply_registry_ops`. Не наложилось / реестр не собрался —
     `False`: справка не имеет права ронять форму, а невозможность записи всё равно
     поймает гейт своим отказом."""
-    from config import prospective_registry
     from config_modules.model_sections_validation import default_slot_required
     try:
         text = _apply_ops_to_text(_read(target), [tuple(op) for op in ops], template)

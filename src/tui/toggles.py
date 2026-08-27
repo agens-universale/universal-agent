@@ -124,7 +124,7 @@ class ToggleSpec:
 
 
 # --- /level: трек уровней, хинты из Router (спека §12.1) --------------------
-_LEVEL_ROLE_TEXT: Dict[str, str] = {
+LEVEL_ROLE_TEXT: Dict[str, str] = {
     "light": "быстрая и дешёвая: простые задачи",
     "default": "основная рабочая: повседневные задачи",
     "max": "самая сильная: сложные задачи",
@@ -149,7 +149,7 @@ def level_value_hint(app: Any, value: str) -> str:
         return f"{resolved.model} · --model: уровни отключены на этот запуск"
     if router.registry_empty():
         return f"{resolved.model} · легаси: уровни появятся с реестром моделей"
-    role = _LEVEL_ROLE_TEXT.get(value, "")
+    role = LEVEL_ROLE_TEXT.get(value, "")
     if resolved.source.startswith("фоллбэк "):
         chain = resolved.source[len("фоллбэк "):]
         return f"{resolved.alias} ({chain}) · {role}"

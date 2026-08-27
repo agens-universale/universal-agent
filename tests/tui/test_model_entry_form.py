@@ -1685,3 +1685,24 @@ async def test_a_failure_while_the_cursor_was_away_is_reported_on_return():
         from tui.editors.field_list import LIST_FAILED
         assert len(calls) == 1, "дребезг сломан: повторный запрос теми же параметрами"
         assert LIST_FAILED in str(form.query_one("#mef-model-status", Static).render())
+
+
+async def test_empty_server_answer_is_not_reported_as_a_failure():
+    """Сервер ОТВЕТИЛ пустым списком — это не сбой запроса.
+
+    Голосовая панель в той же ситуации говорит «сервер не вернул моделей»
+    (`field_list.LIST_EMPTY`), и состояние это заведено ровно затем, чтобы
+    отличать «с адресом и сетью всё в порядке, моделей там нет» от «не
+    достучались». Форма записи реестра валила оба случая в LIST_FAILED и
+    отправляла человека чинить связь, которая работает."""
+    from tui.editors.field_list import LIST_EMPTY
+    form = _form(initial=None, existing_aliases=set(), fetch=lambda *a, **k: [],
+                 effective_url="http://hub/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(4):
+            await pilot.pause()
+        assert str(form.query_one("#mef-model-status", Static).render()) == LIST_EMPTY

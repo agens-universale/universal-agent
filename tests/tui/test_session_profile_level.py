@@ -110,6 +110,29 @@ def test_switch_session_profile_remerges_effective_config(tmp_path):
     assert app.effective_config()["profile"] == "work"
 
 
+def test_switch_session_profile_signals_the_screen(tmp_path, monkeypatch):
+    """Смена профиля сессии обязана дойти до экрана — тем же сигналом, что и
+    перечитка конфига с диска.
+
+    Экран кэширует куски конфига один раз на секцию (голосовой flow строится на
+    voice-секцию), и без сигнала `/profiles work`, где в профиле своя секция
+    `voice`, оставлял бы Ctrl+T диктовать на ПРЕЖНИЙ endpoint: витрины и футер
+    профиль уже показывают, а голос молча идёт мимо. Сигнал один на оба пути —
+    `reload_config` и этот; отдельного канала для профиля не заводим."""
+    _write_work_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    seen = []
+
+    class _FakeMain:
+        def config_reloaded(self):
+            seen.append(True)
+
+    monkeypatch.setattr(type(app), "is_running", property(lambda self: True))
+    monkeypatch.setattr(app, "_main_screen", lambda: _FakeMain())
+    app.switch_session_profile("work")
+    assert seen == [True]
+
+
 def test_session_layer_stays_above_profile_in_both_directions(tmp_path):
     """§2, позиционное правило: сессия — ВЕРХНИЙ слой, а не снимок момента.
 

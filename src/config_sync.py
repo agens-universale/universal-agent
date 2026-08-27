@@ -146,8 +146,12 @@ def _verbatim_block(user_text: str, top_key: str) -> Optional[str]:
         return None
 
 
-def _prune_backups(backup_dir: Path, name: str, *, keep: int) -> None:
-    """Оставить последние `keep` бэкапов `<name>.bak-*`, старые удалить (bounded рост)."""
+def prune_backups(backup_dir: Path, name: str, *, keep: int = 10) -> None:
+    """Оставить последние `keep` бэкапов `<name>.bak-*`, старые удалить (bounded рост).
+
+    Публичная: конвенцию бэкапов держит этот модуль, и правило роста — её
+    часть. Зовут и сброс конфига, и удаление профиля из /settings; своя
+    редакция у второго и приводила к каталогу без предела."""
     baks = sorted(backup_dir.glob(name + ".bak-*"))
     for old in baks[:-keep]:
         try:
@@ -173,7 +177,7 @@ def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup = backup_dir / (path.name + f".bak-{ts}")
     shutil.copyfile(path, backup)
-    _prune_backups(backup_dir, path.name, keep=10)
+    prune_backups(backup_dir, path.name)
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
         tmp.write_text(template_text, encoding="utf-8")
@@ -283,7 +287,7 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup = backup_dir / (path.name + f".bak-{ts}")
     shutil.copyfile(path, backup)
-    _prune_backups(backup_dir, path.name, keep=10)
+    prune_backups(backup_dir, path.name)
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
         tmp.write_text(result, encoding="utf-8")

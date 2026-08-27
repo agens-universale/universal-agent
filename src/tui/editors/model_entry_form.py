@@ -41,10 +41,12 @@ from onboarding_fields import (
     NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
     URL_ERROR as _URL_ERROR,
 )
-from tui.editors.connection import _PRESET_NO_MATCH_CLOSED
+from tui.editors.connection import PRESET_NO_MATCH_CLOSED
 from tui.editors.field_list import (
+    LIST_EMPTY,
     LIST_FAILED,
     LIST_LOADING,
+    MODEL_RELOAD_HINT,
     FieldListController,
     write_field,
 )
@@ -61,9 +63,17 @@ from tui.widgets.paste_input import PasteInput
 # звать одно и то же состояние двумя разными словами нельзя.
 MODEL_LIST_HINT = "модели с сервера · печать — фильтр/свой id · Enter — подставить · Esc — свернуть"
 MODEL_LIST_HINT_NO_MATCH = "в списке такого нет · Enter — оставить свой id · Esc — свернуть"
-# Список ходит на сервер и раскрытым, и свёрнутым — поэтому «перечитать», а не
-# «показать» (`field_list.LIST_CLOSED_HINT` — вариант локального источника).
-MODEL_RELOAD_HINT = "Alt+↓ — перечитать список"
+
+def _list_outcome(models) -> str | None:
+    """Чем кончился поход за списком: строка состояния или None (всё хорошо).
+
+    `None` от загрузчика значит «не достучались» (исключение проглочено в
+    `_fetch_blocking`), пустой список — «сервер ответил, моделей нет». Состояния
+    разные, и слова у них разные — те же, что у голосовой панели."""
+    if models is None:
+        return LIST_FAILED
+    return LIST_EMPTY if not models else None
+
 
 _ALIAS_LABEL = "Алиас"
 _ALIAS_HINT = ("короткое имя записи — им пользуются слоты и привязки · "
@@ -229,10 +239,11 @@ class ModelEntryForm(Vertical):
         self._positions = ("mef-url", "mef-token", None, "mef-model", "mef-alias")
         self._idx = 0
         self._models: list = []
-        # Провалилась ли последняя загрузка. Пустой `_models` сам по себе двусмыслен —
-        # «ещё не ходили» и «сходили, не получилось» выглядят одинаково, а показать
-        # надо разное.
-        self._list_failed = False
+        # Чем кончилась последняя загрузка: None — не ходили или всё хорошо, иначе
+        # готовая строка состояния. Пустой `_models` сам по себе двусмыслен — «ещё не
+        # ходили», «сервер ответил пусто» и «не достучались» выглядят одинаково, а
+        # говорить о них надо разное (`field_list.LIST_FAILED` / `LIST_EMPTY`).
+        self._list_status = None
         # Ключ последней автоподгрузки — (url, auth), а не флаг «уже пробовали»:
         # ревизия владельца по смоку. Сбой при пустом токене, потом введённый
         # токен — вход в поле обязан сходить ЗАНОВО, флаг же держал форму на
@@ -640,12 +651,12 @@ class ModelEntryForm(Vertical):
                 if key != self._autoload_key:
                     self._autoload_key = key
                     self._start_models_fetch(refresh=False)
-                elif self._list_failed:
-                    # Этими же параметрами уже сходили и не получилось — пока курсор
-                    # был на другом поле, показать ошибку было негде. Дребезг загрузку
-                    # не повторит, и молчание читалось бы как «список ещё летит»:
+                elif self._list_status:
+                    # Этими же параметрами уже сходили — пока курсор был на другом
+                    # поле, сказать об исходе было негде. Дребезг загрузку не
+                    # повторит, и молчание читалось бы как «список ещё летит»:
                     # говорим то же, что сказали бы, останься курсор здесь.
-                    self._set_status(LIST_FAILED)
+                    self._set_status(self._list_status)
         else:
             # Счётчик/ошибка списка — про поле, с которого курсор ушёл: «2 модели»
             # под чужим полем не про что.
@@ -853,18 +864,18 @@ class ModelEntryForm(Vertical):
             # курсор пустым полем без объяснения — дребезг автоподгрузки повторить
             # загрузку теми же параметрами не даст.
             self._models = list(models or [])
-            self._list_failed = not models
+            self._list_status = _list_outcome(models)
             return
         if not models:
-            # Честная ошибка вместо молчания: сервер мог лежать, а клавиша выглядела
-            # бы мёртвой. Вписать id руками при этом никто не мешает.
+            # Исход вместо молчания: сервер мог лежать, а клавиша выглядела бы
+            # мёртвой. Вписать id руками при этом никто не мешает.
             self._models = []
-            self._list_failed = True
+            self._list_status = _list_outcome(models)
             self._list.close()
-            self._set_status(LIST_FAILED)
+            self._set_status(self._list_status)
             return
         self._models = list(models)
-        self._list_failed = False
+        self._list_status = None
         self._list.close()                   # прошлое раскрытие больше не наше
         self._list.open(forced=True, filter_text=self._model_value())
         n = len(self._models)
@@ -917,7 +928,7 @@ class ModelEntryForm(Vertical):
                 # но не молчим — строка под полем говорит, что совпадений не нашлось,
                 # и чем список вернуть. Раскрытым пустым он обещал бы «Enter —
                 # оставить свой адрес» там, где Enter сохраняет форму.
-                self._presets_ctrl.close(closed_hint=_PRESET_NO_MATCH_CLOSED)
+                self._presets_ctrl.close(closed_hint=PRESET_NO_MATCH_CLOSED)
             elif self._presets_ctrl.is_open:
                 self._presets_ctrl.apply_filter(value)
             else:

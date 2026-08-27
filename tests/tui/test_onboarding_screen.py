@@ -1160,7 +1160,7 @@ async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
     реально сработала на этом прогоне, а не осталась мёртвым кодом."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONFIRM, STEP_MCP
+    from tui.screens.onboarding import STEP_MCP, STEP_VOICE
     from voice_runtime import paths as vpaths
     calls = []
 
@@ -1176,7 +1176,7 @@ async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
         scr._goto(STEP_MCP); await pilot.pause()
         await pilot.press("pagedown")
         await pilot.pause()
-        assert scr._step_id() == STEP_CONFIRM
+        assert scr._step_id() == STEP_VOICE
         assert calls, "изоляция не сработала — voice_runtime.state обошёл подмену"
 
 
@@ -1382,17 +1382,18 @@ async def test_model_footer_marked_after_list_loads(tmp_path):
 async def test_mcp_space_toggles(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.screens.onboarding import STEP_CONFIRM, STEP_MCP
+    from tests.tui.test_onboarding_voice_step import FakeVoice
+    from tui.screens.onboarding import STEP_MCP, STEP_VOICE
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen()
+        scr = _screen(voice=FakeVoice())
         await pilot.app.push_screen(scr); await pilot.pause()
         scr._goto(STEP_MCP); await pilot.pause()
         await pilot.press("space")          # отметить первый (duckduckgo)
         await pilot.pause()
         assert "duckduckgo" in scr._mcp_selected
         await pilot.press("enter"); await pilot.pause()
-        assert scr._step_id() == STEP_CONFIRM
+        assert scr._step_id() == STEP_VOICE
 
 
 @pytest.mark.asyncio
@@ -2354,7 +2355,7 @@ def _screen_with_profiles_on_disk(tmp_path, **over):
 
 @pytest.mark.asyncio
 async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, monkeypatch):
-    """Полный проход: подключение → модель → уровень max → MCP → подтверждение.
+    """Полный проход: подключение → модель → уровень max → MCP → голос → подтверждение.
     Итог — валидный конфиг (та же двухфазная проверка, что у записи реестра)."""
     pytest.importorskip("textual")
     import yaml
@@ -2364,12 +2365,15 @@ async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, mo
     from tui.app import TuiApp
     from tui.editors.connection import ConnectionEditor
     from tui.editors.model import ModelEditor
-    from tui.screens.onboarding import STEP_CONFIRM, STEP_LEVELS, STEP_MCP, STEP_MODEL
+    from tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
+                                        STEP_MODEL, STEP_VOICE)
     from tests.tui.conftest import wait_until
+    from tests.tui.test_onboarding_voice_step import FakeVoice
     monkeypatch.chdir(tmp_path)
     committed = []
     cfg_path, scr = _screen_with_profiles_on_disk(
         tmp_path, on_commit=lambda: committed.append(True),
+        voice=FakeVoice(),
         fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True),
                                ModelInfo("Heavy", tool_capable=True)])
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2400,6 +2404,9 @@ async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, mo
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._step_id() == STEP_MCP
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert scr._step_id() == STEP_VOICE
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._step_id() == STEP_CONFIRM

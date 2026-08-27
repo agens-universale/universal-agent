@@ -17,7 +17,7 @@ from textual.widgets import Input, Rule, Static
 from rich.text import Text
 
 from tui.editors.field_list import LIST_CLOSED_HINT
-from tui.editors.models_section import _FOOTER_PROFILE_BACK
+from tui.editors.models_section import FOOTER_PROFILE_BACK
 from tui.editors.voice_endpoint import _MODEL_RELOAD_HINT, _URL_REQUIRED
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from tui.services.probe_presentation import connection_line_text
@@ -519,7 +519,7 @@ class SettingsScreen(Screen):
                 # `_FOOTER_READONLY` соврал бы про «Esc — меню».
                 ed = self._models_editor()
                 return (self._profile_footer(ed) if ed is not None
-                        else _FOOTER_PROFILE_BACK)
+                        else FOOTER_PROFILE_BACK)
             if self._profiles_name_prompt is not None:
                 return (_FOOTER_PROFILE_NAME_RENAME
                         if self._profiles_name_prompt["mode"] == "rename"
@@ -547,8 +547,8 @@ class SettingsScreen(Screen):
         footer = ed.footer_text()
         if not (ed.showing_list and self._file_view_settings().enabled):
             return footer
-        from tui.editors.models_section import _FOOTERS_WITH_VIEW
-        return _FOOTERS_WITH_VIEW.get(footer, footer)
+        from tui.editors.models_section import FOOTERS_WITH_VIEW
+        return FOOTERS_WITH_VIEW.get(footer, footer)
 
     def _file_view_settings(self):
         """Настройки встроенного просмотрщика — тем же фабричным методом и из того
@@ -1901,7 +1901,7 @@ class SettingsScreen(Screen):
         confirm = self._voice_confirm_text()
         if confirm:
             frame.mount(Static(Text(confirm, style=WARN),
-                               classes="set-confirm set-dyn set-voicehint"))
+                               classes=f"set-confirm set-dyn set-voicehint {KEEP_IN_VIEW}"))
         else:
             frame.mount(Static(self._voice_hint_text(s),
                                classes="set-hint set-dyn set-voicehint"))
@@ -2042,7 +2042,7 @@ class SettingsScreen(Screen):
         if not self._config_path:
             return None
         try:
-            from config_origin import origins, OVERLAY_LABELS
+            from config_origin import origins, overlay_label
             origin = origins(self._config_path, ["voice.url"])["voice.url"]
         except Exception:
             return None                  # диагностика не обязана ронять секцию
@@ -2050,8 +2050,12 @@ class SettingsScreen(Screen):
             return None
         if origin.overlay_kind == "managed" and self._voice_url_is_ours(origin.effective):
             return None
+        # Подпись строит `overlay_label`, а не сырой словарь: профильные значения в
+        # нём — ШАБЛОНЫ с `{name}`, и прямая подстановка печатала человеку
+        # «перекрыто профилем {name} (проектным)». Форматирование живёт в одной
+        # точке — там же, где соседние витрины («Подключение», запись реестра).
         return (f"⚠ действует {origin.effective} — "
-                f"перекрыто {OVERLAY_LABELS[origin.overlay_kind]}")
+                f"перекрыто {overlay_label(origin)}")
 
     def _voice_url_is_ours(self, url) -> bool:
         """Адрес ведёт на наш локальный сервис. Проверку не дублируем — зовём гейт
@@ -2193,7 +2197,12 @@ class SettingsScreen(Screen):
         confirm = self._voice_confirm_text()
         if confirm:
             w.update(Text(confirm, style=WARN))
-            w.set_classes("set-confirm set-dyn set-voicehint")
+            w.set_classes(f"set-confirm set-dyn set-voicehint {KEEP_IN_VIEW}")
+            # Тело секции не пересобирается — `reveal_focus` никто не позовёт, а
+            # вопрос садится ниже вьюпорта (тело длиннее рамки, и кадр мог уехать
+            # плашкой итога). Подводим разово сами, как `_singleton`: приоритет
+            # держит маркер выше, подводку заказывает тот, кто меняет виджет.
+            reveal(w)
         else:
             w.update(self._voice_hint_text())
             w.set_classes("set-hint set-dyn set-voicehint")
@@ -3796,6 +3805,11 @@ class SettingsScreen(Screen):
         except OSError as exc:
             self._rollback_profile_pointers(written, name, file_exc=exc, action="удалить")
             return
+        # Рост каталога ограничивает владелец конвенции — тем же числом, что и у
+        # бэкапов конфига. Своей редакции правила здесь не заводим: разошлась бы с
+        # обещанием readme на первой же правке одной из сторон.
+        from config_sync import prune_backups
+        prune_backups(backup.parent, path.name)
         if not self._reload_after_profile_file_change("удалено"):
             return
         self._profiles_idx = 0
@@ -3973,9 +3987,9 @@ class SettingsScreen(Screen):
             # имя не говорит, куда именно ляжет файл.
             return f"Enter — создать файл {self._profiles_base_root() / '<имя>.yml'}"
         if row["kind"] == "level":
-            from tui.toggles import _LEVEL_ROLE_TEXT
+            from tui.toggles import LEVEL_ROLE_TEXT
             level = str(self._config.get("level") or "default")
-            role = _LEVEL_ROLE_TEXT.get(level, "")
+            role = LEVEL_ROLE_TEXT.get(level, "")
             head = f"{level} — {role}" if role else level
             target = self._level_write_target()
             lines = [head, f"←/→/Enter — переключить (запись: {target})",
@@ -4376,8 +4390,8 @@ class SettingsScreen(Screen):
                 + self._PROFILE_OVERLAY_HINT_TAIL)
         if not self._file_view_settings().enabled:
             return hint
-        from tui.editors.models_section import _VIEW_KEY
-        return f"{hint} · {_VIEW_KEY}"
+        from tui.editors.models_section import VIEW_KEY
+        return f"{hint} · {VIEW_KEY}"
 
     def _refresh_profile_overlay(self) -> None:
         """Пересчитать превью оверлеев: и усечение — ПОСЛЕ layout-прохода, когда регион

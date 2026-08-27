@@ -62,7 +62,8 @@ def _assert_canon(scr, *, scroll_id, frame_id, footer_id):
         f"сторож проверяет переполнение, подберите более тесное окно")
 
 
-@pytest.mark.parametrize("section", ["Подключение", "Модели", "MCP-серверы",
+@pytest.mark.parametrize("section", ["Подключение", "Модели", "Профили",
+                                     "MCP-серверы", "Голосовой ввод",
                                      "Режимы работы", "Обновление"])
 async def test_settings_footer_survives_overflowing_section(tmp_path, section):
     from tui.app import TuiApp
@@ -394,3 +395,28 @@ async def test_canon_survives_live_resize(tmp_path, new_h):
             f"после ресайза 40→{new_h} футер за краем: {footer.region} ⊄ {scr.region}")
         assert scr.region.contains_region(scroll.region), (
             f"после ресайза 40→{new_h} рамка за краем: {scroll.region} ⊄ {scr.region}")
+
+
+async def test_voice_remove_confirm_is_pulled_into_view(tmp_path):
+    """Тот же канон у вопроса ГОЛОСОВОЙ секции — самой длинной на экране.
+
+    Кадр предварительно уводится вниз плашкой обновления движка: слот вопроса
+    обновляется НА МЕСТЕ (`_refresh_voice_hint`), минуя пересборку тела, и одного
+    родового маркера тут мало — подводку обязан заказать сам обновляющий. Без
+    этого футер менялся на «Enter — удалить», а вопрос стоял выше вьюпорта
+    (замерено: scroll_y=29, вопрос на y=-12) — ровно тот дефект, что уже чинили
+    у списка моделей и у подтверждения перезаписи ${ENV:VAR}. Секция пришла из
+    develop, где потолка рамки ещё не существовало."""
+    from tests.tui.test_settings_voice import LOCAL_OUTDATED, _mk_screen, _open_voice
+    from tui.app import TuiApp
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test(size=(80, 16)) as pilot:
+        scr, _fake = _mk_screen(tmp_path, LOCAL_OUTDATED)
+        await _open_voice(app, scr, pilot)
+        await pilot.press("ctrl+u")          # плашка итога уводит кадр в конец тела
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("delete")
+        await pilot.pause()
+        assert scr._voice_awaiting_remove, "предусловие: вопрос задан"
+        await _assert_revealed(pilot, scr, ".set-voicehint")

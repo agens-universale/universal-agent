@@ -417,6 +417,40 @@ async def test_delete_backs_the_file_up_and_names_the_path(tmp_path, monkeypatch
     assert str(backups[0]) in flash
 
 
+async def test_delete_keeps_only_the_last_backups(tmp_path, monkeypatch):
+    """Бэкапы профилей ограничены тем же числом, что и бэкапы конфига.
+
+    Конвенцию держит `config_sync` (`backups/<файл>.bak-<ts>`, keep=10), и правило
+    роста — её часть: экран переписал имя файла третьей редакцией, а обрезку не
+    позвал, и каталог рос бесконечно — единственное такое место в приложении, при
+    том что readme обещает «последние 10»."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    backups_dir = tmp_path / "base" / "profiles" / "backups"
+    backups_dir.mkdir(parents=True)
+    for i in range(12):                      # уже накопленные бэкапы прошлых удалений
+        (backups_dir / f"home.yml.bak-2026010{i % 10}-00000{i % 10}").write_text("x", encoding="utf-8")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "home")
+        await pilot.press("delete")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert not profile.exists()
+    kept = sorted(backups_dir.glob("home.yml.bak-*"))
+    assert len(kept) == 10, [p.name for p in kept]
+    # Свежий — среди оставшихся: обрезка снимает СТАРЫЕ, а не только что созданный.
+    assert any(p.read_text(encoding="utf-8") == _PROFILE_BODY for p in kept)
+
+
 async def test_delete_of_the_active_profile_clears_the_pointer(tmp_path, monkeypatch):
     """Удаление активного снимает указатель (`profile: ""`) — иначе конфиг
     ссылался бы на исчезнувший файл; баннер об этом предупреждает заранее."""

@@ -136,7 +136,7 @@ def test_the_inherited_row_footer_promises_neither_del_nor_enter():
     footer = m._FOOTER_PROFILE_BASE_ENTRY
     assert "Del" not in footer and "Enter" not in footer
     assert "n — добавить" in footer
-    assert m._FOOTERS_WITH_VIEW[footer].count("Enter") == 0
+    assert m.FOOTERS_WITH_VIEW[footer].count("Enter") == 0
 
 
 def test_the_file_viewer_key_is_promised_only_in_the_profile_sub_view():
@@ -150,13 +150,13 @@ def test_the_file_viewer_key_is_promised_only_in_the_profile_sub_view():
     — но слова обещания стоят рядом с остальными футерами секции, иначе их не
     видел бы ни один сборщик."""
     from tui.editors import models_section as m
-    promised = set(m._FOOTERS_WITH_VIEW.values())
+    promised = set(m.FOOTERS_WITH_VIEW.values())
     for name, value in _all_footer_strings().items():
-        if m._VIEW_KEY in value:
+        if m.VIEW_KEY in value:
             assert value in promised, f"{name}: обещает просмотр файла вне под-вида"
-    for base, viewed in m._FOOTERS_WITH_VIEW.items():
-        assert m._VIEW_KEY not in base
-        assert viewed.count(m._VIEW_KEY) == 1
+    for base, viewed in m.FOOTERS_WITH_VIEW.items():
+        assert m.VIEW_KEY not in base
+        assert viewed.count(m.VIEW_KEY) == 1
         assert viewed.endswith(m._EXIT_TO_LIST), viewed   # выход остаётся последним
 
 
@@ -552,12 +552,16 @@ def test_network_list_statuses_come_from_one_dictionary():
     дыру не закрыл бы — экраны точно так же разъехались бы на следующей правке одного
     из них. `model.LIST_LOADING is field_list.LIST_LOADING` доказывает, что имя в
     `model.py` — это импорт, а не повторное объявление."""
-    from tui.editors import field_list, model, voice_endpoint
+    from tui.editors import field_list, model, model_entry_form, voice_endpoint
     assert model.LIST_LOADING is field_list.LIST_LOADING
     assert model.LIST_FAILED is field_list.LIST_FAILED
     assert voice_endpoint.LIST_LOADING is field_list.LIST_LOADING
     assert voice_endpoint.LIST_FAILED is field_list.LIST_FAILED
     assert voice_endpoint.LIST_EMPTY is field_list.LIST_EMPTY
+    # Постоянная строка под полем со списком — тот же класс: у формы записи реестра и
+    # у голосовой панели она обязана быть ОДНОЙ (приезжали из двух объявлений).
+    assert model_entry_form.MODEL_RELOAD_HINT is field_list.MODEL_RELOAD_HINT
+    assert voice_endpoint._MODEL_RELOAD_HINT is field_list.MODEL_RELOAD_HINT
 
 
 def test_url_error_comes_from_one_dictionary():

@@ -3,7 +3,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-from tui.screens.onboarding import STEP_VOICE
+from tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
+                                    STEP_VOICE)
 
 
 class FakeVoice:
@@ -110,7 +111,7 @@ async def test_voice_step_local_confirm_shows_short_model(monkeypatch, tmp_path)
         await pilot.press("enter")                    # «Локальный сервис» — выбор
         await pilot.press("enter")                    # …и далее
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         body = str(screen.query(".onb-dyn").first().render())
         assert "локальный сервис · faster-whisper-small" in body
 
@@ -141,7 +142,7 @@ def test_mcp_step_footer_keeps_space_hint():
     from tui.screens.onboarding import OnboardingScreen
     scr = OnboardingScreen(config={}, config_path="X:/nope/config.yml", review_all=True,
                            on_commit=lambda: None)
-    scr._step = 2
+    scr._step = scr._steps.index(STEP_MCP)
     assert "Space — выбрать" in scr._footer_text()
 
 
@@ -163,7 +164,7 @@ async def test_voice_space_selects_stays_then_enter_advances(monkeypatch):
         assert any("(●) Локальный сервис" in t for t in texts)
         await pilot.press("enter")                    # выбор уже сделан → далее
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         assert screen._voice_choice == "local"
 
 
@@ -184,7 +185,7 @@ async def test_voice_pagedown_after_space_ignores_cursor_drift(monkeypatch):
         await pilot.pause()
         await pilot.press("pagedown")
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         assert screen._voice_choice == "local"          # не «skip» — курсор не при чём
 
 
@@ -230,7 +231,7 @@ async def test_voice_enter_marks_then_advances(monkeypatch):
         assert screen._step_id() == STEP_VOICE                       # пометили и остались
         await pilot.press("enter")
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
 
 
 @pytest.mark.asyncio
@@ -248,7 +249,7 @@ async def test_voice_pagedown_without_choice_takes_cursor_option(monkeypatch):
         await pilot.press("pagedown")
         await pilot.pause()
         assert screen._voice_choice == "skip"
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
 
 
 @pytest.mark.asyncio
@@ -349,7 +350,7 @@ async def test_voice_step_cloud_reveals_fields_and_confirm_line(monkeypatch):
         screen.query_one("#voice-model", Input).value = "wh-1"
         await pilot.press("enter")                   # submit полей → advance
         await pilot.pause()
-        assert screen._step == 4                     # подтверждение
+        assert screen._step_id() == STEP_CONFIRM                     # подтверждение
         assert screen._voice_choice == "cloud"
         body = str(screen.query(".onb-dyn").first().render())
         assert "endpoint stt.x" in body
@@ -370,7 +371,7 @@ async def test_commit_local_calls_switch_to_local(monkeypatch, tmp_path):
         await pilot.press("enter")                   # …и далее
         await pilot.pause()
         assert screen._voice_choice == "local"
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         monkeypatch.setattr(screen, "_commit_config", lambda: True)
         screen._commit()
         assert voice.calls == ["switch_to_local"]
@@ -396,13 +397,13 @@ async def test_pageup_after_cloud_confirm_not_stuck(monkeypatch):
         screen.query_one("#voice-model", Input).value = "wh-1"
         await pilot.press("enter")                   # submit полей → advance (confirm)
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         await pilot.press("pageup")
         await pilot.pause()
         assert screen._step_id() == STEP_VOICE                     # PgUp жив после cloud-полей
         await pilot.press("pageup")
         await pilot.pause()
-        assert screen._step == 2                     # и остаётся живым дальше
+        assert screen._step_id() == STEP_MCP                     # и остаётся живым дальше
 
 
 @pytest.mark.asyncio
@@ -421,10 +422,10 @@ async def test_pageup_from_live_cloud_fields_not_stuck(monkeypatch):
         await pilot.pause()
         await pilot.press("pageup")                   # назад прямо из живых полей
         await pilot.pause()
-        assert screen._step == 2
+        assert screen._step_id() == STEP_MCP
         await pilot.press("pageup")                   # каскад: ещё раз назад
         await pilot.pause()
-        assert screen._step == 1
+        assert screen._step_id() == STEP_LEVELS
 
 
 @pytest.mark.asyncio
@@ -541,7 +542,7 @@ async def test_voice_cloud_draft_survives_pageup(monkeypatch):
         screen.query_one("#voice-url", Input).value = "https://stt.x/v1/audio/transcriptions"
         await pilot.press("pageup")                  # назад на шаг MCP
         await pilot.pause()
-        assert screen._step == 2
+        assert screen._step_id() == STEP_MCP
         await pilot.press("pagedown")                # и снова вперёд
         await pilot.pause()
         assert screen._step_id() == STEP_VOICE
@@ -1275,7 +1276,7 @@ async def test_field_cursor_resets_with_the_group_on_leaving_the_step(monkeypatc
         screen.query_one("#voice-model", Input).value = "wh-1"
         await pilot.press("pagedown")                      # ушли со шага…
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         await pilot.press("pageup")                        # …и вернулись
         await pilot.pause()
         calls_before = len(voice.model_calls)
@@ -1303,7 +1304,7 @@ async def test_returning_to_the_step_starts_in_the_variants_group(tmp_path):
         assert scr._voice_cursor_group() == "fields"
         await pilot.press("pagedown")                      # далее — на подтверждение
         await pilot.pause()
-        assert scr._step == 4
+        assert scr._step_id() == STEP_CONFIRM
         await pilot.press("pageup")                        # и обратно на шаг голоса
         await pilot.pause()
         assert scr._step_id() == STEP_VOICE
@@ -1501,7 +1502,8 @@ async def _goto_voice_step(pilot, screen):
     """Как _to_voice_step, но ставит актуальный номер шага (STEP_VOICE): тот хелпер
     завязан на нумерацию ДО объединения шагов «Адрес»/«Авторизация» в «Подключение»
     и чинится отдельной задачей плана — здесь его не трогаем."""
-    from tui.screens.onboarding import STEP_VOICE
+    from tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
+                                    STEP_VOICE)
     await pilot.pause()
     screen._values["completions_url"] = "http://h:1/v1/chat/completions"
     screen._values["Authorization"] = ""
@@ -1690,7 +1692,8 @@ async def test_voice_step_prefill_noop_when_nothing_configured(tmp_path, monkeyp
     попадают в except Exception раньше, чем доходят до mode == "off"."""
     from tui.app import TuiApp
     from tui.services.voice_setup import VoiceStatus
-    from tui.screens.onboarding import STEP_VOICE
+    from tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
+                                    STEP_VOICE)
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()

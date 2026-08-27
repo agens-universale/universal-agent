@@ -150,7 +150,7 @@ _FOOTER_PROFILE_EMPTY = f"n — добавить запись · PgUp/PgDn — �
 # Тело под-вида ещё не смонтировано (первый кадр) — обещаем ровно то, что работает
 # без него. Экран берёт эту строку ОТСЮДА, а не пишет свою: «куда ведёт Esc»
 # формулируется в одном месте (импорт, не копия).
-_FOOTER_PROFILE_BACK = _EXIT_TO_LIST
+FOOTER_PROFILE_BACK = _EXIT_TO_LIST
 
 # --- просмотр файла профиля (§11a) --------------------------------------------
 #
@@ -159,7 +159,7 @@ _FOOTER_PROFILE_BACK = _EXIT_TO_LIST
 # ничего. Здесь живут только СЛОВА обещания — рядом с остальными строками футера
 # секции: перебор стражей смотрит в этот модуль, и обещание, написанное на стороне
 # экрана, осталось бы и без словаря клавиш, и без бюджета двух строк.
-_VIEW_KEY = "v — просмотр файла"
+VIEW_KEY = "v — просмотр файла"
 
 
 def _with_view_key(footer: str) -> str:
@@ -170,14 +170,14 @@ def _with_view_key(footer: str) -> str:
     head, sep, tail = footer.rpartition(f" · {_EXIT_TO_LIST}")
     if not sep or tail:
         raise ValueError(f"футер без хвоста «· {_EXIT_TO_LIST}»: {footer}")
-    return f"{head} · {_VIEW_KEY} · {_EXIT_TO_LIST}"
+    return f"{head} · {VIEW_KEY} · {_EXIT_TO_LIST}"
 
 
 # Словарь «футер под-вида → он же с обещанием `v`»: экран подменяет строку по нему,
 # когда просмотрщик доступен. Имя на `_FOOTER` — сборщик стражей перебирает и
 # словари, а бюджет двух строк обязан считаться именно для варианта, который
 # попадает на экран (он длиннее оригинала).
-_FOOTERS_WITH_VIEW = {
+FOOTERS_WITH_VIEW = {
     footer: _with_view_key(footer)
     for footer in (_FOOTER_PROFILE_ENTRY, _FOOTER_PROFILE_SLOT,
                    _FOOTER_PROFILE_ASSIGN, _FOOTER_PROFILE_ADD,
@@ -376,7 +376,7 @@ _INHERITED_LABEL = "основной"
 # как текущее состояние, а не как часть выбора.
 _ACTIVE_DESC_LEAD = "работает активным уровнем: сейчас "
 _SLOT_DEAD_HINT = "уровень не резолвится: задайте хотя бы один слот"
-# Подписи потребителей, которых НЕТ в транспортном словаре `_CONSUMER_RU_LABEL`
+# Подписи потребителей, которых НЕТ в транспортном словаре `CONSUMER_RU_LABEL`
 # (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
 # собственностью — здесь только UI-добавка (контракт п.2 волны B).
 #
@@ -426,8 +426,8 @@ def assign_consumers() -> list:
 def consumer_labels() -> dict:
     """Подпись каждой строки привязок: 6 готовых берутся ИЗ транспортного словаря
     (копия разошлась бы с ним на первой же правке), остальные — свои."""
-    from utils.llm_chat_client import _CONSUMER_RU_LABEL
-    labels = dict(_CONSUMER_RU_LABEL)
+    from utils.llm_chat_client import CONSUMER_RU_LABEL
+    labels = dict(CONSUMER_RU_LABEL)
     labels.update(_UI_CONSUMER_LABEL)
     for name in SUBAGENT_NAMES:
         # `.get`, а не индекс: новый субагент в коде появляется строкой сам — пусть
@@ -461,8 +461,8 @@ def inherited_value(value: str) -> str:
 def slot_head(level: str) -> str:
     """Голова строки слота — «уровень · роль» копирайтом §1 из ЕДИНОГО источника
     (`tui/toggles.py`, там же его берут хинты `/level`)."""
-    from tui.toggles import _LEVEL_ROLE_TEXT
-    return f"{level} · {_LEVEL_ROLE_TEXT.get(level, '')}"
+    from tui.toggles import LEVEL_ROLE_TEXT
+    return f"{level} · {LEVEL_ROLE_TEXT.get(level, '')}"
 
 
 def slot_head_text(level: str, width: int = 0) -> Text:

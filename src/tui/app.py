@@ -452,16 +452,24 @@ class TuiApp(App):
             self._circuit_breaker.reset()
         self._notice_profile_source_change(old_source)
         self._notice_boot_frozen_diff(old_effective, self.effective_config())
-        # Экран мог закэшировать куски конфига (голосовой flow строится один раз на
-        # voice-секцию) — без сигнала правка из /settings подействовала бы только со
-        # следующего запуска. Снимок mtime здесь больше не трогаем: одиночный
-        # `_config_mtime` сменился набором `_config_mtime_set`, его считает
-        # `_compute_mtime_set()` строкой выше.
-        if self.is_running:
-            main = self._main_screen()
-            if main is not None and hasattr(main, "config_reloaded"):
-                main.config_reloaded()
+        # Снимок mtime здесь больше не трогаем: одиночный `_config_mtime` сменился
+        # набором `_config_mtime_set`, его считает `_compute_mtime_set()` выше.
+        self._notify_screen_config_changed()
         self.invalidate_runner()
+
+    def _notify_screen_config_changed(self) -> None:
+        """Сказать главному экрану, что действующий конфиг сменился.
+
+        Экран кэширует куски конфига один раз на секцию (голосовой flow строится
+        на voice-секцию), поэтому сигнал обязателен КАЖДОМУ пути смены: и
+        перечитке с диска, и сессионному выбору профиля. Точка одна — иначе у
+        второго пути заводится свой канал и расходится с первым (сессионный
+        профиль со своей секцией `voice` оставлял Ctrl+T на прежнем endpoint)."""
+        if not self.is_running:
+            return
+        main = self._main_screen()
+        if main is not None and hasattr(main, "config_reloaded"):
+            main.config_reloaded()
 
     def reload_config_if_changed(self) -> None:
         """Гейт свежести окна: перечитать базу (reload_config), только если мтайм-набор
@@ -635,6 +643,7 @@ class TuiApp(App):
         old_effective = self.effective_config()
         self.apply_session_override("profile", name)
         self._notice_boot_frozen_diff(old_effective, self.effective_config())
+        self._notify_screen_config_changed()
         runner = self.active_runner
         live = runner is not None and runner.is_running()
         self.invalidate_runner()

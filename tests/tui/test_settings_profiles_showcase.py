@@ -518,6 +518,28 @@ async def test_settings_screen_shows_profile_overlay_label_no_keyerror(tmp_path,
         assert "перекрыто профилем work (проектным)" in body
 
 
+def test_voice_override_text_names_the_profile(tmp_path, monkeypatch):
+    """Тот же класс, что сторож «Подключения» выше, — но для строки честности
+    голосовой секции: подпись перекрывшего слоя строится ОДНОЙ функцией на весь
+    экран. Секция голоса пришла из develop с прямым обращением к словарю
+    `OVERLAY_LABELS`, где профильные значения — шаблоны, и печатала человеку
+    «перекрыто профилем {name} (проектным)». Проверяем результат, а не вызов:
+    подмена рендера обратно на словарь краснит именно этот assert."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      'profile: "work"\nvoice:\n  url: "http://base-voice/v1"\n'
+                      'agent:\n  model: "test-model"\n')
+    _write(project_dir / ".gc" / "profiles" / "work.yml",
+           'voice:\n  url: "http://profile-voice/v1"\n')
+
+    scr = _mk_screen(config={"profile": "work"}, config_path=base_cfg)
+    text = scr._voice_override_text()
+    assert text == ("⚠ действует http://profile-voice/v1 — "
+                    "перекрыто профилем work (проектным)")
+
+
 # --- /config: шапка профиль/уровень/модель + путь файла профиля ---
 
 async def test_config_screen_header_shows_profile_level_model(tmp_path, monkeypatch):

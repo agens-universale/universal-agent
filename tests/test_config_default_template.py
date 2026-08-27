@@ -68,6 +68,8 @@ EXPERT_ONLY_KEYS: set = {
     # лежит закомментированным — как образец формата (сторож этого —
     # test_default_presets_are_not_materialized_into_the_template).
     "endpoint_presets",
+    # Голосовой каталог — тот же класс и то же правило.
+    "voice_endpoint_presets",
     # --- agent: тюнинги finish gate / output storage ---
     # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
     "agent.finish_gate_max_iterations",

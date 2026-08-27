@@ -17,6 +17,7 @@ from onboarding_fields import (
     NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
     NO_AUTH_LABEL as _NO_AUTH_LABEL,
     NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
+    URL_EMPTY as _URL_EMPTY,
     URL_ERROR as _URL_ERROR,
 )
 from tui.editors.field_list import write_field
@@ -24,7 +25,6 @@ from tui.editors.preset_list import PRESET_HINT as _PRESET_HINT, preset_list_con
 from tui.palette import DEEP_DIM
 from tui.widgets.paste_input import PasteInput
 
-_URL_EMPTY = "введите адрес"
 _TOKEN_EMPTY = "введите токен"
 _TOKEN_PH_CREATE = "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"
 _TOKEN_PH_CLEARED = "токен очищен · будет удалён при сохранении"
@@ -33,7 +33,7 @@ _PRESET_HINT_EMPTY = "выберите провайдера или впишит�
 # Набранного нет в каталоге: список свёрнут (предлагать нечего), но молчать об этом —
 # значит оставить человека гадать, сработал ли фильтр. Клавиша названа та же, что и в
 # обычном свёрнутом состоянии: у `Enter` здесь ровно его всегдашний смысл — сохранить.
-_PRESET_NO_MATCH_CLOSED = "в списке такого нет · Alt+↓ — показать список"
+PRESET_NO_MATCH_CLOSED = "в списке такого нет · Alt+↓ — показать список"
 
 
 def _auth_active(header: str | None) -> int | None:
@@ -357,7 +357,7 @@ class ConnectionEditor(Vertical):
                 # оставить свой адрес» — выдуманное значение клавиши, которая везде
                 # сохраняет форму; заодно первое нажатие уходило на сворачивание,
                 # а не на переход дальше.
-                self._presets_ctrl.close(closed_hint=_PRESET_NO_MATCH_CLOSED)
+                self._presets_ctrl.close(closed_hint=PRESET_NO_MATCH_CLOSED)
                 return
             if self._presets_ctrl.is_open:
                 self._presets_ctrl.apply_filter(value)
