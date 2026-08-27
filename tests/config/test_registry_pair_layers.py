@@ -203,3 +203,49 @@ def test_weakened_transport_notice_reaches_the_startup_notices(isolated_cwd, tmp
     config_dict, _meta = load_config_ex(str(base))
     assert ("запись gc ослабляет защиту запроса, который идёт с общим токеном"
             in config_dict["compat_notices"])
+
+
+# --- ссылка ${ENV:…}, которая не подставилась, обязана называть себя ---
+
+
+def _pair_error(entry: dict, env: dict, monkeypatch) -> str:
+    """Вердикт правила пары для записи, прогнанной через резолвер, как это делает
+    загрузчик: сперва подстановка, потом проверка."""
+    from config_modules.env_interpolation import resolve_env_placeholders
+    from config_modules.model_registry import validate_registry_pairs
+
+    for name in ("PAIR_URL", "PAIR_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    raw = {"models": {"corp": dict(entry)}}
+    try:
+        validate_registry_pairs(resolve_env_placeholders(raw), source="config.yml",
+                                raw_source=raw)
+    except ValueError as exc:
+        return str(exc)
+    return ""
+
+
+def test_an_unresolved_reference_names_the_variable_not_the_config(monkeypatch):
+    """Запись с плейсхолдерами в обоих концах пары — ПРАВИЛЬНАЯ форма (docs §«Секреты»).
+    Пока переменные не экспортированы, ссылки схлопываются в "" и пара разваливается,
+    но винить конфиг за это нельзя: человек забыл export, а не ошибся в файле."""
+    error = _pair_error(
+        {"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"},
+        {}, monkeypatch)
+    assert "PAIR_URL" in error and "PAIR_TOKEN" in error, error
+    assert "задан свой токен, но не задан адрес" not in error, error
+
+
+def test_a_literal_violation_still_speaks_about_the_config(monkeypatch):
+    """Контроль: ссылок нет — прежний текст про пару остаётся, он там верен."""
+    error = _pair_error({"model": "m", "url": "https://h/v1"}, {}, monkeypatch)
+    assert "задан свой адрес, но не задан токен" in error, error
+
+
+def test_a_resolved_reference_is_judged_by_its_value(monkeypatch):
+    """Контроль: переменные заданы — пара цела, отказа нет."""
+    assert _pair_error(
+        {"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"},
+        {"PAIR_URL": "https://h/v1", "PAIR_TOKEN": "sk-1"}, monkeypatch) == ""

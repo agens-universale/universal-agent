@@ -478,8 +478,12 @@ def load_config_ex(
 
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
+    # Дорезолвный вид держим для отказа правила пары: после подстановки от `${ENV:X}`
+    # остаётся пустая строка, и назвать незаданную переменную уже нечем.
+    base_before_env = raw_config
     raw_config = resolve_env_placeholders(raw_config)
-    validate_registry_pairs(raw_config, source=str(base_path))
+    validate_registry_pairs(raw_config, source=str(base_path),
+                            raw_source=base_before_env)
 
     (raw_config, ref, active_name, roots, managed_path, project_path,
      managed_raw, _base_voice) = _merge_layers(

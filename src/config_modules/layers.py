@@ -90,8 +90,10 @@ def _merge_layers(
     if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
         with open(managed_path, "r", encoding="utf-8") as file:
             managed_raw = yaml.safe_load(file) or {}
+        managed_before_env = managed_raw
         managed_raw = resolve_env_placeholders(managed_raw)
-        validate_registry_pairs(managed_raw, source=str(managed_path))
+        validate_registry_pairs(managed_raw, source=str(managed_path),
+                                raw_source=managed_before_env)
         raw_config = deep_merge(raw_config, managed_raw)
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
@@ -99,8 +101,10 @@ def _merge_layers(
     if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
         with open(project_path, "r", encoding="utf-8") as file:
             project_raw = yaml.safe_load(file) or {}
+        project_before_env = project_raw
         project_raw = resolve_env_placeholders(project_raw)
-        validate_registry_pairs(project_raw, source=project_path)
+        validate_registry_pairs(project_raw, source=project_path,
+                                raw_source=project_before_env)
         raw_config = deep_merge(raw_config, project_raw)
 
     # Профиль (спека §3): указатель резолвится из пре-профильного мержа выше (ось 1,

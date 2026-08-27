@@ -107,7 +107,27 @@ def _pair_violation(label: str, has_address: bool, has_token: bool) -> str | Non
     return None
 
 
-def validate_registry_pairs(raw: dict, source: str = "") -> None:
+def _unresolved_pair_refs(entry) -> list[str]:
+    """Имена переменных, из-за которых поля СВЯЗИ записи оказались пустыми.
+
+    Смотрит ДОРЕЗОЛВНОЕ значение: после подстановки от `${ENV:X}` не остаётся ничего,
+    кроме пустой строки, и назвать причину уже нечем."""
+    from config_raw import missing_env_refs
+    if not isinstance(entry, dict):
+        return []
+    backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+    headers = (backend.get("chat_completion_headers")
+               if isinstance(backend.get("chat_completion_headers"), dict) else {})
+    names: list[str] = []
+    for value in (entry.get("url"), entry.get("token"), backend.get("completions_url"),
+                  backend.get("proxy"), headers.get("Authorization")):
+        for name in missing_env_refs(value):
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> None:
     """§3, точка B: проверка правила пары на СЫРОМ документе одного слоя, до слияния.
 
     Нужна отдельно от валидатора `ModelEntry`: слои сливаются `deep_merge` рекурсивно по
@@ -119,7 +139,14 @@ def validate_registry_pairs(raw: dict, source: str = "") -> None:
     применяется один раз, к итоговому документу. Определение пары — общее с точкой A
     (`connection_parts`): pre-write валидаторы гоняют только A, и разъехавшиеся
     определения дали бы записанный из Settings файл, который следующий старт отвергнет
-    здесь."""
+    здесь.
+
+    `raw_source` — ТОТ ЖЕ документ до подстановки `${ENV:…}`. Правило судит значения
+    ПОСЛЕ неё (решение владельца 2026-08-26, вариант Б), и незаданная переменная
+    честно ломает пару: конфиг без неё работать не может. Но винить за это конфиг
+    нельзя — человек забыл `export`, а не ошибся в файле, — поэтому причину называем
+    по дорезолвному виду. Без `raw_source` поведение прежнее: имя переменной в
+    подставленном значении не сохраняется, и выдумывать его нечестно."""
     models = (raw or {}).get("models")
     if not isinstance(models, dict):
         return
@@ -141,6 +168,15 @@ def validate_registry_pairs(raw: dict, source: str = "") -> None:
             ),
         )
         if problem:
+            names = _unresolved_pair_refs(
+                ((raw_source or {}).get("models") or {}).get(alias))
+            if names:
+                raise ValueError(
+                    f"{prefix}models.{alias}: не задана переменная окружения "
+                    f"{', '.join(names)} — ссылка ${{ENV:…}} подставилась пустой, и "
+                    "запись осталась без половины пары «адрес + токен». Экспортируйте "
+                    "переменную либо впишите значение в конфиг прямо"
+                )
             raise ValueError(problem)
 
 

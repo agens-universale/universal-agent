@@ -123,6 +123,11 @@ _PAIR_NEEDS_TOKEN = ("задан свой адрес, но не задан то�
                      "или отметьте «без авторизации»")
 _PAIR_NEEDS_URL = ("задан свой токен, но не задан адрес — укажите адрес "
                    "или верните наследование")
+# Пару разорвала не ошибка в полях, а ссылка, которая не подставится: сказать про
+# «не задан адрес» там, где человек забыл `export`, значит послать его искать
+# несуществующую опечатку.
+_PAIR_ENV_MISSING = ("переменная окружения {names} не задана — ссылка подставится "
+                     "пустой, и запись останется без половины пары «адрес + токен»")
 _TOKEN_LABEL = "Токен"
 # Слова клавиши — ОДНА константа на подпись поля и на футер секции (канон
 # `onboarding_fields.URL_ERROR`): списанные заново, они разойдутся на первой
@@ -168,13 +173,25 @@ def _resolved_for_request(url: str, auth: str | None) -> tuple[str, str | None]:
             resolve_env_placeholders(auth) if auth else auth)
 
 
-def _env_missing_line(url: str) -> str:
-    """Ссылка в адресе НЕ подставилась: резолв даст "", и стучаться в пустой адрес
-    нечестно — под визуально заполненным полем и проба, и список соврали бы «нет
-    соединения», как будто лежит сервер. Называем переменную (эталон —
-    `screens/onboarding._auto_probe`). Одна строка на обе сетевые клавиши: причина у них
-    общая, и разойдись они словами, одно и то же состояние читалось бы двумя."""
-    return f"⚠ {onboarding.display_value(url)}"
+def _env_missing_line(*raw_values: str | None) -> str:
+    """Первая из ссылок `${ENV:…}`, которая НЕ подставится, — строкой; "" — подставятся
+    все (запрос осмыслен, идём в сеть).
+
+    Резолв ненайденной переменной даёт "", и под визуально заполненным полем и проба, и
+    список соврали бы про сервер: пустой адрес читался бы как «нет соединения», пустой
+    ключ — как «✗ токен отклонён (401)». Гейт стоит на ОБОИХ концах связи: токенный
+    случай даже чаще адресного — `docs/configuration.md` сам толкает держать токен
+    ссылкой, а `profiles.find_literal_tokens` ругает литеральный. Называем переменную
+    (эталон — `screens/onboarding._auto_probe`).
+
+    Порядок аргументов = порядок проверки, и он не косметический: адрес идёт первым,
+    потому что без него запрос бессмыслен независимо от ключа. Одна строка на обе
+    сетевые клавиши и на оба конца: причина у них общая, и разойдись они словами, одно
+    и то же состояние читалось бы четырьмя."""
+    for raw in raw_values:
+        if onboarding.env_ref_status(raw) == onboarding.ENV_REF_MISSING:
+            return f"⚠ {onboarding.display_value(raw)}"
+    return ""
 
 
 class ModelEntryForm(Vertical):
@@ -357,6 +374,21 @@ class ModelEntryForm(Vertical):
             return _inherited(self._effective_url)
         return _ADDRESS_HINT
 
+    @staticmethod
+    def _as_validator_sees(value):
+        """Значение так, как его увидит валидатор конфига: `${ENV:…}` уже подставлены.
+
+        Правило пары судит РАСКРЫТОЕ значение (решение владельца 2026-08-26, вариант Б),
+        и форма обязана судить так же. Иначе одну и ту же запись стороны читают
+        по-разному: `url: ${ENV:X}` при незаданной переменной форма считала своим
+        адресом и требовала токен, а писатель видел пустую строку и требовал токен
+        УБРАТЬ — собрать такую запись было нельзя ни одним набором полей.
+
+        `None` (ключа нет) подстановка не трогает — «токена нет» и «токен пустой» этим
+        не путаются."""
+        from config_modules.env_interpolation import resolve_env_placeholders
+        return resolve_env_placeholders(value)
+
     def _pair_parts(self) -> tuple[bool, bool]:
         """Что запись задаёт СВОЕГО — (адрес, токен) — ядровым определением §2
         (`model_registry.connection_parts`), тем же, каким судит валидатор конфига.
@@ -365,7 +397,10 @@ class ModelEntryForm(Vertical):
         нетронутый токен записи остаётся в ней и без единой правки поля, а галка ● — это
         заданный `token: ""`, не «токена нет». Считать иначе значит разойтись с
         `submit()` — и молча записать то, что правило запрещает: снятая галка над
-        сохранённым `token: ""` УДАЛЯЕТ ключ, и пара при своём адресе теряет половину."""
+        сохранённым `token: ""` УДАЛЯЕТ ключ, и пара при своём адресе теряет половину.
+
+        Значения проходят через `_as_validator_sees`: в файл уезжает ссылка, а судится
+        то, во что она раскроется."""
         headers = self._backend0.get("chat_completion_headers") or {}
         if self._no_auth:
             token = ""
@@ -376,12 +411,30 @@ class ModelEntryForm(Vertical):
         else:
             token = self._token_current
         return connection_parts(
-            url=self._url_value(),
-            token=token,
-            completions_url=self._backend0.get("completions_url"),
-            proxy=self._backend0.get("proxy"),
-            authorization=headers.get("Authorization"),
+            url=self._as_validator_sees(self._url_value()),
+            token=self._as_validator_sees(token),
+            completions_url=self._as_validator_sees(
+                self._backend0.get("completions_url")),
+            proxy=self._as_validator_sees(self._backend0.get("proxy")),
+            authorization=self._as_validator_sees(headers.get("Authorization")),
         )
+
+    def _pair_env_missing(self) -> list[str]:
+        """Имена переменных, из-за которых половина пары окажется пустой.
+
+        Спрашивается по ДОРЕЗОЛВНЫМ значениям тех же пяти полей, что судит
+        `_pair_parts`: после подстановки от ссылки не остаётся ничего, кроме пустой
+        строки, и назвать причину уже нечем."""
+        from config_raw import missing_env_refs
+        headers = self._backend0.get("chat_completion_headers") or {}
+        names: list[str] = []
+        for value in (self._url_value(), self._token_value(), self._token_current,
+                      self._backend0.get("completions_url"),
+                      self._backend0.get("proxy"), headers.get("Authorization")):
+            for name in missing_env_refs(value):
+                if name not in names:
+                    names.append(name)
+        return names
 
     def _pair_in_backend(self) -> bool:
         """Пара (или её половина) задана ВТОРЫМ написанием — секцией `backend` записи.
@@ -392,9 +445,10 @@ class ModelEntryForm(Vertical):
         headers = self._backend0.get("chat_completion_headers") or {}
         return any(connection_parts(
             url="", token=None,
-            completions_url=self._backend0.get("completions_url"),
-            proxy=self._backend0.get("proxy"),
-            authorization=headers.get("Authorization"),
+            completions_url=self._as_validator_sees(
+                self._backend0.get("completions_url")),
+            proxy=self._as_validator_sees(self._backend0.get("proxy")),
+            authorization=self._as_validator_sees(headers.get("Authorization")),
         ))
 
     def _pair_returnable(self) -> bool:
@@ -824,8 +878,9 @@ class ModelEntryForm(Vertical):
         if not url:
             self._set_status(_LIST_NO_URL)
             return True
-        if onboarding.env_ref_status(url) == onboarding.ENV_REF_MISSING:
-            self._set_status(_env_missing_line(url))
+        env_missing = _env_missing_line(url, self._current_token_raw())
+        if env_missing:
+            self._set_status(env_missing)
             return True
         auth = self._current_auth_header()
         # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
@@ -991,6 +1046,23 @@ class ModelEntryForm(Vertical):
             return onboarding.authorization_header(self._token_current)
         return None
 
+    def _current_token_raw(self) -> str | None:
+        """СЫРОЙ токен, с которым уйдёт запрос, — тем же правилом, каким собирает
+        заголовок `_current_auth_header`: набранное в поле, иначе действующий свой
+        токен записи. Нужен гейту `${ENV:…}`: собранный заголовок называл бы
+        переменную вперемешку со схемой («Bearer ${ENV:X} · переменной нет»), а в
+        файле лежит и не подставляется именно ссылка.
+
+        УНАСЛЕДОВАННЫЙ токен сюда не попадает, и это не забывчивость: `effective_auth`
+        приезжает из УЖЕ РЕЗОЛВНУТОГО конфига (`settings._probe_args_from_config`
+        читает `self._config`, а не файл) — ссылки в нём физически нет, называть
+        нечего, и выдуманное имя переменной было бы хуже молчания. Гейт наследованной
+        половины возможен только вместе с сырым значением, приехавшим сюда с ней."""
+        if self._no_auth or not self.own_connection():
+            return None
+        return self._token_value() or (
+            self._token_current if self._own_token_active() else None)
+
     def probe_connection(self) -> bool:
         """`Ctrl+Space`: проверить связь по тем значениям, что стоят в полях СЕЙЧАС.
         Это ПРОБА, не подбор списка (контракт п.4).
@@ -1007,8 +1079,9 @@ class ModelEntryForm(Vertical):
         if not url:
             self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
             return True
-        if onboarding.env_ref_status(url) == onboarding.ENV_REF_MISSING:
-            self._set_probe_line(Text(_env_missing_line(url), style=WARN))
+        env_missing = _env_missing_line(url, self._current_token_raw())
+        if env_missing:
+            self._set_probe_line(Text(env_missing, style=WARN))
             return True
         auth = self._current_auth_header()
         model = self._model_value()
@@ -1209,10 +1282,15 @@ class ModelEntryForm(Vertical):
         # §2: своё подключение задаётся ЦЕЛИКОМ — половину пары форма не сохраняет.
         # Иначе отказ пришёл бы от валидатора конфига, когда правка уже сделана.
         has_address, has_token = self._pair_parts()
-        if has_address and not has_token:
-            return self._fail(_PAIR_NEEDS_TOKEN)
-        if has_token and not has_address:
-            return self._fail(_PAIR_NEEDS_URL)
+        if has_address != has_token:
+            names = self._pair_env_missing()
+            if names:
+                # Половину пары съела НЕПОДСТАВЛЕННАЯ ссылка, а не ошибка в полях:
+                # отправить человека искать опечатку там, где он забыл `export`, —
+                # худшее, что тут можно сказать. Тот же разбор делает валидатор
+                # загрузки (`model_registry.validate_registry_pairs`).
+                return self._fail(_PAIR_ENV_MISSING.format(names=", ".join(names)))
+            return self._fail(_PAIR_NEEDS_TOKEN if has_address else _PAIR_NEEDS_URL)
         self._clear_error()
         fields: dict = {}
         if values["model"]:

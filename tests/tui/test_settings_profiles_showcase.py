@@ -219,8 +219,12 @@ async def test_profiles_section_empty_state_shows_spec_text_and_level_row(tmp_pa
         body = " ".join(str(w.render()) for w in scr.query(".set-hint"))
         assert "Профиль — отдельный файл-конфиг" in body
         assert "переключаемый набор ЛЮБЫХ настроек" in body
-        assert "models" in body and "slots" in body
-        assert "~/.gc/profiles/<имя>.yml" in body
+        # Пустая секция — место для ОДНОГО действия: ни примера YAML, ни второго
+        # обещания клавиши, ни пути. Путь называет строка под списком и считает его
+        # от фактического корня; захардкоженный `~/.gc/...` врал при своём GC_HOME.
+        assert "models:" not in body and "slots:" not in body
+        assert "~/.gc/profiles" not in body
+        assert "клавишей n" not in body
         # строка уровня живёт и в пустом состоянии
         rows = _profiles_rows_text(scr)
         assert any("уровень модели по умолчанию" in l for l in rows)
@@ -304,6 +308,33 @@ async def test_activate_base_profile_redirects_to_project_when_project_sets_poin
         assert 'profile: "home"' in project_config.read_text(encoding="utf-8")
         # базовый — не тронут указателем чужого профиля
         assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_overlay_suffix_is_spaced_off_the_active_marker(tmp_path, monkeypatch):
+    """Профиль, который несёт ТОЛЬКО секции (без слотов), не слипается с маркером.
+
+    Отступ хвоста был привязан к наличию слотов, и у такого профиля пропадал —
+    строка читалась как «активен+voice» одним словом (живой смок владельца
+    2026-08-26). Профиль без слотов — обычный случай: секция `voice`, гварды,
+    лимиты меняются без переопределения моделей."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml",
+           "voice:\n  url: https://from-profile/v1/audio/transcriptions\n")
+
+    app = app_mod.TuiApp(config={**_base_dict(), "profile": "work"})
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config={**_base_dict(), "profile": "work"}, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        line = next(l for l in _profiles_rows_text(scr) if "work" in l)
+    assert "+voice" in line, line
+    assert "активен+voice" not in line, line
+    assert "активен   +voice" in line, line
 
 
 async def test_active_base_profile_selected_by_project_config_shows_marker_and_hint(tmp_path, monkeypatch):
@@ -537,7 +568,51 @@ def test_voice_override_text_names_the_profile(tmp_path, monkeypatch):
     scr = _mk_screen(config={"profile": "work"}, config_path=base_cfg)
     text = scr._voice_override_text()
     assert text == ("⚠ действует http://profile-voice/v1 — "
-                    "перекрыто профилем work (проектным)")
+                    "перекрыто профилем work (проектным); "
+                    "выбор режима ниже этого не изменит")
+
+
+async def test_voice_override_line_stands_above_both_modes(tmp_path, monkeypatch):
+    """Строка перекрытия — свойство ВСЕЙ секции, и стоит выше обоих вариантов.
+
+    Перекрывший слой бьёт оба режима: профиль ложится выше managed-слоя, в котором
+    живёт адрес локальной батарейки, — выбрав «Локальный сервис», человек всё равно
+    получит адрес профиля. Стоя ПОД вариантами, строка прилипала к соседнему и
+    читалась как его свойство (живой смок владельца 2026-08-26): курсор на
+    «Локальном сервисе» — предупреждение про чужой, казалось бы, адрес."""
+    import tui.app as app_mod
+    from tests.tui.conftest import open_settings_section
+    from tests.tui.test_settings_voice import CLOUD, FakeVoiceSetup
+    from tui.screens.settings import SettingsScreen
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      'profile: "work"\nvoice:\n  url: "http://base-voice/v1"\n'
+                      'agent:\n  model: "test-model"\n')
+    _write(project_dir / ".gc" / "profiles" / "work.yml",
+           'voice:\n  url: "http://profile-voice/v1"\n')
+
+    app = app_mod.TuiApp(config={"profile": "work", "voice": {}})
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config={"profile": "work", "voice": {}},
+                             config_path=str(base_cfg), on_apply=lambda: None,
+                             probe_fn=_fake_probe(), voice=FakeVoiceSetup(CLOUD))
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Голосовой ввод")
+        await pilot.pause()
+        widgets = list(scr.query("#set-frame > *"))
+        classes = [" ".join(w.classes) for w in widgets]
+        over = next(i for i, c in enumerate(classes) if "set-voiceoverride" in c)
+        rows = [i for i, c in enumerate(classes) if "set-voicerow" in c]
+        margin = widgets[over].styles.margin
+    assert rows, classes
+    assert over < rows[0], f"строка перекрытия должна стоять ВЫШЕ вариантов: {classes}"
+    # Воздух с ОБЕИХ сторон одним shorthand: вплотную к первой строке режима
+    # предупреждение снова читается как её свойство. Раздельный margin-bottom рядом с
+    # `.set-hint { margin-top: 1 }` Textual перетирает — сторож ловит и это.
+    assert (margin.top, margin.bottom) == (1, 1), margin
 
 
 # --- /config: шапка профиль/уровень/модель + путь файла профиля ---

@@ -2728,3 +2728,41 @@ async def test_wizard_reprobes_after_token_cleared(tmp_path):
         await pilot.pause()
         assert ed.token_cleared is True
         assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_review_levels_step_shows_the_levels_already_assigned(tmp_path):
+    """Тот же промах, что чинил `_effective_model` на шаге «Модель», — на под-форме
+    уровней: она читала ТОЛЬКО сессионные `_values`, и на повторном заходе все уровни
+    показывались «не задана», даже заданные в файле. Человек переназначал их заново, не
+    видя, что там уже стоит.
+
+    Показывается ЯВНО назначенный слот, а не резолв матрицей фоллбэков: незаданный
+    `max` работает моделью `default`, но написать против него её имя значило бы сказать
+    «уровень назначен» там, где он не назначен."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_LEVELS
+
+    cfg_path, cfg = _registry_cfg(tmp_path, "z-ai/glm-5.3", alias="glm-5.3")
+    import yaml
+    from config_modules.registry_write import apply_registry_ops
+    apply_registry_ops(cfg_path, [("upsert_model", "gemini", {"model": "google/gemini-3.7"}),
+                                  ("write_slot", "light", "gemini")], "")
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg,
+                      fetch=lambda *a, **k: [ModelInfo("z-ai/glm-5.3", tool_capable=True),
+                                             ModelInfo("google/gemini-3.7", tool_capable=True)])
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
+        rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
+        light = [r for r in rows if "light" in r]
+        assert light and "google/gemini-3.7" in light[0], f"назначенный light не назван: {rows}"
+        # max в файле НЕ задан — остаётся «не задана», а не именем модели фоллбэка:
+        # незаданный уровень работает моделью default, но назначенным от этого не стал
+        max_row = [r for r in rows if "max" in r]
+        assert max_row and "не задана" in max_row[0], max_row

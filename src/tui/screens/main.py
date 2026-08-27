@@ -1024,8 +1024,12 @@ class TraceScreen(Screen):
 
     def _voice_config(self) -> dict:
         """voice-секция + прокси агента: у голоса своего поля прокси нет, а в облако
-        он ходит по тем же правилам, что backend (копия — оригинал не трогаем)."""
-        cfg = getattr(self.app, "_config", None) or {}
+        он ходит по тем же правилам, что backend (копия — оригинал не трогаем).
+
+        Читаем из ЕДИНОЙ точки (`effective_config`), как витрины и сборка executor:
+        база `app._config` не знает про сессионный слой, и профиль, выбранный на
+        сессию, со своей секцией `voice` до диктовки бы не доехал."""
+        cfg = self.app.effective_config() or {}
         voice = dict(cfg.get("voice") or {})
         voice.setdefault("proxy", cfg.get("proxy"))
         return voice
@@ -1114,7 +1118,7 @@ class TraceScreen(Screen):
         Дёшево и без сети: `status_cheap` смотрит state.json и конфиг."""
         try:
             from tui.services.voice_setup import status_cheap
-            cfg = getattr(self.app, "_config", None) or {}
+            cfg = self.app.effective_config() or {}   # единая точка, как в _voice_config
             return status_cheap(cfg).mode == "local"
         except Exception:
             return False
@@ -1151,7 +1155,7 @@ class TraceScreen(Screen):
         """Поднять батарейку фоном. Запись не начинаем сами: холодный старт долгий, и
         человек за это время успевает уйти — зовём его обратно тостом."""
         self._voice_service_pending = True
-        cfg = getattr(self.app, "_config", None) or {}
+        cfg = self.app.effective_config() or {}   # единая точка, как в _voice_config
 
         def _work() -> None:
             from voice_runtime.autostart import ensure_voice_service

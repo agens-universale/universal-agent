@@ -337,6 +337,10 @@ def fit_mode_pairs(pairs: list[str], width: int) -> str:
     return " · ".join(out) + tail if out else "…"
 
 
+# Отступ хвоста строки профиля (слоты и секции-оверлеи) от колонки «● активен».
+_PROFILE_TAIL_GAP = 3
+
+
 def fit_overlay_suffix(names: list[str], width: int) -> str:
     """Суффикс секций-оверлеев профиля («+security+summary»), усечённый ЦЕЛЫМИ
     именами под `width` (тот же приём, что и `fit_mode_pairs`, но без разделителя
@@ -1888,6 +1892,12 @@ class SettingsScreen(Screen):
             self._voice_group = _VOICE_GROUP_VARIANTS
         frame.mount(Static(Text("Режим:", style=DEEP_DIM),
                            classes="set-info set-dyn set-spaced-gap"))
+        # Перекрытие — свойство ВСЕЙ секции, а не строки под курсором: профиль и
+        # project-слой ложатся выше managed, где живёт адрес локальной батарейки, и
+        # перебивают ОБА режима. Стоя под вариантами, строка прилипала к соседнему и
+        # читалась как его свойство (живой смок 2026-08-26): курсор на «Локальном
+        # сервисе» — предупреждение про адрес, который человек считает чужим.
+        self._mount_voice_override_hint(frame)
         highlight = self._voice_highlight_variants()
         for i in range(len(_VOICE_ROWS)):
             # Подсветка — строго по курсору (ушёл в поля — её нет ни у одной строки);
@@ -1895,7 +1905,6 @@ class SettingsScreen(Screen):
             cls = "set-row set-dyn set-spaced set-voicerow" + (
                 " selected" if i == self._voice_row and highlight else "")
             frame.mount(Static(self._voice_row_text(i, s), classes=cls))
-        self._mount_voice_override_hint(frame)
         # Один слот под курсором: подсказка строки ИЛИ confirm удаления — они сменяют
         # друг друга обновлением на месте (_refresh_voice_hint), без пересборки секции.
         confirm = self._voice_confirm_text()
@@ -2054,8 +2063,12 @@ class SettingsScreen(Screen):
         # нём — ШАБЛОНЫ с `{name}`, и прямая подстановка печатала человеку
         # «перекрыто профилем {name} (проектным)». Форматирование живёт в одной
         # точке — там же, где соседние витрины («Подключение», запись реестра).
+        # Хвост про режим — не украшение: перекрывший слой бьёт ОБА варианта, и без
+        # него человек читает строку как «проблема того ряда, что рядом» и
+        # рассчитывает уйти от неё переключением.
         return (f"⚠ действует {origin.effective} — "
-                f"перекрыто {overlay_label(origin)}")
+                f"перекрыто {overlay_label(origin)}; "
+                "выбор режима ниже этого не изменит")
 
     def _voice_url_is_ours(self, url) -> bool:
         """Адрес ведёт на наш локальный сервис. Проверку не дублируем — зовём гейт
@@ -2073,8 +2086,8 @@ class SettingsScreen(Screen):
 
     def _refresh_voice_override(self) -> None:
         """Перекрытие меняется вместе со слоями (установка/удаление местного сервиса
-        правят managed-оверлей) — строку заводим/обновляем/убираем НА МЕСТЕ, сразу за
-        строками режима; секцию для этого пересобирать не нужно."""
+        правят managed-оверлей) — строку заводим/обновляем/убираем НА МЕСТЕ, сразу
+        ПЕРЕД строками режима; секцию для этого пересобирать не нужно."""
         text = self._voice_override_text()
         # Виджет, УЖЕ помеченный на удаление (`_pruning`), существующим не считаем: он
         # ещё в дереве, но обречён — обновление исчезло бы вместе с ним (канон `_singleton`).
@@ -2090,7 +2103,7 @@ class SettingsScreen(Screen):
         if len(rows) != len(_VOICE_ROWS):
             return
         self.query_one("#set-frame", Vertical).mount(
-            Static(text, classes=_VOICE_OVERRIDE_CLASSES), after=rows[-1])
+            Static(text, classes=_VOICE_OVERRIDE_CLASSES), before=rows[0])
 
     def _voice_row_text(self, i: int, s) -> Text:
         """Строка режима в языке опций мастера (onboarding._voice_row_text): курсор ▸
@@ -3929,16 +3942,21 @@ class SettingsScreen(Screen):
         summary = self._profile_summary(ref.path)
         tail = ""
         if summary.slots:
-            tail += "   " + " · ".join(f"{lvl} {alias}" for lvl, alias in summary.slots.items())
+            tail += " · ".join(f"{lvl} {alias}" for lvl, alias in summary.slots.items())
         if summary.overlay_sections:
             width = self._profiles_row_width()
-            if width <= 0:
-                tail += "".join(f"+{n}" for n in summary.overlay_sections)
-            else:
-                budget = max(0, width - len(t.plain) - len(tail))
-                tail += fit_overlay_suffix(summary.overlay_sections, budget)
+            # Отступ от колонки маркера ставится ОДИН раз ниже, а не вместе со слотами:
+            # привязанный к ним, он пропадал у профиля, который несёт только секции —
+            # и суффикс слипался с маркером в «активен+voice» (живой смок 2026-08-26).
+            budget = (max(0, width - len(t.plain) - len(tail) - _PROFILE_TAIL_GAP)
+                      if width > 0 else 0)
+            if budget <= 0 and width > 0:
+                budget = 0
+            suffix = ("".join(f"+{n}" for n in summary.overlay_sections) if width <= 0
+                      else fit_overlay_suffix(summary.overlay_sections, budget))
+            tail += (" " if tail else "") + suffix
         if tail:
-            t.append(tail, style=DIM)
+            t.append(" " * _PROFILE_TAIL_GAP + tail, style=DIM)
         session_overrides = getattr(self.app, "_session_overrides", None) or {}
         session_name = session_overrides.get("profile")
         if session_name == name and session_name != config_active:
@@ -4030,22 +4048,17 @@ class SettingsScreen(Screen):
                 "Профиль — отдельный файл-конфиг: переключаемый набор ЛЮБЫХ "
                 "настроек — модели, уровни, гварды и любые другие секции конфига",
                 classes="set-hint set-dyn"))
-            frame.mount(Static(
-                "Создать — клавишей n; вручную — сохраните файл "
-                "~/.gc/profiles/<имя>.yml, например:",
-                classes="set-hint set-dyn"))
-            skeleton = (
-                "models:\n"
-                "  flash:\n"
-                "    url: https://openrouter.ai/api/v1/chat/completions\n"
-                "    token: sk-or-...\n"
-                "slots:\n"
-                "  default: flash\n"
-                "  light: flash"
-            )
-            frame.mount(Static(skeleton, classes="set-hint set-dyn", markup=False))
+            # Ни клавиши, ни пути здесь больше нет — оба уже названы, и точнее:
+            # клавишу обещает футер по позиции курсора (он стартует на
+            # строке-действии), полный путь — строка под списком, и она считает его
+            # от ФАКТИЧЕСКОГО корня профилей. Прежняя редакция звала «клавишей n»
+            # рядом с футерным «Enter» и печатала захардкоженный
+            # `~/.gc/profiles/...`, который врёт при своём GC_HOME и при запуске с
+            # `--config`. Пример YAML снят следом: пустая секция — место для одного
+            # действия, а не для справочника формата (он есть в
+            # docs/configuration.md и demo_profile.yml).
         # Цикл идёт и в пустом состоянии: там из строк-нелевелов остаётся одна
-        # «+ добавить профиль» — строка-действие под подсказкой-примером.
+        # «+ добавить профиль» — строка-действие под подсказкой о сути профиля.
         for i, row in enumerate(rows):
             if row["kind"] == "level":
                 continue
@@ -4179,8 +4192,8 @@ class SettingsScreen(Screen):
         frame.mount(Static("", classes="set-hint set-dyn set-profiles-overlay-hint",
                            markup=False))
         self._refresh_profile_overlay()
-        # Стек ОТКРЫТОГО профиля (None — открыт активный, его стек и есть runtime,
-        # либо стек не собрался). Всё, что описывает его подключение, берётся отсюда
+        # Стек ОТКРЫТОГО профиля (None — открыт активный: его стек и есть runtime).
+        # Всё, что описывает его подключение, берётся отсюда
         # одним куском: адрес с токеном для наследования и проб — и список пресетов
         # адреса, который профиль вправе переопределить тем же `endpoint_presets`.
         # Развести их значило бы чинить один случай правила и оставить второй.
@@ -4298,15 +4311,66 @@ class SettingsScreen(Screen):
 
         Представление готовое: тем же `load_config_ex(..., profile_override=...)`
         приложение собирает базу при сессионном переключении профиля
-        (`tui/app.py::_profile_remerge`)."""
+        (`tui/app.py::_profile_remerge`). Стек не собрался — отвечают ДОКУМЕНТЫ
+        (`_open_profile_connection_by_documents`), и в ответе тогда одно только
+        подключение: чужой runtime витрине не подходит ничем."""
         if not self._config_path or name == (self._config or {}).get("profile"):
             return None
         from config import load_config_ex
         try:
             cfg, _meta = load_config_ex(self._config_path, profile_override=name)
         except Exception:
-            return None
+            return self._open_profile_connection_by_documents(name)
         return cfg
+
+    def _open_profile_connection_by_documents(self, name: str) -> dict | None:
+        """Подключение открытого профиля по ДОКУМЕНТАМ: `backend` базы, поверх
+        которого лёг `backend` файла профиля (плюс `endpoint_presets` — их профиль
+        переопределяет тем же слоем). Только эти ключи, зато без полной загрузки.
+
+        Нужно потому, что собрать стек мешает ЛЮБАЯ его часть, а не подключение:
+        чаще всего — фаза 2, ссылочная целостность слотов на merged-реестре
+        («slots.default: моделей в реестре ≥2» у профиля со своими записями, но без
+        своих слотов, над базой с реестром). К адресу и токену тот отказ отношения
+        не имеет, а расплачивалась за него витрина: прежний `return None` уводил
+        `_mount_open_profile` на runtime, и строка чужого файла показывала адрес
+        АКТИВНОГО профиля, а Ctrl+Space стучался туда же его токеном — ровно та
+        ложь, от которой предостерегает докстринг выше.
+
+        Чужого профиля документный расчёт не видит ПО УСТРОЙСТВУ: читаются ровно
+        два файла — база и этот профиль. Нечитаемый профиль — `{}` от
+        `read_document`, то есть ответ одной базы; нечитаема и база — пусто, и это
+        честнее чужого адреса.
+
+        Скоуп тот же, что у тени базы (`_base_registry_snapshot`), с тем же
+        осознанным расхождением: managed-слой `~/.gc/config.local.yml` и проектный
+        `.gc/config.yml` в него не входят (быстрый путь их учитывает). Сентинелы
+        шаблона здесь не гасятся: значения уходят в `_probe_args_from_config`, где
+        это правило и живёт, — второй его реализации не заводим.
+
+        Типы значений проверяются: сюда приходят как раз документы, схему НЕ
+        прошедшие, и `completions_url: {}` из правленого руками YAML не должен
+        доезжать до пробы."""
+        from config_modules.env_interpolation import resolve_env_placeholders
+        from config_modules.merge import deep_merge
+        row = self._profile_row_by_name(name)
+        if row is None:
+            return None
+        merged = deep_merge(self._base_config_doc(),
+                            self._profile_document(row["ref"].path))
+        sections = resolve_env_placeholders(
+            {key: merged.get(key) for key in ("backend", "endpoint_presets")})
+        backend = sections.get("backend")
+        backend = backend if isinstance(backend, dict) else {}
+        url, headers = backend.get("completions_url"), backend.get("chat_completion_headers")
+        proxy = backend.get("proxy")
+        return {
+            "completions_url": url if isinstance(url, str) else "",
+            "chat_completion_headers": headers if isinstance(headers, dict) else {},
+            "use_ssl": backend.get("use_ssl", True),
+            "proxy": proxy if isinstance(proxy, str) else None,
+            "endpoint_presets": sections.get("endpoint_presets"),
+        }
 
     def _profile_document(self, path) -> dict:
         """Сырой документ профиля через кэш прохода — сосед `_profile_summary`:

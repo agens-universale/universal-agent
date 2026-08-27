@@ -248,10 +248,11 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) 
         if values:
             missing = onboarding.write_wizard_values(config_path, values)
             if missing:
-                # Запись идёт по правилу «всё или ничего», поэтому непустой список —
-                # это «файл не тронут», а не «часть полей пропущена» (канон 2026-08-20).
-                io.printer("\n  [ошибка] конфиг не записан: не нашлись поля "
-                           f"{', '.join(missing)} — впишите их вручную")
+                # Правило «всё или ничего» — про ПЛОСКУЮ запись; записи реестра ушли
+                # раньше отдельной транзакцией, поэтому файл уже не нетронут. Говорим
+                # о том, чего не хватает, а не о судьбе всего конфига.
+                io.printer("\n  [ошибка] не записаны поля: "
+                           f"{', '.join(missing)} — впишите их в конфиг вручную")
     except ValueError as exc:
         io.printer(f"\n  [ошибка] конфиг не записан: {exc}")
     except (KeyboardInterrupt, EOFError):

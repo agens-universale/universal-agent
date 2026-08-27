@@ -311,6 +311,33 @@ class OnboardingScreen(Screen):
             pass
         return "" if not name or name == onboarding.MODEL_SENTINEL else name
 
+    def _assigned_level_model(self, level: str) -> str:
+        """Провайдерский id модели, ЯВНО назначенной уровню в конфиге запуска, — или
+        пусто, если слот не задан.
+
+        Именно явный слот, а не резолв матрицей фоллбэков: незаданный `max` работает
+        моделью `default`, но написать против него её имя значило бы сказать «уровень
+        назначен» там, где он не назначен, — и следующий PgDn закрепил бы выдуманное.
+
+        Тот же промах, что чинил `_effective_model` на шаге «Модель», только этажом
+        ниже: под-форма уровней читала ТОЛЬКО сессионные `_values`, и на повторном
+        заходе все уровни показывались «не задана» — даже те, что стоят в файле.
+        Человек переназначал их заново, не видя, что там уже есть."""
+        config = self._config or {}
+        alias = (config.get("slots") or {}).get(level)
+        if not alias:
+            return ""
+        entry = (config.get("models") or {}).get(alias)
+        model = entry.get("model") if isinstance(entry, dict) else None
+        return model or alias
+
+    def _level_value(self, level: str) -> str:
+        """Что показать против уровня: набранное в этом прогоне мастера, иначе —
+        назначенное в конфиге. Один источник на список уровней и на его под-форму:
+        разойдясь, они показали бы одному человеку два разных ответа на один вопрос."""
+        return (self._values.get(onboarding.MODEL_SLOT_KEYS[level])
+                or self._assigned_level_model(level))
+
     def _shown_values(self) -> dict:
         """Чем витрины мастера (лента-сводка и подтверждение) заполняют то, чего
         человек сам не набрал, — резолвнутым конфигом запуска. При активном профиле
@@ -803,7 +830,7 @@ class OnboardingScreen(Screen):
         level = self._levels_stage
         body.mount(Static(_LEVEL_FORM_LABEL[level], classes="onb-hint onb-dyn", markup=False))
         endpoint, auth = self._endpoint_auth()
-        current = self._values.get(onboarding.MODEL_SLOT_KEYS[level], "")
+        current = self._level_value(level)
         # Тот же редактор, что на шаге «Модель», со своим id поля (иначе два поля с
         # одним id в одном дереве). url/токен не переспрашиваются — записи реестра
         # наследуют их от плоского подключения (решение 10 плана).
@@ -823,7 +850,7 @@ class OnboardingScreen(Screen):
         `/level` и слоты секции «Модели». Собирать её здесь заново значило бы
         показывать одну сущность на одном экране двумя способами."""
         from tui.editors.models_section import slot_head, slot_head_text
-        value = self._values.get(onboarding.MODEL_SLOT_KEYS[level], "")
+        value = self._level_value(level)
         width = max(len(slot_head(name)) for name in _LEVEL_ROWS) + 2
         t = Text()
         t.append("▸ " if is_cursor else "  ", style=ACCENT)
@@ -1540,11 +1567,13 @@ class OnboardingScreen(Screen):
             self.query_one("#onb-body", Static).update(f"✗ конфиг не записан: {exc}")
             return False
         if missing:
-            # Непустой список значит «файл НЕ тронут» (запись идёт «всё или ничего»).
-            # Прежде мы его игнорировали и рапортовали «✓ конфиг записан», хотя часть
-            # полей не сохранилась — находка ревью коллеги.
+            # Непустой список значит, что ПЛОСКАЯ запись не состоялась целиком
+            # («всё или ничего» — её правило). Записи реестра при этом уходят
+            # ОТДЕЛЬНОЙ транзакцией и первыми, поэтому обещать «конфиг не записан»
+            # нельзя: человек пошёл бы искать нетронутый файл, а там уже модели.
+            # Называем ровно то, чего не хватает.
             self.query_one("#onb-body", Static).update(
-                f"✗ конфиг не записан: не нашлись поля {', '.join(missing)}")
+                f"✗ не записаны поля: {', '.join(missing)} — впишите их в конфиг вручную")
             return False
         self.query_one("#onb-body", Static).update("✓ конфиг записан")
         return True

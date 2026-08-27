@@ -690,6 +690,20 @@ async def test_the_first_block_caption_stands_under_the_profile_title(tmp_path, 
 # --- наследование: адрес и токен — из подключения ОТКРЫТОГО профиля ---------------
 
 
+def _active_profile_runtime() -> dict:
+    """Runtime экрана, каким его собирает старт с АКТИВНЫМ профилем: свой адрес и
+    свой токен. Именно он подставлялся, когда стек ОТКРЫТОГО профиля не собрался, —
+    и именно ему нельзя попадать в витрину чужого файла."""
+    return {"completions_url": "https://active-profile/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer ACTIVE"},
+            "model": "test-model", "profile": "home"}
+
+
+# База со СВОЕЙ записью реестра: над ней реестр открытого профиля становится
+# двузначным, и фаза 2 (`slots.default`) на стеке профиля без слотов не сходится —
+# ровно тот живой стенд, на котором подключение подменялось чужим.
+_BASE_WITH_A_MODEL = _base_config_text("home") + "models:\n  base-main:\n    model: b\n"
+
 _CORP_PROFILE = ("backend:\n"
                  '  completions_url: "https://corp/v1/chat/completions"\n'
                  "  chat_completion_headers:\n"
@@ -722,6 +736,31 @@ async def test_an_open_profile_inherits_from_its_own_connection(tmp_path, monkey
         assert ed._effective_auth == "Bearer CORP"
 
 
+async def test_an_open_profile_keeps_its_connection_when_its_registry_does_not_resolve(
+        tmp_path, monkeypatch):
+    """Тот же профиль со своим `backend`, но своих слотов у него нет, а реестр над
+    базой с записью стал двузначным: ПОЛНЫЙ стек не собирается (фаза 2 требует
+    `slots.default`). К адресу и токену эта нехватка отношения не имеет.
+
+    Отказ реестра не даёт права подставить чужое подключение: строка записи
+    показывала бы адрес АКТИВНОГО профиля, Ctrl+Space стучался бы туда его же
+    токеном, а активация увела бы эту запись совсем на другой адрес."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _BASE_WITH_A_MODEL)
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "corp.yml", _CORP_PROFILE)
+
+    app = app_mod.TuiApp(config=_active_profile_runtime())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=_active_profile_runtime())
+        ed = await _open_profile(pilot, scr, "corp")
+        assert ed._effective_url == "https://corp/v1/chat/completions"
+        assert ed._effective_auth == "Bearer CORP"
+        assert ed._entry_address("m1") == "https://corp/v1/chat/completions"
+        assert "active-profile" not in _texts(scr)
+
+
 async def test_an_open_profile_without_its_own_connection_keeps_the_base_one(
         tmp_path, monkeypatch):
     """Контроль: своего `backend` у профиля нет — наследуется адрес основного
@@ -739,11 +778,12 @@ async def test_an_open_profile_without_its_own_connection_keeps_the_base_one(
         assert ed._effective_url == "http://host/v1/chat/completions"
 
 
-async def test_an_open_profile_that_cannot_be_stacked_falls_back_to_the_runtime(
+async def test_an_open_profile_that_cannot_be_stacked_falls_back_to_its_documents(
         tmp_path, monkeypatch):
     """Стек открытого профиля не собрался (файл — валидный YAML, но не проходит
-    схему): остаёмся на runtime, как было до этой правки. Отказ собрать стек — не
-    повод оставить редактор вовсе без адреса."""
+    схему): подключение считается по ДОКУМЕНТАМ. Своего `backend` у профиля нет —
+    значит адрес основного конфига, а не runtime с активным профилем: отказ собрать
+    стек не повод ни оставить редактор без адреса, ни выдать ему чужой."""
     import tui.app as app_mod
     _project(tmp_path, monkeypatch)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
@@ -751,11 +791,37 @@ async def test_an_open_profile_that_cannot_be_stacked_falls_back_to_the_runtime(
     _write(tmp_path / "base" / "profiles" / "corp.yml",
            "max_steps: не-число\nmodels:\n  m1:\n    model: x\n")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(config=_active_profile_runtime())
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg)
+        scr = await _profiles_screen(pilot, app, base_cfg, config=_active_profile_runtime())
         ed = await _open_profile(pilot, scr, "corp")
         assert ed._effective_url == "http://host/v1/chat/completions"
+        assert ed._effective_auth is None
+
+
+async def test_a_profile_whose_file_is_unreadable_never_lends_another_connection(
+        tmp_path, monkeypatch):
+    """Файл профиля нечитаем (битый YAML). Под-вид над ним не открывается вовсе —
+    гейт Enter отказывает, экран жив, — а если подключение всё же считают, отвечает
+    единственный прочитанный документ: основной конфиг. Чужого профиля в ответе нет
+    ни при каком состоянии файла: документный расчёт его попросту не видит."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _BASE_WITH_A_MODEL)
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "corp.yml", "backend: [не закрыт\n")
+
+    app = app_mod.TuiApp(config=_active_profile_runtime())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=_active_profile_runtime())
+        await _put_cursor(pilot, scr, "profile", "corp")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "не удалось прочитать файл профиля" in _notice(scr)
+        assert scr._profiles_open is None
+        endpoint, auth = scr._probe_args_from_config(scr._open_profile_config("corp"))[:2]
+        assert endpoint == "http://host/v1/chat/completions"
+        assert auth is None
 
 
 async def test_an_open_profile_names_the_level_that_is_really_acting(tmp_path, monkeypatch):

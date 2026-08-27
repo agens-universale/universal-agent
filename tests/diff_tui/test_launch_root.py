@@ -50,7 +50,7 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
         lambda _cfg: str(tmp_path / "threads"),
     )
     monkeypatch.setattr("config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
-    monkeypatch.setattr("config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("config_modules.env_vars.project_local_config_path", lambda: None)
     monkeypatch.setattr(
         "config_modules.env_vars.ensure_project_gc_dir",
         lambda: None,
@@ -112,7 +112,7 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
         lambda _cfg: str(tmp_path / "threads"),
     )
     monkeypatch.setattr("config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
-    monkeypatch.setattr("config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("config_modules.env_vars.project_local_config_path", lambda: None)
     monkeypatch.setattr(
         "config_modules.env_vars.ensure_project_gc_dir",
         lambda: None,

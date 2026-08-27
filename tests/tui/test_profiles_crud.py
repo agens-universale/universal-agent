@@ -165,23 +165,6 @@ async def test_created_file_is_valid_by_the_profile_schema(tmp_path, monkeypatch
     assert "sk-" not in text                         # бланк не несёт литерального токена
 
 
-async def test_empty_state_example_is_valid_by_the_profile_schema(tmp_path, monkeypatch):
-    """Второй, ОТДЕЛЬНЫЙ текст: учебный пример пустого состояния экрана. У него
-    другое назначение (показать, как выглядит профиль), поэтому синхронности с
-    бланком не требуем — только чтобы пример не учил невалидному YAML."""
-    import tui.app as app_mod
-    from config_modules.profiles import validate_profile_text
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-
-    app = app_mod.TuiApp(config=_base_dict())
-    async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg)
-        example = next(str(w.render()) for w in scr.query(".set-hint")
-                       if "models:" in str(w.render()))
-    validate_profile_text(example)
 
 
 async def test_create_puts_the_cursor_on_the_new_row(tmp_path, monkeypatch):

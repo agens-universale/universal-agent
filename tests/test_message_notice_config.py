@@ -149,7 +149,7 @@ project_memory:
 """,
         encoding="utf-8",
     )
-    monkeypatch.setattr("config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("config_modules.env_vars.project_local_config_path", lambda: None)
     monkeypatch.setattr("config._xdg_config_path", lambda: None)
     cfg = load_config(str(cfg_path))
     assert cfg["project_memory_check_interval_messages"] == 4

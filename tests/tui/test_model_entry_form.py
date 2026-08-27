@@ -1273,7 +1273,7 @@ async def test_malformed_url_is_rejected():
         assert "http(s)://" in str(form.query_one("#mef-error", Static).render())
 
 
-async def test_an_env_reference_in_the_address_is_not_a_malformed_url():
+async def test_an_env_reference_in_the_address_is_not_a_malformed_url(monkeypatch):
     """Форма получает СЫРОЙ документ (`models_section._read_document` →
     `config_raw.read_document`, «без резолва ${ENV:VAR}»), и `${ENV:VAR}` в адресе —
     штатная документированная форма (`docs/configuration.md`: пример
@@ -1284,6 +1284,8 @@ async def test_an_env_reference_in_the_address_is_not_a_malformed_url():
     правкой одного id модели: тупик с выходом только через ручную правку YAML. То же
     исключение, что у пробы мастера (`screens/onboarding`: `not _valid_endpoint_url(url)
     and not config_raw.env_refs(url)`)."""
+    monkeypatch.setenv("MEF_HUB", "https://hub/v1/chat/completions")
+    monkeypatch.setenv("MEF_TOK", "sk-hub")
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
                           "url": "${ENV:MEF_HUB}", "token": "${ENV:MEF_TOK}"},
                  existing_aliases={"flash"})
@@ -1294,11 +1296,18 @@ async def test_an_env_reference_in_the_address_is_not_a_malformed_url():
         assert (ok, alias) == (True, "flash"), str(
             form.query_one("#mef-error", Static).render())
         assert fields["url"] == "${ENV:MEF_HUB}"       # ссылка уезжает ссылкой
-        # Набрать плейсхолдер руками — тот же путь: проверка смотрит на ЗНАЧЕНИЕ, а не
-        # на то, трогали ли поле.
+        # Набрать плейсхолдер руками — тот же путь: структурная проверка смотрит на
+        # ЗНАЧЕНИЕ, а не на то, трогали ли поле. С ЗАДАННОЙ переменной сохраняется.
+        monkeypatch.setenv("MEF_OTHER", "https://other/v1/chat/completions")
         form.query_one("#mef-url", Input).value = "${ENV:MEF_OTHER}"
         await pilot.pause()
         assert form.submit()[0] is True, str(form.query_one("#mef-error", Static).render())
+        # А НЕзаданная разрывает пару — и отказ обязан назвать переменную, а не
+        # отправить человека искать опечатку в полях (решение владельца, вариант Б).
+        monkeypatch.delenv("MEF_OTHER", raising=False)
+        await pilot.pause()
+        assert form.submit()[0] is False
+        assert "MEF_OTHER" in str(form.query_one("#mef-error", Static).render())
 
 
 # --- Alt+↓ (подбор) и Ctrl+Space (проба) — РАЗНЫЕ клавиши -----------------------
@@ -1532,6 +1541,61 @@ async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(monkey
         assert calls == [], calls                      # в сеть не ходили
 
 
+async def test_a_missing_env_variable_in_the_token_stops_the_probe(monkeypatch):
+    """Тот же гейт на ВТОРОМ конце связи — и он важнее адресного: `docs/configuration.md`
+    сам толкает держать в `${ENV:…}` именно ТОКЕН, а `profiles.find_literal_tokens` в
+    рантайме ругает литеральный.
+
+    Незаданная переменная схлопывала ключ в пустой `Bearer `, differential-проба делала
+    ДВА сетевых вызова и выносила вердикт «✓ сервер доступен · ✗ токен отклонён (401)»:
+    форма винила токен там, где виновата ненайденная переменная, а пустой ключ при этом
+    улетал на живой сервер.
+
+    В строке — сама ССЫЛКА, а не собранный `_current_auth_header()`: «Bearer ${ENV:X} ·
+    переменной нет» называет переменную вперемешку со схемой."""
+    monkeypatch.delenv("MEF_NO_TOKEN", raising=False)
+    calls = []
+
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://hub/v1/chat/completions",
+                          "token": "${ENV:MEF_NO_TOKEN}"},
+                 existing_aliases={"flash"},
+                 probe=lambda *a, **k: calls.append(a) or ProbeResult(
+                     "ok", 200, None, 1, "доступен"))
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.probe_connection() is True
+        for _ in range(3):
+            await pilot.pause()
+        line = str(form.query_one("#mef-probe-line", Static).render())
+        assert "MEF_NO_TOKEN" in line and "переменной нет" in line, line
+        assert "Bearer" not in line, line              # ссылка, а не заголовок
+        assert calls == [], calls                      # в сеть не ходили
+
+
+async def test_a_missing_env_variable_in_the_token_stops_the_model_list(monkeypatch):
+    """То же для подбора списка: он уходит на эндпоинт САМ, простым переходом курсора
+    на поле id, — и уносил бы пустой ключ, отвечая «✗ не удалось получить список», как
+    будто дело в сервере."""
+    monkeypatch.delenv("MEF_NO_TOKEN", raising=False)
+    calls = []
+
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://hub/v1/chat/completions",
+                          "token": "${ENV:MEF_NO_TOKEN}"},
+                 existing_aliases={"flash"},
+                 fetch=lambda url, auth, **k: calls.append((url, auth)) or _models())
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        status = str(form.query_one("#mef-model-status", Static).render())
+        assert "MEF_NO_TOKEN" in status and "переменной нет" in status, status
+        assert calls == [], calls                      # в сеть не ходили
+
+
 # --- состояние наружу: хозяину нужен позиционный футер ---------------------------
 
 async def test_form_tells_the_host_where_the_cursor_is_and_what_is_open():
@@ -1685,6 +1749,41 @@ async def test_a_failure_while_the_cursor_was_away_is_reported_on_return():
         from tui.editors.field_list import LIST_FAILED
         assert len(calls) == 1, "дребезг сломан: повторный запрос теми же параметрами"
         assert LIST_FAILED in str(form.query_one("#mef-model-status", Static).render())
+
+
+async def test_a_dangling_env_reference_is_judged_as_the_validator_judges_it(monkeypatch):
+    """Правило пары судит РАСКРЫТОЕ значение (решение владельца 2026-08-26, вариант Б),
+    и форма обязана судить так же — её докстринг это и обещает.
+
+    Пока переменной нет, `${ENV:…}` в адресе для валидатора «своего адреса нет».
+    Форма же считала его своим и требовала токен, а писатель, увидев пустую строку,
+    требовал токен УБРАТЬ: запись не собиралась ни одним набором полей."""
+    monkeypatch.delenv("MEF_PAIR_URL", raising=False)
+    form = _form(initial={"alias": "corp", "model": "corp/model-x",
+                          "url": "${ENV:MEF_PAIR_URL}"},
+                 existing_aliases={"corp"})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-model", Input).value = "corp/model-y"
+        ok, alias, fields = form.submit()
+        assert (ok, alias) == (True, "corp"), str(
+            form.query_one("#mef-error", Static).render())
+        assert fields["url"] == "${ENV:MEF_PAIR_URL}", "в файл обязана уехать ССЫЛКА"
+
+
+async def test_a_resolved_env_reference_still_needs_its_half_of_the_pair(monkeypatch):
+    """Контроль той же монеты: переменная задана — адрес свой, и правило пары снова
+    требует токен. Иначе запись ушла бы на свой хост с общим ключом."""
+    monkeypatch.setenv("MEF_PAIR_URL", "https://corp/v1/chat/completions")
+    form = _form(initial={"alias": "corp", "model": "corp/model-x",
+                          "url": "${ENV:MEF_PAIR_URL}"},
+                 existing_aliases={"corp"})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-model", Input).value = "corp/model-y"
+        ok, _alias, _fields = form.submit()
+        assert ok is False
+        assert "не задан токен" in str(form.query_one("#mef-error", Static).render())
 
 
 async def test_empty_server_answer_is_not_reported_as_a_failure():

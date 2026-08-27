@@ -270,8 +270,8 @@ async def test_voice_flow_cache_dropped_on_config_hot_reload(monkeypatch, tmp_pa
     # Оверлеи машины (managed ~/.gc/config.local.yml с wire'нутым локальным сервисом,
     # project-local <cwd>/.gc/config.yml) не должны перекрывать конфиг теста — тот же
     # приём, что в tests/test_voice_config.py.
-    monkeypatch.setattr("config.managed_config_path", lambda: tmp_path / "no-managed.yml")
-    monkeypatch.setattr("config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: tmp_path / "no-managed.yml")
+    monkeypatch.setattr("config_modules.env_vars.project_local_config_path", lambda: None)
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
         "voice:\n  url: https://new.x/v1/audio/transcriptions\n  token: t2\n",
@@ -409,8 +409,8 @@ async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(
     from tui.app import TuiApp
 
     monkeypatch.setattr("voice.recorder.available", lambda: True)
-    monkeypatch.setattr("config.managed_config_path", lambda: tmp_path / "no-managed.yml")
-    monkeypatch.setattr("config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: tmp_path / "no-managed.yml")
+    monkeypatch.setattr("config_modules.env_vars.project_local_config_path", lambda: None)
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
         "voice:\n  url: https://new.x/v1/audio/transcriptions\n  token: t2\n",
@@ -438,3 +438,43 @@ async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(
         new = screen._ensure_voice_flow()
         assert new is not flow, "устаревший flow пережил запись"
         assert new._cfg["url"] == "https://new.x/v1/audio/transcriptions"
+
+
+@pytest.mark.asyncio
+async def test_voice_config_follows_the_session_profile(tmp_path, monkeypatch):
+    """Голос читает конфиг из ЕДИНОЙ точки — `effective_config()`, а не из базового
+    снимка `app._config`.
+
+    Профиль, выбранный на сессию (`/profiles work`), — верхний слой: витрины и
+    футер показывают его сразу. Голос же брал базу и с собственной секцией `voice`
+    в профиле продолжал бы диктовать на прежний endpoint — тот же класс, что
+    сигнал экрану при переключении профиля."""
+    pytest.importorskip("textual")
+    import yaml
+    from config import load_config_ex
+    from tui.app import TuiApp
+
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
+                        lambda: tmp_path / "no-managed.yml")
+    monkeypatch.setattr("config_modules.env_vars.project_local_config_path", lambda: None)
+    base = tmp_path / "config.yml"
+    base.write_text(yaml.safe_dump(
+        {"backend": {"completions_url": "http://h/v1/chat/completions"},
+         "agent": {"model": "M"},
+         "voice": dict(VOICE_CFG)}, allow_unicode=True), encoding="utf-8")
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text(
+        "voice:\n  url: https://from-profile/v1/audio/transcriptions\n  token: pt\n",
+        encoding="utf-8")
+
+    cfg, _meta = load_config_ex(str(base))
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app.set_config_path(str(base))
+    async with app.run_test() as pilot:
+        screen = pilot.app.screen
+        assert screen._voice_config()["url"] == VOICE_CFG["url"]   # предусловие
+        app.switch_session_profile("work")
+        await pilot.pause()
+        assert app.effective_config()["voice"]["url"] == \
+            "https://from-profile/v1/audio/transcriptions", "предусловие: профиль лёг"
+        assert screen._voice_config()["url"] == "https://from-profile/v1/audio/transcriptions"
