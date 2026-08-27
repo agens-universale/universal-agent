@@ -498,3 +498,26 @@ def test_show_excluded_dirs_keeps_the_walk_unpruned(tmp_path, monkeypatch):
     assert seen["prune_names"] == ()
     assert seen["prune_dot_dirs"] is False
     assert any(e["path"].endswith("node_modules") for e in data["excluded_dirs"])
+
+
+def test_missing_grep_is_named_before_a_non_native_pattern(tmp_path, monkeypatch):
+    """Без grep нативный путь невозможен в принципе — не предлагать агенту упрощать паттерн."""
+    (tmp_path / "a.py").write_text("foo_suffix", encoding="utf-8")
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch, has_grep=False)
+
+    data = _call(tool, tmp_path, pattern="(foo|bar)_suffix", query_mode="python-re")
+
+    assert data["search_backend"] == "python"
+    assert data["fallback_reason"] == "no_grep"
+
+
+def test_prefiltered_entries_respect_the_path_boundary(tmp_path):
+    root = tmp_path / "app"
+    sibling = tmp_path / "app2" / "x.py"
+    inside = root / "y.py"
+    tool = _tool(tmp_path)
+
+    rels = [e.rel for e in tool._prefiltered_entries(str(root), [str(sibling), str(inside)])]
+
+    assert rels == ["x.py", "y.py"]  # сосед с общим префиксом имени — не «2/x.py»

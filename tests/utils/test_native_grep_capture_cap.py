@@ -1,0 +1,65 @@
+"""Потолок захвата stdout режет вывод grep посреди строки — обрезанное совпадение не отдаём."""
+
+from utils.native_fs_search import run_native_grep
+from utils.pattern_native_gate import NativeGrepPlan
+
+PLAN = NativeGrepPlan(fixed=True, pattern="KEY", case_insensitive=False)
+
+
+class _Res:
+    def __init__(self, stdout, *, capped):
+        self.stdout = stdout
+        self.stderr = ""
+        self.return_code = 0
+        self.stdout_hit_capture_cap = capped
+        self.timed_out = False
+
+
+class _Backend:
+    def __init__(self, stdout, *, capped):
+        self._res = _Res(stdout, capped=capped)
+
+    def exec(self, cmd, timeout=None, env=None):
+        return self._res
+
+    def exec_argv(self, argv, timeout=None, env=None):
+        return self._res
+
+    def join(self, base, name):
+        return base.rstrip("/") + "/" + name
+
+    def isabs(self, p):
+        return p.startswith("/")
+
+
+def _run(stdout, *, capped):
+    return run_native_grep(
+        _Backend(stdout, capped=capped),
+        "/work",
+        PLAN,
+        exclude_dir_names=[],
+        exclude_nested_dot_dirs=False,
+        file_pattern=None,
+        max_matches=100,
+        report_path=lambda p: p,
+        is_dir_target=True,
+    )
+
+
+def test_capped_output_drops_the_cut_last_line():
+    res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = ", capped=True)
+    assert [(m["line"], m["line_content"]) for m in res.matches] == [(1, "KEY = 1")]
+    assert res.truncated is True
+    assert res.hit_capture_cap is True
+
+
+def test_capped_output_ending_on_a_newline_keeps_every_line():
+    res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = 2\n", capped=True)
+    assert [m["line"] for m in res.matches] == [1, 2]
+    assert res.truncated is True
+
+
+def test_uncapped_output_without_trailing_newline_is_complete():
+    res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = 2", capped=False)
+    assert [m["line"] for m in res.matches] == [1, 2]
+    assert res.truncated is False

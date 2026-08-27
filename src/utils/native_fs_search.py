@@ -301,6 +301,11 @@ def count_native_candidates(
 
 # Byte semantics for the prefilter: with LC_ALL=C ``grep -i`` folds ASCII only
 # (which is exactly what prefilter_terms allows) and BOM bytes are plain bytes.
+# Accepted gap: Python's re.IGNORECASE additionally folds KELVIN SIGN <-> k,
+# LONG S <-> s and dotless/dotted I <-> i, so a file that relies on those code
+# points could be dropped here. Code and configs never contain them, and the
+# native grep path has carried the same gap since it exists; folding the terms
+# for them would either disable the prefilter for most words or multiply terms.
 _PREFILTER_ENV = dict(_GREP_CLEAN_ENV, LC_ALL="C")
 # UTF-16 BOMs as POSIX printf octal escapes: the Python path decodes such files,
 # but their UTF-16 bytes never contain the needle's UTF-8 bytes — the BOM terms
@@ -314,6 +319,8 @@ def prefilter_terms(needles: Needles, *, case_insensitive: bool) -> Optional[Lis
     Sound only while grep sees the bytes Python would match: control characters
     cannot travel as ``-e`` terms, and ``grep -i`` folds non-ASCII by locale, so
     case-insensitive searches keep only ASCII terms (``LC_ALL=C`` folds ASCII).
+    The one accepted deviation is Python's special case folds of k/s/i to
+    KELVIN SIGN / LONG S / dotless-dotted I — see ``_PREFILTER_ENV``.
     """
     if needles.required_literal is not None:
         terms = [needles.required_literal]
@@ -508,6 +515,10 @@ def run_native_grep(
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
 
     lines = stdout.splitlines()
+    if hit_cap and lines and not stdout.endswith("\n"):
+        # The transport ceiling cut the stream mid-line: that last match is
+        # incomplete (or unparsable) — drop it rather than show a torn line.
+        lines = lines[:-1]
     truncated = False
     if allow_path is None:
         need = max_matches + 1

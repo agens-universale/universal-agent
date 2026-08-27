@@ -204,7 +204,7 @@ class FindInFiles(AbstractSimpleTool):
                 "stop_reason=output_capped: grep output hit the transport ceiling — "
                 "narrow pattern/path/file_pattern, not limit. "
                 "prefilter=grep: candidate files were picked inside the sandbox by a "
-                "fixed-string needle before any host read."
+                "fixed-string needle before any host read (ASCII case folding)."
             ),
             # Copy: callers (inject_tool_fields) mutate parameters in place.
             "parameters": copy.deepcopy(cls._PARAM_SCHEMA),
@@ -233,7 +233,8 @@ class FindInFiles(AbstractSimpleTool):
             "search_backend=grep ran inside the sandbox; python read each candidate "
             "file from the host (fallback_reason says why). stop_reason=output_capped: "
             "grep output hit the transport ceiling — narrow the query, not limit. "
-            "prefilter=grep: candidates were picked in the sandbox by a needle first.\n"
+            "prefilter=grep: candidates were picked in the sandbox by a needle first "
+            "(ASCII case folding).\n"
         )
 
     @enforce_read_guard(path_arg="path")
@@ -1201,8 +1202,11 @@ class FindInFiles(AbstractSimpleTool):
         root_n = backend.normpath(root).rstrip("/\\")
         for abs_path in abs_paths:
             abs_n = backend.normpath(abs_path)
-            if abs_n.startswith(root_n):
-                rel = abs_n[len(root_n):].lstrip("/\\")
+            if abs_n == root_n:
+                rel = "."
+            elif abs_n.startswith(root_n) and abs_n[len(root_n)] in "/\\":
+                # Separator boundary: a sibling sharing the name prefix is not inside.
+                rel = abs_n[len(root_n) + 1:]
             else:
                 rel = os.path.basename(abs_n)
             yield WalkEntry(rel or ".", False)
@@ -1238,6 +1242,15 @@ class FindInFiles(AbstractSimpleTool):
             run_native_grep,
         )
         from utils.pattern_native_gate import is_grep_native_safe
+
+        # No grep at all: native is impossible whatever the pattern — say that,
+        # not "pattern_not_native" (which invites the agent to simplify the pattern).
+        try:
+            has_grep = bool(getattr(self._backend, "has_grep", False))
+        except Exception:
+            has_grep = False
+        if not has_grep:
+            return None, "no_grep"
 
         # Affix/complex open budgets and multi-hit regex semantics stay on Python.
         if pattern_mode in (PatternMode.AFFIX_OR, PatternMode.COMPLEX):
@@ -1305,8 +1318,8 @@ class FindInFiles(AbstractSimpleTool):
             allow_path=_hit_allowed,
             exclude_paths=accepted_excludes,
         )
-        if result is None or result.failure:
-            return None, (result.failure if result is not None else "native_error")
+        if result.failure:
+            return None, result.failure
 
         shown = result.matches
         for m in shown:
