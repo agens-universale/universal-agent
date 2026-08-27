@@ -8,7 +8,11 @@ version = "0.3.1"
 description = "MCP server for reading and writing office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) with xlsx analytics"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.26.0",
+    # Верхняя граница обязательна: в mcp 2.0 убран `mcp.server.fastmcp`, а сервер
+    # импортирует именно оттуда FastMCP. Без неё pip ставит двойку (она
+    # удовлетворяет `>=1.26.0`), и рецепт падает на импорте — «нет соединения»
+    # в списке MCP при бодром «подключён» у менеджера (найдено 27.08.2026).
+    "mcp>=1.26.0,<2",
     "markitdown[pdf,docx,xlsx,xls,pptx]>=0.0.1",
     "uvicorn[standard]>=0.30.0",
     "python-json-logger>=2.0.0",

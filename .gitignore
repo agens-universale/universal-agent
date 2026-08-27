@@ -137,3 +137,10 @@ docs/tui/
 docs/2026-06-23-corp-mirror-config-overlay.md
 docs/CHANGES-vs-master.md
 snapshot_report.html
+
+# Локфайл uv в репозитории НЕ хранится: приложение уезжает во внутренний контур,
+# где свой реестр Python-пакетов, а lock пинит имена и хэши из публичного PyPI —
+# такой файл там не резолвится и мешает. Версии задают манифесты пакетов
+# (packages/*/pyproject.toml), они и есть источник правды. Локально uv создаёт
+# lock сам при первом `uv run`/`uv sync` — он просто не попадает в git.
+uv.lock
