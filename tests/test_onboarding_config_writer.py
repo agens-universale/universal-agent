@@ -143,6 +143,38 @@ def test_upsert_mapping_entry_into_bare_empty_anchor():
     assert "slots:\n  default: glm" in out
 
 
+def test_upsert_mapping_entry_refuses_non_empty_inline_mapping():
+    """Рукописный инлайновый мэппинг (`slots: {default: "flash"}`) переписать
+    построчно нечем — своих строк у записей там нет. Нормализация родителя в
+    блочную форму молча снесла бы соседей: валидный YAML, зелёный нотис,
+    потерянные данные. Отказ — тем же контрактом, что у `_drop_mapping_entry`."""
+    text = 'slots: {default: "flash"}\nmodels:\n  flash:\n    url: http://a\n'
+    with pytest.raises(ValueError, match="инлайновый мэппинг"):
+        w.upsert_mapping_entry(text, "slots", "light", ['light: "glm"'])
+    # Ключ, который в этом мэппинге ЕСТЬ, — тот же отказ: «замена» вышла бы
+    # переписыванием всей секции, а не одной записи.
+    with pytest.raises(ValueError, match="инлайновый мэппинг"):
+        w.upsert_mapping_entry(text, "slots", "default", ['default: "glm"'])
+
+
+def test_upsert_mapping_entry_into_empty_bracket_anchor_keeps_parent_trailing_comment():
+    """Нормализация `{}` в блочную форму переписывает СТРОКУ родителя — её
+    трейлинг-комментарий описывает секцию и обязан переехать вместе с ней."""
+    text = "models: {}   # реестр моделей\nslots:\n  default: glm\n"
+    out = w.upsert_mapping_entry(text, "models", "flash", ["flash:", "  url: http://b"])
+    assert "models:   # реестр моделей\n  flash:\n    url: http://b\n" in out
+
+
+def test_upsert_mapping_entry_uses_the_column_of_existing_siblings():
+    """Отступ новой записи задают УЖЕ ЛЕЖАЩИЕ соседи, а не хардкод «родитель+2»:
+    файл с 4-пробельным каноном иначе получал запись на чужой колонке — YAML
+    ломался (ParserError) либо запись вкладывалась внутрь соседней."""
+    text = 'models:\n    glm:\n        url: "http://a"\n'
+    out = w.upsert_mapping_entry(text, "models", "flash", ["flash:", '  url: "http://b"'])
+    assert yaml.safe_load(out)["models"] == {
+        "glm": {"url": "http://a"}, "flash": {"url": "http://b"}}
+
+
 def test_upsert_mapping_entry_missing_parent_raises_keyerror():
     with pytest.raises(KeyError):
         w.upsert_mapping_entry("backend:\n  url: x\n", "models", "flash",
@@ -228,6 +260,26 @@ def test_remove_mapping_entry_collapse_branch_preserves_next_top_level_comment()
     assert "backend:\n  url: http://b" in out
 
 
+def test_remove_mapping_entry_collapse_keeps_dangling_section_comment():
+    """Собственный комментарий записи уходит вместе с ней НАМЕРЕННО, а висячий
+    комментарий секции — не её: он описывает секцию и переживает схлопывание,
+    ровно как комментарий следующего топ-ключа."""
+    text = ("models:\n  # реестр заполняется формой\n\n  glm:\n    url: http://a\n"
+            "backend:\n  url: http://b\n")
+    out = w.remove_mapping_entry(text, "models", "glm")
+    assert "# реестр заполняется формой" in out
+    assert yaml.safe_load(out)["models"] == {}
+
+
+def test_remove_mapping_entry_collapse_keeps_parent_trailing_comment():
+    """Схлопывание переписывает строку родителя в `parent: {}` — её трейлинг-
+    комментарий описывает секцию, а не удаляемую запись."""
+    text = 'slots:   # уровни\n  default: "glm"\nbackend:\n  url: x\n'
+    out = w.remove_mapping_entry(text, "slots", "default")
+    assert "slots: {}   # уровни" in out
+    assert yaml.safe_load(out)["slots"] == {}
+
+
 def test_remove_mapping_entry_missing_entry_is_noop():
     text = "models:\n  glm:\n    url: http://a\n"
     assert w.remove_mapping_entry(text, "models", "flash") == text
@@ -278,6 +330,45 @@ def test_upsert_key_named_like_nested_field_not_confused():
     # добавилась НОВАЯ запись верхнего уровня, чужие поля model: целы
     assert out.count('    model: "') == 2       # вложенные поля обеих записей не тронуты
     assert '  model:\n' in out                  # новая запись-алиас
+
+
+# --- ключи, которые YAML разбирает НЕ побайтно (llama3:8b, '123', '*') --------
+# Писатель квотирует такие ключи (`"llama3:8b":`), а перечитывал регексом,
+# режущим строку по ПЕРВОМУ двоеточию: ключ `"llama3` не совпадал ни с чем —
+# upsert дописывал ещё один блок (PyYAML берёт последний, файл пух с каждым
+# сохранением), remove и переименование молча отказывали.
+
+_COLON_TEXT = (
+    "models:\n"
+    '  "llama3:8b":\n'
+    '    url: "http://a"\n'
+    "slots:\n"
+    '  default: "llama3:8b"\n'
+)
+
+
+def test_upsert_replaces_existing_entry_with_colon_in_key():
+    out = w.upsert_mapping_entry(
+        _COLON_TEXT, "models", '"llama3:8b"',
+        ['"llama3:8b":', '  url: "http://b"'])
+    assert out.count('  "llama3:8b":') == 1     # замена, а не второй блок
+    assert "http://b" in out and "http://a" not in out
+
+
+def test_remove_deletes_entry_with_colon_in_key():
+    out = w.remove_mapping_entry(_COLON_TEXT, "models", '"llama3:8b"')
+    assert '  "llama3:8b":' not in out
+    assert 'default: "llama3:8b"' in out        # слот (не models) не тронут
+
+
+def test_child_lookup_matches_key_by_yaml_value_not_by_quoting_style():
+    """Рукописные `'123'` и `'*'` — те же ключи, что писатель кладёт СВОИМИ
+    двойными кавычками: сравнение идёт по разобранному скаляру, не по байтам."""
+    out = w.remove_mapping_entry("models:\n  '123':\n    url: \"http://a\"\n",
+                                 "models", '"123"')
+    assert yaml.safe_load(out)["models"] == {}
+    wildcard = "assign:\n  subagents:\n    '*': \"glm\"\n"
+    assert w.remove_mapping_entry(wildcard, "assign.subagents", '"*"') != wildcard
 
 
 # --- ensure_section_anchor / create_profile_file / write_text -----------------

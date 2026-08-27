@@ -685,3 +685,154 @@ async def test_the_first_block_caption_stands_under_the_profile_title(tmp_path, 
         assert "запись:" in str(list(ed.children)[0].render())
         first_caption = str(list(ed.children)[1].render())
         assert "реестр" in first_caption and first_caption.startswith("▾")
+
+
+# --- наследование: адрес и токен — из подключения ОТКРЫТОГО профиля ---------------
+
+
+_CORP_PROFILE = ("backend:\n"
+                 '  completions_url: "https://corp/v1/chat/completions"\n'
+                 "  chat_completion_headers:\n"
+                 '    Authorization: "Bearer CORP"\n'
+                 "models:\n"
+                 "  m1:\n"
+                 '    model: "x"\n')
+
+
+async def test_an_open_profile_inherits_from_its_own_connection(tmp_path, monkeypatch):
+    """Профиль со своим `backend`, открытый при ДРУГОМ активном: и витрина его
+    собственной записи, и проба формы обязаны говорить про адрес с токеном ЭТОГО
+    файла — при активации роутер уведёт запись ровно туда.
+
+    Runtime экрана здесь не годится ровно по той же причине, по которой не годится
+    тень базы (`_base_registry_snapshot`): он собран с УЖЕ АКТИВНЫМ профилем, и
+    строка чужого файла показывала бы «наследуется: <адрес активного>», а Ctrl+Space
+    стучался бы туда же — чужим токеном."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "corp.yml", _CORP_PROFILE)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "corp")
+        assert ed._effective_url == "https://corp/v1/chat/completions"
+        assert ed._effective_auth == "Bearer CORP"
+
+
+async def test_an_open_profile_without_its_own_connection_keeps_the_base_one(
+        tmp_path, monkeypatch):
+    """Контроль: своего `backend` у профиля нет — наследуется адрес основного
+    конфига, как и раньше. Стек профиля не имеет права ничего «терять»."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "corp.yml", "models:\n  m1:\n    model: x\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "corp")
+        assert ed._effective_url == "http://host/v1/chat/completions"
+
+
+async def test_an_open_profile_that_cannot_be_stacked_falls_back_to_the_runtime(
+        tmp_path, monkeypatch):
+    """Стек открытого профиля не собрался (файл — валидный YAML, но не проходит
+    схему): остаёмся на runtime, как было до этой правки. Отказ собрать стек — не
+    повод оставить редактор вовсе без адреса."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "corp.yml",
+           "max_steps: не-число\nmodels:\n  m1:\n    model: x\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "corp")
+        assert ed._effective_url == "http://host/v1/chat/completions"
+
+
+async def test_an_open_profile_names_the_level_that_is_really_acting(tmp_path, monkeypatch):
+    """Та же поправка, что и у секции «Модели»: пикер привязок под-вида обещает
+    «работает активным уровнем: сейчас …», а уровень переключает сессионный
+    `/level`, до файла не доходящий."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        app._session_overrides["level"] = "max"
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "home")
+        assert ed._active_level == "max"
+
+
+# --- превью оверлеев переживает запись в профиль ----------------------------------
+
+
+async def test_the_overlay_preview_is_recounted_after_a_write(tmp_path, monkeypatch):
+    """Состав превью зависит от того, что показывают ФОРМЫ, а запись в профиль это
+    меняет: у профиля из одних `slots` реестр пуст, формы слотов не показаны — и
+    `slots` живёт в превью. Первая же созданная запись поднимает эти формы, и
+    превью обязано замолчать: иначе подпись дублирует видимое до перемонтирования
+    под-вида."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", "slots:\n  default: flash\n")
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _open_profile(pilot, scr, "work")
+        assert "профиль также переопределяет: slots" in _texts(scr)   # предусловие
+        await pilot.press("n")
+        await pilot.pause()
+        await _fill_entry(pilot, scr, "flash", "google/gemini-2.5-flash")
+        assert "профиль также переопределяет" not in _texts(scr)
+
+
+async def test_an_open_profile_offers_its_own_endpoint_presets(tmp_path, monkeypatch):
+    """Тот же класс, что и адрес наследования: список пресетов адреса профиль вправе
+    переопределить своим `endpoint_presets`, и открытый файл обязан показывать СВОЙ
+    список, а не список активного профиля. Починить одно и оставить второе значило бы
+    закрыть случай, а не правило."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "corp.yml",
+           _CORP_PROFILE
+           + "endpoint_presets:\n"
+             '  - name: "Корп-шлюз"\n'
+             '    url: "https://corp-gw/v1/chat/completions"\n')
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "corp")
+        assert [p.name for p in ed._presets] == ["Корп-шлюз"]
+
+
+async def test_an_open_profile_is_written_under_the_stack_gate(tmp_path, monkeypatch):
+    """Файл профиля правится с оглядкой на основной конфиг: пока профиль активен, его
+    файл — часть стека следующего старта. Экран обязан отдать секции путь базы; активен
+    ли профиль на самом деле, решает валидатор."""
+    import tui.app as app_mod
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "home")
+        assert ed._stack_base == scr._config_path

@@ -198,7 +198,7 @@ class SettingsScreen(Screen):
         self._raw = self._read_raw()    # значения полей ИЗ ФАЙЛА, без резолва (см. _read_raw)
         self._origins = self._read_origins()   # происхождение полей: чем перекрыто, что действует
         self._on_apply = on_apply
-        self._pending_env_save = None   # (section, values, warn_detail) — ждёт confirm перезаписи ссылки
+        self._pending_env_save = None   # (section, values, warn_detail, back_to_menu) — ждёт confirm перезаписи ссылки
         self._view: object = "menu"     # "menu" | int(0..5)
         self._menu_idx = 0
         self._modes_idx = 0             # курсор строки подэкрана «Режимы работы»
@@ -215,6 +215,8 @@ class SettingsScreen(Screen):
         self._profiles_delete_name = None
         self._profiles_open = None
         self._menu_pass_snapshot = None   # (текст, документ) цели записи на один проход меню
+        self._models_verdict_cache = None  # (снимок файлов стека, вердикт) — см. _models_verdict
+        self._parsed_target = None        # (текст, документ) цели записи — см. _target_snapshot
         from tui.services.settings_probe import probe as _default_probe
         from tui.services.settings_probe import probe_auth as _default_auth_probe
         self._probe_fn = probe_fn or _default_probe
@@ -607,7 +609,13 @@ class SettingsScreen(Screen):
         нужен ещё и текст — для валидации. Без снимка это четыре чтения файла и
         разбор YAML заново на каждое ↑/↓ в меню. Кэш прохода — тот же приём, что у
         `_profiles_disk_cache` секции «Профили», и сбрасывается там же, где рисуется
-        меню: правка файла извне видна с первого же кадра."""
+        меню: правка файла извне видна с первого же кадра.
+
+        ЧИТАЕТСЯ файл на каждом проходе (0.1 мс — за этим свежесть и держится), а вот
+        РАЗБИРАЕТСЯ только новый текст: `parse_document` конфига размером с шаблон
+        стоит 10 мс, и платить их за каждое ↑/↓ ради того же самого документа не за
+        что. Ключ — сам текст, поэтому «тот же документ» здесь значит буквально то же
+        содержимое, а не «файл вроде бы не трогали»."""
         if self._menu_pass_snapshot is None:
             from pathlib import Path
             import config_raw
@@ -617,7 +625,9 @@ class SettingsScreen(Screen):
                     text = Path(self._config_path).read_text(encoding="utf-8")
                 except OSError:
                     text = ""
-            self._menu_pass_snapshot = (text, config_raw.parse_document(text))
+            if self._parsed_target is None or self._parsed_target[0] != text:
+                self._parsed_target = (text, config_raw.parse_document(text))
+            self._menu_pass_snapshot = self._parsed_target
         return self._menu_pass_snapshot
 
     def _target_document(self) -> dict:
@@ -625,8 +635,70 @@ class SettingsScreen(Screen):
         «Модели» (решение 6 волны B): реестр редактируется в файле, а не в резолве."""
         return self._target_snapshot()[1]
 
+    def _config_stack_texts(self) -> tuple | None:
+        """Содержимое файлов, из которых соберётся стек следующего старта:
+        `((путь, текст|None), …)` либо None, когда состав выяснить не удалось.
+
+        Состав называет `config.profile_mtime_set` — тот же набор, по которому
+        приложение решает, устарел ли конфиг. Берётся из него именно СОСТАВ, а не
+        мтаймы: снимок нужен ключом кэша вердикта, а устаревший глиф хуже медленных
+        стрелок — разрешения `st_mtime` на Windows для этого не хватает, содержимое же
+        отвечает точно и дёшево (≈1 мс против ≈30 мс самой валидации). Профиль в
+        наборе — тот, которого называет указатель правимого файла; перенацелить его
+        способен только чужой слой, а тот лежит в наборе рядом со своим текстом."""
+        if not self._config_path:
+            return None
+        from pathlib import Path
+        from config import profile_mtime_set
+        try:
+            paths = profile_mtime_set(self._config_path,
+                                      self._target_document().get("profile") or None)
+        except OSError:
+            return None
+        snapshot = []
+        for path in paths:
+            try:
+                snapshot.append((path, Path(path).read_text(encoding="utf-8")))
+            except OSError:
+                snapshot.append((path, None))
+        return tuple(snapshot)
+
+    def _models_verdict(self, text: str) -> str | None:
+        """Вердикт валидации секций моделей: `"schema"` — файл не проходит схему (чужая
+        ошибка, не реестра), `"sections"` — сломаны ссылки слотов/привязок, None — чисто.
+
+        Судится СТЕК, который соберёт следующий старт (`validate_config_text_with_sections`
+        с `base_path`), а не один файл: реестр кросс-слоен по устройству — слот профиля
+        вправе смотреть на модель базы, — и однофайловый вердикт врёт в обе стороны:
+        красит «!» рабочую раскладку «модели в основном конфиге, уровни в профиле» и
+        молчит о слоте активного профиля, смотрящем в удалённую запись.
+
+        Считается не чаще, чем меняется хоть один файл стека: полный прогон YAML+схемы
+        стоит ≈30 мс на конфиге размером с шаблон, а строку хаба перерисовывает КАЖДОЕ
+        ↑/↓ в меню. Сбрасывать кэш некому и незачем: ключ — само содержимое файлов
+        (и правимый текст в том числе), и любая запись — своя ли, чужая ли — меняет его
+        вместе с вердиктом. Состав стека выяснить не удалось — не кэшируем вовсе."""
+        stack = self._config_stack_texts()
+        key = None if stack is None else (text, stack)
+        cached = self._models_verdict_cache
+        if key is not None and cached is not None and cached[0] == key:
+            return cached[1]
+        from config import _app_config_from_text, validate_config_text_with_sections
+        verdict = None
+        try:
+            _app_config_from_text(text)   # фаза 1 — про САМ файл: чужой слой не при чём
+        except ValueError:
+            verdict = "schema"
+        if verdict is None:
+            try:
+                validate_config_text_with_sections(text, base_path=self._config_path)
+            except ValueError:
+                verdict = "sections"
+        self._models_verdict_cache = None if key is None else (key, verdict)
+        return verdict
+
     def _models_glyph(self) -> tuple[str, str]:
-        """Вердикт строки «Модели» — про ФАЙЛ, а не про сеть (потому секция и вышла из
+        """Вердикт строки «Модели» — про ФАЙЛЫ, а не про сеть (потому секция и вышла из
         probe-волны). Реестр непуст: сломанные ссылки слотов/привязок → `!`; реестр,
         в котором ни одна запись не резолвит адрес, → `—` (валиден, но не работает —
         та же дыра схемы, о которой секция говорит строкой); иначе `✓`. Реестра нет —
@@ -636,16 +708,11 @@ class SettingsScreen(Screen):
         `!` именно здесь — за неё эта строка не отвечает: `—`, «вердикта нет»."""
         text, document = self._target_snapshot()
         if document.get("models"):
-            from config import _app_config_from_text
-            from config_modules.model_sections_validation import validate_model_sections
             from tui.editors.models_section import registry_resolves_any_address
-            try:
-                cfg = _app_config_from_text(text)
-            except ValueError:
+            verdict = self._models_verdict(text)
+            if verdict == "schema":
                 return "—", DEEP_DIM         # файл не проходит схему — но не из-за реестра
-            try:
-                validate_model_sections(cfg)
-            except ValueError:
+            if verdict == "sections":
                 return "!", ERR              # ссылки слотов/привязок сломаны — это наше
             if not registry_resolves_any_address(document, self._probe_args_from_config()[0]):
                 return "—", DEEP_DIM         # адреса нет ни у записей, ни в «Подключении»
@@ -868,10 +935,24 @@ class SettingsScreen(Screen):
             return False
         return picked != self._raw_value("model")
 
+    def _acting_level(self) -> str:
+        """Уровень, которым агент работает ПРЯМО СЕЙЧАС: сессионный `/level`, если он
+        задан, иначе записанный в конфиге. Тот же порядок, что у
+        `TuiApp._level_provider` — второго прочтения одного факта здесь не заводим.
+
+        Экран открывается с БАЗОЙ (`screen_config()`, без сессионных переопределений),
+        поэтому спрашивать `self._config` нельзя ни одной витрине, обещающей «сейчас»:
+        `/level` в файл не пишет, и записанное там — не то, что работает."""
+        session = (getattr(self.app, "_session_overrides", None) or {}).get("level")
+        return str(session or (self._config or {}).get("level") or "default")
+
     # --- probe-инфраструктура (спека B2.1: слоты + generation) ---
-    def _probe_args_from_config(self):
+    def _probe_args_from_config(self, config=None):
+        """(адрес, токен, ssl, модель, прокси) действующего конфига. По умолчанию —
+        runtime экрана; `config` передаёт тот, кто спрашивает про ДРУГОЙ стек (под-вид
+        открытого профиля — про свой, см. `_open_profile_config`)."""
         from onboarding import MODEL_SENTINEL, TOKEN_SENTINEL, URL_SENTINEL
-        c = self._config
+        c = self._config if config is None else config
         url = c.get("completions_url") or ""
         endpoint = url if url and url != URL_SENTINEL else ""
         auth = (c.get("chat_completion_headers") or {}).get("Authorization")
@@ -1179,7 +1260,7 @@ class SettingsScreen(Screen):
                 effective_url=endpoint, effective_auth=auth, verify=verify,
                 config_proxy=proxy,
                 presets=endpoint_presets_from_config(self._config or {}),
-                active_level=str((self._config or {}).get("level") or "default"),
+                active_level=self._acting_level(),
                 legacy_editor_factory=self._make_legacy_model_editor,
                 legacy_hints=self._field_hint_specs("model"),
                 on_change=self._models_changed, on_notice=self._models_notice,
@@ -1362,6 +1443,12 @@ class SettingsScreen(Screen):
         показывать записанное, не прежнее."""
         self._raw = self._read_raw()
         self._menu_pass_snapshot = None   # файл изменился — снимок прохода протух
+        self._profiles_disk_cache = {}    # ... и дисковые сводки секции «Профили» тоже
+        if self._profiles_open is not None:
+            # Запись меняет и СОСТАВ превью оверлеев: реестр стал непуст (или опустел)
+            # — формы `slots`/`assign` поднялись (или ушли), а превью говорит ровно
+            # про то, чего формы не показывают.
+            self._refresh_profile_overlay()
         try:
             self._on_apply()
             self._config = getattr(self.app, "_config", None) or self._config
@@ -2002,7 +2089,14 @@ class SettingsScreen(Screen):
         текущее имя при переименовании (сам себе тёзкой не считается).
 
         Разделители пути отклоняем отдельно от прочего: имя идёт прямо в имя файла
-        (`<имя>.yml`), и это единственная защита от выхода за пределы корня."""
+        (`<имя>.yml`), и это единственная защита от выхода за пределы корня.
+
+        По той же причине — и запрещённые в именах файлов Windows символы. Без них
+        человек получал в лицо сырое «[Errno 22] Invalid argument» с временным путём
+        вместо ответа про имя, а `имя:поток` вдобавок оставлял в каталоге профилей
+        мусорный файл `имя`: NTFS читает двоеточие как альтернативный поток и заводит
+        под него носитель. Отвергаем на всех платформах: профиль, созданный на Linux,
+        едет вместе с проектом, и там же он и ломается."""
         from config_modules.model_registry import RESERVED_WORDS
         from config_modules.profiles import discover_all_refs, profile_roots
         import os
@@ -2011,6 +2105,9 @@ class SettingsScreen(Screen):
             return "введите имя профиля"
         if "/" in name or "\\" in name or name in (".", ".."):
             return "имя не должно содержать разделители пути"
+        forbidden = sorted(set(name) & set(':*?"<>|'))
+        if forbidden:
+            return f'имя не должно содержать недопустимые символы ({" ".join(forbidden)})'
         if name in RESERVED_WORDS:
             return f'имя «{name}» зарезервировано ({", ".join(RESERVED_WORDS)})'
         roots = profile_roots(Path(os.getcwd()), self._profiles_base_path())
@@ -2630,17 +2727,30 @@ class SettingsScreen(Screen):
             self._profiles_open = None
             return False
         from tui.editors.models_section import ModelsSectionEditor
-        for text, cls in self._profile_overlay_specs():
-            frame.mount(Static(text, classes=cls, markup=False))
-        endpoint, auth, verify, _m, proxy = self._probe_args_from_config()
+        frame.mount(Static("", classes="set-info set-dyn set-profiles-overlay",
+                           markup=False))
+        frame.mount(Static("", classes="set-hint set-dyn set-profiles-overlay-hint",
+                           markup=False))
+        self._refresh_profile_overlay()
+        # Стек ОТКРЫТОГО профиля (None — открыт активный, его стек и есть runtime,
+        # либо стек не собрался). Всё, что описывает его подключение, берётся отсюда
+        # одним куском: адрес с токеном для наследования и проб — и список пресетов
+        # адреса, который профиль вправе переопределить тем же `endpoint_presets`.
+        # Развести их значило бы чинить один случай правила и оставить второй.
+        profile_cfg = self._open_profile_config(row["name"])
+        endpoint, auth, verify, _m, proxy = self._probe_args_from_config(profile_cfg)
         from config_modules.endpoint_presets import endpoint_presets_from_config
         frame.mount(ModelsSectionEditor(
             target=row["ref"].path, template="", is_profile=True,
             base_registry=self._base_registry_snapshot,
+            # Пока профиль активен, его файл — часть стека следующего старта, и гейт
+            # записи обязан судить merged; для неактивного валидатор сам остаётся на
+            # фазе 1, сверив указатель базы с целью.
+            stack_base=self._config_path,
             effective_url=endpoint, effective_auth=auth, verify=verify,
             config_proxy=proxy,
-            presets=endpoint_presets_from_config(self._config or {}),
-            active_level=str((self._config or {}).get("level") or "default"),
+            presets=endpoint_presets_from_config(profile_cfg or self._config or {}),
+            active_level=self._acting_level(),
             on_change=self._models_changed, on_notice=self._models_notice))
         return True
 
@@ -2725,6 +2835,31 @@ class SettingsScreen(Screen):
             "assign": sections.get("assign") or {},
             "base_url": "" if url == URL_SENTINEL else url,
         }
+
+    def _open_profile_config(self, name: str) -> dict | None:
+        """Конфиг стека «база + ОТКРЫТЫЙ профиль» — то, чем станет runtime, если этот
+        профиль активировать. None — спрашивать нечего или незачем: открыт активный
+        (runtime уже про него) либо стек не собрался (битый/исчезнувший файл), и тогда
+        остаёмся на runtime, как было.
+
+        Тот же принцип, которым рядом строится тень базы (`_base_registry_snapshot`):
+        `self._config` собран с УЖЕ АКТИВНЫМ профилем, и адрес с токеном, взятые
+        оттуда, — из чужого подключения. Профиль со своим `backend` показывал бы
+        «наследуется: <адрес активного>», Ctrl+Space и список моделей формы стучались
+        бы туда же и чужим токеном, а при активации роутер увёл бы те же записи совсем
+        на другой адрес — витрина и проба врали бы обе.
+
+        Представление готовое: тем же `load_config_ex(..., profile_override=...)`
+        приложение собирает базу при сессионном переключении профиля
+        (`tui/app.py::_profile_remerge`)."""
+        if not self._config_path or name == (self._config or {}).get("profile"):
+            return None
+        from config import load_config_ex
+        try:
+            cfg, _meta = load_config_ex(self._config_path, profile_override=name)
+        except Exception:
+            return None
+        return cfg
 
     def _profile_document(self, path) -> dict:
         """Сырой документ профиля через кэш прохода — сосед `_profile_summary`:
@@ -2811,19 +2946,24 @@ class SettingsScreen(Screen):
         from tui.editors.models_section import _VIEW_KEY
         return f"{hint} · {_VIEW_KEY}"
 
-    def _profile_overlay_specs(self) -> list[tuple[str, str]]:
-        """(текст, css-класс) строк превью — пусто, когда переопределять нечего:
-        профиль из одних моделей молчит, а не показывает пустую фразу."""
-        if not self._profile_overlay_names():
-            return []
-        return [(self._profile_overlay_text(), "set-info set-dyn set-profiles-overlay"),
-                (self._profile_overlay_hint(), "set-hint set-dyn set-profiles-overlay-hint")]
-
     def _refresh_profile_overlay(self) -> None:
-        """Досчитать усечение ПОСЛЕ layout-прохода, когда регион строки уже известен
-        (тот же carry-fix, что `_refresh_profiles_rows`)."""
-        for widget in self.query(".set-profiles-overlay"):
-            widget.update(self._profile_overlay_text())
+        """Пересчитать превью оверлеев: и усечение — ПОСЛЕ layout-прохода, когда регион
+        строки уже известен (тот же carry-fix, что `_refresh_profiles_rows`), — и сам
+        СОСТАВ. Состав меняет не только ширина: запись в профиль поднимает формы
+        `slots`/`assign` (реестр стал непуст) или убирает их, а превью говорит ровно
+        про то, чего формы НЕ показывают, — не пересчитанное, оно дублирует видимое
+        или молчит о невидимом до перемонтирования под-вида.
+
+        Переопределять нечего — обе строки гаснут: профиль из одних моделей молчит, а
+        не показывает пустую фразу. Гаснут, а не сносятся: смонтированы они один раз
+        (`_mount_open_profile`), и вернуть их на СВОЁ место посреди тела было бы
+        нечем."""
+        names = self._profile_overlay_names()
+        for selector, render in ((".set-profiles-overlay", self._profile_overlay_text),
+                                 (".set-profiles-overlay-hint", self._profile_overlay_hint)):
+            for widget in self.query(selector):
+                widget.display = bool(names)
+                widget.update(render() if names else "")
 
     _UPDATE_ACTION_UPDATE = "Обновить агента"
     _UPDATE_ACTION_CHECK = "Проверить обновления"
@@ -3305,7 +3445,7 @@ class SettingsScreen(Screen):
             # молча, каким бы путём (probe, force, секция 1) сюда ни пришли.
             written, erased = self._env_refs_overwritten(values)
             if written or erased:
-                self._pending_env_save = (section, values, warn_detail)
+                self._pending_env_save = (section, values, warn_detail, back_to_menu)
                 self._singleton("set-envconfirm",
                                 Text(self._env_confirm_text(written, erased), style=WARN),
                                 f"set-confirm set-dyn {KEEP_IN_VIEW}")
@@ -3674,9 +3814,10 @@ class SettingsScreen(Screen):
         if event.key == "enter" and self._view in _WRITE_GATED_SECTIONS \
                 and self._pending_env_save is not None:
             event.stop()                          # confirm перезаписи ссылки: Enter — подтвердил
-            section, values, warn_detail = self._pending_env_save
+            section, values, warn_detail, back_to_menu = self._pending_env_save
             self._pending_env_save = None
-            self._do_save(section, values, warn_detail=warn_detail, confirmed=True)
+            self._do_save(section, values, warn_detail=warn_detail, confirmed=True,
+                          back_to_menu=back_to_menu)
             return
         if event.key in ("tab", "shift+tab"):
             # Съедаем ВСЕГДА, даже когда переходить некуда (§4.2.6): tab/shift+tab —

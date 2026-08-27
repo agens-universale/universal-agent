@@ -218,13 +218,40 @@ class OnboardingScreen(Screen):
             t.append(name, style=f"bold {style}" if i == self._step else style)
         return t
 
+    def _effective_model(self) -> str:
+        """Действующая модель конфига запуска — ПРОВАЙДЕРСКИЙ id из резолва
+        `ModelRouter` (§6/§7), а не плоский `agent.model`: волна B пишет реестр
+        (`models.<алиас>` + `slots.default`), а плоский ключ оставляет шаблонным
+        сентинелом — по нему мастер на своём же настроенном конфиге видел бы
+        «модель не задана» и молча переставлял слот на первую модель сервера.
+
+        Канон витрин ветки (`config._effective_model_name`,
+        `main._footer_model_name`), но берётся `model`, а не `alias`: и сводка, и
+        шаг сверяются со списком С СЕРВЕРА, где модели названы провайдерскими id.
+
+        Резолв не удался (полусырой конфиг: пустой реестр без плоского ключа,
+        слот на несуществующий алиас) — фоллбэк на плоский ключ: мастер обязан
+        открываться на любом конфиге. Сентинел шаблона — «ещё не задано», а не
+        значение: отдаём пусто, как и на конфиге без модели вовсе."""
+        config = self._config or {}
+        name = config.get("model")
+        try:
+            from model_router import ModelRouter
+            resolved = ModelRouter(
+                config, level_provider=lambda: config.get("level") or "default",
+            ).resolve("main", check_breaker=False)
+            name = resolved.model
+        except Exception:
+            pass
+        return "" if not name or name == onboarding.MODEL_SENTINEL else name
+
     def _shown_values(self) -> dict:
         """Чем витрины мастера (лента-сводка и подтверждение) заполняют то, чего
         человек сам не набрал, — резолвнутым конфигом запуска. При активном профиле
         это значения его слоя: витрина говорит о том, чем агент реально будет
         работать, а плашка рядом объясняет, откуда они (спека §5)."""
         return {"completions_url": self._config.get("completions_url"),
-                "model": self._config.get("model"),
+                "model": self._effective_model(),
                 "Authorization": (self._config.get("chat_completion_headers") or {}
                                   ).get("Authorization")}
 
@@ -412,9 +439,7 @@ class OnboardingScreen(Screen):
             body.mount(Static(_MODEL_STEP_HINT, classes="onb-hint onb-dyn set-spaced",
                               markup=False))
             endpoint, auth = self._endpoint_auth()
-            cfg_model = self._config.get("model") or ""
-            if cfg_model == onboarding.MODEL_SENTINEL:
-                cfg_model = ""
+            cfg_model = self._effective_model()
             ed = ModelEditor(current=self._values.get("model", ""), endpoint=endpoint,
                              auth=auth, verify=bool(self._config.get("use_ssl", True)),
                              fetch=self._fetch,

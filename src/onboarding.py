@@ -94,9 +94,42 @@ TOKEN_SENTINEL = "Bearer <ВПИШИТЕ_ТОКЕН>"
 MODEL_SENTINEL = "<ВПИШИТЕ_МОДЕЛЬ>"
 
 
-def _every_entry_carries(c: Dict[str, Any], field: str) -> bool:
-    """У КАЖДОЙ записи реестра задано своё `field` — тогда плоский `backend` для
-    этого поля не нужен (спека §4: незаданное у записи наследуется от него).
+def _entry_carries_own_connection(entry: Dict[str, Any]) -> bool:
+    """Запись ЗАГРУЖЕННОГО реестра несёт своё подключение целиком.
+
+    Что считать адресом и токеном, спрашиваем у ядра (`connection_parts`, §2) — тем
+    же определением судят Router и правило атомарной пары. Своё прочтение ключей
+    ошибалось бы в обе стороны: `url: ""` — это «своего адреса нет, пара
+    наследуется», а не заданный адрес; своё подключение вдобавок пишется вторым
+    равноправным написанием (`backend.completions_url` / `backend.proxy` /
+    `backend.chat_completion_headers.Authorization`), и заполненный по документации
+    реестр объявлялся бы ненастроенным.
+
+    Форма здесь — снимок (`config._serialize_model_entry`): сырого `token` в
+    загруженном конфиге уже нет, вместо него вычисленный `authorization_header`
+    (None — наследовать, "" — ЗАДАННЫЙ токен «сервер не требует авторизации»), а
+    явные оверлеи backend лежат в `backend_overrides`.
+
+    Адрес и токен спрашиваются вместе, одним ответом: правило пары (§3) не пускает
+    в загруженный конфиг половину подключения, поэтому «свой адрес» и «свой токен»
+    у записи — одно и то же условие."""
+    from config_modules.model_registry import connection_parts
+
+    entry = entry or {}
+    overrides = entry.get("backend_overrides") or {}
+    headers = overrides.get("chat_completion_headers") or {}
+    return all(connection_parts(
+        url=entry.get("url"),
+        token=entry.get("authorization_header"),
+        completions_url=overrides.get("completions_url"),
+        proxy=overrides.get("proxy"),
+        authorization=headers.get("Authorization"),
+    ))
+
+
+def _registry_is_self_sufficient(c: Dict[str, Any]) -> bool:
+    """КАЖДАЯ запись реестра работает через СВОЁ подключение — тогда плоский
+    `backend` не нужен вовсе (спека §4: незаданное у записи наследуется от него).
 
     Только для `chat_completions`: в `responses` от записи действует один
     провайдерский id, per-model адрес и авторизация мертвы (§4) — там такой конфиг
@@ -108,17 +141,13 @@ def _every_entry_carries(c: Dict[str, Any], field: str) -> bool:
     models = c.get("models") or {}
     return (c.get("backend_api_mode") == "chat_completions"
             and bool(models)
-            # «Задано» = ключ задан, а не «значение непусто»: `token: ""` — штатная
-            # форма записи локального сервера (адрес и токен задаются парой), и её
-            # `authorization_header` пустой. Truthiness объявила бы полностью
-            # настроенный локальный сетап незаполненным шаблоном.
-            and all((entry or {}).get(field) is not None for entry in models.values()))
+            and all(_entry_carries_own_connection(entry) for entry in models.values()))
 
 
 def _endpoint_set(c: Dict[str, Any]) -> bool:
     if c.get("completions_url") not in (None, URL_SENTINEL):
         return True
-    return _every_entry_carries(c, "url")
+    return _registry_is_self_sufficient(c)
 
 
 def _legacy_model_set(c: Dict[str, Any]) -> bool:
@@ -134,7 +163,7 @@ def _model_set(c: Dict[str, Any]) -> bool:
     пишет мастер, наследуют url и авторизацию от плоского `backend` (решение 10),
     поэтому такой реестр поверх плейсхолдерного endpoint'а — «нечем работать», а не
     «настроено». Адрес и токен реестр закрывает отдельно и по другому условию —
-    когда их несут сами записи (`_every_entry_carries`)."""
+    когда их несут сами записи (`_registry_is_self_sufficient`)."""
     return bool(c.get("models")) or _legacy_model_set(c)
 
 
@@ -148,12 +177,11 @@ def _auth_set(c: Dict[str, Any]) -> bool:
     # токена (и нет полноценного agent_auth). Реальный токен ИЛИ намеренное отсутствие
     # заголовка (локальный прокси / эндпоинт без auth сам ставит авторизацию) → задан.
     # Гейт — детектор незаполненного шаблона, а не валидатор auth: отсутствие ≠ сентинел.
-    # Симметрично адресу: авторизацию может нести и сама запись реестра. Смотрим на
-    # `authorization_header` — вычисленное поле снимка (`config._serialize_model_entry`),
-    # сырого `token` в загруженном конфиге уже нет.
+    # Симметрично адресу: авторизацию может нести и сама запись реестра — целой парой
+    # со своим адресом, порознь их правило пары (§3) в конфиг не пускает.
     auth = (c.get("chat_completion_headers") or {}).get("Authorization")
     if auth == TOKEN_SENTINEL:
-        return _agent_auth_set(c) or _every_entry_carries(c, "authorization_header")
+        return _agent_auth_set(c) or _registry_is_self_sufficient(c)
     return True
 
 
@@ -347,7 +375,34 @@ MODEL_SLOT_KEYS: Dict[str, str] = {
 }
 
 
-def _registry_ops(values: Dict[str, Any]) -> List[tuple]:
+def _aliases_in_file(config_path) -> Dict[str, str]:
+    """Алиасы реестра, УЖЕ лежащие в правимом файле → провайдерский id каждого
+    (`model` не задан — id равен самому алиасу, §4).
+
+    Нужны уникализации имён: `upsert_model` МЕРЖИТ в существующую запись, поэтому
+    занятое имя — это чужая пара «адрес + токен», которая переживёт прогон. Читаем
+    именно правимый файл, а не merged-конфиг: домержится запись только здесь.
+
+    Файл нечитаем или не парсится — считаем реестр пустым: сказать об этом человеку
+    всё равно нечем, а следом идёт `apply_registry_ops`, который тот же файл читает
+    сам и отказывает понятной ошибкой."""
+    from pathlib import Path
+
+    import yaml
+
+    try:
+        raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return {}
+    models = raw.get("models") if isinstance(raw, dict) else None
+    if not isinstance(models, dict):
+        return {}
+    return {alias: ((entry or {}).get("model") if isinstance(entry, dict) else None) or alias
+            for alias, entry in models.items()}
+
+
+def _registry_ops(values: Dict[str, Any], existing: Optional[Dict[str, str]] = None
+                  ) -> List[tuple]:
     """Операции реестра для собранных мастером моделей: `models.<alias>` + свой
     слот на каждый ЗАПОЛНЕННЫЙ уровень (незаполненный не пишет ничего — слот на
     несуществующий алиас нерезолвим, §4).
@@ -355,8 +410,15 @@ def _registry_ops(values: Dict[str, Any]) -> List[tuple]:
     Один и тот же id на двух уровнях — одна запись и два слота на неё; разные id
     с одинаковым хвостом имени разводятся `unique_alias`. Соответствие «id → уже
     выданный алиас» ищется по РЕЗУЛЬТАТУ, а не по первому расчёту имени: иначе
-    третий уровень с уже разведённой моделью получал бы ещё одну запись-близнеца."""
+    третий уровень с уже разведённой моделью получал бы ещё одну запись-близнеца.
+
+    `existing` (алиас → id, уже лежащие в файле — `_aliases_in_file`) участвует в
+    той же уникализации: имя за ТОЙ ЖЕ моделью переиспользуется (upsert домержится
+    в неё, и тариф записи переживает повторный прогон), а имя за ДРУГОЙ моделью
+    занято — взяв его, мастер увёл бы слот на чужую пару «адрес + токен», хотя
+    человек только что ввёл новое подключение."""
     ops: List[tuple] = []
+    existing = existing or {}
     planned: Dict[str, str] = {}          # алиас → id, уже запланированный этой записью
     for slot, key in MODEL_SLOT_KEYS.items():
         model_id = values.get(key)
@@ -366,8 +428,8 @@ def _registry_ops(values: Dict[str, Any]) -> List[tuple]:
                       if planned_id == model_id), None)
         if alias is None:
             alias = default_alias_for(model_id)
-            if alias in planned:
-                alias = unique_alias(alias, planned)
+            if alias in planned or existing.get(alias, model_id) != model_id:
+                alias = unique_alias(alias, set(planned) | set(existing))
             planned[alias] = model_id
             ops.append(("upsert_model", alias, {"model": model_id}))
         ops.append(("write_slot", slot, alias))
@@ -390,6 +452,13 @@ def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
     Все записи реестра уходят ОДНОЙ транзакцией: вторая запись без слота
     нерезолвима (§4) и была бы отвергнута валидацией отдельной операцией.
 
+    Записей всё же ДВЕ (реестр и плоские `backend.*`), и порядок между ними —
+    часть политики: реестр идёт ПЕРВЫМ. Его отказ тогда не пишет ничего, и «конфиг
+    не записан» — правда, включая секрет: плоским ключом уходит ТОКЕН, и оставить
+    его на диске от несостоявшегося прогона нельзя. Отказ второй записи оставляет
+    модели без подключения — `is_unconfigured` вернёт человека в мастер, а секрета
+    на диске нет.
+
     Возвращает якоря плоских полей, которых в конфиге не нашлось (вызывающий
     решает, показывать ли предупреждение); отказ записи — `ValueError`.
     """
@@ -400,13 +469,21 @@ def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
     from config_modules.registry_write import apply_registry_ops
 
     template_path = _default_config_path()
+    try:
+        template = Path(template_path).read_text(encoding="utf-8")
+    except OSError:
+        # Шаблон недоступен — это не повод уронить мастер трейсбеком (вызывающие
+        # ловят `ValueError`): якорь отсутствующей секции писатель синтезирует сам
+        # (`ensure_section_anchor_text`), а плоскому ключу без якоря останется
+        # отчёт «не записан». Путь недочитанного шаблона дальше не отдаём: тот же
+        # отказ ждал бы и `write_values`, только уже трейсбеком.
+        template = ""
     model_keys = set(MODEL_SLOT_KEYS.values())
     flat = {FIELD_ANCHOR_PATHS.get(key, key): value
             for key, value in values.items() if key not in model_keys}
-    missing = ocw.write_values(config_path, flat, template_path=template_path,
-                               validate=validate_config_text)
-    ops = _registry_ops(values)
+    ops = _registry_ops(values, _aliases_in_file(config_path))
     if ops:
-        apply_registry_ops(config_path, ops,
-                           Path(template_path).read_text(encoding="utf-8"))
-    return missing
+        apply_registry_ops(config_path, ops, template)
+    return ocw.write_values(config_path, flat,
+                            template_path=template_path if template else None,
+                            validate=validate_config_text)

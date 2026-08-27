@@ -1,4 +1,5 @@
 """Онбординг первого запуска: детект ненастроенного конфига + текст-гайд + запись."""
+import pytest
 import yaml
 
 import config
@@ -208,6 +209,70 @@ def test_registry_of_local_servers_without_auth_closes_auth():
                                  "authorization_header": ""}},
     }
     assert onboarding.is_unconfigured(cfg) is False
+
+
+def _loaded_with_registry(tmp_path, monkeypatch, extra: str, replace=()) -> dict:
+    """config.yml из пакетного шаблона + `extra` в хвосте, прочитанный НАСТОЯЩИМ
+    загрузчиком (слои изолированы).
+
+    Детект судит СНИМОК записи (`config._serialize_model_entry`), а не сырой YAML:
+    формы «своего подключения» разложены там по разным ключам (`url` /
+    `backend_overrides.completions_url`), и синтетический словарь того, что реально
+    приезжает в детект, не доказывает."""
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
+        "config": tmp_path / "gc", "state": tmp_path / "s",
+        "data": tmp_path / "d", "cache": tmp_path / "c",
+    })
+    monkeypatch.setattr(config, "_project_local_config_path", lambda: None)
+    monkeypatch.chdir(tmp_path)
+    text = (bundled_root() / "config.default.yml").read_text(encoding="utf-8")
+    for old, new in replace:
+        text = text.replace(old, new)
+    path = tmp_path / "config.yml"
+    path.write_text(text + extra, encoding="utf-8")
+    return config.load_config(str(path))
+
+
+def test_registry_entry_in_backend_form_closes_endpoint_and_auth(tmp_path, monkeypatch):
+    """Вторая документированная форма своего подключения (docs/configuration.md,
+    «Профили и уровни моделей»): `backend.completions_url` +
+    `backend.chat_completion_headers.Authorization` — равноправная с `url`/`token`.
+    Router её маршрутизирует, значит конфиг рабочий; судить о «своём подключении»
+    по одним плоским ключам записи значит гнать в мастер на КАЖДОМ старте человека,
+    заполнившего реестр по документации."""
+    cfg = _loaded_with_registry(tmp_path, monkeypatch, """
+models:
+  flash:
+    model: g
+    backend:
+      completions_url: https://x/v1/chat/completions
+      chat_completion_headers:
+        Authorization: Bearer sk-real
+slots:
+  default: flash
+""")
+    assert onboarding.is_unconfigured(cfg) is False
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+    assert resolved.url == "https://x/v1/chat/completions"
+
+
+def test_registry_entry_with_empty_url_does_not_close_endpoint(tmp_path, monkeypatch):
+    """`url: ""` — «своего адреса нет, пара наследуется» (`connection_parts`), а не
+    «адрес задан пустой строкой»: так его резолвит рантайм. При плейсхолдерном
+    плоском адресе запрос уйдёт на `your-backend:PORT` — детект обязан прочитать
+    запись так же, иначе объявляет готовым конфиг, которому работать нечем."""
+    cfg = _loaded_with_registry(tmp_path, monkeypatch, """
+models:
+  flash:
+    model: g
+    url: ""
+slots:
+  default: flash
+""", replace=((f'Authorization: "{onboarding.TOKEN_SENTINEL}"',
+               'Authorization: "Bearer sk-real"'),))
+    assert onboarding.is_unconfigured(cfg) is True
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+    assert resolved.url == onboarding.URL_SENTINEL
 
 
 def test_setup_guide_on_registry_config_does_not_demand_model():
@@ -463,6 +528,84 @@ def test_write_wizard_values_rerun_keeps_pricing_of_same_entry(tmp_path, monkeyp
     assert raw["models"]["qwen3-coder"]["model"] == "qwen3-coder"
     assert raw["models"]["qwen3-coder"]["pricing"] == {"input": 12, "output": 48}
     assert raw["slots"]["default"] == "qwen3-coder"
+
+
+def test_write_wizard_values_does_not_hijack_a_taken_alias_with_its_own_pair(
+        tmp_path, monkeypatch):
+    """Имя алиаса, уже занятое ДРУГОЙ моделью, брать нельзя: `upsert_model` мержит
+    в существующую запись («ключа нет — сохранить как был»), поэтому её собственная
+    пара пережила бы прогон и увела бы слот на СТАРЫЙ хост со СТАРЫМ токеном — при
+    том что человек только что ввёл новые. Занятыми считаются и алиасы из файла, а
+    не только запланированные этим прогоном."""
+    from pathlib import Path
+
+    from config import _default_config_path
+    from config_modules.registry_write import apply_registry_ops
+
+    cfg_path = _wizard_config(tmp_path, monkeypatch)
+    template = Path(_default_config_path()).read_text(encoding="utf-8")
+    apply_registry_ops(cfg_path, [
+        ("upsert_model", "qwen-plus", {"model": "vendor-a/qwen-plus",
+                                       "url": "https://a/v1/chat/completions",
+                                       "token": "A"}),
+        ("write_slot", "default", "qwen-plus"),
+    ], template)
+
+    onboarding.write_wizard_values(cfg_path, {
+        "completions_url": "https://b/v1/chat/completions",
+        "Authorization": "Bearer B",
+        "model": "vendor-b/qwen-plus",
+    })
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert raw["models"]["qwen-plus"] == {"model": "vendor-a/qwen-plus",
+                                          "url": "https://a/v1/chat/completions",
+                                          "token": "A"}
+    # Новая запись — без своей пары: работает через только что записанное общее
+    # подключение, ради которого мастер и запускали.
+    assert raw["models"]["qwen-plus-2"] == {"model": "vendor-b/qwen-plus"}
+    assert raw["slots"]["default"] == "qwen-plus-2"
+
+
+def test_write_wizard_values_leaves_no_token_when_the_registry_write_fails(
+        tmp_path, monkeypatch):
+    """Отказ записи — «конфиг не записан» и для СЕКРЕТА тоже: реестр пишется первым,
+    поэтому его провал не оставляет на диске плоский токен от несостоявшегося
+    прогона (мастер при этом честно говорит, что ничего не записал)."""
+    import config_modules.registry_write as rw
+
+    cfg_path = _wizard_config(tmp_path, monkeypatch)
+
+    def _refuse(*_args, **_kwargs):
+        raise rw.RegistryWriteError("запись реестра отказала")
+
+    monkeypatch.setattr(rw, "apply_registry_ops", _refuse)
+    with pytest.raises(ValueError):
+        onboarding.write_wizard_values(cfg_path, {
+            "completions_url": "https://x/v1/chat/completions",
+            "Authorization": "Bearer sk-secret",
+            "model": "qwen/qwen3-coder",
+        })
+    text = cfg_path.read_text(encoding="utf-8")
+    assert "sk-secret" not in text
+    assert onboarding.TOKEN_SENTINEL in text
+
+
+def test_write_wizard_values_survives_a_missing_template(tmp_path, monkeypatch):
+    """Пакетный шаблон недоступен — мастер не падает трейсбеком: вызывающие ловят
+    только `ValueError`, а якорь секции писатель синтезирует сам, и пустой шаблон
+    ему не мешает."""
+    cfg_path = _wizard_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "_default_config_path",
+                        lambda: str(tmp_path / "no-such-template.yml"))
+    onboarding.write_wizard_values(cfg_path, {
+        "completions_url": "https://x/v1/chat/completions",
+        "Authorization": "Bearer sk-1",
+        "model": "qwen/qwen3-coder",
+    })
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert raw["models"] == {"qwen3-coder": {"model": "qwen/qwen3-coder"}}
+    assert raw["slots"]["default"] == "qwen3-coder"
+    assert raw["backend"]["completions_url"] == "https://x/v1/chat/completions"
 
 
 def test_write_wizard_values_result_resolves_in_both_api_modes(tmp_path, monkeypatch):

@@ -1381,6 +1381,76 @@ async def test_final_commit_writes_and_calls_on_commit(tmp_path):
         assert committed == [True]
 
 
+def _registry_cfg(tmp_path, model_id, *, alias):
+    """Конфиг, настроенный ЭТОЙ ЖЕ веткой: подключение — плоскими ключами, модель —
+    записью реестра (`models.<алиас>` + `slots.default`), а легаси `agent.model` так
+    и остался шаблонным сентинелом. Ровно то, что оставляет после себя
+    `write_wizard_values`, — и ровно то, поверх чего мастер открывают повторно.
+
+    Возвращает (путь к файлу, конфиг «как его видит приложение»)."""
+    from pathlib import Path
+    import yaml
+    from config import _default_config_path
+    from config_modules.registry_write import apply_registry_ops
+    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
+                               auth="Bearer tok")
+    template = Path(_default_config_path()).read_text(encoding="utf-8")
+    apply_registry_ops(cfg_path, [("upsert_model", alias, {"model": model_id}),
+                                  ("write_slot", "default", alias)], template)
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    cfg = _resolved_conn_cfg(cfg_path)
+    cfg["models"] = raw.get("models")
+    cfg["slots"] = raw.get("slots")
+    return cfg_path, cfg
+
+
+@pytest.mark.asyncio
+async def test_review_on_registry_config_keeps_the_configured_model(tmp_path):
+    """Мастер поверх РЕЕСТРОВОГО конфига (`gc-ua --init-config` на уже настроенном):
+    действующая модель обязана быть ему известна — сводка её называет, шаг «Модель»
+    ставит курсор на строку «текущая», а проход насквозь (PgDn) слот не переставляет.
+
+    Пока шаг якорился на плоском `agent.model`, действующей модели для мастера не
+    существовало вовсе: сводка говорила «модель: —», курсор вставал на ПЕРВУЮ модель
+    из ответа сервера, и один PgDn молча уводил `slots.default` на чужую. Соседние
+    review-тесты живут на легаси-конфиге (`agent.model` задан) и этого не видели."""
+    pytest.importorskip("textual")
+    import yaml
+    from model_picker import ModelInfo
+    from tests.tui.conftest import wait_until
+    from textual.widgets import Static
+    from tui.app import TuiApp
+    from tui.editors.model import ModelEditor
+    from tui.screens.onboarding import STEP_MODEL
+    cfg_path, cfg = _registry_cfg(tmp_path, "openai/gpt-5.6-terra", alias="gpt-5.6-terra")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg,
+                      fetch=lambda *a, **k: [ModelInfo("glm-5.2-fp8", tool_capable=True),
+                                             ModelInfo("openai/gpt-5.6-terra",
+                                                       tool_capable=True)])
+        await pilot.app.push_screen(scr); await pilot.pause()
+        summary = str(scr.query_one("#onb-summary", Static).render())
+        assert "модель: openai/gpt-5.6-terra" in summary
+        scr._goto(STEP_MODEL)
+        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
+                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await pilot.pause()
+        rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
+        current = [r for r in rows if "текущая" in r]
+        assert current, f"строки «текущая» на шаге нет: {rows}"
+        assert "openai/gpt-5.6-terra" in current[0]
+        # Курсор ▸ и пометка ● — на ней же: Enter/PgDn отсюда подтверждают своё, не чужое.
+        assert current[0].startswith("▸") and "●" in current[0]
+        await pilot.press("pagedown")                  # проход насквозь, ничего не выбирая
+        await pilot.pause()
+        assert scr._values.get("model") == "openai/gpt-5.6-terra"
+        assert scr._commit_config() is True
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        assert raw["slots"]["default"] == "gpt-5.6-terra"
+        assert raw["models"] == {"gpt-5.6-terra": {"model": "openai/gpt-5.6-terra"}}
+
+
 # --- ссылки на переменные окружения ${ENV:VAR} (настоящий файл + настоящий os.environ) ---
 # Критический регресс: шаг «Подключение» показывал/писал РЕЗОЛВНУТОЕ значение
 # self._config, а не сырое из файла — непройденный проход мастера подменял ссылку

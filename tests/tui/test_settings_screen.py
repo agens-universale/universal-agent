@@ -3684,3 +3684,127 @@ async def test_ctrl_u_reprobes_on_the_next_leave(tmp_path):
         await pilot.pause()
         assert ed.token_cleared is True
         assert len(probes) == 1
+
+
+# ── глиф «Модели»: вердикт о СТЕКЕ, а не об одном файле ─────────────────────────
+
+
+def _stacked_layers(tmp_path, monkeypatch):
+    """База + каталог профилей рядом с ней, изолированные от машины (тот же приём,
+    что в `tests/config/test_stacked_validation.py`): иначе managed-оверлей и
+    проектный `.gc/config.yml` разработчика подмешались бы в стек, который судит
+    глиф."""
+    from config_modules import env_vars
+    from config_modules.env_vars import EnvVars
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path / "gc_home"))
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    (tmp_path / "profiles").mkdir()
+    return tmp_path / "config.yml", tmp_path / "profiles"
+
+
+_STACK_BASE = ('profile: "work"\n'
+               "backend:\n"
+               '  completions_url: "http://host/v1/chat/completions"\n'
+               "models:\n"
+               '  a:\n    model: "x"\n'
+               '  b:\n    model: "y"\n')
+
+
+def _models_glyph(base) -> str:
+    scr = _mk_screen(config=_cfg(), config_path=str(base))
+    return scr._models_glyph()[0]
+
+
+def test_hub_models_glyph_judges_the_stack_not_the_single_file(tmp_path, monkeypatch):
+    """«Модели в основном конфиге, уровни в профиле» — рабочая раскладка: стек
+    резолвится, приложение стартует. Вердикт по ОДНОМУ файлу видит два алиаса без
+    единого слота и красит строку хаба «!» — про конфиг, который работает."""
+    base, profiles = _stacked_layers(tmp_path, monkeypatch)
+    base.write_text(_STACK_BASE, encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
+    assert _models_glyph(base) == "✓"
+
+
+def test_hub_models_glyph_flags_a_stack_broken_by_the_profile(tmp_path, monkeypatch):
+    """Обратная сторона того же правила: сам по себе config.yml резолвится, а слот
+    активного профиля смотрит в пустоту — следующий старт упадёт. «✓» здесь было бы
+    зелёным светом конфигу, который не загрузится."""
+    base, profiles = _stacked_layers(tmp_path, monkeypatch)
+    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n'
+                    'slots:\n  default: "a"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "ghost"\n', encoding="utf-8")
+    assert _models_glyph(base) == "!"
+
+
+def test_hub_models_glyph_is_not_recomputed_while_the_files_stand_still(
+        tmp_path, monkeypatch):
+    """Вердикт — полная YAML+pydantic валидация стека (≈33 мс на конфиге размером с
+    шаблон), а строку хаба перерисовывает КАЖДОЕ ↑/↓ в меню. Пока ни один файл стека
+    не изменился, ответ тот же — считать его заново незачем. Разбор YAML цели (10 мс
+    там же) — по той же причине и с тем же ключом: содержимое."""
+    import config as config_mod
+    import config_raw
+    base, profiles = _stacked_layers(tmp_path, monkeypatch)
+    base.write_text(_STACK_BASE, encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
+    scr = _mk_screen(config=_cfg(), config_path=str(base))
+    calls, parses = [], []
+    real = config_mod.validate_config_text_with_sections
+    real_parse = config_raw.parse_document
+    monkeypatch.setattr(config_mod, "validate_config_text_with_sections",
+                        lambda *a, **kw: (calls.append(1), real(*a, **kw))[1])
+    monkeypatch.setattr(config_raw, "parse_document",
+                        lambda *a, **kw: (parses.append(1), real_parse(*a, **kw))[1])
+    for _ in range(5):
+        scr._menu_pass_snapshot = None       # новый проход меню — как на каждое ↑/↓
+        assert scr._models_glyph()[0] == "✓"
+    assert len(calls) == 1, f"валидация стека прогонялась {len(calls)} раз(а)"
+    assert len(parses) == 1, f"YAML цели разбирался {len(parses)} раз(а)"
+
+
+def test_hub_models_glyph_never_serves_a_stale_verdict(tmp_path, monkeypatch):
+    """Устаревший глиф хуже медленных стрелок: правка ЛЮБОГО файла стека — свой
+    пересчёт. Проверяются оба слоя: и профиль (его правит под-вид «Профилей»), и
+    цель записи самой секции."""
+    base, profiles = _stacked_layers(tmp_path, monkeypatch)
+    base.write_text(_STACK_BASE, encoding="utf-8")
+    profile = profiles / "work.yml"
+    profile.write_text('slots:\n  default: "a"\n', encoding="utf-8")
+    scr = _mk_screen(config=_cfg(), config_path=str(base))
+    assert scr._models_glyph()[0] == "✓"
+
+    profile.write_text('slots:\n  default: "ghost"\n', encoding="utf-8")
+    scr._menu_pass_snapshot = None
+    assert scr._models_glyph()[0] == "!", "правка профиля не видна"
+
+    base.write_text(_STACK_BASE + '  ghost:\n    model: "z"\n', encoding="utf-8")
+    scr._menu_pass_snapshot = None
+    assert scr._models_glyph()[0] == "✓", "правка цели записи не видна"
+
+
+# ── «сейчас работает уровень…» — про сессию, а не про файл ─────────────────────
+
+
+async def test_the_models_section_names_the_level_that_is_really_acting(tmp_path):
+    """`/level` переключает уровень на сессию, в файл не записывая, а экран
+    открывается с БАЗОЙ (`screen_config()` — без сессионных переопределений).
+    Пикер привязок обещает «работает активным уровнем: сейчас …» — называть там
+    записанное в файле значит называть не то, что работает."""
+    import tui.app as app_mod
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text("level: default\n"
+                        "backend:\n"
+                        '  completions_url: "http://host/v1/chat/completions"\n'
+                        "models:\n  flash:\n    model: \"m\"\n", encoding="utf-8")
+    cfg = {"completions_url": "http://host/v1/chat/completions", "level": "default"}
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        app._session_overrides["level"] = "max"      # /level посреди сессии
+        scr = _mk_screen(config=cfg, config_path=str(cfg_file))
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Модели")
+        await pilot.pause()
+        assert scr._models_editor()._active_level == "max"

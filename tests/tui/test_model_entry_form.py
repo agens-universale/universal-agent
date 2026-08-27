@@ -714,6 +714,42 @@ async def test_ctrl_u_returns_the_whole_pair_from_either_field(field_id):
         assert ok is True and fields["url"] is None and fields["token"] is None
 
 
+async def test_ctrl_u_from_the_token_field_leaves_the_cursor_on_a_live_field():
+    """Клавиша замораживает поле ПОД курсором (общая пара → токен `disabled`), и Textual
+    сам уводит фокус по focus chain — на алиас, где Input делает select-all. Курсор формы
+    при этом остаётся на позиции токена: Alt+↓ и Space мертвы, а любая печать ЗАМЕНЯЕТ
+    имя записи, и Enter молча переименовывает её с каскадом по слотам и привязкам.
+
+    Форма — хозяин курсора: заморозив позицию под ним, она обязана сама перевести его на
+    законную (та же дисциплина, что у `move`/`_skip_position`). Соседняя незамороженная
+    и первая в паре — «Адрес». Пресет-лист при этом раскрываться НЕ должен: над опустевшим
+    полем следующий Enter подставил бы строку списка вместо сохранения."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "https://my-host/v1/chat/completions",
+                          "token": "sk-OWN"},
+                 existing_aliases={"flash"},
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer sk-HUB")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.move(1)                                   # адрес → токен
+        await pilot.pause()
+        assert form._positions[form._idx] == "mef-token"
+        assert form.clear_token() is True
+        await pilot.pause()
+        assert pilot.app.focused is form.query_one("#mef-url", Input)
+        assert form.on_url_field is True               # футер обещает клавиши адреса
+        assert form.presets_open is False              # Enter сохраняет, а не подставляет
+        await pilot.press("g")
+        await pilot.pause()
+        assert form.query_one("#mef-alias", Input).value == "flash"
+        assert form.query_one("#mef-url", Input).value == "g"   # печать ушла под курсор
+        form.query_one("#mef-url", Input).value = ""
+        await pilot.pause()
+        ok, alias, _fields = form.submit()
+        assert (ok, alias) == (True, "flash")          # Enter не переименовал запись
+
+
 async def test_ctrl_u_takes_the_no_auth_checkbox_off_too():
     """Галка ● — часть пары (`token: ""` над своим адресом, §2), и Ctrl+U снимает её
     вместе с обоими полями. Оставь он галку — запись осталась бы «своей» с пустой
@@ -1078,6 +1114,28 @@ async def test_duplicate_alias_is_rejected_with_an_honest_error():
         assert "уже используется" in str(form.query_one("#mef-error", Static).render())
 
 
+@pytest.mark.parametrize("alias", ["[x]", "[/x]"])
+async def test_an_alias_with_brackets_stays_readable_in_the_error(alias):
+    """Строка ошибки — PLAIN-TEXT: в неё интерполируется то, что набрал человек, и
+    квадратные скобки Rich читает разметкой. `[x]` съедало имя («алиас '' уже
+    используется» — отказ про пустоту), `[/x]` (закрывающий тег без открытого) ронял
+    `MarkupError` наружу через `enter()` в хозяина, и приложение закрывалось.
+
+    Имена такие проходят и валидатор (`validate_model_alias` смотрит только
+    зарезервированные слова), и запись в файл (`_yaml_key` их квотирует) — то есть
+    повторный ввод СОХРАНЁННОГО имени и ронял TUI. Тот же класс ветка уже чинила
+    `markup=False` (`settings._singleton`, `models_section._ask`)."""
+    form = _form(initial=None, existing_aliases={alias})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-alias", Input).value = alias
+        form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
+        ok, _alias, _fields = form.submit()            # разметка здесь и роняла форму
+        assert ok is False
+        error = str(form.query_one("#mef-error", Static).render())
+        assert f"'{alias}'" in error, error             # имя названо, а не проглочено
+
+
 async def test_empty_alias_derives_the_name_from_the_model_id():
     """Алиас не обязателен (ревизия владельца): пустое поле показывает ПРИЗРАКОМ
     конкретное имя, что возьмётся из id (логика мастера: последний path-сегмент,
@@ -1165,6 +1223,34 @@ async def test_creating_an_entry_named_like_a_base_one_is_refused():
         assert form.query_one("#mef-alias", Input).placeholder == "gemini-2.5-flash-2"
 
 
+async def test_editing_an_own_entry_named_like_a_base_one_is_allowed():
+    """Тёзка базовой — ЛЕГАЛЬНАЯ раскладка профиля (§4/§5 спеки эффективного вида):
+    загрузчик её принимает, витрина считает её своей (`_entry_origin` → own) и обещает
+    «Enter — изменить». Решение владельца запрещает СОЗДАНИЕ тёзки через UI, но правку
+    существующей отказ убивал вместе с ней: выход был только Del или переименование, а
+    оно меняет смысл — запись перестаёт перекрывать базовую.
+
+    То же правило, каким форма не считает запись дублем самой себя (`_other_aliases`):
+    из «занятых» исключается СОБСТВЕННОЕ имя записи, и только оно."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+                 existing_aliases={"flash"},
+                 base_aliases=frozenset({"flash", "opus"}))
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-model", Input).value = "zhipu/glm-4.6"
+        ok, alias, fields = form.submit()
+        assert (ok, alias) == (True, "flash"), str(
+            form.query_one("#mef-error", Static).render())
+        assert fields["model"] == "zhipu/glm-4.6"
+        # Переименование В имя ДРУГОЙ базовой записи — это уже создание тёзки, только
+        # из существующей: по-прежнему отказ.
+        form.query_one("#mef-alias", Input).value = "opus"
+        ok, _alias, _fields = form.submit()
+        assert ok is False
+        from tui.editors import model_entry_form as mef
+        assert str(form.query_one("#mef-error", Static).render()) == mef._ALIAS_TAKEN_BY_BASE
+
+
 async def test_empty_model_id_means_the_alias_is_the_id():
     """Пусто в поле id — легально: алиас и есть провайдерский id (`model_router`:
     `entry.get("model") or alias`), ключ `model` не отдаётся."""
@@ -1185,6 +1271,34 @@ async def test_malformed_url_is_rejected():
         ok, _alias, _fields = form.submit()
         assert ok is False
         assert "http(s)://" in str(form.query_one("#mef-error", Static).render())
+
+
+async def test_an_env_reference_in_the_address_is_not_a_malformed_url():
+    """Форма получает СЫРОЙ документ (`models_section._read_document` →
+    `config_raw.read_document`, «без резолва ${ENV:VAR}»), и `${ENV:VAR}` в адресе —
+    штатная документированная форма (`docs/configuration.md`: пример
+    `models.flash.token: "${ENV:OPENROUTER_API_KEY}"`, «${ENV:VAR} работают и внутри
+    профиля»), к которой ветка сама и толкает (`profiles.find_literal_tokens`).
+
+    Структурная проверка её бракует, и запись с таким адресом нельзя было сохранить даже
+    правкой одного id модели: тупик с выходом только через ручную правку YAML. То же
+    исключение, что у пробы мастера (`screens/onboarding`: `not _valid_endpoint_url(url)
+    and not config_raw.env_refs(url)`)."""
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "${ENV:MEF_HUB}", "token": "${ENV:MEF_TOK}"},
+                 existing_aliases={"flash"})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-model", Input).value = "zhipu/glm-4.6"
+        ok, alias, fields = form.submit()
+        assert (ok, alias) == (True, "flash"), str(
+            form.query_one("#mef-error", Static).render())
+        assert fields["url"] == "${ENV:MEF_HUB}"       # ссылка уезжает ссылкой
+        # Набрать плейсхолдер руками — тот же путь: проверка смотрит на ЗНАЧЕНИЕ, а не
+        # на то, трогали ли поле.
+        form.query_one("#mef-url", Input).value = "${ENV:MEF_OTHER}"
+        await pilot.pause()
+        assert form.submit()[0] is True, str(form.query_one("#mef-error", Static).render())
 
 
 # --- Alt+↓ (подбор) и Ctrl+Space (проба) — РАЗНЫЕ клавиши -----------------------
@@ -1336,6 +1450,88 @@ async def test_probe_without_any_address_is_honest():
         assert "адрес" in str(form.query_one("#mef-probe-line", Static).render())
 
 
+async def test_the_probe_resolves_env_references_before_the_request(monkeypatch):
+    """`${ENV:VAR}` в полях — СЫРОЕ значение файла, а не адрес и не токен: в запрос
+    обязано уйти раскрытое. Буквальный `Bearer ${ENV:MEF_TOK}` сервер отклоняет, и проба
+    отвечала «✗ токен отклонён» на исправном конфиге.
+
+    Раскрытие — тем же резолвером, что у `config.load_config`, и ВНУТРИ воркера: у
+    `${FILE:...}` это чтение с диска, в UI-потоке оно подвесило бы интерфейс (эталон —
+    `screens/onboarding._auto_probe`). Наружу (поле, submit) раскрытое не возвращается."""
+    monkeypatch.setenv("MEF_HUB", "https://hub/v1/chat/completions")
+    monkeypatch.setenv("MEF_TOK", "sk-REAL")
+    seen = []
+
+    def fake_probe(endpoint, auth, verify, model, **kwargs):
+        seen.append((endpoint, auth))
+        return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "${ENV:MEF_HUB}", "token": "${ENV:MEF_TOK}"},
+                 existing_aliases={"flash"}, probe=fake_probe)
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.probe_connection() is True
+        for _ in range(3):
+            await pilot.pause()
+        assert seen, "проба не пошла"
+        assert all(e == "https://hub/v1/chat/completions" for e, _ in seen), seen
+        assert "Bearer sk-REAL" in [auth for _, auth in seen], seen
+        # Поле остаётся сырым: раскрытое значение — только для запроса.
+        assert form.query_one("#mef-url", Input).value == "${ENV:MEF_HUB}"
+
+
+async def test_the_model_list_resolves_env_references_before_the_request(monkeypatch):
+    """Тот же страж для подбора списка: он уходит на эндпоинт САМ, при простом переходе
+    курсора на поле id, — с буквальной ссылкой в адресе список молча не грузился бы
+    никогда («✗ не удалось получить список»)."""
+    monkeypatch.setenv("MEF_HUB", "https://hub/v1/chat/completions")
+    monkeypatch.setenv("MEF_TOK", "sk-REAL")
+    calls = []
+
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "${ENV:MEF_HUB}", "token": "${ENV:MEF_TOK}"},
+                 existing_aliases={"flash"},
+                 fetch=lambda url, auth, **k: calls.append((url, auth)) or _models())
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        assert calls == [("https://hub/v1/chat/completions", "Bearer sk-REAL")], calls
+
+
+async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(monkeypatch):
+    """Переменной нет — резолв даст "", и стучаться в пустой адрес нечестно: под
+    визуально заполненным полем и проба, и список соврали бы «нет соединения», как будто
+    сломан сам сервер. Называем переменную (эталон — `screens/onboarding._auto_probe`,
+    `env_ref_status`/`ENV_REF_MISSING`)."""
+    monkeypatch.delenv("MEF_ABSENT", raising=False)
+    calls = []
+
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "url": "${ENV:MEF_ABSENT}", "token": "sk-own"},
+                 existing_aliases={"flash"},
+                 fetch=lambda url, auth, **k: calls.append((url, auth)) or _models(),
+                 probe=lambda *a, **k: calls.append(a) or ProbeResult(
+                     "ok", 200, None, 1, "доступен"))
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.probe_connection() is True
+        for _ in range(3):
+            await pilot.pause()
+        line = str(form.query_one("#mef-probe-line", Static).render())
+        assert "MEF_ABSENT" in line and "переменной нет" in line, line
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        status = str(form.query_one("#mef-model-status", Static).render())
+        assert "MEF_ABSENT" in status and "переменной нет" in status, status
+        assert calls == [], calls                      # в сеть не ходили
+
+
 # --- состояние наружу: хозяину нужен позиционный футер ---------------------------
 
 async def test_form_tells_the_host_where_the_cursor_is_and_what_is_open():
@@ -1462,3 +1658,30 @@ async def test_the_cursor_does_not_call_a_typed_address_inherited():
         selected = [r for r in rows if r.startswith("▸")]
         assert selected and "OpenRouter" in selected[0], rows
         assert "наследовать" not in selected[0], rows
+
+
+async def test_a_failure_while_the_cursor_was_away_is_reported_on_return():
+    """Загрузка провалилась, пока курсор ушёл с поля id: показать ошибку было
+    негде, а дребезг автоподгрузки не повторит запрос теми же параметрами — без
+    памяти о провале вернувшийся курсор встречало бы молчание, неотличимое от
+    «список ещё летит»."""
+    calls: list = []
+    form = _form(initial=None, existing_aliases=set(),
+                 fetch=lambda url, auth, **k: calls.append((url, auth)) or None,
+                 effective_url="http://hub/v1/chat/completions")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        form.move(1)                                   # уйти с поля, не дождавшись
+        for _ in range(3):
+            await pilot.pause()                        # ответ приходит под чужим полем
+        assert calls, "автоподгрузка не стартовала"
+        assert str(form.query_one("#mef-model-status", Static).render()) == ""
+
+        form.move(-1)                                  # вернуться на поле id
+        for _ in range(3):
+            await pilot.pause()
+        from tui.editors.field_list import LIST_FAILED
+        assert len(calls) == 1, "дребезг сломан: повторный запрос теми же параметрами"
+        assert LIST_FAILED in str(form.query_one("#mef-model-status", Static).render())

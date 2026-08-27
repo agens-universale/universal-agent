@@ -671,14 +671,16 @@ async def test_needs_default_slot_on_the_effective_config(tmp_path, monkeypatch)
     merged валиден; легаси-база без реестра плюс первая запись профиля — вопроса
     нет (одна модель резолвится сама)."""
     async with _profile_view(tmp_path, monkeypatch) as (_p, _s, ed):
-        assert ed._needs_default_slot("glm") is False      # база задаёт default
+        # база задаёт default
+        assert ed._needs_default_slot([("upsert_model", "glm", {})]) is False
 
     async with _profile_view(tmp_path, monkeypatch, registry=False) as (_p, _s, ed):
-        assert ed._needs_default_slot("glm") is False      # легаси-база, одна модель
+        # легаси-база, одна модель
+        assert ed._needs_default_slot([("upsert_model", "glm", {})]) is False
 
     async with _profile_view(tmp_path, monkeypatch,
                              base=_BASE_ONE_MODEL) as (pilot, scr, ed):
-        assert ed._needs_default_slot("glm") is True
+        assert ed._needs_default_slot([("upsert_model", "glm", {})]) is True
         await pilot.press("n")
         await pilot.pause()
         await _fill_entry(pilot, scr, "glm", "zhipu/glm-4")

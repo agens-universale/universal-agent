@@ -3,10 +3,20 @@
 import re
 from pathlib import Path
 
+import yaml
+
 from utils.atomic_io import atomic_replace
 
 
-_KEY_LINE_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[^\s#][^:\n]*):(?P<rest>.*)$")
+# Ключ строки — либо квотированный скаляр ЦЕЛИКОМ, либо плоский до первого
+# двоеточия. Квотированные формы идут первыми не для красоты: `"llama3:8b":`
+# (Ollama-стиль, схема такой алиас пропускает) плоская ветка резала по первому
+# двоеточию до `"llama3`, и писатель переставал находить то, что сам записал.
+_KEY_LINE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)"
+    r"(?P<key>\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*'|[^\s#][^:\n]*)"
+    r":(?P<rest>.*)$"
+)
 
 
 def _lines_with_offsets(text: str):
@@ -21,6 +31,22 @@ def _lines_with_offsets(text: str):
 def _indent_len(line: str) -> int:
     """Длина отступа в символах (пробелы и табы, как есть)."""
     return len(line) - len(line.lstrip(" \t"))
+
+
+def _key_scalar(raw: str) -> str:
+    """Ключ как YAML-СКАЛЯР, а не как байты строки файла.
+
+    Писатель обязан находить всё, что видит загрузчик (`dict[str, ModelEntry]` —
+    любой строковый ключ), а один и тот же ключ живёт в файле в разных начертаниях:
+    писатель кладёт `"llama3:8b"`, рука пишет `'123'` или `'*'`. Побайтное
+    сравнение разводило эти виды — запись «не находилась», и upsert дописывал
+    дубль вместо замены. Разбор не удался (обрывок вроде `*`) — сравниваем
+    литералом: хуже прежнего не будет."""
+    try:
+        value = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        return raw
+    return raw if value is None else str(value)
 
 
 def quote_scalar(value: str) -> str:
@@ -233,34 +259,76 @@ def insert_missing(text: str, dotted_key: str, template_text: str) -> str:
     return _splice(text, insert_at, block)
 
 
+def _child_indent_len(segment: str, parent_indent: int):
+    """Колонка ПРЯМЫХ детей секции: минимальный отступ среди строк-ключей глубже
+    родителя (None — детей нет). Один источник и для поиска записи, и для вставки
+    новой: колонку задаёт живой сосед, а не хардкод «родитель + 2» — в файле с
+    4-пробельным каноном тот выдавал запись на чужой колонке (YAML ломался либо
+    запись вкладывалась внутрь соседней, и секция «Модели» не работала вовсе)."""
+    child = None
+    for _start, _end, line in _lines_with_offsets(segment):
+        if _KEY_LINE_RE.match(line) is None:
+            continue
+        indent = _indent_len(line)
+        if indent <= parent_indent:
+            continue
+        if child is None or indent < child:
+            child = indent
+    return child
+
+
 def _find_child_anchor(text: str, parent_dotted: str, key: str):
     """(start, end, indent_str, rest) строки ПРЯМОГО ребёнка `key` секции
-    `parent_dotted`. Ключ сравнивается литерально, НЕ через dotted-путь: алиасы
+    `parent_dotted`. Ключ сравнивается ЦЕЛИКОМ, НЕ через dotted-путь: алиасы
     с точками (`opus-4.8`) в `find_anchor` разбивались на вложенный путь
     opus-4→8, запись «не находилась» — upsert дописывал дубль, remove молчал
     (смок 2026-07-30). Прямой ребёнок = ключ-строка минимального отступа внутри
     диапазона секции (глубже отступа родителя) — вложенное поле-тёзка (`model:`
-    внутри чужой записи) не матчится. KeyError, если ребёнка нет."""
+    внутри чужой записи) не матчится. Сам ключ сверяется КАК СКАЛЯР (`_key_scalar`):
+    начертание в файле и начертание, которым его ищут, совпадают не всегда.
+    KeyError, если ребёнка нет."""
     _p_start, p_end, p_indent, _p_rest = find_anchor(text, parent_dotted)
     span_end = section_end(text, p_end, p_indent)
     seg = text[p_end:span_end]
-    child_indent = None
-    for _start, _end2, line in _lines_with_offsets(seg):
-        if _KEY_LINE_RE.match(line) is None:
-            continue
-        ind = _indent_len(line)
-        if ind <= len(p_indent):
-            continue
-        if child_indent is None or ind < child_indent:
-            child_indent = ind
+    child_indent = _child_indent_len(seg, len(p_indent))
     if child_indent is not None:
+        wanted = _key_scalar(key)
         for start, end2, line in _lines_with_offsets(seg):
             m = _KEY_LINE_RE.match(line)
             if m is None or _indent_len(line) != child_indent:
                 continue
-            if m.group("key").strip() == key:
+            if _key_scalar(m.group("key").strip()) == wanted:
                 return p_end + start, p_end + end2, m.group("indent"), m.group("rest")
     raise KeyError(f"{parent_dotted}.{key}")
+
+
+# Хвост строки родителя (`parent:<rest>`) БЕЗ значения: голый ключ либо пустой
+# инлайновый мэппинг `{}`, в обоих случаях с необязательным трейлинг-комментом.
+# Всё прочее в этой позиции — рукописный НЕПУСТОЙ инлайновый мэппинг: у его
+# записей нет своих строк, и построчный писатель их не тронет.
+_EMPTY_PARENT_REST_RE = re.compile(
+    r"^(?:[ \t]*\{[ \t]*\})?(?P<comment>[ \t]*#.*)?[ \t]*$")
+
+
+def _empty_parent_tail(rest: str, parent_dotted: str) -> str:
+    """Трейлинг-комментарий строки пустого родителя (или ''), с отказом на
+    непустом инлайновом мэппинге.
+
+    Отказ — тот же контракт, что у `_drop_mapping_entry` слоя записи реестра:
+    форму, у которой отдельной строки нет вовсе, построчный писатель обязан
+    назвать, а не «починить». Разбирать и разворачивать flow-мэппинг он не
+    станет — это не его работа; молча переписать секцию блочной формой значило бы
+    снести соседние записи под зелёный нотис. Текст отказа называет ФАКТ (всё
+    содержимое секции лежит в строке ключа), а инлайновый мэппинг — гипотезой:
+    это самая частая, но не единственная форма такой строки."""
+    match = _EMPTY_PARENT_REST_RE.match(rest)
+    if match is None:
+        raise ValueError(
+            f"содержимое секции {parent_dotted} лежит в строке самого ключа, а правки "
+            "идут построчно; похоже, это инлайновый мэппинг — разверните секцию в "
+            "блочную форму (каждая запись со своей строки)"
+        )
+    return match.group("comment") or ""
 
 
 def upsert_mapping_entry(
@@ -272,10 +340,13 @@ def upsert_mapping_entry(
 
     `block_lines` — строки блока БЕЗ отступа родителя (первая строка — сама
     `key:`, остальные — её вложенное содержимое с СОБСТВЕННЫМ относительным
-    отступом); функция доиндентивает каждую строку на отступ родителя + 2.
+    отступом); функция доиндентивает каждую строку на колонку УЖЕ ЛЕЖАЩИХ
+    соседей (родитель + 2 — только когда соседей нет, `_child_indent_len`).
     Родителя нет в `text` → `KeyError` (вызывающий сначала гарантирует якорь
     через `ensure_section_anchor`). Родитель пуст (`key:` без детей ИЛИ
-    `key: {}`) → первая запись, инлайновая `{}` нормализуется в блочную форму.
+    `key: {}`) → первая запись, инлайновая `{}` нормализуется в блочную форму, а
+    трейлинг-комментарий строки родителя переезжает вместе с ней. Родитель —
+    НЕПУСТОЙ инлайновый мэппинг → `ValueError` (`_empty_parent_tail`).
     Запись `key` уже есть → заменяется ЦЕЛИКОМ БЛОКОМ, включая её СОБСТВЕННЫЙ
     прикреплённый комментарий (тот уходит вместе со старым блоком — если нужен
     новый, положите его первой строкой(-ами) `block_lines`); прикреплённый
@@ -284,18 +355,24 @@ def upsert_mapping_entry(
     иначе комментарий соседней топ-уровневой секции переехал бы ПЕРЕД новую
     запись при добавлении второй+ записи подряд, напр. models.light вслед за
     models.default)."""
-    p_start, p_end, p_indent, _p_rest = find_anchor(text, parent_dotted)
+    p_start, p_end, p_indent, p_rest = find_anchor(text, parent_dotted)
     parent_key = parent_dotted.rsplit(".", 1)[-1]
-    child_indent = p_indent + "  "
+    span_end = section_end(text, p_end, p_indent)
+    existing_indent = _child_indent_len(text[p_end:span_end], len(p_indent))
+    child_indent = " " * existing_indent if existing_indent is not None else p_indent + "  "
     new_block = "".join(f"{child_indent}{line}\n" if line else "\n" for line in block_lines)
     try:
         k_start, k_end, k_indent, _ = _find_child_anchor(text, parent_dotted, key)
     except KeyError:
-        block_end = _exclude_next_attached_comment(text, section_end(text, p_end, p_indent))
-        if block_end == p_end:
-            # Пустой родитель ("parent:" без детей ИЛИ "parent: {}") — нормализуем
-            # инлайновую форму в блочную и вставляем первую запись.
-            return text[:p_start] + f"{p_indent}{parent_key}:\n" + new_block + text[p_end:]
+        block_end = _exclude_next_attached_comment(text, span_end)
+        if not _has_content(text[p_end:block_end]):
+            # Родитель без единой записи-строки ("parent:" ИЛИ "parent: {}", в т.ч.
+            # с висячими комментами под ним) — нормализуем инлайновую форму в
+            # блочную и вставляем первую запись. Непустой инлайновый мэппинг сюда
+            # не доедет: `_empty_parent_tail` отказывает.
+            tail = _empty_parent_tail(p_rest, parent_dotted)
+            return (text[:p_start] + f"{p_indent}{parent_key}:{tail}\n"
+                    + text[p_end:block_end] + new_block + text[block_end:])
         return _splice(text, block_end, new_block)
     entry_start = _attached_comment_start(text, k_start, k_indent)
     entry_end = _exclude_next_attached_comment(text, section_end(text, k_end, k_indent))
@@ -323,19 +400,26 @@ def remove_mapping_entry(text: str, parent_dotted: str, key: str) -> str:
     развернёт его в `None`, и схема (`dict[str, ModelEntry]` и т.п.) упадёт;
     граница этого схлопывания (`block_end`) так же защищена от поглощения
     прикреплённого комментария СЛЕДУЮЩЕГО топ-уровневого ключа/секции (не
-    только границы отдельных записей внутри родителя)."""
+    только границы отдельных записей внутри родителя). Висячие комментарии
+    внутри секции и трейлинг-комментарий строки родителя схлопывание переживают:
+    они описывают секцию, а не удаляемую запись."""
     try:
         k_start, k_end, k_indent, _ = _find_child_anchor(text, parent_dotted, key)
     except KeyError:
         return text
-    p_start, p_end, p_indent, _p_rest = find_anchor(text, parent_dotted)  # родитель точно есть
+    p_start, p_end, p_indent, p_rest = find_anchor(text, parent_dotted)  # родитель точно есть
     parent_key = parent_dotted.rsplit(".", 1)[-1]
     entry_start = _attached_comment_start(text, k_start, k_indent)
     entry_end = _exclude_next_attached_comment(text, section_end(text, k_end, k_indent))
     block_end = _exclude_next_attached_comment(text, section_end(text, p_end, p_indent))
     remaining = text[p_end:entry_start] + text[entry_end:block_end]
     if not _has_content(remaining):
-        return text[:p_start] + f"{p_indent}{parent_key}: {{}}\n" + text[block_end:]
+        # Схлопывание переписывает СТРОКУ родителя — трейлинг-комментарий на ней
+        # описывает секцию, а не удаляемую запись; `remaining` — висячие комменты
+        # внутри секции, тоже не её (свой, прикреплённый, уже ушёл в `entry_start`).
+        tail = _empty_parent_tail(p_rest, parent_dotted)
+        return (text[:p_start] + f"{p_indent}{parent_key}: {{}}{tail}\n"
+                + remaining + text[block_end:])
     return text[:entry_start] + text[entry_end:]
 
 

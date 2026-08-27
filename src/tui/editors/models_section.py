@@ -230,6 +230,13 @@ _NOTICE_REMOVE_REFUSED_INHERITED = (
 _NOTICE_EDIT_REFUSED_INHERITED = (
     "✗ не изменено: «{alias}» — запись основного конфига. "
     "Измените её в секции «Модели».")
+# Тот же приём в другую сторону: на СВОЮ запись смотрит слот чужого файла стека.
+# Удаление невозможно так же безусловно — снять ссылку одной записью в два файла
+# слой записи не даёт, — и вопрос так же ложен. Файл и координата названы: свой
+# файл человек видит, чужой нет, и без них ему некуда идти.
+_NOTICE_REMOVE_REFUSED_CROSS_LAYER = (
+    "✗ не удалено: на «{alias}» ссылается {refs}. "
+    "Снимите ссылку там — одной записью два файла не правятся.")
 _NOTICE_ENTRY_SAVED = "Запись «{alias}» сохранена — {file}"
 # Ячейка адреса мёртвой записи: причина «мёртвости» видна в самой строке, длинное
 # объяснение (`_NO_ADDRESS_HINT`) остаётся в notice сохранения.
@@ -538,9 +545,14 @@ def registry_preview(document: dict) -> str:
     """Превью хаба для непустого реестра: «N в реестре · default <алиас>».
 
     Резервная модель (`agent.model`) в счёт N НЕ входит (§12.4) — она не запись
-    реестра, а фоллбэк на случай пустого реестра."""
-    models = document.get("models") or {}
-    slots = document.get("slots") or {}
+    реестра, а фоллбэк на случай пустого реестра.
+
+    Секции берутся общей санацией (`section_dict`): превью пересчитывается на КАЖДОЙ
+    перерисовке меню, а файл в этот момент правят под ногами — `slots:` бывает и
+    списком, и недописанным якорем. Не-словарь здесь значит «секции нет»: витрина
+    обязана пережить любой файл (зовут её без try), а судит его глиф."""
+    models = section_dict(document, "models")
+    slots = section_dict(document, "slots")
     text = f"{len(models)} в реестре"
     default = slots.get("default")
     if default:
@@ -562,7 +574,7 @@ class ModelsSectionEditor(Vertical):
     """
 
     def __init__(self, *, target, template: str, is_profile: bool = False,
-                 base_registry=None,
+                 base_registry=None, stack_base=None,
                  effective_url: str = "",
                  effective_auth: str | None = None, verify: bool = True,
                  config_proxy: str | None = None, presets=(),
@@ -575,6 +587,12 @@ class ModelsSectionEditor(Vertical):
         # Что за файл перед нами — единственное, чем режимы отличаются: валидатор
         # записи, отсутствие `agent.model` и хвост футера следуют отсюда.
         self._is_profile = is_profile
+        # Путь основного конфига — под-виду профиля: пока профиль АКТИВЕН, его файл
+        # часть того стека, который соберёт следующий старт, и гейт записи обязан
+        # судить merged (§12 спеки). Активен ли он — решает не экран, а валидатор:
+        # он сам сверяет указатель базы с целью и для неактивного остаётся на фазе 1.
+        # Правило живёт в одном месте, а не переспрашивается на каждой стороне.
+        self._stack_base = stack_base
         # Тень основного конфига — ПРОВАЙДЕР снимка (callable без аргументов), а не
         # значение: `_reload` перечитывает её тем же вызовом, и файл основного
         # конфига, изменившийся пока открыт профиль, доезжает до экрана. `None` —
@@ -609,6 +627,7 @@ class ModelsSectionEditor(Vertical):
         self._measured_width = None       # ширина рамки, под которую посчитаны колонки
         self._picker = None               # {"items", "idx", "on_pick"}
         self._pending = None              # {"alias", "references", "last"} — confirm удаления
+        self._writing_entry = None        # (алиас, запись) транзакции в полёте, см. `_own_entry`
 
     # --- файловое состояние цели ---------------------------------------------
     def _read_document(self) -> dict:
@@ -692,6 +711,17 @@ class ModelsSectionEditor(Vertical):
                           and alias not in self._own_entries) else "own"
 
     def _own_entry(self, alias: str) -> dict:
+        """Своя запись — из файла цели, а пока идёт транзакция записи — ТА, что уедет
+        в файл ею (`_writing_entry`).
+
+        Вопрос «какая модель по умолчанию» задаётся ДО `upsert_model`: своей записи в
+        файле в этот момент ещё нет, и витрина, читающая только файл, описывала бы
+        строку пикера выдуманным — алиасом вместо провайдерского id и адресом
+        «Подключения» вместо своего. Подмена стоит здесь, а не у каждого читателя:
+        через `_own_entry` запись видят и `_entry`, и `_entry_model`, и
+        `_address_cell`, и разойтись им нечем."""
+        if self._writing_entry is not None and alias == self._writing_entry[0]:
+            return self._writing_entry[1]
         entry = self._own_entries.get(alias)
         return entry if isinstance(entry, dict) else {}
 
@@ -1708,18 +1738,25 @@ class ModelsSectionEditor(Vertical):
             self._write(self._rename_ops(prev, alias, fields), alias)
             return
         ops = [("upsert_model", alias, fields)]
-        if self._needs_default_slot(alias):
+        if self._needs_default_slot(ops):
             # Вторая модель делает реестр неоднозначным (спека §4): валидатор отвергнет
             # такую запись отдельной операцией — и правильно. Спрашиваем слот и уходим
             # ОДНОЙ транзакцией (решение Task 1). Выбор — из ЭФФЕКТИВНОГО реестра:
             # слот профиля законно указывает на запись основного конфига, и прятать
             # её из списка значило бы предлагать неполный набор ответов.
             aliases = sorted({*self._effective_aliases, alias})
-            model_w = max(len(self._entry_model(a)) for a in aliases)
-            self._open_picker(
-                [self._picker_alias_item(a, model_w) for a in aliases],
-                lambda chosen: self._write(
-                    ops + [("write_slot", "default", chosen)], alias),
+            # Строку своей записи описывает то, что уедет в файл ЭТОЙ транзакцией:
+            # в файле её ещё нет (`upsert_model` уйдёт вместе с выбранным слотом).
+            # Описания собираются здесь и целиком — `_refresh_picker_rows` их только
+            # усекает, — поэтому подмена снимается сразу же.
+            self._writing_entry = (alias, self._merged_entry(alias, fields))
+            try:
+                model_w = max(len(self._entry_model(a)) for a in aliases)
+                rows = [self._picker_alias_item(a, model_w) for a in aliases]
+            finally:
+                self._writing_entry = None
+            self._open_picker(rows, lambda chosen: self._write(
+                ops + [("write_slot", "default", chosen)], alias),
                 hint=_PICKER_DEFAULT_HINT)
             return
         self._write(ops, alias)
@@ -1731,13 +1768,7 @@ class ModelsSectionEditor(Vertical):
         ключи), переезд всех ссылок slots/assign, снятие старой записи. Порядок
         важен: к моменту `remove_model` на старое имя уже никто не ссылается.
         Валидация — одна, на итог; занятое имя отвергла форма."""
-        merged = dict(self._own_entries.get(prev) or {})
-        for key, value in fields.items():
-            if value is None:
-                merged.pop(key, None)
-            else:
-                merged[key] = value
-        ops: list = [("upsert_model", alias, merged)]
+        ops: list = [("upsert_model", alias, self._merged_entry(prev, fields))]
         for level in LEVELS:
             if self._slot_value(level) == prev:
                 ops.append(("write_slot", level, alias))
@@ -1747,24 +1778,41 @@ class ModelsSectionEditor(Vertical):
         ops.append(("remove_model", prev, True))
         return ops
 
-    def _needs_default_slot(self, alias: str) -> bool:
-        """Спрашивать ли «какая модель по умолчанию»: станет ли после записи
-        неоднозначным ЭФФЕКТИВНЫЙ конфиг (§7) — моделей ≥2 и ни одного слота.
+    def _merged_entry(self, alias: str, fields: dict) -> dict:
+        """Запись, какой она станет после правок формы: `fields` поверх своей старой
+        по контракту писателя (значение — установить, `None` — снять, ключа нет —
+        оставить как было).
 
-        Считается по merged, а не по своему файлу, потому что валидируется тоже
-        merged: вторая запись в профиль поверх ОДНОЙ модели основного конфига без
-        слотов делает нерезолвимым его, а свой-only гейт этот случай пропускал.
-        Обратная сторона той же формулы: над легаси-базой (реестра нет вовсе)
-        первая запись профиля вопроса не вызывает — одна модель резолвится сама."""
-        after = {*self._effective_aliases, alias}
-        return len(after) >= 2 and not any(self._effective_slot_value(level)
-                                           for level in LEVELS)
+        Одна на обоих, кому итог нужен ДО записи: `_rename_ops` собирает им
+        переезжающую под новое имя запись, пикер default-слота — описание строки той,
+        которой в файле ещё нет. Второй раз выписанное правило merge'а разъехалось бы
+        с писателем на первой же правке контракта."""
+        merged = dict(self._own_entry(alias))
+        for key, value in fields.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        return merged
+
+    def _needs_default_slot(self, ops: list) -> bool:
+        """Спрашивать ли «какая модель по умолчанию»: оставит ли ЭТА транзакция стек
+        без резолвимого `default` (§7).
+
+        Спрашивается у слоя записи, а не считается здесь: правило резолвимости одно,
+        и своя его редакция в секции разъезжалась с валидатором — считала по своему
+        файлу плюс тень, а тень есть только у под-вида профиля."""
+        from config_modules.registry_write import needs_default_slot
+        return needs_default_slot(self._target, ops, self._template,
+                                  is_profile=self._is_profile,
+                                  stack_base=self._stack_base)
 
     def _write(self, ops: list, alias: str) -> None:
         from config_modules.registry_write import RegistryWriteError, apply_registry_ops
         try:
             apply_registry_ops(self._target, ops, self._template,
-                               is_profile=self._is_profile)
+                               is_profile=self._is_profile,
+                               stack_base=self._stack_base)
         except (RegistryWriteError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}", ok=False)
             return
@@ -1799,7 +1847,8 @@ class ModelsSectionEditor(Vertical):
         self._close_picker()
         try:
             apply_registry_ops(self._target, [op], self._template,
-                               is_profile=self._is_profile)
+                               is_profile=self._is_profile,
+                               stack_base=self._stack_base)
         except (RegistryWriteError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}", ok=False)
             return
@@ -1828,7 +1877,9 @@ class ModelsSectionEditor(Vertical):
         row = self._row_at_cursor()
         if row is None or row["kind"] != "entry":
             return False                    # резервную модель удалять нечем — она поле
-        from config_modules.registry_write import RegistryWriteError, references_to
+        from config_modules.registry_write import (RegistryWriteError,
+                                                   references_broken_by_removal,
+                                                   references_to)
         alias = row["alias"]
         if self._entry_origin(alias) == "base":
             # Отказ СРАЗУ, без confirm-баннера (ревизия владельца по смоку A+B):
@@ -1837,6 +1888,20 @@ class ModelsSectionEditor(Vertical):
             # `removed=False` в `confirm_pending` остаётся страховкой от гонки
             # (запись исчезла из файла между баннером и Enter).
             self._notice(_NOTICE_REMOVE_REFUSED_INHERITED.format(alias=alias), ok=False)
+            return False
+        try:
+            foreign = references_broken_by_removal(self._target, alias,
+                                             stack_base=self._stack_base)
+        except (RegistryWriteError, OSError):
+            foreign = []            # чужой слой нечитаем — своё удаление это не запрещает
+        if foreign:
+            # Тот же приём, что и с унаследованной записью: вопрос ложен, а не
+            # преждевременен — снять запись, на которую смотрит другой файл, нельзя
+            # ни при каком ответе.
+            self._notice(_NOTICE_REMOVE_REFUSED_CROSS_LAYER.format(
+                alias=alias,
+                refs=", ".join(f"{name}: {coordinate}" for name, coordinate in foreign)),
+                ok=False)
             return False
         try:
             references = references_to(self._target, alias)
@@ -1882,7 +1947,8 @@ class ModelsSectionEditor(Vertical):
         from config_modules.registry_write import RegistryWriteError, remove_model
         try:
             report = remove_model(self._target, pending["alias"], force=True,
-                                  is_profile=self._is_profile)
+                                  is_profile=self._is_profile,
+                                  stack_base=self._stack_base)
         except (RegistryWriteError, OSError) as exc:
             self._notice(f"✗ не удалено: {exc}", ok=False)
             return

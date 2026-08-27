@@ -164,3 +164,21 @@ def test_level_fallback_matrix():
         "default": ("default", "max", "light"),
         "max": ("max", "default", "light"),
     }
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ({"models": {"a": {}}}, False),                                   # одна модель резолвится сама
+    ({"models": {}}, False),                                          # реестра нет — нечего резолвить
+    ({"models": {"a": {}, "b": {}}}, True),                           # две и ни одного слота
+    ({"models": {"a": {}, "b": {}}, "slots": {"default": "a"}}, False),
+    ({"models": {"a": {}, "b": {}}, "slots": {"light": "a"}}, False),  # любой слот включает матрицу
+    ({"models": {"a": {}, "b": {}}, "slots": {"max": "a"}}, False),
+])
+def test_default_slot_required_names_the_rule_once(raw, expected):
+    """Правило §4 отдельным предикатом: его спрашивают двое — валидатор (жалуется)
+    и слой записи (спрашивает ДО записи). Написанное дважды от руки, оно уже
+    разъезжалось."""
+    from config_modules.model_sections_validation import default_slot_required
+
+    cfg = AppConfig.model_validate(raw)
+    assert default_slot_required(cfg.models, cfg.slots) is expected

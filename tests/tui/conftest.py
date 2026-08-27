@@ -340,8 +340,17 @@ def _isolated_config_layers(tmp_path):
     """Слои поверх базового config.yml — на tmp. Нужны любой секции /settings:
     `SettingsScreen.__init__` → `_read_origins()` читает настоящие
     `~/.gc/config.local.yml` и `<cwd>/.gc/config.yml`, и перекрытое там поле
-    добавляет в секцию строку «⚠ действует … — перекрыто»."""
+    добавляет в секцию строку «⚠ действует … — перекрыто».
+
+    Патчатся ОБА имени: `config.py` связывает `managed_config_path` при импорте
+    (`from mcp_runtime.paths import ...`), поэтому подмена только в модуле-источнике
+    до загрузчика не доходит — тесты продолжали мержить настоящий
+    `~/.gc/config.local.yml`. Пока он нёс только `mcp`, это было незаметно; с тех
+    пор как pre-write валидация судит стек, реестр из чужого оверлея менял бы
+    вердикт записи, и изоляция обязана быть настоящей."""
     with mock.patch("mcp_runtime.paths.managed_config_path",
+                    lambda: tmp_path / "config.local.yml"), \
+         mock.patch("config.managed_config_path",
                     lambda: tmp_path / "config.local.yml"), \
          mock.patch("config._project_local_config_path", lambda: None):
         yield

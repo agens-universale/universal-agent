@@ -49,7 +49,7 @@ from tui.editors.field_list import (
     write_field,
 )
 from tui.editors.preset_list import PRESET_HINT as _PRESET_HINT, preset_list_controller
-from tui.palette import ACCENT, DEEP_DIM, INK, WARN
+from tui.palette import ACCENT, DEEP_DIM, WARN
 from tui.services.probe_presentation import connection_line_text, plural_models
 from tui.widgets.paste_input import PasteInput
 
@@ -143,6 +143,30 @@ def _inherited(value: str) -> str:
     return f"наследуется: {value}"
 
 
+def _resolved_for_request(url: str, auth: str | None) -> tuple[str, str | None]:
+    """Раскрыть `${ENV:VAR}`/`${FILE:...}` перед отправкой — тем же резолвером, что у
+    `config.load_config`: сама ссылка не адрес и не токен, и буквальный
+    `Bearer ${ENV:TOK}` сервер отклоняет — проба врала «✗ токен отклонён» на исправном
+    конфиге, а список не грузился никогда.
+
+    Зовётся ТОЛЬКО из воркеров (эталон — `screens/onboarding._auto_probe`): `${FILE:...}`
+    — синхронное чтение с диска, и в UI-потоке оно подвешивало бы интерфейс на каждый
+    переход курсора. Наружу — в поля, `peek()`, `submit()` — раскрытое не возвращается:
+    в файл обязана уехать ссылка."""
+    from config_modules.env_interpolation import resolve_env_placeholders
+    return (resolve_env_placeholders(url),
+            resolve_env_placeholders(auth) if auth else auth)
+
+
+def _env_missing_line(url: str) -> str:
+    """Ссылка в адресе НЕ подставилась: резолв даст "", и стучаться в пустой адрес
+    нечестно — под визуально заполненным полем и проба, и список соврали бы «нет
+    соединения», как будто лежит сервер. Называем переменную (эталон —
+    `screens/onboarding._auto_probe`). Одна строка на обе сетевые клавиши: причина у них
+    общая, и разойдись они словами, одно и то же состояние читалось бы двумя."""
+    return f"⚠ {onboarding.display_value(url)}"
+
+
 class ModelEntryForm(Vertical):
     def __init__(self, *, initial: dict | None = None, existing_aliases=(),
                  fetch=None, probe=None, presets: list | None = None,
@@ -205,6 +229,10 @@ class ModelEntryForm(Vertical):
         self._positions = ("mef-url", "mef-token", None, "mef-model", "mef-alias")
         self._idx = 0
         self._models: list = []
+        # Провалилась ли последняя загрузка. Пустой `_models` сам по себе двусмыслен —
+        # «ещё не ходили» и «сходили, не получилось» выглядят одинаково, а показать
+        # надо разное.
+        self._list_failed = False
         # Ключ последней автоподгрузки — (url, auth), а не флаг «уже пробовали»:
         # ревизия владельца по смоку. Сбой при пустом токене, потом введённый
         # токен — вход в поле обязан сходить ЗАНОВО, флаг же держал форму на
@@ -493,7 +521,14 @@ class ModelEntryForm(Vertical):
         # Строка ошибки монтируется сразу и пустой (display гасит место под неё):
         # remove()+mount() с тем же id в одном такте даёт DuplicateIds, если форма
         # падает на одной ошибке два submit() подряд (урок донора).
-        error = Static("", id="mef-error", classes="onb-warn onb-dyn set-group-gap")
+        #
+        # `markup=False` — единственный Static формы, в который интерполируется НАБРАННОЕ
+        # человеком (`_fail`: алиас в отказе). Квадратные скобки Rich читает разметкой:
+        # `[x]` съедал имя из отказа, `[/x]` ронял `MarkupError` наружу — и валидатор
+        # такие имена пропускает, а файл их квотирует, то есть падало на повторном вводе
+        # СОХРАНЁННОГО имени. Тот же приём, каким чинён этот класс в `settings._singleton`.
+        error = Static("", id="mef-error", classes="onb-warn onb-dyn set-group-gap",
+                       markup=False)
         error.display = False
         yield error
 
@@ -605,6 +640,12 @@ class ModelEntryForm(Vertical):
                 if key != self._autoload_key:
                     self._autoload_key = key
                     self._start_models_fetch(refresh=False)
+                elif self._list_failed:
+                    # Этими же параметрами уже сходили и не получилось — пока курсор
+                    # был на другом поле, показать ошибку было негде. Дребезг загрузку
+                    # не повторит, и молчание читалось бы как «список ещё летит»:
+                    # говорим то же, что сказали бы, останься курсор здесь.
+                    self._set_status(LIST_FAILED)
         else:
             # Счётчик/ошибка списка — про поле, с которого курсор ушёл: «2 модели»
             # под чужим полем не про что.
@@ -695,6 +736,19 @@ class ModelEntryForm(Vertical):
         self.query_one("#mef-noauth", Static).update(self._noauth_text())
         self._sync_token_visibility()
         self._sync_pair_state()
+        # Позиция под курсором могла ЗАМЁРЗНУТЬ этим же действием (токен при общей паре):
+        # `disabled` у фокусного Input Textual разруливает сам — уводит фокус на соседа по
+        # focus chain, то есть на алиас, где Input делает select-all, — а `_idx` формы
+        # остаётся на токене. Печать после этого заменяла ИМЯ записи, Enter сохранял
+        # переименование (с каскадом по слотам и привязкам), а клавиши позиции (Alt+↓,
+        # Space) молчали. Форма — хозяин курсора: заморозила позицию — сама её и покидает,
+        # той же дисциплиной, какой `move` обходит `_skip_position`. Цель — «Адрес»: первое
+        # поле пары и единственный незамороженный сосед. НЕ через `_focus_position`: он
+        # раскрыл бы пресет-лист над опустевшим полем, и следующий Enter подставил бы строку
+        # списка вместо сохранения.
+        if self._skip_position(self._positions[self._idx]):
+            self._idx = self._positions.index("mef-url")
+            self.query_one("#mef-url", Input).focus()
         # Связь, по которой ходила проба, изменилась (`_current_url`/`_current_auth_
         # header` с этого момента отдают унаследованные), а `Input.Changed` по
         # программной записи не летит — обесценивать вердикт приходится руками, иначе
@@ -759,6 +813,9 @@ class ModelEntryForm(Vertical):
         if not url:
             self._set_status(_LIST_NO_URL)
             return True
+        if onboarding.env_ref_status(url) == onboarding.ENV_REF_MISSING:
+            self._set_status(_env_missing_line(url))
+            return True
         auth = self._current_auth_header()
         # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
         # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
@@ -776,6 +833,7 @@ class ModelEntryForm(Vertical):
 
     def _fetch_blocking(self, url: str, auth: str | None, gen: int,
                         refresh: bool) -> None:
+        url, auth = _resolved_for_request(url, auth)
         try:
             models = self._fetch(url, auth, verify=self._verify,
                                  config_proxy=self._config_proxy, refresh=refresh)
@@ -790,17 +848,23 @@ class ModelEntryForm(Vertical):
             return
         if self._positions[self._idx] != "mef-model":
             # Курсор успел уйти с поля: список запоминаем (вернётся — раскроется
-            # сам), но раскрывать и вешать счётчик под чужим полем нельзя.
+            # сам), но раскрывать и вешать счётчик под чужим полем нельзя. Провал
+            # запоминаем тем же движением: забыть его значит встретить вернувшийся
+            # курсор пустым полем без объяснения — дребезг автоподгрузки повторить
+            # загрузку теми же параметрами не даст.
             self._models = list(models or [])
+            self._list_failed = not models
             return
         if not models:
             # Честная ошибка вместо молчания: сервер мог лежать, а клавиша выглядела
             # бы мёртвой. Вписать id руками при этом никто не мешает.
             self._models = []
+            self._list_failed = True
             self._list.close()
             self._set_status(LIST_FAILED)
             return
         self._models = list(models)
+        self._list_failed = False
         self._list.close()                   # прошлое раскрытие больше не наше
         self._list.open(forced=True, filter_text=self._model_value())
         n = len(self._models)
@@ -932,6 +996,9 @@ class ModelEntryForm(Vertical):
         if not url:
             self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
             return True
+        if onboarding.env_ref_status(url) == onboarding.ENV_REF_MISSING:
+            self._set_probe_line(Text(_env_missing_line(url), style=WARN))
+            return True
         auth = self._current_auth_header()
         model = self._model_value()
         self._probe_gen += 1
@@ -944,6 +1011,7 @@ class ModelEntryForm(Vertical):
 
     def _probe_blocking(self, url: str, auth: str | None, model: str, gen: int) -> None:
         from tui.services.settings_probe import ProbeResult, probe_connection
+        url, auth = _resolved_for_request(url, auth)
         try:
             result = probe_connection(url, auth, self._verify, model,
                                       config_proxy=self._config_proxy,
@@ -1103,13 +1171,29 @@ class ModelEntryForm(Vertical):
             return self._fail(str(exc))
         if alias in self._other_aliases:
             return self._fail(f"алиас '{alias}' уже используется")
-        if alias in self._base_aliases:
+        if alias in self._base_aliases and alias != self._own_alias:
             # Имя записи основного конфига: своей такой в профиле нет, дублем это не
             # является — но две строки реестра под одним алиасом читались бы как
             # одна, и отказ говорит, чем имя занято (§5).
+            #
+            # Кроме СОБСТВЕННОГО имени записи — по тому же правилу, каким запись не
+            # считается дублем самой себя (`_other_aliases`). Тёзка базовой в профиле
+            # легальна (§4/§5: она её перекрывает, витрина зовёт её своей и обещает
+            # «Enter — изменить»), и запрет владельца — про СОЗДАНИЕ такой записи, а не
+            # про правку существующей: иначе её нельзя тронуть вовсе, а переименование
+            # в выход не годится — оно снимает перекрытие. Переименование В чужое базовое
+            # имя это условие по-прежнему отвергает.
             return self._fail(_ALIAS_TAKEN_BY_BASE)
         url = values["url"]
-        if url and not onboarding._valid_endpoint_url(url):
+        if (url and not onboarding._valid_endpoint_url(url)
+                and not onboarding.env_ref_status(url)):
+            # Ссылка `${ENV:VAR}` — штатное СЫРОЕ значение поля: форма читает документ
+            # без резолва (`models_section._read_document`), а `docs/configuration.md`
+            # сам зовёт хранить адрес и токен так. Структурная проверка её бракует, и
+            # запись с таким адресом нельзя было сохранить даже правкой одного id модели
+            # — тупик с выходом только через ручную правку YAML. Гейт по ЗНАЧЕНИЮ, а не
+            # по «трогали ли поле»: иначе плейсхолдер нельзя было бы и набрать. То же
+            # исключение, что у пробы мастера (`screens/onboarding`).
             return self._fail(_URL_ERROR)
         # §2: своё подключение задаётся ЦЕЛИКОМ — половину пары форма не сохраняет.
         # Иначе отказ пришёл бы от валидатора конфига, когда правка уже сделана.

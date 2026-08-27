@@ -87,6 +87,12 @@ def _footer(scr) -> str:
     return str(scr.query_one("#set-footer", Static).render())
 
 
+def _notice(scr) -> str:
+    """Строка-реплика экрана: отказы секции приезжают ею (`_models_notice`: ok=False
+    → `_notice`), удача — плашкой."""
+    return " ".join(str(w.render()) for w in scr.query("#set-notice"))
+
+
 @asynccontextmanager
 async def _section(tmp_path, body: str = "", *, models=("test-model",),
                    model: str = '"test-model"', size=None):
@@ -155,6 +161,17 @@ async def test_hub_preview_in_legacy_mode_is_the_model_name(tmp_path):
     """Реестра нет — превью то же, что и сегодня: имя модели из файла."""
     async with _section(tmp_path) as (_pilot, scr, _cfg_file):
         assert "test-model" in str(scr._row_value(1))
+
+
+def test_hub_preview_survives_a_section_that_is_not_a_mapping():
+    """Превью считается на КАЖДОЙ перерисовке меню — в том числе когда конфиг правят
+    под ногами и `slots:` в этот момент список, а не словарь. Секция-не-словарь для
+    витрины значит «секции нет»; валидировать схему здесь нечем и незачем — вердикт
+    даёт глиф, а превью обязано пережить любой файл (`_row_value` зовёт его без
+    try, и `.get` на списке роняет весь экран)."""
+    from tui.editors.models_section import registry_preview
+    assert registry_preview({"models": {"a": {}}, "slots": ["light"]}) == "1 в реестре"
+    assert registry_preview({"models": ["a"], "slots": {}}) == "0 в реестре"
 
 
 async def test_hub_glyph_is_ok_when_the_registry_is_filled_and_valid(tmp_path):
@@ -269,6 +286,77 @@ async def test_second_entry_is_written_together_with_the_default_slot(tmp_path):
         doc = _doc(cfg_file)
         assert set(doc["models"]) == {"flash", "opus"}
         assert doc["slots"]["default"] in ("flash", "opus")
+
+
+async def test_the_default_slot_picker_describes_the_entry_being_written(tmp_path):
+    """Позиция ещё НЕ ЗАПИСАННОЙ записи описывается тем, что уедет в неё этой же
+    транзакцией, а не выдумывается: в файле записи нет, и витринные `_entry_model`/
+    `_address_cell` подставляли алиас вместо провайдерского id и адрес
+    «Подключения» вместо своего — человек выбирал модель по умолчанию по строке,
+    которой ни до, ни после выбора не существует."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        from tui.editors.model_entry_form import ModelEntryForm
+        await pilot.press("n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "opus"
+        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        form.query_one("#mef-url", Input).value = "https://own-host/v1/chat/completions"
+        form.query_one("#mef-token", Input).value = "sk-OWN"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                # submit → пикер default
+        await pilot.pause()
+        ed = _editor(scr)
+        assert ed.picker_open
+        row = next(r for r in ed._picker["rows"] if r["value"] == "opus")
+        desc = row["desc"].plain
+        assert "anthropic/claude-opus" in desc, desc     # id из формы, не алиас
+        assert "own-host" in desc, desc                  # свой адрес из формы
+        assert "Подключения" not in desc, desc           # он НЕ унаследован
+        flash = next(r for r in ed._picker["rows"] if r["value"] == "flash")
+        assert "google/gemini-2.5-flash" in flash["desc"].plain   # соседи как были
+
+
+async def test_the_base_section_asks_about_the_default_when_a_profile_holds_models(
+        tmp_path, monkeypatch):
+    """Вопрос о слоте задаётся по СТЕКУ, а не по своему файлу: легаси-база без
+    реестра плюс активный профиль с моделью — первая запись в базу делает merged
+    неоднозначным, и гейт её отвергнет.
+
+    Своя редакция правила в секции этого не видела: тень есть только у под-вида
+    профиля, а у основной секции её нет вовсе — вопрос не задавался там, где запись
+    без слота невозможна, и человек упирался в тупик (предложить слот секции было
+    негде). Ответ уходит ОДНОЙ транзакцией, после которой конфиг грузится."""
+    from config import load_config_ex
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)          # <cwd>/.gc/profiles — первый корень дискавери
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "work.yml").write_text('models:\n  p1:\n    model: "x"\n',
+                                       encoding="utf-8")
+    async with _section(tmp_path, 'profile: "work"\n') as (pilot, scr, cfg_file):
+        await pilot.press("alt+n")     # реестра у базы нет — тело занял легаси-редактор
+        await pilot.pause()
+        from tui.editors.model_entry_form import ModelEntryForm
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "gc"
+        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        form._presets_ctrl.close()     # раскрытый на входе пресет-лист съел бы Enter
+        await pilot.pause()
+        await pilot.press("enter")                # submit → пикер default
+        await pilot.pause()
+        assert _editor(scr).picker_open, "пикер «какая модель по умолчанию» не открылся"
+        await pilot.press("enter")                # выбрать первую строку пикера
+        await pilot.pause()
+        doc = _doc(cfg_file)
+        assert doc["models"]["gc"]["model"] == "anthropic/claude-opus"
+        assert doc["slots"]["default"] == "gc"
+        load_config_ex(str(cfg_file))             # merged резолвится — тупика нет
 
 
 async def test_the_add_row_opens_the_creation_form(tmp_path):
@@ -403,6 +491,37 @@ async def test_deleting_the_last_entry_warns_that_levels_switch_off(tmp_path):
         assert "Реестр станет пустым — уровни выключатся" in _texts(scr)
 
 
+async def test_removing_an_entry_the_profile_points_at_is_refused_at_once(
+        tmp_path, monkeypatch):
+    """На запись смотрит слот АКТИВНОГО ПРОФИЛЯ — другого файла: баннер «точно
+    удалить?» обещал бы удаление, которого не случится ни при каком ответе
+    (транзакции через два файла у слоя записи нет). Отказ сразу — и с именем файла
+    и координатой, иначе человеку некуда идти: свой файл он видит, чужой нет."""
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)          # <cwd>/.gc/profiles — первый корень дискавери
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+    body = ('profile: "work"\n'
+            "models:\n"
+            "  gc:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        _goto(_editor(scr), "entry", alias="gc")
+        await pilot.press("delete")
+        await pilot.pause()
+        ed = _editor(scr)
+        assert not ed.awaiting_confirm                  # ложного вопроса нет
+        assert not list(ed.query(".models-confirm"))
+        notice = _notice(scr)
+        assert "✗ не удалено" in notice
+        assert "work.yml" in notice and "slots.default" in notice, notice
+        assert cfg_file.read_bytes() == before
+        assert "gc" in ed._aliases                      # строка на месте
+
+
 # --- резервная модель ---------------------------------------------------------
 
 async def test_new_entry_key_does_not_drop_an_unsaved_reserve_choice(tmp_path):
@@ -443,6 +562,38 @@ async def test_reserve_save_returns_to_the_registry_list(tmp_path):
         assert "other-model" in cfg_file.read_text(encoding="utf-8")
         assert scr._view == 1                       # остались в секции
         assert any("flash" in r for r in _rows(scr))   # и видим список записей
+
+
+async def test_reserve_save_under_the_env_banner_still_returns_to_the_list(tmp_path):
+    """Тот же возврат, но через вторую дверь: `agent.model` — ссылка `${ENV:…}`, и
+    Enter в под-форме сперва поднимает подтверждение перезаписи. Подтверждающий Enter
+    пишет ЗАНОВО, и «остаться в списке» обязано пережить эту дорогу: снимок
+    подтверждения хранил (секцию, значения, предупреждение), а куда возвращаться —
+    терял, и человека выбрасывало в хаб через два уровня вместо одного."""
+    import os
+    os.environ["GC_TEST_MODEL_REF"] = "test-model"
+    try:
+        async with _section(tmp_path, _REGISTRY, models=("test-model", "other-model"),
+                            model='"${ENV:GC_TEST_MODEL_REF}"') as (pilot, scr, cfg_file):
+            ed = _editor(scr)
+            _goto(ed, "reserve")
+            await pilot.pause()
+            await pilot.press("enter")                  # открыть под-форму
+            await _wait_legacy_list(pilot, scr)
+            await pilot.press("down")
+            await pilot.press("enter")                  # submit → подтверждение
+            await pilot.pause()
+            assert scr._pending_env_save is not None     # предусловие: баннер висит
+            await pilot.press("enter")                  # подтвердили перезапись
+            await pilot.pause()
+            await pilot.pause()
+            content = cfg_file.read_text(encoding="utf-8")
+            assert "${ENV:GC_TEST_MODEL_REF}" not in content   # запись состоялась
+            assert scr._view == 1, "выбросило из секции"
+            assert any("flash" in r for r in _rows(scr))
+    finally:
+        os.environ.pop("GC_TEST_MODEL_REF", None)
+
 
 
 async def test_empty_state_save_returns_to_the_hub(tmp_path):

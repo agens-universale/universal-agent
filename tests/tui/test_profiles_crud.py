@@ -210,11 +210,21 @@ async def test_create_puts_the_cursor_on_the_new_row(tmp_path, monkeypatch):
     ("home", "уже существует"),
     ("", "введите имя"),
     ("../evil", "разделител"),
+    ("имя:поток", "недопустимые символы"),
+    ("отчёт*", "недопустимые символы"),
+    ('кавычка"', "недопустимые символы"),
+    ("труба|", "недопустимые символы"),
 ])
 async def test_create_refuses_bad_names(tmp_path, monkeypatch, name, expected):
-    """Резервное слово (`RESERVED_WORDS`), тёзка существующего, пустое имя и
-    разделитель пути — честная ошибка вместо файла. Разделитель отдельно: имя
-    идёт прямо в имя файла, это единственная защита от выхода из корня."""
+    """Резервное слово (`RESERVED_WORDS`), тёзка существующего, пустое имя,
+    разделитель пути и символы, запрещённые в именах файлов Windows, — честная
+    ошибка вместо файла. Разделитель отдельно: имя идёт прямо в имя файла, это
+    единственная защита от выхода из корня.
+
+    Запрещённые символы — там же и по той же причине: без проверки человек получал
+    в лицо сырое «[Errno 22] Invalid argument» с временным путём, а `имя:поток`
+    вдобавок оставлял в каталоге профилей мусорный файл `имя` — NTFS понимает
+    двоеточие как альтернативный поток и создаёт носитель."""
     import tui.app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -230,6 +240,8 @@ async def test_create_refuses_bad_names(tmp_path, monkeypatch, name, expected):
         await _type_name(pilot, scr, name)
         assert expected in _notice(scr)
         assert [r["name"] for r in scr._profiles_rows() if r["kind"] == "profile"] == ["home"]
+        # Отказ обязан быть ЧИСТЫМ: ни файла профиля, ни мусорного носителя ADS.
+        assert sorted(p.name for p in (tmp_path / "base" / "profiles").iterdir())             == ["home.yml"]
 
 
 async def test_create_refuses_on_the_package_template(tmp_path, monkeypatch):

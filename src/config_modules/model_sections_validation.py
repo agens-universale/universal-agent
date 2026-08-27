@@ -65,6 +65,23 @@ def _check_assign_value(models: dict, coordinate: str, value: str, prefix: str, 
     )
 
 
+def default_slot_required(models, slots) -> bool:
+    """Нужен ли ЯВНЫЙ слот, чтобы реестр резолвился (спека §4): при 2+ моделях и ни
+    одном заданном слоте вывести `default` не из чего.
+
+    Отдельным предикатом, потому что спрашивают его двое: валидатор — чтобы
+    пожаловаться, и слой записи — чтобы форма успела спросить человека ДО записи.
+    Написанное дважды от руки, это правило уже разъезжалось: одна копия считала по
+    слитому стеку, другая по одному файлу, и вопрос «какая модель по умолчанию» не
+    задавался там, где запись потом отвергал гейт."""
+    return (
+        len(models) >= 2
+        and slots.light is None
+        and slots.default is None
+        and slots.max is None
+    )
+
+
 def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[str]:
     """Ссылочная целостность models/slots/assign на итоговом merged-конфиге.
 
@@ -84,12 +101,7 @@ def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[st
         if alias is not None and alias not in models:
             errors.append(f'{prefix}slots.{slot_name}: алиас "{alias}" не найден в merged-реестре models')
 
-    if (
-        len(models) >= 2
-        and cfg.slots.light is None
-        and cfg.slots.default is None
-        and cfg.slots.max is None
-    ):
+    if default_slot_required(models, cfg.slots):
         errors.append(
             f"{prefix}slots.default: моделей в реестре ≥2 — укажите slots.default "
             "(или любой другой слот — default резолвится по матрице фоллбэков)"
