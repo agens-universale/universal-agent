@@ -60,8 +60,12 @@ _FOOTER_EMPTY = ("↑/↓ · Enter — сохранить · Alt+↓ — пер�
 # реестром, а save-машины у секции больше нет.
 _FOOTER_RESERVE_FORM = ("↑/↓ · Enter — сохранить · Alt+↓ — перечитать список · "
                         "Esc — к списку")
+# «Ctrl+U — очистить» — обещание встроенного биндинга Textual Input
+# (delete_left_all, конвенция readline): он работает во всех полях, но обещан на
+# адресе — там очистка значит «вернуть наследование», и владелец её не находил.
 _FOOTER_FORM_URL = ("Enter — сохранить · Alt+↓ — показать список · "
-                    "Ctrl+Space — проверить связь · Esc — к списку")
+                    "Ctrl+U — очистить · Ctrl+Space — проверить связь · "
+                    "Esc — к списку")
 _FOOTER_FORM_MODEL = ("Enter — сохранить · Alt+↓ — перечитать список · "
                       "Ctrl+Space — проверить связь · Esc — к списку")
 _FOOTER_FORM_NOAUTH = ("↑/↓ · Enter — сохранить · Space — переключить · "
@@ -131,6 +135,13 @@ _PROFILE_EMPTY_HINT = (
 )
 _NO_ADDRESS_HINT = ("адрес не задан ни у записи, ни в «Подключении» — "
                     "по такой записи запрос не уйдёт")
+# Ячейка адреса мёртвой записи: причина «мёртвости» видна в самой строке, длинное
+# объяснение (`_NO_ADDRESS_HINT`) остаётся в notice сохранения.
+_DEAD_ADDRESS_CELL = "без адреса"
+# Строка-действие в конце блока «реестр»: Enter/клик = клавиша n. DIM + многоточие
+# (пробы владельца: DEEP_DIM читался подсказкой, тил перетягивал глаз с данных;
+# DIM — виден сразу, но не спорит с реестром и цветами уровней).
+_ADD_ROW_LABEL = "+ добавить модель…"
 _PICKER_DEFAULT_HINT = ("в реестре станет больше одной модели — выберите, какая "
                         "работает по умолчанию")
 # Хвост записи называет ВСЕ уровни, которыми она работает, а не один `default`:
@@ -162,25 +173,37 @@ _BLOCK_CAPTIONS = {
     "slot": "уровни",
     "assign": "назначения: кто чем работает",
 }
-_BLOCK_LEAD = "────"
-# Подписи короче этой ширины дочерчиваются до неё, длинная — оставляет хвост в
-# четыре черты: подпись-строка узнаётся по форме, а не по одинаковой длине.
-_BLOCK_CAPTION_WIDTH = 32
 _BLOCK_TAIL_MIN = 4
+# Все черты-подписи ОДНОЙ ширины — по самой длинной подписи плюс минимальный
+# хвост (ревизия владельца: разная длина линий читалась как неровность, а не
+# как форма). Новая длинная подпись раздвинет все черты сама. Слева вместо
+# черты — стрелка сворачивания (▾/▸): шапка блока стала его выключателем.
+_BLOCK_CAPTION_WIDTH = max(
+    len(f"▾ {text} ") for text in _BLOCK_CAPTIONS.values()
+) + _BLOCK_TAIL_MIN
+# Порядок блоков секции — он же порядок обхода в `_rows`/`_body`.
+_BLOCK_ORDER = ("entry", "slot", "assign")
+
+# Сворачивание блоков живёт на процесс (решение владельца: память на сессию,
+# в файлы не пишется), ключ — файл цели: основной конфиг и каждый профиль
+# помнят своё, а пересборка/перемонтирование секции состояние не теряет.
+_COLLAPSED_BLOCKS: dict = {}
 
 
-def block_caption(text: str) -> str:
-    """Подпись блока в виде черты-разделителя: `──── реестр ────────`.
+class _BlockHeader(Static):
+    """Шапка блока — единственный МЫШИНЫЙ элемент секции: сворачивание только
+    кликом, без клавиш (решение владельца). Это безопасно ровно потому, что
+    дефолт — «всё раскрыто»: без мыши пользователь ничего не теряет, фича
+    аддитивна. Позицией курсора шапка не является — путь стрелок не растёт."""
 
-    Не симметричный `f"──── {label} ────"` маркера сжатия (`trace_render.py:190`,
-    `main.py:1862`) — и это осознанно: тот маркер ИНЛАЙНОВЫЙ, он метит точку в потоке
-    событий и потому одинаково короток с обеих сторон. Здесь строка стоит там, где
-    стояла бы черта-разделитель блока (и класс несёт её же, `set-group-sep`), поэтому
-    она дочерчивается вправо: слева — метка, справа — сама черта. Форма — макет
-    владельца из ревизии Task 12; если решат унифицировать с маркером, это правка
-    одной строки."""
-    head = f"{_BLOCK_LEAD} {text} "
-    return head + "─" * max(_BLOCK_TAIL_MIN, _BLOCK_CAPTION_WIDTH - len(head))
+    def __init__(self, text, *, kind: str, on_toggle, **kwargs) -> None:
+        super().__init__(text, **kwargs)
+        self._kind = kind
+        self._on_toggle = on_toggle
+
+    def on_click(self, event) -> None:
+        event.stop()
+        self._on_toggle(self._kind)
 
 
 def fit_cell(text: str, width: int) -> str:
@@ -223,30 +246,29 @@ def address_host(url: str) -> str:
 # --- нижняя половина секции: слоты (уровень → алиас) и привязки потребителей ---
 _SLOT_UNSET = "не задан"
 _ASSIGN_ACTIVE = "активная"
-_PICKER_SLOT_HINT = "первая строка снимает слот — уровень вернётся к фоллбэку"
-_PICKER_ASSIGN_HINT = ("первая строка снимает привязку — потребитель уйдёт на "
-                       "активную модель")
+# Правая колонка строки «активная» в пикере: снятие привязки не фиксирует ничего —
+# потребитель следует за активным уровнем (`ModelRouter.resolve`, ветка без binding).
+# «сейчас <уровень>» — вычисленное на этот момент, слово «сейчас» и помечает его
+# как текущее состояние, а не как часть выбора.
+_ACTIVE_DESC_LEAD = "работает активным уровнем: сейчас "
 _SLOT_DEAD_HINT = "уровень не резолвится: задайте хотя бы один слот"
-_ASSIGN_ACTIVE_HINT = "работает активной моделью сессии, как основной трейс"
-# `auto_judge` — потребитель волны C: строка в реестре есть, но никто его ещё не
-# зовёт. Фоллбэк у него СВОЙ (уровень default, не активная модель — см. коммент
-# `_CONSUMER_RU_LABEL` и `ModelRouter.resolve`), поэтому общий текст «активной» ему
-# не подходит.
-_AUTO_JUDGE_HINT = "активен с функцией авто-выбора"
-_AUTO_JUDGE_UNBOUND_HINT = "без привязки идёт уровнем default, не активной моделью"
-
-# `*` — не «те, кого нет в списке»: в списке перечислены ВСЕ канонические имена, и
-# поимённо чужое имя вписать нельзя (валидатор фазы 2 отвергает ключ). Реальный смысл
-# ровно два: единственный способ привязать кастомных субагентов из `.md`-файлов и
-# общая привязка «всем сразу, кому своя не задана» (`ModelRouter._lookup_binding`:
-# точное имя → `*`).
-_WILDCARD_HINT = ("действует на субагентов из .md-файлов и на тех, кому не задана "
-                  "своя привязка")
 # Подписи потребителей, которых НЕТ в транспортном словаре `_CONSUMER_RU_LABEL`
 # (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
 # собственностью — здесь только UI-добавка (контракт п.2 волны B).
+#
+# `auto_judge` — потребитель волны C: строка в реестре есть, но никто его ещё не
+# зовёт, а без привязки он пойдёт уровнем default, не активным (`ModelRouter.
+# resolve`). Описание «появится с авто-выбором» — в голове строки грамматикой
+# «имя · описание» (построчной подсказки у секции больше нет — строка объясняет
+# себя сама).
+#
+# `*` — не «те, кого нет в списке»: в списке перечислены ВСЕ канонические имена, и
+# поимённо чужое имя вписать нельзя (валидатор фазы 2 отвергает ключ). Реальный
+# смысл ровно два: единственный способ привязать кастомных субагентов из
+# `.md`-файлов и общая привязка «всем сразу, кому своя не задана»
+# (`ModelRouter._lookup_binding`: точное имя → `*`).
 _UI_CONSUMER_LABEL = {
-    "auto_judge": "судья auto_judge",
+    "auto_judge": "судья auto_judge · появится с авто-выбором",
     "*": "* · кастомные и будущие субагенты",
 }
 # Роль субагента рядом с его именем — грамматика «имя · описание» канона
@@ -383,6 +405,7 @@ class ModelsSectionEditor(Vertical):
                  effective_url: str = "",
                  effective_auth: str | None = None, verify: bool = True,
                  config_proxy: str | None = None, presets=(),
+                 active_level: str = "default",
                  legacy_editor_factory=None, legacy_hints=(),
                  on_change=None, on_notice=None, on_legacy_save=None) -> None:
         super().__init__(classes="onb-dyn")
@@ -396,12 +419,18 @@ class ModelsSectionEditor(Vertical):
         self._verify = verify
         self._config_proxy = config_proxy
         self._presets = list(presets)
+        # Активный уровень — знание ЭКРАНА (config + сессионные переключатели);
+        # секция показывает файл, но описание «активной» в пикере говорит о рантайме.
+        self._active_level = active_level
         self._legacy_editor_factory = legacy_editor_factory
         self._legacy_hints = list(legacy_hints)
         self._on_change = on_change
         self._on_notice = on_notice
         self._on_legacy_save = on_legacy_save
         self._document = self._read_document()
+        # Свёрнутые блоки — общий на процесс словарь по файлу цели (см. коммент
+        # у `_COLLAPSED_BLOCKS`): set видов из `_BLOCK_ORDER`.
+        self._collapsed = _COLLAPSED_BLOCKS.setdefault(str(target), set())
         self._idx = 0                     # курсор строки списка (записи + резервная)
         self._form = None                 # ModelEntryForm в работе
         # Легаси-редактор — СОСТОЯНИЕ (флаг), а виджет пересоздаётся каждой сборкой
@@ -485,10 +514,20 @@ class ModelsSectionEditor(Vertical):
         правку того, чего в нём не существует."""
         if self.registry_empty:
             return []
-        return ([{"kind": "entry", "alias": a} for a in self._aliases]
-                + [{"kind": "slot", "level": level} for level in LEVELS]
-                + [{"kind": "assign", "consumer": c} for c in assign_consumers()]
-                + ([] if self._is_profile else [{"kind": "reserve"}]))
+        rows: list = []
+        if "entry" not in self._collapsed:
+            rows += [{"kind": "entry", "alias": a} for a in self._aliases]
+            # «+ добавить» — последней строкой БЛОКА (ревизия владельца): курсор
+            # при входе встаёт на данные, действие — «…и ещё одна» в конце.
+            # Клавиша n остаётся путём из любого места секции.
+            rows.append({"kind": "add"})
+        if "slot" not in self._collapsed:
+            rows += [{"kind": "slot", "level": level} for level in LEVELS]
+        if "assign" not in self._collapsed:
+            rows += [{"kind": "assign", "consumer": c} for c in assign_consumers()]
+        if not self._is_profile:
+            rows.append({"kind": "reserve"})
+        return rows
 
     def _row_at_cursor(self) -> dict | None:
         rows = self._rows()
@@ -516,11 +555,12 @@ class ModelsSectionEditor(Vertical):
 
     def _address_cell(self, alias: str) -> str:
         """Ячейка адреса: хост, куда реально уйдёт запрос, плюс происхождение адреса,
-        если он унаследован. Адрес не резолвится вовсе — ячейка пуста, а причину
-        называет подсказка строки (прежнее поведение мёртвой записи)."""
+        если он унаследован. Адрес не резолвится вовсе — ячейка называет это сама
+        («без адреса»): построчной подсказки у секции больше нет, а «по этой записи
+        запрос не уйдёт» — факт про запись, и место ему в её строке."""
         address = self._entry_address(alias)
         if not address:
-            return ""
+            return _DEAD_ADDRESS_CELL
         own = (self._entries.get(alias) or {}).get("url")
         return address_host(address) + ("" if own else _INHERITED_TAIL)
 
@@ -545,9 +585,15 @@ class ModelsSectionEditor(Vertical):
             t.append(level, style=DEEP_DIM if dead else value_style(level))
         return t
 
+    def _address_width(self) -> int:
+        """Натуральная ширина колонки адреса — по самой длинной ячейке. Колонка НЕ
+        растягивается на весь остаток рамки: иначе указатель уезжал бы к правому краю
+        и переставал читаться как столбец, стоящий в общей сетке."""
+        return max([len(self._address_cell(a)) for a in self._aliases] + [0])
+
     def _pointer_width(self) -> int:
-        """Ширина столбца указателя — по самому длинному в списке: столбец крайний
-        правый, и все указатели стоят в нём друг под другом.
+        """Ширина столбца указателя — по самому длинному в списке: все указатели стоят
+        друг под другом, сразу за колонкой адреса.
 
         Усечения у него нет — «← light, default» пополам не режут: на узкой рамке он
         уходит целиком, третьей ступенью лестницы `_entry_columns` (второй жертвой
@@ -571,7 +617,8 @@ class ModelsSectionEditor(Vertical):
         Порядок жертв — канон all-or-nothing `_mode_row_text` («не влезло — хвост
         уходит целиком, ядро строки видимо всегда»), только ступеней здесь четыре:
 
-        1. адрес ужимается многоточием до `_MIN_ADDRESS_COLS`;
+        1. колонка адреса стоит по своему содержимому (`_address_width`) и ужимается
+           многоточием только когда рамке не хватает, до `_MIN_ADDRESS_COLS`;
         2. не осталось и этого — колонка адреса уходит ЦЕЛИКОМ вместе со своим
            зазором (иначе строка длиннее рамки: Static её перенесёт, а перенос рвёт
            указатель пополам и ставит хвост к левому краю без отступа);
@@ -591,7 +638,7 @@ class ModelsSectionEditor(Vertical):
             return alias_w, model_w, None, pointer_w
         core = 2 + alias_w + (2 + model_w if model_w else 0)
         tail = (2 + pointer_w) if pointer_w else 0
-        address_w = width - core - 2 - tail
+        address_w = min(width - core - 2 - tail, self._address_width())
         if address_w >= _MIN_ADDRESS_COLS:
             return alias_w, model_w, address_w, pointer_w
         if core + tail <= width:
@@ -689,7 +736,9 @@ class ModelsSectionEditor(Vertical):
         labels = consumer_labels()
         heads = [slot_head(level) for level in LEVELS]
         heads += [labels[consumer] for consumer in assign_consumers()]
-        values = [_SLOT_UNSET, _ASSIGN_ACTIVE, *LEVELS, *self._aliases]
+        values = ([self._slot_unset_label(lvl) for lvl in LEVELS
+                   if not self._slot_value(lvl)]
+                  + [_ASSIGN_ACTIVE, *LEVELS, *self._aliases])
         head_w = max(len(h) for h in heads) + 3
         value_w = max(len(v) for v in values)
         width = self._row_width()
@@ -733,10 +782,19 @@ class ModelsSectionEditor(Vertical):
                      style=DEEP_DIM if value is None else value_style(value))
         return t
 
+    def _slot_unset_label(self, level: str) -> str:
+        """Значение пустого слота называет фоллбэк само: «не задан → default» —
+        построчной подсказки больше нет, а «что реально работает вместо» — главный
+        факт этой строки. Уровень-кандидат или единственная модель — одинаково
+        стрелкой; не резолвится ничего — честное «не задан»."""
+        candidate, alias = self._slot_fallback(level)
+        target = candidate or alias
+        return f"{_SLOT_UNSET} → {target}" if target else _SLOT_UNSET
+
     def _slot_row_text(self, level: str, selected: bool) -> Text:
         return self._binding_row_text(
             lambda w: slot_head_text(level, w), self._slot_value(level),
-            _SLOT_UNSET, selected)
+            self._slot_unset_label(level), selected)
 
     def _assign_row_text(self, consumer: str, selected: bool) -> Text:
         label = consumer_labels()[consumer]
@@ -751,62 +809,39 @@ class ModelsSectionEditor(Vertical):
             return self._slot_row_text(row["level"], selected)
         if row["kind"] == "assign":
             return self._assign_row_text(row["consumer"], selected)
+        if row["kind"] == "add":
+            t = Text()
+            t.append("▸ " if selected else "  ", style=ACCENT)
+            # Та же дисциплина, что у всех строк: не переносится НИ на какой ширине
+            # (нашлось свипом стража — голый Static на узкой рамке переносился).
+            width = self._row_width()
+            label = _ADD_ROW_LABEL if width <= 0 else fit_cell(_ADD_ROW_LABEL,
+                                                               max(0, width - 2))
+            t.append(label, style=DIM)
+            return t
         return self._entry_row_text(row["alias"], selected)
 
-    def _slot_hint(self, level: str) -> str:
-        """Чем слот занят, а если не задан — что работает ВМЕСТО него: честный
-        фоллбэк по матрице `LEVEL_FALLBACK` (тот же обход, что у `ModelRouter.
-        _resolve_level`, включая правило «единственная модель реестра»), а не общая
-        фраза «действует default» — она была бы враньём, когда default тоже пуст."""
-        alias = self._slot_value(level)
-        if alias:
-            return f"уровень {level} работает моделью «{alias}»"
+    def _slot_fallback(self, level: str) -> tuple:
+        """Что работает ВМЕСТО незаданного слота: обход `LEVEL_FALLBACK` (тот же,
+        что у `ModelRouter._resolve_level`). `(уровень, алиас)` — фоллбэк по матрице;
+        `(None, алиас)` — правило «единственная модель реестра»; `(None, None)` —
+        уровень не резолвится. Один обход на обе витрины — текст подсказки и
+        крашеное описание в пикере."""
         for candidate in LEVEL_FALLBACK[level][1:]:
             fallback = self._slot_value(candidate)
             if fallback:
-                return f"{_SLOT_UNSET} · действует {candidate} → {fallback}"
+                return candidate, fallback
         if len(self._aliases) == 1:
-            return (f"{_SLOT_UNSET} · действует единственная модель реестра → "
-                    f"{self._aliases[0]}")
-        return f"{_SLOT_UNSET} · {_SLOT_DEAD_HINT}"
+            return None, self._aliases[0]
+        return None, None
 
-    def _assign_hint(self, consumer: str) -> str:
-        value = self._assign_value(consumer)
-        if value is None:
-            base = _AUTO_JUDGE_UNBOUND_HINT if consumer == "auto_judge" else _ASSIGN_ACTIVE_HINT
-        elif value in LEVELS:
-            base = f"работает уровнем {value}"
-        else:
-            base = f"жёсткий пин модели «{value}»"
-        if consumer == "auto_judge":
-            return f"{_AUTO_JUDGE_HINT} · {base}"
-        if consumer == "*":
-            # У wildcard'а спрашивают не «что будет без него», а «кого он вообще
-            # накрывает» — про «активную» строка молчит, это общий факт всех
-            # непривязанных потребителей, а не смысл этой строки.
-            return _WILDCARD_HINT if value is None else f"{_WILDCARD_HINT} · {base}"
-        return base
-
-    def _hint_text(self) -> str:
-        """Подсказка под списком — про строку под курсором (канон «Профилей»):
-        куда пишем и чем строка проблемна."""
-        row = self._row_at_cursor()
-        if row is None:
-            return ""
-        target = Path(self._target).name
-        if row["kind"] == "reserve":
-            return f"{_RESERVE_HINT} · запись: {target}"
-        if row["kind"] == "slot":
-            return f"{self._slot_hint(row['level'])} · запись: {target}"
-        if row["kind"] == "assign":
-            return f"{self._assign_hint(row['consumer'])} · запись: {target}"
-        alias = row["alias"]
-        address = self._entry_address(alias)
-        if not address:
-            return f"{_NO_ADDRESS_HINT} · запись: {target}"
-        own = (self._entries.get(alias) or {}).get("url")
-        head = address if own else f"наследует адрес основного конфига: {address}"
-        return f"{head} · запись: {target}"
+    def _slot_fallback_text(self, level: str) -> str:
+        candidate, alias = self._slot_fallback(level)
+        if candidate:
+            return f"действует {candidate} → {alias}"
+        if alias:
+            return f"действует единственная модель реестра → {alias}"
+        return _SLOT_DEAD_HINT
 
     # --- рендер ---------------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -826,39 +861,112 @@ class ModelsSectionEditor(Vertical):
             yield self._legacy
             yield from self._legacy_hint_widgets()
             return
-        rows = self._rows()
-        if not rows:
+        if self.registry_empty:
             # Пустой реестр профиля: легаси-редактора, который держал бы это место в
             # config.yml, здесь не бывает — своё пустое состояние с входом в реестр.
+            # Условие — именно пустота РЕЕСТРА: пустой `_rows` бывает и у профиля со
+            # всеми свёрнутыми блоками, там телу положены шапки.
             yield Static(_PROFILE_EMPTY_HINT, classes="set-hint set-dyn", markup=False)
             return
-        previous = None
-        for i, row in enumerate(rows):
-            # Черта на СМЕНЕ группы (записи → слоты → привязки → резервная) — то же
-            # правило, что у «Режимов работы»/«Профилей»: группы разделены, внутри
-            # группы строки идут сплошняком.
-            if row["kind"] != previous:
-                yield from self._block_head(row["kind"], first=previous is None)
-            previous = row["kind"]
-            cls = "models-row set-row set-dyn set-spaced" + (" selected" if i == self._idx else "")
-            yield Static(self._row_text(row, i == self._idx), classes=cls, markup=False)
-        yield Static(self._hint_text(), classes="set-hint set-dyn models-hint", markup=False)
+        rows = self._rows()
+        # Цель записи — константа всей секции, а не факт строки: одной статичной
+        # строкой НАД списком, ПОЛНЫМ путём (ревизия владельца: одно имя файла не
+        # говорит, какой именно это конфиг, а строка всё равно свободна). Построчной
+        # подсказки под списком нет — каждая строка объясняет себя сама (адрес и
+        # «без адреса» в колонке, фоллбэк в значении слота, описания в головах);
+        # детали — в пикере и форме по Enter.
+        yield Static(f"запись: {self._target}",
+                     classes="set-hint set-dyn models-target", markup=False)
+        # Обход ПО БЛОКАМ, а не по строкам: шапка есть и у свёрнутого блока (строк
+        # у него нет), и она же — его выключатель (клик, `_BlockHeader`). Индексы
+        # строк идут сквозь блоки тем же порядком, что `_rows`. Плотность B: строки
+        # блока впритык, воздух — margin-top шапки.
+        i = 0
+        for kind in _BLOCK_ORDER:
+            yield _BlockHeader(self._block_header_text(kind), kind=kind,
+                               on_toggle=self._toggle_block,
+                               classes="set-group-sep models-block set-dyn")
+            if kind in self._collapsed:
+                continue
+            while i < len(rows) and rows[i]["kind"] in (kind, "add"):
+                cls = "models-row set-row set-dyn" + (" selected" if i == self._idx else "")
+                yield Static(self._row_text(rows[i], i == self._idx), classes=cls,
+                             markup=False)
+                i += 1
+        if i < len(rows) and rows[i]["kind"] == "reserve":
+            # «Резервная модель» — не блок, а одна строка: голая черта-отбивка,
+            # сворачивать нечего.
+            yield Rule(classes="set-group-sep")
+            cls = "models-row set-row set-dyn" + (" selected" if i == self._idx else "")
+            yield Static(self._row_text(rows[i], i == self._idx), classes=cls,
+                         markup=False)
 
-    def _block_head(self, kind: str, *, first: bool):
-        """Шапка блока — подпись, ВПИСАННАЯ в черту-разделителя: отдельной строки
-        заголовка блок не получает, лишних строк на экране и так хватает. Первый блок
-        подписан так же, как остальные: заголовка «Модели» внутри рамки больше нет
-        (его слово стоит в шапке экрана), и подпись встаёт на освободившееся место.
+    def _block_header_text(self, kind: str) -> Text:
+        """Шапка блока: стрелка состояния + подпись. У раскрытого подпись вписана в
+        черту (хвост — до общей ширины `_BLOCK_CAPTION_WIDTH`): черта отделяет блок
+        от соседей сверху. У свёрнутого черты НЕТ вовсе (ревизия владельца) —
+        отделять нечего, шапка сама себе строка, — зато есть превью содержимого."""
+        collapsed = kind in self._collapsed
+        t = Text()
+        t.append("▸ " if collapsed else "▾ ", style=DEEP_DIM)
+        t.append(_BLOCK_CAPTIONS[kind], style=DEEP_DIM)
+        if collapsed:
+            preview = self._block_preview(kind)
+            if preview.plain:
+                t.append(" · ", style=DEEP_DIM)
+                t.append_text(preview)
+            return t
+        tail = max(_BLOCK_TAIL_MIN, _BLOCK_CAPTION_WIDTH - len(t.plain) - 1)
+        t.append(" " + "─" * tail, style=DEEP_DIM)
+        return t
 
-        «Резервная модель» подписи не имеет — это одна строка, объясняющая себя сама,
-        и там остаётся прежняя голая черта."""
-        caption = _BLOCK_CAPTIONS.get(kind)
-        if caption is None:
-            if not first:
-                yield Rule(classes="set-group-sep")
+    def _block_preview(self, kind: str) -> Text:
+        """Одна строка о содержимом свёрнутого блока. Реестр — счёт и хосты; уровни
+        — вся раскладка (имена цветом уровня, канон §12.4); привязки — счёт и
+        сколько переопределено (нули не перечисляем: «все активная» честнее)."""
+        if kind == "entry":
+            from tui.editors.model import _plural_models
+            n = len(self._aliases)
+            hosts: list = []
+            for alias in self._aliases:
+                address = self._entry_address(alias)
+                host = address_host(address) if address else None
+                if host and host not in hosts:
+                    hosts.append(host)
+            t = Text(f"{n} {_plural_models(n)}", style=DEEP_DIM)
+            if hosts:
+                t.append(" · ", style=DEEP_DIM)
+                t.append(hosts[0], style=DEEP_DIM)
+                if len(hosts) > 1:
+                    t.append(f" +{len(hosts) - 1}", style=DEEP_DIM)
+            return t
+        if kind == "slot":
+            t = Text()
+            for i, level in enumerate(LEVELS):
+                if i:
+                    t.append(" · ", style=DEEP_DIM)
+                t.append(level, style=value_style(level))
+                alias = self._slot_value(level)
+                t.append("→", style=DEEP_DIM)
+                t.append(alias or "—", style=DIM if alias else DEEP_DIM)
+            return t
+        total = len(assign_consumers())
+        bound = sum(1 for c in assign_consumers() if self._assign_value(c) is not None)
+        tail = f"переопределено {bound}" if bound else "все активная"
+        return Text(f"{total} · {tail}", style=DEEP_DIM)
+
+    def _toggle_block(self, kind: str) -> None:
+        """Клик по шапке. Пока экран держит инлайн-состояние (форма, пикер,
+        confirm) — клик не наш: сворачивание под вопросом уводило бы контекст
+        из-под него. Курсор после пересборки — клампом `_rows`."""
+        if self._form is not None or self._picker is not None or self._pending is not None:
             return
-        yield Static(block_caption(caption), markup=False,
-                     classes="set-group-sep models-block set-dyn")
+        if kind in self._collapsed:
+            self._collapsed.discard(kind)
+        else:
+            self._collapsed.add(kind)
+        self._idx = min(self._idx, max(0, len(self._rows()) - 1))
+        self._rebuild()
 
     def _legacy_hint_widgets(self):
         for text, cls in self._legacy_hints:
@@ -920,8 +1028,6 @@ class ModelsSectionEditor(Vertical):
         for i, (widget, row) in enumerate(zip(widgets, rows)):
             widget.update(self._row_text(row, i == self._idx))
             widget.set_class(i == self._idx, "selected")
-        for widget in self.query(".models-hint"):
-            widget.update(self._hint_text())
         # Подсвеченную строку подводим сами: фокуса у строк нет, за курсором Textual
         # не следит, а список секции длиннее экрана — записи, три слота и полтора
         # десятка привязок. Через общий резолвер, а не напрямую: висящий вопрос
@@ -999,8 +1105,8 @@ class ModelsSectionEditor(Vertical):
         if self._pending is not None:
             return
         if self._picker is not None:
-            items = self._picker["items"]
-            self._picker["idx"] = (self._picker["idx"] + delta) % len(items)
+            rows = self._picker["rows"]
+            self._picker["idx"] = (self._picker["idx"] + delta) % len(rows)
             self._refresh_picker_rows()
             return
         if self._form is not None:
@@ -1036,6 +1142,8 @@ class ModelsSectionEditor(Vertical):
             return
         if row["kind"] == "reserve":
             self._open_reserve()
+        elif row["kind"] == "add":
+            self._open_form(None)
         elif row["kind"] in ("slot", "assign"):
             self._open_value_picker(row)
         else:
@@ -1128,16 +1236,47 @@ class ModelsSectionEditor(Vertical):
         ok, alias, fields = self._form.submit()
         if not ok:
             return                          # ошибка осталась В форме, писать нечего
+        prev = self._form.original_alias
+        if prev is not None and alias != prev:
+            self._write(self._rename_ops(prev, alias, fields), alias)
+            return
         ops = [("upsert_model", alias, fields)]
         if self._needs_default_slot(alias):
             # Вторая модель делает реестр неоднозначным (спека §4): валидатор отвергнет
             # такую запись отдельной операцией — и правильно. Спрашиваем слот и уходим
             # ОДНОЙ транзакцией (решение Task 1).
             aliases = sorted({*self._aliases, alias})
-            self._open_picker(aliases, lambda chosen: self._write(
-                ops + [("write_slot", "default", chosen)], alias))
+            model_w = max(len(self._entry_model(a)) for a in aliases)
+            self._open_picker(
+                [self._picker_alias_item(a, model_w) for a in aliases],
+                lambda chosen: self._write(
+                    ops + [("write_slot", "default", chosen)], alias),
+                hint=_PICKER_DEFAULT_HINT)
             return
         self._write(ops, alias)
+
+    def _rename_ops(self, prev: str, alias: str, fields: dict) -> list:
+        """Переименование записи — ОДНА транзакция: новая запись с полным содержимым
+        старой (merge правок формы здесь, а не у писателя: под новым именем записи
+        ещё нет, и писательский merge стартовал бы с пустоты, теряя нетронутые
+        ключи), переезд всех ссылок slots/assign, снятие старой записи. Порядок
+        важен: к моменту `remove_model` на старое имя уже никто не ссылается.
+        Валидация — одна, на итог; занятое имя отвергла форма."""
+        merged = dict(self._entries.get(prev) or {})
+        for key, value in fields.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        ops: list = [("upsert_model", alias, merged)]
+        for level in LEVELS:
+            if self._slot_value(level) == prev:
+                ops.append(("write_slot", level, alias))
+        for consumer in assign_consumers():
+            if self._assign_value(consumer) == prev:
+                ops.append(("write_assign", consumer, alias))
+        ops.append(("remove_model", prev, True))
+        return ops
 
     def _needs_default_slot(self, alias: str) -> bool:
         after = {*self._aliases, alias}
@@ -1266,6 +1405,51 @@ class ModelsSectionEditor(Vertical):
         widgets = list(self.query(".models-row"))
         return widgets[idx] if 0 <= idx < len(widgets) else None
 
+    def _picker_alias_item(self, alias: str, model_w: int) -> dict:
+        """Позиция-модель: справа ТЕ ЖЕ колонки, что у строки реестра (id + адрес),
+        — по одному id модели не различить (две записи на один id, разные endpoint'ы),
+        а выбор вслепую и был проблемой плоского списка."""
+        desc = Text()
+        desc.append(self._entry_model(alias).ljust(model_w), style=DIM)
+        cell = self._address_cell(alias)
+        if cell:
+            desc.append("  ")
+            desc.append(cell, style=DEEP_DIM)
+        return {"value": alias, "label": alias, "desc": desc}
+
+    def _picker_fallback_desc(self, level: str) -> Text:
+        """Крашеная версия `_slot_fallback_text` для строк пикера: имя уровня — своим
+        цветом (§12.4: уровень выглядит одинаково на всём экране), алиас — DIM как
+        прочие алиасы-значения. Ветки без имени уровня остаются ровным DEEP_DIM."""
+        candidate, alias = self._slot_fallback(level)
+        if candidate is None:
+            return Text(self._slot_fallback_text(level), style=DEEP_DIM)
+        t = Text("действует ", style=DEEP_DIM)
+        t.append(candidate, style=value_style(candidate))
+        t.append(" → ", style=DEEP_DIM)
+        t.append(alias, style=DIM)
+        return t
+
+    def _picker_level_desc(self, level: str) -> Text:
+        """Позиция-уровень отвечает «что реально произойдёт»: на какую модель уровень
+        указывает СЕЙЧАС, — а не описание роли (оно стоит в блоке «уровни» выше)."""
+        alias = self._slot_value(level)
+        t = Text()
+        if alias:
+            # «→» — не `_LEVEL_TAIL_LEAD`: у указателя реестра стрелка смотрит
+            # НА запись («← light»), здесь — ОТ уровня к модели.
+            t.append("→ ", style=DEEP_DIM)
+            t.append(alias, style=DIM)
+        else:
+            t.append(f"{_SLOT_UNSET} · ", style=DEEP_DIM)
+            t.append_text(self._picker_fallback_desc(level))
+        return t
+
+    def _picker_active_desc(self) -> Text:
+        t = Text(_ACTIVE_DESC_LEAD, style=DEEP_DIM)
+        t.append(self._active_level, style=value_style(self._active_level))
+        return t
+
     def _open_value_picker(self, row: dict) -> None:
         """Список значений строки слота/привязки — ПОД ней (решение 9).
 
@@ -1273,55 +1457,87 @@ class ModelsSectionEditor(Vertical):
         через слоты). Первая позиция обеих — снятие значения: отдельной клавиши
         снятия нет (Global Constraints), а «не задан»/«активная» — не значения, а
         отсутствие ключа в файле. `on_pick` получает `None` именно за неё —
-        сентинел опознаётся ПОЗИЦИЕЙ и до записи доезжает тем же `None`, которым
-        снимает ключ слой записи."""
+        сентинел опознаётся строкой с `value is None` и до записи доезжает тем же
+        `None`, которым снимает ключ слой записи.
+
+        Уровни и алиасы идут сплошным списком, без черт-разделителей: группы и так
+        различимы правой колонкой («→ модель» против «id + адрес») и цветом
+        подписи (ревизия владельца — черты внутри дропдауна резали список)."""
         anchor = self._row_widget(self._idx)
+        model_w = self._model_width()
+        alias_items = [self._picker_alias_item(a, model_w) for a in self._aliases]
         if row["kind"] == "slot":
             level = row["level"]
-            self._open_picker(
-                self._aliases,
-                lambda chosen: self._write_binding(
-                    ("write_slot", level, chosen), self._slot_notice(level, chosen)),
-                hint=_PICKER_SLOT_HINT, unset_label=_SLOT_UNSET, after=anchor)
+            rows = [{"value": None, "label": _SLOT_UNSET,
+                     "desc": self._picker_fallback_desc(level)},
+                    *alias_items]
+            self._open_picker(rows, lambda chosen: self._write_binding(
+                ("write_slot", level, chosen), self._slot_notice(level, chosen)),
+                after=anchor, current=self._slot_value(level))
             return
         consumer = row["consumer"]
-        self._open_picker(
-            [*LEVELS, *self._aliases],
-            lambda chosen: self._write_binding(
-                ("write_assign", consumer, chosen),
-                self._assign_notice(consumer, chosen)),
-            hint=_PICKER_ASSIGN_HINT, unset_label=_ASSIGN_ACTIVE, after=anchor)
+        rows = ([{"value": None, "label": _ASSIGN_ACTIVE,
+                  "desc": self._picker_active_desc()}]
+                + [{"value": lvl, "label": lvl, "desc": self._picker_level_desc(lvl)}
+                   for lvl in LEVELS]
+                + alias_items)
+        self._open_picker(rows, lambda chosen: self._write_binding(
+            ("write_assign", consumer, chosen),
+            self._assign_notice(consumer, chosen)),
+            after=anchor, current=self._assign_value(consumer))
 
-    def _open_picker(self, items: list, on_pick, *, hint: str = _PICKER_DEFAULT_HINT,
-                     unset_label: str | None = None, after=None) -> None:
-        """`unset_label` — подпись позиции «снять значение»: список получает её ПЕРВОЙ
-        строкой сам, и вызывающему нечего перепутать. Списку без снятия (вопрос «какая
-        модель по умолчанию» — там снятие невозможно, слот обязателен) она не нужна."""
-        rows = ([unset_label] if unset_label is not None else []) + list(items)
-        self._picker = {"items": rows, "idx": 0, "on_pick": on_pick,
-                        "unset": unset_label is not None}
+    def _open_picker(self, rows: list, on_pick, *, hint: str | None = None,
+                     after=None, current=None) -> None:
+        """Строки — словари `{"value", "label", "desc"}`; `value is None` — снятие
+        ключа.
+
+        Курсор открывается на ТЕКУЩЕМ значении строки (`current`): выбранное видно
+        сразу, Enter без движения — no-op записи того же значения. Ключа в файле
+        нет — `current=None` находит первую строку (она и есть «снято»).
+
+        `hint` у пикеров значений НЕ монтируется: каждая позиция объясняет себя
+        своей правой колонкой, а общий текст под списком говорил бы только про
+        первую строку. Остался он один — вопрос формы «какая модель по умолчанию»,
+        там hint и есть сам вопрос."""
+        idx = next((i for i, r in enumerate(rows) if r["value"] == current), 0)
+        self._picker = {"rows": rows, "idx": idx, "on_pick": on_pick}
+        # Строка-якорь на время раскрытия теряет нижний воздух (.set-spaced):
+        # список — продолжение строки и обязан стоять к ней вплотную.
+        if after is not None:
+            after.add_class("models-picker-anchor")
         scroll = VerticalScroll(classes="dropdown-scroll onb-dyn models-picker")
         scroll.can_focus = False
         self.mount(scroll, after=after)
         if not scroll.is_attached:
             return
         scroll.mount(*[Static("", classes="onb-option onb-dyn models-picker-row")
-                       for _ in items])
-        self.mount(Static(hint, classes="onb-hint onb-dyn models-picker-hint",
-                          markup=False), after=scroll)
+                       for _ in rows])
+        if hint is not None:
+            self.mount(Static(hint, classes="onb-hint onb-dyn models-picker-hint",
+                              markup=False), after=scroll)
         self._refresh_picker_rows()
 
     def _refresh_picker_rows(self) -> None:
         if self._picker is None:
             return
+        rows = self._picker["rows"]
         widgets = list(self.query(".models-picker-row"))
-        for i, (widget, value) in enumerate(zip(widgets, self._picker["items"])):
-            unset = self._picker["unset"] and i == 0     # снятие — позиция, не текст
+        label_w = max([len(r["label"]) for r in rows] + [0])
+        for i, (widget, row) in enumerate(zip(widgets, rows)):
+            selected = i == self._picker["idx"]
             text = Text()
-            text.append("▸ " if i == self._picker["idx"] else "  ", style=ACCENT)
-            text.append(value, style=DEEP_DIM if unset else value_style(value))
+            text.append("▸ " if selected else "  ", style=ACCENT)
+            # Снятие — по `value is None`, не по тексту подписи: алиас с именем
+            # «не задан» схемой разрешён.
+            unset = row["value"] is None
+            text.append(row["label"].ljust(label_w),
+                        style=DEEP_DIM if unset else value_style(row["label"]))
+            desc = row.get("desc")
+            if desc is not None and desc.plain:
+                text.append("  ")
+                text.append_text(desc)
             widget.update(text)
-            widget.set_class(i == self._picker["idx"], "selected")
+            widget.set_class(selected, "selected")
         if 0 <= self._picker["idx"] < len(widgets):
             # Своя строка в раскрытом списке — тот же приём, что у `field_list`:
             # ↑/↓ крутят ВНУТРЕННИЙ скролл `.dropdown-scroll`, за курсором Textual
@@ -1333,17 +1549,15 @@ class ModelsSectionEditor(Vertical):
         picker = self._picker
         if picker is None:
             return
-        idx = picker["idx"]
-        # Первая позиция списка со снятием — «значения нет», и наружу уходит `None`,
-        # а не её подпись: сравнивать выбранное с текстом «не задан»/«активная»
-        # нельзя — алиас с таким именем схемой разрешён.
-        value = None if picker["unset"] and idx == 0 else picker["items"][idx]
-        picker["on_pick"](value)
+        row = picker["rows"][picker["idx"]]
+        picker["on_pick"](row["value"])
 
     def _close_picker(self) -> None:
         self._picker = None
         for widget in self.query(".models-picker, .models-picker-hint"):
             widget.remove()
+        for widget in self.query(".models-picker-anchor"):
+            widget.remove_class("models-picker-anchor")
 
     # --- связь с экраном ------------------------------------------------------
     def _notice(self, text: str, *, ok) -> None:

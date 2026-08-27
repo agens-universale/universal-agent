@@ -1081,6 +1081,7 @@ class SettingsScreen(Screen):
                 effective_url=endpoint, effective_auth=auth, verify=verify,
                 config_proxy=proxy,
                 presets=endpoint_presets_from_config(self._config or {}),
+                active_level=str((self._config or {}).get("level") or "default"),
                 legacy_editor_factory=self._make_legacy_model_editor,
                 legacy_hints=self._field_hint_specs("model"),
                 on_change=self._models_changed, on_notice=self._models_notice,
@@ -1430,9 +1431,9 @@ class SettingsScreen(Screen):
             # Сегодня в TOGGLES одна preset-группа (`rigor`) → не рисуется.
             if i > 0 and TOGGLES[name].preset_keys:
                 frame.mount(Rule(classes="set-group-sep"))
-            # set-spaced — воздух между строками, тот же класс/паттерн, что и в
-            # секции «Обновление» (margin-bottom: 1 на каждой строке).
-            cls = "set-row set-dyn set-spaced" + (" selected" if selected else "")
+            # Без set-spaced: плотность B — тогглы группы впритык (общий пульт),
+            # воздух даёт разделитель групп (margin-top .set-group-sep).
+            cls = "set-row set-dyn" + (" selected" if selected else "")
             frame.mount(Static(self._mode_row_text(name, selected), classes=cls))
         # Подсказка выделенного тоггла — ВНУТРИ рамки (конвенция «Обновления»:
         # пояснительная строка в карточке под строками-опциями, класс set-hint).
@@ -1566,6 +1567,10 @@ class SettingsScreen(Screen):
             # «— без профиля» — первой строкой: глобальная деактивация; в пустом
             # состоянии (профилей нет) строка бессмысленна — деактивировать нечего.
             rows.insert(0, {"kind": "none"})
+        # «+ добавить профиль» — последней строкой списка (перенос паттерна
+        # «Моделей», ревизия владельца): Enter = клавиша n. Есть и в пустом
+        # состоянии — там это единственная строка-действие над строкой уровня.
+        rows.append({"kind": "add"})
         rows.append({"kind": "level"})
         return rows
 
@@ -2267,6 +2272,15 @@ class SettingsScreen(Screen):
             t.append("   · выбран в текущей сессии", style=DEEP_DIM)
         return t
 
+    def _add_profile_row_text(self, selected: bool) -> Text:
+        """Строка-действие «+ добавить профиль…» — перенос паттерна «Моделей»:
+        Enter = клавиша n, цвет и грамматика те же (DIM + многоточие — пробы
+        владельца: DEEP_DIM читался подсказкой, тил перетягивал глаз)."""
+        t = Text()
+        t.append("▸ " if selected else "  ", style=ACCENT)
+        t.append("+ добавить профиль…", style=DIM)
+        return t
+
     def _none_row_text(self, rows: list[dict], selected: bool) -> Text:
         """Строка «— без профиля»: глобальная деактивация; `● активен` — когда
         конфиг-указатель пуст."""
@@ -2295,6 +2309,10 @@ class SettingsScreen(Screen):
 
     def _profiles_hint_text(self, rows: list[dict]) -> str:
         row = self._profiles_row_under_cursor(rows)
+        if row["kind"] == "add":
+            # Полный путь — то же правило, что у «запись:» секции «Модели»: одно
+            # имя не говорит, куда именно ляжет файл.
+            return f"Enter — создать файл {self._profiles_base_root() / '<имя>.yml'}"
         if row["kind"] == "level":
             from tui.toggles import _LEVEL_ROLE_TEXT
             level = str(self._config.get("level") or "default")
@@ -2349,20 +2367,26 @@ class SettingsScreen(Screen):
                 "  light: flash"
             )
             frame.mount(Static(skeleton, classes="set-hint set-dyn", markup=False))
-        else:
-            for i, row in enumerate(rows):
-                if row["kind"] == "level":
-                    continue
-                selected = i == self._profiles_idx
-                cls = "set-row set-dyn set-spaced set-profiles-row" + (" selected" if selected else "")
-                text = (self._none_row_text(rows, selected) if row["kind"] == "none"
-                        else self._profile_row_text(row, rows, selected))
-                frame.mount(Static(text, classes=cls))
-                if self._name_prompt_belongs_to(row):
-                    self._mount_profile_name_prompt(frame)
+        # Цикл идёт и в пустом состоянии: там из строк-нелевелов остаётся одна
+        # «+ добавить профиль» — строка-действие под подсказкой-примером.
+        for i, row in enumerate(rows):
+            if row["kind"] == "level":
+                continue
+            selected = i == self._profiles_idx
+            cls = "set-row set-dyn set-profiles-row" + (" selected" if selected else "")
+            if row["kind"] == "none":
+                text = self._none_row_text(rows, selected)
+            elif row["kind"] == "add":
+                text = self._add_profile_row_text(selected)
+            else:
+                text = self._profile_row_text(row, rows, selected)
+            frame.mount(Static(text, classes=cls))
+            if self._name_prompt_belongs_to(row):
+                self._mount_profile_name_prompt(frame)
         if (self._profiles_name_prompt or {}).get("mode") == "create":
             # Создание своей строки не имеет — поле раскрывается ПОД СПИСКОМ
-            # (контракт п.5), в пустом состоянии — под подсказкой-примером.
+            # (контракт п.5): строка «+ добавить» последняя, и поле встаёт ровно
+            # под ней; в пустом состоянии — под подсказкой-примером.
             self._mount_profile_name_prompt(frame)
         if profile_rows:
             # Черта перед строкой уровня: уровень — не «ещё один профиль»,
@@ -2370,11 +2394,12 @@ class SettingsScreen(Screen):
             frame.mount(Rule(classes="set-group-sep"))
         level_idx = len(rows) - 1
         selected = level_idx == self._profiles_idx
-        # в пустом состоянии сверху скелет-подсказка без нижнего отступа —
-        # даём строке уровня воздух сверху и снизу (set-spaced-gap, не пара
-        # раздельных классов: longhand-margins в Textual перетирают друг друга)
-        spacing = "set-spaced" if profile_rows else "set-spaced-gap"
-        cls = f"set-row set-dyn {spacing} set-profiles-row" + (" selected" if selected else "")
+        # Плотность B: при живом списке воздух строке уровня даёт черта над ней
+        # (margin-top .set-group-sep), свой класс не нужен. В пустом состоянии
+        # черты нет — set-spaced-gap даёт воздух сверху и снизу (не пара
+        # раздельных классов: longhand-margins в Textual перетирают друг друга).
+        spacing = "" if profile_rows else "set-spaced-gap "
+        cls = f"set-row set-dyn {spacing}set-profiles-row" + (" selected" if selected else "")
         frame.mount(Static(self._level_row_text(selected), classes=cls))
         frame.mount(Static(self._profiles_hint_text(rows),
                            classes="set-hint set-dyn set-profiles-hint"))
@@ -2417,6 +2442,8 @@ class SettingsScreen(Screen):
                 fresh[i].update(self._level_row_text(selected))
             elif row["kind"] == "none":
                 fresh[i].update(self._none_row_text(rows, selected))
+            elif row["kind"] == "add":
+                fresh[i].update(self._add_profile_row_text(selected))
             else:
                 fresh[i].update(self._profile_row_text(row, rows, selected))
 
@@ -2479,6 +2506,7 @@ class SettingsScreen(Screen):
             effective_url=endpoint, effective_auth=auth, verify=verify,
             config_proxy=proxy,
             presets=endpoint_presets_from_config(self._config or {}),
+            active_level=str((self._config or {}).get("level") or "default"),
             on_change=self._models_changed, on_notice=self._models_notice))
         return True
 
@@ -3483,6 +3511,8 @@ class SettingsScreen(Screen):
                     self._level_apply(1)
                 elif row["kind"] == "profile":
                     self._open_profile(row)
+                elif row["kind"] == "add":
+                    self._begin_profile_name_prompt("create")
                 else:
                     # «— без профиля» — не файл, открывать нечего (деактивация —
                     # Space). Молчание было бы ложью футера, обещающего «Enter —

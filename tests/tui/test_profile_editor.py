@@ -78,6 +78,7 @@ async def _fill_entry(pilot, scr, alias: str, model: str) -> None:
     form = scr.query(ModelEntryForm).last()
     form.query_one("#mef-alias", Input).value = alias
     form.query_one("#mef-model", Input).value = model
+    form._presets_ctrl.close()      # раскрытый на входе пресет-лист съел бы Enter
     await pilot.pause()
     await pilot.press("enter")
     await pilot.pause()
@@ -668,4 +669,6 @@ async def test_the_first_block_caption_stands_under_the_profile_title(tmp_path, 
         title = scr.query_one("#set-title", Static)
         assert title.display is True
         assert "профиль work" in str(title.render())
-        assert str(list(ed.children)[0].render()) == m.block_caption("реестр")
+        assert "запись:" in str(list(ed.children)[0].render())
+        first_caption = str(list(ed.children)[1].render())
+        assert "реестр" in first_caption and first_caption.startswith("▾")

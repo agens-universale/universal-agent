@@ -480,7 +480,9 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-row { height: auto; padding: 0 1; }
 .set-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
 /* Разделитель групп секции «Режимы работы» (ревизия 7) — тот же приём, что .palette-group-sep. */
-.set-group-sep { color: $deep-dim; padding: 0 1; height: 1; margin: 0; }
+/* Плотность B: строки блока впритык, воздух несут ГРАНИЦЫ — разделитель/подпись
+   блока отбивается сверху от чужого блока и стоит вплотную к своим строкам. */
+.set-group-sep { color: $deep-dim; padding: 0 1; height: 1; margin: 1 0 0 0; }
 .set-hint { color: $deep-dim; padding: 0 1; margin-top: 1; }   /* воздух перед контекст-подсказкой */
 .set-info { height: auto; padding: 0 1; }   /* инфо-строки (Версия/Источник) — тот же отступ */
 /* Подписи редакторов (Модель/Подключение) несут .onb-hint/.onb-warn из онбординга
@@ -585,3 +587,12 @@ ModelsSectionEditor { height: auto; }
    Confirm-баннер удаления — язык баннера MCP (.mcp-confirm), общий с ним. */
 .models-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; }
 .models-picker-hint { color: $deep-dim; padding: 0 1; }
+/* «запись: <полный путь>» — первая строка секции: свой воздух не нужен, отбивку
+   от неё даёт margin-top первой черты-подписи (.set-group-sep). Шортхенд гасит
+   margin-top базового .set-hint. nowrap: длинный путь усекается краем рамки, а не
+   рвёт строку на две. */
+.models-target { margin: 0; text-wrap: nowrap; }
+/* Строка-якорь раскрытого пикера: без нижнего воздуха .set-spaced — список стоит
+   вплотную к своей строке. Шортхенд и позиция ПОСЛЕ .set-spaced в файле: правило
+   побеждает порядком при равной специфичности. */
+.models-picker-anchor { margin: 0; }

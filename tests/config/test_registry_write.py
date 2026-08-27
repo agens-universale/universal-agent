@@ -493,7 +493,10 @@ def test_profile_skeleton_is_blank_without_literal_token(tmp_path):
     w.create_profile_file(path, PROFILE_SKELETON)
 
     assert "sk-" not in PROFILE_SKELETON            # бланк, не учебный пример с токеном
-    assert load_profile_document(path) == {"models": {}, "slots": {}}
+    # Ни одного КЛЮЧА (ревизия владельца): пустые `models: {}`/`slots: {}` делали
+    # свежий профиль «переопределяющим» секции, которых он не трогал.
+    assert load_profile_document(path) == {}
+    assert PROFILE_SKELETON.lstrip().startswith("#")
 
 
 def test_profile_skeleton_accepts_first_entry(tmp_path):

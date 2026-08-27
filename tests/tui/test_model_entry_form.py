@@ -105,11 +105,10 @@ async def test_escape_collapses_the_list_and_then_gives_the_key_back(tmp_path):
                  effective_url="http://hub/v1/chat/completions")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(1)                                  # алиас → id модели
-        await pilot.pause()
-        assert form.reload_models() is True
+        form.escape()                                 # свернуть пресеты входа
+        form.move(-1); form.move(-1)                  # адрес → алиас → id модели
         for _ in range(3):
-            await pilot.pause()
+            await pilot.pause()                       # автоподгрузка раскрыла список
         assert _rows(form), "список не раскрылся"
         assert form.escape() is True                  # свернуть список
         await pilot.pause()
@@ -129,7 +128,7 @@ async def test_is_dirty_is_honest():
         assert form.is_dirty() is True
         form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
         assert form.is_dirty() is False
-        form.move(-1)                                  # курсор → галка (последняя позиция)
+        form.move(1); form.move(1)                     # адрес → токен → галка
         await pilot.pause()
         assert form.toggle_no_auth() is True
         assert form.is_dirty() is True                 # «явно без авторизации» — правка
@@ -219,9 +218,7 @@ async def test_inherit_preset_is_offered_when_editing_a_record_with_its_own_url(
                  existing_aliases={"flash"}, presets=presets,
                  effective_url="http://hub/v1/chat/completions")
     async with _harness(form).run_test() as pilot:
-        await pilot.pause()
-        form.move(1)                                   # id → адрес
-        await pilot.pause()
+        await pilot.pause()                            # курсор уже на адресе (позиция 1)
         assert form.presets_open is False              # поверх своего адреса — не сам
         assert form.reload_presets() is True           # Alt+↓ раскрывает явно
         await pilot.pause()
@@ -249,9 +246,7 @@ async def test_inherit_preset_leaves_the_field_empty():
     form = _form(initial=None, existing_aliases=set(), presets=presets,
                  effective_url="http://hub/v1/chat/completions")
     async with _harness(form).run_test() as pilot:
-        await pilot.pause()
-        form.move(1); form.move(1)                     # алиас → id → адрес
-        await pilot.pause()
+        await pilot.pause()                            # курсор на адресе, список раскрыт
         rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
         assert rows and "основной конфиг" in rows[0], rows
         assert form.enter() is True                    # Enter по пункту наследования
@@ -286,7 +281,7 @@ async def test_no_auth_toggle_freezes_the_field_and_writes_empty_token():
                  existing_aliases={"flash"})
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(-1)                                  # курсор → галка
+        form.move(1); form.move(1)                     # адрес → токен → галка
         await pilot.pause()
         assert form.toggle_no_auth() is True
         await pilot.pause()
@@ -307,7 +302,8 @@ async def test_no_auth_switched_off_returns_the_record_to_inheritance():
                  effective_auth="Bearer sk-HUB")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(-1)                                  # курсор → галка (стоит ●)
+        # Один move: замороженное ● поле токена курсор пропускает сам.
+        form.move(1)                                   # адрес → (токен ●) → галка
         await pilot.pause()
         assert form.toggle_no_auth() is True           # ● → ○
         ok, _alias, fields = form.submit()
@@ -352,28 +348,70 @@ async def test_duplicate_alias_is_rejected_with_an_honest_error():
         assert "уже используется" in str(form.query_one("#mef-error", Static).render())
 
 
-async def test_empty_alias_is_rejected_with_an_honest_error():
-    """Пустое имя — честная ошибка, а не молчаливый отказ и не выдумка имени."""
+async def test_empty_alias_derives_the_name_from_the_model_id():
+    """Алиас не обязателен (ревизия владельца): пустое поле показывает ПРИЗРАКОМ
+    конкретное имя, что возьмётся из id (логика мастера: последний path-сегмент,
+    занятое имя получает суффикс), placeholder следует за печатью в поле id, а
+    Enter принимает призрак без ввода."""
+    form = _form(initial=None, existing_aliases={"gemini-2.5-flash"})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        alias_field = form.query_one("#mef-alias", Input)
+        assert alias_field.placeholder == "имя из id модели"     # id пуст — принцип
+        form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
+        await pilot.pause()
+        assert alias_field.placeholder == "gemini-2.5-flash-2"   # призрак = что возьмётся
+        # Выбор из списка пишется write_field'ом, который глушит Input.Changed, —
+        # призрак обязан пересчитаться и на этом пути (живой смок: id из списка,
+        # а в поле алиаса остался generic-текст).
+        form._apply_model("zhipu/glm-4.6")
+        await pilot.pause()
+        assert alias_field.placeholder == "glm-4.6"
+        form._apply_model("google/gemini-2.5-flash")
+        await pilot.pause()
+        ok, alias, fields = form.submit()
+        assert (ok, alias) == (True, "gemini-2.5-flash-2")
+        assert fields["model"] == "google/gemini-2.5-flash"
+
+
+async def test_empty_alias_and_model_together_are_rejected():
+    """Пусто ОБА — имени взять неоткуда: честная ошибка, а не молчаливый отказ и не
+    выдумка имени."""
     form = _form(initial=None, existing_aliases=set())
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
         ok, _alias, _fields = form.submit()
         assert ok is False
-        assert str(form.query_one("#mef-error", Static).render())
+        assert "укажите id модели или алиас" in str(
+            form.query_one("#mef-error", Static).render())
 
 
-async def test_own_alias_is_not_its_own_duplicate_and_is_read_only_on_edit():
-    """Редактирование: алиас — read-only заголовок (поля для ввода нет), и запись
-    не считает саму себя дублем."""
+async def test_own_alias_is_editable_and_not_its_own_duplicate():
+    """Редактирование: алиас — обычное предзаполненное поле (переименование — та же
+    форма, транзакцию ведёт секция), запись не считает саму себя дублем, а СТЁРТЫЙ
+    алиас — «переименуй в имя по умолчанию»: призрак-placeholder называет имя из
+    id, Enter принимает его."""
     form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
                  existing_aliases={"flash", "glm"})
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert not form.query("#mef-alias")            # поля ввода нет
-        assert "flash" in str(form.query_one("#mef-alias-head", Static).render())
+        field = form.query_one("#mef-alias", Input)
+        assert field.value == "flash"                  # предзаполнен, редактируем
+        assert form.original_alias == "flash"          # прежнее имя — секции, для rename
         ok, alias, _fields = form.submit()
-        assert (ok, alias) == (True, "flash")
+        assert (ok, alias) == (True, "flash")          # сам себе не дубль
+        field.value = "glm"
+        ok, _alias, _fields = form.submit()
+        assert ok is False                             # занятое имя — честная ошибка
+        assert "уже используется" in str(form.query_one("#mef-error", Static).render())
+        field.value = "fresh"
+        ok, alias, _fields = form.submit()
+        assert (ok, alias) == (True, "fresh")          # переименование уходит секции
+        field.value = ""
+        await pilot.pause()
+        assert field.placeholder == "gemini-2.5-flash"     # призрак имени по умолчанию
+        ok, alias, _fields = form.submit()
+        assert (ok, alias) == (True, "gemini-2.5-flash")   # Enter принял призрак
 
 
 async def test_empty_model_id_means_the_alias_is_the_id():
@@ -400,9 +438,10 @@ async def test_malformed_url_is_rejected():
 
 # --- Alt+↓ (подбор) и Ctrl+Space (проба) — РАЗНЫЕ клавиши -----------------------
 
-async def test_alt_down_fills_the_model_list():
-    """`Alt+↓` на поле id идёт на эндпоинт и раскрывает список; Enter подставляет
-    выделенную строку в поле."""
+async def test_the_model_list_loads_itself_on_field_entry():
+    """Вход в поле id подгружает список САМ (ревизия владельца: к этому полю курсор
+    приходит после адреса и токена — идти есть по чему) и раскрывает его; Enter
+    подставляет выделенную строку. `Alt+↓` остаётся принудительным перечитыванием."""
     calls = []
 
     def fetch(url, auth, **kwargs):
@@ -414,9 +453,8 @@ async def test_alt_down_fills_the_model_list():
                  effective_auth="Bearer sk-HUB")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(1)                                   # курсор → id модели
-        await pilot.pause()
-        assert form.reload_models() is True
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
         for _ in range(3):
             await pilot.pause()
         assert calls == [("http://hub/v1/chat/completions", "Bearer sk-HUB")]
@@ -425,6 +463,10 @@ async def test_alt_down_fills_the_model_list():
         assert form.enter() is True                    # подставить выделенную
         await pilot.pause()
         assert form.query_one("#mef-model", Input).value == "google/gemini-2.5-flash"
+        assert form.reload_models() is True            # Alt+↓ — перечитать заново
+        for _ in range(3):
+            await pilot.pause()
+        assert len(calls) == 2                         # автоподгрузка была ОДИН раз
 
 
 async def test_alt_down_reports_a_dead_endpoint_instead_of_staying_silent():
@@ -432,11 +474,10 @@ async def test_alt_down_reports_a_dead_endpoint_instead_of_staying_silent():
                  effective_url="http://hub/v1/chat/completions")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(1)
-        await pilot.pause()
-        assert form.reload_models() is True
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
         for _ in range(3):
-            await pilot.pause()
+            await pilot.pause()                        # автоподгрузка при входе
         from tui.editors.field_list import LIST_FAILED
         assert LIST_FAILED in str(form.query_one("#mef-model-status", Static).render())
 
@@ -476,11 +517,10 @@ async def test_ctrl_space_probes_and_alt_down_fetches_and_they_never_swap():
         assert "токен принят" in line, line
 
         probes.clear()
-        form.move(1)                                   # курсор → id модели
-        await pilot.pause()
-        assert form.reload_models() is True
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
         for _ in range(3):
-            await pilot.pause()
+            await pilot.pause()                        # автоподгрузка при входе
         assert probes == [], "подбор списка постучался пробой"
         assert fetches, "подбор списка не сходил на эндпоинт"
 
@@ -508,21 +548,8 @@ async def test_form_tells_the_host_where_the_cursor_is_and_what_is_open():
                  effective_url="http://hub/v1/chat/completions")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert (form.on_url_field, form.on_model_field) == (False, False)
-        assert (form.presets_open, form.list_open) == (False, False)
-        form.move(1)                                   # → id модели
-        await pilot.pause()
-        assert (form.on_model_field, form.list_open) == (True, False)
-        assert form.list_has_selection is False
-        assert form.reload_models() is True
-        for _ in range(3):
-            await pilot.pause()
-        assert (form.list_open, form.list_has_selection) == (True, True)
-        assert form.escape() is True
-        await pilot.pause()
-        assert form.list_open is False
-        form.move(1)                                   # → адрес
-        await pilot.pause()
+        # Старт — поле адреса (порядок «куда → чем → что → как назвать»): вход
+        # раскрыл пресет-лист сам, первая строка подсвечена.
         assert (form.on_url_field, form.on_model_field) == (True, False)
         assert (form.presets_open, form.presets_have_selection) == (True, True)
         form.query_one("#mef-url", Input).value = "https://my-own.internal/v1"
@@ -530,6 +557,17 @@ async def test_form_tells_the_host_where_the_cursor_is_and_what_is_open():
         # Строки видны все, но ни одна не подсвечена: Enter здесь оставит свой адрес,
         # и футер обязан читать именно этот признак, а не «список не пуст».
         assert (form.presets_open, form.presets_have_selection) == (True, False)
+        assert form.escape() is True                   # свернуть — двигаться дальше
+        await pilot.pause()
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        # Автоподгрузка на входе (fetch-стаб): список раскрылся сам, строка выделена.
+        assert (form.on_model_field, form.on_url_field) == (True, False)
+        assert (form.list_open, form.list_has_selection) == (True, True)
+        assert form.escape() is True
+        await pilot.pause()
+        assert (form.list_open, form.on_model_field) == (False, True)
 
 
 # --- вёрстка: рамка одна на поле и его список -----------------------------------
@@ -546,11 +584,10 @@ async def test_both_lists_live_inside_their_field_frames():
                  effective_url="http://hub/v1/chat/completions")
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(1)                                   # курсор → id модели
-        await pilot.pause()
-        assert form.reload_models() is True
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
         for _ in range(3):
-            await pilot.pause()
+            await pilot.pause()                        # автоподгрузка раскрыла список
         model_group = form.query_one("#mef-model-group")
         assert form.query_one("#mef-model", Input).parent is model_group
         assert list(model_group.query(VerticalScroll)), "строки моделей — внутрь группы"
@@ -560,7 +597,7 @@ async def test_both_lists_live_inside_their_field_frames():
         # уйти с поля можно только свернув его (канон §4.2.2).
         assert form.escape() is True
         await pilot.pause()
-        form.move(1)                                   # курсор → адрес: пресеты раскрылись
+        form.move(1); form.move(1)                     # id → алиас → адрес: пресеты раскрылись
         await pilot.pause()
         url_group = form.query_one("#mef-url-group")
         assert form.query_one("#mef-url", Input).parent is url_group

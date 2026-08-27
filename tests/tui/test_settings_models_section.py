@@ -198,14 +198,20 @@ async def test_empty_state_mounts_the_legacy_model_editor(tmp_path):
 
 async def test_escape_from_the_new_entry_form_returns_to_the_empty_state(tmp_path):
     """Esc из формы возвращает в СВОЁ под-состояние (пустое состояние секции), а не
-    в меню — Esc-вложенность Global Constraints."""
+    в меню — Esc-вложенность Global Constraints. Первый Esc достаётся пресет-листу
+    адреса: форма открывается курсором на адресе, и список раскрыт (канон «вход на
+    адрес — всегда раскрыть»)."""
     from tui.editors.model import ModelEditor
     from tui.editors.model_entry_form import ModelEntryForm
     async with _section(tmp_path) as (pilot, scr, _cfg_file):
         await _wait_legacy_list(pilot, scr)
         await pilot.press("alt+n")
         await pilot.pause()
-        assert scr.query(ModelEntryForm)
+        form = scr.query(ModelEntryForm).last()
+        assert form.on_url_field                  # курсор встал на адрес (новый порядок)
+        if form.presets_open:
+            await pilot.press("escape")           # №1 — свернуть раскрытый список
+            await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
         assert scr._view == 1                     # из секции не вышли
@@ -226,6 +232,7 @@ async def test_creating_the_first_entry_writes_valid_yaml(tmp_path):
         form = scr.query(ModelEntryForm).last()
         form.query_one("#mef-alias", Input).value = "flash"
         form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
+        form._presets_ctrl.close()     # раскрытый на входе пресет-лист съел бы Enter
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -251,6 +258,7 @@ async def test_second_entry_is_written_together_with_the_default_slot(tmp_path):
         form = scr.query(ModelEntryForm).last()
         form.query_one("#mef-alias", Input).value = "opus"
         form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        form._presets_ctrl.close()     # раскрытый на входе пресет-лист съел бы Enter
         await pilot.pause()
         await pilot.press("enter")                # submit → пикер default
         await pilot.pause()
@@ -261,6 +269,73 @@ async def test_second_entry_is_written_together_with_the_default_slot(tmp_path):
         doc = _doc(cfg_file)
         assert set(doc["models"]) == {"flash", "opus"}
         assert doc["slots"]["default"] in ("flash", "opus")
+
+
+async def test_the_add_row_opens_the_creation_form(tmp_path):
+    """«+ добавить модель» — последняя строка блока реестра: Enter на ней = клавиша
+    n, форма создания (без прежнего имени — это не правка)."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        idx = _goto(ed, "add")
+        assert idx == len(ed._aliases)              # сразу за записями, до слотов
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        assert form.original_alias is None
+
+
+async def test_renaming_an_entry_moves_its_references(tmp_path):
+    """Переименование — правка той же формы, ОДНА транзакция: запись переезжает под
+    новое имя с полным содержимым, ссылки slots/assign едут следом, старой записи не
+    остаётся, файл валиден."""
+    from config import validate_config_text_with_sections
+    from tui.editors.model_entry_form import ModelEntryForm
+    body = (_REGISTRY
+            + "assign:\n"
+            '  summary: "flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "entry", alias="flash")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        assert form.original_alias == "flash"
+        form.query_one("#mef-alias", Input).value = "turbo"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        doc = _doc(cfg_file)
+        assert set(doc["models"]) == {"turbo", "opus"}
+        assert doc["models"]["turbo"]["model"] == "google/gemini-2.5-flash"
+        assert doc["slots"]["default"] == "turbo"   # ссылка слота переехала
+        assert doc["assign"]["summary"] == "turbo"  # и ссылка привязки тоже
+        validate_config_text_with_sections(cfg_file.read_text(encoding="utf-8"))
+        assert not scr.query(ModelEntryForm)
+
+
+async def test_renaming_to_a_taken_alias_leaves_the_file_untouched(tmp_path):
+    """Занятое имя — ошибка В форме: транзакция не стартует, файл байт-в-байт."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        ed = _editor(scr)
+        _goto(ed, "entry", alias="flash")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "opus"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "уже используется" in _texts(scr)
+        assert cfg_file.read_bytes() == before
+        assert scr.query(ModelEntryForm)            # форма жива, черновик не потерян
 
 
 async def test_entry_without_any_address_is_shown_as_problematic(tmp_path):
@@ -463,6 +538,7 @@ async def test_new_entry_after_env_confirm_cancels_it(tmp_path):
             form = scr.query(ModelEntryForm).last()
             form.query_one("#mef-alias", Input).value = "flash"
             form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
+            form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
@@ -569,14 +645,14 @@ def test_legacy_editor_lookup_reports_an_empty_tree():
 
 
 async def test_entry_row_hint_names_the_target_file(tmp_path):
-    """Канон «Профилей»: подсказка строки всегда называет файл-цель — и у записи
-    реестра, и у резервной модели (запись идёт в один и тот же config.yml)."""
+    """Файл-цель секция называет один раз, статичной строкой над списком, и ПОЛНЫМ
+    путём (ревизия владельца: одно имя не говорит, какой именно это конфиг)."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
-        assert f"запись: {cfg_file.name}" in _texts(scr)
+        assert f"запись: {cfg_file}" in _texts(scr)
         ed = _editor(scr)
         _goto(ed, "reserve")
         await pilot.pause()
-        assert f"запись: {cfg_file.name}" in _texts(scr)
+        assert f"запись: {cfg_file}" in _texts(scr)
 
 
 def test_levels_come_from_the_domain_not_a_local_copy():
@@ -696,7 +772,9 @@ async def test_slot_picker_opens_under_the_row_with_unset_first(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         assert ed.picker_open, "пикер слота не раскрылся"
-        assert ed._picker["items"] == ["не задан", "flash", "opus"]
+        assert [r["label"] for r in ed._picker["rows"]] == ["не задан", "flash", "opus"]
+        assert ed._picker["rows"][0]["value"] is None      # снятие — по value, не тексту
+        assert ed._picker["idx"] == 0                      # слот пуст → курсор на снятии
         assert "не задан" in _picker_rows(ed)[0]
         children = list(ed.children)
         row = list(ed.query(".models-row"))[idx]
@@ -713,7 +791,8 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert ed._picker["items"] == ["активная", "light", "default", "max", "flash", "opus"]
+        assert [r["label"] for r in ed._picker["rows"]] == [
+            "активная", "light", "default", "max", "flash", "opus"]
 
 
 async def test_alt_down_opens_the_same_picker(tmp_path):
@@ -782,7 +861,8 @@ async def test_choosing_an_alias_writes_the_slot(tmp_path):
 
 async def test_the_first_position_unsets_the_slot(tmp_path):
     """«не задан» — не значение, а снятие: строка слота уходит из файла целиком,
-    уровень возвращается к фоллбэку матрицы."""
+    уровень возвращается к фоллбэку матрицы. Пикер открывается курсором на ТЕКУЩЕМ
+    значении (выбранное видно сразу) — к снятию курсор ведут стрелками."""
     body = (_REGISTRY + '  light: "opus"\n')
     async with _section(tmp_path, body) as (pilot, scr, cfg_file):
         assert _doc(cfg_file)["slots"]["light"] == "opus"
@@ -790,7 +870,10 @@ async def test_the_first_position_unsets_the_slot(tmp_path):
         _goto(ed, "slot", level="light")
         await pilot.pause()
         await pilot.press("enter")
-        await pilot.press("enter")                  # первая позиция — снять
+        assert ed._picker["idx"] == 2               # курсор на текущем значении (opus)
+        await pilot.press("up")
+        await pilot.press("up")                     # opus → flash → «не задан»
+        await pilot.press("enter")
         await pilot.pause()
         assert "light" not in _doc(cfg_file)["slots"]
         assert _doc(cfg_file)["slots"]["default"] == "flash"   # соседний слот цел
@@ -819,6 +902,8 @@ async def test_active_removes_the_assign_key(tmp_path):
         _goto(ed, "assign", consumer="finish_gate")
         await pilot.pause()
         await pilot.press("enter")
+        assert ed._picker["idx"] == 1               # курсор на текущем значении (light)
+        await pilot.press("up")                     # light → «активная»
         await pilot.press("enter")                  # первая позиция — снять
         await pilot.pause()
         assign = _doc(cfg_file).get("assign") or {}
@@ -885,27 +970,35 @@ def test_consumer_labels_reuse_the_transport_dictionary():
 
 async def test_auto_judge_row_is_present_and_marked_inert(tmp_path):
     """`auto_judge` в реестре потребителей есть (строка на месте), но до волны C
-    привязка инертна — hint помечает это словами спеки, а не молчит.
+    привязка инертна — это говорит ГОЛОВА строки («имя · описание», построчной
+    подсказки у секции больше нет), а не молчит.
 
     Что Router его не зовёт и без привязки идёт уровнем default, а не активной
     моделью, — страж волны A (`tests/router/test_model_router.py::
     test_auto_judge_without_binding_uses_default_statically_not_active_level`);
     здесь не дублируется."""
+    from tui.editors.models_section import consumer_labels
+    assert consumer_labels()["auto_judge"] == "судья auto_judge · появится с авто-выбором"
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
         _goto(ed, "assign", consumer="auto_judge")
         await pilot.pause()
-        assert "активен с функцией авто-выбора" in _texts(scr)
+        assert "появится с авто-выбором" in _texts(scr)
 
 
 async def test_unset_slot_hint_names_the_real_fallback(tmp_path):
-    """Хинт незаданного слота — честный фоллбэк по матрице `LEVEL_FALLBACK`, а не
-    выдуманный текст: light не задан → работает слот default."""
+    """Пустой слот называет честный фоллбэк по матрице `LEVEL_FALLBACK`, а не
+    выдуманный текст: light не задан → работает default. Живёт это в САМОЙ строке
+    (колонка значения; построчной подсказки больше нет), а развёрнутая форма с
+    алиасом — в описании первой позиции пикера."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
         _goto(ed, "slot", level="light")
         await pilot.pause()
-        assert "не задан · действует default → flash" in _texts(scr)
+        assert "не задан → default" in _texts(scr)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "действует default → flash" in ed._picker["rows"][0]["desc"].plain
 
 
 async def test_invalid_combination_leaves_the_file_untouched(tmp_path):
@@ -917,7 +1010,8 @@ async def test_invalid_combination_leaves_the_file_untouched(tmp_path):
         _goto(ed, "slot", level="default")
         await pilot.pause()
         await pilot.press("enter")
-        await pilot.press("enter")                  # «не задан» — снять последний слот
+        await pilot.press("up")                     # с текущего (flash) на «не задан»
+        await pilot.press("enter")                  # снять последний слот
         await pilot.pause()
         assert cfg_file.read_bytes() == before
         assert "не сохранено" in _texts(scr)
@@ -943,7 +1037,8 @@ async def test_alias_named_like_a_sentinel_is_pinned_not_dropped(tmp_path):
         _goto(ed, "slot", level="light")
         await pilot.pause()
         await pilot.press("enter")
-        assert ed._picker["items"] == ["не задан", "не задан", "активная"]
+        assert [r["label"] for r in ed._picker["rows"]] == [
+            "не задан", "не задан", "активная"]
         await pilot.press("down")                   # сентинел → одноимённый алиас
         await pilot.press("enter")
         await pilot.pause()
@@ -1072,9 +1167,7 @@ async def test_wildcard_row_names_the_subagents_it_really_covers(tmp_path):
         ed = _editor(scr)
         _goto(ed, "assign", consumer="*")
         await pilot.pause()
-        hint = ed._hint_text()
-        assert ".md" in hint
-        assert "привязк" in hint
+        assert "кастомные и будущие субагенты" in " ".join(_rows(scr))
         assert "остальные субагенты" not in " ".join(_rows(scr))
 
 
@@ -1091,17 +1184,48 @@ async def test_reserve_row_is_dimmed_while_the_registry_works(tmp_path):
 
 async def test_block_captions_stand_in_the_separators_instead_of_the_frame_title(tmp_path):
     """Заголовок «Модели» внутри рамки дублировал шапку экрана — вместо него блоки
-    подписаны сами, подписью, вписанной в черту-разделитель."""
+    подписаны сами: стрелка сворачивания + подпись, вписанные в черту. Все черты
+    ОДНОЙ ширины (по самой длинной подписи — ревизия владельца: рваный правый край
+    читался как неровность)."""
     async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
         title = scr.query_one("#set-title", Static)
         assert str(title.render()) == ""
         assert title.display is False
-        assert [str(w.render()) for w in scr.query(".models-block")] == [
-            "──── реестр ────────────────────",
-            "──── уровни ────────────────────",
-            "──── назначения: кто чем работает ────"]
+        captions = [str(w.render()) for w in scr.query(".models-block")]
+        assert captions == [
+            "▾ реестр ──────────────────────────",
+            "▾ уровни ──────────────────────────",
+            "▾ назначения: кто чем работает ────"]
+        assert len({len(c) for c in captions}) == 1     # единый правый край
         ed = _editor(scr)
-        assert "реестр" in str(list(ed.children)[0].render())
+        assert "запись:" in str(list(ed.children)[0].render())
+        assert "реестр" in str(list(ed.children)[1].render())
+
+
+async def test_clicking_a_block_header_collapses_and_expands(tmp_path):
+    """Шапка блока — его выключатель, и только мышью (решение владельца; безопасно
+    ровно потому, что дефолт «всё раскрыто» — без мыши ничего не теряется). Клик:
+    строки блока уходят из тела и из пути курсора, шапка несёт ▸ и превью
+    содержимого; второй клик возвращает всё."""
+    from tui.editors.models_section import _BlockHeader
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        rows_before = len(ed._rows())
+        await pilot.click(_BlockHeader)             # первая шапка — «реестр»
+        await pilot.pause()
+        assert ed._collapsed == {"entry"}
+        assert all(r["kind"] not in ("entry", "add") for r in ed._rows())
+        assert len(ed._rows()) == rows_before - len(ed._aliases) - 1
+        head = str(list(ed.query(".models-block"))[0].render())
+        assert head.startswith("▸") and "2 модели" in head
+        assert "─" not in head                      # у свёрнутой шапки черты нет
+        await pilot.click(_BlockHeader)
+        await pilot.pause()
+        assert ed._collapsed == set()
+        assert len(ed._rows()) == rows_before
+        head = str(list(ed.query(".models-block"))[0].render())
+        assert head.startswith("▾") and "модели" not in head
+        assert head.endswith("─")                   # раскрытая — вписана в черту
 
 
 async def test_slot_row_head_carries_the_colour_of_its_level(tmp_path):
@@ -1249,8 +1373,9 @@ _LONG_ALIAS = (
 
 def _lower_rows(ed) -> list:
     """Виджеты нижней половины секции: строки слотов, привязок и резервной модели —
-    всё, что идёт в списке после записей реестра."""
-    return list(ed.query(".models-row"))[len(ed._aliases):]
+    всё, что идёт после записей реестра и строки «+ добавить» (она — часть верхнего
+    блока и меряется своим стражем)."""
+    return list(ed.query(".models-row"))[len(ed._aliases) + 1:]
 
 
 def _grid_rows(ed) -> list:
@@ -1312,8 +1437,9 @@ async def test_the_reserve_row_stands_in_the_registry_grid(tmp_path):
 
 async def test_the_reserve_row_drops_its_hint_whole(tmp_path):
     """Хвост строки — подсказка «действует только без реестра» — уходит ЦЕЛИКОМ
-    (канон `_mode_row_text`), а не режется многоточием: она дословно повторена в
-    подсказке под курсором, и терять там нечего. Ядро строки — подпись и сама модель."""
+    (канон `_mode_row_text`), а не режется многоточием: та же фраза стоит в шапке
+    под-формы резервной модели (Enter), терять её насовсем негде. Ядро строки —
+    подпись и сама модель."""
     async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
@@ -1324,8 +1450,6 @@ async def test_the_reserve_row_drops_its_hint_whole(tmp_path):
         row = ed._row_text({"kind": "reserve"}, False)
         assert "действует" not in row.plain
         assert row.plain.rstrip().endswith("test-model")
-        _goto(ed, "reserve")                # то же самое — в подсказке под курсором
-        assert ed._hint_text().startswith("действует только без реестра")
 
 
 async def test_the_reserve_row_never_outgrows_the_frame(tmp_path):

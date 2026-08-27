@@ -62,9 +62,18 @@ MODEL_LIST_HINT_NO_MATCH = "нет совпадений · Enter — остав�
 MODEL_RELOAD_HINT = "Alt+↓ — перечитать список"
 
 _ALIAS_LABEL = "Алиас"
-_ALIAS_HINT = "короткое имя записи — им пользуются слоты и привязки"
-_ALIAS_PLACEHOLDER = "напр. flash"
-_ALIAS_EMPTY = "введите алиас записи"
+_ALIAS_HINT = ("короткое имя записи — им пользуются слоты и привязки · "
+               "пусто = имя из id")
+# Алиас не обязателен (ревизия владельца): пустое поле показывает ПРИЗРАКОМ то
+# конкретное имя, что реально возьмётся из id (placeholder = default_alias_for +
+# уникализация, следует за полем id), и Enter принимает его без ввода. Пока id
+# пуст и выводить не из чего — короткий принцип вместо длинной фразы: объяснение
+# живёт в подсказке ПОД полем, а не в самом поле.
+_ALIAS_PLACEHOLDER = "имя из id модели"
+_ALIAS_OR_MODEL_EMPTY = "укажите id модели или алиас"
+# Переименование — не «другая запись»: ссылки уровней и привязок едут следом
+# одной транзакцией (см. `_submit_form` секции).
+_ALIAS_RENAME_HINT = "переименование обновит уровни и привязки записи"
 _MODEL_LABEL = "Провайдерский id модели"
 _MODEL_PLACEHOLDER = "если не указать — id модели равен алиасу"
 _URL_LABEL = "Адрес API-сервера"
@@ -112,15 +121,16 @@ class ModelEntryForm(Vertical):
             probe = default_probe
         self._fetch = fetch
         self._probe = probe
-        # Позиции курсора: алиас — поле только при СОЗДАНИИ (у существующей записи
-        # он read-only заголовок: переименование это другая запись, её делают
-        # созданием). `None` — строка-галки «без авторизации», как в _positions
-        # ConnectionEditor: это не Input, фокус с неё снимается явно.
-        self._positions = tuple(
-            ([] if self._own_alias else ["mef-alias"])
-            + ["mef-model", "mef-url", "mef-token", None])
+        # Позиции курсора — порядок человека, настраивающего подключение (ревизия
+        # владельца): куда → чем → что → как назвать. К входу в поле id адрес и
+        # токен уже стоят — автоподгрузка списка идёт по ним. Алиас — обычное поле
+        # и при правке (переименование — транзакция секции). `None` — строка-галка
+        # «без авторизации», как в _positions ConnectionEditor: это не Input,
+        # фокус с неё снимается явно.
+        self._positions = ("mef-url", "mef-token", None, "mef-model", "mef-alias")
         self._idx = 0
         self._models: list = []
+        self._models_autoload_done = False   # автоподгрузка — один раз на форму
         self._list_gen = 0                # поколение загрузки: протухший ответ отбрасывается
         self._probe_gen = 0
         # Оба контроллера заводятся ЗДЕСЬ, а не на монтировании: смонтированные поля
@@ -164,11 +174,20 @@ class ModelEntryForm(Vertical):
         было бы неправдой — placeholder'ы это различают."""
         return self._own_alias is not None
 
-    def _alias_head_text(self) -> Text:
-        t = Text()
-        t.append(f"{_ALIAS_LABEL}  ", style=DEEP_DIM)
-        t.append(self._alias0, style=INK)
-        return t
+    def _derived_alias(self, model: str) -> str:
+        """Имя, которое реально возьмётся при пустом алиасе: логика мастера
+        (`default_alias_for` + уникализация против чужих имён)."""
+        return onboarding.unique_alias(
+            onboarding.default_alias_for(model), self._other_aliases)
+
+    def _alias_placeholder(self, model: str) -> str:
+        return self._derived_alias(model) if model else _ALIAS_PLACEHOLDER
+
+    def _refresh_alias_placeholder(self) -> None:
+        """Призрак в поле алиаса следует за полем id: печать в id меняет имя,
+        которое возьмётся по умолчанию, — placeholder обязан говорить правду."""
+        for w in self.query("#mef-alias"):
+            w.placeholder = self._alias_placeholder(self._model_value())
 
     def _url_placeholder(self) -> str:
         """Placeholder поля адреса виден ровно в один момент — когда поле ПУСТО (в
@@ -218,28 +237,10 @@ class ModelEntryForm(Vertical):
 
     def compose(self) -> ComposeResult:
         # Рамка одна и она всегда (канон §3.2.1): у поля со списком её рисует
-        # группа, у одинокого поля — класс set-framed.
+        # группа, у одинокого поля — класс set-framed. Порядок полей — как в
+        # `_positions`: адрес → токен → id → алиас.
         icls = "onb-dyn set-framed"
-        if self._is_edit():
-            yield Static(self._alias_head_text(), id="mef-alias-head",
-                         classes="onb-hint onb-dyn")
-        else:
-            yield Static(_ALIAS_LABEL, classes="onb-hint onb-dyn")
-            yield PasteInput(value="", placeholder=_ALIAS_PLACEHOLDER,
-                             id="mef-alias", classes=icls)
-            yield Static(_ALIAS_HINT, classes="onb-hint onb-dyn")
-        yield Static(_MODEL_LABEL, classes="onb-hint onb-dyn set-group-gap")
-        # Поле id — со списком моделей (Alt+↓), значит внутри рамки-группы: рамка
-        # одна на поле и его список (спека §3.1).
-        with Vertical(classes="field-group onb-dyn", id="mef-model-group"):
-            yield PasteInput(value=self._model0, placeholder=_MODEL_PLACEHOLDER,
-                             id="mef-model", classes="onb-dyn group-field")
-        # Строка состояния списка (загрузка/сбой/счётчик) — пустая не занимает места
-        # (`display`), как статусы `ModelEditor`.
-        status = Static("", id="mef-model-status", classes="onb-hint onb-dyn")
-        status.display = False
-        yield status
-        yield Static(_URL_LABEL, classes="onb-hint onb-dyn set-group-gap")
+        yield Static(_URL_LABEL, classes="onb-hint onb-dyn")
         self._url_input = PasteInput(value="", placeholder=self._url_placeholder(),
                                      id="mef-url", classes="onb-dyn group-field")
         with Vertical(classes="field-group onb-dyn", id="mef-url-group"):
@@ -252,6 +253,23 @@ class ModelEntryForm(Vertical):
         yield PasteInput(value="", placeholder=self._token_placeholder(), password=True,
                          id="mef-token", classes=tcls)
         yield Static(self._noauth_text(), id="mef-noauth", classes=self._noauth_cls())
+        yield Static(_MODEL_LABEL, classes="onb-hint onb-dyn set-group-gap")
+        # Поле id — со списком моделей (автоподгрузка при входе, Alt+↓ — перечитать),
+        # значит внутри рамки-группы: рамка одна на поле и его список (спека §3.1).
+        with Vertical(classes="field-group onb-dyn", id="mef-model-group"):
+            yield PasteInput(value=self._model0, placeholder=_MODEL_PLACEHOLDER,
+                             id="mef-model", classes="onb-dyn group-field")
+        # Строка состояния списка (загрузка/сбой/счётчик) — пустая не занимает места
+        # (`display`), как статусы `ModelEditor`.
+        status = Static("", id="mef-model-status", classes="onb-hint onb-dyn")
+        status.display = False
+        yield status
+        yield Static(_ALIAS_LABEL, classes="onb-hint onb-dyn set-group-gap")
+        yield PasteInput(value=self._alias0,
+                         placeholder=self._alias_placeholder(self._model0),
+                         id="mef-alias", classes=icls)
+        yield Static(_ALIAS_RENAME_HINT if self._is_edit() else _ALIAS_HINT,
+                     classes="onb-hint onb-dyn")
         yield Static(probe_line_text(None), id="mef-probe-line",
                      classes="set-hint set-dyn")
         # Строка ошибки монтируется сразу и пустой (display гасит место под неё):
@@ -312,7 +330,18 @@ class ModelEntryForm(Vertical):
             # клавиша гейтится позицией курсора, и обещание уходит вместе с ней.
             self._presets_ctrl.hide_closed_hint()
         if target == "mef-model":
-            self._list.show_closed_hint()    # чем раскрыть список (Alt+↓)
+            self._list.show_closed_hint()    # чем перечитать список (Alt+↓)
+            if self._models:
+                # Список уже подгружен — раскрыть сразу (ревизия владельца: вход в
+                # поле показывает варианты сам, Enter для этого не нужен).
+                if not self._list.is_open:
+                    self._list.open(forced=True, filter_text=self._model_value())
+            elif not self._models_autoload_done:
+                # Автоподгрузка — один раз на форму: к этому полю курсор приходит
+                # после адреса и токена, идти есть по чему. Сбой не блокирует
+                # ручной ввод, Alt+↓ остаётся принудительным перечитыванием.
+                self._models_autoload_done = True
+                self._start_models_fetch(refresh=False)
         else:
             self._list.hide_closed_hint()
             # Счётчик/ошибка списка — про поле, с которого курсор ушёл: «2 модели»
@@ -349,6 +378,9 @@ class ModelEntryForm(Vertical):
 
     def _apply_model(self, model_id: str) -> None:
         write_field(self.query_one("#mef-model", Input), model_id)
+        # write_field глушит Input.Changed (иначе список сужался бы сам по себе) —
+        # призрак алиаса пересчитываем руками, ему это событие и было нужно.
+        self._refresh_alias_placeholder()
         self._invalidate_probe()
 
     def reload_presets(self) -> bool:
@@ -373,6 +405,11 @@ class ModelEntryForm(Vertical):
         наша."""
         if self._positions[self._idx] != "mef-model":
             return False
+        return self._start_models_fetch(refresh=True)
+
+    def _start_models_fetch(self, *, refresh: bool) -> bool:
+        """Уйти за списком моделей. `refresh=False` — автоподгрузка при входе в поле
+        (кэш годится), `True` — принудительное перечитывание по Alt+↓."""
         url = self._current_url()
         if not url:
             self._set_status(_LIST_NO_URL)
@@ -387,15 +424,16 @@ class ModelEntryForm(Vertical):
         # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
         # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
         # клавиши разведены по ролям, значит и по воркерам.
-        self.run_worker(lambda: self._fetch_blocking(url, auth, gen), thread=True,
+        self.run_worker(lambda: self._fetch_blocking(url, auth, gen, refresh), thread=True,
                         exclusive=True, group="model-entry-list",
                         name="model-entry-list-fetch")
         return True
 
-    def _fetch_blocking(self, url: str, auth: str | None, gen: int) -> None:
+    def _fetch_blocking(self, url: str, auth: str | None, gen: int,
+                        refresh: bool) -> None:
         try:
             models = self._fetch(url, auth, verify=self._verify,
-                                 config_proxy=self._config_proxy, refresh=True)
+                                 config_proxy=self._config_proxy, refresh=refresh)
         except Exception:
             models = None
         self.app.call_from_thread(self._on_models, models, gen)
@@ -404,6 +442,11 @@ class ModelEntryForm(Vertical):
         # Поколение протухло — ответ не про эту загрузку: не трогаем ни состояние,
         # ни DOM.
         if gen != self._list_gen or not self.is_mounted:
+            return
+        if self._positions[self._idx] != "mef-model":
+            # Курсор успел уйти с поля: список запоминаем (вернётся — раскроется
+            # сам), но раскрывать и вешать счётчик под чужим полем нельзя.
+            self._models = list(models or [])
             return
         if not models:
             # Честная ошибка вместо молчания: сервер мог лежать, а клавиша выглядела
@@ -454,6 +497,7 @@ class ModelEntryForm(Vertical):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "mef-model":
             self._list.apply_filter(event.input.value)   # no-op, если список свёрнут
+            self._refresh_alias_placeholder()
         elif event.input.id == "mef-url":
             self._presets_ctrl.apply_filter(event.input.value)
         if event.input.id in ("mef-url", "mef-token", "mef-model"):
@@ -581,10 +625,17 @@ class ModelEntryForm(Vertical):
         except NoMatches:
             return self._model0
 
+    @property
+    def original_alias(self) -> str | None:
+        """Алиас, под которым запись живёт в файле СЕЙЧАС (None — создание).
+        Секция сравнивает его с алиасом из `submit()`: разошлись — переименование,
+        транзакция с переездом ссылок."""
+        return self._own_alias
+
     def peek(self) -> dict:
         """Сырые значения полей без сайд-эффектов — для dirty-проверки и хозяина."""
         return {
-            "alias": self._own_alias or self._field_value("mef-alias"),
+            "alias": self._field_value("mef-alias"),
             "url": self._field_value("mef-url"),
             "token": self._field_value("mef-token"),
             "model": self._field_value("mef-model"),
@@ -632,7 +683,13 @@ class ModelEntryForm(Vertical):
         values = self.peek()
         alias = values["alias"]
         if not alias:
-            return self._fail(_ALIAS_EMPTY)
+            # Пустой алиас — имя из id (ровно то, что показывал призрак-placeholder):
+            # одинаково при создании и правке — стереть алиас существующей записи
+            # значит «переименуй в имя по умолчанию». Выводить не из чего только
+            # когда пусто И поле id — честная ошибка.
+            if not values["model"]:
+                return self._fail(_ALIAS_OR_MODEL_EMPTY)
+            alias = self._derived_alias(values["model"])
         try:
             validate_model_alias(alias)
         except ValueError as exc:
