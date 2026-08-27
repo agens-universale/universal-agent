@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Callable
 
 import onboarding
-import onboarding_config_writer
 import onboarding_fields as _of
 from onboarding import authorization_header, mask_authorization, _valid_endpoint_url  # re-export
 
@@ -247,14 +246,7 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) 
     try:
         values = collect_fields(io, config, review_all=review_all)
         if values:
-            from config import _default_config_path, validate_config_text
-            from onboarding import FIELD_ANCHOR_PATHS
-            dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in values.items()}
-            for missing in onboarding_config_writer.write_values(
-                config_path, dotted,
-                template_path=_default_config_path(),
-                validate=validate_config_text,
-            ):
+            for missing in onboarding.write_wizard_values(config_path, values):
                 io.printer(f"  [warn] поле {missing} не найдено в конфиге — пропущено")
     except ValueError as exc:
         io.printer(f"\n  [ошибка] конфиг не записан: {exc}")

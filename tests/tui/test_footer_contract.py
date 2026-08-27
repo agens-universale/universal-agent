@@ -121,20 +121,24 @@ async def test_wizard_footer_names_the_right_key_per_step(tmp_path):
     где есть проба (шаг «Подключение», карта проб §2.5), раскрытие/перечитывание
     списка ушло на `Alt+↓`. Шаг «Подключение» обещает обе — пробу и `Alt+↓ —
     показать список» (список свёрнут); шаг «Модель» — только `Alt+↓ — перечитать
-    список», `Ctrl+Space` там больше не обещана; шаг MCP молчит про обе."""
+    список», `Ctrl+Space` там больше не обещана; шаг MCP молчит про обе.
+
+    Шаги адресуются ИМЕНАМИ (волна B, Task 8): состав шагов зависит от дискавери
+    профилей, и номер «2» с этого момента у разных прогонов разный."""
     from tests.tui.conftest import wizard_connection_step
+    from tui.screens.onboarding import STEP_CONNECTION, STEP_MCP, STEP_MODEL
     async with wizard_connection_step(tmp_path) as (pilot, scr):
         await pilot.press("escape")   # свернуть пресет-лист, раскрытый по умолчанию
         await pilot.pause()
-        scr._step = 0
+        scr._step = scr._steps.index(STEP_CONNECTION)
         footer = scr._footer_text()
         assert "Ctrl+Space — проверить связь" in footer
         assert "Alt+↓ — показать список" in footer
-        scr._step = 1
+        scr._step = scr._steps.index(STEP_MODEL)
         footer = scr._footer_text()
         assert "Alt+↓ — перечитать список" in footer
         assert "Ctrl+Space" not in footer
-        scr._step = 2
+        scr._step = scr._steps.index(STEP_MCP)
         footer = scr._footer_text()
         assert "Ctrl+Space" not in footer   # на шаге MCP клавиша молчит
         assert "Alt+↓" not in footer
@@ -192,7 +196,7 @@ async def test_no_live_wizard_footer_tells_an_outdated_story(tmp_path):
     from tests.tui.conftest import wizard_connection_step
     async with wizard_connection_step(tmp_path) as (pilot, scr):
         seen = []
-        for step in (0, 1, 2, 3):
+        for step in range(len(scr._steps)):     # весь состав прогона, не «первые четыре»
             scr._step = step
             seen.append(scr._footer_text())
         await pilot.press("tab")

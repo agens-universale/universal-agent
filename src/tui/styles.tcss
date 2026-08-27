@@ -436,8 +436,8 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-summary { height: 1; margin-bottom: 1; }   /* строка сводки — клип по краю, без переноса; воздух перед заголовком шага */
 #onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
 /* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
-#onb-model, #conn-url, #conn-token, #conn-proxy, #mef-alias, #mef-model, #mef-url, #mef-token, #set-profile-name { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
-#onb-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus,
+#onb-model, #onb-level-model, #conn-url, #conn-token, #conn-proxy, #mef-alias, #mef-model, #mef-url, #mef-token, #set-profile-name { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#onb-model:focus, #onb-level-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus,
 #mef-alias:focus, #mef-model:focus, #mef-url:focus, #mef-token:focus,
 #set-profile-name:focus { border: none; background: $band-bg; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
@@ -501,13 +501,13 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-slot { height: auto; width: 1fr; }
 /* Поле ввода в /settings — скруглённая amber-рамка (id+class специфичнее flat
    #onb-* → онбординг остаётся без рамки, как принят). */
-#onb-model.set-framed,
+#onb-model.set-framed, #onb-level-model.set-framed,
 #conn-url.set-framed, #conn-token.set-framed, #conn-proxy.set-framed,
 #mef-alias.set-framed, #mef-model.set-framed, #mef-url.set-framed, #mef-token.set-framed,
 #set-profile-name.set-framed {
     border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg;
 }
-#onb-model.set-framed:focus,
+#onb-model.set-framed:focus, #onb-level-model.set-framed:focus,
 #conn-url.set-framed:focus, #conn-token.set-framed:focus, #conn-proxy.set-framed:focus,
 #mef-alias.set-framed:focus, #mef-model.set-framed:focus,
 #mef-url.set-framed:focus, #mef-token.set-framed:focus, #set-profile-name.set-framed:focus {

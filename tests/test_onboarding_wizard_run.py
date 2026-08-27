@@ -1,4 +1,7 @@
+import yaml
+
 import onboarding
+import onboarding_config_writer
 import onboarding_wizard as wz
 
 
@@ -94,6 +97,74 @@ def test_run_without_mcp_skips_mcp(tmp_path, monkeypatch):
                   cfg_file, review_all=False, io=io) is True
 
 
+def test_run_writes_registry_entry_and_flat_connection(tmp_path, monkeypatch):
+    """CLI-визард пишет ТО ЖЕ, что и TUI-мастер (ядро записи одно, onboarding.py):
+    подключение — плоскими ключами, модель — записью реестра со слотом default;
+    легаси `agent.model` не трогается, конфиг после прогона настроен."""
+    import config as cfg_mod
+    from bundled_assets import bundled_root
+    from config_modules import env_vars
+
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
+        "config": tmp_path / "gc", "state": tmp_path / "s",
+        "data": tmp_path / "d", "cache": tmp_path / "c",
+    })
+    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: None)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("model_picker.fetch_models", lambda *a, **k: None)   # без сети
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file)))
+
+    starting = cfg_mod.load_config(str(cfg_file))
+    # адрес, auth-меню «1» (токен), токен, модель (списка нет → ручной ввод)
+    io = _io(["https://x/v1/chat/completions", "1", "sk-1", "qwen/qwen3-coder"])
+    assert wz.run(starting, cfg_file, review_all=False, io=io, mcp=None) is True
+
+    raw = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+    assert raw["backend"]["completions_url"] == "https://x/v1/chat/completions"
+    assert raw["backend"]["chat_completion_headers"]["Authorization"] == "Bearer sk-1"
+    assert raw["models"] == {"qwen3-coder": {"model": "qwen/qwen3-coder"}}
+    assert raw["slots"]["default"] == "qwen3-coder"
+    assert raw["agent"]["model"] == onboarding.MODEL_SENTINEL
+    assert onboarding.is_unconfigured(cfg_mod.load_config(str(cfg_file))) is False
+
+
+def test_run_with_registry_but_skipped_endpoint_stays_unconfigured(tmp_path, monkeypatch):
+    """Модель записана в реестр, а адрес пропущен Enter'ом: визард обязан отчитаться
+    «не настроено» и напечатать гайд. Иначе «✓ Готово» закрывало бы вопрос навсегда —
+    следующий старт мастер не предложил бы, а запрос ушёл бы на плейсхолдерный хост."""
+    import config as cfg_mod
+    from bundled_assets import bundled_root
+    from config_modules import env_vars
+
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
+        "config": tmp_path / "gc", "state": tmp_path / "s",
+        "data": tmp_path / "d", "cache": tmp_path / "c",
+    })
+    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: None)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("model_picker.fetch_models", lambda *a, **k: None)
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file)))
+
+    printed = []
+    it = iter(["", "3", "qwen3-coder"])   # адрес пропущен, auth-меню «3» (пропустить), модель
+    io = wz.WizardIO(reader=lambda p, s: next(it), printer=printed.append)
+    assert wz.run(cfg_mod.load_config(str(cfg_file)), cfg_file,
+                  review_all=False, io=io, mcp=None) is False
+
+    raw = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+    assert raw["models"] == {"qwen3-coder": {"model": "qwen3-coder"}}    # модель записана
+    assert raw["backend"]["completions_url"] == onboarding.URL_SENTINEL  # адрес так и не задан
+    blob = "\n".join(printed)
+    assert "настройка не завершена" in blob
+    assert "backend.completions_url" in blob
+
+
 def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
@@ -107,7 +178,7 @@ def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
     def failing_write_values(*args, **kwargs):
         raise ValueError("схема не валидна")
 
-    monkeypatch.setattr(wz.onboarding_config_writer, "write_values", failing_write_values)
+    monkeypatch.setattr(onboarding_config_writer, "write_values", failing_write_values)
     monkeypatch.setattr(wz, "_reload_config", lambda: {
         "completions_url": onboarding.URL_SENTINEL,
         "chat_completion_headers": {"Authorization": "Bearer real"},

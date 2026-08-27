@@ -268,16 +268,27 @@ async def mounted_model_editor(tmp_path, *, models):
 @asynccontextmanager
 async def wizard_connection_step(tmp_path):
     """Мастер первого запуска на шаге «Подключение» (первый экран, как его видит
-    новичок): пресет-лист адреса раскрыт сам — вход на поле его раскрывает."""
+    новичок): пресет-лист адреса раскрыт сам — вход на поле его раскрывает.
+
+    Работа идёт из `tmp_path`: состав шагов мастера зависит от дискавери профилей,
+    а тот смотрит и в ПРОЕКТНЫЙ корень (`<cwd>/.gc/profiles`) — появившийся в
+    репозитории каталог профилей молча сдвинул бы шаги у всех, кто зовёт этот
+    хелпер, и первым шагом стал бы не «Подключение»."""
+    import os
     from tests.tui.test_onboarding_screen import _screen
     from tui.app import TuiApp
-    app = TuiApp(config={"model": "M"})
-    async with app.run_test() as pilot:
-        screen = _screen()
-        await app.push_screen(screen)
-        await pilot.pause()          # ConnectionEditor.focus_input идёт call_after_refresh
-        await pilot.pause()
-        yield pilot, screen
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        app = TuiApp(config={"model": "M"})
+        async with app.run_test() as pilot:
+            screen = _screen()
+            await app.push_screen(screen)
+            await pilot.pause()      # ConnectionEditor.focus_input идёт call_after_refresh
+            await pilot.pause()
+            yield pilot, screen
+    finally:
+        os.chdir(cwd)
 
 
 @contextmanager

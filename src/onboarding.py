@@ -94,12 +94,44 @@ TOKEN_SENTINEL = "Bearer <ВПИШИТЕ_ТОКЕН>"
 MODEL_SENTINEL = "<ВПИШИТЕ_МОДЕЛЬ>"
 
 
+def _every_entry_carries(c: Dict[str, Any], field: str) -> bool:
+    """У КАЖДОЙ записи реестра задано своё `field` — тогда плоский `backend` для
+    этого поля не нужен (спека §4: незаданное у записи наследуется от него).
+
+    Только для `chat_completions`: в `responses` от записи действует один
+    провайдерский id, per-model адрес и авторизация мертвы (§4) — там такой конфиг
+    ушёл бы на плоский плейсхолдер. Проверка по ВСЕМ записям, а не по резолвнутой,
+    намеренно грубее: резолв (слоты, привязки, фоллбэки уровней) — знание Router'а,
+    тащить его в детект первого запуска нельзя, а «самодостаточны все» ошибается
+    только в безопасную сторону — лишний раз предложить мастер, но не объявить
+    готовым конфиг, который уйдёт на `your-backend:PORT`."""
+    models = c.get("models") or {}
+    return (c.get("backend_api_mode") == "chat_completions"
+            and bool(models)
+            and all((entry or {}).get(field) for entry in models.values()))
+
+
 def _endpoint_set(c: Dict[str, Any]) -> bool:
-    return c.get("completions_url") not in (None, URL_SENTINEL)
+    if c.get("completions_url") not in (None, URL_SENTINEL):
+        return True
+    return _every_entry_carries(c, "url")
+
+
+def _legacy_model_set(c: Dict[str, Any]) -> bool:
+    """Плоский `agent.model` заполнен (не плейсхолдер шаблона)."""
+    return c.get("model") not in (None, "", MODEL_SENTINEL)
 
 
 def _model_set(c: Dict[str, Any]) -> bool:
-    return c.get("model") not in (None, "", MODEL_SENTINEL)
+    """Требование модели: непустой merged-реестр (любой слой, спека §11) ИЛИ
+    заполненный легаси-ключ.
+
+    Сам факт непустого реестра закрывает ТОЛЬКО это требование: записи, которые
+    пишет мастер, наследуют url и авторизацию от плоского `backend` (решение 10),
+    поэтому такой реестр поверх плейсхолдерного endpoint'а — «нечем работать», а не
+    «настроено». Адрес и токен реестр закрывает отдельно и по другому условию —
+    когда их несут сами записи (`_every_entry_carries`)."""
+    return bool(c.get("models")) or _legacy_model_set(c)
 
 
 def _agent_auth_set(c: Dict[str, Any]) -> bool:
@@ -112,9 +144,12 @@ def _auth_set(c: Dict[str, Any]) -> bool:
     # токена (и нет полноценного agent_auth). Реальный токен ИЛИ намеренное отсутствие
     # заголовка (локальный прокси / эндпоинт без auth сам ставит авторизацию) → задан.
     # Гейт — детектор незаполненного шаблона, а не валидатор auth: отсутствие ≠ сентинел.
+    # Симметрично адресу: авторизацию может нести и сама запись реестра. Смотрим на
+    # `authorization_header` — вычисленное поле снимка (`config._serialize_model_entry`),
+    # сырого `token` в загруженном конфиге уже нет.
     auth = (c.get("chat_completion_headers") or {}).get("Authorization")
     if auth == TOKEN_SENTINEL:
-        return _agent_auth_set(c)
+        return _agent_auth_set(c) or _every_entry_carries(c, "authorization_header")
     return True
 
 
@@ -172,30 +207,43 @@ def pending_requirements(config: Dict[str, Any]) -> List[_Requirement]:
 def is_unconfigured(config: Dict[str, Any]) -> bool:
     """True, если конфиг ещё не готов к запуску (есть незакрытое требование).
 
-    Спека §11: заполненный merged-реестр моделей (`models` непуст, любой источник —
-    базовый конфиг, профиль, проектный слой) закрывает требование самостоятельно —
-    легаси-плейсхолдеры (`backend.completions_url`/`agent.model`) тогда не блокируют,
-    они лишь база наследования (`active_profile_or_registry_note`)."""
-    if config.get("models"):
-        return False
+    Требования проверяются ВСЕ — реестр моделей входит в них через `_model_set`
+    (спека §11: «нечем работать» ловится в обоих мирах), а не закорачивает детект
+    целиком: иначе конфиг с живым реестром и плейсхолдерным адресом считался бы
+    настроенным, мастер отчитывался бы «✓ Готово», следующий старт больше не
+    предложил бы настройку, а запрос ушёл бы на `your-backend:PORT`."""
     return bool(pending_requirements(config))
 
 
-def active_profile_or_registry_note(config: Dict[str, Any]) -> Optional[str]:
-    """Спека §11: активный merged-реестр моделей ИЛИ выбранный профиль (любой
-    источник — базовый указатель, проектный, CLI) — мастер онбординга пишет
-    плоские легаси-поля (`backend.completions_url`/`agent.model`), но при живом
-    реестре/профиле они станут только БАЗОЙ НАСЛЕДОВАНИЯ для незаданного, а не
-    рабочей моделью (Router решает резолв через слоты/привязки, §6). Профиль —
-    более конкретная причина, чем голый реестр (частный случай §1), поэтому
-    проверяется первым."""
+def _registry_overridden_above(config_path) -> bool:
+    """Действующий реестр пришёл НЕ из того файла, который правит мастер: слой выше
+    (проектный `.gc/config.yml`, managed) переопределил `models`/`slots.default`.
+
+    Считает тем же `origins`, что и витрина происхождения полей в Settings, —
+    отдельного знания о слоях мастеру заводить не нужно."""
+    if not config_path:
+        return False
+    from config_origin import origins
+    found = origins(str(config_path), ["models", "slots.default"])
+    return any(origin.overlay_kind for origin in found.values())
+
+
+def overriding_layer_note(config: Dict[str, Any], config_path=None) -> Optional[str]:
+    """Спека §11: что перекроет выбор, сделанный в мастере (мастер пишет БАЗОВЫЙ
+    config.yml, а конфиг собирается стопкой слоёв — ось 2, §2).
+
+    Профиль (любой источник — базовый указатель, проектный, CLI) лежит над базой →
+    предупреждаем. Реестр моделей — только когда он пришёл слоем ВЫШЕ правимого
+    файла: свой же реестр config.yml мастер с волны B дописывает сам (решение 10),
+    и предупреждать там не о чем, а проектный слой молча оставил бы выбор человека
+    без эффекта. Без `config_path` слой не различить — тогда только профиль."""
     profile = config.get("profile") or None
     if profile:
-        return (f'действует профиль "{profile}" — эти поля станут базой наследования, '
-                'а не рабочей моделью')
-    if config.get("models"):
-        return ("действует реестр моделей — эти поля станут базой наследования, "
-                "а не рабочей моделью")
+        return (f'действует профиль "{profile}" — ваш выбор ляжет в основной конфиг, '
+                'но профиль его перекроет')
+    if config.get("models") and _registry_overridden_above(config_path):
+        return ("действует реестр моделей из другого слоя конфигурации — ваш выбор "
+                "ляжет в основной конфиг, но этот слой его перекроет")
     return None
 
 
@@ -208,14 +256,16 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     just_created=True → конфиг создан этим запуском (иначе уже существовал).
     Если модель уже задана (а адрес/токен — нет), добавляем ремарку: эти поля
     нужны для preset-модели; либо укажи свою модель и адрес/токен под неё."""
-    profile_note = active_profile_or_registry_note(config)
+    profile_note = overriding_layer_note(config, config_path)
     pending = pending_requirements(config)
     if not pending:
         base = f"[gc] Конфиг настроен: {config_path} — можно запускать."
         return f"{base}\n[gc] {profile_note}." if profile_note else base
     fields = "\n".join(f"    • {r.hint}" for r in pending)
     note = ""
-    if _model_set(config):
+    if _legacy_model_set(config):
+        # Ремарка — про ПЛОСКИЙ ключ (её текст его и называет): при живом реестре
+        # с нетронутым плейсхолдером она печатала бы «agent.model = <ВПИШИТЕ_МОДЕЛЬ>».
         note = (
             f"\n  Модель по умолчанию уже задана (agent.model = {config.get('model')}) —\n"
             f"  осталось указать для неё адрес и токен; либо укажите свою модель\n"
@@ -239,3 +289,146 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
         f"    • Либо впишите поля вручную и запустите снова.\n\n"
         f"  MCP-серверы (веб-поиск, документы и др.): gc-mcp install — поставить, gc-mcp help — все команды\n"
     )
+
+
+# --- Профили, которые мастер может предложить (шаг «Профили», спека §11) ---
+
+def discover_profiles_for_onboarding(config_path) -> Dict[str, Any]:
+    """Профили обоих корней (спека §3.1) — тем же дискавери, что у секции
+    «Профили» (`config_modules.profiles`): проектный `.gc/profiles` от текущего
+    каталога и «рядом с базой» от конфига, который правит мастер. Своего обхода
+    каталогов у мастера нет.
+
+    Пути конфига ещё нет (плейсхолдер до резолва в `TuiApp`) — резолвить корни не
+    от чего, предлагать нечего."""
+    from pathlib import Path
+
+    from config_modules.profiles import discover_profiles, profile_roots
+
+    if not config_path:
+        return {}
+    return discover_profiles(profile_roots(Path.cwd(), Path(config_path)))
+
+
+# --- Запись собранного мастером (волна B, спека §11) ----------------------
+
+def default_alias_for(model_id: str) -> str:
+    """Алиас `models.<alias>` из провайдерского id модели: последний path-сегмент
+    до опций (`qwen/qwen-2.5-flash` → `qwen-2.5-flash`; `qwen/m:free` → `m`),
+    короткое имя без `/` — как есть. Имени алиаса мастер не спрашивает: на первом
+    запуске лишний вопрос дороже, чем предсказуемое имя, а переименовать запись
+    можно в секции «Модели».
+
+    Коллизия с зарезервированным словом уровня (`RESERVED_WORDS`, §4) → суффикс
+    `-model` (`light` → `light-model`): иначе запись не прошла бы валидацию.
+    Пустой id (или после нормализации — пустая строка) → `"model"`.
+    """
+    from config_modules.model_registry import RESERVED_WORDS
+
+    if not model_id:
+        return "model"
+    slug = model_id.strip().rsplit("/", 1)[-1].split(":", 1)[0].strip()
+    if not slug:
+        return "model"
+    return f"{slug}-model" if slug in RESERVED_WORDS else slug
+
+
+def unique_alias(alias: str, taken) -> str:
+    """`alias`, либо `alias-2`/`alias-3`/… — первое имя, не занятое в `taken`.
+
+    Нужен шагу уровней: два РАЗНЫХ провайдерских id могут свернуться в одно имя
+    (`vendor-a/qwen-plus` и `vendor-b/qwen-plus`), и без разведения вторая запись
+    затёрла бы первую по merge-контракту — оба слота увели бы уровни на одну
+    модель, а выбор человека потерялся бы молча."""
+    taken = set(taken)
+    if alias not in taken:
+        return alias
+    n = 2
+    while f"{alias}-{n}" in taken:
+        n += 1
+    return f"{alias}-{n}"
+
+
+# Модели, собранные мастером: ключ в `values` → слот реестра. `model` — базовый шаг,
+# `model_light`/`model_max` — опциональный скипаемый шаг уровней (TUI, решение 8
+# плана волны B). Имена ключей — контракт между шагами и записью, поэтому живут
+# здесь, у политики записи, а не в экране.
+MODEL_SLOT_KEYS: Dict[str, str] = {
+    "default": "model",
+    "light": "model_light",
+    "max": "model_max",
+}
+
+
+def _registry_ops(values: Dict[str, Any]) -> List[tuple]:
+    """Операции реестра для собранных мастером моделей: `models.<alias>` + свой
+    слот на каждый ЗАПОЛНЕННЫЙ уровень (незаполненный не пишет ничего — слот на
+    несуществующий алиас нерезолвим, §4).
+
+    Один и тот же id на двух уровнях — одна запись и два слота на неё; разные id
+    с одинаковым хвостом имени разводятся `unique_alias`. Соответствие «id → уже
+    выданный алиас» ищется по РЕЗУЛЬТАТУ, а не по первому расчёту имени: иначе
+    третий уровень с уже разведённой моделью получал бы ещё одну запись-близнеца."""
+    ops: List[tuple] = []
+    planned: Dict[str, str] = {}          # алиас → id, уже запланированный этой записью
+    for slot, key in MODEL_SLOT_KEYS.items():
+        model_id = values.get(key)
+        if not model_id:
+            continue
+        alias = next((name for name, planned_id in planned.items()
+                      if planned_id == model_id), None)
+        if alias is None:
+            alias = default_alias_for(model_id)
+            if alias in planned:
+                alias = unique_alias(alias, planned)
+            planned[alias] = model_id
+            ops.append(("upsert_model", alias, {"model": model_id}))
+        ops.append(("write_slot", slot, alias))
+    return ops
+
+
+def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
+    """Записать собранное мастером в `config_path` — ОДИН путь записи на обе
+    поверхности (CLI-визард и TUI-мастер), политика живёт здесь.
+
+    Подключение (`completions_url`/`Authorization`/`proxy`) пишется плоскими
+    ключами `backend.*`, КАК РАНЬШЕ: это база наследования записей реестра (§4) и
+    живой источник пробы соединения. Модели — записями реестра `models.<alias>:
+    {model: <id>}` + своими слотами вместо легаси `agent.model` (спека §11):
+    базовый шаг даёт `slots.default`, опциональный шаг уровней — `slots.light`/
+    `slots.max`. Per-model `url`/`token` мастер НЕ пишет намеренно: в режиме
+    `responses` они не действуют (§4), и запись, самодостаточная в
+    `chat_completions`, увела бы responses-конфиг с рабочего endpoint'а.
+
+    Указатель профиля (`profile`, шаг «Профили») пишется тем же путём и в тот же
+    момент — на подтверждении: мастер обещает «данные не сохранятся» при выходе,
+    и запись в момент выбора сделала бы это обещание ложным.
+
+    Все записи реестра уходят ОДНОЙ транзакцией: вторая запись без слота
+    нерезолвима (§4) и была бы отвергнута валидацией отдельной операцией.
+
+    Возвращает якоря плоских полей, которых в конфиге не нашлось (вызывающий
+    решает, показывать ли предупреждение); отказ записи — `ValueError`.
+    """
+    from pathlib import Path
+
+    import onboarding_config_writer as ocw
+    from config import _default_config_path, validate_config_text
+    from config_modules.registry_write import apply_registry_ops
+
+    template_path = _default_config_path()
+    model_keys = set(MODEL_SLOT_KEYS.values())
+    flat = {FIELD_ANCHOR_PATHS.get(key, key): value
+            for key, value in values.items() if key not in model_keys}
+    if "profile" in values:
+        # Указатель — топ-уровневый скаляр: у конфигов, созданных до его появления,
+        # строки нет вовсе, а дописать её `write_values` не умеет (его фолбэк на
+        # шаблон работает только для dotted-ключей) — якорь готовит writer.
+        ocw.ensure_pointer_anchor(config_path, template_path=template_path)
+    missing = ocw.write_values(config_path, flat, template_path=template_path,
+                               validate=validate_config_text)
+    ops = _registry_ops(values)
+    if ops:
+        apply_registry_ops(config_path, ops,
+                           Path(template_path).read_text(encoding="utf-8"))
+    return missing

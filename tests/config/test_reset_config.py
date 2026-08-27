@@ -168,16 +168,29 @@ def test_is_unconfigured_true_when_everything_placeholder():
     assert onboarding.is_unconfigured(config) is True
 
 
-def test_is_unconfigured_false_when_registry_non_empty_even_with_placeholders():
-    """Спека §11: заполненный merged-реестр (`models` непуст) закрывает требование —
-    легаси-плейсхолдеры тогда не блокируют, они лишь база наследования."""
+def test_is_unconfigured_false_when_registry_covers_model_placeholder():
+    """Спека §11: заполненный merged-реестр (`models` непуст) закрывает требование
+    МОДЕЛИ — плейсхолдер `agent.model` при нём не блокирует."""
+    config = {
+        "completions_url": "http://real/v1",
+        "chat_completion_headers": {"Authorization": "Bearer sk-1"},
+        "model": onboarding.MODEL_SENTINEL,
+        "models": {"flash": {"url": "http://x"}},
+    }
+    assert onboarding.is_unconfigured(config) is False
+
+
+def test_is_unconfigured_true_when_registry_but_endpoint_placeholder():
+    """…и только его: адрес/токен реестр не закрывает. Записи, которые пишет мастер
+    (решение 10 волны B), наследуют url/токен от плоского `backend` — плейсхолдерный
+    endpoint при живом реестре означает «нечем работать»."""
     config = {
         "completions_url": onboarding.URL_SENTINEL,
         "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"url": "http://x"}},
     }
-    assert onboarding.is_unconfigured(config) is False
+    assert onboarding.is_unconfigured(config) is True
 
 
 def test_is_unconfigured_false_when_legacy_fields_filled():

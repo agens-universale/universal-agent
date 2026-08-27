@@ -11,6 +11,38 @@ def test_profile_header_hides_unset_model_sentinel():
     assert onboarding.MODEL_SENTINEL not in text
 
 
+def test_profile_header_shows_registry_model_not_flat_key():
+    """Шапка называет ДЕЙСТВУЮЩУЮ модель — резолв Router'а (§6/§7), как футер и
+    /status. С волны B мастер плоский ключ не пишет вовсе, и чтение `cfg["model"]`
+    показывало бы прочерк рядом с полностью настроенным реестром."""
+    import onboarding
+    from tui.screens.config import _profile_header_text
+    cfg = {"model": onboarding.MODEL_SENTINEL, "level": "default",
+           "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+           "slots": {"default": "flash"}}
+    text = _profile_header_text(cfg, profile_source=None).plain
+    assert "модель: flash" in text
+
+
+def test_profile_header_prefers_resolved_model_over_stale_flat_key():
+    """Худший случай плоского чтения: `agent.model` заполнен руками и устарел —
+    шапка называла бы моделью то, чем работа не идёт."""
+    from tui.screens.config import _profile_header_text
+    cfg = {"model": "stale-legacy-model", "level": "default",
+           "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+           "slots": {"default": "flash"}}
+    text = _profile_header_text(cfg, profile_source=None).plain
+    assert "stale-legacy-model" not in text
+    assert "модель: flash" in text
+
+
+def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
+    """Пустой реестр — легаси-резолв, плоский ключ остаётся именем модели."""
+    from tui.screens.config import _profile_header_text
+    text = _profile_header_text({"model": "qwen3-coder"}, profile_source=None).plain
+    assert "модель: qwen3-coder" in text
+
+
 @pytest.mark.asyncio
 async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
     pytest.importorskip("textual")

@@ -560,25 +560,47 @@ async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch
         assert '"level": "light"' in scr._content
 
 
-# --- онбординг-предупреждение при активном реестре/профиле (спека §11) ---
+# --- онбординг-предупреждение о перекрывающем слое (спека §11) ---
 
 def test_onboarding_note_for_active_profile():
-    from onboarding import active_profile_or_registry_note
-    note = active_profile_or_registry_note({"profile": "work"})
-    assert note == ('действует профиль "work" — эти поля станут базой наследования, '
-                    'а не рабочей моделью')
+    """Профиль лежит НАД базовым конфигом (ось 2, §2) — то, что мастер запишет в
+    config.yml, профиль перекроет; об этом и предупреждаем."""
+    from onboarding import overriding_layer_note
+    note = overriding_layer_note({"profile": "work"})
+    assert note == ('действует профиль "work" — ваш выбор ляжет в основной конфиг, '
+                    'но профиль его перекроет')
 
 
-def test_onboarding_note_for_registry_without_profile():
-    from onboarding import active_profile_or_registry_note
-    note = active_profile_or_registry_note({"models": {"flash": {}}})
-    assert note == ("действует реестр моделей — эти поля станут базой наследования, "
-                    "а не рабочей моделью")
+def test_onboarding_note_absent_for_registry_in_the_edited_file(tmp_path):
+    """Реестр лежит в том же файле, который мастер и правит, — перекрывать выбор
+    некому (решение 10: мастер дописывает этот же реестр)."""
+    from onboarding import overriding_layer_note
+    base = tmp_path / "config.yml"
+    base.write_text("models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
+                    encoding="utf-8")
+    assert overriding_layer_note({"models": {"flash": {}}}, str(base)) is None
+
+
+def test_onboarding_note_for_registry_from_layer_above_base(tmp_path, monkeypatch):
+    """Спека §11 «любой источник»: действующий реестр пришёл проектным слоем — то,
+    что мастер запишет в базовый config.yml, этот слой перекроет, и выбор человека
+    не подействует. Молчать здесь нельзя."""
+    import config as cfg_mod
+    from onboarding import overriding_layer_note
+    base = tmp_path / "config.yml"
+    base.write_text('profile: ""\n', encoding="utf-8")
+    project = tmp_path / ".gc" / "config.yml"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
+                       encoding="utf-8")
+    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: str(project))
+    note = overriding_layer_note({"models": {"proj": {}}}, str(base))
+    assert note is not None and "перекроет" in note
 
 
 def test_onboarding_note_absent_in_legacy_mode():
-    from onboarding import active_profile_or_registry_note
-    assert active_profile_or_registry_note({"model": "x"}) is None
+    from onboarding import overriding_layer_note
+    assert overriding_layer_note({"model": "x"}) is None
 
 
 def test_setup_guide_includes_profile_note():
@@ -595,18 +617,37 @@ class _FakeMcp:
     def install(self, name=None): return 0
 
 
-async def test_onboarding_screen_shows_warning_when_registry_active(tmp_path):
+async def test_onboarding_screen_shows_warning_when_profile_active(tmp_path):
     from tui.screens.onboarding import OnboardingScreen
     import tui.app as app_mod
-    app = app_mod.TuiApp(config={"models": {"flash": {}}})
+    app = app_mod.TuiApp(config={"profile": "work"})
     async with app.run_test() as pilot:
-        scr = OnboardingScreen(config={"models": {"flash": {}}}, config_path=str(tmp_path / "config.yml"),
+        scr = OnboardingScreen(config={"profile": "work"}, config_path=str(tmp_path / "config.yml"),
                                review_all=True, on_commit=lambda: None,
                                fetch=lambda *a, **k: None, mcp=_FakeMcp())
         app.push_screen(scr)
         await pilot.pause()
         warn = scr.query_one("#onb-profile-warn", Static)
-        assert "действует реестр моделей" in str(warn.render())
+        assert 'действует профиль "work"' in str(warn.render())
+
+
+async def test_onboarding_screen_no_warning_for_registry_in_the_edited_file(tmp_path):
+    """Реестр лежит в файле, который мастер и правит, — плашке нечего сказать."""
+    from tui.screens.onboarding import OnboardingScreen
+    from textual.css.query import NoMatches
+    import tui.app as app_mod
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text("models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
+                        encoding="utf-8")
+    app = app_mod.TuiApp(config={"models": {"flash": {}}})
+    async with app.run_test() as pilot:
+        scr = OnboardingScreen(config={"models": {"flash": {}}}, config_path=str(cfg_path),
+                               review_all=True, on_commit=lambda: None,
+                               fetch=lambda *a, **k: None, mcp=_FakeMcp())
+        app.push_screen(scr)
+        await pilot.pause()
+        with pytest.raises(NoMatches):
+            scr.query_one("#onb-profile-warn", Static)
 
 
 async def test_onboarding_screen_no_warning_in_legacy_mode(tmp_path):

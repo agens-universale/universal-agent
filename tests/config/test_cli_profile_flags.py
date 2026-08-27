@@ -147,7 +147,7 @@ def test_flat_profile_key_names_active_profile_not_config_pointer(isolated_cwd, 
 
     Документу профиля запрещено нести ключ `profile:`, поэтому после мержа он
     остаётся пойнтером config.yml — витрины, читающие плоский ключ (например
-    `onboarding.active_profile_or_registry_note`), называли бы чужое имя."""
+    `onboarding.overriding_layer_note`), называли бы чужое имя."""
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
     _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "home"})

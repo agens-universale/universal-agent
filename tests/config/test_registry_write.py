@@ -166,6 +166,23 @@ def test_upsert_model_alias_with_dot_replaces_not_duplicates(tmp_path, template)
         "model": "anthropic/claude-opus-4.8", "url": "https://other/v1"}
 
 
+def test_upsert_model_quotes_yaml_scalar_alias(tmp_path, template):
+    """Алиас, который YAML разобрал бы НЕ строкой (`123`, `true`, `null`, `~`), уходит
+    в кавычках: без них ключ реестра становится числом/булевым/None, запись валится
+    сырым текстом pydantic — и это худший момент для отказа, плоское подключение к
+    этому месту уже записано. Провайдерские id вида `123` встречаются у локальных
+    раздач моделей, вход достижим через `default_alias_for`."""
+    for alias in ("123", "true", "null", "~", "0755"):
+        path = _cfg(tmp_path, _BASE)
+
+        upsert_model(path, alias, {"model": alias}, template)
+
+        assert _models(path) == {alias: {"model": alias}}, alias
+        # снятие идёт тем же ключом — поиск и запись обязаны видеть одну форму
+        remove_model(path, alias)
+        assert _models(path) in ({}, None), alias
+
+
 # --- remove_model -------------------------------------------------------------
 
 

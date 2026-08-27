@@ -55,7 +55,20 @@ _PLAIN_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+\-]*$")
 
 
 def _yaml_key(key: str) -> str:
-    return key if _PLAIN_KEY_RE.match(key) else ocw.quote_scalar(key)
+    """Ключ записи в том виде, в каком он ляжет в файл.
+
+    Мало быть синтаксически плоским: ключ, который YAML разберёт НЕ строкой
+    (`123`, `true`, `null`, `0755` — локальные раздачи такие id дают), обязан
+    уехать в кавычках, иначе запись валится схемой («models.123.[key]: input
+    should be a valid string») в момент, когда соседние ключи уже записаны.
+    Одна функция и на запись, и на поиск — обе стороны видят один вид."""
+    if not _PLAIN_KEY_RE.match(key):
+        return ocw.quote_scalar(key)
+    try:
+        plain = isinstance(yaml.safe_load(key), str)
+    except yaml.YAMLError:
+        plain = False
+    return key if plain else ocw.quote_scalar(key)
 
 
 def _read(target) -> str:
