@@ -231,6 +231,15 @@ def test_exec_reader_threads_are_daemon(be, monkeypatch):
     assert all(t.daemon for t in readers)
 
 
+def test_exec_per_call_capture_max_overrides_default(be):
+    be.exec_output_capture_max_chars = 50
+    res = be.exec("yes A | head -c 5000", timeout=15, capture_max_chars=400)
+    assert res.return_code == 0
+    assert len(res.stdout) <= 400
+    assert len(res.stdout) > 50
+    assert res.stdout_hit_capture_cap is True
+
+
 def test_exec_bounded_stdout_not_killed(be):
     """Output exceeding cap is bounded; process is NOT killed (drain & discard)."""
     be.exec_output_capture_max_chars = 200

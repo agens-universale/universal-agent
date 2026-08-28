@@ -2,7 +2,8 @@
 
 List / by-name enumeration is NOT here: tools use backend.walk / listdir /
 iter_walk (Harbor private walk channel ~50M fail-closed; local os.walk).
-Tool-exec (60k) must never dump a full tree.
+Tool-exec (60k) is for raw stdout in the model trace. Native grep / prefilter
+post-process the stream, so they capture at the walk ceiling (~50M).
 
 Correctness > speed. On any anomaly callers fall back to the Python path.
 """
@@ -15,6 +16,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from backends.protocol import WALK_OUTPUT_MAX_CHARS
 from utils.find_in_files_scan_mode import Needles
 from utils.fs_search_walk import effective_exclude_dir_names
 from utils.pattern_native_gate import NativeGrepPlan, is_safe_grep_include
@@ -27,6 +29,14 @@ _GREP_CLEAN_ENV = {
     "GREP_COLORS": "",
     "GREP_COLOR": "",
 }
+
+
+def _search_capture_max_chars(backend: Any) -> int:
+    """RAM cap for grep/prefilter stdout: walk ceiling, not tool-exec 60k."""
+    n = getattr(backend, "walk_output_max_chars", None)
+    if isinstance(n, int) and n > 0:
+        return n
+    return WALK_OUTPUT_MAX_CHARS
 
 
 @dataclass
@@ -288,7 +298,12 @@ def count_native_candidates(
     find_s = " ".join(shlex.quote(a) for a in find_argv)
     cmd = f"{find_s} | wc -l"
     try:
-        res = backend.exec(cmd, timeout=120, env=dict(_GREP_CLEAN_ENV))
+        res = backend.exec(
+            cmd,
+            timeout=120,
+            env=dict(_GREP_CLEAN_ENV),
+            capture_max_chars=_search_capture_max_chars(backend),
+        )
     except Exception:
         return None
     if res.return_code not in (0, None):
@@ -402,7 +417,12 @@ def native_prefilter_candidates(
         exclude_paths=exclude_paths,
     )
     try:
-        res = backend.exec(cmd, timeout=PREFILTER_TIMEOUT_SEC, env=dict(_PREFILTER_ENV))
+        res = backend.exec(
+            cmd,
+            timeout=PREFILTER_TIMEOUT_SEC,
+            env=dict(_PREFILTER_ENV),
+            capture_max_chars=_search_capture_max_chars(backend),
+        )
     except Exception as exc:
         log.debug("native prefilter failed: %s", exc)
         return None, "failed"
@@ -473,7 +493,12 @@ def run_native_grep(
                 grep_argv=grep_argv,
                 exclude_paths=exclude_paths,
             )
-            res = backend.exec(cmd, timeout=120, env=dict(_GREP_CLEAN_ENV))
+            res = backend.exec(
+                cmd,
+                timeout=120,
+                env=dict(_GREP_CLEAN_ENV),
+                capture_max_chars=_search_capture_max_chars(backend),
+            )
         elif is_dir_target:
             argv = build_grep_argv_flags(
                 recursive=True,
@@ -482,11 +507,21 @@ def run_native_grep(
                 include=file_pattern.strip() if file_pattern else None,
             )
             argv.extend(["--", plan.pattern, path])
-            res = backend.exec_argv(argv, timeout=120, env=dict(_GREP_CLEAN_ENV))
+            res = backend.exec_argv(
+                argv,
+                timeout=120,
+                env=dict(_GREP_CLEAN_ENV),
+                capture_max_chars=_search_capture_max_chars(backend),
+            )
         else:
             # single file
             argv = list(grep_argv) + [path]
-            res = backend.exec_argv(argv, timeout=120, env=dict(_GREP_CLEAN_ENV))
+            res = backend.exec_argv(
+                argv,
+                timeout=120,
+                env=dict(_GREP_CLEAN_ENV),
+                capture_max_chars=_search_capture_max_chars(backend),
+            )
     except Exception as exc:
         log.debug("native grep failed: %s", exc)
         return _failed("native_error")

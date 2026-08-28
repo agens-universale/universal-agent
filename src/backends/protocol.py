@@ -321,23 +321,37 @@ class FsBackend(ABC):
     @abstractmethod
     def exec(self, command: str, *, cwd: Optional[str] = None,
              timeout: Optional[int] = None,
-             env: Optional[dict] = None) -> ExecResult: ...
+             env: Optional[dict] = None,
+             capture_max_chars: Optional[int] = None) -> ExecResult: ...
 
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
                   timeout: Optional[int] = None,
-                  env: Optional[dict] = None) -> ExecResult:
+                  env: Optional[dict] = None,
+                  capture_max_chars: Optional[int] = None) -> ExecResult:
         """Run a program from an argv list, optionally feeding ``stdin``.
 
         Default builds a POSIX shell string (valid for sandbox backends whose
         exec runs through a POSIX shell). Backends whose exec shell is not
         POSIX (e.g. local Windows cmd.exe) must override with a shell-less
         implementation.
+
+        ``capture_max_chars=None`` → ``exec_output_capture_max_chars`` (tool
+        trace, ~60k). Internal post-processed calls (native grep, walk) pass
+        the walk ceiling (~50M).
         """
         command = " ".join(shlex.quote(str(a)) for a in argv)
         if stdin is not None:
             command = f"printf '%s' {shlex.quote(stdin)} | {command}"
-        return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+        if capture_max_chars is None:
+            return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+        return self.exec(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
+            capture_max_chars=capture_max_chars,
+        )
 
     @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,

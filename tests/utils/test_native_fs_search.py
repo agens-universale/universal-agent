@@ -22,12 +22,14 @@ class _Backend:
         self.commands = []
         self._res = _Res(stdout, rc)
 
-    def exec(self, cmd, timeout=None, env=None):
+    def exec(self, cmd, timeout=None, env=None, **kwargs):
         self.commands.append(cmd)
+        self.last_capture_max_chars = kwargs.get("capture_max_chars")
         return self._res
 
-    def exec_argv(self, argv, timeout=None, env=None):
+    def exec_argv(self, argv, timeout=None, env=None, **kwargs):
         self.commands.append(" ".join(argv))
+        self.last_capture_max_chars = kwargs.get("capture_max_chars")
         return self._res
 
     def join(self, base, name):
@@ -68,6 +70,15 @@ def test_grep_recipe_asks_for_file_names():
     backend = _Backend()
     _run(backend)
     assert "-H" in backend.commands[0].split()
+
+
+def test_native_grep_captures_at_walk_ceiling_not_tool_60k():
+    """Постпроцесс внутри тула: не 60k трейса, а потолок walk (~50M)."""
+    from backends.protocol import WALK_OUTPUT_MAX_CHARS
+
+    backend = _Backend(stdout="/work/a.py:1:KEY\n")
+    _run(backend)
+    assert backend.last_capture_max_chars == WALK_OUTPUT_MAX_CHARS
 
 
 def test_single_file_recipe_asks_for_file_names():
@@ -205,7 +216,7 @@ def test_timeout_is_a_named_failure_not_none():
 
 def test_exec_exception_is_a_named_failure():
     class _Boom(_Backend):
-        def exec(self, cmd, timeout=None, env=None):
+        def exec(self, cmd, timeout=None, env=None, **kwargs):
             raise RuntimeError("no shell")
 
     assert _run(_Boom()).failure == "native_error"
@@ -361,9 +372,9 @@ def test_prefilter_command_keeps_utf16_files_in_play():
 
 def test_prefilter_candidates_are_absolute_paths_under_byte_semantics():
     class _EnvBackend(_Backend):
-        def exec(self, cmd, timeout=None, env=None):
+        def exec(self, cmd, timeout=None, env=None, **kwargs):
             self.env = env
-            return super().exec(cmd, timeout, env)
+            return super().exec(cmd, timeout, env, **kwargs)
 
     backend = _EnvBackend(stdout="/work/a.py\nsub/b.py\n")
     assert _prefilter(backend) == (["/work/a.py", "/work/sub/b.py"], None)
@@ -377,7 +388,7 @@ def test_prefilter_candidates_no_match_is_an_empty_list():
 
 def test_prefilter_candidates_failure_is_named():
     class _Boom(_Backend):
-        def exec(self, cmd, timeout=None, env=None):
+        def exec(self, cmd, timeout=None, env=None, **kwargs):
             raise RuntimeError("no shell")
 
     assert _prefilter(_Boom()) == (None, "failed")

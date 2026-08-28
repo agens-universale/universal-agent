@@ -106,7 +106,7 @@ class HarborBackend(FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
-        """Internal exec. ``capture_max_chars=None`` → tool D2 cap (60k)."""
+        """Internal exec. ``capture_max_chars=None`` → tool-trace cap (~60k)."""
         # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
         if env:
             prefix = "env " + " ".join(
@@ -145,8 +145,15 @@ class HarborBackend(FsBackend):
         cwd: Optional[str] = None,
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
-        return self._exec(command, cwd=cwd, timeout=timeout, env=env)
+        return self._exec(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
+            capture_max_chars=capture_max_chars,
+        )
 
     def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
                     env: Optional[dict] = None) -> ExecResult:

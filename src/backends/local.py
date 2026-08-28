@@ -257,10 +257,16 @@ class LocalFsBackend(FsBackend):
     def join(self, base: str, name: str) -> str:
         return os.path.join(base, name)
 
+    def _exec_capture_max_chars(self, capture_max_chars: Optional[int]) -> int:
+        if capture_max_chars is None:
+            return self.exec_output_capture_max_chars
+        return capture_max_chars
+
     # --- exec ---
     def exec(self, command: str, *, cwd: Optional[str] = None,
              timeout: Optional[int] = None,
-             env: Optional[dict] = None) -> ExecResult:
+             env: Optional[dict] = None,
+             capture_max_chars: Optional[int] = None) -> ExecResult:
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
         return _run_bounded_process(
             command,
@@ -269,13 +275,14 @@ class LocalFsBackend(FsBackend):
             timeout=timeout,
             env=merged_env,
             stdin_text=None,
-            capture_max_chars=self.exec_output_capture_max_chars,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
                   timeout: Optional[int] = None,
-                  env: Optional[dict] = None) -> ExecResult:
+                  env: Optional[dict] = None,
+                  capture_max_chars: Optional[int] = None) -> ExecResult:
         # Shell-less on purpose: the base-class default builds a POSIX shell
         # string, which breaks under Windows cmd.exe (no printf, single quotes
         # not honored). An argv list + stdin goes through CreateProcess /
@@ -288,7 +295,7 @@ class LocalFsBackend(FsBackend):
             timeout=timeout,
             env=merged_env,
             stdin_text=stdin,
-            capture_max_chars=self.exec_output_capture_max_chars,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,

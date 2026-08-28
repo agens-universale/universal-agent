@@ -106,6 +106,22 @@ def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
     assert result.return_code == 0
 
 
+def test_exec_per_call_capture_max_overrides_tool_cap(loop_in_thread):
+    """Internal post-processed exec (native grep) may raise the RAM cap."""
+    env = FakeEnv()
+    huge = "X" * 1000
+
+    async def big_exec(command, **kw):
+        return FakeExecResult(stdout=huge, return_code=0)
+
+    env.exec = big_exec
+    backend = HarborBackend(env, loop_in_thread)
+    backend.exec_output_capture_max_chars = 100
+    result = backend.exec("echo huge", capture_max_chars=500)
+    assert len(result.stdout) == 500
+    assert result.stdout_hit_capture_cap is True
+
+
 def test_exec_small_output_no_cap_hit(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)

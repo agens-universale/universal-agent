@@ -18,8 +18,8 @@ class _Backend:
         self._raise = raise_exc
         self.calls = []
 
-    def exec(self, cmd, timeout=None, env=None):
-        self.calls.append({"cmd": cmd, "timeout": timeout})
+    def exec(self, cmd, timeout=None, env=None, **kwargs):
+        self.calls.append({"cmd": cmd, "timeout": timeout, **kwargs})
         if self._raise is not None:
             raise self._raise
         return self._res
@@ -67,3 +67,11 @@ def test_prefilter_budget_is_one_minute():
     _run(backend)
     assert PREFILTER_TIMEOUT_SEC == 60
     assert backend.calls[0]["timeout"] == PREFILTER_TIMEOUT_SEC
+
+
+def test_prefilter_captures_at_walk_ceiling_not_tool_60k():
+    from backends.protocol import WALK_OUTPUT_MAX_CHARS
+
+    backend = _Backend(_Res())
+    _run(backend)
+    assert backend.calls[0]["capture_max_chars"] == WALK_OUTPUT_MAX_CHARS

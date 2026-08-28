@@ -24,10 +24,10 @@ class _Backend:
     def __init__(self, stdout, *, capped):
         self._res = _Res(stdout, capped=capped)
 
-    def exec(self, cmd, timeout=None, env=None):
+    def exec(self, cmd, timeout=None, env=None, **kwargs):
         return self._res
 
-    def exec_argv(self, argv, timeout=None, env=None):
+    def exec_argv(self, argv, timeout=None, env=None, **kwargs):
         return self._res
 
     def join(self, base, name):
