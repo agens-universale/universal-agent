@@ -323,6 +323,31 @@ def test_capture_cap_below_limit_is_reported_as_output_capped(tmp_path, monkeypa
     assert "fallback_reason" not in data
 
 
+def test_capture_cap_with_native_failure_does_not_fall_to_python(tmp_path, monkeypatch):
+    """Непарсабельный хвост при cap: grep-путь, не download каждого файла."""
+    import utils.native_fs_search as native_fs_search
+    from utils.native_fs_search import NativeGrepResult
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        native_fs_search,
+        "run_native_grep",
+        lambda *a, **k: NativeGrepResult(
+            matches=[], truncated=True, hit_capture_cap=True, failure="native_error"
+        ),
+    )
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", limit=50)
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 0
+    assert data["stop_reason"] == "output_capped"
+    assert data["scan_complete"] is False
+    assert "fallback_reason" not in data
+
+
 # --- call-time exclude_dirs stay on the native path ----------------------------
 
 def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):

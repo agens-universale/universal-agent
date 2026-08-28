@@ -106,12 +106,17 @@ def parse_grep_match_lines(
     join: Callable[[str, str], str],
     isabs: Callable[[str], bool],
     report_path: Callable[[str], str],
+    allow_truncated_tail: bool = False,
 ) -> Optional[List[Dict[str, Any]]]:
     """Parse ``PATH:LINENO:TEXT``. Unparseable → None (fallback).
 
     ``isabs`` comes from the backend: grep prints paths in the BACKEND's syntax,
     and a host answer mis-classifies them — CPython 3.13 stopped calling ``/x``
     absolute on Windows, so the root was joined a second time.
+
+    ``allow_truncated_tail``: a capture cap may cut the last line inside the
+    ``file:line:`` prefix so it is not a match line. Keep the prefix, drop the
+    tail; do not fail the whole buffer (that used to force a Python download).
     """
     matches: List[Dict[str, Any]] = []
     for raw in (stdout or "").splitlines():
@@ -121,6 +126,8 @@ def parse_grep_match_lines(
             return None
         m = _GREP_LINE_RE.match(raw)
         if not m:
+            if allow_truncated_tail:
+                break
             return None
         path = m.group("path")
         if ":" in path:
@@ -557,11 +564,13 @@ def run_native_grep(
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
 
     lines = stdout.splitlines()
-    # The transport ceiling can cut the stream mid-line. The torn tail still
-    # names a real file and line (a minified bundle may have only that one), so
-    # it is kept and flagged below rather than dropped; if the cut fell inside
-    # the file:line prefix, parsing fails and the caller falls back to Python.
-    torn_tail = hit_cap and bool(lines) and not stdout.endswith("\n")
+    # The transport ceiling can cut the stream mid-line. If the torn tail still
+    # names a real file and line (a minified bundle may have only that one), it
+    # is kept and flagged below. If the cut fell inside the file:line prefix,
+    # drop that tail and keep the prefix — do not fail the whole buffer.
+    nonempty = [ln for ln in lines if ln]
+    last_is_match = bool(nonempty) and _GREP_LINE_RE.match(nonempty[-1]) is not None
+    torn_tail = hit_cap and last_is_match and not stdout.endswith("\n")
     truncated = False
     if allow_path is None and max_matches is not None:
         need = max_matches + 1
@@ -581,6 +590,7 @@ def run_native_grep(
         join=backend.join,
         isabs=backend.isabs,
         report_path=report_path,
+        allow_truncated_tail=hit_cap,
     )
     if parsed is None:
         return _failed("native_error", hit_cap=hit_cap)

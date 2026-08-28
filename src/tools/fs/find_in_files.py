@@ -1345,7 +1345,7 @@ class FindInFiles(AbstractSimpleTool):
             allow_path=_hit_allowed,
             exclude_paths=accepted_excludes,
         )
-        if result.failure:
+        if result.failure and not result.hit_capture_cap:
             return None, result.failure
 
         # Same ranking as the Python path, then the limit: grep's disk order
