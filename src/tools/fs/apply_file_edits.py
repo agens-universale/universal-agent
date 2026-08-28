@@ -1,7 +1,7 @@
 import difflib
 import functools
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from security.path_policy import enforce_write_guard
 from utils.file_text import (
@@ -12,8 +12,12 @@ from utils.file_text import (
     try_encode_text_bytes,
 )
 from utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
-from constants.tool_names import FS_WRITE_FILE_NAME
-from tools.fs.edit_line_endings import resolve_edit_line_endings
+from tools.fs.edit_line_endings import (
+    collect_literal_matches,
+    line_ending_change_refused_error,
+    line_ending_change_refused_message,
+    resolve_edit_line_endings,
+)
 from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
@@ -110,9 +114,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             "or use occurrence/first/last/all and expected_matches.\n"
             "Short search like 'i += 1' may match unseen duplicates in file parts not in current read page;\n"
             "prefer broader unique fragments and guard with expected_matches=1 when appropriate.\n"
-            "Line endings: write search/replace with \\n; CRLF files are matched and written in their own style\n"
-            "automatically (edit_results[i].line_endings_normalized=true when a conversion happened).\n"
-            f"This tool never changes a file's line-ending style; to convert a file use {FS_WRITE_FILE_NAME} with newline=lf|crlf.\n"
+            "Write search/replace with \\n; the file's CRLF/LF style is kept.\n"
             "If any edit fails validation or matching, no file changes are written.\n"
             "edits_would_apply/total_would_replace count in-memory simulation;\n"
             "edits_applied/total_replaced are non-zero only when applied=true.\n"
@@ -186,44 +188,24 @@ class ApplyFileEdits(AbstractSimpleTool):
             return diff_text, False
         return diff_text[:max_chars], True
 
-    @staticmethod
-    def _collect_matches(
-        content: str,
-        search: str,
-    ) -> list[Tuple[int, int, int]]:
-        """Collect all matches of search in content. Returns list of (char_index, start_line, end_line)."""
-        entries: list[Tuple[int, int, int]] = []
-        pos = 0
-        while True:
-            idx = content.find(search, pos)
-            if idx == -1:
-                break
-            fragment = content[idx:idx + len(search)]
-            s_line = content.count("\n", 0, idx) + 1
-            e_line = s_line + fragment.count("\n")
-            entries.append((idx, s_line, e_line))
-            pos = idx + len(search)
-        return entries
-
     def _apply_one_edit(
         self,
         *,
         content: str,
         edit: Dict[str, Any],
-    ) -> tuple[bool, str, Dict[str, Any], Dict[str, Any] | None]:
+    ) -> tuple[bool, str, Dict[str, Any], Dict[str, Any] | None, bool]:
         resolved = resolve_edit_line_endings(content, edit["search"], edit["replace"])
         search = resolved.search
         replace = resolved.replace
-        normalized = resolved.normalized
         occurrence = edit.get("occurrence")
         if occurrence is None:
             occurrence = "first"
         expected_matches = edit.get("expected_matches")
-        matches = self._collect_matches(content, search)
+        matches = collect_literal_matches(content, search, resolved.first_index)
         match_count = len(matches)
         if match_count == 0:
             suggestions, _suggestions_total = build_edit_miss_suggestions(
-                search=search,
+                search=edit["search"],
                 content=content,
             )
             return False, content, {
@@ -233,8 +215,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                 "line_numbers": [],
                 "match_ranges": [],
                 "suggestions": suggestions,
-                "line_endings_normalized": normalized,
-            }, {"type": "not_found"}
+            }, {"type": "not_found"}, False
 
         if expected_matches is not None and match_count != expected_matches:
             ranges = [{"start_line": m[1], "end_line": m[2]} for m in matches]
@@ -244,8 +225,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                 "match_count": match_count,
                 "line_numbers": sorted({m[1] for m in matches}),
                 "match_ranges": ranges,
-                "line_endings_normalized": normalized,
-            }, {"type": "match_count_mismatch"}
+            }, {"type": "match_count_mismatch"}, False
 
         if occurrence == "all":
             selected = matches
@@ -262,8 +242,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                     "match_count": match_count,
                     "line_numbers": [],
                     "match_ranges": [],
-                    "line_endings_normalized": normalized,
-                }, {"type": "occurrence_out_of_range"}
+                }, {"type": "occurrence_out_of_range"}, False
             selected = [matches[i]]
         else:
             return False, content, {
@@ -272,8 +251,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                 "match_count": 0,
                 "line_numbers": [],
                 "match_ranges": [],
-                "line_endings_normalized": normalized,
-            }, {"type": "invalid_argument", "field": "occurrence"}
+            }, {"type": "invalid_argument", "field": "occurrence"}, False
 
         parts: list[str] = []
         prev_end = 0
@@ -290,9 +268,8 @@ class ApplyFileEdits(AbstractSimpleTool):
             "match_count": match_count,
             "line_numbers": sorted({m[1] for m in selected}),
             "match_ranges": ranges,
-            "line_endings_normalized": normalized,
         }
-        return True, new_content, meta, None
+        return True, new_content, meta, None, resolved.eol_adapted
 
     @enforce_write_guard(path_arg="path", operation="write")
     def __call__(
@@ -377,6 +354,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         edit_results: list[Dict[str, Any]] = []
         edits_would_apply = 0
         total_would_replace = 0
+        any_eol_adapted = False
         for i, edit in enumerate(edits):
             if not isinstance(edit, dict):
                 return _result(ok=False, applied=False, edits_would_apply=edits_would_apply, total_would_replace=total_would_replace, edits_applied=0, total_replaced=0, edit_results=edit_results, failed_edit_index=i, message=f"Edit #{i} must be an object.", error={"type": "invalid_argument", "field": "edits"})
@@ -387,9 +365,12 @@ class ApplyFileEdits(AbstractSimpleTool):
             if not isinstance(edit["replace"], str):
                 return _result(ok=False, applied=False, edits_would_apply=edits_would_apply, total_would_replace=total_would_replace, edits_applied=0, total_replaced=0, edit_results=edit_results, failed_edit_index=i, message=f"Edit #{i} has invalid 'replace'.", error={"type": "invalid_argument", "field": "replace"})
 
-            ok_edit, next_content, meta, err = self._apply_one_edit(content=current, edit=edit)
+            ok_edit, next_content, meta, err, eol_adapted = self._apply_one_edit(
+                content=current, edit=edit
+            )
             meta["index"] = i
             edit_results.append(meta)
+            any_eol_adapted = any_eol_adapted or eol_adapted
             if not ok_edit:
                 message = f"Edit #{i} failed. No changes applied."
                 if err and err.get("type") == "not_found":
@@ -450,26 +431,29 @@ class ApplyFileEdits(AbstractSimpleTool):
             )
 
         if current == original:
-            noop_message = "No change needed after batch."
-            folded = any(r.get("line_endings_normalized") for r in edit_results)
-            if folded:
-                # A deliberate line-ending change was folded back into the file's
-                # style: the request was not carried out — say so and point to the
-                # tool that owns the file's line-ending style.
-                noop_message += (
-                    " The replacement differs from the matched text only by line endings, "
-                    "which this tool keeps as in the file. To change the file's line-ending "
-                    f"style, rewrite it with {FS_WRITE_FILE_NAME} (newline=lf|crlf) or a shell command."
+            if any_eol_adapted:
+                return _result(
+                    ok=False,
+                    applied=False,
+                    edits_would_apply=edits_would_apply,
+                    total_would_replace=total_would_replace,
+                    edits_applied=0,
+                    total_replaced=0,
+                    edit_results=edit_results,
+                    message=line_ending_change_refused_message(),
+                    diff=diff_text,
+                    diff_truncated=diff_truncated,
+                    error=line_ending_change_refused_error(),
                 )
             return _result(
-                ok=not folded,
+                ok=True,
                 applied=False,
                 edits_would_apply=edits_would_apply,
                 total_would_replace=total_would_replace,
                 edits_applied=0,
                 total_replaced=0,
                 edit_results=edit_results,
-                message=noop_message,
+                message="No change needed after batch.",
                 diff=diff_text,
                 diff_truncated=diff_truncated,
                 error=None,
