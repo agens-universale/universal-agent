@@ -679,8 +679,9 @@ class FindInFiles(AbstractSimpleTool):
     def _output_capped_guidance() -> str:
         return (
             "grep output hit the sandbox transport ceiling before the match limit: "
-            "the matches above are a prefix, not the full set. Raising limit cannot "
-            "help — narrow pattern, path or file_pattern instead."
+            "the matches above are a prefix, not the full set, and a match flagged "
+            "line_content_truncated was cut mid-line. Raising limit cannot help — "
+            "narrow pattern, path or file_pattern instead."
         )
 
     @staticmethod

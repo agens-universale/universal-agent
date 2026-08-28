@@ -1,4 +1,9 @@
-"""Потолок захвата stdout режет вывод grep посреди строки — обрезанное совпадение не отдаём."""
+"""Потолок захвата stdout режет вывод grep посреди строки.
+
+Оборванный хвост всё равно называет настоящие файл и номер строки (у
+минифицированного бандла это может быть единственное совпадение), поэтому он
+остаётся в ответе с пометкой line_content_truncated, а не выбрасывается.
+"""
 
 from utils.native_fs_search import run_native_grep
 from utils.pattern_native_gate import NativeGrepPlan
@@ -46,20 +51,24 @@ def _run(stdout, *, capped):
     )
 
 
-def test_capped_output_drops_the_cut_last_line():
+def test_capped_output_keeps_the_cut_last_line_but_flags_it():
     res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = ", capped=True)
-    assert [(m["line"], m["line_content"]) for m in res.matches] == [(1, "KEY = 1")]
+    assert [(m["line"], m["line_content"]) for m in res.matches] == [(1, "KEY = 1"), (2, "KEY = ")]
+    assert "line_content_truncated" not in res.matches[0]
+    assert res.matches[1]["line_content_truncated"] is True
     assert res.truncated is True
     assert res.hit_capture_cap is True
 
 
-def test_capped_output_ending_on_a_newline_keeps_every_line():
+def test_capped_output_ending_on_a_newline_flags_nothing():
     res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = 2\n", capped=True)
     assert [m["line"] for m in res.matches] == [1, 2]
+    assert all("line_content_truncated" not in m for m in res.matches)
     assert res.truncated is True
 
 
 def test_uncapped_output_without_trailing_newline_is_complete():
     res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = 2", capped=False)
     assert [m["line"] for m in res.matches] == [1, 2]
+    assert all("line_content_truncated" not in m for m in res.matches)
     assert res.truncated is False

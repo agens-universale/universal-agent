@@ -522,10 +522,11 @@ def run_native_grep(
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
 
     lines = stdout.splitlines()
-    if hit_cap and lines and not stdout.endswith("\n"):
-        # The transport ceiling cut the stream mid-line: that last match is
-        # incomplete (or unparsable) — drop it rather than show a torn line.
-        lines = lines[:-1]
+    # The transport ceiling can cut the stream mid-line. The torn tail still
+    # names a real file and line (a minified bundle may have only that one), so
+    # it is kept and flagged below rather than dropped; if the cut fell inside
+    # the file:line prefix, parsing fails and the caller falls back to Python.
+    torn_tail = hit_cap and bool(lines) and not stdout.endswith("\n")
     truncated = False
     if allow_path is None:
         need = max_matches + 1
@@ -547,6 +548,8 @@ def run_native_grep(
     )
     if parsed is None:
         return _failed("native_error", hit_cap=hit_cap)
+    if torn_tail and parsed:
+        parsed[-1]["line_content_truncated"] = True
 
     if allow_path is not None:
         parsed = [m for m in parsed if allow_path(m["file"])]
