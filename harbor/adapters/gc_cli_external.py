@@ -379,6 +379,34 @@ class GcCliExternal(BaseAgent):
             "`skills_load` to load the relevant one before solving."
         )
 
+    def _populate_usage(self, context: Any, state: Any) -> dict[str, Any] | None:
+        """Hand `state.usage` totals to Harbor, which otherwise writes nulls.
+
+        Totals cover every LLM call — main loop, summariser, finish gate, subagents.
+        `n_input_tokens` includes cache on both sides. `cost_usd` is left unset: vllm
+        returns no price, so cost is computed downstream from tokens and the tariff.
+        Best-effort like `_write_trajectory` — runs in a `finally` that may be
+        unwinding a timeout. Returns the totals for the caller's metadata.
+        """
+        try:
+            usage = getattr(state, "usage", None) if state is not None else None
+            totals = usage.totals() if usage is not None else None
+            if not totals or not totals["calls"]:
+                return totals
+            context.n_input_tokens = totals["input"]
+            context.n_output_tokens = totals["output"]
+            context.n_cache_tokens = totals["cached"]
+            if totals["missing_usage_calls"]:
+                self.logger.warning(
+                    "%d of %d LLM calls returned no usage; token totals are short by those",
+                    totals["missing_usage_calls"],
+                    totals["calls"],
+                )
+            return totals
+        except Exception:
+            self.logger.exception("could not report token usage to Harbor")
+            return None
+
     def _write_trajectory(self, state: Any) -> int:
         """Dump the gc-cli run as ATIF `trajectory.json`, mirroring Terminus2.
 
@@ -500,13 +528,20 @@ class GcCliExternal(BaseAgent):
             timings.close()
             self.logger.info("timings: %s", timing_summary)
 
-            # Populate AgentContext so the run isn't a black box. gc-cli does not track
-            # token usage in `state`, so token/cost counters stay None (would need core
-            # accounting); metadata at least records the run shape for log triage.
-            if context is not None and context.metadata is None:
-                context.metadata = {
-                    "agent": self.name(),
-                    "session_id": self._session_id,
-                    "total_steps": n_steps,
-                    "timings": timing_summary,
-                }
+            # Populate AgentContext so the run isn't a black box: token counters the
+            # same way every other Harbor agent reports them, plus metadata for triage.
+            if context is not None:
+                totals = self._populate_usage(context, state)
+                if context.metadata is None:
+                    context.metadata = {
+                        "agent": self.name(),
+                        "session_id": self._session_id,
+                        "total_steps": n_steps,
+                        "timings": timing_summary,
+                        # A zero token count means "no calls"; a missing one means "not
+                        # counted". Record both so the difference stays visible.
+                        "llm_calls": totals["calls"] if totals else None,
+                        "llm_calls_without_usage": (
+                            totals["missing_usage_calls"] if totals else None
+                        ),
+                    }
