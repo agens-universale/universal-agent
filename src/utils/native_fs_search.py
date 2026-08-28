@@ -430,7 +430,7 @@ def run_native_grep(
     exclude_dir_names: Sequence[str],
     exclude_nested_dot_dirs: bool,
     file_pattern: Optional[str],
-    max_matches: int,
+    max_matches: Optional[int],  # None: no count cut — the caller ranks, then limits
     report_path: Callable[[str], str],
     is_dir_target: bool,
     allow_path: Optional[Callable[[str], bool]] = None,
@@ -528,7 +528,7 @@ def run_native_grep(
     # the file:line prefix, parsing fails and the caller falls back to Python.
     torn_tail = hit_cap and bool(lines) and not stdout.endswith("\n")
     truncated = False
-    if allow_path is None:
+    if allow_path is None and max_matches is not None:
         need = max_matches + 1
         if len(lines) > need:
             lines = lines[:need]
@@ -536,7 +536,8 @@ def run_native_grep(
         elif hit_cap:
             truncated = True
     elif hit_cap:
-        # With a filter the pre-parse cut is unsafe: allowed hits may sit past it.
+        # With a filter (or no count cut) the pre-parse cut is unsafe: allowed
+        # or better-ranked hits may sit past it.
         truncated = True
 
     parsed = parse_grep_match_lines(
@@ -554,7 +555,7 @@ def run_native_grep(
     if allow_path is not None:
         parsed = [m for m in parsed if allow_path(m["file"])]
 
-    if len(parsed) > max_matches:
+    if max_matches is not None and len(parsed) > max_matches:
         parsed = parsed[:max_matches]
         truncated = True
 

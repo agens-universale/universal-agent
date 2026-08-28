@@ -533,3 +533,62 @@ def test_prefilter_timeout_is_reported_and_the_walk_answers(tmp_path, monkeypatc
 
     assert data["count"] == 1
     assert data["prefilter"] == "timeout"
+
+
+# --- порядок совпадений при limit одинаков для обоих движков ------------------
+
+def _native_disk_order(tmp_path, monkeypatch):
+    """grep отдаёт совпадения в порядке find (диск), не по релевантности."""
+    import utils.native_fs_search as native_fs_search
+    from utils.native_fs_search import NativeGrepResult
+
+    def _m(name, line):
+        return {"file": str(tmp_path / name), "line": line, "end_line": line,
+                "line_content": "needle", "context": "needle"}
+
+    seen = {}
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return NativeGrepResult(
+            matches=[_m("zzz.py", 1), _m("needle.py", 1), _m("needle.py", 2), _m("sub/a.py", 1)],
+            truncated=False,
+            hit_capture_cap=False,
+        )
+
+    monkeypatch.setattr(native_fs_search, "run_native_grep", spy)
+    return seen
+
+
+def test_native_matches_are_ranked_like_the_python_path_before_the_limit(tmp_path, monkeypatch):
+    for name in ("zzz.py", "needle.py"):
+        (tmp_path / name).write_text("needle", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "a.py").write_text("needle", encoding="utf-8")
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+    seen = _native_disk_order(tmp_path, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="needle", query_mode="text", limit=1)
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 1
+    assert data["matches"][0]["file"].endswith("needle.py")
+    assert data["stop_reason"] == "match_limit"
+    assert seen.get("max_matches") is None  # транспорт не режет до сортировки
+
+
+def test_native_ranking_keeps_line_order_inside_a_file(tmp_path, monkeypatch):
+    for name in ("zzz.py", "needle.py"):
+        (tmp_path / name).write_text("needle", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "a.py").write_text("needle", encoding="utf-8")
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+    _native_disk_order(tmp_path, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="needle", query_mode="text", limit=3)
+
+    files = [(m["file"].rsplit("/", 1)[-1].rsplit(chr(92), 1)[-1], m["line"]) for m in data["matches"]]
+    assert files == [("needle.py", 1), ("needle.py", 2), ("zzz.py", 1)]  # имя, затем глубина
+    assert data["stop_reason"] == "match_limit"

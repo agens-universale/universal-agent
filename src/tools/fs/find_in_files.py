@@ -676,6 +676,39 @@ class FindInFiles(AbstractSimpleTool):
         )
 
     @staticmethod
+    def _needle_strings(needles: Needles) -> List[str]:
+        out: List[str] = []
+        if needles.required_literal is not None:
+            out.append(needles.required_literal)
+        if needles.or_group:
+            out.extend(needles.or_group)
+        return out
+
+    @staticmethod
+    def _relevance_key(
+        abs_path: str, depth: int, needle_strings: List[str], effective_ci: bool
+    ) -> Tuple[int, int, str]:
+        """Which matches survive ``limit`` — the one ranking for both engines:
+        files whose name carries the needle first, then shallower, then by path."""
+        basename = os.path.basename(abs_path)
+        if effective_ci:
+            bn = basename.casefold()
+            ns = [s.casefold() for s in needle_strings]
+        else:
+            bn = basename
+            ns = needle_strings
+        basename_hit = 0 if (ns and any(s in bn for s in ns)) else 1
+        return (basename_hit, depth, abs_path)
+
+    def _depth_under(self, root: str, abs_path: str) -> int:
+        root_n = self._backend.normpath(root).rstrip("/\\")
+        abs_n = self._backend.normpath(abs_path)
+        if abs_n.startswith(root_n) and len(abs_n) > len(root_n) and abs_n[len(root_n)] in "/\\":
+            rel = abs_n[len(root_n) + 1:]
+            return rel.count("/") + rel.count("\\")
+        return 0
+
+    @staticmethod
     def _output_capped_guidance() -> str:
         return (
             "grep output hit the sandbox transport ceiling before the match limit: "
@@ -1224,6 +1257,7 @@ class FindInFiles(AbstractSimpleTool):
         pattern: str,
         query_mode: str,
         pattern_mode: PatternMode,
+        needles: Needles,
         effective_ci: bool,
         file_pattern: Optional[str],
         accepted_excludes: List[str],
@@ -1318,7 +1352,7 @@ class FindInFiles(AbstractSimpleTool):
             exclude_dir_names=exclude_names,
             exclude_nested_dot_dirs=exclude_dot,
             file_pattern=file_pattern,
-            max_matches=limit_eff,
+            max_matches=None,
             report_path=lambda p: p,
             is_dir_target=True,
             allow_path=_hit_allowed,
@@ -1327,7 +1361,17 @@ class FindInFiles(AbstractSimpleTool):
         if result.failure:
             return None, result.failure
 
-        shown = result.matches
+        # Same ranking as the Python path, then the limit: grep's disk order
+        # must not decide which matches survive `limit`. Sort is stable, so
+        # lines inside one file keep grep's ascending order.
+        needle_strings = self._needle_strings(needles)
+        ranked = sorted(
+            result.matches,
+            key=lambda m: self._relevance_key(
+                m["file"], self._depth_under(path, m["file"]), needle_strings, effective_ci
+            ),
+        )
+        shown = ranked[:limit_eff]
         for m in shown:
             m["file"] = tool_report_abspath(m["file"], workspace=self._workspace)
             clipped = self._clip_line_content(m["line_content"])
@@ -1360,7 +1404,7 @@ class FindInFiles(AbstractSimpleTool):
                 search_backend="grep",
             ), None
         # Parity with Python path: count >= limit_eff → match_limit (A boundary).
-        hit_limit = bool(result.truncated) or count >= limit_eff
+        hit_limit = bool(result.truncated) or len(ranked) > limit_eff or count >= limit_eff
         scan_complete = not hit_limit
         more = hit_limit
 
@@ -1464,6 +1508,7 @@ class FindInFiles(AbstractSimpleTool):
             pattern=pattern,
             query_mode=query_mode,
             pattern_mode=pattern_mode,
+            needles=needles,
             effective_ci=effective_ci,
             file_pattern=file_pattern,
             accepted_excludes=accepted_excludes,
@@ -1645,25 +1690,10 @@ class FindInFiles(AbstractSimpleTool):
             )
 
         # --- sort (§6.1) ---
-        needle_strings: List[str] = []
-        if needles.required_literal is not None:
-            needle_strings.append(needles.required_literal)
-        if needles.or_group:
-            needle_strings.extend(needles.or_group)
-
-        def _basename_key(item: Tuple[str, int, str, int]) -> Tuple[int, int, str]:
-            abs_path, depth, _rel, _size = item
-            basename = os.path.basename(abs_path)
-            if effective_ci:
-                bn = basename.casefold()
-                ns = [s.casefold() for s in needle_strings]
-            else:
-                bn = basename
-                ns = needle_strings
-            basename_hit = 0 if (ns and any(s in bn for s in ns)) else 1
-            return (basename_hit, depth, abs_path)
-
-        candidates.sort(key=_basename_key)
+        needle_strings = self._needle_strings(needles)
+        candidates.sort(
+            key=lambda item: self._relevance_key(item[0], item[1], needle_strings, effective_ci)
+        )
 
         # --- content workers (§6.4) ---
         workers = 2 if n >= config.content_workers_threshold else 1
