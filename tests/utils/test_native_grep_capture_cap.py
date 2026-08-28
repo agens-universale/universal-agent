@@ -88,3 +88,10 @@ def test_uncapped_unparseable_line_is_still_a_failure():
     res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2", capped=False)
     assert res.failure == "native_error"
     assert res.matches == []
+
+
+def test_capped_output_with_a_foreign_line_in_the_middle_is_still_a_failure():
+    """Оборванный хвост — только последняя строка; чужая строка посреди потока — сбой и откат."""
+    res = _run("/work/a.py:1:KEY = 1\nsome foreign line\n/work/b.py:2:KEY = 2\n", capped=True)
+    assert res.failure == "native_error"
+    assert res.matches == []

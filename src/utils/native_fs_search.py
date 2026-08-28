@@ -119,14 +119,18 @@ def parse_grep_match_lines(
     tail; do not fail the whole buffer (that used to force a Python download).
     """
     matches: List[Dict[str, Any]] = []
-    for raw in (stdout or "").splitlines():
+    lines = (stdout or "").splitlines()
+    last = max((i for i, ln in enumerate(lines) if ln), default=-1)
+    for i, raw in enumerate(lines):
         if not raw:
             continue
         if "Binary file" in raw or "\x1b[" in raw:
             return None
         m = _GREP_LINE_RE.match(raw)
         if not m:
-            if allow_truncated_tail:
+            # Only the LAST line can be a torn tail; anything else
+            # unparseable is a real anomaly → fail → Python path.
+            if allow_truncated_tail and i == last:
                 break
             return None
         path = m.group("path")
@@ -281,44 +285,6 @@ def build_find_xargs_grep_command(
     find_s = " ".join(shlex.quote(a) for a in find_argv)
     grep_s = " ".join(shlex.quote(a) for a in grep_argv)
     return f"{find_s} | xargs -0 -r {grep_s}"
-
-
-def count_native_candidates(
-    backend: Any,
-    path: str,
-    *,
-    exclude_dir_names: Sequence[str],
-    exclude_nested_dot_dirs: bool,
-    file_pattern: Optional[str],
-    exclude_paths: Sequence[str] = (),
-) -> Optional[int]:
-    """Count files find would search. None on failure."""
-    find_argv = _build_find_prune_argv(
-        path,
-        exclude_dir_names=exclude_dir_names,
-        exclude_nested_dot_dirs=exclude_nested_dot_dirs,
-        file_pattern=file_pattern,
-        print0=False,
-        exclude_paths=exclude_paths,
-    )
-    # Count newlines in -print output (paths should not contain newlines).
-    find_s = " ".join(shlex.quote(a) for a in find_argv)
-    cmd = f"{find_s} | wc -l"
-    try:
-        res = backend.exec(
-            cmd,
-            timeout=120,
-            env=dict(_GREP_CLEAN_ENV),
-            capture_max_chars=_search_capture_max_chars(backend),
-        )
-    except Exception:
-        return None
-    if res.return_code not in (0, None):
-        return None
-    try:
-        return int((res.stdout or "0").strip().split()[0])
-    except (ValueError, IndexError):
-        return None
 
 
 # Byte semantics for the prefilter: with LC_ALL=C ``grep -i`` folds ASCII only

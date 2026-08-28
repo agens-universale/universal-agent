@@ -12,7 +12,7 @@ from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputR
 # Preview-only: transport capture cap drained the rest; total N is unknown.
 # Must not be written into the store — the stored body is the captured prefix.
 CAPTURE_CAP_MARKER = (
-    "\n... [CUTTED — capture cap, rest discarded, total unknown]"
+    "\n... [CUT — capture cap, rest discarded, total unknown]"
 )
 
 

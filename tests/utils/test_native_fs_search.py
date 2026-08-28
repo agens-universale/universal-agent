@@ -274,29 +274,7 @@ def test_run_native_grep_prunes_call_time_paths():
     assert "-path /work/vendor" in backend.commands[0]
 
 
-def test_count_native_candidates_prunes_call_time_paths():
-    from utils.native_fs_search import count_native_candidates
 
-    backend = _Backend(stdout="3\n")
-    assert count_native_candidates(
-        backend,
-        "/work",
-        exclude_dir_names=[".git"],
-        exclude_nested_dot_dirs=True,
-        file_pattern=None,
-        exclude_paths=["/work/vendor"],
-    ) == 3
-    assert "-path /work/vendor" in backend.commands[0]
-
-
-# --- needle prefilter in the sandbox: grep -l -F before any download ------------
-
-from utils.find_in_files_scan_mode import Needles
-from utils.native_fs_search import (
-    build_prefilter_command,
-    native_prefilter_candidates,
-    prefilter_terms,
-)
 
 
 def _needles(required=None, or_group=None):
@@ -314,6 +292,16 @@ def _prefilter(backend, **overrides):
     )
     kwargs.update(overrides)
     return native_prefilter_candidates(backend, "/work", **kwargs)
+
+
+# --- needle prefilter in the sandbox: grep -l -F before any download ------------
+
+from utils.find_in_files_scan_mode import Needles
+from utils.native_fs_search import (
+    build_prefilter_command,
+    native_prefilter_candidates,
+    prefilter_terms,
+)
 
 
 def test_prefilter_terms_prefer_the_required_literal():

@@ -22,6 +22,7 @@ def test_capture_cap_appends_cutted_to_preview_not_store():
     assert meta["text"] == "short" + CAPTURE_CAP_MARKER
     assert "total unknown" in CAPTURE_CAP_MARKER
     assert "OF " not in CAPTURE_CAP_MARKER
+    assert "[CUT " in CAPTURE_CAP_MARKER and "CUTTED" not in CAPTURE_CAP_MARKER
     assert meta["truncated"] is False
     record = state.tool_call_outputs_store.get(meta["output_ref"])
     assert record is not None
