@@ -128,10 +128,8 @@ class FindInFiles(AbstractSimpleTool):
             },
             "limit": {
                 "type": "integer",
-                "description": (
-                    "Maximum matches to return. Omit to use the configured "
-                    "default (100 unless the deployment changed it); maximum 300."
-                ),
+                "description": "Maximum matches to return. Default 100, maximum 300.",
+                "default": 100,
             },
             "case_insensitive": {
                 "type": "boolean",
