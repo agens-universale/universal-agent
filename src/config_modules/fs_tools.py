@@ -35,6 +35,14 @@ class FsFindInFilesConfig(BaseModel):
         default=50_000,
         description="Max walk candidates for complex (directory).",
     )
+    max_unfiltered_host_reads: int = Field(
+        default=1000,
+        description=(
+            "Sandbox backends only: max candidate files read from the host without a "
+            "successful in-sandbox prefilter (it failed, or the pattern has no fixed "
+            "substring). Above it the search refuses with guidance to narrow."
+        ),
+    )
     max_open_files_affix_or: int = Field(
         default=50_000,
         description="Max full-re opens for affix_or (directory content loop).",

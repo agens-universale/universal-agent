@@ -416,6 +416,7 @@ fs_tools:
     max_candidates_or_simple: 200000  # pure a|b|…
     max_candidates_affix_or: 300000   # one (group) + pure prefix/suffix
     max_candidates_complex: 50000     # no cheap prefilter
+    max_unfiltered_host_reads: 1000   # sandbox only: host reads without in-sandbox prefilter
     max_open_files_affix_or: 50000    # full-re opens budget (affix_or only)
     content_workers_threshold: 20000  # N >= → 2 workers; else 1
     max_exclude_dirs: 32

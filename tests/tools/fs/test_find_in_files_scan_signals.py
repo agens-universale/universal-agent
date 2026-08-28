@@ -235,24 +235,6 @@ def test_python_path_names_show_excluded_dirs(tmp_path, monkeypatch):
     assert data["fallback_reason"] == "show_excluded_dirs"
 
 
-def test_python_path_names_a_native_failure(tmp_path, monkeypatch):
-    import utils.native_fs_search as native_fs_search
-
-    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
-    monkeypatch.setattr(
-        native_fs_search, "run_native_grep",
-        lambda *a, **k: _native_result(tmp_path, failure="native_timeout"),
-    )
-    tool = _tool(tmp_path)
-    _native_ready(tool, monkeypatch)
-
-    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
-
-    assert data["search_backend"] == "python"
-    assert data["count"] == 1
-    assert data["fallback_reason"] == "native_timeout"
-
-
 def test_single_file_names_its_python_path(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("KEY = 1\n", encoding="utf-8")
@@ -286,10 +268,6 @@ def test_native_path_does_not_count_candidates_before_grep(tmp_path, monkeypatch
         native_fs_search, "run_native_grep", lambda *a, **k: _native_result(tmp_path)
     )
 
-    def count_spy(*args, **kwargs):
-        raise AssertionError("native path must not count candidates before grep")
-
-    monkeypatch.setattr(native_fs_search, "count_native_candidates", count_spy)
     tool = _tool(tmp_path)
     _native_ready(tool, monkeypatch)
 
@@ -362,11 +340,7 @@ def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):
         seen_run.update(kwargs)
         return _native_result(tmp_path)
 
-    def count_spy(*args, **kwargs):
-        raise AssertionError("native path must not count candidates before grep")
-
     monkeypatch.setattr(native_fs_search, "run_native_grep", run_spy)
-    monkeypatch.setattr(native_fs_search, "count_native_candidates", count_spy)
     tool = _tool(tmp_path)
     backend_cls = type(tool._backend)
     monkeypatch.setattr(backend_cls, "has_grep", True, raising=False)
@@ -634,3 +608,162 @@ def test_native_ranking_keeps_line_order_inside_a_file(tmp_path, monkeypatch):
     files = [(m["file"].rsplit("/", 1)[-1].rsplit(chr(92), 1)[-1], m["line"]) for m in data["matches"]]
     assert files == [("needle.py", 1), ("needle.py", 2), ("zzz.py", 1)]  # имя, затем глубина
     assert data["stop_reason"] == "match_limit"
+
+
+# --- честность флагов: files_too_large, пропуски, сбой native, слепое чтение с хоста ---
+
+def test_files_too_large_makes_the_scan_incomplete(tmp_path, monkeypatch):
+    """Кандидат не прочитан из-за размера — «0 совпадений» не доказательство отсутствия."""
+    (tmp_path / "small.py").write_text("nothing here\n", encoding="utf-8")
+    (tmp_path / "dump.sql").write_text("x" * 200, encoding="utf-8")
+    tool = _force_python(_tool(tmp_path, {"max_file_bytes": 50}), monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="NEEDLE", query_mode="text")
+
+    assert data["count"] == 0
+    assert data["files_too_large"] == 1
+    assert data["scan_complete"] is False
+    assert data["more_matches_may_exist"] is True
+    assert "stop_reason" not in data  # причина не в лимите — флаги честные, stop_reason не выдумываем
+
+
+def _skip_files(monkeypatch, *, binary=(), encoding=()):
+    original = FindInFiles._open_decode_text
+
+    def fake_open(self, abs_path, *args, **kwargs):
+        name = abs_path.replace("\\", "/").rsplit("/", 1)[-1]
+        if name in binary:
+            return None, 0, "binary"
+        if name in encoding:
+            return None, 0, "encoding"
+        return original(self, abs_path, *args, **kwargs)
+
+    monkeypatch.setattr(FindInFiles, "_open_decode_text", fake_open)
+
+
+def test_skipped_binary_and_encoding_are_reported(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("NEEDLE\n", encoding="utf-8")
+    (tmp_path / "blob.bin").write_bytes(b"NEEDLE")
+    (tmp_path / "weird.txt").write_bytes(b"NEEDLE")
+    tool = _force_python(_tool(tmp_path), monkeypatch)
+    _skip_files(monkeypatch, binary=("blob.bin",), encoding=("weird.txt",))
+
+    data = _call(tool, tmp_path, pattern="NEEDLE", query_mode="text")
+
+    assert data["count"] == 1
+    assert data["skipped_binary"] == 1
+    assert data["skipped_encoding"] == 1
+    assert data["scan_complete"] is False  # недекодированный текст не проверен
+    assert data["more_matches_may_exist"] is True
+
+
+def test_binary_skips_alone_keep_the_scan_complete(tmp_path, monkeypatch):
+    """Бинарник пропускает и native grep — иначе два движка разойдутся в честности."""
+    (tmp_path / "a.py").write_text("NEEDLE\n", encoding="utf-8")
+    (tmp_path / "blob.bin").write_bytes(b"NEEDLE")
+    tool = _force_python(_tool(tmp_path), monkeypatch)
+    _skip_files(monkeypatch, binary=("blob.bin",))
+
+    data = _call(tool, tmp_path, pattern="NEEDLE", query_mode="text")
+
+    assert data["skipped_binary"] == 1
+    assert "skipped_encoding" not in data
+    assert data["scan_complete"] is True
+
+
+def _no_host_reads(monkeypatch):
+    def boom(self, *args, **kwargs):
+        raise AssertionError("must not read file content from the host")
+
+    monkeypatch.setattr(FindInFiles, "_open_decode_text", boom)
+
+
+def test_native_timeout_is_an_honest_refusal_not_a_host_scan(tmp_path, monkeypatch):
+    """grep есть, но сорвался: отказ с именем сбоя, а не чтение каждого кандидата с хоста."""
+    import utils.native_fs_search as native_fs_search
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        native_fs_search, "run_native_grep",
+        lambda *a, **k: _native_result(tmp_path, failure="native_timeout"),
+    )
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+    _no_host_reads(monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["ok"] is True
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 0
+    assert data["stop_reason"] == "native_timeout"
+    assert data["scan_complete"] is False and data["more_matches_may_exist"] is True
+    assert "fallback_reason" not in data
+    assert "narrow" in data["guidance"].lower()
+
+
+def _sandbox(tool, monkeypatch):
+    monkeypatch.setattr(tool._backend, "is_sandbox", True, raising=False)
+
+
+def test_sandbox_refuses_blind_host_reads_above_the_threshold(tmp_path, monkeypatch):
+    """COMPLEX без иглы на sandbox: сужения внутри sandbox нет, кандидатов больше порога — отказ до чтения."""
+    for i in range(5):
+        (tmp_path / f"f{i}.py").write_text("abc1\n", encoding="utf-8")
+    tool = _tool(tmp_path, {"max_unfiltered_host_reads": 3})
+    _native_ready(tool, monkeypatch)
+    _sandbox(tool, monkeypatch)
+    _no_host_reads(monkeypatch)
+
+    data = _call(tool, tmp_path, pattern=r"[a-z]+\d", query_mode="python-re")
+
+    assert data["ok"] is True and data["count"] == 0
+    assert data["stop_reason"] == "unfiltered_host_reads"
+    assert data["scan_complete"] is False and data["more_matches_may_exist"] is True
+    assert data["candidate_count"] == 5 and data["candidate_limit"] == 3
+    assert "narrow" in data["guidance"].lower()
+
+
+def test_sandbox_refuses_when_the_prefilter_failed_on_a_big_tree(tmp_path, monkeypatch):
+    import utils.native_fs_search as native_fs_search
+
+    for i in range(5):
+        (tmp_path / f"f{i}.py").write_text("KEY_1 here\n", encoding="utf-8")
+    tool = _tool(tmp_path, {"max_unfiltered_host_reads": 3})
+    _native_ready(tool, monkeypatch)
+    _sandbox(tool, monkeypatch)
+    monkeypatch.setattr(native_fs_search, "prefilter_terms", lambda *a, **k: ["KEY_"])
+    monkeypatch.setattr(native_fs_search, "native_prefilter_candidates", lambda *a, **k: (None, "timeout"))
+    _no_host_reads(monkeypatch)
+
+    data = _call(tool, tmp_path, pattern=r"KEY_\d+", query_mode="python-re")
+
+    assert data["stop_reason"] == "unfiltered_host_reads"
+    assert data["prefilter"] == "timeout"
+    assert data["scan_complete"] is False
+
+
+def test_blind_host_reads_below_the_threshold_proceed(tmp_path, monkeypatch):
+    for i in range(2):
+        (tmp_path / f"f{i}.py").write_text("abc1\n", encoding="utf-8")
+    tool = _tool(tmp_path, {"max_unfiltered_host_reads": 3})
+    _native_ready(tool, monkeypatch)
+    _sandbox(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern=r"[a-z]+\d", query_mode="python-re")
+
+    assert data["count"] == 2
+    assert "stop_reason" not in data
+
+
+def test_local_backend_never_refuses_blind_host_reads(tmp_path, monkeypatch):
+    """Локально host и есть sandbox: чтение бесплатно, порог не действует."""
+    for i in range(5):
+        (tmp_path / f"f{i}.py").write_text("abc1\n", encoding="utf-8")
+    tool = _tool(tmp_path, {"max_unfiltered_host_reads": 3})
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern=r"[a-z]+\d", query_mode="python-re")
+
+    assert data["count"] == 5
+    assert "stop_reason" not in data

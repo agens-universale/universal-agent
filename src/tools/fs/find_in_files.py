@@ -56,6 +56,8 @@ from security.path_policy import resolve_tool_context, _extract_config_dict
 # Python-path fallbacks where an in-sandbox needle prefilter is worth a try: the
 # recipe exists (grep+find), only the pattern/glob could not be expressed natively.
 _PREFILTER_FALLBACK_REASONS = frozenset({"pattern_not_native", "file_pattern_not_native"})
+# Refusals that carry candidate_count / candidate_limit / breakdown.
+_REFUSE_STOP_REASONS = frozenset({"too_many_candidate_files", "unfiltered_host_reads"})
 
 # affix_or re-open budget is the only per-mode open cap (spec §5 / §6.3).
 _MODE_CANDIDATE_LIMIT_ATTR = {
@@ -708,6 +710,14 @@ class FindInFiles(AbstractSimpleTool):
             return rel.count("/") + rel.count("\\")
         return 0
 
+    def _native_failure_guidance(self, failure: str) -> str:
+        what = "timed out" if failure == "native_timeout" else "failed"
+        return (
+            f"Native grep {what}; the search is not complete and nothing was read "
+            "from the host. Narrow path or file_pattern, or simplify the pattern, "
+            "and retry."
+        )
+
     @staticmethod
     def _output_capped_guidance() -> str:
         return (
@@ -1346,7 +1356,28 @@ class FindInFiles(AbstractSimpleTool):
             exclude_paths=accepted_excludes,
         )
         if result.failure and not result.hit_capture_cap:
-            return None, result.failure
+            # grep exists but timed out / failed. A host-side read of every
+            # candidate is exactly the cost this path exists to avoid —
+            # refuse with the failure name; the agent narrows or simplifies.
+            return self._build_response(
+                matches=[],
+                count=0,
+                stop_reason=result.failure,
+                guidance=self._native_failure_guidance(result.failure),
+                scan_complete=False,
+                more_matches_may_exist=True,
+                limit_requested=limit_requested,
+                limit_eff=limit_eff,
+                limit_capped=limit_capped,
+                path=report_path,
+                pattern=pattern,
+                query_mode=query_mode,
+                mode="dir",
+                effective_ci=effective_ci,
+                file_pattern=file_pattern,
+                exclude_dir_errors=exclude_soft_errors or None,
+                search_backend="grep",
+            ), None
 
         # Same ranking as the Python path, then the limit: grep's disk order
         # must not decide which matches survive `limit`. Sort is stable, so
@@ -1636,6 +1667,53 @@ class FindInFiles(AbstractSimpleTool):
         n = len(candidates)
         candidate_limit = self._candidate_limit_for_mode(pattern_mode, config)
 
+        # --- blind host reads on a sandbox (D3) ---
+        # On a sandbox every content read is a download. Without a successful
+        # in-sandbox prefilter (it failed, or the pattern has no fixed
+        # substring) the walk would read every candidate from the host; above
+        # the threshold refuse before reading. Local backends read for free.
+        blind_limit = int(config.max_unfiltered_host_reads)
+        if (
+            bool(getattr(backend, "is_sandbox", False))
+            and prefilter_paths is None
+            and n > blind_limit
+        ):
+            breakdown = self._build_breakdown(
+                start_path=path, candidates=candidates, config=config
+            )
+            why = (
+                f"the in-sandbox prefilter {prefilter}"
+                if prefilter
+                else "the pattern has no fixed substring"
+            )
+            return self._build_response(
+                matches=[],
+                count=0,
+                stop_reason="unfiltered_host_reads",
+                guidance=(
+                    f"{n} candidate files would be read from the host one by one because "
+                    f"{why}; the limit is {blind_limit}. Nothing was read. Narrow path or "
+                    "file_pattern (see breakdown), or give the pattern a fixed substring."
+                ),
+                scan_complete=False,
+                more_matches_may_exist=True,
+                limit_requested=limit_requested,
+                limit_eff=limit_eff,
+                limit_capped=limit_capped,
+                path=report_path,
+                pattern=pattern,
+                query_mode=query_mode,
+                mode="dir",
+                effective_ci=effective_ci,
+                file_pattern=file_pattern,
+                exclude_dir_errors=exclude_soft_errors or None,
+                fallback_reason=fallback_reason,
+                prefilter=prefilter,
+                candidate_count=n,
+                candidate_limit=blind_limit,
+                breakdown=breakdown,
+            )
+
         # --- gate before content (§5) ---
         if n > candidate_limit:
             breakdown = self._build_breakdown(
@@ -1815,6 +1893,16 @@ class FindInFiles(AbstractSimpleTool):
                 True, limit_requested, limit_eff, count=count
             )
 
+        if files_too_large or shared.skipped_encoding:
+            # Walk finished, but some candidates were never searched
+            # (too large / undecodable): "0 matches" is not absence.
+            scan_complete = False
+            more_matches_may_exist = True
+        if shared.skipped_encoding and guidance is None:
+            guidance = (
+                f"{shared.skipped_encoding} file(s) could not be decoded as text and were "
+                "not searched. Do not assume the pattern is absent from them."
+            )
         if files_too_large and guidance is None:
             guidance = (
                 f"{files_too_large} file(s) exceeded the size limit and were not "
@@ -1826,6 +1914,8 @@ class FindInFiles(AbstractSimpleTool):
             matches=all_matches,
             count=count,
             files_too_large=files_too_large or None,
+            skipped_binary=shared.skipped_binary or None,
+            skipped_encoding=shared.skipped_encoding or None,
             stop_reason=stop_reason,
             guidance=guidance,
             scan_complete=scan_complete,
@@ -1906,6 +1996,8 @@ class FindInFiles(AbstractSimpleTool):
         excluded_dirs: Optional[List[Dict[str, str]]] = None,
         search_backend: Optional[str] = None,
         files_too_large: Optional[int] = None,
+        skipped_binary: Optional[int] = None,
+        skipped_encoding: Optional[int] = None,
         fallback_reason: Optional[str] = None,
         prefilter: Optional[str] = None,
     ) -> str:
@@ -1944,6 +2036,10 @@ class FindInFiles(AbstractSimpleTool):
         # from "never opened".
         if files_too_large:
             payload["files_too_large"] = files_too_large
+        if skipped_binary:
+            payload["skipped_binary"] = skipped_binary
+        if skipped_encoding:
+            payload["skipped_encoding"] = skipped_encoding
         if search_backend is not None:
             payload["search_backend"] = search_backend
         # Why the host-side Python path answered instead of in-sandbox grep.
@@ -1953,8 +2049,8 @@ class FindInFiles(AbstractSimpleTool):
         if prefilter is not None:
             payload["prefilter"] = prefilter
 
-        # Refuse breakdown only (too_many_candidate_files).
-        if stop_reason == "too_many_candidate_files":
+        # Refuse breakdown only (too_many_candidate_files / unfiltered_host_reads).
+        if stop_reason in _REFUSE_STOP_REASONS:
             if candidate_count is not None:
                 payload["candidate_count"] = candidate_count
             if candidate_limit is not None:
