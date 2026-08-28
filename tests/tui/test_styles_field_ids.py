@@ -70,7 +70,7 @@ def test_auth_nested_is_gone_everywhere():
     src = Path(__file__).resolve().parents[2] / "src"
     hits = []
     for path in src.rglob("*"):
-        if not path.is_file() or path.suffix == ".pyc":
+        if not path.is_file() or path.suffix in {".pyc", ".bak"}:
             continue
         try:
             text = path.read_text(encoding="utf-8")

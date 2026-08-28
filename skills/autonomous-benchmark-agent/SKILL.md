@@ -1,8 +1,8 @@
 ---
 id: autonomous-benchmark-agent
 name: Autonomous Benchmark Agent
-description: Autonomous execution mode for benchmark tasks across coding, office/document, browser/GUI/computer-use, data, and mixed workflows. Use when the user or harness asks the agent to solve a task without human-in-the-loop and produce machine-checkable outcomes such as a modified working tree, files, logs, screenshots, or exact answers. This skill takes precedence over HITL-heavy coding/planning skills for benchmark runs.
-version: 0.1.0
+description: Autonomous execution mode for benchmark tasks across coding, SQL/DDL, office/document, browser/GUI/computer-use, data, repo-analysis, and mixed workflows. Use when the user or harness asks the agent to solve a task without human-in-the-loop and produce machine-checkable outcomes such as a modified working tree, files, logs, screenshots, or exact answers. Load this skill before solving autonomous eval/benchmark instances. This skill takes precedence over HITL-heavy coding/planning skills for benchmark runs.
+version: 0.2.0
 ---
 
 # Autonomous Benchmark Agent
@@ -72,7 +72,7 @@ For SWE-bench Verified, issue-to-patch, and similar coding benchmarks:
 ## Universal workflow
 
 1. Parse the task
-   - Identify task type: `coding`, `office_document`, `spreadsheet`, `browser_gui`, `desktop_gui`, `data_analysis`, `research`, or `mixed`.
+   - Identify task type: `coding`, `sql_ddl`, `office_document`, `spreadsheet`, `browser_gui`, `desktop_gui`, `data_analysis`, `repo_qa`, `research`, or `mixed`.
    - Identify required final artifact: repo files changed, new file, saved document, UI state, answer string, JSON, screenshot, test log.
    - Extract success criteria, allowed paths, forbidden paths, output schema, and constraints from the prompt/harness.
 
@@ -80,20 +80,36 @@ For SWE-bench Verified, issue-to-patch, and similar coding benchmarks:
    - List/read only the relevant files or app state first.
    - Locate obvious entry points: README, task file, failing tests, document templates, open windows, datasets.
    - Explore further only when the initial evidence is not enough.
+   - Once the next action is clear, stop surveying. Do not over-research the problem.
 
-3. Execute minimally
+3. Research how to check this task (cheap, once)
+   - This is not more problem research. It is: what in *this* sandbox can validate the artifact you will produce.
+   - Look at PATH, image/README, project scripts: binaries, linters, parsers, test runners, make/npm, SQL CLIs, HTTP to a local app. Prefer tools already mentioned. Do not invent a checker that is not installed.
+   - Stop after you have the cheapest matching checker (or know that none exists). Do not browse the whole image.
+
+4. Execute minimally
    - Make the smallest change/action likely to satisfy the grader.
    - Preserve existing structure and formatting unless the task requires changing it.
    - For ambiguous details, choose the most standard interpretation and note the assumption.
    - Prefer general fixes over narrow patches tailored only to visible examples.
 
-4. Verify cheaply
+5. Verify cheaply
+   - Always verify after you did the work. Do **not** call the finalizing tool until you have run the checker from step 3, or recorded that none exists.
    - Run targeted checks first.
    - Run broader checks only if cheap and likely to catch regressions.
    - For GUI/office tasks, verify by reading back saved files or observing final app state when possible.
    - If verification is blocked by environment, record the exact blocker. Do not claim checks passed when they were not run.
+   - Match checker to artifact (use only what is present):
+     - code / tests in repo → the project's test/build command;
+     - SQL / DDL / migration → parser or SQL CLI in PATH (`sqlparse`, `sqlfluff`, dialect parser named in the image, `psql` dry-run, Greenplum helpers, etc.);
+     - written file / report → read back the final path; if a parser/linter for that format exists, run it;
+     - claims about a repository → every cited path was actually read; a truncated listing is not a complete tree;
+     - HTTP API change → hit the local endpoint after the app is up, or say you could not start it.
+   - If the checker fails: fix the artifact and re-run. Do not finish on a failed check unless the task is to report the failure.
+   - If no checker exists: read back the deliverable at least. Reasoning is not a substitute for a skipped available tool.
+   - After a green check, stop. Do not invent extra exploration (jar dumps, unrelated reports).
 
-5. Emit benchmark result
+6. Emit benchmark result
    - Save durable artifacts only when requested or naturally required by the task.
    - Follow the harness/user output instructions exactly.
    - The runtime requires finish tool at the end of work, call it once with an honest report aligned to your trace. That closes the agent turn; it is not a substitute for the grader artifact unless the harness says so.
@@ -123,6 +139,16 @@ For SWE-bench Verified, issue-to-patch, and similar coding benchmarks:
 - Before finishing, inspect `git status` / diff when available so your report matches the tree.
 - Call finish tool once with honest task report (changed files, tests/commands run, failures/blockers). 
 - Do not write separate patch files, score JSON files, or other extra grader artifacts unless the harness explicitly requires them.
+
+### SQL / DDL / schema tasks
+
+- Do not invent columns, partitions, or objects the sources do not support. If a requested partition key is absent, say so.
+- Review-only tasks: still parse the proposed corrected script, not only the original.
+- Do not claim the script executes on a cluster you did not reach.
+
+### Repo Q&A / inventory tasks
+
+- Do not cite a file you did not open. A truncated listing is not a complete tree and is not proof that a path is missing — narrow, paginate, or report partial coverage.
 
 ### Office/document/spreadsheet tasks
 
@@ -188,3 +214,5 @@ For coding benchmarks, the primary deliverable remains the modified working tree
 - Do not perform wide refactors, broad redesigns, or aesthetic rewrites.
 - Do not modify the grader/harness to make the benchmark pass.
 - Do not hide failed checks; benchmark reports must be honest and reproducible.
+- Do not finish after writing SQL/DDL/report files without running an available parser, linter, test, or readback in this sandbox.
+- Do not treat a truncated listing as a complete inventory of a repository.
