@@ -265,3 +265,35 @@ def test_encode_text_for_append_utf8_sig_no_mid_bom_regression():
     data = encode_text_for_append("hello", "utf-8-sig")
     assert data == b"hello"
     assert data[:3] != b"\xef\xbb\xbf"
+
+
+# --- line endings -----------------------------------------------------------
+
+from gc_core.utils.file_text import convert_line_endings, detect_line_ending
+
+
+def test_detect_line_ending_crlf():
+    assert detect_line_ending("a\r\nb\r\n") == "\r\n"
+
+
+def test_detect_line_ending_lf():
+    assert detect_line_ending("a\nb\n") == "\n"
+
+
+def test_detect_line_ending_none_without_newlines():
+    assert detect_line_ending("single line") is None
+    assert detect_line_ending("") is None
+
+
+def test_detect_line_ending_mixed_picks_dominant():
+    assert detect_line_ending("a\r\nb\r\nc\n") == "\r\n"
+    assert detect_line_ending("a\nb\nc\r\n") == "\n"
+
+
+def test_convert_line_endings_to_crlf_and_to_lf():
+    assert convert_line_endings("a\nb\r\nc", "\r\n") == "a\r\nb\r\nc"
+    assert convert_line_endings("a\r\nb\nc", "\n") == "a\nb\nc"
+
+
+def test_convert_line_endings_leaves_bare_cr_alone():
+    assert convert_line_endings("a\rb\n", "\r\n") == "a\rb\r\n"

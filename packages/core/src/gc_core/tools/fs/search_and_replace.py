@@ -3,6 +3,12 @@ import functools
 import difflib
 from typing import Dict, Any
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.tools.fs.edit_line_endings import (
+    collect_literal_matches,
+    line_ending_change_refused_error,
+    line_ending_change_refused_message,
+    resolve_edit_line_endings,
+)
 from gc_core.tools.fs.edit_suggestions import build_edit_miss_suggestions
 from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.security.path_policy import enforce_write_guard
@@ -177,7 +183,7 @@ Important Usage Rules
   - message: string — human-readable summary.
   - error: object|null — error details when ok=false due to an error (not "not found").
 - **NEVER** use shell commands like `sed`, `perl -pi`, etc. — this tool is safe and cross-platform.
-- For multiline replacements use line feed characters (e.g. \\n, \\r\\n depending on the platform)  in literal text for arguments `search` and `replace`
+- Write `search`/`replace` with \\n; the file's CRLF/LF style is kept.
 
 Examples
 Replace database URL in config:
@@ -556,6 +562,10 @@ Update version string:
             )
         content = decoded.text or ""
         encoding_used = decoded.encoding_used
+        original_search = search
+        resolved = resolve_edit_line_endings(content, search, replace)
+        search = resolved.search
+        replace = resolved.replace
         actual_sha256 = sha256_hex_of_bytes(raw)
         stale_error = check_expected_file_sha256(actual_sha256, expected_file_sha256)
         if stale_error is not None:
@@ -571,23 +581,11 @@ Update version string:
                 error=stale_error,
             )
 
-        # Build all match starts (non-overlapping, like str.replace behavior).
-        match_entries: list[tuple[int, int, int]] = []  # (start_idx, start_line, end_line)
-        start = 0
-        while True:
-            idx = content.find(search, start)
-            if idx == -1:
-                break
-            matched_fragment = content[idx:idx + len(search)]
-            match_start_line = content.count("\n", 0, idx) + 1
-            match_end_line = match_start_line + matched_fragment.count("\n")
-            match_entries.append((idx, match_start_line, match_end_line))
-            start = idx + len(search)
-
+        match_entries = collect_literal_matches(content, search, resolved.first_index)
         match_count = len(match_entries)
         if match_count == 0:
             suggestions, suggestions_total = build_edit_miss_suggestions(
-                search=search,
+                search=original_search,
                 content=content,
             )
             miss_message = "Search string not found in file. No changes made."
@@ -674,6 +672,21 @@ Update version string:
             )
 
         if new_content == content:
+            if resolved.eol_adapted:
+                return _result(
+                    ok=False,
+                    matched=True,
+                    replaced=0,
+                    match_count=match_count,
+                    line_numbers=line_numbers,
+                    match_ranges=match_ranges,
+                    message=line_ending_change_refused_message(),
+                    diff=diff_text,
+                    diff_truncated=diff_truncated,
+                    suggestions=[],
+                    suggestions_total=0,
+                    error=line_ending_change_refused_error(),
+                )
             return _result(
                 ok=False,
                 matched=True,
