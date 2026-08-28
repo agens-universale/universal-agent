@@ -37,17 +37,24 @@ def test_list_files_walk_reports_walk_too_large():
     data = json.loads(_tool(ListFiles)(path="/work", max_depth=2))
     assert data["ok"] is False
     assert data["error"]["type"] == "walk_too_large"
+    assert "incomplete" in data["error"]["message"]
+    assert "not proof" in data["error"]["message"]
     assert "narrow the path" in data["error"]["message"]
+    assert "raise the ceiling" not in data["error"]["message"]
 
 
 def test_list_files_listdir_reports_walk_too_large():
     data = json.loads(_tool(ListFiles)(path="/work"))
     assert data["ok"] is False
     assert data["error"]["type"] == "walk_too_large"
+    assert "raise the ceiling" not in data["error"]["message"]
 
 
 def test_find_files_by_name_reports_walk_too_large():
     data = json.loads(_tool(FindFilesByName)(path="/work", query="app"))
     assert data["ok"] is False
     assert data["error"]["type"] == "walk_too_large"
+    assert "incomplete" in data["error"]["message"]
+    assert "not proof" in data["error"]["message"]
     assert "narrow the path" in data["error"]["message"]
+    assert "raise the ceiling" not in data["error"]["message"]

@@ -34,8 +34,10 @@ class WalkOutputTooLargeError(OSError):
         self.path = path
         self.ceiling_chars = ceiling_chars
         msg = message or (
-            f"directory listing under {path!r} exceeds walk output ceiling "
-            f"({ceiling_chars} chars); narrow the path or raise the ceiling"
+            f"directory listing under {path!r} is incomplete: it exceeded the "
+            f"walk output ceiling ({ceiling_chars} chars). This is not proof "
+            f"that a path or tree is absent — narrow the path, reduce depth, "
+            f"do not search from the repository root"
         )
         super().__init__(msg)
 
