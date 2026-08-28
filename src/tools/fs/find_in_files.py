@@ -1276,7 +1276,6 @@ class FindInFiles(AbstractSimpleTool):
         every candidate file from the host, so the switch is never silent.
         """
         from utils.native_fs_search import (
-            count_native_candidates,
             hard_exclude_names_for_grep,
             native_grep_refusal,
             run_native_grep,
@@ -1319,21 +1318,9 @@ class FindInFiles(AbstractSimpleTool):
             return None, refusal
         assert plan is not None
 
-        # Same candidate ceiling as Python path (scan automaton refuse).
-        n = count_native_candidates(
-            self._backend,
-            path,
-            exclude_dir_names=exclude_names,
-            exclude_nested_dot_dirs=exclude_dot,
-            file_pattern=file_pattern,
-            exclude_paths=accepted_excludes,
-        )
-        if n is None:
-            return None, "native_error"
-        candidate_limit = self._candidate_limit_for_mode(pattern_mode, config)
-        if n > candidate_limit:
-            # Fall through to Python so refuse envelope/breakdown stay identical.
-            return None, "candidate_limit"
+        # No find|wc -l here: that ceiling is the Python path's cost guard.
+        # Native grep already walks the same tree; a failed count used to
+        # fall through to host downloads (the Gigabench Problem 3 path).
 
         # Per-hit guard, memoized: one policy evaluation per file, not per hit.
         allowed_cache: Dict[str, bool] = {}

@@ -41,8 +41,6 @@ def test_native_branch_hands_the_predicate_to_run_native_grep(tmp_path, monkeypa
     backend_cls = type(tool._backend)
     monkeypatch.setattr(backend_cls, "has_grep", True, raising=False)
     monkeypatch.setattr(backend_cls, "has_find", True, raising=False)
-    # Подсчёт кандидатов ходит в настоящий find — на хосте без него тест падал бы.
-    monkeypatch.setattr(native_fs_search, "count_native_candidates", lambda *a, **k: 1)
 
     json.loads(tool(path=str(tmp_path), pattern="KEY", query_mode="text"))
 
@@ -75,8 +73,6 @@ def test_capture_cap_below_limit_stays_native_with_output_capped(tmp_path, monke
     backend_cls = type(tool._backend)
     monkeypatch.setattr(backend_cls, "has_grep", True, raising=False)
     monkeypatch.setattr(backend_cls, "has_find", True, raising=False)
-    # Подсчёт кандидатов ходит в настоящий find — на хосте без него тест падал бы.
-    monkeypatch.setattr(native_fs_search, "count_native_candidates", lambda *a, **k: 1)
 
     data = json.loads(tool(path=str(tmp_path), pattern="KEY", query_mode="text", limit=50))
 

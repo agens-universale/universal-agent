@@ -184,12 +184,9 @@ def test_limit_is_still_validated_when_given(tmp_path):
 # --- честность движка: fallback_reason и output_capped -----------------------
 
 def _native_ready(tool, monkeypatch, *, has_grep=True):
-    import utils.native_fs_search as native_fs_search
-
     backend_cls = type(tool._backend)
     monkeypatch.setattr(backend_cls, "has_grep", has_grep, raising=False)
     monkeypatch.setattr(backend_cls, "has_find", has_grep, raising=False)
-    monkeypatch.setattr(native_fs_search, "count_native_candidates", lambda *a, **k: 1)
 
 
 def _native_result(tmp_path, *, truncated=False, hit_cap=False, failure=None):
@@ -280,6 +277,28 @@ def test_native_answer_carries_no_fallback_reason(tmp_path, monkeypatch):
     assert "fallback_reason" not in data
 
 
+def test_native_path_does_not_count_candidates_before_grep(tmp_path, monkeypatch):
+    """find|wc -l is the Python-path cost guard; native goes straight to grep."""
+    import utils.native_fs_search as native_fs_search
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        native_fs_search, "run_native_grep", lambda *a, **k: _native_result(tmp_path)
+    )
+
+    def count_spy(*args, **kwargs):
+        raise AssertionError("native path must not count candidates before grep")
+
+    monkeypatch.setattr(native_fs_search, "count_native_candidates", count_spy)
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    assert "fallback_reason" not in data
+
+
 def test_capture_cap_below_limit_is_reported_as_output_capped(tmp_path, monkeypatch):
     """Потолок вывода grep — не лимит совпадений и не повод молча читать всё
     заново с хоста: честный стоп с советом сузить запрос."""
@@ -312,15 +331,14 @@ def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):
     (tmp_path / "vendor").mkdir()
     (tmp_path / "vendor" / "x.py").write_text("KEY\n", encoding="utf-8")
     (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
-    seen_run, seen_count = {}, {}
+    seen_run = {}
 
     def run_spy(*args, **kwargs):
         seen_run.update(kwargs)
         return _native_result(tmp_path)
 
     def count_spy(*args, **kwargs):
-        seen_count.update(kwargs)
-        return 1
+        raise AssertionError("native path must not count candidates before grep")
 
     monkeypatch.setattr(native_fs_search, "run_native_grep", run_spy)
     monkeypatch.setattr(native_fs_search, "count_native_candidates", count_spy)
@@ -335,7 +353,6 @@ def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):
     assert data["search_backend"] == "grep"
     assert "fallback_reason" not in data
     assert seen_run["exclude_paths"] == [vendor]
-    assert seen_count["exclude_paths"] == [vendor]
 
 
 # --- needle prefilter drives the Python path -----------------------------------
