@@ -297,6 +297,56 @@ def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     )
 
 
+def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread):
+    """fs_append samples 100KiB; base64 (~137k) exceeds tool-exec 60k."""
+    import base64
+
+    from backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    from utils.file_text import APPEND_HEAD_SAMPLE_BYTES
+
+    env = FakeEnv()
+    raw = b"A" * APPEND_HEAD_SAMPLE_BYTES
+    encoded = base64.b64encode(raw).decode("ascii")
+    assert len(encoded) > DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+
+    async def head_exec(command, **kw):
+        env.calls.append(command)
+        if "head -c" in command and "base64" in command:
+            return FakeExecResult(stdout=encoded, return_code=0)
+        return FakeExecResult(stdout="", return_code=1)
+
+    env.exec = head_exec
+    backend = HarborBackend(env, loop_in_thread)
+    sample = backend.read_head_bytes("/work/big.txt", APPEND_HEAD_SAMPLE_BYTES)
+    assert sample == raw
+
+    async def huge_tool(command, **kw):
+        return FakeExecResult(stdout="Y" * 100_000, return_code=0)
+
+    env.exec = huge_tool
+    tool = backend.exec("echo y")
+    assert len(tool.stdout) == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    assert tool.stdout_hit_capture_cap is True
+
+
+def test_read_head_bytes_raises_if_capture_ceiling_hit(loop_in_thread):
+    import base64
+
+    env = FakeEnv()
+    raw = b"B" * 200
+    encoded = base64.b64encode(raw).decode("ascii")
+
+    async def head_exec(command, **kw):
+        if "head -c" in command and "base64" in command:
+            return FakeExecResult(stdout=encoded, return_code=0)
+        return FakeExecResult(stdout="", return_code=1)
+
+    env.exec = head_exec
+    backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=50)
+    with pytest.raises(OSError, match="capture ceiling"):
+        backend.read_head_bytes("/work/a.bin", 200)
+
+
 def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
     """D: raw bytes must survive exec (no utf-8/surrogateescape mangling)."""
     import base64
