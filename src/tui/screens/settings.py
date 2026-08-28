@@ -3616,8 +3616,19 @@ class SettingsScreen(Screen):
         if name in RESERVED_WORDS:
             return f'имя «{name}» зарезервировано ({", ".join(RESERVED_WORDS)})'
         roots = profile_roots(Path(os.getcwd()), self._profiles_base_path())
-        if name in discover_all_refs(roots) and name != exclude:
-            return f'профиль «{name}» уже существует'
+        # Тёзка ищется БЕЗ учёта регистра: имя идёт прямо в имя файла, а Windows и
+        # macOS регистр не различают — побуквенное сравнение пропускало «TestProf1»
+        # при живом «testprof1», и дальше падал уже `rename` с `[WinError 183]`,
+        # показывая человеку путь вместо ответа про имя (а указатели к тому моменту
+        # успевали переписаться, и их приходилось откатывать). Отвергаем на ВСЕХ
+        # платформах — по той же причине, что и запрещённые символы Windows выше:
+        # профиль едет вместе с проектом и ломается уже на чужой машине.
+        existing = {known.casefold(): known for known in discover_all_refs(roots)}
+        clash = existing.get(name.casefold())
+        # Сам себе тёзкой не считается: сменить РЕГИСТР своего имени законно, и
+        # файловая система такое переименование принимает.
+        if clash is not None and clash != exclude:
+            return f'профиль «{clash}» уже существует'
         return None
 
     def _profile_write_block(self, *, ref=None, name: str | None = None) -> str | None:

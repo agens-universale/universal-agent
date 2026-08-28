@@ -1130,3 +1130,89 @@ async def test_rename_survives_a_failed_session_persist(tmp_path, monkeypatch):
         assert (tmp_path / "base" / "profiles" / "house.yml").is_file()
         assert "profile" not in app._session_overrides          # откат + санация
         assert "session_profile_stale" in [n.code for n in collect_runtime_notices()]
+
+
+# --- Имя профиля: коллизия по регистру ------------------------------------------
+
+
+async def test_rename_into_a_name_differing_only_in_case_is_refused(tmp_path, monkeypatch):
+    """`testprof2` → `TestProf1` при живом `testprof1` — отказ по имени, а не крэш
+    файловой системы.
+
+    Проверка тёзки сравнивала имена ПОБУКВЕННО, а Windows-ФС регистр не различает:
+    `TestProf1` проходил гейт, а `rename` падал `[WinError 183]` — человек получал
+    в лицо путь и номер ошибки вместо ответа про имя. Хуже того, указатели во всех
+    слоях к этому моменту уже переписаны и их приходится откатывать.
+
+    Отвергаем на ВСЕХ платформах — тем же правилом, что и запрещённые символы
+    Windows: профиль едет вместе с проектом, и на чужой ФС ломается там."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "testprof1.yml", "# ПЕРВЫЙ\n" + _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "testprof2.yml", "# ВТОРОЙ\n" + _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "testprof2")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "TestProf1")
+
+        notice = _notice(scr)
+        assert "уже существует" in notice, notice
+        assert "WinError" not in notice and "Errno" not in notice
+        # оба файла целы и на своих местах
+        root = tmp_path / "base" / "profiles"
+        assert sorted(p.name for p in root.iterdir()) == ["testprof1.yml", "testprof2.yml"]
+        assert "ПЕРВЫЙ" in (root / "testprof1.yml").read_text(encoding="utf-8")
+
+
+async def test_create_with_a_name_differing_only_in_case_is_refused(tmp_path, monkeypatch):
+    """То же правило на входе создания: `create_profile_file` отказ даёт, но
+    техническим текстом про существующий файл — про ИМЯ отвечает гейт."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "testprof1.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await pilot.press("n")
+        await pilot.pause()
+        await _type_name(pilot, scr, "TESTPROF1")
+
+        notice = _notice(scr)
+        # Про ИМЯ, а не про файл: гейт обязан ответить раньше писателя, который
+        # показывает полный путь и «файл профиля уже существует».
+        assert "профиль «testprof1» уже существует" in notice, notice
+        assert ".yml" not in notice
+
+
+async def test_renaming_a_profile_to_its_own_name_in_another_case_still_works(
+        tmp_path, monkeypatch):
+    """Сторож от чрезмерного запрета: сменить РЕГИСТР СВОЕГО имени можно —
+    тёзка здесь сам себе, и файловая система такое переименование принимает."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "testprof1.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "testprof1")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "TestProf1")
+
+        assert "уже существует" not in _notice(scr)
+        assert (tmp_path / "base" / "profiles" / "TestProf1.yml").is_file()
