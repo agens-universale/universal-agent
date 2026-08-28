@@ -4028,6 +4028,14 @@ class SettingsScreen(Screen):
             return f"Enter — создать файл {self._profiles_base_root() / '<имя>.yml'}"
         if row["kind"] == "none":
             if (self._config.get("profile") or None) is None:
+                # Единственная фраза секции о ДЕЙСТВУЮЩЕМ состоянии — остальное здесь
+                # про файл. Сессионный выбор его перекрывает, и «действует чистый
+                # конфиг» тогда прямая ложь: в силе профиль, который в это же время
+                # показывает футер. Файловую половину оставляем — секция правит её.
+                session = self._session_profile_name()
+                if session:
+                    return ("глобально профиль не выбран; "
+                            f"в этой сессии действует «{session}»")
                 return "профиль не выбран — действует чистый конфиг"
             return f"Space — деактивировать (запись: {self._deactivation_target()})"
         name, ref = row["name"], row["ref"]
@@ -4089,8 +4097,14 @@ class SettingsScreen(Screen):
             # (контракт п.5): строка «+ добавить» последняя, и поле встаёт ровно
             # под ней; в пустом состоянии — под подсказкой-примером.
             self._mount_profile_name_prompt(frame)
-        frame.mount(Static(self._profiles_hint_text(rows),
-                           classes="set-hint set-dyn set-profiles-hint"))
+        if self._profiles_name_prompt is None:
+            # Во время ввода имени подсказка МОЛЧИТ: она про строку под курсором
+            # («Space — активировать», путь файла), а клавиши забрал инпут — Space
+            # там печатается. Обещание недоступного плюс лишние строки между полем
+            # и ответом на него: отказ уезжал в конец секции, за чужой текст. Роль
+            # клавиш в этом состоянии называет позиционный футер.
+            frame.mount(Static(self._profiles_hint_text(rows),
+                               classes="set-hint set-dyn set-profiles-hint"))
         if self._profiles_delete_name is not None:
             frame.mount(Static(Text(self._profile_delete_confirm_text(), style=WARN),
                                classes=f"set-confirm set-dyn {KEEP_IN_VIEW}", markup=False))

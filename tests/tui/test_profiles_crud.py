@@ -1216,3 +1216,33 @@ async def test_renaming_a_profile_to_its_own_name_in_another_case_still_works(
 
         assert "уже существует" not in _notice(scr)
         assert (tmp_path / "base" / "profiles" / "TestProf1.yml").is_file()
+
+
+async def test_name_prompt_hides_the_hint_about_the_row_under_cursor(tmp_path, monkeypatch):
+    """Пока идёт ввод имени, подсказка под списком молчит.
+
+    Она рассказывает про строку ПОД КУРСОРОМ («Space — активировать», путь файла),
+    но клавиши в этот момент забрал инпут: Space печатается, а не активирует. Текст
+    обещал недоступное и вдобавок стоял между полем ввода и ответом на него —
+    отказ уезжал на пять строк вниз. Футер про режим ввода знает и говорит своё
+    («Enter — переименовать · Esc — отмена»), подсказке добавить нечего."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "home")
+        hints = [str(w.render()) for w in scr.query(".set-profiles-hint")]
+        assert any("активировать" in h for h in hints)     # до ввода — на месте
+
+        await pilot.press("r")
+        await pilot.pause()
+
+        hints = [str(w.render()) for w in scr.query(".set-profiles-hint")]
+        assert hints == [], hints
+        assert "переименовать" in _footer(scr)             # роль клавиш называет футер

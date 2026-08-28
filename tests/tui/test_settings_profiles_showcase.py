@@ -1193,3 +1193,44 @@ async def test_profiles_section_no_longer_carries_the_level_row(tmp_path, monkey
 
         assert "level" not in [r["kind"] for r in scr._profiles_rows()]
         assert not any("уровень модели" in l for l in _profiles_rows_text(scr))
+
+
+async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choice(
+        tmp_path, monkeypatch):
+    """Подсказка на «— без профиля» говорит о ДЕЙСТВУЮЩЕМ состоянии, а не о файле,
+    и при сессионном выборе врала: «действует чистый конфиг», когда действует
+    профиль из сессии — тот самый, который в это же время показывает футер.
+
+    Остальная секция не врёт: маркер `● активен` честно про глобальное состояние
+    (её предмет — файл), а строка профиля несёт хвост «выбран в текущей сессии».
+    Правится ровно фраза о действии."""
+    import tui.app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    # Пара «адрес+токен» задана целиком: с половиной пары стек профиля не собрался
+    # бы, и санация сняла бы сессионный выбор — предмет теста исчез бы до проверки.
+    _write(tmp_path / "base" / "profiles" / "home.yml",
+           'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n')
+
+    app = app_mod.TuiApp(config=_base_dict())
+    app.set_config_path(str(base_cfg))
+    app.reload_config()
+    async with app.run_test() as pilot:
+        # ПОСЛЕ старта: запуск приложения перечитывает набор сессионных ключей и
+        # затирает выставленное до него.
+        app.set_session_override("profile", "home")
+        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        rows = scr._profiles_rows()
+        scr._profiles_idx = next(i for i, r in enumerate(rows) if r["kind"] == "none")
+
+        hint = scr._profiles_hint_text(scr._profiles_rows())
+
+        assert "чистый конфиг" not in hint, hint
+        assert "home" in hint            # назван тот профиль, что реально в силе
+        assert "сесси" in hint
