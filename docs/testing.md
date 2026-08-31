@@ -2,7 +2,7 @@
 
 # Тесты
 
-Один раз в корне репо: `uv sync`. Подтягивает dev/test-зависимости (`textual`, `rich` — в основных deps; `office-mcp` из `external/office-mcp` — в test-группе).
+Один раз в корне репо: `uv sync`. Подтягивает dev/test-зависимости (`textual`, `rich` — в основных deps; `office-mcp` из `external/vendor/office-mcp` — в test-группе).
 
 `uv tool install -e .` и `gc-mcp-install` — для **запуска агента** (`gc-cli` / `gc-ua`), не для pytest. Тесты гоняйте через `uv run pytest`, а не из venv `uv tool`.
 
@@ -11,13 +11,13 @@
 uv run pytest
 
 # office-mcp (свой venv через --directory)
-uv run --directory external/office-mcp pytest
+uv run --directory external/vendor/office-mcp pytest
 
 # science-mcp
-uv run --directory external/science-mcp pytest
+uv run --directory external/vendor/science-mcp pytest
 
 # computer-mcp (на Linux)
-uv run --directory external/computer-mcp pytest -m "not windows"
+uv run --directory external/vendor/computer-mcp pytest -m "not windows"
 ```
 
 Папка или файл: `uv run pytest packages/core/tests/security/ -q`
@@ -28,12 +28,12 @@ uv run --directory external/computer-mcp pytest -m "not windows"
 
 | Каталог | Что проверяет | Тестов |
 |---|---|---|
-| `packages/core/tests` | ядро/SDK | 3632 |
-| `packages/tui/tests` | TUI | 3331 |
-| `packages/server/tests` | server и swarm | 206 |
-| `packages/mcp/tests` | рецепты и менеджер MCP | 138 |
+| `packages/core/tests` | ядро/SDK | 4069 |
+| `packages/tui/tests` | TUI | 3381 |
+| `packages/server/tests` | server и swarm | 216 |
+| `packages/mcp/tests` | рецепты и менеджер MCP | 159 |
 | `packages/cli/tests` | CLI | 129 |
-| `tests` | репозиторий целиком: колёса, литералы модулей, принадлежность тестов | 41 |
+| `tests` | репозиторий целиком: колёса, литералы модулей, принадлежность тестов | 66 |
 | `external/litellm/tests` | батарейка LiteLLM Proxy | 13 |
 
 Принадлежность закреплена тестом `tests/test_test_ownership.py`: набор пакета не

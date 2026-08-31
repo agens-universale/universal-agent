@@ -10,7 +10,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 - CLI-агент: запросы, инструменты, треды, скиллы.
 - Два режима бэкенда: `chat_completions` и `v1/responses` (deprecated).
-- MCP: 6 транспортов, готовые рецепты в `recommended_mcp/`.
+- MCP: 6 транспортов, готовые рецепты в дистрибутиве `gc-mcp` (`packages/mcp/src/recommended_mcp/`).
 - Скиллы и пакеты скиллов (встроенные паки `supercoder` / `codebase` / `articles`).
 - Слои инструкций `AGENTS.md` (L0 shipped → L1 `~/.gc/AGENTS.md` → L2 проект → L3 `.gc/AGENTS.md`) — задать агенту проектный/глобальный контекст; `--init` генерирует `AGENTS.md` по структуре репо.
 - Профили и уровни моделей (`light`/`default`/`max`): реестр `models`/`slots`/`assign` в конфиге, переключаемые YAML-профили, CLI `--profile`/`--level`, палитра `/level`/`/profiles`.
@@ -85,7 +85,7 @@ gc-mcp install duckduckgo_search   # один MCP + авто-подключен�
 
 Как это устроено внутри: [docs/packaging.md](docs/packaging.md).
 
-Подробнее про MCP: [`recommended_mcp/README.md`](recommended_mcp/README.md).
+Подробнее про MCP: [`recommended_mcp/README.md`](packages/mcp/src/recommended_mcp/README.md).
 
 Запуск без графического режима
 ```bash

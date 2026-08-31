@@ -124,7 +124,7 @@ gc-serve
 Из рабочей копии по-прежнему работает и запуск модулем:
 
 ```bash
-uv run python -m src.server
+uv run python -m gc_server.server
 ```
 
 > Точка входа `gc-serve` появилась вместе с профилями установки. Тогда же

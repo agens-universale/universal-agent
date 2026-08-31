@@ -7,6 +7,27 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 
+def _inst():
+    """Модуль `recommended_mcp.install` — одной копией на весь файл, по требованию.
+
+    Восемь функций ниже открывали его каждая своим локальным импортом. Так было
+    надо, пока cli жил в ядре (`gc_core.mcp_runtime.cli`), а рецепты — в корне
+    репозитория: до `ensure_repo_on_sys_path()` пакета `recommended_mcp` на
+    `sys.path` просто не было, и верхнеуровневый импорт падал бы на загрузке
+    модуля. После переезда cli ВНУТРЬ `recommended_mcp` эта причина исчезла, но
+    наверх импорт всё равно не поднят: `install` тянет `urllib.request` и
+    `gc_core.mcp_runtime.state`, это ~25 мс (замерено), а платили бы их и
+    `gc-mcp help`, которому install не нужен вовсе, и открытие `/settings` в TUI
+    (`gc_tui/services/mcp_manager.py` импортирует этот модуль верхнеуровнево).
+    Поэтому копия стала одна, а лень осталась.
+
+    Возвращается МОДУЛЬ, а не его функции: тесты подменяют по строке
+    `recommended_mcp.install._dist_name`, `_node_install_paths`, `npm_global_has`,
+    и разрешение атрибута обязано оставаться на момент вызова.
+    """
+    from recommended_mcp import install
+    return install
+
 
 def _load_manifest_entries(config: str | None = None):
     """(entries, recipe_root). Резолвит манифест (config=None → дефолтная цепочка)."""
@@ -33,22 +54,20 @@ def _load_repo_url(config: Optional[str] = None):
 def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False,
                  repo_url=None, repo_ref=None) -> bool:
     """Поставить один рецепт в MCP-venv. True если успех."""
-    from recommended_mcp import install as _r
-    run_install_entries = _r.run_install_entries
     from recommended_mcp.runtime.venv import ensure_mcp_venv, pip_install_target
     ensure_mcp_venv()
     with pip_install_target():
-        results = run_install_entries([entry], root, agent_dep_dir, editable=editable,
-                                      repo_url=repo_url, repo_ref=repo_ref)
+        results = _inst().run_install_entries(
+            [entry], root, agent_dep_dir, editable=editable,
+            repo_url=repo_url, repo_ref=repo_ref,
+        )
     return any(s == "installed" for _, s, _ in results)
 
 
 def _wire_one(entry, root: Path, agent_dep_dir) -> None:
     from recommended_mcp.runtime import wiring
-    from recommended_mcp import install as _r
-    _node_install_paths = _r._node_install_paths
     from gc_core.config_modules.env_vars import gc_paths
-    npx = str(_node_install_paths(agent_dep_dir)["npx"])
+    npx = str(_inst()._node_install_paths(agent_dep_dir)["npx"])
     cache = str(gc_paths()["cache"])
     recipe_dir = (root / entry.path).resolve()
     try:
@@ -62,19 +81,15 @@ def _wire_one(entry, root: Path, agent_dep_dir) -> None:
 
 
 def _uninstall_one(entry, root: Path) -> None:
-    from recommended_mcp import install as _r
-    uninstall_entry = _r.uninstall_entry
-    uninstall_entry(entry, root)
+    _inst().uninstall_entry(entry, root)
 
 
 def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bool = False) -> int:
     entries, root = _load_manifest_entries(config)
     dep = _agent_dep_dir()
     repo_url, repo_ref = _load_repo_url(config)
-    from recommended_mcp import install as _r
-    find_entry = _r.find_entry
     if name:
-        entry = find_entry(entries, name)
+        entry = _inst().find_entry(entries, name)
         if entry is None:
             print(f"[error] MCP '{name}' не найден в манифесте. Доступны: "
                   f"{', '.join(e.name for e in entries)}", file=sys.stderr)
@@ -130,9 +145,7 @@ def wire(name: str, config: Optional[str] = None) -> bool:
     """Подключить УЖЕ установленный MCP по имени (wire_snippet рецепта в
     config.local.yml). True — подключён; False — имени нет в манифесте."""
     entries, root = _load_manifest_entries(config)
-    from recommended_mcp import install as _r
-    find_entry = _r.find_entry
-    entry = find_entry(entries, name)
+    entry = _inst().find_entry(entries, name)
     if entry is None:
         return False
     _wire_one(entry, root, _agent_dep_dir())
@@ -152,12 +165,10 @@ def remove(name: str, config: Optional[str] = None, keep_package: bool = False) 
 
 def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
     """yes = установлен; — = проверили, не установлен; ? = проверить не удалось."""
-    from recommended_mcp import install as _r
-    _dist_name, npm_global_has = _r._dist_name, _r.npm_global_has
     from recommended_mcp.runtime.venv import query_installed_version
     itype = entry.install.type
     if itype in ("pypi", "source", "wheel"):
-        name = _dist_name(entry, root)
+        name = _inst()._dist_name(entry, root)
         if name is None:
             return "?"
         return "yes" if query_installed_version(name) else "—"
@@ -165,7 +176,7 @@ def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
         pkg = entry.install.npm_package
         if not pkg:
             return "?"
-        res = npm_global_has(pkg, agent_dep_dir)
+        res = _inst().npm_global_has(pkg, agent_dep_dir)
         return "?" if res is None else ("yes" if res else "—")
     return "?"
 
@@ -188,14 +199,12 @@ def _cmd_list() -> int:
 
 def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
     from recommended_mcp.runtime import wiring
-    from recommended_mcp import install as _r
-    find_entry = _r.find_entry
     if wiring.unwire(name):
         print(f"[unwired] {name}")
     else:
         print(f"[info] {name} не был подключён")
     if not keep_package:
-        entry = find_entry(entries, name)
+        entry = _inst().find_entry(entries, name)
         if entry is not None:
             _uninstall_one(entry, root)
         else:
@@ -317,10 +326,8 @@ def installed_state(name: str, config: Optional[str] = None, *, manifest=None) -
     Медленно (subprocess-опрос venv). installed=None — проверить не удалось.
     manifest=(entries, root) — уже загруженный манифест (кэш вызывающего); иначе грузим."""
     entries, root = manifest if manifest is not None else _load_manifest_entries(config)
-    from recommended_mcp import install as _r
-    find_entry, _dist_name = _r.find_entry, _r._dist_name
     from recommended_mcp.runtime.venv import query_installed_version
-    entry = find_entry(entries, name)
+    entry = _inst().find_entry(entries, name)
     if entry is None:
         return {"installed": None, "version": None, "update": None}
     status = _installed_status(entry, root, _agent_dep_dir())
@@ -330,7 +337,7 @@ def installed_state(name: str, config: Optional[str] = None, *, manifest=None) -
         return {"installed": False, "version": None, "update": None}
     version = None
     if entry.install.type in ("pypi", "source", "wheel"):
-        dist = _dist_name(entry, root)
+        dist = _inst()._dist_name(entry, root)
         if dist:
             version = query_installed_version(dist)
     update = _available_update(entry, version)

@@ -37,7 +37,7 @@ security:
 
 Перед тем как команда уйдёт в subprocess, `execute_command` и `run_python_code` проходят через `command_guard` — детерминированный сканер токенов команды. Он ловит прямые обращения к protected-путям в тексте команды (например, `rm -rf .gc`) и блокирует их **до** запуска процесса. Это закрывает сценарий, при котором агент сам себе стирал `.gc` через `execute_command` (баг TSKBCKGRNDGNT-2).
 
-Обфускацию (`$(echo .gc)` и т.п.) tripwire не ловит — второй рубеж там LLM-судья (`command_moderation`).
+Обфускацию (`$(printf '.%s' gc)`, base64, переменные окружения) tripwire не ловит — второй рубеж там LLM-судья (`command_moderation`).
 
 Список protected-путей передаётся в prompt судьи как `never_touch_paths`; если судья недоступен — fail-closed (команда блокируется).
 

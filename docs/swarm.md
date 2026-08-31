@@ -79,7 +79,9 @@ swarm:
   enabled: true                           # обязательно для активации ручек
 
   # Корни для артефактов. Принимают абсолютный путь (как есть) ИЛИ относительный
-  # (резолвится от корня репо сервера); если опустить — дефолт:
+  # (резолвится от корня bundled-ассетов, `bundled_assets.bundled_root()`:
+  #  в рабочей копии packages/core/assets/, в колесе <site-packages>/gc_core/assets/);
+  #  если опустить — дефолт:
   #   swarm_threads_dir = <state>/projects/<project-slug>/swarm/threads
   #   sandbox_root_dir  = <state>/projects/<project-slug>/swarm/sandboxes
   # (в отличие от cli_venv_root/agent_dep_dir/extra_mounts — те только абсолютные).
@@ -91,8 +93,8 @@ swarm:
   # Куда на хосте сохранять агентские .gc/logs из песочницы при финализации.
   # Это делает сам swarm (lifecycle.check_and_finalize), на хост-стороне —
   # поэтому логи агента сохраняются даже если bwrap снят / убит по таймауту / упал.
-  # Абсолютный путь (как есть) / относительный (от корня репо); пусто → дефолт
-  # swarm_threads_dir/<swarm_id>/agent_logs/. При задании — <swarm_logs_dir>/<swarm_id>/.
+  # Абсолютный путь (как есть) / относительный (от корня bundled-ассетов, см. выше);
+  # пусто → дефолт swarm_threads_dir/<swarm_id>/agent_logs/. При задании — <swarm_logs_dir>/<swarm_id>/.
   swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
 
   # Сколько одновременных sworm'ов разрешено. При превышении → 503.
@@ -115,7 +117,10 @@ swarm:
   # Какой sandbox-tool. На данный момент поддерживается только bubblewrap.
   sandbox_tool: "bubblewrap"
 
-  # Путь к wrapper-скрипту (по умолчанию gc_server/swarm/run-cli-in-sandbox.sh в репо).
+  # Путь к wrapper-скрипту. Дефолт — run-cli-in-sandbox.sh ВНУТРИ пакета
+  # (gc_server/swarm/, едет в колесе как package data, поэтому работает и в
+  # установленном профиле). У этого поля своя база: относительный путь
+  # резолвится от каталога пакета, а не от ассетов — задавайте абсолютным.
   wrapper_path: "/opt/gc-cli/gc_server/swarm/run-cli-in-sandbox.sh"
 
   # Venv c gc-cli и зависимостями. Биндится --ro-bind внутрь песочницы.
@@ -132,7 +137,8 @@ swarm:
     - "/opt/gc-cli/skills"
 
   # Опц. пути к agent.md и skills_data_dir, которые материализуются в sandbox.
-  # Относительные резолвятся от корня репозитория сервера.
+  # Относительные резолвятся от корня bundled-ассетов (см. выше), поэтому
+  # дефолтный prompts/server_agent.md и находится — он лежит в ассетах ядра.
   # Отдельного swarm-промпта нет: по умолчанию используется тот же
   # prompts/server_agent.md, что и в webhook-режиме (вход — JSON-payload).
   agentmd_path: "prompts/server_agent.md"
@@ -172,7 +178,8 @@ client                 server                   wrapper.sh             bwrap + g
 
 1. **HTTP-вход.** `POST /swarm/run` приходит в `server.py:swarm_run`. Проверяется `swarm.enabled` (иначе 503), парсится JSON, нормализуются `task_id` и `system`, формируется `swarm_id = "swarm_<system>_<task_id>"` (префикс `swarm_` — чтобы каталоги отличались от обычных тредов вебхука).
 2. **Идемпотентность (AR-3).** Под глобальным `_SWARM_RUN_LOCK` читается `meta.json`:
-   - exist & `status ∈ {queued, running}` → **409 `swarm_id_already_active`**;
+   - exist & `status ∈ {queued, running}` → **409 `swarm_id_already_active`**
+     (`queued` на диск больше не пишется: `runner.start_swarm_process` сохраняет meta ровно один раз, уже после успешного `Popen`, сразу в `running` — иначе провал запуска оставлял на диске `queued`, и следующий вызов получал 409 сутки, до janitor'а. В проверке имя оставлено ради meta, написанных прежними версиями);
    - exist & `status` final → **409 `swarm_id_already_finalized`**;
    - `reuse_strategy != "reject"` → **501 `not_implemented`** (MVP поддерживает только `reject`).
 3. **Защита от перегрузки.** Если `monitor.active_count >= max_concurrent` → **503 `too_many_concurrent_swarm_processes`**.
@@ -220,7 +227,7 @@ client                 server                   wrapper.sh             bwrap + g
 Текущий статус задачи. Вызывает `check_and_finalize` с `heavy_checks=False` (без `du`/`psutil`-проверок — быстро для HTTP).
 
 **Ответ:** `{"status", "system", "task_id", "meta": {swarm_meta: {...}}}`.
-`status` ∈ `{queued, running, completed, failed, timeout, unknown_failed}`. Финальные статусы — `{completed, failed, timeout, unknown_failed}` (см. `lifecycle.FINAL_STATUSES`).
+`status` ∈ `{running, completed, failed, timeout, unknown_failed}`. Финальные статусы — `{completed, failed, timeout, unknown_failed}` (см. `lifecycle.FINAL_STATUSES`). `queued` встречается только в meta от прежних версий: свежий запуск пишет meta один раз, уже в `running` (см. шаг 2 выше).
 
 Если `meta.json` отсутствует — `404`.
 

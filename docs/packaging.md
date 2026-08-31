@@ -3,14 +3,14 @@
 # Как устроена упаковка: шесть дистрибутивов, пять пакетов
 
 Код разбит на настоящие пакеты с собственным пространством имён:
-`gc_core` (SDK), `gc_cli`, `gc_tui`, `gc_server`. Каждый живёт в своём каталоге
-под `packages/` и собирается своим манифестом.
+`gc_core` (SDK), `gc_cli`, `gc_tui`, `gc_server`, `recommended_mcp`. Каждый живёт
+в своём каталоге под `packages/` и собирается своим манифестом.
 
 ## Профили
 
 | Дистрибутив | Пакет | Модулей | Команды |
 |---|---|---|---|
-| `gc-core` | `gc_core` | 286 | **нет** — это библиотека |
+| `gc-core` | `gc_core` | 287 | **нет** — это библиотека |
 | `gc-cli` | `gc_cli` | 4 | `gc-cli` |
 | `gc-tui` | `gc_tui` | 137 | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc_server` | 15 | `gc-serve` |
@@ -102,8 +102,25 @@ packages = ["src/gc_tui"]
 `recommended_mcp` и `external` пока остаются наверху: первый — настоящий
 импортируемый пакет (его зовёт `recommended_mcp.runtime.daemon_autostart`),
 второй обязан быть его соседом. Исходники MCP-серверов лежат в
-`external/vendor/<имя>` и едут в колесо `gc-mcp` через `force-include`, сохраняя
-соседство. В манифесте при этом стоит ИМЯ каталога, а не путь: относительный путь
+`external/vendor/<имя>`, но в колесо `gc-mcp` через `force-include` едет
+**только `ddgs-mcp`** — одна строка в `packages/mcp/pyproject.toml`:
+
+```toml
+[tool.hatch.build.targets.wheel.force-include]
+"../../external/vendor/ddgs-mcp" = "external/vendor/ddgs-mcp"
+```
+
+Причина — цена бандла: `ddgs-mcp` это наша тонкая обёртка над `ddgs`, 6 файлов
+на 5,7 КБ, и веб-поиск нужен агенту в базовой поставке. Остальные три
+(`office`, `science`, `computer`) — 165 файлов на ~1,6 МБ, и они ставятся
+`pip install` из git-подкаталога (`repo_url` + `#subdirectory=external/vendor/<имя>`
+из манифеста рецептов), то есть требуют сети. Так же было и до разбиения на
+пакеты: корневой манифест на `develop` force-include'ил ровно `external/ddgs-mcp`
+и ничего больше — переезд только переименовал путь. Если понадобится
+полностью офлайновый контур, force-include расширяется, и колесо растёт на
+эти ~1,6 МБ.
+
+В манифесте при этом стоит ИМЯ каталога, а не путь: относительный путь
 резолвился от каталога рецептов и после их переезда в `packages/mcp/src` начал
 вести в никуда, молча сваливая установку в git-метод. Имя ищет
 `install._vendor_candidates` — в колесе и в рабочей копии, без арифметики путей.
@@ -283,8 +300,14 @@ uv run pytest
 `gc_tui/` и `gc_server/` в `site-packages`, который идёт в `sys.path` раньше
 каталогов `packages/*/src` — и прогон начал бы молча исполнять устаревшую копию.
 
-`conftest.py` в корне кладёт на `sys.path` все `packages/*/src` плюс сам корень
-(там лежит `recommended_mcp` — отдельный импортируемый пакет). Пути к исходникам
+На `sys.path` каталоги `packages/*/src` кладёт не корневой `conftest.py` (его в
+дереве нет), а плагин тест-кита: `gc_testkit.plugin` подхватывается через
+entry point `pytest11` и зовёт `gc_testkit.sources.ensure_sources_on_path()`.
+Бутстрап переехал туда, когда наборы разъехались по пакетам и прогон стал
+возможен из `packages/<имя>`, где корневого conftest не видно. Сам корень
+репозитория на `sys.path` не кладётся: он делал бы namespace-пакетами `docs`,
+`external`, `integrations`, `packages` и `tests`, а наш `external/` — соседом
+стороннего дистрибутива того же имени в одном `_NamespacePath`. Пути к исходникам
 внутри тестов берутся из `gc_testkit.paths`, а не собираются вручную: при
 следующем переезде правится один файл, а не сорок.
 
@@ -297,7 +320,7 @@ uv run pytest
 
 | Функция | Что возвращает | Для чего |
 |---|---|---|
-| `bundled_assets.bundled_root()` | каталог ассетов: `packages/core/assets` в репо, `site-packages` в колесе | `prompts/`, `skills/`, `config.default.yml` |
+| `bundled_assets.bundled_root()` | каталог ассетов: `packages/core/assets` в репо, `gc_core/assets` внутри пакета в колесе | `prompts/`, `skills/`, `config.default.yml` |
 | `bundled_assets.repo_root()` | корень рабочей копии либо **`None`** | `config_server.yml`, `integrations/` |
 
 До разбиения на пакеты маркер `prompts/` лежал в корне репозитория, поэтому

@@ -44,7 +44,7 @@ universal-agent/
   pyproject.toml                 # мета gc-ua (чисто метаданные) + корень uv-workspace
   packages/core/
     pyproject.toml               # дистрибутив gc-core — БЕЗ [project.scripts]
-    src/gc_core/                 # 279 модулей SDK
+    src/gc_core/                 # 287 модулей SDK
     assets/                      # prompts/, skills/, config.default.yml
   packages/cli/
     pyproject.toml               # gc-cli   → gc-core, gc-mcp
@@ -63,7 +63,7 @@ universal-agent/
     src/gc_testkit/              # раскладка, фикстуры, pytest-плагин
   external/                      # сторонние батарейки: vendor/ (MCP), litellm/
   integrations/                  # стенды бенчмарков: harbor/, bench_configs/
-  tests/                         # только общерепозиторное: колёса, MCP
+  tests/                         # общерепозиторное: колёса, сетки, владение
 ```
 
 Наборы тестов лежат в `packages/*/tests` — по одному на дистрибутив.
@@ -81,7 +81,7 @@ universal-agent/
 | `gc-tui` | `gc_tui` | `gc-core`, `gc-mcp` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc_server` | `gc-core`, `gc-mcp` | `gc-serve` |
 | `gc-mcp` | `recommended_mcp` | `gc-core` | `gc-mcp`, `gc-mcp-install` |
-| `gc-ua` (мета) | — | все четыре | все шесть |
+| `gc-ua` (мета) | — | все пять | все шесть |
 
 Каждый профиль объявляет ТОЛЬКО свою команду: имя команды принадлежит одному
 дистрибутиву, иначе два профиля не ставятся рядом. Подробности и цена ошибки —
@@ -101,7 +101,7 @@ uv tool install "gc-cli @ git+URL#subdirectory=packages/cli"    # как инс�
 
 | Пакет | Модулей | Что внутри |
 |---|---|---|
-| `gc_core` | 279 | 45 имён верхнего уровня: конфиг, тулы, память, безопасность, MCP-клиент |
+| `gc_core` | 287 | 45 имён верхнего уровня: конфиг, тулы, память, безопасность, MCP-клиент |
 | `gc_cli` | 4 | `cli`, `arg_parser`, `onboarding_wizard` |
 | `gc_tui` | 137 | экраны, редакторы, `diff_tui`, `voice`, `voice_runtime` |
 | `gc_server` | 15 | `server`, `server_cleanup_threads`, `rest_api`, `swarm` |
@@ -185,11 +185,12 @@ app_version, config_sync, config_raw, config_origin, model_picker
 `gc_testkit/module_literals.py`.
 
 Отсюда **три сетки** в корневом наборе, дополняющие друг друга:
-`test_import_health` (битые имена и потерянные связывания), `test_module_literals`
-(имена модулей, записанные строкой), `test_test_ownership` (набор пакета не
-импортирует пакеты выше себя). Ни одна не полна сама по себе — и ни одна не ловит
-двух вещей, на которых уже спотыкались: подмену подмодуля через `sys.modules` без
-атрибута на пакете и зашитый в строку файловый путь.
+`test_import_health` (битые имена, потерянные связывания и дореформенные плоские
+имена в узлах импорта), `test_module_literals` (имена модулей, записанные
+строкой), `test_test_ownership` (набор пакета не импортирует пакеты выше себя).
+Ни одна не полна сама по себе — и ни одна не ловит двух вещей, на которых уже
+спотыкались: подмену подмодуля через `sys.modules` без атрибута на пакете и
+зашитый в строку файловый путь.
 
 **Ядро не зависит ни от кого.** У `gc_core` ноль импортов `gc_cli`, `gc_tui`,
 `gc_server` и `recommended_mcp`. Это не самоцель, а то, ради чего затевался переезд:
