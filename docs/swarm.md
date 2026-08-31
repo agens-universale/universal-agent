@@ -79,9 +79,8 @@ swarm:
   enabled: true                           # обязательно для активации ручек
 
   # Корни для артефактов. Принимают абсолютный путь (как есть) ИЛИ относительный
-  # (резолвится от корня bundled-ассетов, `bundled_assets.bundled_root()`:
-  #  в рабочей копии packages/core/assets/, в колесе <site-packages>/gc_core/assets/);
-  #  если опустить — дефолт:
+  # (резолвится от каталога САМОГО config_server.yml — то есть от того места, где
+  #  вы этот путь и видите); если опустить — дефолт:
   #   swarm_threads_dir = <state>/projects/<project-slug>/swarm/threads
   #   sandbox_root_dir  = <state>/projects/<project-slug>/swarm/sandboxes
   # (в отличие от cli_venv_root/agent_dep_dir/extra_mounts — те только абсолютные).
@@ -93,7 +92,7 @@ swarm:
   # Куда на хосте сохранять агентские .gc/logs из песочницы при финализации.
   # Это делает сам swarm (lifecycle.check_and_finalize), на хост-стороне —
   # поэтому логи агента сохраняются даже если bwrap снят / убит по таймауту / упал.
-  # Абсолютный путь (как есть) / относительный (от корня bundled-ассетов, см. выше);
+  # Абсолютный путь (как есть) / относительный (от каталога config_server.yml, см. выше);
   # пусто → дефолт swarm_threads_dir/<swarm_id>/agent_logs/. При задании — <swarm_logs_dir>/<swarm_id>/.
   swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
 
@@ -125,6 +124,12 @@ swarm:
 
   # Venv c gc-cli и зависимостями. Биндится --ro-bind внутрь песочницы.
   # ПРИНИМАЕТСЯ ТОЛЬКО АБСОЛЮТНЫЙ путь; пустое или относительное игнорируется.
+  # Если не задать — берётся venv, в котором работает сам сервер: `gc-cli`
+  # приезжает зависимостью gc-server и лежит именно там. Наружу, в PATH, uv
+  # выносит только gc-serve — команды зависимостей он не экспортирует, поэтому
+  # прежний PATH-fallback в установке через `uv tool install` команду не находил
+  # и КАЖДЫЙ sworm падал с exit 127. Задавать вручную нужно, только если CLI
+  # живёт в отдельном venv.
   cli_venv_root: "/opt/gc-cli/.venv"
 
   # Доп. директория с зависимостями MCP (например ~/.local/share/gc/node для playwright).
@@ -137,12 +142,17 @@ swarm:
     - "/opt/gc-cli/skills"
 
   # Опц. пути к agent.md и skills_data_dir, которые материализуются в sandbox.
-  # Относительные резолвятся от корня bundled-ассетов (см. выше), поэтому
-  # дефолтный prompts/server_agent.md и находится — он лежит в ассетах ядра.
+  # У них РАЗНЫЕ якоря, и это не случайность: agentmd_path целится в файл ВНУТРИ
+  # дистрибутива, поэтому относительный путь резолвится от корня bundled-ассетов
+  # (дефолтный prompts/server_agent.md там и лежит). skills_dir — пользовательский
+  # контент, его относительный путь резолвится от каталога config_server.yml, а
+  # дефолт лежит в <gc-data>/swarm_skills и переживает `uv tool upgrade`.
+  # Если каталога скиллов нет, sworm идёт БЕЗ них; в лог об этом пишется только
+  # когда путь задан явно.
   # Отдельного swarm-промпта нет: по умолчанию используется тот же
   # prompts/server_agent.md, что и в webhook-режиме (вход — JSON-payload).
   agentmd_path: "prompts/server_agent.md"
-  skills_dir: "swarm_skills"
+  skills_dir: "/var/lib/gc-cli/swarm/skills"
 ```
 
 Дефолты (если поле опущено): `enabled=false`, `max_concurrent=10`, `ttl_seconds=86400`, `limits={memory_mb=1024, disk_mb=2048, cpu_percent=50, timeout_seconds=1800}`, `cli_command="gc-cli"`, `sandbox_tool="bubblewrap"`.

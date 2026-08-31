@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
@@ -16,9 +17,9 @@ PROJECT_ROOT = str(bundled_root())
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
 
-def _resolve_path(maybe_path: Any, default_rel: str, *, base: str | None = None) -> str:
+def _resolve_asset_path(maybe_path: Any, default_rel: str, *, base: str | None = None) -> str:
     """
-    Преобразовать конфиг-путь в абсолютный.
+    Путь к файлу, который ЕДЕТ В КОЛЕСЕ вместе с дистрибутивом.
 
     - Если значение пустое или не строка — использовать ``base``/``default_rel``.
     - Если путь абсолютный — вернуть как есть.
@@ -26,6 +27,10 @@ def _resolve_path(maybe_path: Any, default_rel: str, *, base: str | None = None)
 
     ``base`` по умолчанию — корень ассетов. Для файлов самого дистрибутива
     (обёртка песочницы) вызывающий передаёт каталог пакета явно.
+
+    Такой якорь верен ровно для этих двух полей (agentmd_path, wrapper_path):
+    их цель лежит ВНУТРИ установленного пакета. Всё остальное, что человек
+    пишет в config_server.yml, резолвит `_resolve_user_path` — см. его докстринг.
     """
     root = base or PROJECT_ROOT
     if not isinstance(maybe_path, str) or not maybe_path.strip():
@@ -37,21 +42,62 @@ def _resolve_path(maybe_path: Any, default_rel: str, *, base: str | None = None)
     return os.path.join(root, path)
 
 
-def _resolve_optional(maybe_path: Any) -> str:
-    """Опциональный путь: абсолютный → как есть; относительный → от PROJECT_ROOT;
-    пустой/не-строка → "" (пусто = «используй дефолт»)."""
+def _resolve_user_path(maybe_path: Any, default: str, *, config_dir: str) -> str:
+    """
+    Путь, который человек написал в своём config_server.yml.
+
+    - Абсолютный — как есть.
+    - Относительный — от каталога САМОГО config_server.yml, то есть от того
+      места, где человек этот путь и видит.
+    - Пустой/не строка — ``default`` (вызывающий передаёт уже абсолютный путь;
+      "" означает «поле опционально, дефолт считает кто-то ниже»).
+
+    Раньше здесь стоял тот же якорь, что у пакетных файлов, — корень ассетов.
+    На develop это совпадало с корнем репозитория (`bundled_root()` возвращал
+    `here.parent`), рядом с которым и лежит config_server.yml, поэтому
+    `swarm_logs_dir: "./agent_logs"` давал каталог рядом с конфигом. После
+    переезда ассетов внутрь пакета тот же якорь стал указывать в
+    site-packages/gc_core/assets: логи агентов писались в чужой пакет и
+    стирались при `uv tool upgrade`, а несуществующий `<assets>/swarm_skills`
+    молча оставлял песочницу без скиллов.
+    """
     if not isinstance(maybe_path, str) or not maybe_path.strip():
-        return ""
+        return default
     path = maybe_path.strip()
-    return path if os.path.isabs(path) else os.path.join(PROJECT_ROOT, path)
+    return path if os.path.isabs(path) else os.path.join(config_dir, path)
 
 
-def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _user_config_dir(server_cfg: Dict[str, Any], explicit: str | None) -> str:
+    """Каталог, от которого резолвятся относительные пути пользовательского конфига.
+
+    Приоритет: явный аргумент `config_dir` → каталог прочитанного
+    config_server.yml (ключ `config_path`, его кладёт `load_server_config`) →
+    CWD. CWD в хвосте не наугад: это первый кандидат в поиске самого
+    config_server.yml (см. `rest_api.server_config._server_config_candidates`),
+    так что при «файла нет вовсе» относительный путь смотрит туда же, куда
+    смотрел поиск.
+    """
+    if isinstance(explicit, str) and explicit.strip():
+        return os.path.abspath(explicit.strip())
+    cfg_path = server_cfg.get("config_path")
+    if isinstance(cfg_path, str) and cfg_path.strip():
+        return os.path.dirname(os.path.abspath(cfg_path.strip()))
+    return os.getcwd()
+
+
+def build_swarm_config(
+    server_cfg: Dict[str, Any], *, config_dir: str | None = None
+) -> Dict[str, Any]:
     """
     Построить нормализованный конфиг для swarm-режима.
 
     На вход подаётся целиком SERVER_CONFIG (как в src.server),
-    на выходе — словарь с полями:
+    ``config_dir`` — каталог, от которого резолвятся ОТНОСИТЕЛЬНЫЕ пути
+    пользовательского конфига. Обычно передавать его не нужно:
+    `load_server_config` кладёт прочитанный путь в `server_cfg["config_path"]`,
+    и каталог берётся оттуда (см. `_user_config_dir`).
+
+    На выходе — словарь с полями:
       - enabled: bool
       - threads_dir: str (абсолютный путь)
       - sandbox_root_dir: str (абсолютный путь)
@@ -63,28 +109,35 @@ def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
       - sandbox_tool: str
       - agentmd_path: str (абсолютный путь)
       - skills_dir: str (абсолютный путь)
+      - skills_dir_configured: bool — путь назван человеком, а не взят дефолтом
     """
     raw_swarm = server_cfg.get("swarm") or {}
 
     enabled = bool(raw_swarm.get("enabled", False))
 
+    base_dir = _user_config_dir(server_cfg, config_dir)
     paths = env_vars.gc_paths()
     slug = env_vars.project_slug()
     swarm_root = paths["state"] / "projects" / slug / "swarm"
     # Процессный каталог sworm'а (meta/completion/stdout/stderr). Поле в конфиге —
     # `swarm_threads_dir` (старое имя `threads_dir` ещё читается для совместимости).
-    threads_dir = _resolve_path(
+    threads_dir = _resolve_user_path(
         raw_swarm.get("swarm_threads_dir", raw_swarm.get("threads_dir")),
         str(swarm_root / "threads"),
+        config_dir=base_dir,
     )
-    sandbox_root_dir = _resolve_path(
-        raw_swarm.get("sandbox_root_dir"), str(swarm_root / "sandboxes")
+    sandbox_root_dir = _resolve_user_path(
+        raw_swarm.get("sandbox_root_dir"),
+        str(swarm_root / "sandboxes"),
+        config_dir=base_dir,
     )
 
     # Куда на хосте lifecycle сохраняет агентские .gc/logs из песочницы при
-    # финализации. Абсолютный путь — как есть; относительный — от PROJECT_ROOT;
-    # пусто → дефолт `threads_dir/<swarm_id>/agent_logs/`.
-    swarm_logs_dir = _resolve_optional(raw_swarm.get("swarm_logs_dir"))
+    # финализации. Абсолютный путь — как есть; относительный — от каталога
+    # config_server.yml; пусто → дефолт `threads_dir/<swarm_id>/agent_logs/`.
+    swarm_logs_dir = _resolve_user_path(
+        raw_swarm.get("swarm_logs_dir"), "", config_dir=base_dir
+    )
 
     max_concurrent = int(raw_swarm.get("max_concurrent", 10))
     ttl_seconds = int(raw_swarm.get("ttl_seconds", 86400))
@@ -102,19 +155,58 @@ def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     # поэтому дефолт работает и в установленном профиле. Раньше она жила в
     # scripts/ репозитория, который не попадал ни в одно колесо: дефолтного
     # пути там быть не могло в принципе.
-    wrapper_path = _resolve_path(
+    wrapper_path = _resolve_asset_path(
         raw_swarm.get("wrapper_path"),
         "run-cli-in-sandbox.sh",
         base=_PACKAGE_DIR,
     )
     sandbox_tool = str(raw_swarm.get("sandbox_tool", "bubblewrap"))
-    agentmd_path = _resolve_path(raw_swarm.get("agentmd_path"), "prompts/server_agent.md")
-    skills_dir = _resolve_path(raw_swarm.get("skills_dir"), "swarm_skills")
+    agentmd_path = _resolve_asset_path(
+        raw_swarm.get("agentmd_path"), "prompts/server_agent.md"
+    )
+    # Скиллы для песочницы — пользовательский контент, а не ассет дистрибутива:
+    # дефолт кладём рядом с обычным пользовательским слоем скиллов ядра
+    # (`gc_paths()["data"]/skills`, см. tools/skills/registry.get_skills_registry),
+    # только под своим именем. Каталог переживает `uv tool upgrade`, в отличие
+    # от прежнего `<assets>/swarm_skills`, которого к тому же не существовало
+    # нигде в дереве — runner молча пропускал копирование.
+    skills_dir = _resolve_user_path(
+        raw_swarm.get("skills_dir"),
+        str(paths["data"] / "swarm_skills"),
+        config_dir=base_dir,
+    )
+    # Отличаем «пользователь назвал каталог» от «взят дефолт». Нужно ровно для
+    # громкости предупреждения в runner: несуществующий каталог, который человек
+    # выписал руками, — ошибка конфигурации и требует крика; несуществующий
+    # дефолт означает просто «swarm-скиллы не заводили», и кричать об этом на
+    # КАЖДОМ запуске нельзя. Дефолт непустой всегда, поэтому по самому значению
+    # эти два случая уже неразличимы.
+    skills_dir_configured = bool(str(raw_swarm.get("skills_dir") or "").strip())
 
     # Шаг 1.11 (AR-6, AR-7): bind-mount пути для wrapper.sh.
-    # cli_venv_root и agent_dep_dir принимают только абсолютные пути;
-    # если не заданы — wrapper делает fallback на legacy-поведение (PATH lookup).
+    # cli_venv_root и agent_dep_dir принимают только абсолютные пути.
+    #
+    # Незаданный cli_venv_root дефолтится на venv, в котором работает САМ сервер,
+    # если искомая команда там есть. Причина: `uv tool install gc-server` ставит
+    # gc-cli зависимостью в venv инструмента, но наружу, в PATH, выносит только
+    # gc-serve — команды зависимостей uv не экспортирует. PATH-fallback обёртки
+    # в такой установке команду не находил, и КАЖДЫЙ sworm завершался exit 127.
+    # А venv сервера — ровно то место, где gc-cli лежит: и при `uv tool install`,
+    # и в dev-чекауте с editable-установкой.
+    #
+    # Если команды там нет (сервер поднят системным python без venv), остаётся
+    # прежний PATH-fallback, и обёртка отказывает на нём с внятным сообщением
+    # вместо голого exit 127.
     cli_venv_root = _abs_or_empty(raw_swarm.get("cli_venv_root"))
+    if (
+        "cli_venv_root" not in raw_swarm
+        and os.path.isfile(os.path.join(sys.prefix, "bin", cli_command))
+    ):
+        # Именно ОТСУТСТВИЕ ключа, а не пустой результат `_abs_or_empty`. Если
+        # человек ключ написал, но значение негодное (относительный путь), он
+        # обязан увидеть прежнее «игнорируется», а не тихую подстановку чужого
+        # venv вместо своей опечатки.
+        cli_venv_root = sys.prefix
     agent_dep_dir = _abs_or_empty(raw_swarm.get("agent_dep_dir"))
     extra_mounts_raw = raw_swarm.get("extra_mounts") or []
     if not isinstance(extra_mounts_raw, list):
@@ -146,6 +238,7 @@ def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "sandbox_tool": sandbox_tool,
         "agentmd_path": agentmd_path,
         "skills_dir": skills_dir,
+        "skills_dir_configured": skills_dir_configured,
         "cli_venv_root": cli_venv_root,
         "agent_dep_dir": agent_dep_dir,
         "extra_mounts": extra_mounts,

@@ -7,6 +7,8 @@ import yaml
 from gc_core.bundled_assets import repo_root
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars, project_slug
+from gc_server.rest_api.server_config import load_server_config
+from gc_server.swarm import config as swarm_config
 from gc_server.swarm.config import build_swarm_config
 
 
@@ -70,11 +72,141 @@ def test_demo_template_swarm_paths_are_usable():
 
 
 def test_swarm_wrapper_and_agentmd_paths_unchanged(isolated_env, tmp_path):
-    """Пакетные ресурсы остаются с PROJECT_ROOT-дефолтами."""
+    """Пакетные ресурсы остаются с PROJECT_ROOT-дефолтами.
+
+    skills_dir из этого списка ушёл намеренно: он не файл дистрибутива, а
+    пользовательский контент, и его дефолт переехал под gc_paths() — см.
+    test_skills_dir_default_lives_under_gc_data.
+    """
     cfg = build_swarm_config({})
     assert tmp_path not in Path(cfg["wrapper_path"]).parents
     assert tmp_path not in Path(cfg["agentmd_path"]).parents
-    assert tmp_path not in Path(cfg["skills_dir"]).parents
+
+
+# ---------------------------------------------------------------------------
+# Якорь относительных путей пользовательского конфига
+#
+# До разбиения на пакеты `bundled_root()` возвращал корень репозитория — то есть
+# ровно тот каталог, где лежит config_server.yml, и "./agent_logs" давал каталог
+# рядом с конфигом. После переезда ассетов внутрь пакета тот же якорь стал
+# указывать в site-packages/gc_core/assets: логи агентов писались в чужой пакет и
+# исчезали при `uv tool upgrade`, а несуществующий <assets>/swarm_skills молча
+# оставлял песочницу без скиллов.
+# ---------------------------------------------------------------------------
+
+
+def _server_cfg_with_config_at(path: Path, swarm: dict) -> dict:
+    """SERVER_CONFIG в том виде, в каком его отдаёт load_server_config()."""
+    return {"config_path": str(path), "swarm": swarm}
+
+
+def test_relative_user_paths_resolve_next_to_server_config(isolated_env, tmp_path):
+    """Относительные пути берутся от каталога САМОГО config_server.yml."""
+    conf_dir = tmp_path / "etc"
+    conf_dir.mkdir()
+    cfg = build_swarm_config(
+        _server_cfg_with_config_at(
+            conf_dir / "config_server.yml",
+            {
+                "swarm_threads_dir": "swarm_threads",
+                "sandbox_root_dir": ".swarm_sandboxes",
+                "swarm_logs_dir": "./agent_logs",
+                "skills_dir": "./swarm_skills",
+            },
+        )
+    )
+    assert Path(cfg["threads_dir"]) == conf_dir / "swarm_threads"
+    assert Path(cfg["sandbox_root_dir"]) == conf_dir / ".swarm_sandboxes"
+    assert Path(cfg["swarm_logs_dir"]) == conf_dir / "agent_logs"
+    assert Path(cfg["skills_dir"]) == conf_dir / "swarm_skills"
+
+
+def test_relative_user_paths_never_land_in_bundled_assets(isolated_env, tmp_path):
+    """Сама регрессия: ни один пользовательский путь не уезжает в каталог ассетов.
+
+    Проверяем не «равно ожидаемому», а «не внутри чужого пакета» — так сетка
+    переживёт следующий переезд ассетов и всё равно поймает возврат якоря.
+    """
+    conf_dir = tmp_path / "etc"
+    conf_dir.mkdir()
+    assets = Path(swarm_config.PROJECT_ROOT).resolve()
+    cfg = build_swarm_config(
+        _server_cfg_with_config_at(
+            conf_dir / "config_server.yml",
+            {
+                "swarm_threads_dir": "swarm_threads",
+                "sandbox_root_dir": ".swarm_sandboxes",
+                "swarm_logs_dir": "./agent_logs",
+                "skills_dir": "./swarm_skills",
+            },
+        )
+    )
+    for key in ("threads_dir", "sandbox_root_dir", "swarm_logs_dir", "skills_dir"):
+        resolved = Path(cfg[key]).resolve()
+        assert assets not in resolved.parents and resolved != assets, (
+            f"{key} снова резолвится внутрь ассетов: {resolved}"
+        )
+
+
+def test_absolute_user_paths_are_left_alone(isolated_env, tmp_path):
+    """Абсолютный путь пользователя не трогаем — каталог конфига ни при чём."""
+    conf_dir = tmp_path / "etc"
+    conf_dir.mkdir()
+    cfg = build_swarm_config(
+        _server_cfg_with_config_at(
+            conf_dir / "config_server.yml",
+            {"swarm_logs_dir": "/var/lib/gc/agent_logs"},
+        )
+    )
+    assert cfg["swarm_logs_dir"] == "/var/lib/gc/agent_logs"
+
+
+def test_explicit_config_dir_beats_config_path(isolated_env, tmp_path):
+    """Явный аргумент сильнее ключа config_path — для вызывающих без dict'а."""
+    conf_dir = tmp_path / "etc"
+    conf_dir.mkdir()
+    explicit = tmp_path / "elsewhere"
+    cfg = build_swarm_config(
+        _server_cfg_with_config_at(
+            conf_dir / "config_server.yml", {"skills_dir": "./swarm_skills"}
+        ),
+        config_dir=str(explicit),
+    )
+    assert Path(cfg["skills_dir"]) == explicit / "swarm_skills"
+
+
+def test_without_config_path_relative_resolves_from_cwd(isolated_env, tmp_path):
+    """Конфига нет вовсе (минимальный дефолт) — якорь CWD, первый кандидат поиска."""
+    cfg = build_swarm_config({"swarm": {"skills_dir": "./swarm_skills"}})
+    assert Path(cfg["skills_dir"]) == tmp_path / "swarm_skills"
+
+
+def test_skills_dir_default_lives_under_gc_data(isolated_env, tmp_path):
+    """Дефолт скиллов — в XDG-каталоге данных, а не в каталоге ассетов.
+
+    Каталог ассетов принадлежит чужому пакету: `uv tool upgrade` его
+    переустанавливает, а до переезда его вообще не существовало — runner тихо
+    пропускал копирование.
+    """
+    cfg = build_swarm_config({})
+    assert Path(cfg["skills_dir"]) == env_vars.gc_paths()["data"] / "swarm_skills"
+
+
+def test_config_path_of_load_server_config_feeds_the_anchor(monkeypatch, tmp_path):
+    """Сквозной путь: load_server_config → build_swarm_config, без ручной склейки.
+
+    Именно так их зовёт gc_server.server, и именно здесь ломался якорь: путь
+    прочитанного файла раньше не доезжал до swarm-конфига вовсе.
+    """
+    conf_dir = tmp_path / "etc"
+    conf_dir.mkdir()
+    (conf_dir / "config_server.yml").write_text(
+        "swarm:\n  enabled: true\n  swarm_logs_dir: ./agent_logs\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=conf_dir / "config_server.yml"))
+
+    cfg = build_swarm_config(load_server_config())
+    assert Path(cfg["swarm_logs_dir"]) == conf_dir / "agent_logs"
 
 
 # ---------------------------------------------------------------------------

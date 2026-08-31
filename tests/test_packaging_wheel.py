@@ -265,6 +265,22 @@ def test_versions_are_pinned_together():
     for sub in ("packages/cli", "packages/tui", "packages/server"):
         leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         assert f"gc-mcp=={ver}" in leaf["project"]["dependencies"], sub
+    # gc-cli — зависимость СЕРВЕРА, а не гигиена списка: sworm запускает внутри
+    # песочницы именно `gc-cli` (swarm/run-cli-in-sandbox.sh). Пока дистрибутив
+    # был один, он объявлял обе команды сам; после разделения профилей установка
+    # сервера перестала приносить CLI, и каждый sworm заканчивался exit 127.
+    # Пин обязан быть ТОЧНЫМ, как у соседей: с `>=` в установку сервера приедет
+    # CLI из другого коммита, и материализованный для песочницы config.yml
+    # разойдётся со схемой ядра, которое стоит рядом. Подмена `==` на `>=` этой
+    # строкой и красится — цикл выше её не держит, он смотрит только на gc-core
+    # и gc-mcp.
+    server = tomllib.loads(
+        (REPO / "packages/server/pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert f"gc-cli=={ver}" in server["project"]["dependencies"], (
+        "gc-server обязан пинить gc-cli точно — иначе sworm остаётся без CLI "
+        "или получает его из чужого коммита"
+    )
 
 
 def test_profile_subdirs_match_layout():

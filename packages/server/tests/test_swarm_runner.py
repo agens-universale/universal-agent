@@ -426,6 +426,80 @@ def test_materialize_copies_swarm_agent_md(tmp_path):
     assert written["paths"]["agent_md_path"] == "/work/.gc/agent.md"
 
 
+def test_materialize_copies_swarm_skills(tmp_path):
+    """Если каталог скиллов есть — содержимое едет в песочницу, path обновляется."""
+    import yaml as _yaml
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("backend: {}\n")
+    src_skills = tmp_path / "swarm_skills" / "hello"
+    src_skills.mkdir(parents=True)
+    (src_skills / "SKILL.md").write_text("# hello\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+
+    runner._materialize_runtime_config(
+        str(host_cfg), str(sandbox),
+        {"skills_dir": str(tmp_path / "swarm_skills")},
+    )
+    assert (sandbox / ".gc" / "skills" / "hello" / "SKILL.md").exists()
+    written = _yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
+    assert written["paths"]["skills_data_path"] == "/work/.gc/skills"
+
+
+def test_materialize_warns_when_skills_dir_missing(tmp_path, caplog):
+    """Промах по skills_dir обязан быть слышным.
+
+    Без копирования paths.skills_data_path не переопределяется, песочница
+    поднимается без скиллов, а sworm завершается «успешно» — ни ошибки, ни
+    строки в лог. Ровно так и жил дефолт, указывавший в несуществующий
+    <assets>/swarm_skills.
+
+    Кричим ТОЛЬКО про путь, который человек выписал руками
+    (`skills_dir_configured`): дефолт непустой всегда, и без этого различения
+    предупреждение сыпалось бы на каждом запуске у всех, кто swarm-скиллы не
+    заводил, — то есть приучало бы его пропускать.
+    """
+    import logging
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("backend: {}\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    missing = tmp_path / "no_such_skills"
+
+    with caplog.at_level(logging.WARNING, logger="gc_server.swarm.runner"):
+        runner._materialize_runtime_config(
+            str(host_cfg), str(sandbox),
+            {"skills_dir": str(missing), "skills_dir_configured": True},
+        )
+
+    assert str(missing) in caplog.text
+    assert "скилл" in caplog.text.lower()
+    assert not (sandbox / ".gc" / "skills").exists()
+
+
+def test_materialize_silent_when_skills_dir_not_configured(tmp_path, caplog):
+    """Незаданный skills_dir — законная конфигурация, предупреждать не о чем.
+
+    Проверяется НЕ пустая строка (её `build_swarm_config` больше вернуть не
+    может — дефолт непустой), а именно случай «дефолт, и каталога нет»: свежая
+    установка, где swarm-скиллы не заводили.
+    """
+    import logging
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("backend: {}\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    default_missing = tmp_path / "gc-data" / "swarm_skills"
+
+    with caplog.at_level(logging.WARNING, logger="gc_server.swarm.runner"):
+        runner._materialize_runtime_config(
+            str(host_cfg), str(sandbox),
+            {"skills_dir": str(default_missing), "skills_dir_configured": False},
+        )
+
+    assert "скилл" not in caplog.text.lower()
+
+
 def test_materialize_missing_host_config_uses_empty_base(tmp_path):
     """Если host config не найден — продолжаем с пустым base + overrides."""
     import yaml as _yaml

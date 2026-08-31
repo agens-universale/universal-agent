@@ -167,6 +167,32 @@ if [[ -n "${SWARM_CLI_VENV_ROOT}" ]]; then
 else
   CLI_BIN="${SWARM_CLI_COMMAND}"
 fi
+
+# Проверяем, что команда вообще есть, ДО запуска. Раньше единственным следом
+# отсутствующего CLI были exit 127 и error_type=wrapper_setup_error — по ним не
+# видно, что не найден именно gc-cli, и человек ищет поломку в bwrap.
+# Ветка без cli_venv_root особенно коварна: `uv tool install gc-server`
+# экспортирует в PATH только СВОИ команды (проверено установкой во временный
+# UV_TOOL_DIR: gc-cli лежит в <UV_TOOL_DIR>/gc-server/bin, а симлинка в
+# UV_TOOL_BIN_DIR у него нет), поэтому gc-cli стоит рядом с сервером, но по
+# имени не находится. Лечится заданием swarm.cli_venv_root.
+CLI_FOUND=0
+if [[ -n "${SWARM_CLI_VENV_ROOT}" ]]; then
+  [[ -x "${CLI_BIN}" ]] && CLI_FOUND=1
+  CLI_HINT="check swarm.cli_venv_root in config_server.yml (now: ${SWARM_CLI_VENV_ROOT})"
+else
+  command -v "${CLI_BIN}" >/dev/null 2>&1 && CLI_FOUND=1
+  CLI_HINT="uv tool install exports only the commands of the requested distribution, so gc-cli from the gc-server tool venv is NOT in PATH; point swarm.cli_venv_root at that venv"
+fi
+if [[ "${CLI_FOUND}" -ne 1 ]]; then
+  CLI_ERROR="CLI ${SWARM_CLI_COMMAND} not found (tried: ${CLI_BIN}); ${CLI_HINT}"
+  printf '%s\n' "${CLI_ERROR}" >> "${STDERR_LOG}"
+  # 127 — тот же код, что вернул бы сам запуск ненайденной команды: сторонние
+  # мониторы, которые уже смотрят на exit_code, ничего не теряют.
+  write_completion 127 "wrapper_setup_error" "${CLI_ERROR}"
+  exit 127
+fi
+
 CLI_CMD=(
   "${CLI_BIN}"
   --config "/work/.gc/config.yml"

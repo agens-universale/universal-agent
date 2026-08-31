@@ -183,6 +183,10 @@ def _materialize_runtime_config(
         swarm_overrides["paths"]["agent_md_path"] = "/work/.gc/agent.md"
 
     # Опционально: swarm-specific skills (skills_dir) — копируем содержимое.
+    # Промах по каталогу молчаливым быть не должен: без копирования
+    # paths.skills_data_path не переопределяется, песочница поднимается без
+    # скиллов, и sworm завершается «успешно» — ровно так и жил дефолт,
+    # указывавший в несуществующий <assets>/swarm_skills.
     swarm_skills_dir = swarm_cfg.get("skills_dir") or ""
     if swarm_skills_dir and os.path.isdir(swarm_skills_dir):
         dst_skills = os.path.join(sandbox_path, ".gc", "skills")
@@ -190,6 +194,18 @@ def _materialize_runtime_config(
             shutil.rmtree(dst_skills)
         shutil.copytree(swarm_skills_dir, dst_skills)
         swarm_overrides["paths"]["skills_data_path"] = "/work/.gc/skills"
+    elif swarm_skills_dir and swarm_cfg.get("skills_dir_configured"):
+        # Кричим только про путь, который человек выписал руками: это ошибка
+        # конфигурации. Несуществующий ДЕФОЛТ означает лишь «swarm-скиллы не
+        # заводили» — законное состояние свежей установки, и предупреждать о нём
+        # на каждом запуске значит приучить пропускать это предупреждение мимо.
+        logger.warning(
+            "runtime config materialization: каталог скиллов %s не существует — "
+            "в песочницу ничего не скопировано, агент пойдёт БЕЗ swarm-скиллов. "
+            "Путь берётся из swarm.skills_dir в config_server.yml "
+            "(относительный — от каталога самого конфига).",
+            swarm_skills_dir,
+        )
 
     merged = deep_merge(raw, swarm_overrides)
 

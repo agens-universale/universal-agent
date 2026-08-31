@@ -49,6 +49,13 @@ def load_server_config() -> Dict[str, Any]:
     - logging (опционально)
     - agent_overrides (опционально)
     - threads_cleanup (опционально)
+
+    Плюс служебный ключ `config_path` — путь файла, который реально прочитан
+    ("" если файла нет и вернулся минимальный дефолт). Секцией он не является;
+    он нужен потребителям, которые резолвят ОТНОСИТЕЛЬНЫЕ пути из этого же
+    файла: якорем обязан быть каталог самого config_server.yml, а другого
+    места, где этот путь известен, в коде нет (см.
+    `swarm.config._user_config_dir`).
     """
     from gc_core.config_modules import env_vars
     if env_vars.env.server_config_path is not None:
@@ -78,6 +85,7 @@ def load_server_config() -> Dict[str, Any]:
             "agent": {"server_agentmd_path": "./prompts/server_agent.md"},
             "agent_overrides": {},
             "logging": {},
+            "config_path": "",
         }
 
     # Единственная строка, по которой вообще можно узнать, ЧЕЙ конфиг прочитан:
@@ -113,6 +121,7 @@ def load_server_config() -> Dict[str, Any]:
         "logging": raw.get("logging") or {},
         "swarm": swarm_cfg,
         "threads_cleanup": threads_cleanup_cfg,
+        "config_path": cfg_path,
     }
 
 

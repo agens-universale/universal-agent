@@ -49,6 +49,29 @@ def test_load_server_config_logs_which_candidate_won(monkeypatch, tmp_path, capl
     assert os.path.realpath(str(tmp_path / "config_server.yml")) in caplog.text
 
 
+def test_load_server_config_reports_the_file_it_read(monkeypatch, tmp_path):
+    """Прочитанный путь обязан уезжать вместе с конфигом.
+
+    Он единственный источник каталога, от которого резолвятся относительные
+    пути этого же файла (swarm.skills_dir и соседи). Пока его не было, swarm
+    резолвил их от корня bundled-ассетов — то есть внутрь чужого пакета.
+    """
+    custom = tmp_path / "my_server.yml"
+    custom.write_text("server:\n  port: 9999\n", encoding="utf-8")
+    monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=custom))
+
+    assert load_server_config()["config_path"] == str(custom)
+
+
+def test_load_server_config_reports_empty_path_when_nothing_found(monkeypatch, tmp_path):
+    """Файла нет — ключ есть, но пустой: «якорь неизвестен», а не «якорь = ассеты»."""
+    monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
+    monkeypatch.setattr("gc_server.rest_api.server_config.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    assert load_server_config()["config_path"] == ""
+
+
 # --- Task 10 (ревью): agent_overrides идут через apply_cli_overrides ------------
 #
 # Контракт (CLAUDE.md): agent_overrides перекрывают config.yml так же, как

@@ -51,14 +51,19 @@ threads_cleanup:
 
 swarm:
   enabled: false
+  # ВСЕ пути этой секции, кроме agentmd_path и wrapper_path (они целятся в файлы
+  # ВНУТРИ пакета), — пользовательские: абсолютный берётся как есть,
+  # относительный резолвится от каталога ЭТОГО файла, пустой даёт дефолт под
+  # XDG-каталогами (gc_paths(): state — для тредов и песочниц, data — для
+  # скиллов). Раньше якорем был корень bundled-ассетов; до разбиения на пакеты он
+  # совпадал с корнем репозитория, где лежит и config_server.yml, а после
+  # переезда ассетов стал указывать в site-packages/gc_core/assets — то есть в
+  # чужой пакет, который стирает `uv tool upgrade`.
   # Процессный каталог sworm'а на хосте: meta/completion/stdout/stderr per swarm_id.
   swarm_threads_dir: "swarm_threads"
   sandbox_root_dir: ".swarm_sandboxes"
   # Куда на хосте сохранять агентские .gc/logs из песочницы при финализации
-  # (это делает сам swarm-код, lifecycle, а не тест-оркестратор). Абсолютный путь
-  # как есть; относительный резолвится от корня bundled-ассетов (в репозитории
-  # packages/core/assets, в колесе site-packages/gc_core/assets), а НЕ от корня
-  # репо — см. PROJECT_ROOT в swarm/config.py. Пусто → дефолт
+  # (это делает сам swarm-код, lifecycle, а не тест-оркестратор). Пусто → дефолт
   # swarm_threads_dir/<swarm_id>/agent_logs/. Сохраняются даже при timeout/kill.
   #swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
   max_concurrent: 10
@@ -77,11 +82,25 @@ swarm:
   # из коробки; переопределять — только абсолютным путём.
   #wrapper_path: "/opt/gc-cli/.venv/lib/python3.12/site-packages/gc_server/swarm/run-cli-in-sandbox.sh"
   sandbox_tool: "bubblewrap"
+  # agentmd_path — файл из колеса: относительный путь резолвится от корня
+  # bundled-ассетов (packages/core/assets в репозитории,
+  # site-packages/gc_core/assets в установке), а не от этого файла.
   agentmd_path: "./prompts/server_agent.md"
+  # А вот скиллы — пользовательский контент. "./swarm_skills" здесь означает
+  # каталог РЯДОМ с config_server.yml; пусто → дефолт
+  # <gc_paths.data>/swarm_skills. Если каталога нет, runner скажет об этом
+  # предупреждением и поднимет песочницу без скиллов — молчаливым промах больше
+  # не бывает.
   skills_dir: "./swarm_skills"
   # Bind-mount пути для wrapper.sh (AR-6 / AR-7). ТОЛЬКО абсолютные пути —
   # относительные/пустые молча игнорируются (см. swarm/config.py::_abs_or_empty),
   # и тогда wrapper делает fallback на PATH lookup. Полная дока — docs/swarm.md.
+  # ВАЖНО для установки через `uv tool install gc-server`: gc-cli приезжает
+  # зависимостью и лежит в <UV_TOOL_DIR>/gc-server/bin, но в PATH uv выносит
+  # только команды самого дистрибутива (gc-serve). PATH-fallback в такой
+  # установке команду не найдёт — задавайте cli_venv_root равным
+  # <UV_TOOL_DIR>/gc-server. Обёртка теперь говорит об этом прямо, а не отдаёт
+  # голый exit 127.
   # cli_venv_root: "/opt/gc-cli/.venv"      # ro-bind venv c gc-cli внутрь песочницы
   # agent_dep_dir: "/opt/gc-cli/mcp-deps"   # зависимости MCP (node/npx и т.п.)
   # extra_mounts:                           # доп. ro-bind (prompts, skills, статика)
