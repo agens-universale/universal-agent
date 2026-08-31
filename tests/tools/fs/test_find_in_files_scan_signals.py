@@ -903,3 +903,20 @@ def test_native_branch_streams_top_k_and_maps_from_files_seen(tmp_path, monkeypa
     assert data["stop_reason"] == "output_capped"
     assert data["top_level_dirs"][0]["match_files"] == 7  # по files_seen, не по одному показанному матчу
     assert data["top_level_dirs_total"] == 2
+
+
+def test_unfiltered_host_reads_names_a_rejected_needle(tmp_path, monkeypatch):
+    """Игла есть, но для sandbox-фильтра непригодна (не-ASCII при case_insensitive):
+    совет «дай фиксированную подстроку» тут — дезориентация."""
+    for i in range(5):
+        (tmp_path / f"f{i}.py").write_text("Ключа\n", encoding="utf-8")
+    tool = _tool(tmp_path, {"max_unfiltered_host_reads": 3})
+    _native_ready(tool, monkeypatch)
+    _sandbox(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="Ключ(а|б)", query_mode="python-re", case_insensitive=True)
+
+    assert data["stop_reason"] == "unfiltered_host_reads"
+    guidance = data["guidance"]
+    assert "cannot drive" in guidance
+    assert "give the pattern a fixed substring" not in guidance

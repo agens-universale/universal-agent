@@ -56,16 +56,18 @@ def _split_grep_record(raw: str) -> Optional[Tuple[str, int, str]]:
     return m.group("path"), int(m.group("line")), m.group("text")
 
 
-def _grep_env(pattern: str) -> Dict[str, str]:
-    """Clean env; an ASCII pattern adds byte semantics (``LC_ALL=C``).
+def _grep_env(plan: NativeGrepPlan) -> Dict[str, str]:
+    """Clean env; an ASCII fixed-string pattern adds byte semantics (``LC_ALL=C``).
 
     In a UTF-8 locale grep treats a cp1251 / latin-1 file as binary and, with
     ``--binary-files=without-match``, skips it silently — the answer then claims
-    completeness. Bytes cannot miss an ASCII needle (``-i`` folds ASCII only,
-    which is exactly the pattern's alphabet). Non-ASCII patterns keep the locale.
+    completeness. Bytes cannot miss an ASCII fixed needle (``-i`` folds ASCII
+    only, which is exactly the pattern's alphabet). ERE stays in the locale even
+    for ASCII patterns: under bytes ``.`` and ``[^x]`` match one BYTE, so
+    ``caf.s`` would stop matching ``cafés``.
     """
     env = dict(_GREP_CLEAN_ENV)
-    if pattern.isascii():
+    if plan.fixed and plan.pattern.isascii():
         env["LC_ALL"] = "C"
     return env
 
@@ -82,10 +84,10 @@ def _stream_top_k(
     backend: Any,
     report_path: Callable[[str], str],
     allow_path: Optional[Callable[[str], bool]],
-    rank_key: Callable[[str], Any],
-    top_k: int,
+    rank_key: Optional[Callable[[str], Any]],
+    top_k: Optional[int],
 ) -> NativeGrepResult:
-    """One pass over the raw buffer: rank every record, keep only the K best.
+    """One pass over the raw buffer; with ``rank_key`` — keep only the K best.
 
     The full-parse path materialises a dict per match and sorts them all — on a
     50M buffer that is ~900 MB for an answer of 100 rows. Here records are read
@@ -93,6 +95,9 @@ def _stream_top_k(
     heap keeps the K best, and only the winners become match dicts. The answer
     is identical (same key, disk order on ties); ``total_matches`` and
     ``files_seen`` feed the limit flags and the density map without the losers.
+
+    ``rank_key=None`` — the plain path: every record in disk order (the legacy
+    full parse, same brain, no second parser to drift).
     """
     end = len(stdout)
     torn_tail = hit_cap and not stdout.endswith("\n")
@@ -118,6 +123,9 @@ def _stream_top_k(
                 continue
             total += 1
             files_seen.add(abs_p)
+            if rank_key is None:
+                yield 0, i, abs_p, line_no, text, is_last
+                continue
             key = key_cache.get(abs_p)
             if key is None:
                 key = rank_key(abs_p)
@@ -125,7 +133,10 @@ def _stream_top_k(
             yield key, i, abs_p, line_no, text, is_last
 
     try:
-        winners = heapq.nsmallest(top_k, records(), key=lambda r: (r[0], r[1]))
+        if rank_key is not None and top_k is not None:
+            winners = heapq.nsmallest(top_k, records(), key=lambda r: (r[0], r[1]))
+        else:
+            winners = list(records())
     except _ParseFailure:
         return NativeGrepResult(
             matches=[], truncated=False, hit_capture_cap=hit_cap, failure="native_error"
@@ -223,60 +234,6 @@ def native_grep_refusal(
     return None
 
 
-def parse_grep_match_lines(
-    stdout: str,
-    *,
-    root: str,
-    join: Callable[[str, str], str],
-    isabs: Callable[[str], bool],
-    report_path: Callable[[str], str],
-    allow_truncated_tail: bool = False,
-) -> Optional[List[Dict[str, Any]]]:
-    """Parse ``PATH:LINENO:TEXT``. Unparseable → None (fallback).
-
-    ``isabs`` comes from the backend: grep prints paths in the BACKEND's syntax,
-    and a host answer mis-classifies them — CPython 3.13 stopped calling ``/x``
-    absolute on Windows, so the root was joined a second time.
-
-    ``allow_truncated_tail``: a capture cap may cut the last line inside the
-    ``file:line:`` prefix so it is not a match line. Keep the prefix, drop the
-    tail; do not fail the whole buffer (that used to force a Python download).
-    """
-    matches: List[Dict[str, Any]] = []
-    lines = (stdout or "").splitlines()
-    last = max((i for i, ln in enumerate(lines) if ln), default=-1)
-    for i, raw in enumerate(lines):
-        if not raw:
-            continue
-        rec = _split_grep_record(raw)
-        if rec is None:
-            # Сторож про двоичные файлы и управляющие символы применим только к
-            # строкам, которые НЕ разобрались: с `--binary-files=without-match`
-            # заметку «Binary file X matches» grep не печатает никогда, поэтому
-            # на разобранной строке он мог сработать лишь на самих данных.
-            if "Binary file" in raw or "\x1b[" in raw:
-                return None
-            # Only the LAST line can be a torn tail; anything else
-            # unparseable is a real anomaly → fail → Python path.
-            if allow_truncated_tail and i == last:
-                break
-            return None
-        path, line_no, text = rec
-        if not isabs(path):
-            abs_p = join(root, path)
-        else:
-            abs_p = path
-        matches.append(
-            {
-                "file": report_path(abs_p),
-                "line": line_no,
-                "end_line": line_no,
-                "line_content": text,
-                "context": text + ("\n" if not text.endswith("\n") else ""),
-            }
-        )
-    return matches
-
 
 def _fnmatch_escape(path: str) -> str:
     """Literal ``find -path`` pattern: backslash-escape the fnmatch metacharacters."""
@@ -364,7 +321,6 @@ def build_grep_argv_flags(
     case_insensitive: bool = False,
     fixed: bool = False,
     include: Optional[str] = None,
-    null_after_name: bool = False,
 ) -> List[str]:
     """Grep flags up to (not including) ``--`` — the one source for every caller.
 
@@ -372,26 +328,47 @@ def build_grep_argv_flags(
     from here, so a flag can never be smoked in one and emitted in the other.
 
     ``-H``: always print the file name. Without it a chunk holding a single file
-    yields ``LINENO:TEXT`` and parse_grep_match_lines reads the line number as a
+    yields ``LINENO:TEXT`` and the record parser reads the line number as a
     path (phantom files, wrong line numbers).
 
-    ``null_after_name``: ``--null`` puts NUL after the file name instead of the
-    colon (GNU and BSD; the short ``-Z`` means *decompress* on BSD). Production
-    asks for it so a colon inside a file name cannot break the parse; the
-    capability probes keep the colon form they expect.
+    ``--null`` puts NUL after the file name instead of the colon (GNU and BSD;
+    the short ``-Z`` means *decompress* on BSD): a colon inside a file name can
+    no longer break the parse. ``--devices=skip``: a symlink to a FIFO handed to
+    grep as an argument blocks open() until the timeout otherwise. Both are
+    always on — the probes smoke exactly what production emits, and a grep
+    without them (busybox) honestly fails the probe.
     """
     argv: List[str] = [grep_bin, "-H"]
     if recursive:
         argv.append("-R")
-    argv.extend(["-n", "--color=never", "--no-messages", "--binary-files=without-match"])
-    if null_after_name:
-        argv.append("--null")
+    argv.extend(
+        [
+            "-n",
+            "--color=never",
+            "--no-messages",
+            "--binary-files=without-match",
+            "--null",
+            "--devices=skip",
+        ]
+    )
     if case_insensitive:
         argv.append("-i")
     argv.append("-F" if fixed else "-E")
     if include:
         argv.append(f"--include={include}")
     return argv
+
+
+def _inline_env(env: Optional[Dict[str, str]]) -> str:
+    """``env K=V `` prefix for the SECOND command of a pipeline.
+
+    Harbor forwards env by prefixing ``env K=V`` to the whole command string —
+    in ``env … find … | xargs … grep …`` only find gets it. The grep half must
+    carry its own assignments inline (harmless duplication on local backends).
+    """
+    if not env:
+        return ""
+    return "env " + " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items()) + " "
 
 
 def build_find_xargs_grep_command(
@@ -402,6 +379,7 @@ def build_find_xargs_grep_command(
     file_pattern: Optional[str],
     grep_argv: Sequence[str],
     exclude_paths: Sequence[str] = (),
+    grep_env: Optional[Dict[str, str]] = None,
 ) -> str:
     """``find -print0 | xargs -0 -r grep …`` — one wire for probe and production.
 
@@ -419,7 +397,7 @@ def build_find_xargs_grep_command(
     )
     find_s = " ".join(shlex.quote(a) for a in find_argv)
     grep_s = " ".join(shlex.quote(a) for a in grep_argv)
-    return f"{find_s} | xargs -0 -r {grep_s}"
+    return f"{find_s} | xargs -0 -r {_inline_env(grep_env)}{grep_s}"
 
 
 # Byte semantics for the prefilter: with LC_ALL=C ``grep -i`` folds ASCII only
@@ -494,7 +472,7 @@ def build_prefilter_command(
     find_s = " ".join(shlex.quote(a) for a in find_argv)
     grep_s = " ".join(shlex.quote(a) for a in grep_argv)
     bom_s = " ".join(f"-e \"$(printf '{octal}')\"" for octal in _UTF16_BOM_PRINTF)
-    return f"{find_s} | xargs -0 -r {grep_s} {bom_s}"
+    return f"{find_s} | xargs -0 -r {_inline_env(dict(_PREFILTER_ENV))}{grep_s} {bom_s}"
 
 
 def native_prefilter_candidates(
@@ -596,10 +574,10 @@ def run_native_grep(
     )
 
     grep_argv: List[str] = build_grep_argv_flags(
-        case_insensitive=plan.case_insensitive, fixed=plan.fixed, null_after_name=True
+        case_insensitive=plan.case_insensitive, fixed=plan.fixed
     )
     grep_argv.extend(["--", plan.pattern])
-    env = _grep_env(plan.pattern)
+    env = _grep_env(plan)
 
     try:
         if need_prune:
@@ -611,6 +589,7 @@ def run_native_grep(
                 file_pattern=file_pattern,
                 grep_argv=grep_argv,
                 exclude_paths=exclude_paths,
+                grep_env=env,
             )
             res = backend.exec(
                 cmd,
@@ -624,7 +603,6 @@ def run_native_grep(
                 case_insensitive=plan.case_insensitive,
                 fixed=plan.fixed,
                 include=file_pattern.strip() if file_pattern else None,
-                null_after_name=True,
             )
             argv.extend(["--", plan.pattern, path])
             res = backend.exec_argv(
@@ -676,64 +654,28 @@ def run_native_grep(
         # empty success — ok for xargs -r with zero files
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
 
-    if rank_key is not None and top_k is not None:
-        return _stream_top_k(
-            stdout,
-            hit_cap=hit_cap,
-            root=path,
-            backend=backend,
-            report_path=report_path,
-            allow_path=allow_path,
-            rank_key=rank_key,
-            top_k=top_k,
-        )
-
-    lines = stdout.splitlines()
-    # The transport ceiling can cut the stream mid-line. If the torn tail still
-    # names a real file and line (a minified bundle may have only that one), it
-    # is kept and flagged below. If the cut fell inside the file:line prefix,
-    # drop that tail and keep the prefix — do not fail the whole buffer.
-    nonempty = [ln for ln in lines if ln]
-    last_is_match = bool(nonempty) and _split_grep_record(nonempty[-1]) is not None
-    torn_tail = hit_cap and last_is_match and not stdout.endswith("\n")
-    truncated = False
-    if allow_path is None and max_matches is not None:
-        need = max_matches + 1
-        if len(lines) > need:
-            lines = lines[:need]
-            truncated = True
-        elif hit_cap:
-            truncated = True
-    elif hit_cap:
-        # With a filter (or no count cut) the pre-parse cut is unsafe: allowed
-        # or better-ranked hits may sit past it.
-        truncated = True
-
-    parsed = parse_grep_match_lines(
-        "\n".join(lines),
+    result = _stream_top_k(
+        stdout,
+        hit_cap=hit_cap,
         root=path,
-        join=backend.join,
-        isabs=backend.isabs,
+        backend=backend,
         report_path=report_path,
-        allow_truncated_tail=hit_cap,
+        allow_path=allow_path,
+        rank_key=rank_key,
+        top_k=top_k,
     )
-    if parsed is None:
-        return _failed("native_error", hit_cap=hit_cap)
-    if torn_tail and parsed:
-        parsed[-1]["line_content_truncated"] = True
-
-    if allow_path is not None:
-        parsed = [m for m in parsed if allow_path(m["file"])]
-
-    if max_matches is not None and len(parsed) > max_matches:
-        parsed = parsed[:max_matches]
-        truncated = True
-
-    return NativeGrepResult(
-        matches=parsed,
-        truncated=truncated,
-        hit_capture_cap=hit_cap,
-    )
+    if result.failure:
+        return result
+    if rank_key is None and max_matches is not None and len(result.matches) > max_matches:
+        del result.matches[max_matches:]
+        return NativeGrepResult(
+            matches=result.matches,
+            truncated=True,
+            hit_capture_cap=hit_cap,
+            total_matches=result.total_matches,
+            files_seen=result.files_seen,
+        )
+    return result
 
 
 def hard_exclude_names_for_grep(extra: Optional[Sequence[str]] = None) -> List[str]:

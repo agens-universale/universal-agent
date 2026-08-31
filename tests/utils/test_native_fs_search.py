@@ -337,7 +337,8 @@ def test_prefilter_command_lists_files_by_fixed_strings():
         exclude_paths=[],
     )
     assert cmd.startswith("find -H /work -mindepth 1")
-    assert "| xargs -0 -r grep -l --null -F -i" in cmd  # --null: у BSD grep -Z значит «распаковать»
+    assert "| xargs -0 -r env " in cmd  # env внутрь пайплайна: Harbor даёт его только первой команде
+    assert "grep -l --null -F -i" in cmd  # --null: у BSD grep -Z значит «распаковать»
     assert "'(' -type f -o -type l ')'" in cmd
     assert "-e KEY" in cmd
     assert "--binary-files=without-match" not in cmd
@@ -400,12 +401,15 @@ def test_production_grep_terminates_file_names_with_nul():
     assert "--null" in backend.commands[0].split()
 
 
-def test_probe_flags_stay_without_nul():
-    """Пробы capabilities разбирают вывод по двоеточию — им --null не нужен."""
+def test_null_and_devices_skip_are_always_on():
+    """Инвариант «пробуем тем же, чем выдаём»: оба флага в билдере безусловно —
+    пробы capabilities зовут его же, busybox без --null честно провалит пробу.
+    --devices=skip: симлинк на FIFO без писателя вешал grep до таймаута."""
     from utils.native_fs_search import build_grep_argv_flags
 
-    assert "--null" not in build_grep_argv_flags()
-    assert "--null" in build_grep_argv_flags(null_after_name=True)
+    flags = build_grep_argv_flags()
+    assert "--null" in flags
+    assert "--devices=skip" in flags
 
 
 def test_nul_terminated_file_name_with_colon_is_parsed():
@@ -450,3 +454,38 @@ def test_non_ascii_pattern_keeps_the_locale():
         max_matches=10, report_path=lambda p: p, is_dir_target=True,
     )
     assert "LC_ALL" not in backend.env
+
+
+def test_pipeline_carries_the_env_to_grep_not_only_find():
+    """Harbor подставляет env префиксом к строке команды — в пайплайне он достаётся
+    только find; для grep присваивания должны стоять внутри пайплайна."""
+    backend = _Backend(stdout="/work/a.py\x001:KEY\n")
+    _run(backend)
+    cmd = backend.commands[0]
+    tail = cmd.split("| xargs -0 -r ", 1)[1]
+    assert tail.startswith("env ")
+    assert "LC_ALL=C" in tail  # PLAN — фикс-строка ASCII
+    assert "GREP_OPTIONS=" in tail
+
+
+def test_ere_ascii_pattern_keeps_the_locale():
+    """Под LC_ALL=C точка и классы в ERE матчат байт, не символ (caf.s ≠ cafés) —
+    байтовая локаль только для фикс-строк."""
+    backend = _EnvSpyBackend(stdout="")
+    run_native_grep(
+        backend, "/work", NativeGrepPlan(fixed=False, pattern="caf.s", case_insensitive=False),
+        exclude_dir_names=[".git"], exclude_nested_dot_dirs=True, file_pattern=None,
+        max_matches=10, report_path=lambda p: p, is_dir_target=True,
+    )
+    assert "LC_ALL" not in (backend.env or {})
+    tail = backend.commands[0].split("| xargs -0 -r ", 1)[1]
+    assert "LC_ALL=C" not in tail
+
+
+def test_prefilter_pipeline_carries_env_to_grep():
+    backend = _Backend(stdout="")
+    _prefilter(backend)
+    cmd = backend.commands[0]
+    tail = cmd.split("| xargs -0 -r ", 1)[1]
+    assert tail.startswith("env ")
+    assert "LC_ALL=C" in tail

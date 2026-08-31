@@ -128,7 +128,7 @@ def probe_has_grep(backend: "FsBackend") -> bool:
         )
         out = res.stdout or ""
         # -H labels stdin ``(standard input)``; accept labelled and bare rows.
-        if "beta" not in out or not re.search(r"(?:^|:)\d+:", out, re.M):
+        if "beta" not in out or not re.search(r"(?:^|:|\x00)\d+:", out, re.M):
             return False
     except Exception:
         return False
@@ -170,8 +170,8 @@ def probe_has_grep(backend: "FsBackend") -> bool:
         text = res.stdout or ""
         if "beta" not in text:
             return False
-        # Expect path:line:text shape
-        if not re.search(r":\d+:", text):
+        # Expect path<sep>line:text shape (--null: NUL after the name)
+        if not re.search(r"[:\x00]\d+:", text):
             return False
 
         # Production takes -F for every literal/text-mode call and -i whenever
@@ -185,7 +185,7 @@ def probe_has_grep(backend: "FsBackend") -> bool:
         if res.return_code != 0:
             return False
         text = res.stdout or ""
-        return "beta" in text and bool(re.search(r":\d+:", text))
+        return "beta" in text and bool(re.search(r"[:\x00]\d+:", text))
     except Exception:
         return False
     finally:
@@ -335,6 +335,7 @@ def probe_find_xargs_grep(backend: "FsBackend") -> bool:
                 exclude_nested_dot_dirs=True,
                 file_pattern=None,
                 grep_argv=grep_argv,
+                grep_env=dict(_GREP_CLEAN_ENV),
             ),
             timeout=30,
             env=dict(_GREP_CLEAN_ENV),
@@ -342,7 +343,7 @@ def probe_find_xargs_grep(backend: "FsBackend") -> bool:
         if res.return_code != 0:
             return False
         text = (res.stdout or "").replace("\\", "/")
-        if not re.search(r":\d+:secret", text):
+        if not re.search(r"[:\x00]\d+:secret", text):
             return False
         if re.search(r"(^|/)skip/", text, re.M):
             return False

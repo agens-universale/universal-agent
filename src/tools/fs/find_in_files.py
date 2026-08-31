@@ -721,6 +721,8 @@ class FindInFiles(AbstractSimpleTool):
         prefilter: Optional[str],
         fallback_reason: Optional[str],
         show_excluded_dirs: bool,
+        needles: Needles,
+        effective_ci: bool,
     ) -> Tuple[str, bool]:
         """Why nothing narrowed the candidates inside the sandbox → (reason, a needle would help).
 
@@ -739,6 +741,15 @@ class FindInFiles(AbstractSimpleTool):
         backend = self._backend
         if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
             return "grep or find is unavailable in the sandbox, so no prefilter is possible", False
+        from utils.native_fs_search import prefilter_terms
+
+        if self._needle_strings(needles) and prefilter_terms(needles, case_insensitive=effective_ci) is None:
+            # Игла есть, но для sandbox-фильтра непригодна — совет «добавь
+            # фиксированную подстроку» здесь дезориентирует.
+            return (
+                "the pattern's fixed substring cannot drive the in-sandbox prefilter "
+                "(non-ASCII under case_insensitive, or control characters)"
+            ), False
         return "the pattern has no fixed substring for an in-sandbox prefilter", True
 
     def _native_failure_guidance(self, failure: str) -> str:
@@ -1791,6 +1802,8 @@ class FindInFiles(AbstractSimpleTool):
                 prefilter=prefilter,
                 fallback_reason=fallback_reason,
                 show_excluded_dirs=show_excluded_dirs,
+                needles=needles,
+                effective_ci=effective_ci,
             )
             return self._build_response(
                 matches=[],

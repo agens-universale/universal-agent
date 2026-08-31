@@ -8,6 +8,7 @@ read/list use shell through exec.
 """
 import asyncio
 import base64
+import posixpath
 import shlex
 import tempfile
 import uuid
@@ -355,7 +356,9 @@ class HarborBackend(FsBackend):
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:
-        return path.rstrip("/") or "/"
+        # find печатает пути префиксом вызова, prune сравнивает строки — «//» и
+        # «/./» в префиксе молча ломали исключения. Пути песочницы всегда POSIX.
+        return posixpath.normpath(path) if path else path
 
     def join(self, base: str, name: str) -> str:
         return base.rstrip("/") + "/" + name

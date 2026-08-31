@@ -121,6 +121,10 @@ class _PosixBox(LocalFsBackend):
         for opt in opts:
             if opt not in self.xargs_flags:
                 return ExecResult("", "xargs: invalid option " + opt + "\n", 1)
+        if rest and rest[0] == "env":
+            rest.pop(0)
+            while rest and "=" in rest[0] and not rest[0].startswith("-"):
+                rest.pop(0)
         found = self._find(find_argv)
         if found.return_code != 0:
             return found
@@ -200,7 +204,7 @@ class _PosixBox(LocalFsBackend):
 
     def _grep(self, argv, *, stdin=None):
         self.grep_argvs.append(list(argv))
-        recursive = with_filename = line_number = fixed = ci = False
+        recursive = with_filename = line_number = fixed = ci = null_sep = False
         include = exclude_dir = None
         pattern, paths = None, []
         i = 1
@@ -229,6 +233,10 @@ class _PosixBox(LocalFsBackend):
                 include = tok.split("=", 1)[1]
             elif tok.startswith("--exclude-dir="):
                 exclude_dir = tok.split("=", 1)[1]
+            elif tok == "--null":
+                null_sep = True
+            elif tok.startswith("--devices="):
+                pass
             else:
                 return ExecResult("", "grep: unrecognized option " + tok + "\n", 2)
             i += 1
@@ -256,6 +264,7 @@ class _PosixBox(LocalFsBackend):
                 targets.append((p, _read_text(p)))
 
         show_name = with_filename or len(targets) > 1
+        name_sep = "\0" if null_sep else ":"
         out = []
         for name, content in targets:
             for no, line in enumerate(content.splitlines(), start=1):
@@ -264,7 +273,7 @@ class _PosixBox(LocalFsBackend):
                 hit = (needle in hay) if fixed else bool(re.search(needle, hay))
                 if not hit:
                     continue
-                prefix = (name + ":") if show_name else ""
+                prefix = (name + name_sep) if show_name else ""
                 prefix += (str(no) + ":") if line_number else ""
                 out.append(prefix + line)
         return ExecResult("\n".join(out) + ("\n" if out else ""), "", 0 if out else 1)

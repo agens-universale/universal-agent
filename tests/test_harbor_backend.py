@@ -406,3 +406,12 @@ def test_walk_entries_hit_ceiling_raises(loop_in_thread):
     backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=500)
     with pytest.raises(WalkOutputTooLargeError):
         backend.walk_entries("/work")
+
+
+def test_normpath_collapses_dot_and_double_slash(loop_in_thread):
+    """find печатает пути префиксом вызова; prune сравнивает строки —
+    rstrip-нормализация пропускала «/проект//x/./y»."""
+    backend = HarborBackend(FakeEnv(), loop_in_thread)
+    assert backend.normpath("/w//x/./y/") == "/w/x/y"
+    assert backend.normpath("/w/a/../b") == "/w/b"
+    assert backend.normpath("/") == "/"
