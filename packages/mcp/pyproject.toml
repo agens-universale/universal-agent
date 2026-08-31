@@ -34,8 +34,15 @@ packages = ["src/recommended_mcp"]
 # Промах цели не заметен на глаз: локальных исходников просто не находится, и
 # установка тихо сваливается в git-метод — то есть требует сети там, где должна
 # была обойтись бандлом. Почему в колесо едет только ddgs-mcp — docs/packaging.md.
+#
+# Цель перечислена ПОФАЙЛОВО, а не каталогом. Каталогом hatchling забирает всё
+# подряд, включая то, чего нет под гитом: `build/lib/**`, `src/*.egg-info/**` и
+# `uv.lock` появляются у любого, кто хоть раз собирал ddgs-mcp локально. Из-за
+# этого состав колеса зависел от истории машины сборщика — 8 лишних записей из
+# 15. Здесь ровно то, что нужно `pip install <path>`: манифест и исходники.
 [tool.hatch.build.targets.wheel.force-include]
-"../../external/vendor/ddgs-mcp" = "external/vendor/ddgs-mcp"
+"../../external/vendor/ddgs-mcp/pyproject.toml" = "external/vendor/ddgs-mcp/pyproject.toml"
+"../../external/vendor/ddgs-mcp/src/ddgs_mcp" = "external/vendor/ddgs-mcp/src/ddgs_mcp"
 
 [tool.pytest.ini_options]
 # Набор пакета самодостаточен: `cd packages/mcp && pytest` — доказательство,

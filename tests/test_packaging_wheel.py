@@ -175,6 +175,37 @@ def test_server_wheel_contents(wheels):
         assert m in names, m
 
 
+def test_vendored_ddgs_ships_without_build_junk(wheels):
+    """В колесо едут только версионированные файлы вендоренного ddgs-mcp.
+
+    `force-include`, нацеленный на КАТАЛОГ, забирает его целиком — вместе с
+    `build/lib/**`, `src/*.egg-info/**` и `uv.lock`, которых нет под гитом: они
+    появляются у любого, кто хоть раз собирал ddgs-mcp локально. Состав колеса
+    начинал зависеть от истории машины сборщика (было 8 лишних записей из 15),
+    а воспроизводимость сборки — ровно то, ради чего колесо и собирают.
+
+    Подмена, которую ловит тест: вернуть цель каталогом
+    (`"../../external/vendor/ddgs-mcp" = "external/vendor/ddgs-mcp"`) на копии,
+    где ddgs-mcp собирали.
+    """
+    shipped = {n for n in wheels["gc_mcp"] if n.startswith("external/")}
+    assert shipped, "исходники ddgs-mcp вообще не попали в колесо"
+
+    junk = {
+        n for n in shipped
+        if "/build/" in n or ".egg-info" in n or n.endswith(("uv.lock", ".pyc"))
+    }
+    assert not junk, f"в колесо уехали артефакты сборки: {sorted(junk)}"
+
+    # Достаточность: без манифеста и исходников `pip install <path>` не соберёт
+    # пакет, и локальная установка тихо свалится в git-метод.
+    for needed in (
+        "external/vendor/ddgs-mcp/pyproject.toml",
+        "external/vendor/ddgs-mcp/src/ddgs_mcp/__init__.py",
+    ):
+        assert needed in shipped, f"{needed} нет в колесе; есть {sorted(shipped)}"
+
+
 def test_server_wheel_ships_the_sandbox_wrapper(wheels, wheel_infos):
     """Обёртка песочницы едет в колесе, и с исполняемым битом.
 
