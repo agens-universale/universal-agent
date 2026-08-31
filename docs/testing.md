@@ -66,7 +66,9 @@ cd packages/core && uv run --project ../.. pytest -q
   `Path(__file__).resolve().parents[N]` ломается при любом переезде файла, причём
   молча: если каталог по ошибочному пути не существует, `rglob` вернёт пустоту и
   проверка пройдёт вхолостую.
-- `gc_testkit.plugin` — подключается автоматически через entry point `pytest11`;
+- `gc_testkit.plugin` — подключается автоматически через entry point `pytest11`,
+  но бутстрап включает только для НАШИХ наборов: гейт сверяет `rootdir`
+  собираемого набора с корнем рабочей копии;
   отдельный `conftest.py` в пакете для этого не нужен.
 - `gc_testkit.helpers`, `gc_testkit.intent_fixtures`, `gc_testkit.tui_support`,
   `gc_testkit.tui_fixtures`, `gc_testkit.harbor_fakes` — импортируемые хелперы.

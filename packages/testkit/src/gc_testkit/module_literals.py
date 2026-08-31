@@ -258,7 +258,19 @@ def scan() -> tuple[list[Ref], list[tuple[Ref, str]]]:
     ensure_sources_on_path()
 
     ours = _top_level_names()
-    paths = [p for d in scan_dirs() for p in d.rglob("*.py") if "__pycache__" not in p.parts]
+    # SKIP_DIRS проверяется по ВСЕМ компонентам пути, а не только по верхнему
+    # уровню: `scan_dirs()` отсеивает корни, но `rglob` ниже спускается куда
+    # угодно. Без этого сетка лезла в `external/vendor/*/.venv` — venv вендора
+    # появляется у любого, кто хоть раз прогнал его тесты, — и краснела на
+    # чужом `mcp/server/__main__.py`, где `getLogger("server")` к нашей
+    # раскладке отношения не имеет.
+    _skip = SKIP_DIRS | {"__pycache__"}
+    paths = [
+        p
+        for d in scan_dirs()
+        for p in d.rglob("*.py")
+        if _skip.isdisjoint(p.parts)
+    ]
     paths += [REPO / f for f in SCAN_FILES if (REPO / f).exists()]
 
     refs = collect(paths, ours)

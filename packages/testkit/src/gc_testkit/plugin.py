@@ -4,13 +4,37 @@
 ``conftest.py`` в каждом пакете не нужен: набор любого пакета получает и
 заглушку ``tools``, и сбрасывающие состояние autouse-фикстуры.
 
-Тот же ``pytest11`` подключает плагин и в ЧУЖИХ проектах — в любом окружении,
-куда попало колесо ``gc-testkit``. Всё, что плагин делает, осмысленно только
-внутри рабочей копии монорепозитория, поэтому вне её он ПОЛНОСТЬЮ ИНЕРТЕН
-(гейт ``_IN_WORKING_COPY`` ниже). Раньше инертности не было: жадный ``REPO`` в
-``gc_testkit.paths`` бросал ``RuntimeError`` прямо на импорте и обрывал чужой
-pytest ДО сбора тестов, а autouse-фикстуры уронили бы каждый чужой тест на
+Тот же ``pytest11`` подключает плагин и в ЧУЖИХ прогонах — в любом окружении,
+куда попало колесо ``gc-testkit``, и при ЛЮБОМ rootdir. Всё, что плагин делает,
+осмысленно только для наших наборов, поэтому включается он по гейту
+``_suite_root_is_ours`` ниже: корень СОБИРАЕМОГО набора (``config.rootpath``)
+обязан быть корнем нашей рабочей копии или каталогом одного из её
+``packages/<имя>``. Вне рабочей копии плагин ПОЛНОСТЬЮ ИНЕРТЕН. Раньше
+инертности не было вовсе: жадный ``REPO`` в ``gc_testkit.paths`` бросал
+``RuntimeError`` прямо на импорте и обрывал чужой pytest ДО сбора тестов, а
+autouse-фикстуры уронили бы каждый чужой тест на
 ``ModuleNotFoundError: gc_core``.
+
+Гейт спрашивает про собираемый НАБОР, а не про место самого плагина. Прежний
+``_IN_WORKING_COPY = repo_root() is not None`` проверял, лежит ли внутри
+рабочей копии сам плагин, и ничего не знал о том, чей набор сейчас гоняют. До
+разбиения на пакеты этот вопрос и не стоял: бутстрап жил в корневом
+``conftest.py``, а conftest подхватывается только для тестов НИЖЕ своего
+каталога — у вендоренных серверов (``external/vendor/*-mcp``) свои
+``pyproject.toml``, то есть свой rootdir, и корневой conftest до них не
+доставал. Отсечка была бесплатной, от устройства pytest.
+
+Гейт ниже держится на том же признаке, поэтому у вендора обязана быть своя
+секция ``[tool.pytest.ini_options]``: без неё pytest поднимает rootdir до корня
+монорепозитория, и отличить чужой прогон от нашего уже нечем. У ``ddgs-mcp``
+секции не было, и на нём утечка пережила первую починку гейта; теперь это
+стережёт ``tests/test_testkit_rootdir_gate.py``. Точка входа
+``pytest11`` грузится НЕЗАВИСИМО от rootdir, и отсечка пропала: в прогоне
+вендоренного сервера на ``sys.path`` оказывались все ``packages/*/src``, а без
+``mcp`` в окружении — ещё и заглушки ``trafilatura``/``readability``, у которых
+``extract()`` всегда None, а ``Document.summary()`` — пустая строка. Чужой
+набор от этого зеленеет: извлекать перестаёт что бы то ни было. Наблюдалось
+запуском из ``external/vendor/office-mcp``.
 
 Pytest: keep a consistent real ``tools`` package when MCP is installed.
 
@@ -18,8 +42,9 @@ Some tests replace ``sys.modules['tools']`` with stubs (summary_triggers, inject
 processing_responses stubs). Without cleanup, later tests see ``ModuleNotFoundError`` for
 ``tools.connect_mcp`` / ``tools.skills``.
 
-When MCP is **not** installed, a minimal stub is registered at startup so intent tests can import
-``states`` without running ``tools/__init__.py``.
+When MCP is **not** installed, a minimal stub is registered before the conftests are imported (see
+``pytest_load_initial_conftests``) so intent tests can import ``states`` without running
+``tools/__init__.py``.
 """
 
 from __future__ import annotations
@@ -28,6 +53,7 @@ import importlib
 import importlib.util
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -37,16 +63,28 @@ import pytest
 from gc_testkit.paths import module_dir, package_dir, repo_root
 from gc_testkit.sources import ensure_sources_on_path
 
-#: Гейт инертности вне рабочей копии — см. шапку модуля. Каталоги, которыми
-#: оперирует плагин (``packages/*/src``, ``gc_core/tools``), существуют ТОЛЬКО
-#: в чекауте; в постороннем проекте спрашивать их не у кого.
-_IN_WORKING_COPY = repo_root() is not None
+#: Собираем ли мы СВОЙ набор. Ставится в ``pytest_load_initial_conftests``:
+#: раньше хука rootdir неизвестен, а без него гейт не отличить от прежнего
+#: «плагин лежит в рабочей копии» — см. шапку модуля.
+_OUR_SUITE = False
 
-# Набор может гоняться из корня репозитория или из каталога одного пакета;
-# во втором случае каталоги исходников соседних пакетов на sys.path не попадут
-# сами. Ставим их до первого импорта gc_*.
-if _IN_WORKING_COPY:
-    ensure_sources_on_path()
+
+def _suite_root_is_ours(rootpath) -> bool:
+    """Лежит ли корень собираемого набора в рабочей копии, где лежит плагин.
+
+    Наши прогоны дают ровно два вида rootdir: корень репозитория (запуск из
+    корня) и ``packages/<имя>`` — у каждого пакета свой
+    ``[tool.pytest.ini_options]``, поэтому корнем pytest объявляет его каталог.
+    Проверять «rootpath где-то внутри рабочей копии» нельзя: вендоренные
+    серверы лежат в ``external/vendor/`` НАШЕГО дерева, и такая проверка
+    пропустила бы ровно тот случай, ради которого гейт и переписан.
+    """
+    root = repo_root()
+    if root is None:
+        return False
+    rootpath = Path(rootpath).resolve()
+    return rootpath == root or rootpath.parent == root / "packages"
+
 
 _MINIMAL_PRELOADED = False
 
@@ -94,11 +132,50 @@ def _stub_optional_web_parsers() -> None:
         sys.modules["readability"] = mod
 
 
+#: Файлы, которые заглушка грузит из дерева gc_core «как есть».
+#:
+#: Гейт рабочей копии проверяет ОДИН файл-маркер (``packages/core/pyproject.toml``
+#: со строкой ``name = "gc-core"``), а заглушке нужно целое дерево. На неполном
+#: чекауте (sparse, worktree с частичной выкладкой, bisect на коммит до
+#: появления этих путей) маркер на месте, а файлов нет — и голый
+#: ``FileNotFoundError`` прилетал из pluggy ДО сбора тестов, без единого
+#: упоминания gc_testkit в тексте ошибки. Проверено запуском на синтетическом
+#: дереве. Поэтому гейт расширен проверкой самих загружаемых файлов: жёстко
+#: падать плагину нельзя (прогон может не иметь к заглушке никакого отношения),
+#: а молчать нельзя тем более — отказ обязан назвать себя.
+_STORE_SRC = "tools/session/stored_outputs/tool_call_outputs_store.py"
+_SIMPLE_TOOL_BASE_SRC = "tools/simple_tool_base.py"
+_SUBMIT_SOLUTION_SRC = "tools/turn/submit_solution.py"
+_PRELOAD_SOURCES = (_STORE_SRC, _SIMPLE_TOOL_BASE_SRC, _SUBMIT_SOLUTION_SRC)
+
+
+def _missing_preload_sources() -> list[str]:
+    """Какие из ``_PRELOAD_SOURCES`` в рабочей копии не выложены."""
+    core = package_dir("gc_core")
+    return [rel for rel in _PRELOAD_SOURCES if not (core / rel).is_file()]
+
+
 def preload_minimal_tools_package() -> None:
-    """Minimal ``tools`` tree for intent tests when MCP is not installed."""
+    """Minimal ``tools`` tree for intent tests when MCP is not installed.
+
+    На неполном дереве отказывается вслух и НЕ прерывает прогон — см.
+    ``_PRELOAD_SOURCES``.
+    """
     global _MINIMAL_PRELOADED
     if _MINIMAL_PRELOADED:
         return
+
+    missing = _missing_preload_sources()
+    if missing:
+        print(
+            "gc_testkit: заглушка пакета tools не собрана — в "
+            f"{package_dir('gc_core')} не выложены: {', '.join(missing)}. "
+            "Прогон продолжаю; наборы, которым нужен tools без установленного "
+            "mcp, покраснеют на импорте.",
+            file=sys.stderr,
+        )
+        return
+
     _MINIMAL_PRELOADED = True
 
     # То же, что в _load_file_module: раскладка спрашивается в момент вызова.
@@ -124,7 +201,7 @@ def preload_minimal_tools_package() -> None:
     setattr(session_pkg, "stored_outputs", stored_pkg)
     _load_file_module(
         "gc_core.tools.session.stored_outputs.tool_call_outputs_store",
-        "tools/session/stored_outputs/tool_call_outputs_store.py",
+        _STORE_SRC,
     )
     wrapping_mod = types.ModuleType("gc_core.tools.session.stored_outputs.wrapping")
     wrapping_mod.maybe_store_and_wrap_tool_output = lambda tool_res, **_kw: tool_res
@@ -134,11 +211,10 @@ def preload_minimal_tools_package() -> None:
     skills_pkg.__path__ = [str(tools_dir / "skills")]
     sys.modules["gc_core.tools.skills"] = skills_pkg
 
-    _load_file_module(
-        "gc_core.tools.simple_tool_base", "tools/simple_tool_base.py")
+    _load_file_module("gc_core.tools.simple_tool_base", _SIMPLE_TOOL_BASE_SRC)
     _load_file_module(
         "gc_core.tools.turn.submit_solution",
-        "tools/turn/submit_solution.py",
+        _SUBMIT_SOLUTION_SRC,
     )
 
     connect_mcp_pkg = types.ModuleType("gc_core.tools.connect_mcp")
@@ -169,22 +245,41 @@ def ensure_real_tools_package() -> None:
     importlib.import_module("gc_core.tools")
 
 
-if _IN_WORKING_COPY and not _mcp_runtime_available():
-    preload_minimal_tools_package()
+def pytest_load_initial_conftests(early_config) -> None:
+    """Бутстрап нашего набора: ``sys.path`` и, без mcp, заглушка ``tools``.
+
+    Хук выбран не произвольно. ``rootpath`` появляется только в хуках — на
+    импорте модуля rootdir ещё не определён; и это последний момент ПЕРЕД
+    импортом conftest'ов, а они импортируют ``gc_testkit.paths`` и ``gc_core``,
+    так что к их загрузке ``sys.path`` обязан быть готов. В
+    ``pytest_configure`` было бы уже поздно: порядок «наш хук → conftest'ы →
+    configure» проверен запуском.
+
+    Обе строчки раньше стояли на импорте модуля. Набор может гоняться из корня
+    репозитория или из каталога одного пакета; во втором случае каталоги
+    исходников соседних пакетов на ``sys.path`` не попадут сами.
+    """
+    global _OUR_SUITE
+    if not _suite_root_is_ours(early_config.rootpath):
+        return
+    _OUR_SUITE = True
+    ensure_sources_on_path()
+    if not _mcp_runtime_available():
+        preload_minimal_tools_package()
 
 
 @pytest.fixture(autouse=True)
 def _restore_real_tools_package_after_test():
     yield
-    if _IN_WORKING_COPY and _mcp_runtime_available():
+    if _OUR_SUITE and _mcp_runtime_available():
         ensure_real_tools_package()
 
 
 @pytest.fixture(autouse=True)
 def _clear_runtime_notices_between_tests():
-    # Вне рабочей копии gc_core может быть не установлен вовсе: autouse-фикстура
+    # В чужом прогоне gc_core может быть не установлен вовсе: autouse-фикстура
     # обязана промолчать, а не уронить каждый чужой тест на ModuleNotFoundError.
-    if not _IN_WORKING_COPY:
+    if not _OUR_SUITE:
         yield
         return
     from gc_core.runtime_notices import clear_runtime_notices
@@ -197,7 +292,7 @@ def _clear_runtime_notices_between_tests():
 @pytest.fixture(autouse=True)
 def _reset_message_projection_tags():
     """Спека 08: каждый тест стартует с default for_model = только think."""
-    if not _IN_WORKING_COPY:
+    if not _OUR_SUITE:
         yield
         return
     from gc_core.message_projection import configure_for_model_tags
