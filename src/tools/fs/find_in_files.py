@@ -16,7 +16,7 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from backends.protocol import WalkOutputTooLargeError
 from backends.walk_util import WalkEntry
@@ -1152,7 +1152,7 @@ class FindInFiles(AbstractSimpleTool):
         self,
         *,
         start_path: str,
-        matches: List[Dict[str, Any]],
+        files: Iterable[str],
         config: FsFindInFilesConfig,
     ) -> Optional[Dict[str, Any]]:
         """Карта «где густо» из уже разобранного вывода grep: файлы с
@@ -1164,8 +1164,8 @@ class FindInFiles(AbstractSimpleTool):
         prefix_len = len(start_norm.rstrip("/\\"))
         dir_files: Dict[str, set] = {}
         root_files: set = set()
-        for m in matches:
-            f = backend.normpath(str(m.get("file") or ""))
+        for raw_file in files:
+            f = backend.normpath(str(raw_file or ""))
             rel = f[prefix_len:].lstrip("/\\")
             if not rel:
                 continue
@@ -1418,6 +1418,16 @@ class FindInFiles(AbstractSimpleTool):
                 allowed_cache[real_abs] = cached
             return cached
 
+        # Same ranking as the Python path, applied INSIDE the grep run: the
+        # buffer is streamed and only the K best survive, so a 50M output does
+        # not become a million dicts for an answer of `limit` rows.
+        needle_strings = self._needle_strings(needles)
+
+        def _rank(abs_path: str):
+            return self._relevance_key(
+                abs_path, self._depth_under(path, abs_path), needle_strings, effective_ci
+            )
+
         result = run_native_grep(
             self._backend,
             path,
@@ -1430,6 +1440,8 @@ class FindInFiles(AbstractSimpleTool):
             is_dir_target=True,
             allow_path=_hit_allowed,
             exclude_paths=accepted_excludes,
+            rank_key=_rank,
+            top_k=limit_eff,
         )
         if result.failure and not result.hit_capture_cap:
             # grep exists but timed out / failed. Отказ уместен ТОЛЬКО в песочнице:
@@ -1459,15 +1471,11 @@ class FindInFiles(AbstractSimpleTool):
                 search_backend="grep",
             ), None
 
-        # Same ranking as the Python path, then the limit: grep's disk order
-        # must not decide which matches survive `limit`. Sort is stable, so
-        # lines inside one file keep grep's ascending order.
-        needle_strings = self._needle_strings(needles)
-        ranked = sorted(
-            result.matches,
-            key=lambda m: self._relevance_key(
-                m["file"], self._depth_under(path, m["file"]), needle_strings, effective_ci
-            ),
+        # The K survivors come back ranked; sorting them again is cheap and keeps
+        # the contract for results that did not go through the streaming path.
+        ranked = sorted(result.matches, key=lambda m: _rank(m["file"]))
+        total_matches = (
+            result.total_matches if result.total_matches is not None else len(ranked)
         )
         shown = ranked[:limit_eff]
         for m in shown:
@@ -1484,7 +1492,13 @@ class FindInFiles(AbstractSimpleTool):
             # report the prefix honestly instead. The parsed prefix already
             # says WHERE it is dense — hand the agent that map for narrowing.
             hit_dirs = self._hit_dirs_breakdown(
-                start_path=path, matches=result.matches, config=config
+                start_path=path,
+                files=(
+                    result.files_seen
+                    if result.files_seen is not None
+                    else [m["file"] for m in result.matches]
+                ),
+                config=config,
             )
             guidance = self._output_capped_guidance()
             if hit_dirs and hit_dirs.get("top_level_dirs"):
@@ -1514,7 +1528,7 @@ class FindInFiles(AbstractSimpleTool):
                 search_backend="grep",
             ), None
         # Parity with Python path: count >= limit_eff → match_limit (A boundary).
-        hit_limit = bool(result.truncated) or len(ranked) > limit_eff or count >= limit_eff
+        hit_limit = bool(result.truncated) or total_matches > limit_eff or count >= limit_eff
         scan_complete = not hit_limit
         more = hit_limit
 

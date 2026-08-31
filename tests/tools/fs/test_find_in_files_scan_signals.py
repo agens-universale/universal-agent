@@ -872,3 +872,34 @@ def test_unfiltered_host_reads_guidance_for_show_excluded_dirs(tmp_path, monkeyp
     assert data["stop_reason"] == "unfiltered_host_reads"
     assert "show_excluded_dirs" in data["guidance"]
     assert "fixed substring" not in data["guidance"]
+
+
+def test_native_branch_streams_top_k_and_maps_from_files_seen(tmp_path, monkeypatch):
+    """Тул просит у grep только K лучших, а карту «где густо» строит по всем файлам с хитами."""
+    import utils.native_fs_search as native_fs_search
+    from utils.native_fs_search import NativeGrepResult
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    seen = {}
+
+    def fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        return NativeGrepResult(
+            matches=[{"file": str(tmp_path / "src" / "a.py"), "line": 1, "end_line": 1,
+                      "line_content": "KEY", "context": "KEY\n"}],
+            truncated=False, hit_capture_cap=True,
+            total_matches=1000,
+            files_seen={str(tmp_path / "src" / f"m{i}.py") for i in range(7)}
+            | {str(tmp_path / "docs" / "d.md")},
+        )
+
+    monkeypatch.setattr(native_fs_search, "run_native_grep", fake_run)
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", limit=50)
+
+    assert seen["top_k"] == 50 and callable(seen["rank_key"])
+    assert data["stop_reason"] == "output_capped"
+    assert data["top_level_dirs"][0]["match_files"] == 7  # по files_seen, не по одному показанному матчу
+    assert data["top_level_dirs_total"] == 2

@@ -9,12 +9,13 @@ Correctness > speed. On any anomaly callers fall back to the Python path.
 """
 from __future__ import annotations
 
+import heapq
 import logging
 import os
 import re
 import shlex
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
 from backends.protocol import WALK_OUTPUT_MAX_CHARS
 from utils.find_in_files_scan_mode import Needles
@@ -26,6 +27,8 @@ log = logging.getLogger(__name__)
 _GREP_LINE_RE = re.compile(r"^(?P<path>[^:]+):(?P<line>[0-9]+):(?P<text>.*)$")
 # Tail of a ``--null`` record: the file name is already split off at NUL.
 _GREP_REST_RE = re.compile(r"^(?P<line>[0-9]+):(?P<text>.*)$")
+# One grep record, read straight from the buffer — no list of lines.
+_RECORD_RE = re.compile(r"[^\n]+")
 _GREP_CLEAN_ENV = {
     "GREP_OPTIONS": "",
     "GREP_COLORS": "",
@@ -67,6 +70,87 @@ def _grep_env(pattern: str) -> Dict[str, str]:
     return env
 
 
+class _ParseFailure(Exception):
+    """A record that is neither a match line nor a torn tail: the buffer is invalid."""
+
+
+def _stream_top_k(
+    stdout: str,
+    *,
+    hit_cap: bool,
+    root: str,
+    backend: Any,
+    report_path: Callable[[str], str],
+    allow_path: Optional[Callable[[str], bool]],
+    rank_key: Callable[[str], Any],
+    top_k: int,
+) -> NativeGrepResult:
+    """One pass over the raw buffer: rank every record, keep only the K best.
+
+    The full-parse path materialises a dict per match and sorts them all — on a
+    50M buffer that is ~900 MB for an answer of 100 rows. Here records are read
+    straight from the buffer, the ranking key is memoised per file, a bounded
+    heap keeps the K best, and only the winners become match dicts. The answer
+    is identical (same key, disk order on ties); ``total_matches`` and
+    ``files_seen`` feed the limit flags and the density map without the losers.
+    """
+    end = len(stdout)
+    torn_tail = hit_cap and not stdout.endswith("\n")
+    total = 0
+    files_seen: Set[str] = set()
+    key_cache: Dict[str, Any] = {}
+
+    def records() -> Iterator[Tuple[Any, int, str, int, str, bool]]:
+        nonlocal total
+        for i, rm in enumerate(_RECORD_RE.finditer(stdout)):
+            raw = rm.group(0).rstrip("\r")
+            is_last = rm.end() == end
+            rec = _split_grep_record(raw)
+            if rec is None:
+                if "Binary file" in raw or "\x1b[" in raw:
+                    raise _ParseFailure()
+                if hit_cap and is_last:
+                    return  # torn prefix: drop the tail, keep what parsed
+                raise _ParseFailure()
+            p, line_no, text = rec
+            abs_p = p if backend.isabs(p) else backend.join(root, p)
+            if allow_path is not None and not allow_path(abs_p):
+                continue
+            total += 1
+            files_seen.add(abs_p)
+            key = key_cache.get(abs_p)
+            if key is None:
+                key = rank_key(abs_p)
+                key_cache[abs_p] = key
+            yield key, i, abs_p, line_no, text, is_last
+
+    try:
+        winners = heapq.nsmallest(top_k, records(), key=lambda r: (r[0], r[1]))
+    except _ParseFailure:
+        return NativeGrepResult(
+            matches=[], truncated=False, hit_capture_cap=hit_cap, failure="native_error"
+        )
+    matches: List[Dict[str, Any]] = []
+    for _key, _i, abs_p, line_no, text, is_last in winners:
+        entry: Dict[str, Any] = {
+            "file": report_path(abs_p),
+            "line": line_no,
+            "end_line": line_no,
+            "line_content": text,
+            "context": text + ("\n" if not text.endswith("\n") else ""),
+        }
+        if torn_tail and is_last:
+            entry["line_content_truncated"] = True
+        matches.append(entry)
+    return NativeGrepResult(
+        matches=matches,
+        truncated=hit_cap,
+        hit_capture_cap=hit_cap,
+        total_matches=total,
+        files_seen=files_seen,
+    )
+
+
 def _search_capture_max_chars(backend: Any) -> int:
     """RAM cap for grep/prefilter stdout: walk ceiling, not tool-exec 60k."""
     n = getattr(backend, "walk_output_max_chars", None)
@@ -84,6 +168,10 @@ class NativeGrepResult:
     # Why the recipe could not answer (``native_error`` / ``native_timeout``);
     # None on success. Callers fall back to the Python path and tell the agent.
     failure: Optional[str] = None
+    # Streaming top-K only: how many records passed the filter, and every file
+    # that had a hit — for the honest limit flags and the density map.
+    total_matches: Optional[int] = None
+    files_seen: Optional[Set[str]] = None
 
 
 def native_grep_refusal(
@@ -479,6 +567,8 @@ def run_native_grep(
     is_dir_target: bool,
     allow_path: Optional[Callable[[str], bool]] = None,
     exclude_paths: Sequence[str] = (),
+    rank_key: Optional[Callable[[str], Any]] = None,
+    top_k: Optional[int] = None,
 ) -> NativeGrepResult:
     """Execute grep recipe (optionally via find prune).
 
@@ -489,6 +579,10 @@ def run_native_grep(
     ``allow_path``: optional per-hit path predicate owned by the caller (this
     module knows no policy). Applied BEFORE the ``max_matches`` cut — otherwise
     rejected hits eat the budget and accepted ones are silently dropped.
+
+    ``rank_key`` + ``top_k``: stream the buffer and keep only the K best by the
+    caller's key (see ``_stream_top_k``); ``matches`` come back ranked, plus
+    ``total_matches`` and ``files_seen``. Without them every record is parsed.
     """
 
     def _failed(kind: str, *, hit_cap: bool = False) -> NativeGrepResult:
@@ -581,6 +675,18 @@ def run_native_grep(
     if rc == 0 and not stdout.strip() and not hit_cap:
         # empty success — ok for xargs -r with zero files
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
+
+    if rank_key is not None and top_k is not None:
+        return _stream_top_k(
+            stdout,
+            hit_cap=hit_cap,
+            root=path,
+            backend=backend,
+            report_path=report_path,
+            allow_path=allow_path,
+            rank_key=rank_key,
+            top_k=top_k,
+        )
 
     lines = stdout.splitlines()
     # The transport ceiling can cut the stream mid-line. If the torn tail still
