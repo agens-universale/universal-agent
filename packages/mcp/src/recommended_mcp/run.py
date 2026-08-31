@@ -15,16 +15,20 @@ from pathlib import Path
 # Позволяет запускать файл напрямую: `python recommended_mcp/run.py`.
 # При `python -m recommended_mcp.run` и при import из тестов — no-op.
 if __package__ in (None, ""):
-    _repo_root = Path(__file__).resolve().parents[1]
-    # Исходники разъехались по packages/<дистрибутив>/src; единого <repo>/src
-    # больше нет, и вставка мёртвого пути оставляла gc_core ненаходимым —
-    # прямой запуск (документированный фолбэк, когда gc-mcp недоступен) падал
-    # на ModuleNotFoundError. Ветка legacy оставлена для дореформенных копий.
-    for _p in (_repo_root, *sorted(_repo_root.glob("packages/*/src"))):
-        sys.path.insert(0, str(_p))
-    _legacy_src = _repo_root / "src"
-    if _legacy_src.is_dir():
-        sys.path.insert(0, str(_legacy_src))
+    # Единственная арифметика, которая тут допустима: каталог, из которого
+    # виден САМ пакет рецептов (`packages/mcp/src` в рабочей копии,
+    # site-packages в колесе). Без него не собрать `import recommended_mcp`,
+    # то есть не позвать общий поиск корня.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    # Дальше корень ищет repo_path ПО МАРКЕРУ. Жёсткая глубина здесь уже один
+    # раз сломалась: `parents[1]` указывал на корень до переезда рецептов, а
+    # после переезда стал указывать на packages/mcp/src — gc_core оставался
+    # ненаходимым, и прямой запуск падал на ModuleNotFoundError. Менять её
+    # на parents[4] — повторять ту же ошибку. repo_path знает и дореформенную
+    # раскладку с единым <repo>/src, и кладёт на путь все packages/*/src разом.
+    from recommended_mcp.runtime.repo_path import ensure_repo_on_sys_path
+
+    ensure_repo_on_sys_path()
     __package__ = "recommended_mcp"
 
 from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path

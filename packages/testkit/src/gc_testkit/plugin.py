@@ -4,6 +4,14 @@
 ``conftest.py`` в каждом пакете не нужен: набор любого пакета получает и
 заглушку ``tools``, и сбрасывающие состояние autouse-фикстуры.
 
+Тот же ``pytest11`` подключает плагин и в ЧУЖИХ проектах — в любом окружении,
+куда попало колесо ``gc-testkit``. Всё, что плагин делает, осмысленно только
+внутри рабочей копии монорепозитория, поэтому вне её он ПОЛНОСТЬЮ ИНЕРТЕН
+(гейт ``_IN_WORKING_COPY`` ниже). Раньше инертности не было: жадный ``REPO`` в
+``gc_testkit.paths`` бросал ``RuntimeError`` прямо на импорте и обрывал чужой
+pytest ДО сбора тестов, а autouse-фикстуры уронили бы каждый чужой тест на
+``ModuleNotFoundError: gc_core``.
+
 Pytest: keep a consistent real ``tools`` package when MCP is installed.
 
 Some tests replace ``sys.modules['tools']`` with stubs (summary_triggers, inject_tool_fields,
@@ -20,21 +28,26 @@ import importlib
 import importlib.util
 import sys
 import types
-from pathlib import Path
 
 import pytest
 
 # Исходники разъехались по пакетам — раскладку знает gc_testkit.paths.
-from .paths import module_dir, package_dir  # noqa: E402
-from .sources import ensure_sources_on_path  # noqa: E402
+# Импорты абсолютные, как во всех остальных пакетах: относительные оставались
+# только здесь.
+from gc_testkit.paths import module_dir, package_dir, repo_root
+from gc_testkit.sources import ensure_sources_on_path
+
+#: Гейт инертности вне рабочей копии — см. шапку модуля. Каталоги, которыми
+#: оперирует плагин (``packages/*/src``, ``gc_core/tools``), существуют ТОЛЬКО
+#: в чекауте; в постороннем проекте спрашивать их не у кого.
+_IN_WORKING_COPY = repo_root() is not None
 
 # Набор может гоняться из корня репозитория или из каталога одного пакета;
 # во втором случае каталоги исходников соседних пакетов на sys.path не попадут
 # сами. Ставим их до первого импорта gc_*.
-ensure_sources_on_path()
+if _IN_WORKING_COPY:
+    ensure_sources_on_path()
 
-_CORE_SRC = package_dir("gc_core")
-_TOOLS_DIR = module_dir("tools")
 _MINIMAL_PRELOADED = False
 
 
@@ -49,7 +62,9 @@ def _mcp_runtime_available() -> bool:
 def _load_file_module(name: str, rel: str) -> types.ModuleType:
     if name in sys.modules:
         return sys.modules[name]
-    path = _CORE_SRC / rel
+    # Раскладку спрашиваем ЗДЕСЬ, а не на импорте модуля: вне рабочей копии
+    # package_dir() честно бросает, а импорт плагина обязан быть безобидным.
+    path = package_dir("gc_core") / rel
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {name} from {path}")
@@ -86,22 +101,25 @@ def preload_minimal_tools_package() -> None:
         return
     _MINIMAL_PRELOADED = True
 
+    # То же, что в _load_file_module: раскладка спрашивается в момент вызова.
+    tools_dir = module_dir("tools")
+
     _stub_optional_web_parsers()
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             del sys.modules[name]
 
     tools_pkg = types.ModuleType("gc_core.tools")
-    tools_pkg.__path__ = [str(_TOOLS_DIR)]
+    tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
 
     session_pkg = types.ModuleType("gc_core.tools.session")
-    session_pkg.__path__ = [str(_TOOLS_DIR / "session")]
+    session_pkg.__path__ = [str(tools_dir / "session")]
     sys.modules["gc_core.tools.session"] = session_pkg
     setattr(tools_pkg, "session", session_pkg)
 
     stored_pkg = types.ModuleType("gc_core.tools.session.stored_outputs")
-    stored_pkg.__path__ = [str(_TOOLS_DIR / "session" / "stored_outputs")]
+    stored_pkg.__path__ = [str(tools_dir / "session" / "stored_outputs")]
     sys.modules["gc_core.tools.session.stored_outputs"] = stored_pkg
     setattr(session_pkg, "stored_outputs", stored_pkg)
     _load_file_module(
@@ -113,7 +131,7 @@ def preload_minimal_tools_package() -> None:
     sys.modules["gc_core.tools.session.stored_outputs.wrapping"] = wrapping_mod
 
     skills_pkg = types.ModuleType("gc_core.tools.skills")
-    skills_pkg.__path__ = [str(_TOOLS_DIR / "skills")]
+    skills_pkg.__path__ = [str(tools_dir / "skills")]
     sys.modules["gc_core.tools.skills"] = skills_pkg
 
     _load_file_module(
@@ -124,7 +142,7 @@ def preload_minimal_tools_package() -> None:
     )
 
     connect_mcp_pkg = types.ModuleType("gc_core.tools.connect_mcp")
-    connect_mcp_pkg.__path__ = [str(_TOOLS_DIR / "connect_mcp")]
+    connect_mcp_pkg.__path__ = [str(tools_dir / "connect_mcp")]
     sys.modules["gc_core.tools.connect_mcp"] = connect_mcp_pkg
 
 
@@ -151,19 +169,24 @@ def ensure_real_tools_package() -> None:
     importlib.import_module("gc_core.tools")
 
 
-if not _mcp_runtime_available():
+if _IN_WORKING_COPY and not _mcp_runtime_available():
     preload_minimal_tools_package()
 
 
 @pytest.fixture(autouse=True)
 def _restore_real_tools_package_after_test():
     yield
-    if _mcp_runtime_available():
+    if _IN_WORKING_COPY and _mcp_runtime_available():
         ensure_real_tools_package()
 
 
 @pytest.fixture(autouse=True)
 def _clear_runtime_notices_between_tests():
+    # Вне рабочей копии gc_core может быть не установлен вовсе: autouse-фикстура
+    # обязана промолчать, а не уронить каждый чужой тест на ModuleNotFoundError.
+    if not _IN_WORKING_COPY:
+        yield
+        return
     from gc_core.runtime_notices import clear_runtime_notices
 
     clear_runtime_notices(listeners=True)
@@ -174,6 +197,9 @@ def _clear_runtime_notices_between_tests():
 @pytest.fixture(autouse=True)
 def _reset_message_projection_tags():
     """Спека 08: каждый тест стартует с default for_model = только think."""
+    if not _IN_WORKING_COPY:
+        yield
+        return
     from gc_core.message_projection import configure_for_model_tags
 
     configure_for_model_tags([])

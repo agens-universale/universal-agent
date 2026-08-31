@@ -64,11 +64,14 @@ if not _PROMPTS_DIR.is_dir():                            # editable/local: fall 
     # Корень репозитория ищем ПО МАРКЕРУ, а не фиксированной глубиной: адаптер
     # уже переезжал (harbor/ → integrations/harbor/), и счётчик .parent молча
     # уводил на уровень выше нужного — промпты переставали находиться.
-    _repo_root = None
-    for _candidate in _ADAPTER_DIR.parents:
-        if (_candidate / "packages").is_dir() and (_candidate / "pyproject.toml").is_file():
-            _repo_root = _candidate
-            break
+    # Реализация маркера одна на всех — gc_core.bundled_assets. Своя копия тут
+    # была слабой («packages/ рядом с pyproject.toml») и в чужом монорепо
+    # объявляла корнем ЕГО корень. Импорт локальный, внутри ветки: в образе
+    # промпты лежат рядом с адаптерами, эта ветка не выполняется вовсе, и
+    # адаптер не обязан тянуть ядро на старте.
+    from gc_core.bundled_assets import repo_root_from as _find_repo_root
+
+    _repo_root = _find_repo_root(_ADAPTER_DIR)
     if _repo_root is None:                               # не рабочая копия — оставляем как есть
         _repo_root = _ADAPTER_DIR.parent.parent
     # Ассеты принадлежат дистрибутиву gc-core и лежат рядом с его исходниками;
