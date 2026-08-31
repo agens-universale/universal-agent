@@ -312,6 +312,9 @@ class FindInFiles(AbstractSimpleTool):
                 "path",
                 "path must be absolute",
             )
+        # `find` печатает пути тем же префиксом, каким его позвали, а исключения
+        # уже нормализованы — без этого prune на нативном пути молча не срабатывал.
+        path = self._backend.normpath(path)
         if not isinstance(pattern, str):
             return self._error("invalid_argument", "pattern")
         if pattern == "":
@@ -1403,9 +1406,13 @@ class FindInFiles(AbstractSimpleTool):
             exclude_paths=accepted_excludes,
         )
         if result.failure and not result.hit_capture_cap:
-            # grep exists but timed out / failed. A host-side read of every
-            # candidate is exactly the cost this path exists to avoid —
-            # refuse with the failure name; the agent narrows or simplifies.
+            # grep exists but timed out / failed. Отказ уместен ТОЛЬКО в песочнице:
+            # там чтение каждого кандидата с хоста — ровно та цена, ради которой
+            # этот путь и существует. На локальном бэкенде чтение бесплатно, и
+            # прежний откат на Python давал полный ответ; гейт тот же, что у
+            # соседнего порога max_unfiltered_host_reads.
+            if not getattr(self._backend, "is_sandbox", False):
+                return None, result.failure
             return self._build_response(
                 matches=[],
                 count=0,

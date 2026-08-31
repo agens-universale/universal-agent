@@ -305,8 +305,11 @@ class HarborBackend(FsBackend):
 
     def listdir(self, path: str) -> list:
         """Immediate children via private traverse channel (same ceiling as walk)."""
+        # Тот же общий рецепт, что у обхода: без -H find не идёт по ссылке-аргументу,
+        # и каталог-ссылка выглядел пустым (пустой stdout при коде возврата 0).
+        head = " ".join(shlex.quote(a) for a in find_walk_head(path))
         res = self._exec(
-            f"find {shlex.quote(path)} -mindepth 1 -maxdepth 1 -printf '%f\\t%y\\n'",
+            f"{head} -maxdepth 1 -printf '%f\\t%y\\n'",
             capture_max_chars=self.walk_output_max_chars,
         )
         if res.return_code != 0:

@@ -337,7 +337,8 @@ def test_prefilter_command_lists_files_by_fixed_strings():
         exclude_paths=[],
     )
     assert cmd.startswith("find -H /work -mindepth 1")
-    assert "| xargs -0 -r grep -l -F -i" in cmd
+    assert "| xargs -0 -r grep -l -Z -F -i" in cmd
+    assert "'(' -type f -o -type l ')'" in cmd
     assert "-e KEY" in cmd
     assert "--binary-files=without-match" not in cmd
 

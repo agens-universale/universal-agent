@@ -28,7 +28,10 @@ def test_prune_group_is_shared_by_both_builders():
     )
     assert files_argv[:5] == ["find", "-H", "/w", "-mindepth", "1"]
     assert files_argv[5:16] == group
-    assert files_argv[16:] == ["-prune", "-o", "-type", "f", "-print0"]
+    # Ссылки перечисляются наравне с обычными файлами.
+    assert files_argv[16:] == [
+        "-prune", "-o", "(", "-type", "f", "-o", "-type", "l", ")", "-print0",
+    ]
 
 
 def test_walk_command_prints_the_pruned_dir_before_pruning_it():

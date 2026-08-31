@@ -47,5 +47,5 @@ def test_demo_config_documents_the_walk_ceiling():
     """demo_config.yml — полный справочник значений: ключ должен быть в нём, а не только в docs."""
     import pathlib
 
-    doc = yaml.safe_load(pathlib.Path("demo_config.yml").read_text(encoding="utf-8"))
+    doc = yaml.safe_load((pathlib.Path(__file__).resolve().parents[1] / "demo_config.yml").read_text(encoding="utf-8"))
     assert doc["agent"]["walk_output_max_chars"] == WALK_OUTPUT_MAX_CHARS

@@ -124,10 +124,14 @@ def parse_grep_match_lines(
     for i, raw in enumerate(lines):
         if not raw:
             continue
-        if "Binary file" in raw or "\x1b[" in raw:
-            return None
         m = _GREP_LINE_RE.match(raw)
         if not m:
+            # Сторож про двоичные файлы и управляющие символы применим только к
+            # строкам, которые НЕ разобрались: с `--binary-files=without-match`
+            # заметку «Binary file X matches» grep не печатает никогда, поэтому
+            # на разобранной строке он мог сработать лишь на самих данных.
+            if "Binary file" in raw or "\x1b[" in raw:
+                return None
             # Only the LAST line can be a torn tail; anything else
             # unparseable is a real anomaly → fail → Python path.
             if allow_truncated_tail and i == last:
@@ -185,7 +189,11 @@ def find_prune_group(
     ``exclude_paths``: call-time absolute directories, pruned with the POSIX
     ``-path`` primary (escaped, so a literal path never acts as a glob).
     """
-    parts: List[List[str]] = [["-type", "d", "-name", n] for n in exclude_dir_names if n]
+    # Имя экранируется так же, как путь ниже: домашний предикат сравнивает строго,
+    # а `-name` без экранирования читает имя как шаблон — `my[1]` вырезал бы `my1`.
+    parts: List[List[str]] = [
+        ["-type", "d", "-name", _fnmatch_escape(n)] for n in exclude_dir_names if n
+    ]
     if exclude_nested_dot_dirs:
         parts.append(["-type", "d", "-name", ".*"])
     parts.extend(["-type", "d", "-path", _fnmatch_escape(p)] for p in exclude_paths if p)
@@ -220,7 +228,9 @@ def _build_find_prune_argv(
     if group:
         argv.extend(group + ["-prune", "-o"])
 
-    argv.extend(["-type", "f"])
+    # Ссылка на файл — тоже кандидат: `find` даёт ей тип `l`, а воронка читает
+    # её по цели. Без `-o -type l` список кандидатов уже того, что умеет читать тул.
+    argv.extend(["(", "-type", "f", "-o", "-type", "l", ")"])
     if file_pattern:
         argv.extend(["-name", file_pattern.strip()])
     if print0:
@@ -350,7 +360,7 @@ def build_prefilter_command(
         file_pattern=file_pattern,
         exclude_paths=exclude_paths,
     )
-    grep_argv: List[str] = ["grep", "-l", "-F"]
+    grep_argv: List[str] = ["grep", "-l", "-Z", "-F"]
     if case_insensitive:
         grep_argv.append("-i")
     grep_argv.append("--no-messages")
@@ -406,9 +416,13 @@ def native_prefilter_candidates(
     # xargs: 1 = no chunk matched, 123 = some chunk returned 1 (no match there).
     if res.return_code not in (0, 1, 123, None):
         return None, "failed"
+    # `-Z` просят ради имён с переводом строки: GNU-grep разделяет пути NUL.
+    # BSD-grep флаг принимает, но для `-l` его не соблюдает и пишет через `\n`,
+    # поэтому разбор выбирается по факту наличия NUL, а не по вере в флаг.
+    stdout = res.stdout or ""
     out: List[str] = []
-    for raw in (res.stdout or "").splitlines():
-        line = raw.rstrip("\r")
+    for raw in (stdout.split("\0") if "\0" in stdout else stdout.splitlines()):
+        line = raw.strip("\r\n")
         if not line:
             continue
         out.append(line if backend.isabs(line) else backend.join(path, line))

@@ -678,8 +678,8 @@ def _no_host_reads(monkeypatch):
     monkeypatch.setattr(FindInFiles, "_open_decode_text", boom)
 
 
-def test_native_timeout_is_an_honest_refusal_not_a_host_scan(tmp_path, monkeypatch):
-    """grep есть, но сорвался: отказ с именем сбоя, а не чтение каждого кандидата с хоста."""
+def test_native_timeout_is_an_honest_refusal_in_the_sandbox(tmp_path, monkeypatch):
+    """grep сорвался В ПЕСОЧНИЦЕ: отказ с именем сбоя, а не чтение каждого кандидата с хоста."""
     import utils.native_fs_search as native_fs_search
 
     (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
@@ -689,6 +689,7 @@ def test_native_timeout_is_an_honest_refusal_not_a_host_scan(tmp_path, monkeypat
     )
     tool = _tool(tmp_path)
     _native_ready(tool, monkeypatch)
+    _sandbox(tool, monkeypatch)
     _no_host_reads(monkeypatch)
 
     data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
@@ -700,6 +701,31 @@ def test_native_timeout_is_an_honest_refusal_not_a_host_scan(tmp_path, monkeypat
     assert data["scan_complete"] is False and data["more_matches_may_exist"] is True
     assert "fallback_reason" not in data
     assert "narrow" in data["guidance"].lower()
+
+
+def test_native_failure_falls_back_to_python_on_a_local_backend(tmp_path, monkeypatch):
+    """Локальный бэкенд: чтение с хоста бесплатно — сбой grep обязан откатываться, а не отказывать.
+
+    Гейт тот же, что у соседнего порога max_unfiltered_host_reads: отказ уместен
+    только там, где чтение каждого кандидата действительно дорого.
+    """
+    import utils.native_fs_search as native_fs_search
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        native_fs_search, "run_native_grep",
+        lambda *a, **k: _native_result(tmp_path, failure="native_error"),
+    )
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["ok"] is True
+    assert data["search_backend"] == "python"      # откатились
+    assert data["fallback_reason"] == "native_error"
+    assert data["count"] == 1                      # и ответили верно
+    assert data["scan_complete"] is True
 
 
 def _sandbox(tool, monkeypatch):
