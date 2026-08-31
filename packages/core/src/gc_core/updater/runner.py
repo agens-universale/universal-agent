@@ -19,8 +19,9 @@ from gc_core.updater.source import UpdateSource
 def build_install_target(source: UpdateSource) -> str:
     """Строка переустановки ТЕМ ЖЕ профилем, что стоит сейчас.
 
-    Агент ставится одним из четырёх дистрибутивов (`gc-ua` — всё, `gc-cli` —
-    ядро, `gc-tui`, `gc-server`). Голый `git+URL` всегда резолвится в корневой
+    Агент ставится одним из профилей `app_version.PROFILE_DISTS`: мета `gc-ua` —
+    всё сразу, листовые `gc-tui` / `gc-server` / `gc-cli` / `gc-mcp` — свой кусок,
+    `gc-core` — библиотека. Голый `git+URL` всегда резолвится в корневой
     манифест, то есть в полный профиль: без явного имени и подкаталога
     `--update` на headless-установке молча раздул бы её до полной, а на
     `gc-tui` — потерял бы TUI.

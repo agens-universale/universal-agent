@@ -1,10 +1,14 @@
-"""Контракт упаковки: три непересекающихся дистрибутива из одного src/.
+"""Контракт упаковки: шесть непересекающихся дистрибутивов из одного дерева.
 
 До 0.4.0 колесо было одно, и тест проверял, что в нём лежит ВСЁ, включая
-tui/styles.tcss. Теперь tui и server уехали в отдельные дистрибутивы,
-собираемые из того же дерева, и главный инвариант сменился: три колеса не
-должны заявлять права ни на один общий путь — иначе установка двух профилей
-перетирает файлы, и чья версия победит, решает порядок распаковки.
+tui/styles.tcss. Потом tui, cli, server и менеджер MCP уехали в собственные
+дистрибутивы, собираемые из того же дерева, и главный инвариант сменился:
+колёса не должны заявлять права ни на один общий путь — иначе установка двух
+профилей перетирает файлы, и чья версия победит, решает порядок распаковки.
+
+Второй инвариант — версионный: профили пинят друг друга ТОЧНО, поэтому любой
+манифест, разошедшийся по версии, обязан красить набор (см.
+test_versions_are_pinned_together).
 """
 import itertools
 import shutil
@@ -213,7 +217,14 @@ def test_command_names_do_not_collide_between_leaf_distributions():
 
 def test_meta_pulls_every_profile():
     """Короткая команда `gc-ua @ git+URL` обязана давать полный агент: uv читает
-    из git только КОРНЕВОЙ манифест, поэтому именно он определяет её состав."""
+    из git только КОРНЕВОЙ манифест, поэтому именно он определяет её состав.
+
+    Сравнение идёт с `ver` из этого же файла, то есть тест связывает зависимости
+    корня с его СОБСТВЕННОЙ версией — и ничего не знает о листьях. Листья с
+    корнем связывает сосед, `test_versions_are_pinned_together`; пока в его цикле
+    не было packages/mcp, подмена версии менеджера ничего в этом файле не
+    красила.
+    """
     root = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     ver = root["project"]["version"]
     assert root["project"]["name"] == "gc-ua"
@@ -224,27 +235,57 @@ def test_meta_pulls_every_profile():
 
 
 def test_versions_are_pinned_together():
-    """Профили обязаны собираться из одного коммита: пины друг на друга точные."""
+    """Профили обязаны собираться из одного коммита: пины друг на друга точные.
+
+    packages/mcp тут не ради полноты списка. Пока его в цикле не было, подмена
+    его версии не красила В ЭТОМ ФАЙЛЕ ничего: при 0.5.1 у менеджера и 0.5.0 у
+    остальных манифестов прочие 14 тестов файла проходили (проверено подменой
+    28.08.2026). Разработчик поломки тоже не видит — на рабочем дереве её гасит
+    `[tool.uv.sources] gc-mcp = { workspace = true }`, и `uv sync` спокойно ставит
+    менеджера 0.5.1 рядом с gc-tui, который пинит 0.5.0.
+
+    А на КОЛЁСНОМ пути, по которому едет пользователь, поломка настоящая:
+    METADATA собранного gc_tui-0.5.0 несёт `Requires-Dist: gc-mcp==0.5.0`, в
+    выпуске лежит gc_mcp-0.5.1, и `uv pip install --no-index` отвечает «No
+    solution found ... gc-tui==0.5.0 cannot be used» (тоже проверено).
+    """
     root = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     ver = root["project"]["version"]
-    for sub in ("packages/core", "packages/cli", "packages/tui", "packages/server"):
+    for sub in ("packages/core", "packages/cli", "packages/tui", "packages/server",
+                "packages/mcp"):
         leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         assert leaf["project"]["version"] == ver, f"{sub} разошёлся по версии"
-    for sub in ("packages/cli", "packages/tui", "packages/server"):
+    for sub in ("packages/cli", "packages/tui", "packages/server", "packages/mcp"):
         leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         assert f"gc-core=={ver}" in leaf["project"]["dependencies"], sub
+    # Менеджер MCP — жёсткая зависимость профилей-приложений: команды gc-mcp/
+    # gc-mcp-install объявляет он один (fba7c20b), и без точного пина профиль
+    # соберётся с менеджером из другого коммита. Ядро на него не зависит —
+    # зависимость обратная, gc-mcp тянет gc-core.
+    for sub in ("packages/cli", "packages/tui", "packages/server"):
+        leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+        assert f"gc-mcp=={ver}" in leaf["project"]["dependencies"], sub
 
 
 def test_profile_subdirs_match_layout():
     """app_version.PROFILE_SUBDIRS — источник правды для переустановки; он обязан
-    совпадать с реальной раскладкой манифестов."""
+    совпадать с реальной раскладкой манифестов.
+
+    Мета `gc-ua` в словаре отсутствует НАМЕРЕННО: её манифест лежит в корне, и
+    `#subdirectory=` ей не нужен. Поэтому расхождение между PROFILE_DISTS и
+    PROFILE_SUBDIRS проверяем явно, ровно на одну запись — иначе следующая
+    правка списка профилей снова оставит install_hint без подкаталога и без
+    сторожа.
+    """
     from gc_core import app_version
     assert app_version.PROFILE_SUBDIRS == {
         "gc-core": "packages/core",
         "gc-cli": "packages/cli",
         "gc-tui": "packages/tui",
         "gc-server": "packages/server",
+        "gc-mcp": "packages/mcp",
     }
+    assert set(app_version.PROFILE_DISTS) - set(app_version.PROFILE_SUBDIRS) == {"gc-ua"}
     for name, sub in app_version.PROFILE_SUBDIRS.items():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         assert man["project"]["name"] == name

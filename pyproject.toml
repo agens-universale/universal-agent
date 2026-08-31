@@ -60,6 +60,17 @@ test = [
     # бы молча исполнять устаревшую копию.
     "textual>=0.55",
     "rich>=13",
+    # Снапшот-эталоны TUI: packages/tui/tests/test_snapshot_*.py — 16 тестовых
+    # функций и столько же .raw под гитом. Плагин снёс 502213be (17.08.2026)
+    # вместе с секцией [project.optional-dependencies] dev-tui, когда корень
+    # переписывали в мета-пакет; с тех пор все 16 молча пропускались через
+    # importorskip("pytest_textual_snapshot"), а .gitignore продолжал держать
+    # правило для их SVG — гейт был зелёным и пустым.
+    # Верхняя граница жёсткая, не «на всякий случай»: 1.1.0 пинит syrupy==4.8.0,
+    # тот требует pytest>=7,<9, и с нашим pytest>=9.0.3 uv отвечает «No solution
+    # found». На 1.0.0 приезжает syrupy 6.0.0, конфликта нет (проверено
+    # `uv pip install --dry-run` 28.08.2026).
+    "pytest-textual-snapshot>=1.0,<1.1",
     "pygments>=2.13",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.31.1",
@@ -79,9 +90,11 @@ gc-core = { workspace = true }
 gc-cli = { workspace = true }
 gc-tui = { workspace = true }
 gc-server = { workspace = true }
-# Только для разработки: общая тестовая инфраструктура наборов. Ни в один
-# дистрибутив не входит и в колёса не попадает.
 gc-mcp = { workspace = true }
+# Только для разработки: общая тестовая инфраструктура наборов. Ни в один
+# дистрибутив не входит и в колёса не попадает. Комментарий стоял строкой
+# выше и по виду относился к gc-mcp — а тот как раз настоящий поставляемый
+# дистрибутив со своими командами.
 gc-testkit = { workspace = true }
 office-mcp = { path = "external/vendor/office-mcp", editable = true }
 

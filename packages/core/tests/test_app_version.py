@@ -61,3 +61,34 @@ def test_no_stale_packaging_dir_in_hints():
     """Каталога packaging/ не существует — ни одна подсказка не должна его называть."""
     for dist in app_version.PROFILE_SUBDIRS:
         assert "packaging/" not in app_version.install_hint(dist)
+
+
+def test_install_hint_survives_every_profile():
+    """Естественная форма вызова — `install_hint(installed_dist())`. Пока
+    подкаталог брался как `PROFILE_SUBDIRS[dist]`, она падала KeyError на самой
+    обычной, ПОЛНОЙ установке: `installed_dist()` возвращает `gc-ua`, а меты в
+    словаре нет и быть не должно — её манифест лежит в корне."""
+    for dist in app_version.PROFILE_DISTS:
+        hint = app_version.install_hint(dist)
+        assert hint.startswith("uv tool install")
+        assert f'"{dist} @ git+' in hint
+        assert "\n" not in hint
+    assert "#subdirectory" not in app_version.install_hint("gc-ua"), (
+        "мета лежит в корне — подкаталог ей не нужен и вреден"
+    )
+    assert "#subdirectory=packages/mcp" in app_version.install_hint("gc-mcp")
+
+
+def test_profile_order_probes_mcp_before_core():
+    """Порядок PROFILE_DISTS — не алфавит, а «полнота». Ядро тянут ВСЕ
+    дистрибутивы, поэтому оно последнее. gc-mcp обязан стоять перед ним: он тоже
+    зависит от ядра, и на голой установке менеджера перебор, наткнувшись сперва
+    на gc-core, назвал бы её ядром — а `--update` переустановил бы не тот
+    дистрибутив. Профили-приложения стоят выше gc-mcp: они его тянут, и находить
+    надо их."""
+    order = app_version.PROFILE_DISTS
+    assert order[0] == "gc-ua", "мета полнее всех — она первая"
+    assert order[-1] == "gc-core", "ядро транзитивно у всех — оно последнее"
+    assert order.index("gc-mcp") < order.index("gc-core")
+    for app_dist in ("gc-tui", "gc-server", "gc-cli"):
+        assert order.index(app_dist) < order.index("gc-mcp"), app_dist
