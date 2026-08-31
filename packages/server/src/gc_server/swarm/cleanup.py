@@ -11,7 +11,7 @@ Sandbox удаляется ВМЕСТЕ с meta — это согласуетс�
 физически жив).
 
 Usage:
-  python scripts/cleanup_swarm_threads.py \\
+  python -m gc_server.swarm.cleanup \\
     --threads-dir ~/.local/state/gc/projects/<slug>/swarm/threads \\
     --sandbox-root-dir ~/.local/state/gc/projects/<slug>/swarm/sandboxes \\
     --ttl-hours 24 \\

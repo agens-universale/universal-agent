@@ -1,7 +1,9 @@
 """Тесты для src/swarm/runner.py.
 
 Покрывает start_swarm_process() с моком subprocess.Popen:
-- meta.json создаётся в queued, потом обновляется на running с pid + deadline_at;
+- meta.json появляется только после успешного Popen, сразу в running с pid + deadline_at;
+- отсутствующий/неисполнимый wrapper_path отвергается ДО Popen и без следов на диске;
+- провал на любом шаге до Popen не оставляет песочницы;
 - sandbox-каталог создаётся;
 - env пробрасывается через Popen со всеми SWARM_* переменными;
 - start_new_session=True передан в Popen.
@@ -201,15 +203,19 @@ def test_start_swarm_env_inherits_host_environ(base_swarm_cfg, mock_popen, monke
     assert env["MY_HOST_VAR"] == "host_value"
 
 
-def test_start_swarm_meta_queued_persisted_before_popen(base_swarm_cfg, mock_popen, tmp_path):
-    """До Popen в meta должен быть status=queued. После — running."""
-    state = {"queued_seen": False}
+def test_start_swarm_meta_not_written_before_popen(base_swarm_cfg, mock_popen):
+    """До Popen meta не должно быть вообще. После — сразу running.
+
+    Пока статус queued ложился на диск заранее, провал запуска оставлял его
+    там навсегда: повтор с тем же task_id получал 409 swarm_id_already_active
+    до истечения ttl_seconds (по умолчанию сутки).
+    """
+    state = {"meta_before_popen": None}
 
     def capture_popen_side(*args, **kwargs):
-        meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
-        sm = meta.get("swarm_meta", {})
-        if sm.get("status") == "queued":
-            state["queued_seen"] = True
+        state["meta_before_popen"] = storage.load_swarm_meta(
+            base_swarm_cfg["threads_dir"], "swarm_g_t",
+        )
         proc = MagicMock()
         proc.pid = 999
         return proc
@@ -219,11 +225,89 @@ def test_start_swarm_meta_queued_persisted_before_popen(base_swarm_cfg, mock_pop
     runner.start_swarm_process(
         base_swarm_cfg, system="g", task_id="t", payload={},
     )
-    assert state["queued_seen"], "meta status=queued должен существовать до Popen"
+    assert state["meta_before_popen"] == {}, "meta не должна существовать до Popen"
 
     meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
     assert meta["swarm_meta"]["status"] == "running"
     assert meta["swarm_meta"]["pid"] == 999
+
+
+def test_start_swarm_popen_failure_leaves_no_meta_and_no_sandbox(base_swarm_cfg, mock_popen):
+    """Провал Popen не должен оставлять ни meta, ни песочницы."""
+    mock_popen.side_effect = OSError("boom")
+
+    with pytest.raises(OSError):
+        runner.start_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", payload={},
+        )
+
+    assert storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t") == {}
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
+
+
+def test_start_swarm_failure_before_popen_also_removes_sandbox(
+    base_swarm_cfg, mock_popen, monkeypatch,
+):
+    """Уборка обязана покрывать ВЕСЬ участок между makedirs и Popen.
+
+    Между созданием песочницы и запуском идут материализация runtime-конфига и
+    сборка env; если ловить только OSError вокруг Popen, их исключение оставит
+    каталог сиротой до TTL-janitor'а — то есть на сутки.
+    """
+    def boom(*args, **kwargs):
+        raise RuntimeError("config resolve failed")
+
+    monkeypatch.setattr(runner, "_resolve_host_config_path", boom)
+
+    with pytest.raises(RuntimeError):
+        runner.start_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", payload={},
+        )
+
+    mock_popen.assert_not_called()
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
+
+
+def test_start_swarm_missing_wrapper_rejected_before_popen(base_swarm_cfg, mock_popen, tmp_path):
+    """Несуществующий wrapper_path — отказ ДО Popen и без следов на диске.
+
+    Ровно этот случай давал HTTP 500 на первом POST /swarm/run: шаблон
+    config_server.yml остался с "scripts/run-cli-in-sandbox.sh", который после
+    переезда обёртки внутрь пакета резолвился в gc_server/swarm/scripts/.
+    """
+    base_swarm_cfg["wrapper_path"] = str(tmp_path / "nope" / "run-cli-in-sandbox.sh")
+
+    with pytest.raises(FileNotFoundError):
+        runner.start_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", payload={},
+        )
+
+    mock_popen.assert_not_called()
+    assert storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t") == {}
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
+
+
+def test_start_swarm_non_executable_wrapper_rejected_before_popen(
+    base_swarm_cfg, mock_popen, tmp_path,
+):
+    """Обёртка без бита +x — тоже отказ до Popen, с внятным сообщением."""
+    wrapper = tmp_path / "run-cli-in-sandbox.sh"
+    wrapper.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    wrapper.chmod(0o644)
+    base_swarm_cfg["wrapper_path"] = str(wrapper)
+
+    with pytest.raises(PermissionError):
+        runner.start_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", payload={},
+        )
+
+    mock_popen.assert_not_called()
 
 
 def test_start_swarm_optional_agentmd_skills_in_env(base_swarm_cfg, mock_popen):

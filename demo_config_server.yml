@@ -8,8 +8,10 @@ defaults:
   system: "generic"
 
 agent:
-  # Относительный путь до файла с универсальными инструкциями агента или абсолютный путь.
-  # (резолвится в абсолютный путь относительно корня проекта).
+  # Абсолютный путь — как есть; относительный резолвится от корня bundled-ассетов
+  # (в репозитории packages/core/assets, в колесе site-packages/gc_core/assets),
+  # а НЕ от корня репозитория — см. PROJECT_ROOT в rest_api/server_config.py.
+  # Поэтому "./prompts/..." попадает в bundled-промпт и работает в обеих раскладках.
   server_agentmd_path: "./prompts/demo_server_agent.md"
 
 logging:
@@ -54,7 +56,9 @@ swarm:
   sandbox_root_dir: ".swarm_sandboxes"
   # Куда на хосте сохранять агентские .gc/logs из песочницы при финализации
   # (это делает сам swarm-код, lifecycle, а не тест-оркестратор). Абсолютный путь
-  # как есть / относительный от корня репо; пусто → дефолт
+  # как есть; относительный резолвится от корня bundled-ассетов (в репозитории
+  # packages/core/assets, в колесе site-packages/gc_core/assets), а НЕ от корня
+  # репо — см. PROJECT_ROOT в swarm/config.py. Пусто → дефолт
   # swarm_threads_dir/<swarm_id>/agent_logs/. Сохраняются даже при timeout/kill.
   #swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
   max_concurrent: 10
@@ -65,7 +69,13 @@ swarm:
     cpu_percent: 50
     timeout_seconds: 1800
   cli_command: "gc-cli"
-  wrapper_path: "scripts/run-cli-in-sandbox.sh"
+  # Обёртка песочницы уехала из scripts/ внутрь пакета и едет в колесе как
+  # package data. Относительный путь резолвится от каталога gc_server/swarm/,
+  # поэтому прежнее "scripts/run-cli-in-sandbox.sh" указывало в
+  # gc_server/swarm/scripts/ — файла там нет, и Popen падал FileNotFoundError
+  # на первом же POST /swarm/run. Пусто → обёртка рядом с кодом, что и нужно
+  # из коробки; переопределять — только абсолютным путём.
+  #wrapper_path: "/opt/gc-cli/.venv/lib/python3.12/site-packages/gc_server/swarm/run-cli-in-sandbox.sh"
   sandbox_tool: "bubblewrap"
   agentmd_path: "./prompts/server_agent.md"
   skills_dir: "./swarm_skills"

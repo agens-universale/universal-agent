@@ -119,14 +119,29 @@ def cleanup_threads(
 
 
 def main() -> int:
-    """CLI-обёртка: `python -m gc_server.cleanup_threads --threads-dir ...`."""
+    """CLI-обёртка: `python -m gc_server.cleanup_threads --threads-dir ...`.
+
+    ``--threads-dir`` обязателен, как и у соседнего ``gc_server.swarm.cleanup``.
+    Пока чистка лежала в ``scripts/``, дефолт считался от файла скрипта
+    (``<script>/../threads``); переезд внутрь пакета этот якорь обессмыслил, и на
+    его месте осталось голое ``"threads"`` относительно CWD. В cron с чужим CWD
+    это давало «not found» и код возврата 0 — тихий успех, при котором треды
+    копились месяцами. Дефолт «как у in-process janitor» проблему не решает:
+    тот берёт путь из конфига, а конфиг по умолчанию выводит его из
+    ``project_slug()``, то есть из того же CWD (замерено: из ``/tmp`` получается
+    ``…/projects/-private-tmp/threads``). Каталог без угадывания знает только
+    вызывающий, поэтому его и требуем.
+    """
     parser = argparse.ArgumentParser(
         description="Удалить треды старше заданного срока по updated_at."
     )
     parser.add_argument(
         "--threads-dir",
-        default=None,
-        help="Каталог с файлами threads (meta_*.json / data_*.jsonl).",
+        required=True,
+        help=(
+            "Каталог с файлами threads (meta_*.json / data_*.jsonl). "
+            "Обязателен: дефолта, не зависящего от CWD, у этой команды нет."
+        ),
     )
     parser.add_argument(
         "--ttl-days",
@@ -141,11 +156,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    threads_dir = os.path.abspath(args.threads_dir) if args.threads_dir else "threads"
+    threads_dir = os.path.abspath(args.threads_dir)
     stats = cleanup_threads(threads_dir, args.ttl_days, dry_run=args.dry_run)
     if stats.get("missing_dir"):
+        # Каталога нет — это промах по пути, а не «нечего чистить». Код возврата
+        # 0 здесь означал бы для cron «отработала», и чистка молчала бы месяцами.
         print(f"[cleanup] threads_dir not found: {threads_dir}")
-        return 0
+        return 2
     print("[cleanup] done", stats)
     return 0 if stats["errors"] == 0 else 1
 

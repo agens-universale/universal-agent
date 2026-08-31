@@ -1,3 +1,6 @@
+import logging
+import os
+
 import pytest
 
 from gc_core.config import cli_forces_legacy_model
@@ -25,6 +28,25 @@ def test_server_config_path_none_falls_back_to_default(monkeypatch, tmp_path):
     cfg = load_server_config()
     assert cfg["server"]["host"] == "0.0.0.0"
     assert cfg["server"]["port"] == 8000
+
+
+def test_load_server_config_logs_which_candidate_won(monkeypatch, tmp_path, caplog):
+    """Какой именно config_server.yml прочитан — обязано быть в логе.
+
+    Список кандидатов начинается с CWD, и до этой строки узнать победителя было
+    неоткуда: молчаливый промах резолва однажды поднял сервер с auth_token=None.
+    """
+    (tmp_path / "config_server.yml").write_text(
+        "server:\n  port: 7777\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
+    monkeypatch.chdir(tmp_path)
+
+    with caplog.at_level(logging.INFO, logger="gc_server.rest_api.server_config"):
+        cfg = load_server_config()
+
+    assert cfg["server"]["port"] == 7777
+    assert os.path.realpath(str(tmp_path / "config_server.yml")) in caplog.text
 
 
 # --- Task 10 (ревью): agent_overrides идут через apply_cli_overrides ------------

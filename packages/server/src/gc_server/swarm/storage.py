@@ -42,7 +42,8 @@ def load_swarm_meta(threads_dir: str, swarm_id: str) -> Dict[str, Any]:
 def load_completion_info(threads_dir: str, swarm_id: str) -> Dict[str, Any]:
     """Прочитать completion.json из threads_dir/<swarm_id>/, если он есть.
 
-    Файл пишется wrapper'ом (scripts/run-cli-in-sandbox.sh) после завершения CLI.
+    Файл пишется обёрткой песочницы (gc_server/swarm/run-cli-in-sandbox.sh)
+    после завершения CLI.
     Содержит exit_code, finished_at, error_type, error_message.
 
     Возвращает {} если файл отсутствует или содержит невалидный JSON.

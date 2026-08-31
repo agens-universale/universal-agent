@@ -1,7 +1,10 @@
+import os
 from pathlib import Path
 
 import pytest
+import yaml
 
+from gc_core.bundled_assets import repo_root
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars, project_slug
 from gc_server.swarm.config import build_swarm_config
@@ -32,6 +35,38 @@ def test_swarm_explicit_threads_dir_used_as_is(isolated_env, tmp_path):
     explicit = tmp_path / "custom_threads"
     cfg = build_swarm_config({"swarm": {"threads_dir": str(explicit)}})
     assert Path(cfg["threads_dir"]) == explicit
+
+
+def test_default_wrapper_path_exists_and_is_executable(isolated_env):
+    """Дефолтная обёртка едет в колесе как package data — путь обязан быть живым.
+
+    Пустое значение wrapper_path — единственная конфигурация, которая работает
+    из коробки; если она перестанет резолвиться, /swarm/run отвалится на первом
+    же запросе, как это уже было с "scripts/run-cli-in-sandbox.sh".
+    """
+    cfg = build_swarm_config({})
+    wrapper = cfg["wrapper_path"]
+    assert os.path.isfile(wrapper), wrapper
+    assert os.access(wrapper, os.X_OK), wrapper
+
+
+def test_demo_template_swarm_paths_are_usable():
+    """Шаблон demo_config_server.yml должен подниматься как есть.
+
+    Он не покрывался ничем: после переезда обёртки внутрь пакета его
+    "scripts/run-cli-in-sandbox.sh" резолвился в gc_server/swarm/scripts/, файла
+    там нет, и первый же POST /swarm/run падал FileNotFoundError из Popen.
+    """
+    root = repo_root()
+    assert root is not None, "тест обязан идти в рабочей копии, а не скипаться"
+    raw = yaml.safe_load((root / "demo_config_server.yml").read_text(encoding="utf-8"))
+    cfg = build_swarm_config(raw)
+
+    assert os.path.isfile(cfg["wrapper_path"]), cfg["wrapper_path"]
+    assert os.access(cfg["wrapper_path"], os.X_OK), cfg["wrapper_path"]
+    # agentmd_path из того же шаблона резолвится от корня ассетов — проверяем
+    # заодно, чтобы следующий переезд не оставил и его указывать в пустоту.
+    assert os.path.isfile(cfg["agentmd_path"]), cfg["agentmd_path"]
 
 
 def test_swarm_wrapper_and_agentmd_paths_unchanged(isolated_env, tmp_path):

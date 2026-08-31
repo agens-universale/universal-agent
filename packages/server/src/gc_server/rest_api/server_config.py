@@ -80,6 +80,12 @@ def load_server_config() -> Dict[str, Any]:
             "logging": {},
         }
 
+    # Единственная строка, по которой вообще можно узнать, ЧЕЙ конфиг прочитан:
+    # список кандидатов начинается с CWD, а он у сервера, у cron и у systemd
+    # разный. Раньше в лог не попадало ничего, кроме случая «не нашёлся нигде», —
+    # и неудачный резолв однажды уже поднял сервер с auth_token: None молча.
+    logger.info("config_server.yml: читаю %s", cfg_path)
+
     with open(cfg_path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 

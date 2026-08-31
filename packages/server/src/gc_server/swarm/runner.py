@@ -244,110 +244,145 @@ def start_swarm_process(
     неизвестный верхнеуровневый ключ отвергнет ``extra="forbid"``.
 
     Возвращает (swarm_id, pid).
+
+    Порядок побочных эффектов: обёртка → песочница → ``Popen`` → meta. Сначала
+    проверяется сама обёртка (существование и бит +x), потом создаётся песочница,
+    и лишь после успешного ``Popen`` на диск ложится meta — сразу в статусе
+    ``running``. Провал на любом шаге не оставляет ни meta, ни песочницы: каталог
+    убирается в ``finally``, если создал его этот же вызов. Поэтому повтор с тем
+    же ``task_id`` стартует заново, а не упирается в 409 до истечения TTL.
     """
     swarm_id = _make_swarm_id(system, task_id)
     threads_dir: str = swarm_cfg["threads_dir"]
     sandbox_root_dir: str = swarm_cfg["sandbox_root_dir"]
     limits: Dict[str, Any] = swarm_cfg["limits"]
+    wrapper_path: str = swarm_cfg["wrapper_path"]
+
+    # Обёртку проверяем ДО первого побочного эффекта. Шаблон config_server.yml
+    # пережил переезд scripts/ внутрь пакета со старым значением, относительный
+    # путь резолвился в gc_server/swarm/scripts/ — и FileNotFoundError вылезал
+    # уже из Popen, когда песочница и meta со статусом queued лежали на диске.
+    # Повтор с тем же task_id упирался после этого в 409 на весь ttl_seconds.
+    if not os.path.isfile(wrapper_path):
+        raise FileNotFoundError(
+            f"swarm wrapper не найден: {wrapper_path!r} (поле swarm.wrapper_path "
+            "в config_server.yml; относительный путь резолвится от каталога "
+            "gc_server/swarm/, пустое значение даёт обёртку рядом с кодом)"
+        )
+    if not os.access(wrapper_path, os.X_OK):
+        raise PermissionError(
+            f"swarm wrapper не исполняем: {wrapper_path!r} — нужен бит +x "
+            "(в колесе обёртка едет как package data)"
+        )
 
     # Директория песочницы для этого сворма.
     sandbox_dir = os.path.join(sandbox_root_dir, swarm_id)
+    sandbox_created = not os.path.isdir(sandbox_dir)
     os.makedirs(sandbox_dir, exist_ok=True)
 
-    # Шаг 1.10 (AR-1): материализуем runtime config.yml для CLI.
-    # CLI внутри bwrap не сможет резолвить дефолтные пути config'а — нужно
-    # положить его в /work/.gc/config.yml явно. Wrapper передаст --config.
-    host_config_path = _resolve_host_config_path(swarm_cfg)
-    if host_config_path:
-        try:
-            _materialize_runtime_config(host_config_path, sandbox_dir, swarm_cfg)
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "swarm %s: runtime config materialization failed (proceeding without it)",
-                swarm_id,
-            )
+    # Ни meta, ни другого следа на диске здесь ещё не появляется. Раньше в этом
+    # месте сохранялся статус queued, и любой провал запуска оставлял его
+    # навсегда: повтор с тем же task_id получал 409 swarm_id_already_active до
+    # истечения ttl_seconds (по умолчанию сутки), а песочница оставалась сиротой.
+    # Единственный читатель этой meta — idempotency-проверка в POST /swarm/run,
+    # и она идёт под тем же _SWARM_RUN_LOCK, что и запуск, так что окна нет.
+    proc = None
+    try:
+        # Шаг 1.10 (AR-1): материализуем runtime config.yml для CLI.
+        # CLI внутри bwrap не сможет резолвить дефолтные пути config'а — нужно
+        # положить его в /work/.gc/config.yml явно. Wrapper передаст --config.
+        host_config_path = _resolve_host_config_path(swarm_cfg)
+        if host_config_path:
+            try:
+                _materialize_runtime_config(host_config_path, sandbox_dir, swarm_cfg)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "swarm %s: runtime config materialization failed (proceeding without it)",
+                    swarm_id,
+                )
 
-    # Базовая метадата (совместимая с обычным meta.json) + swarm_meta.
-    base_meta: Dict[str, Any] = {
-        "system": system,
-        "task_id": task_id,
-    }
-    timeout_seconds = int(limits.get("timeout_seconds", 1800))
-    swarm_meta_patch: Dict[str, Any] = {
-        "id": swarm_id,
-        "status": "queued",
-        "created_at": _utc_now_iso(),
-        "limits": limits,
-        "sandbox_path": sandbox_dir,
-        # sandbox жив до TTL janitor'а (см. AR-2 в swarm_spec.md §10).
-        "sandbox_status": "active",
-    }
-    storage.save_swarm_meta(
-        threads_dir,
-        swarm_id,
-        base_meta=base_meta,
-        swarm_meta_patch=swarm_meta_patch,
-    )
-
-    wrapper_path: str = swarm_cfg["wrapper_path"]
-    cli_command: str = swarm_cfg["cli_command"]
-    sandbox_tool: str = swarm_cfg["sandbox_tool"]
-    agentmd_path: str = swarm_cfg.get("agentmd_path", "")
-    skills_dir: str = swarm_cfg.get("skills_dir", "")
-
-    # Шаг 1.11 (AR-6, AR-7): bind-mount'ы для venv + Node + extra paths.
-    cli_venv_root: str = swarm_cfg.get("cli_venv_root", "") or ""
-    agent_dep_dir: str = swarm_cfg.get("agent_dep_dir", "") or ""
-    extra_mounts: list = swarm_cfg.get("extra_mounts", []) or []
-    # В env передаём как newline-separated строку — wrapper читает построчно.
-    extra_mounts_env = "\n".join(str(p) for p in extra_mounts if str(p).strip())
-
-    # Передаём базовый контекст через переменные окружения.
-    env = os.environ.copy()
-    env.update(
-        {
-            "SWARM_ID": swarm_id,
-            "SWARM_SYSTEM": system,
-            "SWARM_TASK_ID": task_id,
-            "SWARM_THREADS_DIR": threads_dir,
-            "SWARM_SANDBOX_DIR": sandbox_root_dir,
-            "SWARM_SANDBOX_PATH": sandbox_dir,
-            "SWARM_CLI_COMMAND": cli_command,
-            "SWARM_SANDBOX_TOOL": sandbox_tool,
-            "SWARM_LIMIT_MEMORY_MB": str(limits.get("memory_mb", "")),
-            "SWARM_LIMIT_DISK_MB": str(limits.get("disk_mb", "")),
-            "SWARM_LIMIT_CPU_PERCENT": str(limits.get("cpu_percent", "")),
-            "SWARM_LIMIT_TIMEOUT_SECONDS": str(limits.get("timeout_seconds", "")),
-            # Полный payload запроса можем передать в окружение как JSON-строку.
-            "SWARM_PAYLOAD_JSON": json.dumps(payload, ensure_ascii=False),
-            # Внешний трейс. Пусто = не задан: обёртка тогда не добавляет флаг,
-            # и ран в песочнице ведёт себя как раньше (ничего не меняется).
-            "SWARM_TRACE_ID": str(trace_id or ""),
-            # Пути до swarm-специфичных инструкций и директории со скиллами.
-            "SWARM_AGENTMD_PATH": agentmd_path,
-            "SWARM_SKILLS_DIR": skills_dir,
-            # Bind-mount пути для wrapper.sh (AR-6, AR-7).
-            "SWARM_CLI_VENV_ROOT": cli_venv_root,
-            "SWARM_AGENT_DEP_DIR": agent_dep_dir,
-            "SWARM_EXTRA_MOUNTS": extra_mounts_env,
+        # Базовая метадата (совместимая с обычным meta.json) + swarm_meta.
+        base_meta: Dict[str, Any] = {
+            "system": system,
+            "task_id": task_id,
         }
-    )
+        timeout_seconds = int(limits.get("timeout_seconds", 1800))
+        swarm_meta_patch: Dict[str, Any] = {
+            "id": swarm_id,
+            "created_at": _utc_now_iso(),
+            "limits": limits,
+            "sandbox_path": sandbox_dir,
+            # sandbox жив до TTL janitor'а (см. AR-2 в swarm_spec.md §10).
+            "sandbox_status": "active",
+        }
 
-    # Для MVP предполагаем, что wrapper_path существует и исполняем.
-    # Ошибки запуска прокидываем выше.
-    # start_new_session=True → PID == PGID, что позволит monitor'у
-    # убить ВСЁ дерево процессов (wrapper + bwrap + CLI + дочерние)
-    # через os.killpg при превышении таймаута/лимитов или при shutdown.
-    proc = subprocess.Popen(  # noqa: S603
-        [wrapper_path],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=env,
-        text=True,
-        start_new_session=True,
-    )
+        cli_command: str = swarm_cfg["cli_command"]
+        sandbox_tool: str = swarm_cfg["sandbox_tool"]
+        agentmd_path: str = swarm_cfg.get("agentmd_path", "")
+        skills_dir: str = swarm_cfg.get("skills_dir", "")
 
-    # Обновляем статус на running и сохраняем PID + deadline.
+        # Шаг 1.11 (AR-6, AR-7): bind-mount'ы для venv + Node + extra paths.
+        cli_venv_root: str = swarm_cfg.get("cli_venv_root", "") or ""
+        agent_dep_dir: str = swarm_cfg.get("agent_dep_dir", "") or ""
+        extra_mounts: list = swarm_cfg.get("extra_mounts", []) or []
+        # В env передаём как newline-separated строку — wrapper читает построчно.
+        extra_mounts_env = "\n".join(str(p) for p in extra_mounts if str(p).strip())
+
+        # Передаём базовый контекст через переменные окружения.
+        env = os.environ.copy()
+        env.update(
+            {
+                "SWARM_ID": swarm_id,
+                "SWARM_SYSTEM": system,
+                "SWARM_TASK_ID": task_id,
+                "SWARM_THREADS_DIR": threads_dir,
+                "SWARM_SANDBOX_DIR": sandbox_root_dir,
+                "SWARM_SANDBOX_PATH": sandbox_dir,
+                "SWARM_CLI_COMMAND": cli_command,
+                "SWARM_SANDBOX_TOOL": sandbox_tool,
+                "SWARM_LIMIT_MEMORY_MB": str(limits.get("memory_mb", "")),
+                "SWARM_LIMIT_DISK_MB": str(limits.get("disk_mb", "")),
+                "SWARM_LIMIT_CPU_PERCENT": str(limits.get("cpu_percent", "")),
+                "SWARM_LIMIT_TIMEOUT_SECONDS": str(limits.get("timeout_seconds", "")),
+                # Полный payload запроса можем передать в окружение как JSON-строку.
+                "SWARM_PAYLOAD_JSON": json.dumps(payload, ensure_ascii=False),
+                # Внешний трейс. Пусто = не задан: обёртка тогда не добавляет флаг,
+                # и ран в песочнице ведёт себя как раньше (ничего не меняется).
+                "SWARM_TRACE_ID": str(trace_id or ""),
+                # Пути до swarm-специфичных инструкций и директории со скиллами.
+                "SWARM_AGENTMD_PATH": agentmd_path,
+                "SWARM_SKILLS_DIR": skills_dir,
+                # Bind-mount пути для wrapper.sh (AR-6, AR-7).
+                "SWARM_CLI_VENV_ROOT": cli_venv_root,
+                "SWARM_AGENT_DEP_DIR": agent_dep_dir,
+                "SWARM_EXTRA_MOUNTS": extra_mounts_env,
+            }
+        )
+
+        # wrapper_path проверен в начале функции; остальные ошибки запуска
+        # прокидываем выше — за собой убирает finally ниже.
+        # start_new_session=True → PID == PGID, что позволит monitor'у
+        # убить ВСЁ дерево процессов (wrapper + bwrap + CLI + дочерние)
+        # через os.killpg при превышении таймаута/лимитов или при shutdown.
+        proc = subprocess.Popen(  # noqa: S603
+            [wrapper_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            text=True,
+            start_new_session=True,
+        )
+    finally:
+        # Убираем за собой ВЕСЬ участок между makedirs и Popen, а не только сам
+        # Popen: до запуска здесь ещё материализуется runtime config и собирается
+        # env, и их исключение оставило бы на диске каталог, до которого доберётся
+        # только TTL-janitor — через сутки. Чужую песочницу (её мог создать
+        # предыдущий вызов с тем же swarm_id) не трогаем.
+        if proc is None and sandbox_created:
+            shutil.rmtree(sandbox_dir, ignore_errors=True)
+
+    # Только теперь meta появляется на диске — сразу в статусе running, с PID
+    # и дедлайном.
     swarm_meta_patch.update(
         {
             "status": "running",
