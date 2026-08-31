@@ -767,3 +767,51 @@ def test_local_backend_never_refuses_blind_host_reads(tmp_path, monkeypatch):
 
     assert data["count"] == 5
     assert "stop_reason" not in data
+
+
+def test_output_capped_on_native_names_the_densest_dirs(tmp_path, monkeypatch):
+    """Обрезанный вывод grep: модель получает карту «где густо», а не голое «сузь»."""
+    import utils.native_fs_search as native_fs_search
+    from utils.native_fs_search import NativeGrepResult
+
+    def _m(*parts):
+        return {"file": str(tmp_path.joinpath(*parts)), "line": 1, "end_line": 1,
+                "line_content": "KEY", "context": "KEY\n"}
+
+    matches = [_m("src", "a.py"), _m("src", "a.py"), _m("src", "b.py"),
+               _m("docs", "d.md"), _m("root.py")]
+    monkeypatch.setattr(
+        native_fs_search, "run_native_grep",
+        lambda *a, **k: NativeGrepResult(matches=list(matches), truncated=False, hit_capture_cap=True),
+    )
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", limit=50)
+
+    assert data["stop_reason"] == "output_capped"
+    assert data["top_level_dirs_total"] == 2
+    top = data["top_level_dirs"]
+    assert top[0]["path"].replace("\\", "/").endswith("/src")
+    assert top[0]["match_files"] == 2  # файлы с совпадениями, не сами совпадения
+    assert top[1]["match_files"] == 1
+    assert data["files_at_root"] == 1
+    assert "densest" in data["guidance"]
+
+
+def test_output_capped_map_is_only_for_the_capped_case(tmp_path, monkeypatch):
+    """match_limit карту не несёт: модель и так получила совпадения для навигации."""
+    import utils.native_fs_search as native_fs_search
+
+    (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        native_fs_search, "run_native_grep",
+        lambda *a, **k: _native_result(tmp_path, truncated=True),
+    )
+    tool = _tool(tmp_path)
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", limit=1)
+
+    assert data["stop_reason"] == "match_limit"
+    assert "top_level_dirs" not in data

@@ -56,8 +56,10 @@ from security.path_policy import resolve_tool_context, _extract_config_dict
 # Python-path fallbacks where an in-sandbox needle prefilter is worth a try: the
 # recipe exists (grep+find), only the pattern/glob could not be expressed natively.
 _PREFILTER_FALLBACK_REASONS = frozenset({"pattern_not_native", "file_pattern_not_native"})
-# Refusals that carry candidate_count / candidate_limit / breakdown.
-_REFUSE_STOP_REASONS = frozenset({"too_many_candidate_files", "unfiltered_host_reads"})
+# Ответы, несущие candidate_count / candidate_limit / breakdown (карту по папкам).
+_REFUSE_STOP_REASONS = frozenset(
+    {"too_many_candidate_files", "unfiltered_host_reads", "output_capped"}
+)
 
 # affix_or re-open budget is the only per-mode open cap (spec §5 / §6.3).
 _MODE_CANDIDATE_LIMIT_ATTR = {
@@ -1117,6 +1119,51 @@ class FindInFiles(AbstractSimpleTool):
             out["files_at_root"] = files_at_root
         return out
 
+    def _hit_dirs_breakdown(
+        self,
+        *,
+        start_path: str,
+        matches: List[Dict[str, Any]],
+        config: FsFindInFilesConfig,
+    ) -> Optional[Dict[str, Any]]:
+        """Карта «где густо» из уже разобранного вывода grep: файлы с
+        совпадениями на папку верхнего уровня. Ничего заново не обходится —
+        только группировка префикса, который и так в руках.
+        """
+        backend = self._backend
+        start_norm = backend.normpath(start_path)
+        prefix_len = len(start_norm.rstrip("/\\"))
+        dir_files: Dict[str, set] = {}
+        root_files: set = set()
+        for m in matches:
+            f = backend.normpath(str(m.get("file") or ""))
+            rel = f[prefix_len:].lstrip("/\\")
+            if not rel:
+                continue
+            head, sep, _rest = rel.replace("\\", "/").partition("/")
+            if not sep:
+                root_files.add(f)
+                continue
+            child = backend.normpath(backend.join(start_norm, head))
+            dir_files.setdefault(child, set()).add(f)
+        if not dir_files and not root_files:
+            return None
+        ranked = sorted(dir_files.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        top = ranked[: int(config.top_level_dirs_cap)]
+        out: Dict[str, Any] = {
+            "top_level_dirs": [
+                {
+                    "path": tool_report_abspath(p, workspace=self._workspace),
+                    "match_files": len(files),
+                }
+                for p, files in top
+            ],
+            "top_level_dirs_total": len(dir_files),
+        }
+        if root_files:
+            out["files_at_root"] = len(root_files)
+        return out
+
     def _refuse_guidance(
         self,
         *,
@@ -1401,12 +1448,24 @@ class FindInFiles(AbstractSimpleTool):
             # grep output was cut by the transport ceiling, not by the match
             # limit: "increase limit" cannot help, and a host-side rescan of
             # every candidate is exactly the cost this path exists to avoid —
-            # report the prefix honestly instead.
+            # report the prefix honestly instead. The parsed prefix already
+            # says WHERE it is dense — hand the agent that map for narrowing.
+            hit_dirs = self._hit_dirs_breakdown(
+                start_path=path, matches=result.matches, config=config
+            )
+            guidance = self._output_capped_guidance()
+            if hit_dirs and hit_dirs.get("top_level_dirs"):
+                dens = ", ".join(
+                    f"{d['path']} ({d['match_files']} files)"
+                    for d in hit_dirs["top_level_dirs"][:3]
+                )
+                guidance += f" Matches so far are densest in: {dens}."
             return self._build_response(
                 matches=shown,
                 count=count,
                 stop_reason="output_capped",
-                guidance=self._output_capped_guidance(),
+                guidance=guidance,
+                breakdown=hit_dirs,
                 scan_complete=False,
                 more_matches_may_exist=True,
                 limit_requested=limit_requested,
