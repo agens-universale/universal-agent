@@ -715,6 +715,32 @@ class FindInFiles(AbstractSimpleTool):
             return rel.count("/") + rel.count("\\")
         return 0
 
+    def _blind_read_reason(
+        self,
+        *,
+        prefilter: Optional[str],
+        fallback_reason: Optional[str],
+        show_excluded_dirs: bool,
+    ) -> Tuple[str, bool]:
+        """Why nothing narrowed the candidates inside the sandbox → (reason, a needle would help).
+
+        ``prefilter_paths is None`` covers several states; the agent must hear the
+        real one — advising a fixed substring to a pattern that IS one misleads.
+        """
+        if prefilter:
+            return f"the in-sandbox prefilter {prefilter}", False
+        if show_excluded_dirs:
+            return "show_excluded_dirs forces the host walk, so the in-sandbox prefilter is skipped", False
+        if fallback_reason not in _PREFILTER_FALLBACK_REASONS:
+            return (
+                f"native grep is unavailable here ({fallback_reason}), so nothing narrowed "
+                "the candidates inside the sandbox"
+            ), False
+        backend = self._backend
+        if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
+            return "grep or find is unavailable in the sandbox, so no prefilter is possible", False
+        return "the pattern has no fixed substring for an in-sandbox prefilter", True
+
     def _native_failure_guidance(self, failure: str) -> str:
         what = "timed out" if failure == "native_timeout" else "failed"
         return (
@@ -1747,10 +1773,10 @@ class FindInFiles(AbstractSimpleTool):
             breakdown = self._build_breakdown(
                 start_path=path, candidates=candidates, config=config
             )
-            why = (
-                f"the in-sandbox prefilter {prefilter}"
-                if prefilter
-                else "the pattern has no fixed substring"
+            why, needle_helps = self._blind_read_reason(
+                prefilter=prefilter,
+                fallback_reason=fallback_reason,
+                show_excluded_dirs=show_excluded_dirs,
             )
             return self._build_response(
                 matches=[],
@@ -1759,7 +1785,8 @@ class FindInFiles(AbstractSimpleTool):
                 guidance=(
                     f"{n} candidate files would be read from the host one by one because "
                     f"{why}; the limit is {blind_limit}. Nothing was read. Narrow path or "
-                    "file_pattern (see breakdown), or give the pattern a fixed substring."
+                    "file_pattern (see top_level_dirs)"
+                    + (", or give the pattern a fixed substring." if needle_helps else ".")
                 ),
                 scan_complete=False,
                 more_matches_may_exist=True,

@@ -841,3 +841,34 @@ def test_output_capped_map_is_only_for_the_capped_case(tmp_path, monkeypatch):
 
     assert data["stop_reason"] == "match_limit"
     assert "top_level_dirs" not in data
+
+
+def test_unfiltered_host_reads_guidance_names_the_real_reason(tmp_path, monkeypatch):
+    """Нет grep в песочнице: причина — нет grep, а не «у паттерна нет фиксированной подстроки»."""
+    for i in range(5):
+        (tmp_path / f"f{i}.py").write_text("KEY\n", encoding="utf-8")
+    tool = _tool(tmp_path, {"max_unfiltered_host_reads": 3})
+    _native_ready(tool, monkeypatch, has_grep=False)
+    _sandbox(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["stop_reason"] == "unfiltered_host_reads"
+    guidance = data["guidance"]
+    assert "no_grep" in guidance
+    assert "fixed substring" not in guidance
+    assert "breakdown" not in guidance and "top_level_dirs" in guidance
+
+
+def test_unfiltered_host_reads_guidance_for_show_excluded_dirs(tmp_path, monkeypatch):
+    for i in range(5):
+        (tmp_path / f"f{i}.py").write_text("KEY\n", encoding="utf-8")
+    tool = _tool(tmp_path, {"max_unfiltered_host_reads": 3})
+    _native_ready(tool, monkeypatch)
+    _sandbox(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", show_excluded_dirs=True)
+
+    assert data["stop_reason"] == "unfiltered_host_reads"
+    assert "show_excluded_dirs" in data["guidance"]
+    assert "fixed substring" not in data["guidance"]

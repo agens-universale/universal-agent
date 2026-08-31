@@ -337,7 +337,7 @@ def test_prefilter_command_lists_files_by_fixed_strings():
         exclude_paths=[],
     )
     assert cmd.startswith("find -H /work -mindepth 1")
-    assert "| xargs -0 -r grep -l -Z -F -i" in cmd
+    assert "| xargs -0 -r grep -l --null -F -i" in cmd  # --null: у BSD grep -Z значит «распаковать»
     assert "'(' -type f -o -type l ')'" in cmd
     assert "-e KEY" in cmd
     assert "--binary-files=without-match" not in cmd
@@ -389,3 +389,64 @@ def test_prefilter_candidates_capped_output_is_named():
     backend = _Backend(stdout="/work/a.py\n")
     backend._res.stdout_hit_capture_cap = True
     assert _prefilter(backend) == (None, "capped")
+
+
+# --- --null: имя файла с двоеточием больше не ломает разбор ----------------------
+
+def test_production_grep_terminates_file_names_with_nul():
+    """GNU и BSD grep понимают --null (короткий -Z у BSD значит «распаковать как zgrep»)."""
+    backend = _Backend(stdout="/work/a.py\x001:KEY\n")
+    _run(backend)
+    assert "--null" in backend.commands[0].split()
+
+
+def test_probe_flags_stay_without_nul():
+    """Пробы capabilities разбирают вывод по двоеточию — им --null не нужен."""
+    from utils.native_fs_search import build_grep_argv_flags
+
+    assert "--null" not in build_grep_argv_flags()
+    assert "--null" in build_grep_argv_flags(null_after_name=True)
+
+
+def test_nul_terminated_file_name_with_colon_is_parsed():
+    res = _run(_Backend(stdout="/work/app:2026-08-31.log\x001:x needle y\n/work/plain.txt\x003:needle here\n"))
+    assert res.failure is None
+    assert [(m["file"], m["line"], m["line_content"]) for m in res.matches] == [
+        ("/work/app:2026-08-31.log", 1, "x needle y"),
+        ("/work/plain.txt", 3, "needle here"),
+    ]
+
+
+def test_colon_form_is_still_accepted_for_greps_without_nul():
+    res = _run(_Backend(stdout="/work/a.py:1:KEY\n"))
+    assert [(m["file"], m["line"]) for m in res.matches] == [("/work/a.py", 1)]
+
+
+# --- LC_ALL=C для ASCII-паттерна: cp1251-файл не пропускается молча ---------------
+
+class _EnvSpyBackend(_Backend):
+    def exec(self, cmd, timeout=None, env=None, **kwargs):
+        self.env = env
+        return super().exec(cmd, timeout, env, **kwargs)
+
+    def exec_argv(self, argv, timeout=None, env=None, **kwargs):
+        self.env = env
+        return super().exec_argv(argv, timeout, env, **kwargs)
+
+
+def test_ascii_pattern_runs_grep_with_byte_semantics():
+    """В UTF-8-локали grep считает cp1251-файл бинарным и молча пропускает; LC_ALL=C ищет байты."""
+    backend = _EnvSpyBackend(stdout="/work/a.py\x001:KEY\n")
+    _run(backend)
+    assert backend.env["LC_ALL"] == "C"
+
+
+def test_non_ascii_pattern_keeps_the_locale():
+    """Кириллический паттерн байтами не ищется — локаль остаётся, как была."""
+    backend = _EnvSpyBackend(stdout="")
+    run_native_grep(
+        backend, "/work", NativeGrepPlan(fixed=True, pattern="ключ", case_insensitive=False),
+        exclude_dir_names=[], exclude_nested_dot_dirs=False, file_pattern=None,
+        max_matches=10, report_path=lambda p: p, is_dir_target=True,
+    )
+    assert "LC_ALL" not in backend.env

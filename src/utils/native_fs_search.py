@@ -24,11 +24,47 @@ from utils.pattern_native_gate import NativeGrepPlan, is_safe_grep_include
 log = logging.getLogger(__name__)
 
 _GREP_LINE_RE = re.compile(r"^(?P<path>[^:]+):(?P<line>[0-9]+):(?P<text>.*)$")
+# Tail of a ``--null`` record: the file name is already split off at NUL.
+_GREP_REST_RE = re.compile(r"^(?P<line>[0-9]+):(?P<text>.*)$")
 _GREP_CLEAN_ENV = {
     "GREP_OPTIONS": "",
     "GREP_COLORS": "",
     "GREP_COLOR": "",
 }
+
+
+def _split_grep_record(raw: str) -> Optional[Tuple[str, int, str]]:
+    """``PATH<NUL>LINENO:TEXT`` (``--null``) or ``PATH:LINENO:TEXT``; None when neither.
+
+    With ``--null`` a colon in a file name (``app:2026-08-31.log``) can no longer
+    be mistaken for the field separator. The colon form stays accepted for a
+    grep that ignores the flag, but then a colon inside the name is ambiguous
+    and the record is rejected, as before.
+    """
+    if "\0" in raw:
+        path, _, rest = raw.partition("\0")
+        m = _GREP_REST_RE.match(rest)
+        if not path or not m:
+            return None
+        return path, int(m.group("line")), m.group("text")
+    m = _GREP_LINE_RE.match(raw)
+    if not m or ":" in m.group("path"):
+        return None
+    return m.group("path"), int(m.group("line")), m.group("text")
+
+
+def _grep_env(pattern: str) -> Dict[str, str]:
+    """Clean env; an ASCII pattern adds byte semantics (``LC_ALL=C``).
+
+    In a UTF-8 locale grep treats a cp1251 / latin-1 file as binary and, with
+    ``--binary-files=without-match``, skips it silently — the answer then claims
+    completeness. Bytes cannot miss an ASCII needle (``-i`` folds ASCII only,
+    which is exactly the pattern's alphabet). Non-ASCII patterns keep the locale.
+    """
+    env = dict(_GREP_CLEAN_ENV)
+    if pattern.isascii():
+        env["LC_ALL"] = "C"
+    return env
 
 
 def _search_capture_max_chars(backend: Any) -> int:
@@ -124,8 +160,8 @@ def parse_grep_match_lines(
     for i, raw in enumerate(lines):
         if not raw:
             continue
-        m = _GREP_LINE_RE.match(raw)
-        if not m:
+        rec = _split_grep_record(raw)
+        if rec is None:
             # Сторож про двоичные файлы и управляющие символы применим только к
             # строкам, которые НЕ разобрались: с `--binary-files=without-match`
             # заметку «Binary file X matches» grep не печатает никогда, поэтому
@@ -137,14 +173,7 @@ def parse_grep_match_lines(
             if allow_truncated_tail and i == last:
                 break
             return None
-        path = m.group("path")
-        if ":" in path:
-            return None
-        try:
-            line_no = int(m.group("line"))
-        except ValueError:
-            return None
-        text = m.group("text")
+        path, line_no, text = rec
         if not isabs(path):
             abs_p = join(root, path)
         else:
@@ -247,6 +276,7 @@ def build_grep_argv_flags(
     case_insensitive: bool = False,
     fixed: bool = False,
     include: Optional[str] = None,
+    null_after_name: bool = False,
 ) -> List[str]:
     """Grep flags up to (not including) ``--`` — the one source for every caller.
 
@@ -256,11 +286,18 @@ def build_grep_argv_flags(
     ``-H``: always print the file name. Without it a chunk holding a single file
     yields ``LINENO:TEXT`` and parse_grep_match_lines reads the line number as a
     path (phantom files, wrong line numbers).
+
+    ``null_after_name``: ``--null`` puts NUL after the file name instead of the
+    colon (GNU and BSD; the short ``-Z`` means *decompress* on BSD). Production
+    asks for it so a colon inside a file name cannot break the parse; the
+    capability probes keep the colon form they expect.
     """
     argv: List[str] = [grep_bin, "-H"]
     if recursive:
         argv.append("-R")
     argv.extend(["-n", "--color=never", "--no-messages", "--binary-files=without-match"])
+    if null_after_name:
+        argv.append("--null")
     if case_insensitive:
         argv.append("-i")
     argv.append("-F" if fixed else "-E")
@@ -360,7 +397,7 @@ def build_prefilter_command(
         file_pattern=file_pattern,
         exclude_paths=exclude_paths,
     )
-    grep_argv: List[str] = ["grep", "-l", "-Z", "-F"]
+    grep_argv: List[str] = ["grep", "-l", "--null", "-F"]
     if case_insensitive:
         grep_argv.append("-i")
     grep_argv.append("--no-messages")
@@ -416,7 +453,7 @@ def native_prefilter_candidates(
     # xargs: 1 = no chunk matched, 123 = some chunk returned 1 (no match there).
     if res.return_code not in (0, 1, 123, None):
         return None, "failed"
-    # `-Z` просят ради имён с переводом строки: GNU-grep разделяет пути NUL.
+    # `--null` просят ради имён с переводом строки (короткий `-Z` у BSD grep значит «распаковать»): GNU-grep разделяет пути NUL.
     # BSD-grep флаг принимает, но для `-l` его не соблюдает и пишет через `\n`,
     # поэтому разбор выбирается по факту наличия NUL, а не по вере в флаг.
     stdout = res.stdout or ""
@@ -465,9 +502,10 @@ def run_native_grep(
     )
 
     grep_argv: List[str] = build_grep_argv_flags(
-        case_insensitive=plan.case_insensitive, fixed=plan.fixed
+        case_insensitive=plan.case_insensitive, fixed=plan.fixed, null_after_name=True
     )
     grep_argv.extend(["--", plan.pattern])
+    env = _grep_env(plan.pattern)
 
     try:
         if need_prune:
@@ -483,7 +521,7 @@ def run_native_grep(
             res = backend.exec(
                 cmd,
                 timeout=120,
-                env=dict(_GREP_CLEAN_ENV),
+                env=env,
                 capture_max_chars=_search_capture_max_chars(backend),
             )
         elif is_dir_target:
@@ -492,12 +530,13 @@ def run_native_grep(
                 case_insensitive=plan.case_insensitive,
                 fixed=plan.fixed,
                 include=file_pattern.strip() if file_pattern else None,
+                null_after_name=True,
             )
             argv.extend(["--", plan.pattern, path])
             res = backend.exec_argv(
                 argv,
                 timeout=120,
-                env=dict(_GREP_CLEAN_ENV),
+                env=env,
                 capture_max_chars=_search_capture_max_chars(backend),
             )
         else:
@@ -506,7 +545,7 @@ def run_native_grep(
             res = backend.exec_argv(
                 argv,
                 timeout=120,
-                env=dict(_GREP_CLEAN_ENV),
+                env=env,
                 capture_max_chars=_search_capture_max_chars(backend),
             )
     except Exception as exc:
@@ -549,7 +588,7 @@ def run_native_grep(
     # is kept and flagged below. If the cut fell inside the file:line prefix,
     # drop that tail and keep the prefix — do not fail the whole buffer.
     nonempty = [ln for ln in lines if ln]
-    last_is_match = bool(nonempty) and _GREP_LINE_RE.match(nonempty[-1]) is not None
+    last_is_match = bool(nonempty) and _split_grep_record(nonempty[-1]) is not None
     torn_tail = hit_cap and last_is_match and not stdout.endswith("\n")
     truncated = False
     if allow_path is None and max_matches is not None:
