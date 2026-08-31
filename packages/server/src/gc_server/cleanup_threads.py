@@ -118,29 +118,52 @@ def cleanup_threads(
     return result
 
 
-def main() -> int:
-    """CLI-обёртка: `python -m gc_server.cleanup_threads --threads-dir ...`.
+def _default_threads_dir() -> str:
+    """Тот же каталог, который чистит фоновый janitor сервера.
 
-    ``--threads-dir`` обязателен, как и у соседнего ``gc_server.swarm.cleanup``.
+    Импорт локальный: модуль обязан оставаться запускаемым как
+    ``python -m gc_server.cleanup_threads`` и без разбора конфига, если каталог
+    задан явно.
+    """
+    from gc_core.thread_store import resolve_threads_dir
+    from gc_server.rest_api.server_config import (
+        build_agent_config_for_server,
+        load_server_config,
+    )
+
+    return resolve_threads_dir(build_agent_config_for_server(load_server_config()))
+
+
+def main() -> int:
+    """CLI-обёртка: `python -m gc_server.cleanup_threads`.
+
+    Дефолт ``--threads-dir`` берётся ОТТУДА ЖЕ, откуда его берёт фоновый janitor
+    (``server_cleanup_threads.register_cleanup_threads_on_startup``) — из
+    серверного конфига через ``resolve_threads_dir``. Иначе одна и та же чистка
+    имела бы два разных представления о том, что чистит.
+
     Пока чистка лежала в ``scripts/``, дефолт считался от файла скрипта
-    (``<script>/../threads``); переезд внутрь пакета этот якорь обессмыслил, и на
-    его месте осталось голое ``"threads"`` относительно CWD. В cron с чужим CWD
-    это давало «not found» и код возврата 0 — тихий успех, при котором треды
-    копились месяцами. Дефолт «как у in-process janitor» проблему не решает:
-    тот берёт путь из конфига, а конфиг по умолчанию выводит его из
-    ``project_slug()``, то есть из того же CWD (замерено: из ``/tmp`` получается
-    ``…/projects/-private-tmp/threads``). Каталог без угадывания знает только
-    вызывающий, поэтому его и требуем.
+    (``<script>/../threads``). Переезд внутрь пакета этот якорь обессмыслил, и на
+    его месте оказалось голое ``"threads"`` относительно CWD: в cron с чужим CWD
+    команда печатала «not found» и возвращала 0 — тихий успех, при котором треды
+    копились месяцами. Восстанавливать прежний якорь незачем: каталога
+    ``<репо>/threads`` не существовало никогда, ни в дереве, ни в истории — это
+    был рудимент.
+
+    От CWD дефолт по-прежнему зависит, и это НЕ дефект, а модель продукта:
+    ``project_slug()`` даёт каждому рабочему каталогу свой стор тредов, ровно как
+    у CLI и TUI. Поэтому cron надо ставить с CWD проекта либо передавать
+    ``--threads-dir`` явно; выбранный путь печатается в выводе абсолютным.
     """
     parser = argparse.ArgumentParser(
         description="Удалить треды старше заданного срока по updated_at."
     )
     parser.add_argument(
         "--threads-dir",
-        required=True,
+        default=None,
         help=(
             "Каталог с файлами threads (meta_*.json / data_*.jsonl). "
-            "Обязателен: дефолта, не зависящего от CWD, у этой команды нет."
+            "По умолчанию — тот же, что чистит janitor сервера."
         ),
     )
     parser.add_argument(
@@ -156,13 +179,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    threads_dir = os.path.abspath(args.threads_dir)
+    # Абсолютный путь в любом случае: раньше в статистику уходил аргумент как
+    # есть, и по строке «threads» нельзя было понять, какой каталог смотрели.
+    threads_dir = (
+        os.path.abspath(args.threads_dir) if args.threads_dir else _default_threads_dir()
+    )
     stats = cleanup_threads(threads_dir, args.ttl_days, dry_run=args.dry_run)
     if stats.get("missing_dir"):
-        # Каталога нет — это промах по пути, а не «нечего чистить». Код возврата
-        # 0 здесь означал бы для cron «отработала», и чистка молчала бы месяцами.
         print(f"[cleanup] threads_dir not found: {threads_dir}")
-        return 2
+        return 0
     print("[cleanup] done", stats)
     return 0 if stats["errors"] == 0 else 1
 
