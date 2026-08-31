@@ -200,7 +200,7 @@ class TestEmitToolStartEnd:
         kinds = [e.kind for e in sink.drain()]
         assert kinds == ["tool_start", "tool_end", "tool_start", "tool_end"]
 
-    def test_wrong_arguments_emits_tool_end_then_raises(self, monkeypatch):
+    def test_wrong_arguments_emits_tool_end_and_returns_error_output(self, monkeypatch):
         from gc_core import processing_responses as pr
         from gc_core.tools import WrongFunctionArgumentsException
 
@@ -213,16 +213,14 @@ class TestEmitToolStartEnd:
         monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
         sink = QueueSubagentProgressSink()
-        try:
-            pr.process_tool_calls(
-                messages=[_fc("fs_read_file", "c_bad")],
-                state=_state(),
-                ctx=_child_ctx(sink),
-                run_agent_func=None,
-            )
-            assert False, "expected WrongFunctionArgumentsException"
-        except WrongFunctionArgumentsException:
-            pass
+        outs = pr.process_tool_calls(
+            messages=[_fc("fs_read_file", "c_bad")],
+            state=_state(),
+            ctx=_child_ctx(sink),
+            run_agent_func=None,
+        )
+        assert [o["call_id"] for o in outs] == ["c_bad"]
+        assert json.loads(outs[0]["output"])["error"]["type"] == "invalid_arguments"
         events = sink.drain()
         assert [e.kind for e in events] == ["tool_start", "tool_end"]
         assert events[1].ok is False

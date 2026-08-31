@@ -129,6 +129,7 @@ class State:
         # неизвестных тулов в батче нет).
         self.last_internal_error_tool_name: Optional[str] = None
         self.internal_error_repeat_count: int = 0
+        self.last_batch_invalid_arguments_count: int = 0
         self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
         # Шаги без вызова session_todo (todo_reminder); переживает ход через meta.

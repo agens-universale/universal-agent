@@ -273,6 +273,8 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
         raise WrongFunctionArgumentsException("bad args", "{}", tool_name=kw["tool_name"])
 
     monkeypatch.setattr(pr, "apply_tool", _boom)
+    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
+    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
 
     class _State:
         messages = []
@@ -289,7 +291,8 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
     messages = [
         {"type": "function_call", "name": "run_subagent", "call_id": "c1", "arguments": "{}"},
     ]
-    with pytest.raises(WrongFunctionArgumentsException):
-        pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    # Ошибка аргументов — output этого вызова, батч не прерывается.
+    outs = pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    assert [o["call_id"] for o in outs] == ["c1"]
 
     assert state.turn_tool_calls == 1

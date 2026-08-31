@@ -77,6 +77,23 @@ class WrongFunctionArgumentsException(Exception):
         self.extra_hint = extra_hint
         self.call_id = call_id
 
+    def to_tool_output(self) -> str:
+        """Отказ валидации как output вызова — тот же контракт, что у unknown_tool.
+
+        Батч не прерывается: этот JSON становится function_call_output упавшего
+        вызова, остальные вызовы хода исполняются.
+        """
+        payload = {
+            "ok": False,
+            "error": {
+                "type": "invalid_arguments",
+                "tool": self.tool_name,
+                "message": self.message,
+            },
+            "message": self.to_llm_feedback(),
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
     def to_llm_feedback(self) -> str:
         """
         Формирует четкое и структурированное сообщение об ошибке для LLM.
