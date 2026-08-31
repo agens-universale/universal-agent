@@ -24,6 +24,7 @@
  "message_policy": "gc_core",
  "message_projection": "gc_core",
  "model_picker": "gc_core",
+ "model_router": "gc_core",
  "onboarding": "gc_core",
  "onboarding_config_writer": "gc_core",
  "onboarding_fields": "gc_core",
@@ -49,8 +50,11 @@
  "trace_id": "gc_core",
  "tui": "gc_tui",
  "tui_entry": "gc_core",
+ "turn_boundary": "gc_core",
  "updater": "gc_core",
  "upgrade_gate": "gc_core",
  "usage": "gc_core",
- "utils": "gc_core"
+ "utils": "gc_core",
+ "voice": "gc_tui",
+ "voice_runtime": "gc_tui"
 }

@@ -31,7 +31,8 @@ import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from gc_testkit.paths import REPO, _MAP_PATH
+from gc_testkit.paths import REPO, _MAP_PATH, package_src_dirs
+from gc_testkit.sources import ensure_sources_on_path
 
 #: Каталоги корня, которые сканировать НЕ надо. Раньше здесь был обратный
 #: список — перечень сканируемых каталогов, и он протух молча: в нём остался
@@ -89,9 +90,13 @@ def _top_level_names() -> set[str]:
     во время миграции — дореформенные имена из module_map.json. Брать сюда
     вложенные подпакеты нельзя: `fs`, `exec`, `session` дают ложные
     срабатывания на обычных строках (`f"fs{i:04d}"` — идентификатор сессии).
+
+    Каталоги пакетов спрашиваются у `paths.package_src_dirs()` — тем же
+    источником, из которого их берёт бутстрап `sys.path`, а не своим `glob`
+    (B8).
     """
     names: set[str] = set()
-    for pkg_src in (REPO / "packages").glob("*/src"):
+    for pkg_src in package_src_dirs():
         for child in pkg_src.iterdir():
             if child.is_dir() and (child / "__init__.py").exists():
                 names.add(child.name)
@@ -244,11 +249,13 @@ def scan() -> tuple[list[Ref], list[tuple[Ref, str]]]:
 
     Раньше эта логика жила внутри main(), и тест её переиспользовать не мог —
     поэтому сетка гонялась только руками и дважды пропустила регрессию.
+
+    Каталоги исходников кладёт `gc_testkit.sources` — та же функция, что зовёт
+    плагин и соседняя сетка `import_health`. Своя копия цикла брала сырой
+    `glob` в порядке ФС, а копия в `import_health` — отсортированный список из
+    `paths`: два источника и два порядка на одну задачу (B8).
     """
-    for pkg in (REPO / "packages").glob("*/src"):
-        entry = str(pkg)
-        if entry not in sys.path:
-            sys.path.insert(0, entry)
+    ensure_sources_on_path()
 
     ours = _top_level_names()
     paths = [p for d in scan_dirs() for p in d.rglob("*.py") if "__pycache__" not in p.parts]
