@@ -55,10 +55,31 @@ def _build_all(out: Path) -> dict:
 
 
 @pytest.fixture(scope="module")
-def wheels(tmp_path_factory):
+def _dist_dir(tmp_path_factory):
+    """Каталог со собранными колёсами. Сборка шести колёс дорогая, поэтому она
+    одна на модуль, а `wheels`/`wheel_infos` — два взгляда на один результат."""
     if shutil.which("uv") is None:
         pytest.skip("uv not on PATH")
-    return _build_all(tmp_path_factory.mktemp("dist"))
+    return tmp_path_factory.mktemp("dist")
+
+
+@pytest.fixture(scope="module")
+def wheels(_dist_dir):
+    return _build_all(_dist_dir)
+
+
+@pytest.fixture(scope="module")
+def wheel_infos(_dist_dir, wheels):
+    """`ZipInfo` по каждому файлу колеса — нужен там, где важны права доступа.
+
+    Зависит от `wheels`, чтобы сборка гарантированно случилась: сам по себе
+    `_dist_dir` пуст.
+    """
+    infos = {}
+    for w in _dist_dir.glob("*.whl"):
+        key = w.name.split("-")[0]
+        infos[key] = {i.filename: i for i in zipfile.ZipFile(w).infolist()}
+    return infos
 
 
 def test_all_distributions_built(wheels):
@@ -152,6 +173,32 @@ def test_server_wheel_contents(wheels):
     for m in ("gc_server/server.py", "gc_server/rest_api/__init__.py",
               "gc_server/swarm/runner.py"):
         assert m in names, m
+
+
+def test_server_wheel_ships_the_sandbox_wrapper(wheels, wheel_infos):
+    """Обёртка песочницы едет в колесе, и с исполняемым битом.
+
+    На этом файле держится весь swarm в установленном профиле: `runner` зовёт
+    его через Popen. До разбиения на пакеты обёртка лежала в `scripts/`, в
+    колёса не попадала вовсе, и swarm из установки не работал в принципе —
+    стеречь было нечего. Теперь это package data, и промах будет виден только
+    пользователю, на первом POST /swarm/run: остальной набор останется зелёным,
+    потому что ни один тест не заглядывает внутрь колеса за этим файлом.
+
+    Бит +x проверяется отдельно от наличия: без него Popen даёт PermissionError,
+    а не FileNotFoundError, и диагноз выглядит совсем иначе.
+    """
+    wrapper = "gc_server/swarm/run-cli-in-sandbox.sh"
+    assert wrapper in wheels["gc_server"], (
+        f"{wrapper} не попал в колесо — swarm в установленном профиле не "
+        "поднимется: runner зовёт этот файл через Popen"
+    )
+
+    mode = wheel_infos["gc_server"][wrapper].external_attr >> 16
+    assert mode & 0o111, (
+        f"{wrapper} едет без исполняемого бита (режим {oct(mode)}) — "
+        "Popen даст PermissionError"
+    )
 
 
 def test_cli_wheel_contents(wheels):
