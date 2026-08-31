@@ -577,3 +577,97 @@ def test_package_skill_no_intent_brief_skips_validation(tmp_path):
     # demo/ всё равно может быть (т.к. _dev есть и есть unrelated.md внутри —
     # это попадает в demo/, но gate не активируется)
     # Главное — упаковка не fails из-за missing required files.
+
+
+def _fake_embedding(tmp_path: Path) -> tuple[Path, Path]:
+    """Чужой репозиторий с нашим колесом в его `.venv`.
+
+    Обычнейший случай встраивания: gc-core установлен в venv ЧУЖОГО проекта, а
+    скрипт упаковки лежит внутри пакета, в `gc_core/assets/skills/…/scripts/`.
+    Чужое дерево нарочно похоже на наше всем, чем ловился слабый маркер: есть
+    `.git`, есть `packages/*/src`, есть даже `packages/core/pyproject.toml` —
+    отличается только имя в нём. Внутри `packages/*/src` лежит модуль
+    `sentinel_foreign_pkg`: если чужой src попадёт на `sys.path`, он станет
+    импортируемым, и это видно из подпроцесса.
+
+    Возвращает (корень чужого репозитория, каталог scripts внутри «колеса»).
+    """
+    root = tmp_path / "foreign-repo"
+    (root / ".git").mkdir(parents=True)
+    (root / "packages" / "other" / "src").mkdir(parents=True)
+    (root / "packages" / "other" / "src" / "sentinel_foreign_pkg.py").write_text(
+        "VALUE = 'foreign'\n", encoding="utf-8")
+    (root / "packages" / "core").mkdir(parents=True)
+    (root / "packages" / "core" / "pyproject.toml").write_text(
+        '[project]\nname = "someone-else"\nversion = "1.0"\n', encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "someone-else-meta"\n', encoding="utf-8")
+
+    wheel_skill = (
+        root / ".venv" / "lib" / f"python{sys.version_info.major}."
+        f"{sys.version_info.minor}" / "site-packages" / "gc_core" / "assets"
+        / "skills" / "skill-creator"
+    )
+    wheel_skill.mkdir(parents=True)
+    import shutil
+    shutil.copytree(
+        SKILL_DIR / "scripts",
+        wheel_skill / "scripts",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    return root, wheel_skill / "scripts"
+
+
+_FOREIGN_PROBE = """
+import json, sys
+from pathlib import Path
+scripts, foreign, skill = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, scripts)
+import package_skill as ps
+repo_root = ps._repo_root()
+layer = ps._detect_source_layer(Path(skill))
+try:
+    import sentinel_foreign_pkg  # noqa: F401
+    shadowed = True
+except ImportError:
+    shadowed = False
+print(json.dumps({
+    "repo_root": None if repo_root is None else str(repo_root),
+    "layer": layer,
+    "leaked": [p for p in sys.path
+               if p.startswith(str(Path(foreign) / "packages"))],
+    "shadowed": shadowed,
+}))
+"""
+
+
+def test_foreign_repo_is_not_taken_for_our_working_copy(tmp_path):
+    """Колесо в .venv чужого репозитория не объявляет его корнем и не лезет в него.
+
+    Слабый маркер («у родителя есть packages/ или .git») отдавал чужой корень
+    молча, и `_detect_source_layer` клал найденные в нём `packages/*/src` в
+    НАЧАЛО sys.path того процесса, который агент запускает от имени
+    пользователя. Проверяется подпроцессом: внутри процесса теста этого не
+    изобразить — `package_skill` уже импортирован, и его `__file__` указывает
+    в рабочую копию, а весь смысл проверки в том, ГДЕ лежит скрипт.
+    """
+    foreign, scripts = _fake_embedding(tmp_path)
+    cwd = tmp_path / "elsewhere"
+    (cwd / "some-skill").mkdir(parents=True)
+
+    result = subprocess.run(
+        [sys.executable, "-c", _FOREIGN_PROBE, str(scripts), str(foreign),
+         str(cwd / "some-skill")],
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        timeout=60,
+        cwd=str(cwd),
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    got = json.loads(result.stdout)
+
+    assert got["repo_root"] is None, got
+    assert got["leaked"] == [], got
+    assert got["shadowed"] is False, got
+    assert got["layer"] == "unknown", got
