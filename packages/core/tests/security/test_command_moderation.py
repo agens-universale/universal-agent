@@ -475,6 +475,10 @@ def test_every_refusal_carries_no_workaround_guidance(
     assert error["guidance"] == NO_WORKAROUND_NOTICE
     assert "Do NOT retry" in error["guidance"]
     assert "equivalent" in error["guidance"]
+    # ...и ровно один раз: ветки «пользователь отказал» приклеивали ту же
+    # формулировку ещё и к reason, из-за чего модель получала её в одном
+    # словаре дважды. Ассерта на это не было, и дубль жил незамеченным.
+    assert "Do NOT retry" not in error["reason"], error["reason"]
 
 
 def test_guidance_is_separate_from_judge_reason():

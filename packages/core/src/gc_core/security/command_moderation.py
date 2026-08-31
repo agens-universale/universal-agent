@@ -228,7 +228,7 @@ def decide_command_execution(
                     allowed=False,
                     decision="cancelled",
                     reason_code="user_confirmation",
-                    reason="User declined the command. " + NO_WORKAROUND_NOTICE,
+                    reason="User declined the command.",
                     error_type="unsafe_command_cancelled_by_user",
                 )
             return ExecutionDecision(
@@ -291,7 +291,7 @@ def decide_command_execution(
             allowed=False,
             decision="cancelled",
             reason_code="user_confirmation",
-            reason="User declined the command. " + NO_WORKAROUND_NOTICE,
+            reason="User declined the command.",
             risk_flags=judge_result.risk_flags,
             error_type="unsafe_command_cancelled_by_user",
         )
