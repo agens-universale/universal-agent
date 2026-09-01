@@ -2,48 +2,52 @@
 
 Nothing is installed in the image, no file is written, no process is left
 running. Each agent-level operation (`tools/list`, `tools/call`) carries its own
-`initialize` -> `notifications/initialized` -> method handshake and throws the
-session away afterwards; the sim-user sidecars this exists for keep their state
-in the server process, not in the MCP session.
+`initialize` -> `notifications/initialized` -> method handshake and closes the
+server-side session with a DELETE when it is done; the sim-user sidecars this
+exists for keep their state in the server process, not in the MCP session.
 
 The script that runs in the container is stdlib-only and does the minimum
 framing work needed to know when to stop reading: an SSE answer must not be read
 to EOF, because per MCP Streamable HTTP the server only SHOULD close the stream
 after the final result.
+
+`python3` is the only carrier. `curl`/`wget` cannot report the response status or
+headers (so `mcp-session-id` would be lost), cannot stop at the first SSE frame,
+and would need a scratch file — a carrier that is wrong in three ways is worse
+than a clear error, and every image this targets ships python3.
 """
 import base64
 import json
 import logging
-import shlex
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from tools.connect_mcp.client import _merge_mcp_headers, _normalize_url
+from tools.connect_mcp.client import (
+    MCP_INIT_PARAMS,
+    _merge_mcp_headers,
+    _normalize_url,
+)
 from tools.connect_mcp.client_port import McpClientPort
+from utils.ssl_config import get_verify_ssl
 
 logger = logging.getLogger(__name__)
 
 EXEC_RESULT_MARKER = "__GC_MCP_EXEC__"
 
-# The exec channel caps captured stdout (backends/protocol.py:10). Leave the
-# backend's own limit in charge; we only detect the hit and fail loudly.
+# Margin between the in-script socket timeout and the backend's own kill, so a
+# slow answer surfaces as an MCP timeout rather than an opaque exec timeout.
 _TIMEOUT_SLACK_SEC = 15
 
-# Carrier order is deliberate and differs from the spec's `curl -> wget ->
-# python3`. FastMCP may answer tools/call with text/event-stream, and per MCP
-# Streamable HTTP the server only SHOULD close that stream after the final
-# result. A carrier that waits for EOF (curl, wget) hangs or truncates; only the
-# python3 carrier stops at the first complete frame. python3 is present in every
-# task image we target, so it leads; the shell carriers stay as fallbacks and
-# always carry an explicit timeout so a stuck stream fails instead of hanging.
-_CARRIERS = ("python3", "curl", "wget")
+# One operation is three requests (initialize, initialized, method). The caller's
+# timeout is the budget for the whole operation, so each request gets a share —
+# otherwise a single operation can outlive the discovery deadline that granted it.
+_REQUESTS_PER_OPERATION = 3
 
-_INIT_PARAMS: Dict[str, Any] = {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {"roots": {"listChanged": True}, "sampling": {}},
-    "clientInfo": {"name": "SurfaceClient", "version": "1.0.0"},
-}
+# Attribute the python3 probe is cached under, on the backend rather than on the
+# client: carrier availability is a property of the environment, and clients are
+# rebuilt per operation.
+_CARRIER_CACHE_ATTR = "_gc_mcp_has_python3"
 
 
 class McpExecCarrierError(RuntimeError):
@@ -52,12 +56,20 @@ class McpExecCarrierError(RuntimeError):
 
 # The container-side script. Doubled braces are literal — this goes through
 # str.format. It performs one POST, follows MCP's /mcp -> /mcp/ redirect itself
-# (urllib will not re-POST on 307), and stops at the first complete JSON-RPC
-# frame instead of reading to EOF.
+# (urllib refuses to re-POST on 307/308; it handles 301/302 on its own by
+# rewriting the method to GET, which never reaches this loop), stops at the first
+# complete JSON-RPC frame instead of reading to EOF, and releases the session.
 _HTTP_CARRIER = '''
-import base64, json, urllib.error, urllib.parse, urllib.request
+import base64, json, ssl, urllib.error, urllib.parse, urllib.request
 
 _req = json.loads(base64.b64decode("{payload_b64}").decode("utf-8"))
+_ctx = ssl._create_unverified_context() if not _req.get("verify_ssl", True) else None
+
+
+def _open(request, timeout):
+    if _ctx is not None:
+        return urllib.request.urlopen(request, timeout=timeout, context=_ctx)
+    return urllib.request.urlopen(request, timeout=timeout)
 
 
 def _read_json_frame(resp):
@@ -105,7 +117,7 @@ def _post(url):
         method="POST",
     )
     try:
-        resp = urllib.request.urlopen(request, timeout=_req["timeout"])
+        resp = _open(request, _req["timeout"])
     except urllib.error.HTTPError as exc:
         headers = {{k.lower(): v for k, v in exc.headers.items()}} if exc.headers else {{}}
         try:
@@ -123,14 +135,33 @@ def _post(url):
         resp.close()
 
 
+def _delete_session(url, session_id):
+    """Release the server-side session; best effort, never fails the operation."""
+    try:
+        request = urllib.request.Request(
+            url, headers={{"mcp-session-id": session_id}}, method="DELETE"
+        )
+        _open(request, 5).close()
+    except Exception:
+        pass
+
+
 try:
     url = _req["url"]
+    redirected = False
     for _ in range(4):
         status, headers, body = _post(url)
         location = headers.get("location")
-        if status not in (301, 302, 307, 308) or not location:
+        if status not in (307, 308) or not location:
+            redirected = False
             break
         url = urllib.parse.urljoin(url, location)
+        redirected = True
+    if redirected:
+        raise RuntimeError("redirect loop not resolved after 4 hops: " + url)
+    session_id = _req["headers"].get("mcp-session-id") or headers.get("mcp-session-id")
+    if _req.get("close_session") and session_id:
+        _delete_session(url, session_id)
 except Exception as exc:
     print("{marker}" + json.dumps({{"error": "{{}}: {{}}".format(type(exc).__name__, exc)}}))
 else:
@@ -155,72 +186,32 @@ def _extract_marked(stdout: str) -> Optional[Dict[str, Any]]:
 class OsBackendStatelessClient(McpClientPort):
     """`http` / `stream_http` / `stdio`, spoken from inside the backend."""
 
-    _carrier_name: Optional[str] = None
-
     def __init__(
         self, server_name: str, server_cfg: Dict[str, Any], *, os_backend: Any
     ) -> None:
         super().__init__(server_name, server_cfg)
         self.os_backend = os_backend
 
-    def _carrier(self) -> str:
-        """Which HTTP client the environment can offer. Probed once per client."""
-        if self._carrier_name is not None:
-            return self._carrier_name
-        for name in _CARRIERS:
+    def _require_python3(self, *, timeout: float) -> None:
+        """Probe once per backend: the carrier is an environment property."""
+        cached = getattr(self.os_backend, _CARRIER_CACHE_ATTR, None)
+        if cached is None:
             probe = self.os_backend.exec(
-                f"command -v {name} 2>/dev/null || true", timeout=20
+                "command -v python3 2>/dev/null || true", timeout=max(5, int(timeout))
             )
-            if (getattr(probe, "stdout", "") or "").strip():
-                self._carrier_name = name
-                return name
-        raise McpExecCarrierError(
-            f"MCP server '{self.server_name}': the environment has none of "
-            f"python3, curl, wget on PATH, so an HTTP request cannot be carried "
-            f"there. Nothing will be installed into the task image; set "
-            f"execute_on: agent for this server if it is reachable from the agent."
-        )
-
-    def _shell_carrier_command(self, request: Dict[str, Any]) -> str:
-        """curl/wget fallback. Correct for application/json answers; an SSE answer
-        the server leaves open is cut by the explicit timeout rather than hanging
-        the run.
-
-        This path reports neither the real HTTP status nor the response headers —
-        the envelope is assembled from the body alone, so `mcp-session-id` is
-        unavailable and a 4xx/5xx surfaces as an empty body rather than an
-        HTTPError. Acceptable here: a server that omits the session header still
-        answers a stateless handshake, an empty body already fails loudly one
-        layer up, and this carrier only runs where python3 is absent.
-        """
-        body = json.dumps(request["payload"])
-        timeout_s = int(request["timeout"])
-        url = shlex.quote(request["url"])
-        if self._carrier() == "curl":
-            header_args = " ".join(
-                f"-H {shlex.quote(f'{k}: {v}')}" for k, v in request["headers"].items()
+            cached = bool((getattr(probe, "stdout", "") or "").strip())
+            try:
+                setattr(self.os_backend, _CARRIER_CACHE_ATTR, cached)
+            except Exception:
+                # Backend forbids attributes; probing again is only a lost cache.
+                pass
+        if not cached:
+            raise McpExecCarrierError(
+                f"MCP server '{self.server_name}': the environment has no python3 on "
+                f"PATH, so an MCP request cannot be carried there. Nothing will be "
+                f"installed into the task image; set execute_on: agent for this "
+                f"server if it is reachable from the agent."
             )
-            fetch = (
-                f"curl -sS -L --max-time {timeout_s} -X POST {header_args} "
-                f"--data-binary {shlex.quote(body)} {url}"
-            )
-        else:
-            header_args = " ".join(
-                f"--header={shlex.quote(f'{k}: {v}')}"
-                for k, v in request["headers"].items()
-            )
-            fetch = (
-                f"wget -q -O - --timeout={timeout_s} {header_args} "
-                f"--post-data={shlex.quote(body)} {url}"
-            )
-        marker = shlex.quote(EXEC_RESULT_MARKER)
-        return (
-            f"{fetch} > /tmp/gc_mcp_body.$$ 2>/dev/null; "
-            f"printf '%s' {marker}; "
-            f"printf '{{\"status\": 200, \"headers\": {{}}, \"body\": '; "
-            f"cat /tmp/gc_mcp_body.$$; printf '}}\\n'; "
-            f"rm -f /tmp/gc_mcp_body.$$"
-        )
 
     # --- public port ---
 
@@ -242,17 +233,78 @@ class OsBackendStatelessClient(McpClientPort):
     def _operation(
         self, method: str, params: Dict[str, Any], *, timeout: float
     ) -> Dict[str, Any]:
-        """Handshake plus the method, then drop the session on the floor."""
+        """Handshake, the method, then release the session on both sides."""
         if str(self.server_cfg.get("transport") or "") == "stdio":
             return self._stdio_operation(method, params, timeout=timeout)
-        session_id = self._handshake(timeout=timeout)
+        # The caller's timeout covers the whole operation, not one request.
+        per_request = max(1.0, float(timeout) / _REQUESTS_PER_OPERATION)
+        self._require_python3(timeout=per_request)
+        session_id = self._handshake(timeout=per_request)
         _headers, body = self._request(
             {"jsonrpc": "2.0", "id": f"gc-{method}", "method": method,
              "params": params},
             session_id=session_id,
-            timeout=timeout,
+            timeout=per_request,
+            close_session=True,
         )
         return body
+
+    def _handshake(self, *, timeout: float) -> Optional[str]:
+        headers, _body = self._request(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": MCP_INIT_PARAMS},
+            session_id=None,
+            timeout=timeout,
+        )
+        session_id = headers.get("mcp-session-id")
+        self._request(
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            session_id=session_id,
+            timeout=timeout,
+        )
+        return session_id
+
+    def _request(
+        self,
+        payload: Dict[str, Any],
+        *,
+        session_id: Optional[str],
+        timeout: float,
+        close_session: bool = False,
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        headers: Dict[str, str] = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+        if session_id:
+            headers["mcp-session-id"] = session_id
+        token = self.server_cfg.get("token")
+        headers.update(
+            _merge_mcp_headers(
+                token=str(token) if token else None,
+                extra_headers=self.server_cfg.get("headers") or {},
+            )
+        )
+        # A CA path is rejected at resolve time, so this is a plain on/off flag.
+        verify = get_verify_ssl(self.server_cfg)
+        request = {
+            "url": _normalize_url(str(self.server_cfg.get("url") or "")),
+            "headers": headers,
+            "payload": payload,
+            "timeout": float(timeout),
+            "verify_ssl": bool(verify),
+            "close_session": bool(close_session),
+        }
+        payload_b64 = base64.b64encode(
+            json.dumps(request).encode("utf-8")
+        ).decode("ascii")
+        code = _HTTP_CARRIER.format(
+            payload_b64=payload_b64, marker=EXEC_RESULT_MARKER
+        )
+        result = self.os_backend.run_python(
+            code, timeout=int(timeout) + _TIMEOUT_SLACK_SEC
+        )
+        return self._interpret(result)
 
     def _stdio_operation(
         self, method: str, params: Dict[str, Any], *, timeout: float
@@ -270,21 +322,26 @@ class OsBackendStatelessClient(McpClientPort):
                 f"'command' in the config"
             )
         argv = [str(command)] + [str(a) for a in (self.server_cfg.get("args") or [])]
+        env = {str(k): str(v) for k, v in (self.server_cfg.get("env") or {}).items()}
+        if env:
+            # `exec_argv` builds `printf … | <argv>` and backends prepend `env K=V`
+            # to the whole string — in POSIX grammar the pipe splits the command
+            # first, so the prefix would land on printf. Put `env` in the argv of
+            # the right side instead, where it binds to the server process.
+            argv = ["env"] + [f"{k}={v}" for k, v in env.items()] + argv
         rpc_id = f"gc-{method}"
         messages = [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-             "params": _INIT_PARAMS},
+             "params": MCP_INIT_PARAMS},
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params},
         ]
         stdin = "".join(json.dumps(m) + "\n" for m in messages)
-        env = {str(k): str(v) for k, v in (self.server_cfg.get("env") or {}).items()}
         result = self.os_backend.exec_argv(
             argv,
             stdin=stdin,
             cwd=self.server_cfg.get("cwd"),
             timeout=int(timeout) + _TIMEOUT_SLACK_SEC,
-            env=env or None,
         )
         if getattr(result, "stdout_hit_capture_cap", False):
             raise McpExecCarrierError(
@@ -307,64 +364,6 @@ class OsBackendStatelessClient(McpClientPort):
             f"stdio output (rc={getattr(result, 'return_code', None)}, "
             f"stderr={stderr})"
         )
-
-    def _handshake(self, *, timeout: float) -> Optional[str]:
-        headers, _body = self._request(
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-             "params": _INIT_PARAMS},
-            session_id=None,
-            timeout=timeout,
-        )
-        session_id = headers.get("mcp-session-id")
-        self._request(
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            session_id=session_id,
-            timeout=timeout,
-        )
-        return session_id
-
-    def _request(
-        self,
-        payload: Dict[str, Any],
-        *,
-        session_id: Optional[str],
-        timeout: float,
-    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        headers: Dict[str, str] = {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-        }
-        if session_id:
-            headers["mcp-session-id"] = session_id
-        token = self.server_cfg.get("token")
-        headers.update(
-            _merge_mcp_headers(
-                token=str(token) if token else None,
-                extra_headers=self.server_cfg.get("headers") or {},
-            )
-        )
-        request = {
-            "url": _normalize_url(str(self.server_cfg.get("url") or "")),
-            "headers": headers,
-            "payload": payload,
-            "timeout": float(timeout),
-        }
-        payload_b64 = base64.b64encode(
-            json.dumps(request).encode("utf-8")
-        ).decode("ascii")
-        code = _HTTP_CARRIER.format(
-            payload_b64=payload_b64, marker=EXEC_RESULT_MARKER
-        )
-        # Give the backend kill a margin over the in-script socket timeout, so a
-        # slow answer surfaces as an MCP timeout rather than an opaque exec one.
-        deadline = int(timeout) + _TIMEOUT_SLACK_SEC
-        if self._carrier() == "python3":
-            result = self.os_backend.run_python(code, timeout=deadline)
-        else:
-            result = self.os_backend.exec(
-                self._shell_carrier_command(request), timeout=deadline
-            )
-        return self._interpret(result)
 
     def _interpret(self, result: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
         if getattr(result, "stdout_hit_capture_cap", False):

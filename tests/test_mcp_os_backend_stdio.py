@@ -70,7 +70,10 @@ def test_stdio_sends_the_full_handshake_on_stdin():
     ]
 
 
-def test_stdio_passes_configured_env():
+def test_stdio_env_binds_to_the_server_not_to_printf():
+    """`exec_argv` pipes stdin through printf and backends prepend `env K=V` to the
+    whole string, where the pipe would bind it to printf. The env has to travel in
+    the argv of the server itself."""
     backend = _StdioSandbox([_frame(1, {}), _frame("gc-tools/list", {"tools": []})])
     client = OsBackendStatelessClient(
         "srv",
@@ -78,7 +81,19 @@ def test_stdio_passes_configured_env():
         os_backend=backend,
     )
     client.list_tools(timeout=20.0)
-    assert backend.calls[0]["env"]["API_KEY"] == "k"
+    call = backend.calls[0]
+    assert call["argv"] == ["env", "API_KEY=k", "srv-bin"]
+    # Passing it as a kwarg too would re-introduce the prefix-on-printf bug.
+    assert call["env"] is None
+
+
+def test_stdio_without_env_runs_the_command_bare():
+    backend = _StdioSandbox([_frame(1, {}), _frame("gc-tools/list", {"tools": []})])
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
+    )
+    client.list_tools(timeout=20.0)
+    assert backend.calls[0]["argv"] == ["srv-bin"]
 
 
 def test_stdio_call_tool_matches_the_reply_by_id():
