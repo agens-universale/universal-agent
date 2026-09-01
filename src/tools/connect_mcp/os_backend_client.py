@@ -243,6 +243,8 @@ class OsBackendStatelessClient(McpClientPort):
         self, method: str, params: Dict[str, Any], *, timeout: float
     ) -> Dict[str, Any]:
         """Handshake plus the method, then drop the session on the floor."""
+        if str(self.server_cfg.get("transport") or "") == "stdio":
+            return self._stdio_operation(method, params, timeout=timeout)
         session_id = self._handshake(timeout=timeout)
         _headers, body = self._request(
             {"jsonrpc": "2.0", "id": f"gc-{method}", "method": method,
@@ -251,6 +253,60 @@ class OsBackendStatelessClient(McpClientPort):
             timeout=timeout,
         )
         return body
+
+    def _stdio_operation(
+        self, method: str, params: Dict[str, Any], *, timeout: float
+    ) -> Dict[str, Any]:
+        """One process, one exchange: handshake and the method share the pipe.
+
+        MCP stdio servers read newline-delimited JSON-RPC, so all three messages
+        can be written at once; closing stdin then ends the process. The reply is
+        matched by id because servers may interleave notifications.
+        """
+        command = self.server_cfg.get("command")
+        if not command:
+            raise McpExecCarrierError(
+                f"MCP server '{self.server_name}': transport stdio needs a "
+                f"'command' in the config"
+            )
+        argv = [str(command)] + [str(a) for a in (self.server_cfg.get("args") or [])]
+        rpc_id = f"gc-{method}"
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": _INIT_PARAMS},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params},
+        ]
+        stdin = "".join(json.dumps(m) + "\n" for m in messages)
+        env = {str(k): str(v) for k, v in (self.server_cfg.get("env") or {}).items()}
+        result = self.os_backend.exec_argv(
+            argv,
+            stdin=stdin,
+            cwd=self.server_cfg.get("cwd"),
+            timeout=int(timeout) + _TIMEOUT_SLACK_SEC,
+            env=env or None,
+        )
+        if getattr(result, "stdout_hit_capture_cap", False):
+            raise McpExecCarrierError(
+                f"MCP server '{self.server_name}': response truncated by the exec "
+                f"output cap; the answer is too large to carry through exec"
+            )
+        for line in (getattr(result, "stdout", "") or "").splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                frame = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(frame, dict) and frame.get("id") == rpc_id:
+                return frame
+        stderr = (getattr(result, "stderr", "") or "")[:500]
+        raise McpExecCarrierError(
+            f"MCP server '{self.server_name}': no reply for id {rpc_id!r} in the "
+            f"stdio output (rc={getattr(result, 'return_code', None)}, "
+            f"stderr={stderr})"
+        )
 
     def _handshake(self, *, timeout: float) -> Optional[str]:
         headers, _body = self._request(
