@@ -82,7 +82,15 @@ def test_filter_warns_on_unknown_names(caplog):
 
 
 def test_discover_one_applies_whitelist(monkeypatch):
-    monkeypatch.setattr(reg, "list_tools_stream_stdio", lambda **kw: list(_RAW))
+    # Transport dispatch lives in client_port now; registry only normalises.
+    # conftest swaps sys.modules["tools"], so neither a string target nor a fresh
+    # import reliably names the module object this class was defined in. Its own
+    # __globals__ always does.
+    monkeypatch.setitem(
+        reg.AgentRuntimeClient.list_tools.__globals__,
+        "list_tools_stream_stdio",
+        lambda **kw: list(_RAW),
+    )
     server_cfg = {
         "transport": "stream_stdio",
         "command": "x",

@@ -4,21 +4,10 @@ import json
 import threading
 import time
 
-import requests
-
 import logging
 
 logger = logging.getLogger(__name__)
-from tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
-from tools.connect_mcp.persistent_stdio import (
-    PersistentStdioRegistry,
-    is_persistent_stdio,
-)
-from tools.connect_mcp.stream_client import (
-    list_tools_stream_http,
-    list_tools_stream_sse,
-    list_tools_stream_stdio,
-)
+from tools.connect_mcp.client_port import AgentRuntimeClient
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -210,73 +199,8 @@ def _discover_one(
         )
         server_description = server_cfg.get("description") or ""
 
-        # persistent_session унифицирован: легаси `sse`/`http` транспорт не имеет
-        # своей персистентной сессии, поэтому при флаге true роутим через
-        # SDK-клиент `stream_sse`/`stream_http` (то же делаем и в call_mcp_tool).
-        effective_transport = transport
-        if server_cfg.get("persistent_session"):
-            if transport == "sse":
-                effective_transport = "stream_sse"
-            elif transport == "http":
-                effective_transport = "stream_http"
-
-        if effective_transport == "stream_sse":
-            tools_raw = list_tools_stream_sse(
-                url=url,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-            )
-        elif effective_transport == "stream_http":
-            tools_raw = list_tools_stream_http(
-                url=url,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-            )
-        elif transport == "stream_stdio":
-            tools_raw = list_tools_stream_stdio(
-                server_cfg=server_cfg,
-                timeout=timeout,
-            )
-        elif is_persistent_stdio(server_cfg):
-            session = PersistentStdioRegistry.instance().get_or_create(
-                server_name, server_cfg
-            )
-            resp = session.call("tools/list", {}, timeout)
-            result = resp.get("result") if isinstance(resp, dict) else None
-            tools_raw = (
-                result.get("tools", [])
-                if isinstance(result, dict)
-                else []
-            )
-            if not isinstance(tools_raw, list):
-                tools_raw = []
-        else:
-            session_id = _get_or_init_session_id(
-                server_name, url, server_cfg, token=token
-            )
-            if not session_id:
-                raise RuntimeError(
-                    f"Failed to initialize MCP session for server '{server_name}'"
-                )
-
-            try:
-                tools_raw = _tools_list_request(
-                    url, session_id=session_id, server_cfg=server_cfg, token=token
-                )
-            except requests.HTTPError:
-                _MCP_SESSIONS.pop(server_name, None)
-                session_id = _get_or_init_session_id(
-                    server_name, url, server_cfg, token=token
-                )
-                if not session_id:
-                    raise RuntimeError(
-                        f"Failed to re-initialize MCP session for server '{server_name}'"
-                    )
-                tools_raw = _tools_list_request(
-                    url, session_id=session_id, server_cfg=server_cfg, token=token
-                )
+        client = AgentRuntimeClient(server_name, server_cfg)
+        tools_raw = client.list_tools(timeout=timeout)
 
         tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
 
