@@ -299,13 +299,17 @@ def call_mcp_tool(
 
     use_retry = bool(server_cfg.get("use_retry", default_use_retry))
 
+    # Resolved once, outside the retry: picking the client is a deterministic
+    # config decision, and a bad locus/transport pair must fail immediately
+    # instead of being retried with backoff and logged as ERROR three times.
+    client = resolve_mcp_client(server_key, server_cfg, os_backend=os_backend)
+
     @retry_with_backoff(
         operation_name=f"MCP tool call ({server_key}:{base_tool_name})",
         retry_log_level=logging.ERROR,
         no_more_retries_log_level=logging.ERROR,
     )
     def _do_mcp_call() -> Any:
-        client = resolve_mcp_client(server_key, server_cfg, os_backend=os_backend)
         return client.call_tool(base_tool_name, arguments_obj, timeout=timeout)
 
     data = _do_mcp_call(

@@ -3,14 +3,28 @@ import pytest
 from tools.connect_mcp.client_port import AgentRuntimeClient, McpClientPort
 
 
-def test_port_defines_the_three_operations():
-    for name in ("list_tools", "call_tool", "close"):
+def test_port_defines_the_two_operations():
+    for name in ("list_tools", "call_tool"):
         assert hasattr(McpClientPort, name)
 
 
-def test_close_is_a_noop_by_default():
-    client = AgentRuntimeClient("srv", {"transport": "http", "url": "http://x/mcp"})
-    assert client.close() is None
+def test_port_has_no_lifecycle_hook():
+    """No close(): session teardown is owned per-operation, not per-client."""
+    assert not hasattr(McpClientPort, "close")
+
+
+def test_call_tool_does_not_coerce_a_non_dict_answer(monkeypatch):
+    """call_mcp_tool has a branch for legacy non-dict answers; keep it reachable."""
+    import tools.connect_mcp.client_port as cp
+
+    monkeypatch.setattr(
+        cp, "call_tool_stream_http",
+        lambda **kw: ["legacy", "list", "answer"],
+    )
+    client = cp.AgentRuntimeClient(
+        "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
+    )
+    assert client.call_tool("t", {}, timeout=1.0) == ["legacy", "list", "answer"]
 
 
 def test_list_tools_routes_stream_http(monkeypatch):

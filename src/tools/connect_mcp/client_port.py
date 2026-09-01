@@ -52,12 +52,13 @@ class McpClientPort(ABC):
     @abstractmethod
     def call_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
-    ) -> Dict[str, Any]:
-        """Raw JSON-RPC response body for `tools/call`."""
+    ) -> Any:
+        """Raw `tools/call` response, exactly as the transport produced it.
 
-    def close(self) -> None:
-        """Release anything long-lived. Stateless clients hold nothing."""
-        return None
+        Not coerced to a dict: legacy transports may answer with a list or a
+        string, and `call_mcp_tool` has a branch that hands such a value to the
+        model as-is.
+        """
 
 
 def _effective_transport(server_cfg: Dict[str, Any]) -> str:
@@ -145,7 +146,7 @@ class AgentRuntimeClient(McpClientPort):
 
     def call_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
-    ) -> Dict[str, Any]:
+    ) -> Any:
         transport = self._require_transport()
         effective = _effective_transport(self.server_cfg)
         url = self._url()
@@ -225,7 +226,7 @@ class AgentRuntimeClient(McpClientPort):
             )
             if session_id:
                 data = do_call(session_id)
-        return data if isinstance(data, dict) else {}
+        return data
 
 
 __all__ = ["McpClientPort", "AgentRuntimeClient"]
