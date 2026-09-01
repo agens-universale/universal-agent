@@ -45,7 +45,10 @@ packages = ["src/recommended_mcp"]
 "../../external/vendor/ddgs-mcp/src/ddgs_mcp" = "external/vendor/ddgs-mcp/src/ddgs_mcp"
 
 [tool.pytest.ini_options]
-# Набор пакета самодостаточен: `cd packages/mcp && pytest` — доказательство,
-# что дистрибутив не тянет соседей.
+# Набор пакета гоняется отдельно: `cd packages/mcp && pytest`. Зелёный
+# автономный прогон изоляции НЕ доказывает: плагин тест-кита кладёт на
+# sys.path все шесть packages/*/src при любом нашем rootdir, поэтому чужой
+# импорт спокойно резолвится. Изоляцию доказывает статический сторож
+# tests/test_test_ownership.py — он смотрит на текст импортов.
 testpaths = ["tests"]
 asyncio_mode = "auto"

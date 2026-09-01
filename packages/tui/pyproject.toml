@@ -45,7 +45,11 @@ gc-voice = "gc_tui.voice_runtime.cli:main"
 packages = ["src/gc_tui"]
 
 [tool.pytest.ini_options]
-# Набор пакета самодостаточен: `cd packages/tui && pytest` — доказательство,
-# что пакет не тянет соседей. Общая инфраструктура приезжает из gc-testkit.
+# Набор пакета гоняется отдельно: `cd packages/tui && pytest`. Зелёный
+# автономный прогон изоляции НЕ доказывает: плагин тест-кита кладёт на
+# sys.path все шесть packages/*/src при любом нашем rootdir, поэтому чужой
+# импорт спокойно резолвится. Изоляцию доказывает статический сторож
+# tests/test_test_ownership.py — он смотрит на текст импортов.
+# Общая инфраструктура приезжает из gc-testkit.
 testpaths = ["tests"]
 asyncio_mode = "auto"

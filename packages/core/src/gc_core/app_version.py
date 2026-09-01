@@ -58,7 +58,14 @@ def install_hint(dist: str) -> str:
     """
     subdir = PROFILE_SUBDIRS.get(dist)
     anchor = f"#subdirectory={subdir}" if subdir else ""
-    return f'uv tool install --force "{dist} @ git+{REPO_GIT_URL}{anchor}"'
+    # `--with-executables-from gc-mcp` — не украшение. `uv` выносит в PATH
+    # команды только САМОГО дистрибутива; `gc-mcp` приезжает зависимостью и
+    # остаётся внутри venv инструмента. Без флага человек, последовавший этой
+    # подсказке, получит рабочий профиль без `gc-mcp` в PATH — и следом совет
+    # онбординга ставить менеджер отдельным инструментом. Тот же флаг
+    # обязателен и при обновлении, см. `updater.runner.build_install_command`.
+    extra = "" if dist in ("gc-ua", "gc-mcp", "gc-core") else " --with-executables-from gc-mcp"
+    return f'uv tool install --force "{dist} @ git+{REPO_GIT_URL}{anchor}"{extra}'
 
 
 # Совместимость: имя, под которым агент публиковался до разделения профилей.

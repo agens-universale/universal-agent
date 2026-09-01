@@ -102,3 +102,61 @@ def test_profile_order_probes_mcp_before_core():
     assert order.index("gc-server") < order.index("gc-cli"), (
         "gc-server тянет gc-cli, поэтому обязан проверяться раньше него"
     )
+
+
+def test_update_keeps_mcp_executables_for_leaf_profiles():
+    """Команда обновления повторяет `--with-executables-from gc-mcp`.
+
+    `uv tool install` не дописывает к существующей установке, а ПЕРЕПИСЫВАЕТ её
+    по командной строке: чего в строке нет — того после обновления не будет.
+    Листовые профили ставятся с этим флагом (readme.md, docs/packaging.md), и
+    без него первое же `--update` молча уносило `gc-mcp` и `gc-mcp-install` из
+    PATH. `uv` при этом рапортует «Installed 1 executable» и считает обновление
+    удачным; в TUI ничего не ломается, потому что `/mcp` импортирует модуль
+    напрямую, — замечает только тот, кто наберёт `gc-mcp` в шелле.
+
+    До разбиения на профили этого быть не могло: единственный дистрибутив
+    объявлял команды MCP сам, и любая переустановка их возвращала.
+
+    Подмена, которую ловит тест: убрать `_executables_args` из
+    `build_install_command`.
+    """
+    from gc_core.updater.runner import build_install_command
+    from gc_core.updater.source import UpdateSource
+
+    def _cmd(dist):
+        src = UpdateSource(
+            url="https://example.invalid/repo",
+            ref=None,
+            commit=None,
+            dist=dist,
+            subdirectory=app_version.PROFILE_SUBDIRS.get(dist),
+        )
+        return build_install_command(src, [])
+
+    for dist in ("gc-cli", "gc-tui", "gc-server"):
+        cmd = _cmd(dist)
+        assert "--with-executables-from" in cmd, (
+            f"{dist}: обновление потеряет gc-mcp/gc-mcp-install из PATH"
+        )
+        assert cmd[cmd.index("--with-executables-from") + 1] == "gc-mcp", dist
+
+    # Отрицательный контроль: у этих трёх флаг не нужен и был бы ложью. Мета
+    # объявляет все шесть команд сама, gc-mcp — их владелец, ядро не объявляет
+    # ничего и как инструмент не ставится. Без этой половины тест прошёл бы и
+    # на реализации «дописывать флаг всем подряд».
+    for dist in ("gc-ua", "gc-mcp", "gc-core"):
+        assert "--with-executables-from" not in _cmd(dist), dist
+
+
+def test_install_hint_keeps_mcp_executables_for_leaf_profiles():
+    """Та же оговорка в подсказке, которую агент печатает человеку.
+
+    `gc_tui/__init__.py` показывает её при «профиль не установлен». Без флага
+    человек получит рабочий профиль без `gc-mcp` в PATH — и следом совет
+    онбординга ставить менеджер отдельным инструментом.
+    """
+    for dist in ("gc-cli", "gc-tui", "gc-server"):
+        assert "--with-executables-from gc-mcp" in app_version.install_hint(dist), dist
+    for dist in ("gc-ua", "gc-mcp", "gc-core"):
+        assert "--with-executables-from" not in app_version.install_hint(dist), dist

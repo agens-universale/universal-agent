@@ -2,12 +2,14 @@
 Изолированный вызов MCP-тула (в т.ч. SSE-сервер).
 Печатает все шаги и сырые ответы для отладки.
 
-Запуск из корня проекта (обязательно python3.12; из-за общего arg_parser нужен -q ""):
-  PYTHONPATH=src python3.12 -m tools.connect_mcp.test_playground.run_sse_tool -q ""
-  или:
-  cd src && python3.12 -m tools.connect_mcp.test_playground.run_sse_tool -q ""
+Запуск (из-за общего arg_parser нужен -q ""):
+  python -m gc_core.tools.connect_mcp.test_playground.run_sse_tool -q ""
 
-Опционально: CONFIG_PATH=/path/to/config.yml
+Прежние строки (`PYTHONPATH=src`, `-m tools.…`) относились к плоской раскладке и
+после разбиения на пакеты ведут в никуда.
+
+Конфиг: CONFIG_PATH=/path/to/config.yml, иначе config.yml в корне рабочей копии.
+Из установленного колеса рабочей копии нет — тогда CONFIG_PATH обязателен.
 """
 from __future__ import annotations
 
@@ -15,26 +17,23 @@ import json
 import os
 import sys
 
-# Найти корень проекта и config.yml без зависимости от arg_parser
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# test_playground -> connect_mcp -> tools -> src -> project_root
-_PROJECT_ROOT = os.path.abspath(
-    os.path.join(_SCRIPT_DIR, "..", "..", "..", "..")
-)
+# Корень рабочей копии — по маркеру, а не счётом `..`. Прежние четыре уровня
+# вверх давали корень репозитория, пока модуль лежал в `src/tools/…`; после
+# переезда в `packages/core/src/gc_core/tools/…` та же арифметика указывает на
+# `packages/core/src`, где никакого config.yml нет, и скрипт падал на open().
+# Вне рабочей копии (запуск из установленного колеса) корня нет вовсе — тогда
+# нужен CONFIG_PATH.
+from pathlib import Path
+
+from gc_core.bundled_assets import repo_root_from
+
+_REPO = repo_root_from(Path(__file__))
 _CONFIG_PATH = os.environ.get(
     "CONFIG_PATH",
-    os.path.join(_PROJECT_ROOT, "config.yml"),
+    str(_REPO / "config.yml") if _REPO else "",
 )
-if not os.path.isfile(_CONFIG_PATH):
-    _CONFIG_PATH = os.path.join(_SCRIPT_DIR, "..", "..", "..", "config.yml")
-
-# Подтянуть src в path для импортов
-if _PROJECT_ROOT not in sys.path:
-    _SRC = os.path.join(_PROJECT_ROOT, "src")
-    if os.path.isdir(_SRC):
-        sys.path.insert(0, _SRC)
-    else:
-        sys.path.insert(0, _PROJECT_ROOT)
+# sys.path трогать больше не нужно: модуль импортируется как часть пакета
+# gc_core, и его зависимости резолвятся штатно.
 
 
 def _load_config():

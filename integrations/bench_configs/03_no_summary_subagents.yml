@@ -1,6 +1,6 @@
 # Bench 2×2 (3/4): summary OFF, subagents ON
 # Skill autonomous-benchmark-agent включён (disable_skills: []).
-# Запуск: gc-cli --config bench_configs/03_no_summary_subagents.yml ...
+# Запуск: gc-cli --config integrations/bench_configs/03_no_summary_subagents.yml ...
 
 backend:
   api_mode: chat_completions

@@ -58,6 +58,18 @@ def test_no_broken_imports():
     Так проявилось переименование `default_config_path` → `_default_config_path`
     на стороне develop, пережившее разрешение конфликта.
     """
+    # Страховка от вакуума ПЕРЕД самой проверкой. `assert not findings` верно и
+    # когда обход вернул пусто: `_python_files()` молча пропускает
+    # несуществующие базы (`if not base.is_dir(): continue`), так что
+    # переименование `packages/` сделало бы сетку вечнозелёной. Раньше от этого
+    # спасал только соседний тест про lru_cache, да и то с запасом в один хит:
+    # в одиночном запуске он даёт hits=0 и молчит.
+    files = ih._python_files()
+    assert len(files) > 500, (
+        f"обход нашёл всего {len(files)} файлов — сетка смотрит не туда "
+        "(в дереве их больше тысячи)"
+    )
+
     findings = scan()
     assert not findings, "поломки импорта:\n" + "\n".join(
         f"  {f.file}:{f.line}  [{f.kind}] {f.detail}" for f in findings
@@ -122,6 +134,15 @@ def test_legacy_list_covers_module_map():
     mapping = json.loads(
         (Path(gc_testkit.__file__).parent / "module_map.json").read_text(encoding="utf-8")
     )
+    # Тот же класс вакуума: `assert not missing` верно и на ПУСТОЙ карте, а её
+    # пустота означала бы, что `module_dir()` перестал находить что бы то ни
+    # было. Порог грубый нарочно — точное число дразнило бы правку при каждом
+    # новом модуле.
+    assert len(mapping) > 40, (
+        f"module_map.json содержит всего {len(mapping)} записей — похоже, карта "
+        "пуста или прочитана не та"
+    )
+
     missing = sorted(set(mapping) - ih.LEGACY_TOPLEVEL)
     assert not missing, f"есть в module_map.json, но не в LEGACY_TOPLEVEL: {missing}"
 

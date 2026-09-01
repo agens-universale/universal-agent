@@ -63,12 +63,24 @@ def test_suite_does_not_import_packages_above_it(dist):
 
     allowed = ALLOWED[dist]
     offenders: list[str] = []
+    scanned = 0
     for path in sorted(suite.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
+        scanned += 1
         extra = _real_imports(path) - allowed
         if extra:
             offenders.append(f"{path.relative_to(REPO)}: {sorted(extra)}")
+
+    # Страховка от вакуума. Сетка утверждает ОТСУТСТВИЕ находок, а такое
+    # утверждение верно и когда обход вернул пусто: переименовали каталог,
+    # сменили маску, сломали rglob — и сетка навсегда зелёная, хотя не
+    # проверяет уже ничего. У соседей (`module_literals`, пины рецептов MCP,
+    # снапшот-гейт) такой счётчик есть, здесь его забыли.
+    assert scanned, (
+        f"в {suite.relative_to(REPO)} не просмотрено ни одного файла — "
+        "сетка ничего не проверяет"
+    )
 
     assert not offenders, (
         f"набор пакета {dist} импортирует чужие пакеты — автономный прогон "
