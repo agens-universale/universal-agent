@@ -47,6 +47,45 @@ def test_unknown_transport_is_skipped():
     assert mapped == {}
 
 
+def test_sse_is_not_tagged_os_backend():
+    """sse needs a live session; tagging it os_backend builds a config the
+    resolver is guaranteed to reject."""
+    mapped = GcCliExternal._harbor_mcp_to_config(
+        [_server("s", "sse", url="http://s:1/mcp")]
+    )
+    assert mapped["s"]["transport"] == "sse"
+    assert mapped["s"]["execute_on"] == "agent"
+
+
+def test_stream_http_and_stdio_are_tagged_os_backend():
+    mapped = GcCliExternal._harbor_mcp_to_config([
+        _server("h", "streamable-http", url="http://h:1/mcp"),
+        _server("d", "stdio", command="srv"),
+    ])
+    assert mapped["h"]["execute_on"] == "os_backend"
+    assert mapped["d"]["execute_on"] == "os_backend"
+
+
+def test_explicit_entry_wins_even_under_the_servers_natural_name():
+    """The mapper sanitises `user-server` to `user_server`; comparing raw keys
+    would register the same sidecar twice under two tool prefixes."""
+    config_dict = {
+        "mcp-servers": {
+            "user-server": {
+                "transport": "stream_http",
+                "url": "http://user-server:8000/mcp",
+                "execute_on": "agent",
+            }
+        }
+    }
+    GcCliExternal._apply_mcp_servers(
+        config_dict,
+        [_server("user-server", "streamable-http", url="http://user-server:8000/mcp")],
+    )
+    assert list(config_dict["mcp-servers"]) == ["user-server"]
+    assert config_dict["mcp-servers"]["user-server"]["execute_on"] == "agent"
+
+
 def test_existing_config_entry_wins_over_autotagging():
     config_dict = {
         "mcp-servers": {

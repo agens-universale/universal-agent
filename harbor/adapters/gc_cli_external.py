@@ -47,6 +47,13 @@ _HARBOR_TRANSPORT_MAP = {
     "stdio": "stdio",
 }
 
+# Transports the agent can speak from inside the task environment. `sse` needs a
+# live session, which a stateless exec cannot hold, so tagging it `os_backend`
+# would build a config the resolver is guaranteed to reject. It stays on the
+# agent locus: unreachable from there gives an honest connection error instead
+# of a self-inflicted configuration one.
+_OS_BACKEND_CAPABLE = ("stream_http", "stdio")
+
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-ua`), so it imports directly — no source-dir / PYTHONPATH.
 #
@@ -473,10 +480,26 @@ class GcCliExternal(BaseAgent):
                     )
                 continue
             key = re.sub(r"[^A-Za-z0-9_]", "_", str(name))
+            if key in mapped and logger is not None:
+                logger.warning(
+                    "MCP server %r collides with an earlier server on key %r after "
+                    "sanitising; the earlier one is dropped",
+                    name, key,
+                )
+            locus = (
+                "os_backend" if gc_transport in _OS_BACKEND_CAPABLE else "agent"
+            )
+            if locus == "agent" and logger is not None:
+                logger.warning(
+                    "MCP server %r uses transport %r, which needs a live session "
+                    "and cannot run inside the task environment; it will be tried "
+                    "from the agent runtime instead",
+                    name, transport,
+                )
             entry: dict = {
                 "transport": gc_transport,
                 "server-name": str(name),
-                "execute_on": "os_backend",
+                "execute_on": locus,
             }
             if gc_transport == "stdio":
                 entry["command"] = str(getattr(server, "command", "") or "")
@@ -500,7 +523,13 @@ class GcCliExternal(BaseAgent):
         if not mapped:
             return
         existing = dict(config_dict.get("mcp-servers") or {})
-        config_dict["mcp-servers"] = {**mapped, **existing}
+        # An explicit entry wins — including when the user wrote the server's
+        # natural name (`user-server`) and the mapper sanitised it to
+        # `user_server`. Comparing raw keys would register the sidecar twice and
+        # discover it under two tool prefixes.
+        claimed = {re.sub(r"[^A-Za-z0-9_]", "_", str(k)) for k in existing}
+        fresh = {k: v for k, v in mapped.items() if k not in claimed}
+        config_dict["mcp-servers"] = {**fresh, **existing}
         meta = dict(config_dict.get("mcp-meta") or {})
         # Every MCP operation is now an exec round-trip into the container, and a
         # sim-user answer is a full LLM call on the other side.
