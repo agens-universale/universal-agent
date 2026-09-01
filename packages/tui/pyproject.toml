@@ -49,9 +49,3 @@ packages = ["src/gc_tui"]
 # что пакет не тянет соседей. Общая инфраструктура приезжает из gc-testkit.
 testpaths = ["tests"]
 asyncio_mode = "auto"
-# Дублирует корневой addopts намеренно: у пакета свой rootdir, и при
-# `cd packages/tui && pytest` корневой конфиг не читается вовсе. Без этого
-# syrupy объявит `.svg`-копии эталонов лишними и посоветует
-# `--snapshot-update` — команду, которая заодно перезапишет девять
-# разъехавшихся `.raw` (см. комментарий в корневом pyproject.toml).
-addopts = "--snapshot-ignore-file-extensions=svg"

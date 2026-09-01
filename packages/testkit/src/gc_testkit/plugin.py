@@ -261,6 +261,20 @@ def pytest_load_initial_conftests(early_config) -> None:
     """
     global _OUR_SUITE
     if not _suite_root_is_ours(early_config.rootpath):
+        if repo_root() is None:
+            # Отказ обязан называть себя. Молчание тут стоит дорого: плагин
+            # приезжает через pytest11 и в не-editable установке (колесо без
+            # рабочей копии) бутстрап не отработает, а набор умрёт
+            # `ModuleNotFoundError: gc_core` — из текста которого имя gc-testkit
+            # не читается вовсе, и человек ищет причину не там. По образцу
+            # `_missing_preload_sources` ниже.
+            print(
+                f"[warn] gc_testkit: рабочая копия не найдена вверх от "
+                f"{Path(__file__).resolve().parent} — бутстрап sys.path "
+                f"пропущен. Наши наборы гоняются из чекаута; из установленного "
+                f"колеса они не собираются.",
+                file=sys.stderr,
+            )
         return
     _OUR_SUITE = True
     ensure_sources_on_path()

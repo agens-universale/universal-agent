@@ -39,6 +39,33 @@ _SNAPSHOT_DRIFT = {
 }
 
 
+def pytest_configure(config):
+    """Скрыть от syrupy наши `.svg`-копии эталонов.
+
+    `.svg` в `__snapshots__` — не эталоны, а копии для человека: фикстура
+    `_copy_raw_snapshots_to_svg` ниже делает их из `.raw` после прогона, потому
+    что Windows не открывает SVG-содержимое под расширением `.raw`. Они под
+    гитигнором и пересоздаются каждый раз.
+
+    syrupy знает только про `.raw`, объявлял все `.svg` «unused unknown snapshot
+    collection» и следом печатал совет «re-run pytest with --snapshot-update to
+    delete unused snapshots». Совет ОПАСЕН: `--snapshot-update` заодно перезапишет
+    `.raw`-эталоны, включая девять разъехавшихся из `_SNAPSHOT_DRIFT`, которые
+    держатся под strict-xfail именно как улика. Одна послушная команда — и
+    разбирать станет нечего.
+
+    Почему здесь, а не `addopts` в манифесте: опция принадлежит syrupy, а тот
+    приезжает только с `pytest-textual-snapshot` из dev-группы. В `addopts` она
+    убивала прогон БЕЗ этой группы — `error: unrecognized arguments` ещё до сбора,
+    причём вместе с `tests/test_snapshot_gate_is_armed.py`, то есть со сторожем,
+    заведённым против ровно этого класса тихих отказов. Здесь же мы правим
+    готовый `config.option`: syrupy читает его в `pytest_sessionstart`, который
+    идёт ПОСЛЕ `pytest_configure`, а без syrupy атрибут просто никому не нужен.
+    """
+    if getattr(config.option, "ignore_file_extensions", None) is None:
+        config.option.ignore_file_extensions = ["svg"]
+
+
 def pytest_collection_modifyitems(items):
     """Mark every TUI test as known-flaky → auto-rerun via pytest-rerunfailures.
 

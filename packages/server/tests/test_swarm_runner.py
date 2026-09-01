@@ -203,12 +203,19 @@ def test_start_swarm_env_inherits_host_environ(base_swarm_cfg, mock_popen, monke
     assert env["MY_HOST_VAR"] == "host_value"
 
 
-def test_start_swarm_meta_not_written_before_popen(base_swarm_cfg, mock_popen):
-    """До Popen meta не должно быть вообще. После — сразу running.
+def test_start_swarm_writes_queued_meta_before_popen(base_swarm_cfg, mock_popen):
+    """До Popen meta уже есть, в статусе queued. После — running с PID.
 
-    Пока статус queued ложился на диск заранее, провал запуска оставлял его
-    там навсегда: повтор с тем же task_id получал 409 swarm_id_already_active
-    до истечения ttl_seconds (по умолчанию сутки).
+    Порядок «сначала след, потом процесс» закрывает окно, в котором живой
+    процесс остаётся неучтённым: если запись статуса running упадёт (права,
+    диск), дерево bwrap+CLI уже работает, и без предварительной meta о нём не
+    узнал бы никто — ни monitor, ни дедлайн, ни /swarm/status, а песочница жила
+    бы до TTL-janitor.
+
+    Обратную беду — залипший queued после провала запуска — закрывает удаление
+    meta в finally, см. test_start_swarm_popen_failure_leaves_no_meta_and_no_sandbox.
+
+    Подмена, которую ловит тест: убрать save_swarm_meta перед Popen.
     """
     state = {"meta_before_popen": None}
 
@@ -225,11 +232,47 @@ def test_start_swarm_meta_not_written_before_popen(base_swarm_cfg, mock_popen):
     runner.start_swarm_process(
         base_swarm_cfg, system="g", task_id="t", payload={},
     )
-    assert state["meta_before_popen"] == {}, "meta не должна существовать до Popen"
+
+    before = state["meta_before_popen"]
+    assert before, "meta обязана существовать ДО Popen — иначе процесс может остаться без учёта"
+    assert before["swarm_meta"]["status"] == "queued"
 
     meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
     assert meta["swarm_meta"]["status"] == "running"
     assert meta["swarm_meta"]["pid"] == 999
+
+
+def test_start_swarm_live_process_is_never_unaccounted(base_swarm_cfg, mock_popen):
+    """Popen удался, запись running упала — meta всё равно на диске.
+
+    Ровно тот случай, ради которого meta пишется заранее: процесс уже живёт, и
+    потерять его нельзя. Статус останется queued, но sworm виден и учтён.
+
+    Подмена: вернуть запись meta только после Popen — тест краснеет, потому что
+    на диске не останется ничего.
+    """
+    proc = MagicMock()
+    proc.pid = 4242
+    mock_popen.return_value = proc
+
+    calls = {"n": 0}
+    real_save = storage.save_swarm_meta
+
+    def _fail_second_save(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_save(*a, **kw)
+        raise OSError("нет места на диске")
+
+    with patch.object(runner.storage, "save_swarm_meta", _fail_second_save):
+        with pytest.raises(OSError):
+            runner.start_swarm_process(
+                base_swarm_cfg, system="g", task_id="t", payload={},
+            )
+
+    meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
+    assert meta, "живой процесс остался без следа на диске"
+    assert meta["swarm_meta"]["status"] == "queued"
 
 
 def test_start_swarm_popen_failure_leaves_no_meta_and_no_sandbox(base_swarm_cfg, mock_popen):

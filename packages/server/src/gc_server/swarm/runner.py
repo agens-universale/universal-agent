@@ -296,13 +296,15 @@ def start_swarm_process(
     sandbox_created = not os.path.isdir(sandbox_dir)
     os.makedirs(sandbox_dir, exist_ok=True)
 
-    # Ни meta, ни другого следа на диске здесь ещё не появляется. Раньше в этом
-    # месте сохранялся статус queued, и любой провал запуска оставлял его
-    # навсегда: повтор с тем же task_id получал 409 swarm_id_already_active до
-    # истечения ttl_seconds (по умолчанию сутки), а песочница оставалась сиротой.
-    # Единственный читатель этой meta — idempotency-проверка в POST /swarm/run,
-    # и она идёт под тем же _SWARM_RUN_LOCK, что и запуск, так что окна нет.
+    # Meta со статусом queued пишется ниже, ПЕРЕД Popen, и удаляется в finally,
+    # если запуск не состоялся. Так закрыты обе беды сразу: провал запуска не
+    # оставляет следа (иначе повтор с тем же task_id получал бы 409
+    # swarm_id_already_active до истечения ttl_seconds, сутки по умолчанию), а
+    # удачный запуск не может остаться неучтённым, даже если запись статуса
+    # running потом не удастся. Единственный читатель — idempotency-проверка в
+    # POST /swarm/run, и она идёт под тем же _SWARM_RUN_LOCK, что и запуск.
     proc = None
+    meta_written = False
     try:
         # Шаг 1.10 (AR-1): материализуем runtime config.yml для CLI.
         # CLI внутри bwrap не сможет резолвить дефолтные пути config'а — нужно
@@ -380,6 +382,19 @@ def start_swarm_process(
         # start_new_session=True → PID == PGID, что позволит monitor'у
         # убить ВСЁ дерево процессов (wrapper + bwrap + CLI + дочерние)
         # через os.killpg при превышении таймаута/лимитов или при shutdown.
+        # Meta ДО запуска, в статусе queued. Иначе между удачным Popen и записью
+        # meta есть окно: если запись упадёт (права, диск), дерево bwrap+CLI уже
+        # работает, а на диске о нём нет ничего — monitor не узнает, дедлайн не
+        # сработает никогда, /swarm/status пуст, песочница живёт до TTL-janitor.
+        # Порядок «сначала след, потом процесс» закрывает именно этот случай.
+        storage.save_swarm_meta(
+            threads_dir,
+            swarm_id,
+            base_meta=base_meta,
+            swarm_meta_patch={**swarm_meta_patch, "status": "queued"},
+        )
+        meta_written = True
+
         proc = subprocess.Popen(  # noqa: S603
             [wrapper_path],
             stdout=subprocess.DEVNULL,
@@ -394,8 +409,14 @@ def start_swarm_process(
         # env, и их исключение оставило бы на диске каталог, до которого доберётся
         # только TTL-janitor — через сутки. Чужую песочницу (её мог создать
         # предыдущий вызов с тем же swarm_id) не трогаем.
-        if proc is None and sandbox_created:
-            shutil.rmtree(sandbox_dir, ignore_errors=True)
+        if proc is None:
+            if sandbox_created:
+                shutil.rmtree(sandbox_dir, ignore_errors=True)
+            # И meta тоже: провалившийся запуск не должен оставлять следа,
+            # иначе повтор с тем же task_id упрётся в 409 до истечения
+            # ttl_seconds. Идемпотентность сохраняется, учёт возвращается.
+            if meta_written:
+                storage.delete_swarm_meta(threads_dir, swarm_id)
 
     # Только теперь meta появляется на диске — сразу в статусе running, с PID
     # и дедлайном.

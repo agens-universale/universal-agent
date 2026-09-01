@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from pathlib import Path
@@ -15,6 +16,8 @@ PROJECT_ROOT = str(bundled_root())
 # Каталог самого пакета: там лежит обёртка песочницы (package data). Держим
 # отдельно от корня ассетов — обёртка это код дистрибутива, а не промпт.
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_asset_path(maybe_path: Any, default_rel: str, *, base: str | None = None) -> str:
@@ -199,14 +202,32 @@ def build_swarm_config(
     # вместо голого exit 127.
     cli_venv_root = _abs_or_empty(raw_swarm.get("cli_venv_root"))
     if (
-        "cli_venv_root" not in raw_swarm
-        and os.path.isfile(os.path.join(sys.prefix, "bin", cli_command))
-    ):
         # Именно ОТСУТСТВИЕ ключа, а не пустой результат `_abs_or_empty`. Если
         # человек ключ написал, но значение негодное (относительный путь), он
         # обязан увидеть прежнее «игнорируется», а не тихую подстановку чужого
         # venv вместо своей опечатки.
+        "cli_venv_root" not in raw_swarm
+        # Абсолютный cli_command несовместим с подстановкой: os.path.join
+        # выбрасывает всё, что левее абсолютного пути, и проверка вырождается в
+        # «существует ли сам этот файл». Он существует — условие проходит, а
+        # обёртка потом склеивает `<venv>/bin//usr/local/bin/gc-cli` и не находит
+        # ничего. Человек, указавший полный путь, уже сказал, где команда: ему
+        # нужна PATH-ветка, а не наш venv.
+        and not os.path.isabs(cli_command)
+        # Только настоящий venv. Системный или conda-префикс сюда пускать нельзя:
+        # обёртка делает `--ro-bind $SWARM_CLI_VENV_ROOT` и молча уехало бы всё
+        # дерево префикса ВНУТРЬ изолированной песочницы — ровно то, от чего
+        # песочница и заводилась. У venv sys.prefix отличается от base_prefix;
+        # установка через `uv tool install` этому удовлетворяет.
+        and sys.prefix != sys.base_prefix
+        and os.path.isfile(os.path.join(sys.prefix, "bin", cli_command))
+    ):
         cli_venv_root = sys.prefix
+        logger.info(
+            "swarm: cli_venv_root не задан — беру venv сервера %s "
+            "(он же уйдёт --ro-bind внутрь песочницы)",
+            cli_venv_root,
+        )
     agent_dep_dir = _abs_or_empty(raw_swarm.get("agent_dep_dir"))
     extra_mounts_raw = raw_swarm.get("extra_mounts") or []
     if not isinstance(extra_mounts_raw, list):

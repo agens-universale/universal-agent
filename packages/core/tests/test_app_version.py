@@ -92,3 +92,13 @@ def test_profile_order_probes_mcp_before_core():
     assert order.index("gc-mcp") < order.index("gc-core")
     for app_dist in ("gc-tui", "gc-server", "gc-cli"):
         assert order.index(app_dist) < order.index("gc-mcp"), app_dist
+
+    # Второй несущий порядок, появившийся вместе с зависимостью gc-server → gc-cli:
+    # в окружении серверной установки теперь лежат ОБА дистрибутива, и перебор
+    # обязан наткнуться на gc-server первым. Иначе `--update` на сервере опознает
+    # установку как CLI и переустановит узкий профиль вместо полного — молча, и
+    # набор от этого не покраснеет, потому что раньше здесь закреплялись только
+    # пары с gc-mcp и gc-core.
+    assert order.index("gc-server") < order.index("gc-cli"), (
+        "gc-server тянет gc-cli, поэтому обязан проверяться раньше него"
+    )

@@ -132,7 +132,14 @@ def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
                 # следующим идёт external/vendor рабочей копии.
                 continue
             name = (data.get("project") or {}).get("name")
-            return str(name) if name else None
+            if name:
+                return str(name)
+            # Имени нет — кандидат не подходит, но поиск не окончен: следующим
+            # идёт external/vendor рабочей копии, где имя объявлено. Прежний
+            # `return None` обрывал перебор на первом же неполном pyproject, и
+            # `gc-mcp remove` рапортовал успех, оставив пакет установленным, —
+            # тот самый тихий пропуск, ради которого соседний except и написан.
+            continue
         return None
     if itype == "wheel":
         pkg_path = (root / entry.path).resolve() / "dist"

@@ -198,6 +198,7 @@ def load_swarm_stdout_stderr(
 
 
 __all__ = [
+    "delete_swarm_meta",
     "load_swarm_meta",
     "save_swarm_meta",
     "load_completion_info",
@@ -206,3 +207,19 @@ __all__ = [
     "load_swarm_stdout_stderr",
 ]
 
+
+
+def delete_swarm_meta(threads_dir: str, swarm_id: str) -> None:
+    """Убрать meta свёрнутого запуска. Отсутствие файла — не ошибка.
+
+    Нужна ровно одному вызывающему: `runner.start_swarm_process` пишет meta со
+    статусом ``queued`` ДО ``Popen``, чтобы живой процесс не остался без учёта,
+    если запись после запуска не удастся. Если же сам запуск провалился, след
+    надо убрать — иначе повтор с тем же ``task_id`` упрётся в 409
+    ``swarm_id_already_active`` до истечения ``ttl_seconds`` (по умолчанию сутки).
+    """
+    _, meta_path, _, _ = _swarm_paths(threads_dir, swarm_id)
+    try:
+        os.remove(meta_path)
+    except FileNotFoundError:
+        pass

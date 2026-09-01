@@ -146,6 +146,13 @@ def test_alien_dependency_is_a_skip_not_a_finding(monkeypatch):
 
     monkeypatch.setattr(ih, "_SKIPPED", {})
     monkeypatch.setattr(importlib.util, "find_spec", alien)
+    # Кэш живёт весь процесс и подмену `_SKIPPED` не замечает: ответ про модуль
+    # уже лежит в нём, а причина пропуска — в словаре, который мы только что
+    # заменили. Без сброса пара расходится, и следующий scan() в этой же сессии
+    # не судит модуль и не заносит его в пропуски. Сбрасываем обе стороны, чтобы
+    # они не могли разъехаться в принципе.
+    ih._module_exists.cache_clear()
+    ih._module_bindings.cache_clear()
 
     quiet = ih.check_missing_names(
         Path(__file__),

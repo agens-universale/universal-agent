@@ -111,16 +111,3 @@ testpaths = [
     "packages/tui/tests",
 ]
 asyncio_mode = "auto"
-# `.svg` в `__snapshots__` — не эталоны, а их копии для человека: фикстура
-# `_copy_raw_snapshots_to_svg` делает их из `.raw` после прогона, потому что
-# Windows не открывает SVG-содержимое под расширением `.raw`. Они под гитигнором
-# и пересоздаются каждый раз.
-#
-# syrupy знает только про `.raw` и объявлял все `.svg` «unused unknown snapshot
-# collection», а следом печатал совет «re-run pytest with --snapshot-update to
-# delete unused snapshots». Совет ОПАСЕН: `--snapshot-update` заодно перезапишет
-# `.raw`-эталоны, в том числе девять разъехавшихся, которые держатся под
-# strict-xfail именно как улика (см. `_SNAPSHOT_DRIFT` в
-# packages/tui/tests/conftest.py). Одна послушная команда — и разбор расхождений
-# станет невозможен.
-addopts = "--snapshot-ignore-file-extensions=svg"

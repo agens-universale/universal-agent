@@ -739,10 +739,37 @@ def serve() -> int:
     except (TypeError, ValueError):
         port = 8000
 
+    # basicConfig ровно здесь, а не на импорте модуля: gc_server импортируют и
+    # как библиотеку (cleanup_threads, тесты), и настраивать чужое логирование
+    # за них нельзя. Без этого вызова наши logger.info/warning не доходили
+    # никуда: uvicorn поднимает только СВОИ логгеры, а до stderr через
+    # logging.lastResort пролезал лишь WARNING+. То есть строка «читаю такой-то
+    # config_server.yml» существовала, но в проде её не видел никто.
+    log_level = str(server_cfg.get("log_level", "info")).lower()
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    # Тревога по СОСТОЯНИЮ, а не по факту «файл не найден». Прежде она жила в
+    # резолвере конфига и срабатывала только когда файла нет нигде — а найденный
+    # конфиг с пустым auth_token молчал, хотя это ровно тот же незащищённый
+    # сервер. Именно туда ведёт подхват постороннего config_server.yml.
+    if not server_cfg.get("auth_token"):
+        logger.warning(
+            "сервер стартует БЕЗ авторизации: auth_token не задан (конфиг: %s). "
+            "Любой, кто дотянется до %s:%s, получит доступ к агенту.",
+            SERVER_CONFIG.get("config_path") or "минимальный дефолт",
+            host,
+            port,
+        )
+
     # Было "src.server:app": под установленным колесом (sources = ["src"]) модуль
     # называется server, поэтому строка резолвилась только при запуске из корня
     # репозитория, а из wheel падала ModuleNotFoundError.
-    uvicorn.run("gc_server.server:app", host=host, port=port)
+    # log_level передаётся явно — server.log_level из конфига читался и не
+    # использовался нигде.
+    uvicorn.run("gc_server.server:app", host=host, port=port, log_level=log_level)
     return 0
 
 
