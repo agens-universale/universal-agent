@@ -9,7 +9,12 @@
 #   pip install "git+<repo_url>[@repo_ref]#subdirectory=external/vendor/<name>-mcp"
 # Публичный https → ставится анонимно, в т.ч. через корп-прокси.
 repo_url: https://gitverse.ru/gigacode-ai/universal-agent
-# repo_ref:   # опц. пин ветки/тега; пусто = дефолтная ветка
+# ВРЕМЕННО: пин на feat/module-split. На дефолтной ветке (master) вендоры лежат
+# в external/<имя>-mcp, а install.py строит #subdirectory=external/vendor/<имя>-mcp
+# — то есть до вливания этой ветки git-метод для office/science/computer даёт
+# 404. СНЯТЬ ПЕРЕД МЕРЖЕМ: после вливания в master пин не нужен и вреден — он
+# заморозит установку на этой ветке.
+repo_ref: feat/module-split
 mcps:
   - name: computer
     description: управление ПК — скриншоты, клики, ввод
