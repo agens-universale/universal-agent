@@ -22,9 +22,10 @@ def test_find_by_basename_anywhere(tmp_path: Path):
     assert res["count"] == 1
     m = res["matches"][0]
     assert Path(m["path"]) == target.resolve()
-    assert m["type"] == "file"
+    assert "type" not in m
     assert m["size_bytes"] == target.stat().st_size
-    assert m["is_binary"] is False
+    assert "is_binary" not in m
+    assert "is_hidden" not in m
     assert "encoding_guess" not in m
     assert res["truncated"] is False
     assert res["walk_stats"]["stop_reason"] == "completed"
@@ -41,26 +42,43 @@ def test_find_match_meta_binary_and_directory(tmp_path: Path):
     text_res = json.loads(_tool()(path=str(tmp_path), query="note.txt"))
     assert text_res["ok"] and text_res["count"] == 1
     tm = text_res["matches"][0]
-    assert tm["type"] == "file"
+    assert "type" not in tm
     assert tm["size_bytes"] == text.stat().st_size
-    assert tm["is_binary"] is False
+    assert "is_binary" not in tm
+    assert "is_hidden" not in tm
     assert "encoding_guess" not in tm
 
     bin_res = json.loads(_tool()(path=str(tmp_path), query="blob.bin"))
     assert bin_res["ok"] and bin_res["count"] == 1
     bm = bin_res["matches"][0]
-    assert bm["type"] == "file"
+    assert "type" not in bm
     assert bm["size_bytes"] == binary.stat().st_size
     assert bm["is_binary"] is True
+    assert "is_hidden" not in bm
     assert "encoding_guess" not in bm
 
     dir_res = json.loads(_tool()(path=str(tmp_path), query="subdir"))
     assert dir_res["ok"] and dir_res["count"] >= 1
-    dm = next(m for m in dir_res["matches"] if m["type"] == "directory")
+    dm = next(m for m in dir_res["matches"] if m.get("type") == "directory")
     assert Path(dm["path"]) == d.resolve()
     assert "size_bytes" not in dm
     assert "is_binary" not in dm
+    assert "is_hidden" not in dm
     assert "encoding_guess" not in dm
+
+
+def test_find_match_meta_hidden_file(tmp_path: Path):
+    hidden = tmp_path / ".notes.txt"
+    hidden.write_text("secret", encoding="utf-8")
+
+    res = json.loads(_tool()(path=str(tmp_path), query=".notes.txt"))
+    assert res["ok"] and res["count"] == 1
+    hm = res["matches"][0]
+    assert Path(hm["path"]) == hidden.resolve()
+    assert hm["is_hidden"] is True
+    assert hm["size_bytes"] == hidden.stat().st_size
+    assert "type" not in hm
+    assert "is_binary" not in hm
 
 
 def test_find_by_name_fragment_and_path_fragment(tmp_path: Path):

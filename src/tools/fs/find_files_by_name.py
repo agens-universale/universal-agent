@@ -132,8 +132,10 @@ class FindFilesByName(AbstractSimpleTool):
             "bracket-free fragment.\n"
             "Args: path (required, absolute directory), query (required), "
             "case_insensitive (default true), max_matches (default 100, maximum 200).\n"
-            "Response: ok, matches[{path, type, …}], count, truncated, "
-            "walk_stats (visited, stop_reason); guidance only when truncated.\n"
+            "Response: ok, matches[{path, size_bytes, …}], count, truncated, "
+            "walk_stats (visited, stop_reason); guidance only when truncated. "
+            "type/is_hidden/is_binary are omitted unless non-default "
+            "(directory / true / true).\n"
         )
 
     def _result(
@@ -296,20 +298,24 @@ class FindFilesByName(AbstractSimpleTool):
             is_binary = classification.is_binary
         except OSError:
             is_binary = None
-        return {
-            "size_bytes": size_bytes,
-            "is_binary": is_binary,
-        }
+        meta: Dict[str, Any] = {"size_bytes": size_bytes}
+        if is_binary:
+            meta["is_binary"] = True
+        return meta
 
     def _entry(
         self, filepath: str, is_dir: bool, size: Optional[int] = None
     ) -> Dict[str, Any]:
+        # Default match is a visible text file: omit type/is_hidden/is_binary
+        # unless they differ (directory / hidden / binary). size_bytes stays
+        # for triage.
         entry: Dict[str, Any] = {
             "path": tool_report_abspath(filepath, workspace=self._workspace),
-            "type": "directory" if is_dir else "file",
-            "is_hidden": self._backend.is_hidden(filepath),
         }
-        # Directories have no file meta; omit null size/binary fields.
+        if is_dir:
+            entry["type"] = "directory"
+        if self._backend.is_hidden(filepath):
+            entry["is_hidden"] = True
         if not is_dir:
             entry.update(self._probe_file_meta(filepath, size))
         return entry
