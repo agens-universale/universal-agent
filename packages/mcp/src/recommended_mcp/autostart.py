@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import socket
+import sys
 import time
 from typing import Any
 from urllib.parse import urlparse
 
 from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_agent_manifest_path
 from recommended_mcp.manifest import load_manifest
-from recommended_mcp.process_supervisor import RunSupervisor
+from recommended_mcp.process_supervisor import RunSupervisor, SupervisorError
 from recommended_mcp.run import run_entry
 
 # Транспорты, при которых агент ходит к уже запущенному серверу (не stdio-spawn).
@@ -77,7 +78,27 @@ def ensure_daemons_for_agent(
         transport = str(server_cfg.get("transport", "")).strip()
         if transport not in _DAEMON_TRANSPORTS:
             continue
-        started = run_entry(entry, recommended_root, supervisor)
+        try:
+            started = run_entry(entry, recommended_root, supervisor)
+        except SupervisorError as exc:
+            # Рецепт ПОДКЛЮЧЁН, но не УСТАНОВЛЕН — обычное состояние: сервер
+            # деинсталлировали, снесли venv рецептов, перенесли конфиг на другую
+            # машину. Проводка при этом остаётся в config.local.yml, потому что
+            # это две независимые операции.
+            #
+            # Ронять на этом весь фронтенд нельзя. В TUI автозапуск включён по
+            # умолчанию (`set_defaults(auto_mcp=True)`), поэтому непоставленный
+            # daemon-рецепт убивал `gc-ua` ДО первого экрана — трейсбеком
+            # FileNotFoundError, из которого не читается ни имя рецепта, ни что
+            # с этим делать. Остальные серверы при этом исправны и должны
+            # подняться.
+            print(
+                f"[warn] {entry.name}: демон не запущен — {exc}. "
+                f"Рецепт подключён, но не установлен: `gc-mcp install {entry.name}`. "
+                f"Отключить автозапуск целиком: --no-auto-mcp.",
+                file=sys.stderr,
+            )
+            continue
         if not started:
             continue
         url = server_cfg.get("url")
