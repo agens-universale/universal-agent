@@ -14,6 +14,7 @@ after the final result.
 import base64
 import json
 import logging
+import shlex
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -28,6 +29,15 @@ EXEC_RESULT_MARKER = "__GC_MCP_EXEC__"
 # The exec channel caps captured stdout (backends/protocol.py:10). Leave the
 # backend's own limit in charge; we only detect the hit and fail loudly.
 _TIMEOUT_SLACK_SEC = 15
+
+# Carrier order is deliberate and differs from the spec's `curl -> wget ->
+# python3`. FastMCP may answer tools/call with text/event-stream, and per MCP
+# Streamable HTTP the server only SHOULD close that stream after the final
+# result. A carrier that waits for EOF (curl, wget) hangs or truncates; only the
+# python3 carrier stops at the first complete frame. python3 is present in every
+# task image we target, so it leads; the shell carriers stay as fallbacks and
+# always carry an explicit timeout so a stuck stream fails instead of hanging.
+_CARRIERS = ("python3", "curl", "wget")
 
 _INIT_PARAMS: Dict[str, Any] = {
     "protocolVersion": "2024-11-05",
@@ -145,11 +155,72 @@ def _extract_marked(stdout: str) -> Optional[Dict[str, Any]]:
 class OsBackendStatelessClient(McpClientPort):
     """`http` / `stream_http` / `stdio`, spoken from inside the backend."""
 
+    _carrier_name: Optional[str] = None
+
     def __init__(
         self, server_name: str, server_cfg: Dict[str, Any], *, os_backend: Any
     ) -> None:
         super().__init__(server_name, server_cfg)
         self.os_backend = os_backend
+
+    def _carrier(self) -> str:
+        """Which HTTP client the environment can offer. Probed once per client."""
+        if self._carrier_name is not None:
+            return self._carrier_name
+        for name in _CARRIERS:
+            probe = self.os_backend.exec(
+                f"command -v {name} 2>/dev/null || true", timeout=20
+            )
+            if (getattr(probe, "stdout", "") or "").strip():
+                self._carrier_name = name
+                return name
+        raise McpExecCarrierError(
+            f"MCP server '{self.server_name}': the environment has none of "
+            f"python3, curl, wget on PATH, so an HTTP request cannot be carried "
+            f"there. Nothing will be installed into the task image; set "
+            f"execute_on: agent for this server if it is reachable from the agent."
+        )
+
+    def _shell_carrier_command(self, request: Dict[str, Any]) -> str:
+        """curl/wget fallback. Correct for application/json answers; an SSE answer
+        the server leaves open is cut by the explicit timeout rather than hanging
+        the run.
+
+        This path reports neither the real HTTP status nor the response headers —
+        the envelope is assembled from the body alone, so `mcp-session-id` is
+        unavailable and a 4xx/5xx surfaces as an empty body rather than an
+        HTTPError. Acceptable here: a server that omits the session header still
+        answers a stateless handshake, an empty body already fails loudly one
+        layer up, and this carrier only runs where python3 is absent.
+        """
+        body = json.dumps(request["payload"])
+        timeout_s = int(request["timeout"])
+        url = shlex.quote(request["url"])
+        if self._carrier() == "curl":
+            header_args = " ".join(
+                f"-H {shlex.quote(f'{k}: {v}')}" for k, v in request["headers"].items()
+            )
+            fetch = (
+                f"curl -sS -L --max-time {timeout_s} -X POST {header_args} "
+                f"--data-binary {shlex.quote(body)} {url}"
+            )
+        else:
+            header_args = " ".join(
+                f"--header={shlex.quote(f'{k}: {v}')}"
+                for k, v in request["headers"].items()
+            )
+            fetch = (
+                f"wget -q -O - --timeout={timeout_s} {header_args} "
+                f"--post-data={shlex.quote(body)} {url}"
+            )
+        marker = shlex.quote(EXEC_RESULT_MARKER)
+        return (
+            f"{fetch} > /tmp/gc_mcp_body.$$ 2>/dev/null; "
+            f"printf '%s' {marker}; "
+            f"printf '{{\"status\": 200, \"headers\": {{}}, \"body\": '; "
+            f"cat /tmp/gc_mcp_body.$$; printf '}}\\n'; "
+            f"rm -f /tmp/gc_mcp_body.$$"
+        )
 
     # --- public port ---
 
@@ -230,9 +301,13 @@ class OsBackendStatelessClient(McpClientPort):
         )
         # Give the backend kill a margin over the in-script socket timeout, so a
         # slow answer surfaces as an MCP timeout rather than an opaque exec one.
-        result = self.os_backend.run_python(
-            code, timeout=int(timeout) + _TIMEOUT_SLACK_SEC
-        )
+        deadline = int(timeout) + _TIMEOUT_SLACK_SEC
+        if self._carrier() == "python3":
+            result = self.os_backend.run_python(code, timeout=deadline)
+        else:
+            result = self.os_backend.exec(
+                self._shell_carrier_command(request), timeout=deadline
+            )
         return self._interpret(result)
 
     def _interpret(self, result: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:

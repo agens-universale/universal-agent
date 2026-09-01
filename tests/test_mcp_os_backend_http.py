@@ -185,3 +185,98 @@ def test_agent_locus_servers_never_appear_in_exec():
         assert sent["url"] == "http://sidecar:8000/mcp"
         assert "corp-internal.example" not in json.dumps(sent)
         assert "other-secret-token" not in json.dumps(sent)
+
+
+class _ProbingSandbox(_RecordingSandbox):
+    """Sandbox whose PATH contains only the tools named in `available`."""
+
+    def __init__(self, answers, available):
+        super().__init__(answers)
+        self.available = set(available)
+        self.probes = []
+
+    def exec(self, command, *, cwd=None, timeout=None, env=None):
+        self.probes.append(command)
+        if command.startswith("command -v "):
+            name = command.split()[2]
+            return _ExecResult(
+                stdout=f"/usr/bin/{name}" if name in self.available else "",
+                return_code=0 if name in self.available else 1,
+            )
+        return _ExecResult(return_code=1)
+
+    def run_python(self, code, *, cwd=None, timeout=None, env=None):
+        if "python3" not in self.available:
+            return _ExecResult(stdout="", stderr="python3: not found", return_code=127)
+        return super().run_python(code, cwd=cwd, timeout=timeout, env=env)
+
+
+def test_python3_is_preferred_when_present():
+    backend = _ProbingSandbox([
+        _ok({"result": {}}, {"mcp-session-id": "s"}),
+        _ok({}),
+        _ok({"result": {"tools": []}}),
+    ], available={"python3", "curl", "wget"})
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=10.0)
+    assert client._carrier() == "python3"
+
+
+def test_curl_is_used_when_python3_is_absent():
+    backend = _ProbingSandbox([], available={"curl", "wget"})
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    assert client._carrier() == "curl"
+
+
+def test_wget_is_the_last_fallback():
+    backend = _ProbingSandbox([], available={"wget"})
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    assert client._carrier() == "wget"
+
+
+def test_no_carrier_at_all_is_an_explicit_error():
+    backend = _ProbingSandbox([], available=set())
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    with pytest.raises(McpExecCarrierError) as excinfo:
+        client.list_tools(timeout=10.0)
+    message = str(excinfo.value)
+    assert "python3" in message and "curl" in message and "wget" in message
+    # Never try to install anything into the task image.
+    assert not any("install" in probe for probe in backend.probes)
+
+
+def test_curl_carrier_always_carries_a_timeout():
+    """curl waits for EOF, so an unclosed SSE stream must not hang forever."""
+    backend = _ProbingSandbox([], available={"curl"})
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    try:
+        client.list_tools(timeout=7.0)
+    except Exception:
+        pass
+    curl_calls = [c for c in backend.probes if "curl -" in c]
+    assert curl_calls
+    assert all("--max-time" in c for c in curl_calls)
+
+
+def test_carrier_is_probed_once_per_client():
+    backend = _ProbingSandbox([
+        _ok({"result": {}}, {"mcp-session-id": "s"}),
+        _ok({}),
+        _ok({"result": {"tools": []}}),
+    ], available={"python3"})
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=10.0)
+    probes = [p for p in backend.probes if p.startswith("command -v ")]
+    assert len(probes) == 1
