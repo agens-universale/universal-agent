@@ -18,6 +18,7 @@ Usage:
 import asyncio
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,14 @@ from harbor.utils.trajectory_utils import format_trajectory_json
 
 from adapters.gc_cli_config import build_gc_cli_config
 from adapters.step_timings import StepTimings
+
+# Harbor task transports -> gc-cli transports, 1:1. Harbor normalises `http` to
+# `streamable-http` (models/task/config.py), so those three are all we ever see.
+_HARBOR_TRANSPORT_MAP = {
+    "streamable-http": "stream_http",
+    "sse": "sse",
+    "stdio": "stdio",
+}
 
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-ua`), so it imports directly — no source-dir / PYTHONPATH.
@@ -441,6 +450,68 @@ class GcCliExternal(BaseAgent):
             self.logger.error("Failed to write ATIF trajectory.json", exc_info=True)
             return 0
 
+    @staticmethod
+    def _harbor_mcp_to_config(servers: list, *, logger: Any = None) -> dict:
+        """Task-declared MCP servers as gc-cli `mcp-servers` entries.
+
+        The task's own environment is where these servers live, so they are
+        tagged `execute_on: os_backend`. The transport is carried through
+        unchanged — the locus is a separate axis.
+        """
+        mapped: dict = {}
+        for server in servers or []:
+            name = getattr(server, "name", None)
+            transport = getattr(server, "transport", None)
+            if not name or not transport:
+                continue
+            gc_transport = _HARBOR_TRANSPORT_MAP.get(str(transport))
+            if gc_transport is None:
+                if logger is not None:
+                    logger.warning(
+                        "MCP server %r: unsupported harbor transport %r, skipped",
+                        name, transport,
+                    )
+                continue
+            key = re.sub(r"[^A-Za-z0-9_]", "_", str(name))
+            entry: dict = {
+                "transport": gc_transport,
+                "server-name": str(name),
+                "execute_on": "os_backend",
+            }
+            if gc_transport == "stdio":
+                entry["command"] = str(getattr(server, "command", "") or "")
+                entry["args"] = [str(a) for a in (getattr(server, "args", None) or [])]
+            else:
+                entry["url"] = str(getattr(server, "url", "") or "")
+            mapped[key] = entry
+        return mapped
+
+    @staticmethod
+    def _apply_mcp_servers(
+        config_dict: dict, servers: list, *, logger: Any = None
+    ) -> None:
+        """Merge task MCP servers into the run config; existing entries win.
+
+        An explicit entry in the agent's own config is a deliberate statement
+        about that server (including its locus), so autotagging never overrides
+        it.
+        """
+        mapped = GcCliExternal._harbor_mcp_to_config(servers, logger=logger)
+        if not mapped:
+            return
+        existing = dict(config_dict.get("mcp-servers") or {})
+        config_dict["mcp-servers"] = {**mapped, **existing}
+        meta = dict(config_dict.get("mcp-meta") or {})
+        # Every MCP operation is now an exec round-trip into the container, and a
+        # sim-user answer is a full LLM call on the other side.
+        meta["request_timeout_sec"] = max(
+            int(meta.get("request_timeout_sec") or 0), 600
+        )
+        meta["discovery_timeout_sec"] = max(
+            int(meta.get("discovery_timeout_sec") or 0), 120
+        )
+        config_dict["mcp-meta"] = meta
+
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
@@ -449,6 +520,9 @@ class GcCliExternal(BaseAgent):
 
         loop = asyncio.get_running_loop()
         config_dict = self._build_config()
+        self._apply_mcp_servers(
+            config_dict, getattr(self, "mcp_servers", None) or [], logger=self.logger
+        )
         skills_dir = getattr(self, "skills_dir", None)
         container_skills = (
             skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
