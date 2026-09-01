@@ -193,9 +193,8 @@ class FindFilesByName(AbstractSimpleTool):
         truncated: bool = False,
         walk_stats: Optional[Dict[str, Any]] = None,
         error: Optional[Dict[str, Any]] = None,
-        listing_backend: Optional[str] = None,
     ) -> str:
-        raw = self._result(
+        return self._result(
             path=path,
             query=query,
             case_insensitive=case_insensitive,
@@ -206,11 +205,6 @@ class FindFilesByName(AbstractSimpleTool):
             walk_stats=walk_stats,
             error=error,
         )
-        if listing_backend is None:
-            return raw
-        payload = json.loads(raw)
-        payload["listing_backend"] = listing_backend
-        return json.dumps(payload, ensure_ascii=False)
 
     def _resolve_read_guard(self) -> Tuple[Any, Any, Any]:
         context = resolve_tool_context(self)
@@ -396,7 +390,6 @@ class FindFilesByName(AbstractSimpleTool):
         root_norm = os.path.normpath(path)
         # Enumeration via backend.iter_walk only (Harbor: private walk channel
         # ~50M fail-closed; local: os.walk). No tool-exec find dump (60k).
-        listing_backend = "python"
 
         exclude_names = effective_exclude_dir_names()
 
@@ -478,5 +471,4 @@ class FindFilesByName(AbstractSimpleTool):
                 "stop_reason": stop_reason,
                 "max_visited": DEFAULT_MAX_VISITED,
             },
-            listing_backend=listing_backend,
         )

@@ -130,7 +130,6 @@ Examples:
         if error is not None:
             payload["error"] = error
         payload["entries"] = entries if entries is not None else []
-        # listing_backend set by caller on success paths via optional kw — see __call__
 
         return json.dumps(payload, ensure_ascii=False)
 
@@ -145,9 +144,8 @@ Examples:
         entries: Optional[List[Dict[str, Any]]] = None,
         truncated: bool = False,
         error: Optional[Dict[str, Any]] = None,
-        listing_backend: Optional[str] = None,
     ) -> str:
-        raw = self._result(
+        return self._result(
             path=path,
             glob=glob,
             max_depth=max_depth,
@@ -157,11 +155,6 @@ Examples:
             truncated=truncated,
             error=error,
         )
-        if listing_backend is None:
-            return raw
-        payload = json.loads(raw)
-        payload["listing_backend"] = listing_backend
-        return json.dumps(payload, ensure_ascii=False)
 
     def _resolve_read_guard(self) -> tuple:
         """
@@ -311,7 +304,6 @@ Examples:
             ok=True,
             entries=result,
             truncated=hit_limit,
-            listing_backend="python",
         )
 
     def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
