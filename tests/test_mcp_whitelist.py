@@ -82,12 +82,14 @@ def test_filter_warns_on_unknown_names(caplog):
 
 
 def test_discover_one_applies_whitelist(monkeypatch):
-    # Transport dispatch lives in client_port now; registry only normalises.
-    # conftest swaps sys.modules["tools"], so neither a string target nor a fresh
-    # import reliably names the module object this class was defined in. Its own
-    # __globals__ always does.
+    # Transport dispatch lives in client_port now; registry only resolves and
+    # normalises. conftest swaps sys.modules["tools"], so neither a string target
+    # nor a fresh import reliably names the module object the resolver returns a
+    # client from — walk the live chain registry itself uses.
+    resolve = reg._discover_one.__globals__["resolve_mcp_client"]
+    client = resolve("srv", {"transport": "stream_stdio", "command": "x"})
     monkeypatch.setitem(
-        reg.AgentRuntimeClient.list_tools.__globals__,
+        type(client).list_tools.__globals__,
         "list_tools_stream_stdio",
         lambda **kw: list(_RAW),
     )

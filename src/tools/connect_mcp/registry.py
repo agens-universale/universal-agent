@@ -7,7 +7,7 @@ import time
 import logging
 
 logger = logging.getLogger(__name__)
-from tools.connect_mcp.client_port import AgentRuntimeClient
+from tools.connect_mcp.execute_on import resolve_mcp_client
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -164,6 +164,7 @@ def _discover_one(
     server_cfg: Dict[str, Any],
     *,
     timeout: float,
+    os_backend: Any = None,
 ) -> tuple[list, dict]:
     """
     Дискавери тулов одного MCP-сервера (одна попытка, без backoff).
@@ -199,7 +200,7 @@ def _discover_one(
         )
         server_description = server_cfg.get("description") or ""
 
-        client = AgentRuntimeClient(server_name, server_cfg)
+        client = resolve_mcp_client(server_name, server_cfg, os_backend=os_backend)
         tools_raw = client.list_tools(timeout=timeout)
 
         tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
@@ -244,6 +245,7 @@ def _build_tools_registry(
     *,
     discovery_timeout_sec: float = 8,
     on_progress=None,
+    os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """
     Построить словарь всех тулов со всех MCP-серверов (без кэширования).
@@ -274,7 +276,9 @@ def _build_tools_registry(
     results: Dict[str, tuple] = {}
 
     def _worker(name, cfg):
-        result = _discover_one(name, cfg, timeout=discovery_timeout_sec)
+        result = _discover_one(
+            name, cfg, timeout=discovery_timeout_sec, os_backend=os_backend
+        )
         results[name] = result
         if on_progress is not None:
             on_progress(name, result[1])
@@ -331,7 +335,13 @@ class ToolsCache:
     - Ключ кэша привязан к текущему содержимому config_data['mcp-servers'].
     """
 
-    def __init__(self, cfg: Dict[str, Any], ttl_default: int = 3600) -> None:
+    def __init__(
+        self,
+        cfg: Dict[str, Any],
+        ttl_default: int = 3600,
+        *,
+        os_backend: Any = None,
+    ) -> None:
         """
         cfg — словарь с mcp-конфигурацией, ожидаются ключи:
         - "mcp-servers": {...}
@@ -339,6 +349,7 @@ class ToolsCache:
         """
         self._config = cfg
         self._ttl_default = ttl_default
+        self._os_backend = os_backend
         self._data: Optional[Dict[str, Dict[str, Any]]] = None
         self._fetched_at: Optional[float] = None
         self._cache_key: Optional[str] = None
@@ -400,6 +411,7 @@ class ToolsCache:
             servers_cfg,
             discovery_timeout_sec=self._discovery_timeout(),
             on_progress=on_progress,
+            os_backend=self._os_backend,
         )
         self._status = status
 

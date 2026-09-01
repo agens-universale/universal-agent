@@ -8,7 +8,7 @@ import time
 import uuid
 
 from config import load_config
-from tools.connect_mcp.client_port import AgentRuntimeClient
+from tools.connect_mcp.execute_on import resolve_mcp_client
 from tools.connect_mcp.registry import get_all_tools
 from tools.connect_mcp.validation import (
     _validate_tool_arguments,
@@ -218,6 +218,8 @@ def call_mcp_tool(
     tools_registry: Dict[str, Dict[str, Any]] | None = None,
     timeout: float = 10.0,
     default_use_retry: bool = False,
+    *,
+    os_backend: Any = None,
 ) -> Any:
     """
     Вызвать инструмент на соответствующем MCP-сервере.
@@ -303,7 +305,7 @@ def call_mcp_tool(
         no_more_retries_log_level=logging.ERROR,
     )
     def _do_mcp_call() -> Any:
-        client = AgentRuntimeClient(server_key, server_cfg)
+        client = resolve_mcp_client(server_key, server_cfg, os_backend=os_backend)
         return client.call_tool(base_tool_name, arguments_obj, timeout=timeout)
 
     data = _do_mcp_call(

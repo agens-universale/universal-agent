@@ -264,7 +264,9 @@ def build_tools_data(
     for k, v in skills_tools_data.items():
         tools_data[k] = v
 
-    mcp_tools_data, mcp_status = get_mcp_tools_data(config_dict, on_progress=on_progress)
+    mcp_tools_data, mcp_status = get_mcp_tools_data(
+        config_dict, on_progress=on_progress, os_backend=os_backend
+    )
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 

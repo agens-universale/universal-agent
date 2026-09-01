@@ -51,3 +51,29 @@ def test_unsupported_transport_raises():
     client = AgentRuntimeClient("srv", {"transport": "carrier-pigeon"})
     with pytest.raises(ValueError):
         client.list_tools(timeout=1.0)
+
+
+def test_os_backend_reaches_the_resolver_from_build_tools_data(monkeypatch):
+    """The backend RunContext already built must reach the per-server resolver."""
+    seen = {}
+
+    class _Sandbox:
+        is_sandbox = True
+
+    sandbox = _Sandbox()
+
+    def fake_resolve(server_name, server_cfg, *, os_backend=None):
+        seen["backend"] = os_backend
+        raise RuntimeError("stop here — we only assert the wiring")
+
+    from tools.connect_mcp import registry as reg
+
+    monkeypatch.setitem(
+        reg._discover_one.__globals__, "resolve_mcp_client", fake_resolve
+    )
+
+    cfg = {"transport": "stream_http", "url": "http://x:8000/mcp"}
+    tools, status = reg._discover_one("srv", cfg, timeout=1.0, os_backend=sandbox)
+    assert tools == []
+    assert status["status"] == "failed"
+    assert seen["backend"] is sandbox
