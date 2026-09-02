@@ -8,6 +8,8 @@ from tools.connect_mcp.os_backend_client import (
     EXEC_RESULT_MARKER,
     McpExecCarrierError,
     OsBackendStatelessClient,
+    _REQUESTS_PER_OPERATION,
+    _split_share,
 )
 
 
@@ -272,6 +274,16 @@ def test_socket_timeout_ends_before_the_exec_kill():
         assert _sent(code)["timeout"] < deadline
 
 
+@pytest.mark.parametrize("total", [3, 8, 12, 20, 30, 45, 90, 120, 300, 600])
+def test_the_ordering_holds_on_every_budget(total):
+    """Not only on budgets that divide evenly: the margin comes off the integer
+    deadline, so truncation cannot leave the socket outliving the exec kill."""
+    socket_timeout, deadline = _split_share(max(1.0, total / _REQUESTS_PER_OPERATION))
+    assert socket_timeout <= deadline
+    if deadline >= 2:
+        assert socket_timeout < deadline
+
+
 def test_slack_keeps_its_full_size_when_the_budget_allows():
     backend = _RecordingSandbox([
         _ok({"result": {}}, {"mcp-session-id": "s"}),
@@ -323,6 +335,26 @@ def test_delete_carries_the_same_auth_headers_as_the_posts():
     delete_src = backend.codes[2].split("def _delete_session")[1].split("\ntry:")[0]
     assert 'dict(_req["headers"])' in delete_src
     assert '{"mcp-session-id": session_id}' not in delete_src
+
+
+def test_the_answer_is_printed_before_the_session_is_released():
+    """Releasing the session is best effort, so it must not be able to lose the
+    answer: a server that accepts the call and then wedges on DELETE would eat
+    the exec deadline, and an unflushed envelope dies with the killed process."""
+    backend = _RecordingSandbox([
+        _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
+        _ok({}),
+        _ok({"result": {"tools": []}}),
+    ])
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=10.0)
+    code = backend.codes[2]
+    printed = code.index('json.dumps({"status"')
+    released = code.index("\n        _delete_session(url, session_id)")
+    assert printed < released
+    assert "sys.stdout.flush()" in code[printed:released]
 
 
 def test_verify_ssl_false_reaches_the_carrier():

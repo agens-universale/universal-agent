@@ -52,10 +52,15 @@ _PROBE_TIMEOUT_SEC = 10
 
 
 def _split_share(share: float) -> tuple[float, int]:
-    """(socket_timeout, exec_deadline) for one request's share of the budget."""
+    """(socket_timeout, exec_deadline) for one request's share of the budget.
+
+    Both come off the integer deadline. Taking the margin off the fractional
+    share instead lets truncation eat it — a 2.67s share left a 2.13s socket
+    against a 2s deadline — which inverts the ordering the margin exists for.
+    """
     deadline = max(1, int(share))
-    slack = min(_TIMEOUT_SLACK_SEC, share * _TIMEOUT_SLACK_SHARE)
-    socket_timeout = max(1.0, share - slack)
+    slack = min(_TIMEOUT_SLACK_SEC, deadline * _TIMEOUT_SLACK_SHARE)
+    socket_timeout = max(1.0, deadline - slack)
     return socket_timeout, deadline
 
 # Attribute the python3 probe is cached under, on the backend rather than on the
@@ -72,9 +77,10 @@ class McpExecCarrierError(RuntimeError):
 # str.format. It performs one POST, follows MCP's /mcp -> /mcp/ redirect itself
 # (urllib refuses to re-POST on 307/308; it handles 301/302 on its own by
 # rewriting the method to GET, which never reaches this loop), stops at the first
-# complete JSON-RPC frame instead of reading to EOF, and releases the session.
+# complete JSON-RPC frame instead of reading to EOF, and releases the session once
+# the answer is out.
 _HTTP_CARRIER = '''
-import base64, json, ssl, urllib.error, urllib.parse, urllib.request
+import base64, json, ssl, sys, urllib.error, urllib.parse, urllib.request
 
 _req = json.loads(base64.b64decode("{payload_b64}").decode("utf-8"))
 _ctx = ssl._create_unverified_context() if not _req.get("verify_ssl", True) else None
@@ -178,12 +184,17 @@ try:
     if redirected:
         raise RuntimeError("redirect loop not resolved after 4 hops: " + url)
     session_id = _req["headers"].get("mcp-session-id") or headers.get("mcp-session-id")
-    if _req.get("close_session") and session_id:
-        _delete_session(url, session_id)
 except Exception as exc:
     print("{marker}" + json.dumps({{"error": "{{}}: {{}}".format(type(exc).__name__, exc)}}))
 else:
+    # The answer leaves first. Releasing the session is best effort, and a
+    # wedged DELETE must not turn a call that succeeded into a carrier error
+    # when the exec deadline lands on it. The flush carries weight: stdout to a
+    # pipe is block-buffered, and a killed process takes the envelope with it.
     print("{marker}" + json.dumps({{"status": status, "headers": headers, "body": body}}))
+    sys.stdout.flush()
+    if _req.get("close_session") and session_id:
+        _delete_session(url, session_id)
 '''
 
 
