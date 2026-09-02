@@ -196,6 +196,21 @@ def _our_prefixes() -> set[str]:
 #: наш прогон на чужом синке.
 _SCAN_ROOTS = ("packages", "tests", "integrations", "external/litellm")
 
+#: Вендоренные MCP-серверы — ЧУЖОЙ код со своей историей, и судить его нашими
+#: правилами нельзя: `legacy_toplevel` знает имена `config`, `server`, `utils`,
+#: и первый же синк с абсолютным `import config` покрасил бы НАШ прогон.
+#:
+#: Отдельная проверка нужна с тех пор, как вендоры переехали внутрь пакета
+#: (`packages/mcp/external/vendor/`): корень `packages` теперь включает их сам.
+#: Правило по СОДЕРЖИМОМУ, а не по месту: где бы каталог `external/vendor` ни
+#: оказался при следующем переезде, его содержимое остаётся чужим.
+_VENDORED = ("external", "vendor")
+
+
+def _is_vendored(path: Path) -> bool:
+    parts = path.parts
+    return any(parts[i:i + 2] == _VENDORED for i in range(len(parts) - 1))
+
 
 def _python_files() -> list[Path]:
     out: list[Path] = []
@@ -204,7 +219,7 @@ def _python_files() -> list[Path]:
         if not base.is_dir():
             continue
         for p in base.rglob("*.py"):
-            if SKIP_DIRS & set(p.parts):
+            if SKIP_DIRS & set(p.parts) or _is_vendored(p):
                 continue
             out.append(p)
     return sorted(out)

@@ -398,3 +398,58 @@ def test_profile_subdirs_match_layout():
     for name, sub in app_version.PROFILE_SUBDIRS.items():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         assert man["project"]["name"] == name
+
+
+def test_force_include_keys_stay_inside_project_root():
+    """Ключи `force-include` не уходят за каталог своего пакета.
+
+    Ключ вида `../../external/…` работает при сборке из рабочего дерева и молча
+    ломает сборку колеса ИЗ sdist: hatchling ищет исходник относительно корня
+    распакованного архива, а там `../..` ведёт наружу, где ничего нет. Симптом —
+    `FileNotFoundError: Forced include not found`, и падает он ПОСЛЕ того, как
+    остальные пакеты собрались: `uv build --all-packages` оставляет tar.gz без
+    колеса, то есть частичный релиз, с виду похожий на полный.
+
+    Ровно из-за такого ключа вендоренные MCP-серверы переехали из
+    `external/vendor/` внутрь `packages/mcp/external/vendor/`: там оба контекста
+    совпадают — и рабочее дерево, и архив видят один и тот же путь.
+
+    Подмена, которую ловит тест: вернуть любому ключу префикс `../`.
+    """
+    offenders = []
+    for name, sub in MANIFESTS.items():
+        man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+        targets = (
+            man.get("tool", {}).get("hatch", {}).get("build", {})
+            .get("targets", {}).get("wheel", {}).get("force-include", {})
+        )
+        for key in targets:
+            if key.startswith("..") or Path(key).is_absolute():
+                offenders.append(f"{sub}/pyproject.toml: {key}")
+
+    assert not offenders, (
+        "force-include ведёт за пределы каталога пакета — колесо из sdist не "
+        "соберётся:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_vendored_sources_live_inside_their_package():
+    """Исходники вендоренных MCP лежат внутри пакета-владельца.
+
+    Не косметика: пока они лежали в `external/vendor/` корня, единственный
+    способ положить их в колесо — ключ с `../../`, а он и ломает sdist (см.
+    тест выше). Плюс `VENDOR_REL` обслуживал два разных смысла сразу.
+
+    Подмена: вернуть каталог в корень репозитория.
+    """
+    inside = REPO / "packages" / "mcp" / "external" / "vendor"
+    assert inside.is_dir(), f"вендоры не найдены в {inside}"
+
+    names = sorted(p.name for p in inside.iterdir() if p.is_dir())
+    assert len(names) >= 4, f"ожидалось четыре вендора, найдено: {names}"
+
+    stale = REPO / "external" / "vendor"
+    assert not stale.exists(), (
+        f"{stale} существует — переезд сделан наполовину, и два места будут "
+        "расходиться"
+    )

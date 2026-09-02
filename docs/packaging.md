@@ -115,18 +115,40 @@ packages = ["src/gc_tui"]
 `recommended_mcp` и `external` пока остаются наверху: первый — настоящий
 импортируемый пакет (его зовёт `recommended_mcp.runtime.daemon_autostart`),
 второй обязан быть его соседом. Исходники MCP-серверов лежат в
-`external/vendor/<имя>`, но в колесо `gc-mcp` через `force-include` едет
+`packages/mcp/external/vendor/<имя>` — внутри пакета-владельца, но в колесо
+`gc-mcp` через `force-include` едет
 **только `ddgs-mcp`** — одна строка в `packages/mcp/pyproject.toml`:
 
 ```toml
 [tool.hatch.build.targets.wheel.force-include]
-"../../external/vendor/ddgs-mcp" = "external/vendor/ddgs-mcp"
+"external/vendor/ddgs-mcp/pyproject.toml" = "external/vendor/ddgs-mcp/pyproject.toml"
+"external/vendor/ddgs-mcp/src/ddgs_mcp"     = "external/vendor/ddgs-mcp/src/ddgs_mcp"
 ```
+
+**Почему вендоры лежат внутри пакета, а не в корне.** Раньше они жили в
+`<repo>/external/vendor/`, и ключ выше выглядел как `../../external/…` — за
+пределами каталога пакета. Из рабочего дерева такое собиралось, а вот колесо ИЗ
+sdist — нет: hatchling ищет исходник относительно корня распакованного архива, а
+там `../..` ведёт наружу. `uv build --all-packages` падал `Forced include not
+found`, причём ПОСЛЕ сборки остальных шести — в `dist/` оставался `gc_mcp.tar.gz`
+без колеса, то есть частичный релиз, с виду похожий на полный. Держит
+`test_force_include_keys_stay_inside_project_root`.
+
+Переехали все четыре, а не только `ddgs-mcp`: перенос одного расщепил бы
+раскладку и лишил бы смысла единственную константу пути. Заодно это объясняет,
+почему вендоры вообще оказались в корне — до разбиения корень И БЫЛ пакетом.
+
+Цена переезда — две константы вместо одной (`install.py`): в колесе исходники
+лежат рядом с рецептами (`site-packages/external/vendor/`), а `#subdirectory`
+для git-установки считается от корня репозитория
+(`packages/mcp/external/vendor/`). Раньше оба ответа совпадали буквой, теперь
+нет; склеить их обратно значит сделать так, что в установленном колесе бандл
+перестанет находиться и установка молча уедет в git-метод.
 
 Причина — цена бандла: `ddgs-mcp` это наша тонкая обёртка над `ddgs`, 6 файлов
 на 5,7 КБ, и веб-поиск нужен агенту в базовой поставке. Остальные три
 (`office`, `science`, `computer`) — 165 файлов на ~1,6 МБ, и они ставятся
-`pip install` из git-подкаталога (`repo_url` + `#subdirectory=external/vendor/<имя>`
+`pip install` из git-подкаталога (`repo_url` + `#subdirectory=packages/mcp/external/vendor/<имя>`
 из манифеста рецептов), то есть требуют сети. Так же было и до разбиения на
 пакеты: корневой манифест на `develop` force-include'ил ровно `external/ddgs-mcp`
 и ничего больше — переезд только переименовал путь. Если понадобится

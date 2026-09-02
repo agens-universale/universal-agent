@@ -96,7 +96,7 @@ gc-mcp = { workspace = true }
 # выше и по виду относился к gc-mcp — а тот как раз настоящий поставляемый
 # дистрибутив со своими командами.
 gc-testkit = { workspace = true }
-office-mcp = { path = "external/vendor/office-mcp", editable = true }
+office-mcp = { path = "packages/mcp/external/vendor/office-mcp", editable = true }
 
 [tool.pytest.ini_options]
 # Наборы живут при своих пакетах; в корне остаётся только то, что проверяет

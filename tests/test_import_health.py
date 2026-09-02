@@ -297,5 +297,7 @@ def test_litellm_is_judged_like_its_neighbour():
 
     assert any("external/litellm" in p for p in scanned), "litellm вне обхода"
     assert not any("external/vendor" in p for p in scanned), (
-        "вендоренные MCP попали в обход — их синк будет красить наш прогон"
+        "вендоренные MCP попали в обход — их синк будет красить наш прогон. "
+        "После переезда внутрь packages/mcp они попадают под корень 'packages' "
+        "сами, поэтому нужен отдельный отсев по содержимому (_is_vendored)"
     )

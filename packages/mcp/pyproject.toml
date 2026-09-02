@@ -41,8 +41,8 @@ packages = ["src/recommended_mcp"]
 # этого состав колеса зависел от истории машины сборщика — 8 лишних записей из
 # 15. Здесь ровно то, что нужно `pip install <path>`: манифест и исходники.
 [tool.hatch.build.targets.wheel.force-include]
-"../../external/vendor/ddgs-mcp/pyproject.toml" = "external/vendor/ddgs-mcp/pyproject.toml"
-"../../external/vendor/ddgs-mcp/src/ddgs_mcp" = "external/vendor/ddgs-mcp/src/ddgs_mcp"
+"external/vendor/ddgs-mcp/pyproject.toml" = "external/vendor/ddgs-mcp/pyproject.toml"
+"external/vendor/ddgs-mcp/src/ddgs_mcp" = "external/vendor/ddgs-mcp/src/ddgs_mcp"
 
 [tool.pytest.ini_options]
 # Набор пакета гоняется отдельно: `cd packages/mcp && pytest`. Зелёный

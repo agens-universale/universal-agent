@@ -3,7 +3,8 @@
 Раскладки для type=source здесь НАСТОЯЩИЕ, а не синтетические. До 28.08.2026
 тесты собирали ``tmp_path/office-mcp`` — папку MCP прямо в каталоге рецептов.
 Такой раскладки не существует ни в колесе (там рецепты и ``external/vendor`` —
-соседи), ни в рабочей копии (там ``<repo>/external/vendor``), поэтому они
+соседи), ни в рабочей копии (там ``<repo>/packages/mcp/external/vendor``),
+поэтому они
 проходили на арифметике ``root / install.source``, которая в жизни не попадала
 в цель ни разу: ``_dist_name`` всегда возвращал None, и деинсталл рецепта без
 явного ``dist:`` молча пропускался. Теперь ``_dist_name`` ищет исходники тем же
@@ -90,7 +91,7 @@ def test_dist_name_fallback_pyproject_when_no_dist(tmp_path):
 
 
 def test_dist_name_source_finds_pyproject_in_repo_layout(tmp_path):
-    """Раскладка рабочей копии: исходники в <repo>/external/vendor, не рядом.
+    """Раскладка рабочей копии: исходники в <repo>/packages/mcp/external/vendor.
 
     Второй кандидат _vendor_candidates находится только по СТРОГОМУ маркеру —
     packages/core/pyproject.toml с name = "gc-core".
@@ -98,7 +99,7 @@ def test_dist_name_source_finds_pyproject_in_repo_layout(tmp_path):
     (tmp_path / "packages" / "core").mkdir(parents=True)
     (tmp_path / "packages" / "core" / "pyproject.toml").write_text(
         '[project]\nname = "gc-core"\n', encoding="utf-8")
-    src = tmp_path / "external" / "vendor" / "office-mcp"
+    src = tmp_path / "packages" / "mcp" / "external" / "vendor" / "office-mcp"
     src.mkdir(parents=True)
     (src / "pyproject.toml").write_text(
         '[project]\nname = "office-mcp"\n', encoding="utf-8")
@@ -124,7 +125,7 @@ def test_dist_name_skips_broken_pyproject_and_keeps_looking(tmp_path):
     """Битый pyproject у первого кандидата не обрывает поиск.
 
     Ровно тот класс промаха, который правка чинит: раньше на любой осечке
-    разбора функция сдавалась, вместо того чтобы дойти до external/vendor
+    разбора функция сдавалась, вместо того чтобы дойти до вендоров
     рабочей копии.
     """
     (tmp_path / "packages" / "core").mkdir(parents=True)
@@ -137,7 +138,7 @@ def test_dist_name_skips_broken_pyproject_and_keeps_looking(tmp_path):
     broken.mkdir(parents=True)
     (broken / "pyproject.toml").write_text("[project\nname = ", encoding="utf-8")
     # Второй (рабочая копия) — целый.
-    good = tmp_path / "external" / "vendor" / "office-mcp"
+    good = tmp_path / "packages" / "mcp" / "external" / "vendor" / "office-mcp"
     good.mkdir(parents=True)
     (good / "pyproject.toml").write_text(
         '[project]\nname = "office-mcp"\n', encoding="utf-8")

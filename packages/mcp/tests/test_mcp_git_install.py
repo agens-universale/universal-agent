@@ -29,8 +29,8 @@ from recommended_mcp import install as inst
 
 def test_repo_subdir_builds_path_from_name():
     # Параметра root у _repo_subdir больше нет: тело его не читало.
-    assert inst._repo_subdir("office-mcp") == "external/vendor/office-mcp"
-    assert inst._repo_subdir("science-mcp") == "external/vendor/science-mcp"
+    assert inst._repo_subdir("office-mcp") == "packages/mcp/external/vendor/office-mcp"
+    assert inst._repo_subdir("science-mcp") == "packages/mcp/external/vendor/science-mcp"
 
 
 @pytest.mark.parametrize(
@@ -39,7 +39,7 @@ def test_repo_subdir_builds_path_from_name():
 def test_repo_subdir_tolerates_legacy_path(legacy, monkeypatch, capsys):
     """Дореформенный путь читается как имя последнего сегмента, а не падает."""
     monkeypatch.setattr(inst, "_LEGACY_SOURCE_WARNED", set())
-    assert inst._repo_subdir(legacy) == "external/vendor/office-mcp"
+    assert inst._repo_subdir(legacy) == "packages/mcp/external/vendor/office-mcp"
     out = capsys.readouterr().out
     assert "[warn]" in out and "устаревший формат" in out
 
@@ -90,7 +90,7 @@ def test_git_fallback_when_no_local_sources(tmp_path, monkeypatch):
                          editable=False, repo_url="https://x/repo", repo_ref="main")
 
     joined = " ".join(calls[0])
-    assert "git+https://x/repo@main#subdirectory=external/vendor/office-mcp" in joined
+    assert "git+https://x/repo@main#subdirectory=packages/mcp/external/vendor/office-mcp" in joined
 
 
 def test_no_local_no_repo_url_errors(tmp_path):

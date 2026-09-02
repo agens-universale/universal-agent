@@ -266,10 +266,24 @@ def _install_docker(name: str, pkg_path: Path) -> None:
     )
 
 
-#: Где лежат исходники наших MCP относительно корня репозитория.
-#: Одно место на весь модуль: и для поиска локальных исходников, и для
-#: вычисления #subdirectory при git-установке.
-VENDOR_REL = "external/vendor"
+#: Где лежат исходники наших MCP. ДВА разных ответа, и их нельзя склеивать.
+#:
+#: Раньше константа была одна: пока вендоры лежали в `<repo>/external/vendor`, а
+#: force-include клал их в колесо под тем же именем, обе раскладки совпадали
+#: буквой. После переезда вендоров внутрь пакета (`packages/mcp/external/vendor`)
+#: они разошлись, и одна константа стала бы тихой поломкой: в установленном
+#: колесе бандловый ddgs-mcp перестал бы находиться, а установка молча съехала бы
+#: в git-метод — то есть потребовала бы сети и закрытой аутентификации там, где
+#: обязана обойтись бандлом.
+#:
+#: В КОЛЕСЕ: `site-packages/recommended_mcp/` и рядом `site-packages/external/vendor/`.
+#: Цель force-include не может стать `packages/mcp/…` — в site-packages появилось
+#: бы родовое имя верхнего уровня `packages`.
+VENDOR_REL_WHEEL = "external/vendor"
+
+#: В РЕПОЗИТОРИИ: путь от его корня. Тем же значением вычисляется
+#: `#subdirectory` для git-установки — pip резолвит его именно от корня.
+VENDOR_REL_REPO = "packages/mcp/external/vendor"
 
 
 def _vendor_candidates(name: str, root: Path) -> list[Path]:
@@ -287,7 +301,7 @@ def _vendor_candidates(name: str, root: Path) -> list[Path]:
     """
     candidates = [
         # Колесо: site-packages/recommended_mcp/ и site-packages/external/vendor/
-        (root.parent / VENDOR_REL / name),
+        (root.parent / VENDOR_REL_WHEEL / name),
     ]
     # Корень рабочей копии ищем ПО СТРОГОМУ МАРКЕРУ и общей реализацией.
     # Своя копия здесь была слабой («packages/ рядом с pyproject.toml») и в
@@ -297,7 +311,7 @@ def _vendor_candidates(name: str, root: Path) -> list[Path]:
     # ломала бы проверку git-фолбэка.
     repo = repo_root_from(root)
     if repo is not None:
-        candidates.append(repo / VENDOR_REL / name)
+        candidates.append(repo / VENDOR_REL_REPO / name)
     return [c.resolve() for c in candidates]
 
 
@@ -341,9 +355,11 @@ def _repo_subdir(source: str) -> str:
     """Путь внутри репозитория для git `#subdirectory`.
 
     Параметра `root` здесь больше нет: тело его не читало (на develop он шёл в
-    `root.name`, а после переезда VENDOR_REL стал константой модуля).
+    `root.name`, а после переезда путь стал константой модуля). Берём
+    РЕПОЗИТОРНУЮ константу: pip резолвит `#subdirectory` от корня репо, а не
+    от раскладки колеса.
     """
-    return f"{VENDOR_REL}/{_source_dir_name(source)}"
+    return f"{VENDOR_REL_REPO}/{_source_dir_name(source)}"
 
 
 def _install_source(

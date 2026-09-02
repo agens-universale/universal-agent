@@ -123,7 +123,7 @@ _LAZY_PATHS = {
     "INTEGRATIONS": lambda root: root / "integrations",
     "HARBOR": lambda root: root / "integrations" / "harbor",
     "RECIPES": lambda root: root / "packages" / "mcp" / "src" / "recommended_mcp",
-    "VENDOR": lambda root: root / "external" / "vendor",
+    "VENDOR": lambda root: root / "packages" / "mcp" / "external" / "vendor",
     "TUI_PKG": lambda root: root / "packages" / "tui" / "src" / "gc_tui",
 }
 

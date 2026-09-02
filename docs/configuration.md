@@ -787,13 +787,13 @@ uv run python -m recommended_mcp.install
 
 - **`computer`** — управление Windows GUI через UI Automation (запуск
   приложений, клики, ввод, чтение состояния окон). Только Windows
-  (`platforms: [win32]`). Исходники: `external/vendor/computer-mcp/`.
+  (`platforms: [win32]`). Исходники: `packages/mcp/external/vendor/computer-mcp/`.
 - **`office`** — чтение офисных документов (pdf, docx, xls, xlsx, pptx,
   csv, html, msg) → markdown. Кросс-платформенно. Исходники:
-  `external/vendor/office-mcp/`.
+  `packages/mcp/external/vendor/office-mcp/`.
 - **`science`** — научные данные и вычисления, поднимается HTTP-daemon'ом.
-  Исходники: `external/vendor/science-mcp/`.
-- **`duckduckgo_search`** — веб-поиск. Исходники: `external/vendor/ddgs-mcp/`.
+  Исходники: `packages/mcp/external/vendor/science-mcp/`.
+- **`duckduckgo_search`** — веб-поиск. Исходники: `packages/mcp/external/vendor/ddgs-mcp/`.
 - **`browser_playwright`** — автоматизация браузера через `@playwright/mcp`
   (npx или Docker). Помечен `optional: true`: при установке без имени
   пропускается, ставится только явным `gc-mcp install browser_playwright`.
@@ -803,7 +803,7 @@ uv run python -m recommended_mcp.install
 `install.py` / `run.py` / структуре каталога —
 в `packages/mcp/src/recommended_mcp/README.md`.
 
-Для итеративной разработки наших MCP в `external/vendor/`:
+Для итеративной разработки наших MCP в `packages/mcp/external/vendor/`:
 
 ```bash
 gc-mcp install --editable

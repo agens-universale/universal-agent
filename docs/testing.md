@@ -2,7 +2,7 @@
 
 # Тесты
 
-Один раз в корне репо: `uv sync`. Подтягивает dev/test-зависимости (`textual`, `rich` — в основных deps; `office-mcp` из `external/vendor/office-mcp` — в test-группе).
+Один раз в корне репо: `uv sync`. Подтягивает dev/test-зависимости (`textual`, `rich` — в основных deps; `office-mcp` из `packages/mcp/external/vendor/office-mcp` — в test-группе).
 
 `uv tool install -e .` и `gc-mcp-install` — для **запуска агента** (`gc-cli` / `gc-ua`), не для pytest. Тесты гоняйте через `uv run pytest`, а не из venv `uv tool`.
 
@@ -11,13 +11,13 @@
 uv run pytest
 
 # office-mcp (свой venv через --directory)
-uv run --directory external/vendor/office-mcp pytest
+uv run --directory packages/mcp/external/vendor/office-mcp pytest
 
 # science-mcp
-uv run --directory external/vendor/science-mcp pytest
+uv run --directory packages/mcp/external/vendor/science-mcp pytest
 
 # computer-mcp (на Linux)
-uv run --directory external/vendor/computer-mcp pytest -m "not windows"
+uv run --directory packages/mcp/external/vendor/computer-mcp pytest -m "not windows"
 ```
 
 Папка или файл: `uv run pytest packages/core/tests/security/ -q`
