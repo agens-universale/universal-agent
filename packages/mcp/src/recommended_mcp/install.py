@@ -320,6 +320,12 @@ def _vendor_candidates(name: str, root: Path) -> list[Path]:
 _LEGACY_SOURCE_WARNED: set[str] = set()
 
 
+#: Дореформенные формы `install.source`, которые мы терпим. Ровно те, что
+#: реально лежали в манифесте develop (`../external/<имя>`) и их вариант без
+#: ведущего `..`. Всё остальное — не «старый формат», а ошибка.
+_LEGACY_SOURCE_PREFIXES = ("../external/", "external/")
+
+
 def _source_dir_name(source: object) -> str:
     """Имя каталога MCP из `install.source`.
 
@@ -331,16 +337,34 @@ def _source_dir_name(source: object) -> str:
     (`[warn] … пропущен`), CLI возвращал 0, и онбординг шёл дальше уже без MCP.
     Берём последний сегмент и ругаемся один раз.
 
-    Падаем только там, где имени нет вовсе: пустая строка, `.`, `..`, голый
-    слэш. Абсолютный путь — это тоже путь, и он тоже терпится: смысл поля в
-    ИМЕНИ подкаталога `external/vendor`, а не в том, где пользователь его
-    записал.
+    Терпимость ограничена ровно этими двумя формами, и это исправление: сначала
+    здесь брался последний сегмент ЛЮБОГО пути. На develop `_repo_subdir`
+    отвергал выход за пределы репозитория (`../../sibling/pkg` → InstallError),
+    и это проверял отдельный тест; вместе с переходом «путь → имя» проверка
+    пропала, а тест не переехал. `source: ../../sibling/pkg` молча превращался в
+    `git+<repo>#subdirectory=…/vendor/pkg`, установка уходила в сеть за
+    несуществующим подкаталогом, и человек получал невнятную ошибку pip вместо
+    внятной ошибки конфигурации — на шаг позже и не про то.
+
+    Падаем на всём остальном: пустая строка, `.`, `..`, голый слэш, абсолютный
+    путь, любой другой относительный. Смысл поля — ИМЯ подкаталога вендора, и
+    путь, ведущий не туда, означает ошибку в манифесте, а не вольность записи.
     """
     raw = str(source).strip()
     name = PurePosixPath(raw.replace("\\", "/")).name
     if not name or name in (".", ".."):
         raise InstallError(
             f"install.source {source!r}: не удалось выделить имя каталога MCP"
+        )
+    normalized = raw.replace("\\", "/")
+    if name != normalized.strip("/") and not any(
+        normalized.startswith(pref) for pref in _LEGACY_SOURCE_PREFIXES
+    ):
+        raise InstallError(
+            f"install.source {source!r}: ожидается ИМЯ каталога MCP "
+            f"(например {name!r}) или дореформенный путь вида "
+            f"'../external/{name}'. Путь ведёт за пределы каталога вендоров, и "
+            f"git-установка искала бы несуществующий подкаталог."
         )
     if name != raw.strip("/") and raw not in _LEGACY_SOURCE_WARNED:
         _LEGACY_SOURCE_WARNED.add(raw)

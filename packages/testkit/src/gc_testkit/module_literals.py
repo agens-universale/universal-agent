@@ -31,7 +31,7 @@ import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from gc_testkit.paths import REPO, _MAP_PATH, package_src_dirs
+from gc_testkit.paths import REPO, _MAP_PATH, module_map, package_src_dirs
 from gc_testkit.sources import ensure_sources_on_path
 
 #: Каталоги корня, которые сканировать НЕ надо. Раньше здесь был обратный
@@ -100,8 +100,7 @@ def _top_level_names() -> set[str]:
         for child in pkg_src.iterdir():
             if child.is_dir() and (child / "__init__.py").exists():
                 names.add(child.name)
-    if _MAP_PATH.is_file():
-        names |= set(json.loads(_MAP_PATH.read_text(encoding="utf-8")))
+    names |= set(module_map())
     src = REPO / "src"
     if src.exists():
         for p in src.iterdir():
@@ -124,6 +123,21 @@ def _looks_like_our_module(lit: str, ours: set[str], *, strict: bool = False) ->
     if lit.split(".")[0] not in ours:
         return False
     return bool(_DOTTED.match(lit)) if strict else True
+
+
+def _touches_sys_modules(body: list) -> bool:
+    """Есть ли внутри `body` обращение к ``sys.modules``.
+
+    Признак цикла выселения. Смотрим на атрибут ``.modules`` у имени ``sys`` —
+    этого хватает и для ``sys.modules.pop(mod)``, и для ``del sys.modules[mod]``,
+    и для ``sys.modules[mod] = stub``.
+    """
+    for stmt in body:
+        for sub in ast.walk(stmt):
+            if (isinstance(sub, ast.Attribute) and sub.attr == "modules"
+                    and isinstance(sub.value, ast.Name) and sub.value.id == "sys"):
+                return True
+    return False
 
 
 def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
@@ -200,6 +214,39 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
                 if (isinstance(first, ast.Constant) and isinstance(first.value, str)
                         and _looks_like_our_module(first.value, ours, strict=True)):
                     refs.append(Ref(rel, node.lineno, "fstring", first.value))
+
+            # 4c) строки ВНУТРИ кортежа/списка/множества в двух формах цикла
+            # выселения: `for mod in ("a", "b"): sys.modules.pop(mod)` и
+            # `if name in ("a", "b"): sys.modules.pop(name)`. Отдельным пунктом,
+            # потому что кодмод переезда правит узлы import и ОДИНОЧНЫЕ
+            # литералы, а элементы кортежа не трогает — и сюда уже проехали
+            # дореформенные "agent_executor" / "run_summary_coordinator"
+            # (packages/core/tests/test_summary_triggers.py, найдено ревью
+            # 02.09.2026). Промах бесшумный: pop по несуществующему ключу — это
+            # no-op, набор остаётся зелёным, а заглушки текут между файлами.
+            #
+            # Обязательное условие — тело РЯДОМ трогает sys.modules. Без него
+            # проверка ловит любой кортеж строк, начинающийся с имени пакета:
+            # список каталогов ('tui', 'diff_tui'), ключ конфига
+            # 'intent_scope', вид события 'usage'. Проверено: сплошной скан дал
+            # ровно семь таких ложных срабатываний и ни одной настоящей находки
+            # сверх той, ради которой пункт и заведён.
+            seqs = []
+            if isinstance(node, ast.For) and _touches_sys_modules(node.body):
+                seqs.append(node.iter)
+            elif isinstance(node, ast.If) and _touches_sys_modules(node.body):
+                test = node.test
+                if isinstance(test, ast.Compare) and any(
+                    isinstance(op, (ast.In, ast.NotIn)) for op in test.ops
+                ):
+                    seqs.extend(test.comparators)
+            for seq in seqs:
+                if not isinstance(seq, (ast.Tuple, ast.List, ast.Set)):
+                    continue
+                for elt in seq.elts:
+                    if (isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                            and _looks_like_our_module(elt.value, ours, strict=True)):
+                        refs.append(Ref(rel, elt.lineno, "sys_modules", elt.value))
 
             # 5) "literal" in sys.modules
             if isinstance(node, ast.Compare) and isinstance(node.left, ast.Constant):

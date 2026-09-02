@@ -33,7 +33,7 @@ def test_main_assembles_stack_dry_run(monkeypatch, tmp_path):
             return None
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg, **kw: None)
     monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
 
     from gc_tui import main
@@ -86,7 +86,11 @@ def test_main_auto_mcp_default_starts_and_stops_daemons(monkeypatch, tmp_path):
     calls: list[str] = []
     monkeypatch.setattr(
         "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
-        lambda cfg: calls.append("ensure"),
+        # **kw: у ensure_mcp_daemons есть именованный disable_hint — фронтенд
+        # сообщает им, КАК у него выключается автозапуск (у gc-ua это
+        # `--no-auto-mcp`, у gc-cli такого флага нет). Заглушка обязана его
+        # принимать, иначе она проверяет не проводку, а свою же сигнатуру.
+        lambda cfg, **kw: calls.append("ensure"),
     )
     monkeypatch.setattr(
         "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
@@ -124,7 +128,7 @@ def test_main_no_auto_mcp_skips_daemons(monkeypatch, tmp_path):
     calls: list[str] = []
     monkeypatch.setattr(
         "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
-        lambda cfg: calls.append("ensure"),
+        lambda cfg, **kw: calls.append("ensure"),
     )
     monkeypatch.setattr(
         "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
@@ -163,7 +167,7 @@ def test_main_auto_mcp_flag_still_works(monkeypatch, tmp_path):
     calls: list[str] = []
     monkeypatch.setattr(
         "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
-        lambda cfg: calls.append("ensure"),
+        lambda cfg, **kw: calls.append("ensure"),
     )
     monkeypatch.setattr(
         "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
@@ -209,7 +213,7 @@ def test_main_voice_autostart_does_not_block_startup(monkeypatch, tmp_path):
             return None
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg, **kw: None)
     monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
 
     state = VoiceState(version="v1", root="/data/voice/speaches", port=8735, model="m")

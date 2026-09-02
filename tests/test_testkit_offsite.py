@@ -121,3 +121,33 @@ def test_offsite_copy_really_sees_no_working_copy(tmp_path):
     used_file, root = res.stdout.split()
     assert used_file.startswith(str(tmp_path)), used_file
     assert root == "None", root
+
+
+def test_broken_module_map_does_not_break_a_foreign_run(tmp_path):
+    """Битый `module_map.json` в колесе не должен ронять чужой pytest.
+
+    Тот же класс, что и жадный `REPO`, только через другую дверь: карта
+    читалась и разбиралась на импорте `gc_testkit.paths`, а `is_file()`
+    защищал лишь от ОТСУТСТВИЯ файла. Повреждённое содержимое давало
+    `JSONDecodeError` при загрузке плагина — до сбора тестов, с текстом, в
+    котором имени gc-testkit нет вовсе, так что человек ищет причину не там.
+
+    Повредить карту проще, чем кажется: она едет в колесе, и её видит любой
+    инструмент, который «чинит» JSON-файлы в site-packages, любой неполный
+    распаковщик, любой сбой при записи.
+    """
+    env = _offsite(tmp_path, hide_our_packages=False)
+    (tmp_path / "gc_testkit" / "module_map.json").write_text(
+        '{"tools": ', encoding="utf-8"     # оборванный JSON
+    )
+
+    res = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         "test_smoke.py"],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+    )
+
+    combined = res.stdout + res.stderr
+    assert "JSONDecodeError" not in combined, combined
+    assert res.returncode == 0, combined
+    assert "1 passed" in combined, combined

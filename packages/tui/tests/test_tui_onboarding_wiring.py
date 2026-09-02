@@ -115,7 +115,7 @@ def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
 
     # Also suppress daemon_autostart (imported in main)
     from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
-    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg: None, raising=False)
+    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 
     # Capture app attributes and intercept run()

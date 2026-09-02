@@ -170,7 +170,7 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict):
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
 
     from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
-    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg: None, raising=False)
+    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 
 

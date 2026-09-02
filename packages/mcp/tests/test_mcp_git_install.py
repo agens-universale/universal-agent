@@ -33,15 +33,44 @@ def test_repo_subdir_builds_path_from_name():
     assert inst._repo_subdir("science-mcp") == "packages/mcp/external/vendor/science-mcp"
 
 
-@pytest.mark.parametrize(
-    "legacy", ["../external/office-mcp", "external/office-mcp", "/abs/path/office-mcp"]
-)
+@pytest.mark.parametrize("legacy", ["../external/office-mcp", "external/office-mcp"])
 def test_repo_subdir_tolerates_legacy_path(legacy, monkeypatch, capsys):
-    """Дореформенный путь читается как имя последнего сегмента, а не падает."""
+    """Дореформенный путь читается как имя последнего сегмента, а не падает.
+
+    Терпим ровно то, что реально лежало в манифесте develop: `../external/<имя>`
+    и тот же путь без ведущего `..`. У пользователя может быть свой
+    `<gc_config>/recommended_mcp/config.local.yml`, дословно снятый с develop, и
+    он побеждает бандловый манифест.
+    """
     monkeypatch.setattr(inst, "_LEGACY_SOURCE_WARNED", set())
     assert inst._repo_subdir(legacy) == "packages/mcp/external/vendor/office-mcp"
     out = capsys.readouterr().out
     assert "[warn]" in out and "устаревший формат" in out
+
+
+@pytest.mark.parametrize(
+    "outside",
+    ["../../sibling/pkg", "/abs/path/office-mcp", "../vendor/pkg", "a/b/c/pkg"],
+    ids=["выход за репозиторий", "абсолютный", "мимо external", "произвольный путь"],
+)
+def test_repo_subdir_rejects_paths_outside_the_vendor_dir(outside, monkeypatch):
+    """Путь, ведущий не в каталог вендоров, — ошибка конфигурации, а не «старый формат».
+
+    Тест возвращён с develop, где `_repo_subdir(Path("../../sibling/pkg"), root)`
+    бросал `InstallError`. При переходе «путь → имя» проверка исчезла вместе с
+    ним: резолвер стал брать basename ЛЮБОГО пути, и `source: ../../sibling/pkg`
+    молча превращался в `git+<repo>#subdirectory=…/vendor/pkg`. Установка уходила
+    в сеть за подкаталогом, которого нет, и человек получал ошибку pip — на шаг
+    позже и не про то, что он написал в манифесте.
+
+    Отдельно от `test_repo_subdir_rejects_degenerate`: там имени нет вовсе
+    (пустая строка, `.`), а здесь имя как раз есть, и именно поэтому промах был
+    бесшумным.
+    """
+    monkeypatch.setattr(inst, "_LEGACY_SOURCE_WARNED", set())
+    with pytest.raises(inst.InstallError) as e:
+        inst._repo_subdir(outside)
+    assert "install.source" in str(e.value)
 
 
 def test_legacy_source_warned_once_per_process(monkeypatch, capsys):

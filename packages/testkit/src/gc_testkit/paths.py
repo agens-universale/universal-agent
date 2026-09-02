@@ -182,11 +182,29 @@ _FLATTENED = {"tui": "gc_tui"}
 _MAP_PATH = Path(__file__).resolve().parent / "module_map.json"
 
 
-def _load_map() -> dict[str, str]:
-    return json.loads(_MAP_PATH.read_text(encoding="utf-8")) if _MAP_PATH.is_file() else {}
+@lru_cache(maxsize=1)
+def module_map() -> dict[str, str]:
+    """Карта, прочитанная ЛЕНИВО и не более одного раза.
 
+    Раньше здесь стоял `_MAP = _load_map()` — чтение и разбор JSON прямо на
+    импорте модуля. Это ровно то, чего весь остальной файл избегает: пакет
+    объявляет `[project.entry-points.pytest11]`, поэтому `gc_testkit.plugin`, а
+    через него и этот модуль, грузится КАЖДЫМ pytest в окружении, куда попало
+    колесо gc-testkit. `is_file()` спасал только от отсутствия файла: битое
+    содержимое роняло импорт `JSONDecodeError`'ом ещё до сбора тестов, и чужой
+    прогон умирал с сообщением, в котором имя gc-testkit не встречается вовсе.
+    Воспроизведено подстановкой невалидного JSON в копию пакета.
 
-_MAP = _load_map()
+    Повреждённая карта здесь не бросает: она означает «дореформенных имён не
+    знаю». Кто действительно на неё опирается (`module_dir`), тот и откажет —
+    с внятным текстом и путём к файлу.
+    """
+    if not _MAP_PATH.is_file():
+        return {}
+    try:
+        return json.loads(_MAP_PATH.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
 
 
 def package_dir(package: str) -> Path:
@@ -203,7 +221,7 @@ def module_dir(old_top_level_name: str) -> Path:
     """
     if old_top_level_name in _FLATTENED:
         return package_dir(_FLATTENED[old_top_level_name])
-    pkg = _MAP.get(old_top_level_name)
+    pkg = module_map().get(old_top_level_name)
     if pkg is None:
         raise KeyError(
             f"неизвестный модуль {old_top_level_name!r}; "

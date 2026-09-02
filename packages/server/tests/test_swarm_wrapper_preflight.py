@@ -99,3 +99,38 @@ def test_existing_cli_is_not_blocked_by_the_preflight(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert completion["exit_code"] == 0
     assert completion["error_type"] == ""
+
+
+@pytest.mark.parametrize(
+    "venv_name",
+    ['ve"nv', "ve\\nv", 've"nv\\back'],
+    ids=["кавычка", "обратный слеш", "оба сразу"],
+)
+def test_completion_json_survives_quotes_in_user_paths(tmp_path, venv_name):
+    """Кавычка в пути не должна ломать JSON — иначе диагностика теряется вся.
+
+    `error_message` собирается из значений, которые человек пишет в
+    `config_server.yml` (`swarm.cli_command`, `swarm.cli_venv_root`), и уезжает
+    в JSON через heredoc. До экранирования одна кавычка делала файл невалидным:
+    `storage.load_completion_info` возвращал `{}`, `lifecycle` отчёта не видел,
+    ждал смерти PID и ставил `unknown_failed`. Терялась ровно та подсказка, ради
+    которой preflight и заведён, — и симптом («задача умерла неизвестно от
+    чего») уводил искать причину не туда.
+
+    До PR такого класса не было: в `write_completion` шли только фиксированные
+    строки и числа.
+    """
+    venv = tmp_path / venv_name
+    (venv / "bin").mkdir(parents=True)
+
+    proc, completion = _run(
+        tmp_path, SWARM_CLI_COMMAND="gc-cli", SWARM_CLI_VENV_ROOT=str(venv),
+    )
+
+    assert proc.returncode == 127
+    # _run уже сделал json.loads — до починки он бросал JSONDecodeError.
+    assert completion is not None
+    assert completion["error_type"] == "wrapper_setup_error"
+    # Путь обязан не только сохранить валидность файла, но и доехать целиком:
+    # экранирование не должно превратиться в потерю символов.
+    assert str(venv / "bin" / "gc-cli") in completion["error_message"]

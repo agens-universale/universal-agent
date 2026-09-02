@@ -68,6 +68,18 @@ write_completion() {
   # Микросекунды не используем: лишняя точность для жизненного цикла sworm'ов.
   finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+  # error_message с 01.09.2026 собирается из строк ПОЛЬЗОВАТЕЛЯ (preflight
+  # подставляет SWARM_CLI_COMMAND и SWARM_CLI_VENV_ROOT), а heredoc ниже кладёт
+  # текст в JSON как есть. Одна кавычка в пути — и completion.json невалиден:
+  # storage.load_completion_info возвращает {}, lifecycle отчёта не видит, ждёт
+  # смерти PID и ставит unknown_failed. То есть теряется ровно та диагностика
+  # («CLI не найден, задайте cli_venv_root»), ради которой preflight и заведён.
+  # Порядок важен: сначала обратный слеш, потом кавычка, иначе экранируем
+  # собственные добавленные слеши. \b, \n и прочие управляющие в путях не
+  # встречаются; при необходимости сюда добавится ещё одна замена.
+  error_message="${error_message//\\/\\\\}"
+  error_message="${error_message//\"/\\\"}"
+
   # Atomic write через .tmp + mv (избегаем половинного файла при kill).
   cat > "${COMPLETION_FILE}.tmp" <<EOF
 {

@@ -37,22 +37,84 @@ ALLOWED = {
 OUR_PACKAGES = {"gc_core", "gc_cli", "gc_tui", "gc_server", "recommended_mcp"}
 
 
-def _real_imports(path) -> set[str]:
-    """Только настоящие импорты. Строковые литералы НЕ считаем.
+TESTKIT_SRC = REPO / "packages" / "testkit" / "src" / "gc_testkit"
 
-    Иначе ложно срабатывает, например, packages/core/tests/test_missing_profile_guards.py:
-    он проверяет шимы ЯДРА и упоминает "gc_tui"/"gc_server" строками — как имена
-    пакетов, отсутствие которых имитирует.
+
+def _dotted_imports(path) -> set[str]:
+    """Полные точечные имена настоящих импортов файла.
+
+    Строковые литералы НЕ считаем: иначе ложно срабатывает, например,
+    packages/core/tests/test_missing_profile_guards.py — он проверяет шимы ЯДРА
+    и упоминает "gc_tui"/"gc_server" строками, как имена пакетов, отсутствие
+    которых имитирует.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                found.add(alias.name.split(".")[0])
+                found.add(alias.name)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            found.add(node.module.split(".")[0])
-    return found & OUR_PACKAGES
+            found.add(node.module)
+    return found
+
+
+def _testkit_file(dotted: str):
+    """Файл модуля тест-кита по точечному имени, иначе None.
+
+    `gc_testkit.tui_support` → tui_support.py; `gc_testkit.helpers.x` →
+    helpers/x.py; сам пакет `gc_testkit.helpers` → helpers/__init__.py.
+    """
+    parts = dotted.split(".")
+    if parts[0] != "gc_testkit":
+        return None
+    rel = TESTKIT_SRC.joinpath(*parts[1:])
+    for candidate in (rel.with_suffix(".py"), rel / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _testkit_pulls(dotted: str, _seen=None) -> set[str]:
+    """Наши пакеты, которые ТЯНЕТ модуль тест-кита — включая транзитивно.
+
+    Тест-кит не нейтрален: `tui_support` внутри функции импортирует
+    `gc_tui.screens.settings`, `tui_fixtures` и `harbor_fakes` тянут `gc_core`.
+    Пока сетка считала только прямые импорты набора, тест ядра мог написать
+    `from gc_testkit.tui_support import open_settings_section`, остаться
+    зелёным — и потребовать `gc_tui`. Ровно тот класс, ради которого тест-кит и
+    вынесли из conftest'ов, и ровно то, что сетка объявлена доказывать.
+    Проверено подменой: до этой правки такая строка в тесте ядра сетку не
+    роняла.
+    """
+    if _seen is None:
+        _seen = set()
+    if dotted in _seen:          # циклы между модулями тест-кита
+        return set()
+    _seen.add(dotted)
+
+    path = _testkit_file(dotted)
+    if path is None:
+        return set()
+
+    pulls: set[str] = set()
+    for imported in _dotted_imports(path):
+        top = imported.split(".")[0]
+        if top in OUR_PACKAGES:
+            pulls.add(top)
+        elif top == "gc_testkit":
+            pulls |= _testkit_pulls(imported, _seen)
+    return pulls
+
+
+def _real_imports(path) -> set[str]:
+    """Наши пакеты, которые требует файл, — напрямую или через тест-кит."""
+    found = _dotted_imports(path)
+    required = {name.split(".")[0] for name in found} & OUR_PACKAGES
+    for imported in found:
+        if imported.split(".")[0] == "gc_testkit":
+            required |= _testkit_pulls(imported)
+    return required
 
 
 @pytest.mark.parametrize("dist", sorted(ALLOWED))

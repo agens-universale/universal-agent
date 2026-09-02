@@ -137,7 +137,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     auto_mcp = args.auto_mcp
     if auto_mcp:
-        ensure_mcp_daemons(config_dict)
+        ensure_mcp_daemons(
+            config_dict, disable_hint="отключить автозапуск целиком: `--no-auto-mcp`"
+        )
 
     voice_expected = False
     _release_voice = None

@@ -17,13 +17,14 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 _supervisor: Any = None
 
 
-def ensure_mcp_daemons(config_dict: dict[str, Any]) -> None:
+def ensure_mcp_daemons(
+    config_dict: dict[str, Any], *, disable_hint: str | None = None
+) -> None:
     """Поднять недостающие MCP-daemon'ы перед запуском агента.
 
     Сбой автозапуска НЕ мешает фронтенду подняться. Автозапуск — удобство:
@@ -39,6 +40,11 @@ def ensure_mcp_daemons(config_dict: dict[str, Any]) -> None:
     рецептов, сбой резолва пути), и делает обещание «фронтенд стартует всегда»
     свойством одной функции, а не дисциплиной каждого вызывающего.
 
+    `disable_hint` — как ИМЕННО выключить автозапуск у вызывающей команды.
+    Фраза уезжает в предупреждения ниже. Параметр, а не константа, потому что
+    модуль общий: у `gc-ua` это `--no-auto-mcp`, у `gc-cli` такого флага нет
+    вовсе — там автозапуск включается `-a`.
+
     Импорт рецептов оставлен ВНЕ `try` намеренно. По докстрингу модуля ошибка
     импорта внутри рецептов (опечатка, отсутствующая зависимость) обязана лететь
     как есть, а не выдаваться за «просто не завелось»: это поломка пакета, а не
@@ -47,15 +53,19 @@ def ensure_mcp_daemons(config_dict: dict[str, Any]) -> None:
     global _supervisor
     from recommended_mcp.autostart import ensure_daemons_for_agent
 
+    kwargs = {} if disable_hint is None else {"disable_hint": disable_hint}
     try:
-        _supervisor = ensure_daemons_for_agent(config_dict)
+        _supervisor = ensure_daemons_for_agent(config_dict, **kwargs)
     except Exception as exc:  # noqa: BLE001 — сознательно широко, см. докстринг
         _supervisor = None
-        print(
-            f"[warn] автозапуск MCP пропущен: {exc}. "
+        from recommended_mcp.autostart import _warn
+
+        _warn(
+            f"автозапуск MCP пропущен: {exc}. "
             "Агент стартует без daemon-серверов; встроенные инструменты и "
-            "остальные MCP работают. Проверить: `gc-mcp list`.",
-            file=sys.stderr,
+            "остальные MCP работают. Проверить: `gc-mcp list`."
+            + (f" {disable_hint}." if disable_hint else ""),
+            code="mcp_autostart_skipped",
         )
 
 

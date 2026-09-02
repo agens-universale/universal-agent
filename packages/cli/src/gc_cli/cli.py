@@ -395,7 +395,11 @@ def main() -> int:
     auth_connector = build_auth_connector(config_dict)
     auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
     if auto_mcp:
-        ensure_mcp_daemons(config_dict)
+        # У gc-cli автозапуск opt-in: выключается тем, что `-a` не передан.
+        # Флага `--no-auto-mcp` здесь нет — он живёт только у gc-ua.
+        ensure_mcp_daemons(
+            config_dict, disable_hint="отключить автозапуск: запустите без `-a`"
+        )
     ctx = create_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
 
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).

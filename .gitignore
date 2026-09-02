@@ -30,8 +30,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-.gc/
 # Type checking
 .mypy_cache/
 .dmypy.json
