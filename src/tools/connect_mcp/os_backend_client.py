@@ -35,14 +35,28 @@ logger = logging.getLogger(__name__)
 
 EXEC_RESULT_MARKER = "__GC_MCP_EXEC__"
 
-# Margin between the in-script socket timeout and the backend's own kill, so a
-# slow answer surfaces as an MCP timeout rather than an opaque exec timeout.
-_TIMEOUT_SLACK_SEC = 15
-
 # One operation is three requests (initialize, initialized, method). The caller's
-# timeout is the budget for the whole operation, so each request gets a share —
-# otherwise a single operation can outlive the discovery deadline that granted it.
+# timeout is the budget for the whole operation: each request's exec deadline is
+# one share of it, so the three cannot add up past the deadline that granted them
+# (the one-off carrier probe per backend is the only thing outside this sum).
 _REQUESTS_PER_OPERATION = 3
+
+# Inside a share, the in-script socket timeout ends before the exec kill, so a
+# slow answer surfaces as an MCP timeout rather than an opaque exec one. The
+# margin shrinks on small budgets — its job is ordering, not size.
+_TIMEOUT_SLACK_SEC = 15
+_TIMEOUT_SLACK_SHARE = 0.2
+
+# The python3 probe runs once per backend; it does not need a full share.
+_PROBE_TIMEOUT_SEC = 10
+
+
+def _split_share(share: float) -> tuple[float, int]:
+    """(socket_timeout, exec_deadline) for one request's share of the budget."""
+    deadline = max(1, int(share))
+    slack = min(_TIMEOUT_SLACK_SEC, share * _TIMEOUT_SLACK_SHARE)
+    socket_timeout = max(1.0, share - slack)
+    return socket_timeout, deadline
 
 # Attribute the python3 probe is cached under, on the backend rather than on the
 # client: carrier availability is a property of the environment, and clients are
@@ -136,12 +150,16 @@ def _post(url):
 
 
 def _delete_session(url, session_id):
-    """Release the server-side session; best effort, never fails the operation."""
+    """Release the server-side session; best effort, never fails the operation.
+
+    Same headers as the POSTs — a token-protected server answers a bare DELETE
+    with 401 and the session would silently outlive the operation.
+    """
     try:
-        request = urllib.request.Request(
-            url, headers={{"mcp-session-id": session_id}}, method="DELETE"
-        )
-        _open(request, 5).close()
+        headers = dict(_req["headers"])
+        headers["mcp-session-id"] = session_id
+        request = urllib.request.Request(url, headers=headers, method="DELETE")
+        _open(request, _req["timeout"]).close()
     except Exception:
         pass
 
@@ -197,7 +215,8 @@ class OsBackendStatelessClient(McpClientPort):
         cached = getattr(self.os_backend, _CARRIER_CACHE_ATTR, None)
         if cached is None:
             probe = self.os_backend.exec(
-                "command -v python3 2>/dev/null || true", timeout=max(5, int(timeout))
+                "command -v python3 2>/dev/null || true",
+                timeout=min(_PROBE_TIMEOUT_SEC, max(1, int(timeout))),
             )
             cached = bool((getattr(probe, "stdout", "") or "").strip())
             try:
@@ -295,15 +314,15 @@ class OsBackendStatelessClient(McpClientPort):
             "verify_ssl": bool(verify),
             "close_session": bool(close_session),
         }
+        socket_timeout, deadline = _split_share(timeout)
+        request["timeout"] = socket_timeout
         payload_b64 = base64.b64encode(
             json.dumps(request).encode("utf-8")
         ).decode("ascii")
         code = _HTTP_CARRIER.format(
             payload_b64=payload_b64, marker=EXEC_RESULT_MARKER
         )
-        result = self.os_backend.run_python(
-            code, timeout=int(timeout) + _TIMEOUT_SLACK_SEC
-        )
+        result = self.os_backend.run_python(code, timeout=deadline)
         return self._interpret(result)
 
     def _stdio_operation(
@@ -337,11 +356,12 @@ class OsBackendStatelessClient(McpClientPort):
             {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params},
         ]
         stdin = "".join(json.dumps(m) + "\n" for m in messages)
+        # One exchange carries the whole operation, so it gets the whole budget.
         result = self.os_backend.exec_argv(
             argv,
             stdin=stdin,
             cwd=self.server_cfg.get("cwd"),
-            timeout=int(timeout) + _TIMEOUT_SLACK_SEC,
+            timeout=max(1, int(timeout)),
         )
         if getattr(result, "stdout_hit_capture_cap", False):
             raise McpExecCarrierError(

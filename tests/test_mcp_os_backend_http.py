@@ -240,8 +240,9 @@ def test_carrier_probe_is_cached_on_the_backend_not_the_client():
     assert len([p for p in backend.probes if "command -v" in p]) == 1
 
 
-def test_the_operation_budget_is_split_across_its_requests():
-    """The caller's timeout covers the whole operation, not each request."""
+def test_the_operation_fits_inside_the_budget_it_was_given():
+    """Three exec deadlines must not add up past the caller's timeout — that is
+    the deadline registry uses to decide the server is dead."""
     backend = _RecordingSandbox([
         _ok({"result": {}}, {"mcp-session-id": "s"}),
         _ok({}),
@@ -251,7 +252,38 @@ def test_the_operation_budget_is_split_across_its_requests():
         "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
     )
     client.list_tools(timeout=30.0)
-    assert [_sent(c)["timeout"] for c in backend.codes] == [10.0, 10.0, 10.0]
+    assert backend.timeouts == [10, 10, 10]
+    assert sum(backend.timeouts) <= 30
+
+
+def test_socket_timeout_ends_before_the_exec_kill():
+    """Ordering inside a share: the in-script socket gives up first, so a slow
+    server is reported as an MCP timeout, not an opaque exec one."""
+    backend = _RecordingSandbox([
+        _ok({"result": {}}, {"mcp-session-id": "s"}),
+        _ok({}),
+        _ok({"result": {"tools": []}}),
+    ])
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=30.0)
+    for code, deadline in zip(backend.codes, backend.timeouts):
+        assert _sent(code)["timeout"] < deadline
+
+
+def test_slack_keeps_its_full_size_when_the_budget_allows():
+    backend = _RecordingSandbox([
+        _ok({"result": {}}, {"mcp-session-id": "s"}),
+        _ok({}),
+        _ok({"result": {"tools": []}}),
+    ])
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=600.0)
+    assert backend.timeouts == [200, 200, 200]
+    assert _sent(backend.codes[0])["timeout"] == 185.0
 
 
 def test_final_request_asks_the_server_to_drop_the_session():
@@ -266,6 +298,31 @@ def test_final_request_asks_the_server_to_drop_the_session():
     client.list_tools(timeout=10.0)
     assert [_sent(c)["close_session"] for c in backend.codes] == [False, False, True]
     assert "DELETE" in backend.codes[2]
+
+
+def test_delete_carries_the_same_auth_headers_as_the_posts():
+    """A token-protected server answers a bare DELETE with 401 and the session
+    outlives the operation. The carrier must reuse the request headers."""
+    backend = _RecordingSandbox([
+        _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
+        _ok({}),
+        _ok({"result": {"tools": []}}),
+    ])
+    client = OsBackendStatelessClient(
+        "srv",
+        {"transport": "http", "url": "http://x:8000/mcp", "token": "t0k",
+         "headers": {"X-Team": "bench"}},
+        os_backend=backend,
+    )
+    client.list_tools(timeout=10.0)
+    final = _sent(backend.codes[2])
+    assert final["headers"]["Authorization"] == "Bearer t0k"
+    assert final["headers"]["X-Team"] == "bench"
+    assert final["headers"]["mcp-session-id"] == "sid-1"
+    # The DELETE is built from the same header dict, not from a bare session id.
+    delete_src = backend.codes[2].split("def _delete_session")[1].split("\ntry:")[0]
+    assert 'dict(_req["headers"])' in delete_src
+    assert '{"mcp-session-id": session_id}' not in delete_src
 
 
 def test_verify_ssl_false_reaches_the_carrier():

@@ -87,6 +87,15 @@ def test_stdio_env_binds_to_the_server_not_to_printf():
     assert call["env"] is None
 
 
+def test_stdio_exchange_gets_the_whole_budget_and_no_more():
+    backend = _StdioSandbox([_frame(1, {}), _frame("gc-tools/list", {"tools": []})])
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
+    )
+    client.list_tools(timeout=20.0)
+    assert backend.calls[0]["timeout"] == 20
+
+
 def test_stdio_without_env_runs_the_command_bare():
     backend = _StdioSandbox([_frame(1, {}), _frame("gc-tools/list", {"tools": []})])
     client = OsBackendStatelessClient(
