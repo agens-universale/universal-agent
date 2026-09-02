@@ -7,14 +7,13 @@ import os
 import time
 import uuid
 
-import requests
-
 from gc_core.config import load_config
-from gc_core.tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
-from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry, is_persistent_stdio
+from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.registry import get_all_tools
-from gc_core.tools.connect_mcp.stream_client import call_tool_stream_http, call_tool_stream_sse, call_tool_stream_stdio
-from gc_core.tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
+from gc_core.tools.connect_mcp.validation import (
+    _validate_tool_arguments,
+    format_mcp_tool_result,
+)
 from gc_core.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -219,6 +218,8 @@ def call_mcp_tool(
     tools_registry: Dict[str, Dict[str, Any]] | None = None,
     timeout: float = 10.0,
     default_use_retry: bool = False,
+    *,
+    os_backend: Any = None,
 ) -> Any:
     """
     Вызвать инструмент на соответствующем MCP-сервере.
@@ -298,16 +299,10 @@ def call_mcp_tool(
 
     use_retry = bool(server_cfg.get("use_retry", default_use_retry))
 
-    # persistent_session унифицирован для всех транспортов: для легаси `sse`/`http`
-    # (one-shot через transport.py) своего пула соединений нет, поэтому при флаге
-    # true роутим через SDK-клиент `stream_sse`/`stream_http` — там уже живёт
-    # `_PersistentSessionManager` с длинной ClientSession.
-    effective_transport = transport
-    if server_cfg.get("persistent_session"):
-        if transport == "sse":
-            effective_transport = "stream_sse"
-        elif transport == "http":
-            effective_transport = "stream_http"
+    # Resolved once, outside the retry: picking the client is a deterministic
+    # config decision, and a bad locus/transport pair must fail immediately
+    # instead of being retried with backoff and logged as ERROR three times.
+    client = resolve_mcp_client(server_key, server_cfg, os_backend=os_backend)
 
     @retry_with_backoff(
         operation_name=f"MCP tool call ({server_key}:{base_tool_name})",
@@ -315,82 +310,7 @@ def call_mcp_tool(
         no_more_retries_log_level=logging.ERROR,
     )
     def _do_mcp_call() -> Any:
-        if effective_transport == "stream_sse":
-            return call_tool_stream_sse(
-                url=url,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-                tool_name=base_tool_name,
-                arguments=arguments_obj,
-            )
-        if effective_transport == "stream_http":
-            return call_tool_stream_http(
-                url=url,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-                tool_name=base_tool_name,
-                arguments=arguments_obj,
-            )
-        if transport == "stream_stdio":
-            return call_tool_stream_stdio(
-                server_cfg=server_cfg,
-                timeout=timeout,
-                tool_name=base_tool_name,
-                arguments=arguments_obj,
-            )
-        if is_persistent_stdio(server_cfg):
-            session = PersistentStdioRegistry.instance().get_or_create(
-                server_key, server_cfg
-            )
-            return session.call(
-                "tools/call",
-                {"name": base_tool_name, "arguments": arguments_obj},
-                timeout,
-            )
-
-        session_id = _get_or_init_session_id(
-            server_key, url, server_cfg, token=token, timeout=timeout
-        )
-        if not session_id:
-            raise RuntimeError(
-                f"Failed to initialize MCP session for server '{server_key}'"
-            )
-
-        def do_call(sid: str):
-            return _call_mcp_tool(
-                url=url,
-                session_id=sid,
-                tool_name=base_tool_name,
-                arguments=arguments_obj,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-                server_key=server_key,
-            )
-
-        try:
-            data_local = do_call(session_id)
-        except requests.HTTPError:
-            _MCP_SESSIONS.pop(server_key, None)
-            session_id = _get_or_init_session_id(
-                server_key, url, server_cfg, token=token, timeout=timeout
-            )
-            if not session_id:
-                raise RuntimeError(
-                    f"Failed to re-initialize MCP session for server '{server_key}'"
-                )
-            data_local = do_call(session_id)
-
-        if data_local == {} and transport == "sse":
-            _MCP_SESSIONS.pop(server_key, None)
-            session_id = _get_or_init_session_id(
-                server_key, url, server_cfg, token=token, timeout=timeout
-            )
-            if session_id:
-                data_local = do_call(session_id)
-        return data_local
+        return client.call_tool(base_tool_name, arguments_obj, timeout=timeout)
 
     data = _do_mcp_call(
         use_retry=use_retry,

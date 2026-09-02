@@ -3,7 +3,7 @@ from gc_core.tools.connect_mcp import registry as reg
 
 
 def test_build_registry_parallel_and_status(monkeypatch):
-    def fake_discover_one(name, cfg, *, timeout):
+    def fake_discover_one(name, cfg, *, timeout, os_backend=None):
         if name == "ok":
             return ([{"name": "do_x", "description": "d"}],
                     {"status": "connected", "reason": None, "tool_count": 1, "elapsed_ms": 5})

@@ -27,12 +27,15 @@ class MCPToolWrapper:
         tools_registry: Dict[str, Dict[str, Any]],
         timeout: float,
         default_use_retry: bool,
+        *,
+        os_backend: Any = None,
     ) -> None:
         self._full_tool_name = full_tool_name
         self._servers_cfg = servers_cfg
         self._tools_registry = tools_registry
         self._timeout = timeout
         self._default_use_retry = default_use_retry
+        self._os_backend = os_backend
 
     def __call__(self, **arguments: Any) -> Any:
         return call_mcp_tool(
@@ -42,6 +45,7 @@ class MCPToolWrapper:
             tools_registry=self._tools_registry,
             timeout=self._timeout,
             default_use_retry=self._default_use_retry,
+            os_backend=self._os_backend,
         )
 
 
@@ -408,6 +412,8 @@ def _servers_cfg_with_trace(
 def get_mcp_tools_data_for_config(
     config_dict: Dict[str, Any],
     on_progress=None,
+    *,
+    os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """
     Собрать словарь MCP-инструментов в формате tools_data для заданного config_dict.
@@ -429,7 +435,7 @@ def get_mcp_tools_data_for_config(
         "use_retry": bool(config_dict.get("use_retry", False)),
     }
 
-    tools_cache = ToolsCache(cfg)
+    tools_cache = ToolsCache(cfg, os_backend=os_backend)
 
     try:
         mcp_registry = tools_cache.get_tools(on_progress=on_progress)
@@ -454,6 +460,7 @@ def get_mcp_tools_data_for_config(
                 mcp_registry,
                 timeout,
                 default_use_retry=default_use_retry,
+                os_backend=os_backend,
             )
 
         return fabric

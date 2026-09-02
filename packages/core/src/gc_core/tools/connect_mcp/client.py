@@ -3,6 +3,14 @@ from typing import Any, Dict, List, Optional
 from gc_core.tools.connect_mcp.transport import get_transport
 
 
+# Параметры `initialize`, общие для всех локусов: один источник, иначе при подъёме
+# версии протокола агентский и контейнерный путь разъедутся молча.
+MCP_INIT_PARAMS: Dict[str, Any] = {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {"roots": {"listChanged": True}, "sampling": {}},
+    "clientInfo": {"name": "SurfaceClient", "version": "1.0.0"},
+}
+
 # Кэш MCP-сессий в рамках процесса:
 # ключ — имя сервера из конфига (server_name), значение — session_id.
 _MCP_SESSIONS: Dict[str, str] = {}
@@ -82,17 +90,7 @@ def _init_mcp_session(
         "jsonrpc": "2.0",
         "id": 1,
         "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {
-                "roots": {"listChanged": True},
-                "sampling": {},
-            },
-            "clientInfo": {
-                "name": "SurfaceClient",
-                "version": "1.0.0",
-            },
-        },
+        "params": MCP_INIT_PARAMS,
     }
 
     headers: Dict[str, str] = {
@@ -226,6 +224,7 @@ def _get_or_init_session_id(
 
 
 __all__ = [
+    "MCP_INIT_PARAMS",
     "_MCP_SESSIONS",
     "_normalize_url",
     "_send_initialized_notification",
