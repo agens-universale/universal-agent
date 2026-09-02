@@ -40,8 +40,12 @@ _HOST_HAS_GREP, _HOST_HAS_FIND = _host_caps()
 requires_grep = pytest.mark.skipif(
     not _HOST_HAS_GREP, reason="host grep recipe is not usable"
 )
-requires_find = pytest.mark.skipif(
-    not _HOST_HAS_FIND, reason="host find | xargs | grep pipeline is not usable"
+# Пайплайн find | xargs | grep требует ОБА бинаря: тесты ниже утверждают
+# search_backend == "grep", поэтому без grep они не «падают», а не применимы
+# (на Windows find из Git Bash есть, GNU grep нет — движок честно уходит в Python).
+requires_native_search = pytest.mark.skipif(
+    not (_HOST_HAS_FIND and _HOST_HAS_GREP),
+    reason="host find | xargs | grep pipeline is not usable",
 )
 
 PLAN = NativeGrepPlan(fixed=True, pattern="TOKEN", case_insensitive=False)
@@ -89,7 +93,7 @@ def _spy_exec(monkeypatch, backend):
 # ------------------------------------------------------------------
 
 
-@requires_find
+@requires_native_search
 def test_dir_search_uses_find_xargs_grep_pipeline(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     (tmp_path / ".hidden").mkdir()
@@ -108,7 +112,7 @@ def test_dir_search_uses_find_xargs_grep_pipeline(tmp_path, monkeypatch):
     assert any("find" in cmd and "-print0" in cmd and "xargs -0 -r" in cmd for cmd in piped)
 
 
-@requires_find
+@requires_native_search
 def test_find_prunes_hard_exclude_dirs(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     (tmp_path / "node_modules").mkdir()
@@ -126,7 +130,7 @@ def test_find_prunes_hard_exclude_dirs(tmp_path, monkeypatch):
     assert any("node_modules" in cmd for cmd in piped)
 
 
-@requires_find
+@requires_native_search
 def test_native_context_is_a_plus_minus_five_window(tmp_path):
     """After grep hits, context is the ±5 neighborhood, not a match-line duplicate."""
     (tmp_path / "app.py").write_text(
@@ -147,7 +151,7 @@ def test_native_context_is_a_plus_minus_five_window(tmp_path):
     assert ctx != match["line_content"] + "\n"
 
 
-@requires_find
+@requires_native_search
 def test_native_dir_mode_omits_context_when_file_exceeds_max_bytes(tmp_path, monkeypatch):
     """Grep still locates the hit; oversize files skip the download for the window."""
     (tmp_path / "big.log").write_text("NEEDLE " * 40, encoding="utf-8")
@@ -175,7 +179,7 @@ def test_native_dir_mode_omits_context_when_file_exceeds_max_bytes(tmp_path, mon
     assert reads == []
 
 
-@requires_find
+@requires_native_search
 def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypatch):
     body = "\n".join(
         ["alpha", "TOKEN first", "beta", "gamma", "TOKEN second", "delta"]
@@ -208,7 +212,7 @@ def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypatch):
     assert len(sizes) == 1
 
 
-@requires_find
+@requires_native_search
 def test_native_context_omitted_on_read_error(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     tool = _tool(tmp_path)
@@ -233,7 +237,7 @@ def test_native_context_omitted_on_read_error(tmp_path, monkeypatch):
     assert "size_bytes" in hit
 
 
-@requires_find
+@requires_native_search
 def test_native_context_omitted_on_stat_error(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     tool = _tool(tmp_path)
@@ -260,7 +264,7 @@ def test_native_context_omitted_on_stat_error(tmp_path, monkeypatch):
     assert reads == []
 
 
-@requires_find
+@requires_native_search
 def test_native_context_omitted_on_binary(tmp_path):
     (tmp_path / "app.bin").write_bytes(b"TOKEN\x00binary\n")
     data = _call_tool(tmp_path, pattern="TOKEN", query_mode="text")
@@ -274,7 +278,7 @@ def test_native_context_omitted_on_binary(tmp_path):
     assert "size_bytes" in hit
 
 
-@requires_find
+@requires_native_search
 def test_native_context_omitted_on_encoding(tmp_path):
     (tmp_path / "legacy.txt").write_bytes("TOKEN привет\n".encode("cp1251"))
     data = _call_tool(tmp_path, pattern="TOKEN", query_mode="text")
@@ -288,7 +292,7 @@ def test_native_context_omitted_on_encoding(tmp_path):
     assert "size_bytes" in hit
 
 
-@requires_find
+@requires_native_search
 def test_native_context_clips_long_lines_to_budget(tmp_path):
     huge = "x" * 3000
     lines = [f"pad_{i}" for i in range(1, 10)]
@@ -304,7 +308,7 @@ def test_native_context_clips_long_lines_to_budget(tmp_path):
     assert len(ctx) <= FindInFiles.max_context_chars
 
 
-@requires_find
+@requires_native_search
 def test_native_clips_long_line_to_the_head_budget(tmp_path):
     """Without match offsets grep clips the first N chars (Python keeps the hit)."""
     (tmp_path / "one.txt").write_text(
