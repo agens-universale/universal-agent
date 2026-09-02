@@ -22,7 +22,7 @@ class ListFiles(AbstractSimpleTool):
     """List files and directories under a path with optional depth and glob filter."""
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {
             "type": "function",
             "name": "fs_list_files",
@@ -77,7 +77,7 @@ class ListFiles(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = '''Tool name: fs_list_files
 List files and directories under an absolute directory path.
 Default max_depth=0 = immediate children only; raise max_depth to list nested entries.

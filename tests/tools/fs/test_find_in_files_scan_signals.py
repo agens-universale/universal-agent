@@ -181,6 +181,45 @@ def test_limit_is_still_validated_when_given(tmp_path):
         assert data["error"]["field"] == "limit", bad
 
 
+def test_tool_description_uses_live_config_limits():
+    cfg = {
+        "fs_tools": {
+            "find_in_files": {
+                "default_limit": 7,
+                "max_total_matches": 11,
+            }
+        }
+    }
+    spec = FindInFiles.tool_description(config_dict=cfg)
+    prompt = FindInFiles.prompt_description(config_dict=cfg)
+    limit = spec["parameters"]["properties"]["limit"]
+    assert limit["maximum"] == 11
+    assert "Default 7" in limit["description"]
+    assert "maximum 11" in limit["description"]
+    assert "default 7, max 11" in spec["description"]
+    assert "limit (default 7, max 11" in prompt
+
+
+def test_builtin_tools_data_schema_uses_live_config():
+    from tools.registry import get_builtin_tools_data
+
+    tools = get_builtin_tools_data(
+        {
+            "fs_tools": {
+                "find_in_files": {
+                    "default_limit": 7,
+                    "max_total_matches": 11,
+                }
+            }
+        }
+    )
+    entry = tools["fs_find_in_files"]
+    limit = entry["spec"]["parameters"]["properties"]["limit"]
+    assert limit["maximum"] == 11
+    assert "Default 7" in limit["description"]
+    assert "limit (default 7, max 11" in entry["description"]
+
+
 # --- честность движка: fallback_reason и output_capped -----------------------
 
 def _native_ready(tool, monkeypatch, *, has_grep=True):

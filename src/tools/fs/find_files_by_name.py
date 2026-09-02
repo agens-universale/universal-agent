@@ -9,6 +9,10 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from backends.protocol import WalkOutputTooLargeError
+from config_modules.fs_tools import (
+    FsFindFilesByNameConfig,
+    parse_find_files_by_name_config,
+)
 from security.path_policy import resolve_tool_context, _extract_config_dict
 from security.read_guard import (
     ReadGuardViolation,
@@ -32,12 +36,6 @@ from utils.tool_report_paths import tool_report_abspath
 
 _GLOB_META_RE = re.compile(r"[*?\[\]]")
 
-# Hard safety caps (not configurable in v1).
-DEFAULT_MAX_MATCHES = 100
-HARD_MAX_MATCHES = 200
-DEFAULT_MAX_VISITED = 500_000
-
-
 def _compile_glob_fullmatch(pattern: str, *, case_insensitive: bool) -> re.Pattern:
     flags = re.IGNORECASE if case_insensitive else 0
     return re.compile(f"^{glob_to_regex(pattern)}$", flags)
@@ -47,8 +45,10 @@ class FindFilesByName(AbstractSimpleTool):
     """Full-tree locate by basename, path glob, or path substring (not file contents)."""
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
+        _cfg = parse_find_files_by_name_config(config_dict)
+        _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
         return {
             "type": "function",
             "name": "fs_find_files_by_name",
@@ -65,7 +65,7 @@ class FindFilesByName(AbstractSimpleTool):
                 "directory whose name starts with '.'. "
                 "If path itself is such a directory, it is still searched. "
                 "case_insensitive defaults to true. "
-                "At most max_matches results (default 100, maximum 200); "
+                f"At most max_matches results (default {_dmm}, maximum {_hmm}); "
                 "truncated=true if the search stopped early."
             ),
             "parameters": {
@@ -103,9 +103,9 @@ class FindFilesByName(AbstractSimpleTool):
                     "max_matches": {
                         "type": "integer",
                         "minimum": 1,
-                        "maximum": 200,
+                        "maximum": _hmm,
                         "description": (
-                            "Maximum matches to return. Default 100, maximum 200. "
+                            f"Maximum matches to return. Default {_dmm}, maximum {_hmm}. "
                             "truncated=true if more matches may exist."
                         ),
                     },
@@ -117,8 +117,10 @@ class FindFilesByName(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         skip = hard_exclude_dir_names_for_prompt()
+        _cfg = parse_find_files_by_name_config(config_dict)
+        _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
         return (
             "Tool name: fs_find_files_by_name\n"
             "Find files/directories by name, path fragment, or glob under an absolute directory. "
@@ -130,8 +132,8 @@ class FindFilesByName(AbstractSimpleTool):
             "The mode is inferred: any of * ? [ ] makes it a glob, so 'config[1].yml' is a "
             "character class matching 'config1.yml' — for a literal bracketed name search a "
             "bracket-free fragment.\n"
-            "Args: path (required, absolute directory), query (required), "
-            "case_insensitive (default true), max_matches (default 100, maximum 200).\n"
+            f"Args: path (required, absolute directory), query (required), "
+            f"case_insensitive (default true), max_matches (default {_dmm}, maximum {_hmm}).\n"
             "Response: ok, matches[{path, size_bytes, …}], count, truncated, "
             "walk_stats (visited, stop_reason); guidance only when truncated. "
             "type/is_hidden/is_binary are omitted unless non-default "
@@ -165,7 +167,7 @@ class FindFilesByName(AbstractSimpleTool):
         if truncated:
             stop = (walk_stats or {}).get("stop_reason")
             if stop == "max_visited":
-                cap = (walk_stats or {}).get("max_visited", DEFAULT_MAX_VISITED)
+                cap = (walk_stats or {}).get("max_visited", 0)
                 payload["guidance"] = (
                     f"Search stopped after visiting {cap} entries (max_visited). "
                     "Narrow path or query; increasing max_matches will not help."
@@ -205,6 +207,12 @@ class FindFilesByName(AbstractSimpleTool):
             walk_stats=walk_stats,
             error=error,
         )
+
+    def _resolve_config(self) -> FsFindFilesByNameConfig:
+        """Load find_files_by_name limits from config (FsToolsConfig.find_files_by_name)."""
+        context = resolve_tool_context(self)
+        cfg_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
+        return parse_find_files_by_name_config(cfg_dict if isinstance(cfg_dict, dict) else {})
 
     def _resolve_read_guard(self) -> Tuple[Any, Any, Any]:
         context = resolve_tool_context(self)
@@ -322,16 +330,21 @@ class FindFilesByName(AbstractSimpleTool):
         case_insensitive: bool = True,
         max_matches: Optional[int] = None,
     ) -> str:
+        _ffbn_config = self._resolve_config()
+        default_max_matches = int(_ffbn_config.default_max_matches)
+        hard_max_matches = int(_ffbn_config.hard_max_matches)
+        max_visited = int(_ffbn_config.max_visited)
+
         query_coalesced = coalesce_optional_string(query)
         if query_coalesced is not None:
             query = query_coalesced
         if max_matches is None:
-            max_matches = DEFAULT_MAX_MATCHES
+            max_matches = default_max_matches
 
         path_for_report = path if isinstance(path, str) else ""
         query_for_report = query if isinstance(query, str) else None
         ci = case_insensitive if isinstance(case_insensitive, bool) else bool(case_insensitive)
-        mm = max_matches if isinstance(max_matches, int) else DEFAULT_MAX_MATCHES
+        mm = max_matches if isinstance(max_matches, int) else default_max_matches
 
         _rg_cfg, _rg_root, _rg_extra = self._resolve_read_guard()
         _result = functools.partial(
@@ -364,8 +377,8 @@ class FindFilesByName(AbstractSimpleTool):
             )
         if not isinstance(max_matches, int) or max_matches < 1:
             return _result(ok=False, error={"type": "invalid_argument", "field": "max_matches"})
-        if max_matches > HARD_MAX_MATCHES:
-            max_matches = HARD_MAX_MATCHES
+        if max_matches > hard_max_matches:
+            max_matches = hard_max_matches
 
         query = query.strip()
         path = self._backend.normpath(path)
@@ -422,7 +435,7 @@ class FindFilesByName(AbstractSimpleTool):
                 if is_agent_hidden(base):
                     continue
                 visited += 1
-                if visited > DEFAULT_MAX_VISITED:
+                if visited > max_visited:
                     truncated = True
                     stop_reason = "max_visited"
                     break
@@ -469,6 +482,6 @@ class FindFilesByName(AbstractSimpleTool):
             walk_stats={
                 "visited": visited,
                 "stop_reason": stop_reason,
-                "max_visited": DEFAULT_MAX_VISITED,
+                "max_visited": max_visited,
             },
         )

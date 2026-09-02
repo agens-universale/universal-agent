@@ -9,7 +9,6 @@ Hits / context / stop A/B/C — FINAL-SPEC.
 from __future__ import annotations
 
 import bisect
-import copy
 import json
 import os
 import re
@@ -20,7 +19,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from backends.protocol import WalkOutputTooLargeError
 from backends.walk_util import WalkEntry
-from config_modules.fs_tools import FsFindInFilesConfig
+from config_modules.fs_tools import FsFindInFilesConfig, parse_find_in_files_config
 from utils.find_in_files_scan_mode import (
     Needles,
     PatternMode,
@@ -105,88 +104,95 @@ class FindInFiles(AbstractSimpleTool):
         {QUERY_MODE_TEXT, QUERY_MODE_RE, QUERY_MODE_RE_DOTALL}
     )
 
-    _PARAM_SCHEMA: Dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Absolute file or directory path.",
+    @classmethod
+    def _param_schema(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        cfg = parse_find_in_files_config(config_dict)
+        dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute file or directory path.",
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": (
+                        "What to search for. "
+                        "Default query_mode=python-re: Python regular expression. "
+                        "query_mode=text: exact substring (metacharacters literal). "
+                        "query_mode=python-re-dotall: regex where '.' also matches newline."
+                    ),
+                },
+                "query_mode": {
+                    "type": "string",
+                    "enum": ["text", "python-re", "python-re-dotall"],
+                    "default": "python-re",
+                    "description": (
+                        "How to interpret pattern. Default python-re. "
+                        "python-re: Python regular expression "
+                        "('.' does not match newline; ^/$ are line edges). "
+                        "text: exact substring only — metacharacters like "
+                        "| ( ) . * are literal; use when you need a fixed string "
+                        "that would be special in regex. "
+                        "python-re-dotall: same as python-re, but '.' also matches "
+                        "newline (only when a match must span lines)."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": mtot,
+                    "description": (
+                        f"Maximum matches to return. Default {dlim}, maximum {mtot}."
+                    ),
+                },
+                "case_insensitive": {
+                    "type": "boolean",
+                    "description": (
+                        "Ignore letter case when matching. Default false (case-sensitive, "
+                        "like grep). Set true for case-insensitive search."
+                    ),
+                    "default": False,
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": (
+                        "When path is a directory: only search files whose path relative to "
+                        "path matches this glob. Basename-only patterns (no '/') match at any "
+                        "depth: '*.py' ≡ '**/*.py'. Patterns with '/' are path-globs "
+                        "('src/*.ts' = one level under src/; 'src/**/*.ts' = recursive). "
+                        "Ignored when path is a single file."
+                    ),
+                },
+                "exclude_dirs": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Extra absolute directories to skip (each directory and everything under it). "
+                        "At most 32 entries."
+                    ),
+                },
+                "show_excluded_dirs": {
+                    "type": "boolean",
+                    "description": (
+                        "Include the full list of directories skipped during the walk. "
+                        "Default false. Turn on only when you need to verify which dirs "
+                        "were not entered (hard excludes, dot-dirs, call exclude_dirs). "
+                        "Does not include search_stats."
+                    ),
+                    "default": False,
+                },
             },
-            "pattern": {
-                "type": "string",
-                "description": (
-                    "What to search for. "
-                    "Default query_mode=python-re: Python regular expression. "
-                    "query_mode=text: exact substring (metacharacters literal). "
-                    "query_mode=python-re-dotall: regex where '.' also matches newline."
-                ),
-            },
-            "query_mode": {
-                "type": "string",
-                "enum": ["text", "python-re", "python-re-dotall"],
-                "default": "python-re",
-                "description": (
-                    "How to interpret pattern. Default python-re. "
-                    "python-re: Python regular expression "
-                    "('.' does not match newline; ^/$ are line edges). "
-                    "text: exact substring only — metacharacters like "
-                    "| ( ) . * are literal; use when you need a fixed string "
-                    "that would be special in regex. "
-                    "python-re-dotall: same as python-re, but '.' also matches "
-                    "newline (only when a match must span lines)."
-                ),
-            },
-            "limit": {
-                "type": "integer",
-                "description": (
-                    "Maximum matches to return. Omit to use the configured "
-                    "default (100 unless the deployment changed it); maximum 300."
-                ),
-            },
-            "case_insensitive": {
-                "type": "boolean",
-                "description": (
-                    "Ignore letter case when matching. Default false (case-sensitive, "
-                    "like grep). Set true for case-insensitive search."
-                ),
-                "default": False,
-            },
-            "file_pattern": {
-                "type": "string",
-                "description": (
-                    "When path is a directory: only search files whose path relative to "
-                    "path matches this glob. Basename-only patterns (no '/') match at any "
-                    "depth: '*.py' ≡ '**/*.py'. Patterns with '/' are path-globs "
-                    "('src/*.ts' = one level under src/; 'src/**/*.ts' = recursive). "
-                    "Ignored when path is a single file."
-                ),
-            },
-            "exclude_dirs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Extra absolute directories to skip (each directory and everything under it). "
-                    "At most 32 entries."
-                ),
-            },
-            "show_excluded_dirs": {
-                "type": "boolean",
-                "description": (
-                    "Include the full list of directories skipped during the walk. "
-                    "Default false. Turn on only when you need to verify which dirs "
-                    "were not entered (hard excludes, dot-dirs, call exclude_dirs). "
-                    "Does not include search_stats."
-                ),
-                "default": False,
-            },
-        },
-        "required": ["path", "pattern"],
-        "additionalProperties": False,
-    }
+            "required": ["path", "pattern"],
+            "additionalProperties": False,
+        }
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
+        cfg = parse_find_in_files_config(config_dict)
+        dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
         return {
             "type": "function",
             "name": "fs_find_in_files",
@@ -197,7 +203,7 @@ class FindInFiles(AbstractSimpleTool):
                 "python-re). Optional query_mode: python-re (default), text "
                 "(exact substring; metacharacters literal), python-re-dotall "
                 "(cross-line '.'). "
-                "At most limit matches (default 100, max 300); no pagination. "
+                f"At most limit matches (default {dlim}, max {mtot}); no pagination. "
                 "Skips binary/large files; no .gitignore. "
                 f"Does not enter nested `.gc`, dirs named {skip}, or nested dot-dirs "
                 "(path itself is still searched if it is one of those). "
@@ -212,14 +218,16 @@ class FindInFiles(AbstractSimpleTool):
                 "prefilter=timeout|capped|failed: that pass gave up and every candidate "
                 "was read from the host — narrow path/file_pattern."
             ),
-            # Copy: callers (inject_tool_fields) mutate parameters in place.
-            "parameters": copy.deepcopy(cls._PARAM_SCHEMA),
+            # Fresh dict: callers (inject_tool_fields) mutate parameters in place.
+            "parameters": cls._param_schema(config_dict),
             "strict": True,
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         skip = hard_exclude_dir_names_for_prompt()
+        cfg = parse_find_in_files_config(config_dict)
+        dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
         return (
             "Tool name: fs_find_in_files\n"
             "Search file contents under an absolute file or directory (not file names).\n"
@@ -227,7 +235,7 @@ class FindInFiles(AbstractSimpleTool):
             "(query_mode defaults to python-re).\n"
             "Optional: query_mode (python-re default; text=exact substring; "
             "python-re-dotall=cross-line '.'), "
-            "limit (default 100, max 300; no pagination), "
+            f"limit (default {dlim}, max {mtot}; no pagination), "
             "case_insensitive (default false), "
             "file_pattern (directory only; basename-only like '*.py' matches any depth), "
             "exclude_dirs, "
@@ -271,18 +279,8 @@ class FindInFiles(AbstractSimpleTool):
     def _resolve_config(self) -> Tuple[Any, FsFindInFilesConfig, Dict[str, Any]]:
         rg_context = resolve_tool_context(self)
         cfg_dict = _extract_config_dict(self, getattr(rg_context, "ctx", None), {})
-        fif_raw = {}
-        if isinstance(cfg_dict, dict):
-            fs_raw = cfg_dict.get("fs_tools", {})
-            if isinstance(fs_raw, dict):
-                fif_raw = fs_raw.get("find_in_files", {}) or {}
-        try:
-            config = FsFindInFilesConfig.model_validate(
-                fif_raw if isinstance(fif_raw, dict) else {}
-            )
-        except Exception:
-            config = FsFindInFilesConfig()
-        return rg_context, config, cfg_dict if isinstance(cfg_dict, dict) else {}
+        cfg_dict = cfg_dict if isinstance(cfg_dict, dict) else {}
+        return rg_context, parse_find_in_files_config(cfg_dict), cfg_dict
 
     def _resolve_max_bytes(self, cfg_dict: Dict[str, Any]) -> int:
         return fs_find_in_files_max_bytes(cfg_dict)

@@ -1,12 +1,19 @@
 import json
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
+from config_modules.fs_tools import FsFindFilesByNameConfig
 from tools.fs.find_files_by_name import FindFilesByName
 from tests.helpers.tool_ctx import with_local_ctx
 
 
-def _tool():
-    return with_local_ctx(FindFilesByName)
+def _tool(extra=None):
+    cfg = {}
+    if extra:
+        cfg["fs_tools"] = {"find_files_by_name": extra}
+    return with_local_ctx(FindFilesByName, config_dict=cfg)
 
 
 def test_find_by_basename_anywhere(tmp_path: Path):
@@ -179,16 +186,120 @@ def test_summary_for_max_visited_does_not_blame_max_matches(tmp_path: Path):
     assert "Increase max_matches" not in res["guidance"]
 
 
-def test_find_max_matches_hard_cap_200(tmp_path: Path):
+def test_find_max_matches_hard_cap_300(tmp_path: Path):
     for i in range(5):
         (tmp_path / f"f{i}.dat").write_text("x", encoding="utf-8")
 
     res = json.loads(_tool()(path=str(tmp_path), query="*.dat", max_matches=500))
     assert res["ok"] is True
-    assert res["max_matches"] == 200
+    assert res["max_matches"] == 300
     assert res["count"] == 5
     assert res["truncated"] is False
     assert "guidance" not in res
+
+
+def _write_dat_files(tmp_path: Path, n: int) -> None:
+    for i in range(n):
+        (tmp_path / f"f{i}.dat").write_text("x", encoding="utf-8")
+
+
+def test_config_default_max_matches_applies_when_caller_omits(tmp_path: Path):
+    _write_dat_files(tmp_path, 5)
+    res = json.loads(_tool({"default_max_matches": 2})(path=str(tmp_path), query="*.dat"))
+    assert res["ok"] is True
+    assert res["count"] == 2
+    assert res["max_matches"] == 2
+    assert res["truncated"] is True
+    assert res["walk_stats"]["stop_reason"] == "max_matches"
+
+
+def test_explicit_max_matches_wins_over_config_default(tmp_path: Path):
+    _write_dat_files(tmp_path, 5)
+    res = json.loads(
+        _tool({"default_max_matches": 2})(
+            path=str(tmp_path), query="*.dat", max_matches=4
+        )
+    )
+    assert res["ok"] is True
+    assert res["count"] == 4
+    assert res["max_matches"] == 4
+
+
+def test_config_hard_max_matches_clamps_requested(tmp_path: Path):
+    _write_dat_files(tmp_path, 5)
+    res = json.loads(
+        _tool({"default_max_matches": 2, "hard_max_matches": 2})(
+            path=str(tmp_path), query="*.dat", max_matches=50
+        )
+    )
+    assert res["ok"] is True
+    assert res["max_matches"] == 2
+    assert res["count"] == 2
+    assert res["truncated"] is True
+    assert res["walk_stats"]["stop_reason"] == "max_matches"
+
+
+def test_config_max_visited_is_the_walk_cap(tmp_path: Path):
+    _write_dat_files(tmp_path, 5)
+    res = json.loads(_tool({"max_visited": 2})(path=str(tmp_path), query="*.dat"))
+    assert res["ok"] is True
+    assert res["truncated"] is True
+    assert res["walk_stats"]["stop_reason"] == "max_visited"
+    assert res["walk_stats"]["max_visited"] == 2
+    assert res["walk_stats"]["visited"] > 2
+    assert "max_visited" in res["guidance"]
+    assert "Increase max_matches" not in res["guidance"]
+
+
+def test_find_files_by_name_config_rejects_non_positive_and_unknown_keys():
+    for field in ("default_max_matches", "hard_max_matches", "max_visited"):
+        with pytest.raises(ValidationError):
+            FsFindFilesByNameConfig.model_validate({field: 0})
+    with pytest.raises(ValidationError):
+        FsFindFilesByNameConfig.model_validate({"default_max_visited": 10})
+    with pytest.raises(ValidationError):
+        FsFindFilesByNameConfig.model_validate(
+            {"default_max_matches": 50, "hard_max_matches": 10}
+        )
+
+
+def test_tool_description_uses_live_config_limits():
+    cfg = {
+        "fs_tools": {
+            "find_files_by_name": {
+                "default_max_matches": 7,
+                "hard_max_matches": 11,
+            }
+        }
+    }
+    spec = FindFilesByName.tool_description(config_dict=cfg)
+    prompt = FindFilesByName.prompt_description(config_dict=cfg)
+    mm = spec["parameters"]["properties"]["max_matches"]
+    assert mm["maximum"] == 11
+    assert "Default 7" in mm["description"]
+    assert "maximum 11" in mm["description"]
+    assert "default 7, maximum 11" in spec["description"]
+    assert "max_matches (default 7, maximum 11)" in prompt
+
+
+def test_builtin_tools_data_schema_uses_live_config():
+    from tools.registry import get_builtin_tools_data
+
+    tools = get_builtin_tools_data(
+        {
+            "fs_tools": {
+                "find_files_by_name": {
+                    "default_max_matches": 7,
+                    "hard_max_matches": 11,
+                }
+            }
+        }
+    )
+    entry = tools["fs_find_files_by_name"]
+    mm = entry["spec"]["parameters"]["properties"]["max_matches"]
+    assert mm["maximum"] == 11
+    assert "Default 7" in mm["description"]
+    assert "max_matches (default 7, maximum 11)" in entry["description"]
 
 
 def test_find_case_insensitive(tmp_path: Path):

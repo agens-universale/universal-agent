@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+from typing import Any, Dict, Optional
 
 from security.path_policy import enforce_write_guard
 from tools.simple_tool_base import AbstractSimpleTool
@@ -11,7 +12,7 @@ from utils.tool_report_paths import tool_report_abspath
 class SaveBase64File(AbstractSimpleTool):
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {
             "type": "function",
             "name": "fs_save_base64_file",
@@ -44,7 +45,7 @@ class SaveBase64File(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return (
             "Tool name: fs_save_base64_file\n"
             "Tool description: Decodes base64 data and saves it as a binary file (e.g. PNG screenshot).\n"

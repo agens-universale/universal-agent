@@ -1489,7 +1489,7 @@ class TestQueryMode:
         assert data["error"]["field"] == "query_mode"
 
     def test_schema_query_mode_optional_default_python_re(self):
-        schema = FindInFiles._PARAM_SCHEMA
+        schema = FindInFiles.tool_description()["parameters"]
         assert schema["required"] == ["path", "pattern"]
         assert "query_mode" not in schema["required"]
         qm = schema["properties"]["query_mode"]
