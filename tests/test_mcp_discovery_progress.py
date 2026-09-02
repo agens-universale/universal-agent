@@ -3,7 +3,7 @@ import tools.connect_mcp.registry as reg
 
 
 def test_on_progress_called_per_server(monkeypatch):
-    def fake_discover_one(name, cfg, *, timeout):
+    def fake_discover_one(name, cfg, *, timeout, os_backend=None):
         return ([], {"status": "connected", "reason": None, "tool_count": 0, "elapsed_ms": 1})
     monkeypatch.setattr(reg, "_discover_one", fake_discover_one)
     seen = {}
@@ -15,7 +15,7 @@ def test_on_progress_called_per_server(monkeypatch):
 
 
 def test_on_progress_called_for_timeout(monkeypatch):
-    def fake_discover_one(name, cfg, *, timeout):
+    def fake_discover_one(name, cfg, *, timeout, os_backend=None):
         time.sleep(timeout + 2)
         return ([], {"status": "connected", "reason": None, "tool_count": 0, "elapsed_ms": 0})
     monkeypatch.setattr(reg, "_discover_one", fake_discover_one)
@@ -29,7 +29,7 @@ def test_on_progress_called_for_timeout(monkeypatch):
 
 def test_on_progress_none_is_noop(monkeypatch):
     monkeypatch.setattr(reg, "_discover_one",
-                        lambda n, c, *, timeout: ([], {"status": "connected", "reason": None,
+                        lambda n, c, *, timeout, os_backend=None: ([], {"status": "connected", "reason": None,
                                                        "tool_count": 0, "elapsed_ms": 1}))
     reg._build_tools_registry({"a": {"transport": "stdio", "command": "a"}}, discovery_timeout_sec=2)
 
@@ -38,7 +38,7 @@ def test_on_progress_threads_through_build_tools_data(monkeypatch):
     import tools as tools_pkg
     captured = {}
 
-    def fake_get_mcp(config_dict, on_progress=None):
+    def fake_get_mcp(config_dict, on_progress=None, **_kwargs):
         if on_progress:
             on_progress("srv", {"status": "connected"})
         return ({}, {})
