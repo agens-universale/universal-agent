@@ -57,6 +57,22 @@ def test_sse_is_not_tagged_os_backend():
     assert mapped["s"]["execute_on"] == "agent"
 
 
+def test_adapter_uses_the_resolvers_rule_not_a_copy():
+    """One source of truth for which transports survive a stateless exec."""
+    import adapters.gc_cli_external as mod
+    from tools.connect_mcp.execute_on import OS_BACKEND_TRANSPORTS
+
+    assert not hasattr(mod, "_OS_BACKEND_CAPABLE")
+    mapped = GcCliExternal._harbor_mcp_to_config([
+        _server("h", "streamable-http", url="http://h:1/mcp"),
+        _server("s", "sse", url="http://s:1/mcp"),
+        _server("d", "stdio", command="srv"),
+    ])
+    for entry in mapped.values():
+        expected = "os_backend" if entry["transport"] in OS_BACKEND_TRANSPORTS else "agent"
+        assert entry["execute_on"] == expected
+
+
 def test_stream_http_and_stdio_are_tagged_os_backend():
     mapped = GcCliExternal._harbor_mcp_to_config([
         _server("h", "streamable-http", url="http://h:1/mcp"),

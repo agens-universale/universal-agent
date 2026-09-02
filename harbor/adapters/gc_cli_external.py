@@ -47,12 +47,6 @@ _HARBOR_TRANSPORT_MAP = {
     "stdio": "stdio",
 }
 
-# Transports the agent can speak from inside the task environment. `sse` needs a
-# live session, which a stateless exec cannot hold, so tagging it `os_backend`
-# would build a config the resolver is guaranteed to reject. It stays on the
-# agent locus: unreachable from there gives an honest connection error instead
-# of a self-inflicted configuration one.
-_OS_BACKEND_CAPABLE = ("stream_http", "stdio")
 
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-ua`), so it imports directly — no source-dir / PYTHONPATH.
@@ -465,6 +459,11 @@ class GcCliExternal(BaseAgent):
         tagged `execute_on: os_backend`. The transport is carried through
         unchanged — the locus is a separate axis.
         """
+        # The rule for which transports survive a stateless exec lives in the
+        # resolver; a local copy would drift the moment a transport is added.
+        # gc-cli is imported lazily here, like everywhere else in this adapter.
+        from tools.connect_mcp.execute_on import OS_BACKEND_TRANSPORTS
+
         mapped: dict = {}
         for server in servers or []:
             name = getattr(server, "name", None)
@@ -486,8 +485,12 @@ class GcCliExternal(BaseAgent):
                     "sanitising; the earlier one is dropped",
                     name, key,
                 )
+            # `sse` needs a live session, which a stateless exec cannot hold, so
+            # tagging it os_backend would build a config the resolver is
+            # guaranteed to reject. It stays on the agent locus: unreachable from
+            # there is an honest connection error, not a self-inflicted config one.
             locus = (
-                "os_backend" if gc_transport in _OS_BACKEND_CAPABLE else "agent"
+                "os_backend" if gc_transport in OS_BACKEND_TRANSPORTS else "agent"
             )
             if locus == "agent" and logger is not None:
                 logger.warning(
