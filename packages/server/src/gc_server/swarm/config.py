@@ -45,6 +45,50 @@ def _resolve_asset_path(maybe_path: Any, default_rel: str, *, base: str | None =
     return os.path.join(root, path)
 
 
+def _resolve_wrapper_path(maybe_path: Any, config_dir: str) -> str:
+    """Путь к обёртке песочницы.
+
+    Пусто → обёртка из пакета. Абсолютный → как есть. Относительный ищется
+    сначала рядом с `config_server.yml`, затем в каталоге пакета; если не нашёлся
+    нигде — берётся обёртка из пакета, громко.
+
+    Почему не просто якорь: на develop `bundled_root()` был корнем репозитория, и
+    `demo_config_server.yml` раскладывал штатным значением
+    `"scripts/run-cli-in-sandbox.sh"` — то есть `<репозиторий>/scripts/...`.
+    Обёртка с тех пор переехала внутрь пакета (в `scripts/` она не попадала ни в
+    одно колесо, дефолта там быть не могло), а якорь для относительных путей стал
+    каталогом пакета. У всех, кто скопировал шаблон с develop, значение
+    превращалось в несуществующий `gc_server/swarm/scripts/run-cli-in-sandbox.sh`,
+    и КАЖДЫЙ `POST /swarm/run` отвечал 500 — при живой обёртке в соседнем файле.
+
+    Поиск рядом с конфигом идёт первым: в рабочей копии `config_server.yml` лежит
+    в корне репозитория, поэтому старое значение снова означает ровно то же, что
+    на develop. Фолбэк на пакетную обёртку спасает установленный профиль, где
+    `scripts/` не существует в принципе.
+    """
+    default = os.path.join(_PACKAGE_DIR, "run-cli-in-sandbox.sh")
+    if not isinstance(maybe_path, str) or not maybe_path.strip():
+        return default
+
+    path = maybe_path.strip()
+    if os.path.isabs(path):
+        return path
+
+    local = os.path.normpath(os.path.join(config_dir, path))
+    if os.path.isfile(local):
+        return local
+    packaged = os.path.normpath(os.path.join(_PACKAGE_DIR, path))
+    if os.path.isfile(packaged):
+        return packaged
+
+    logger.warning(
+        "swarm.wrapper_path=%r не найден (искал %s и %s) — беру обёртку из "
+        "пакета: %s",
+        maybe_path, local, packaged, default,
+    )
+    return default
+
+
 def _resolve_user_path(maybe_path: Any, default: str, *, config_dir: str) -> str:
     """
     Путь, который человек написал в своём config_server.yml.
@@ -158,11 +202,7 @@ def build_swarm_config(
     # поэтому дефолт работает и в установленном профиле. Раньше она жила в
     # scripts/ репозитория, который не попадал ни в одно колесо: дефолтного
     # пути там быть не могло в принципе.
-    wrapper_path = _resolve_asset_path(
-        raw_swarm.get("wrapper_path"),
-        "run-cli-in-sandbox.sh",
-        base=_PACKAGE_DIR,
-    )
+    wrapper_path = _resolve_wrapper_path(raw_swarm.get("wrapper_path"), base_dir)
     sandbox_tool = str(raw_swarm.get("sandbox_tool", "bubblewrap"))
     agentmd_path = _resolve_asset_path(
         raw_swarm.get("agentmd_path"), "prompts/server_agent.md"

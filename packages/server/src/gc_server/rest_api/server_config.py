@@ -132,6 +132,53 @@ def load_server_config() -> Dict[str, Any]:
     }
 
 
+def _resolve_server_agent_md(raw: str, server_cfg: Dict[str, Any]) -> str:
+    """Резолв `agent.server_agentmd_path` из пользовательского конфига.
+
+    Относительный путь ищется СНАЧАЛА рядом с самим `config_server.yml` — там,
+    где человек его и видит, — и только потом среди ассетов дистрибутива.
+
+    Раньше стоял безусловный `os.path.join(PROJECT_ROOT, …)`, и это было верно,
+    пока `bundled_root()` возвращал корень репозитория: конфиг лежал там же.
+    После переезда ассетов внутрь пакета тот же якорь стал вести в
+    `packages/core/assets` (в колесе — `site-packages/gc_core/assets`), и пример
+    из `docs/server.md` (`server_agentmd_path: "./server_agent.md"`) перестал
+    находиться. Для секции swarm эта же ветка завела `_resolve_user_path`, а про
+    `agent` забыли — чинили место, а не класс.
+
+    Цена промаха высокая и незаметная: `build_instructions` возвращает пустой
+    текст, предупреждение печатается только при verbose, и сервер обслуживает
+    запросы агентом БЕЗ системных инструкций, ничего об этом не сказав. Поэтому
+    ненайденный файл здесь кричит, а не молчит.
+    """
+    path = raw.strip()
+    if os.path.isabs(path):
+        return path
+
+    cfg_path = server_cfg.get("config_path")
+    base = (
+        os.path.dirname(os.path.abspath(cfg_path.strip()))
+        if isinstance(cfg_path, str) and cfg_path.strip()
+        else os.getcwd()
+    )
+    # normpath: "./server_agent.md" иначе доезжает до логов и до agent_md_path
+    # как "<каталог>/./server_agent.md" — работает, но читается как опечатка.
+    local = os.path.normpath(os.path.join(base, path))
+    if os.path.isfile(local):
+        return local
+
+    bundled = os.path.normpath(os.path.join(PROJECT_ROOT, path))
+    if os.path.isfile(bundled):
+        return bundled
+
+    logger.warning(
+        "agent.server_agentmd_path=%r не найден (искал %s и %s) — агент будет "
+        "работать БЕЗ системных инструкций",
+        raw, local, bundled,
+    )
+    return local
+
+
 def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     Построить config_dict для агента при запуске через REST-сервер.
@@ -166,8 +213,7 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     agent_cfg = server_cfg.get("agent") or {}
     server_agent_path = agent_cfg.get("server_agentmd_path")
     if isinstance(server_agent_path, str) and server_agent_path.strip():
-        if not os.path.isabs(server_agent_path):
-            server_agent_path = os.path.join(PROJECT_ROOT, server_agent_path)
+        server_agent_path = _resolve_server_agent_md(server_agent_path, server_cfg)
         cfg["agent_md_path"] = server_agent_path
 
     overrides = server_cfg.get("agent_overrides") or {}

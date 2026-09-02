@@ -8,10 +8,14 @@ from gc_tui.voice_runtime import leases as leases
 
 #: Умеет ли платформа отдать отпечаток процесса. `process_start_key` реализован
 #: ровно для двух: Linux читает `/proc/<pid>/stat`, Windows зовёт GetProcessTimes
-#: через ctypes. На macOS нет ни того, ни другого, и функция честно возвращает
-#: None — там проверять нечего. Пропускаем тест, а НЕ ослабляем ассерт: иначе он
-#: перестал бы ловить молчаливый None на тех платформах, где отпечаток обязателен,
-#: а без отпечатка `_lease_is_ours` верит каждому тёзке по номеру PID.
+#: через ctypes. На macOS нет ни того, ни другого, и функция возвращает None.
+#:
+#: Это НЕ «нечего проверять», а настоящая дыра: без отпечатка `_lease_is_ours`
+#: верит каждому тёзке по номеру PID. На develop тест на macOS честно падал
+#: красным, и дыра была видна в отчёте. Поэтому здесь xfail(strict=True), а не
+#: skipif: пропуск стирал единственный сигнал, а строгий xfail и не красит набор
+#: красным, и сам развалится в тот день, когда macOS-ветка появится, — забыть
+#: снять маркер не выйдет.
 _HAS_START_KEY = os.name == "nt" or Path("/proc").is_dir()
 
 
@@ -50,8 +54,12 @@ def test_garbage_files_ignored(monkeypatch, tmp_path):
     assert leases.live_leases(alive=lambda pid: False) == []
 
 
-@pytest.mark.skipif(not _HAS_START_KEY,
-                    reason="отпечаток процесса есть только на Linux (/proc) и Windows")
+@pytest.mark.xfail(
+    not _HAS_START_KEY,
+    strict=True,
+    reason="дыра: на macOS process_start_key возвращает None, и lease пишется "
+           "без отпечатка процесса — _lease_is_ours верит любому тёзке по PID",
+)
 def test_start_key_is_taken_from_a_real_process():
     """Отпечаток снимается с ЖИВОГО процесса и повторяется между вызовами.
 

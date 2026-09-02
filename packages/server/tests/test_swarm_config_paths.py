@@ -268,3 +268,55 @@ def test_swarm_agent_overrides_is_a_copy_not_reference(isolated_env):
     cfg = build_swarm_config(server_cfg)
     cfg["agent_overrides"]["max_steps"] = 100
     assert "max_steps" not in original
+
+
+def test_wrapper_path_from_develop_template_falls_back_to_the_packaged_one(
+    isolated_env, tmp_path, caplog
+):
+    """Прежнее штатное значение develop не роняет sworm, а даёт обёртку из пакета.
+
+    `demo_config_server.yml` на develop раскладывал `wrapper_path:
+    "scripts/run-cli-in-sandbox.sh"`, и это работало: `bundled_root()` был корнем
+    репозитория. Обёртка с тех пор переехала внутрь пакета, в `scripts/` она не
+    попадала ни в одно колесо. У всех, кто скопировал шаблон, относительный путь
+    указывал в несуществующий `gc_server/swarm/scripts/...`, и КАЖДЫЙ
+    `POST /swarm/run` отвечал 500 `FileNotFoundError` — при живой обёртке рядом.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger=swarm_config.__name__):
+        cfg = build_swarm_config(
+            {
+                "config_path": str(tmp_path / "config_server.yml"),
+                "swarm": {"enabled": True,
+                          "wrapper_path": "scripts/run-cli-in-sandbox.sh"},
+            }
+        )
+
+    wrapper = Path(cfg["wrapper_path"])
+    assert wrapper.is_file() and os.access(wrapper, os.X_OK), wrapper
+    assert wrapper.name == "run-cli-in-sandbox.sh"
+    # Молчаливый фолбэк был бы своей бедой: человек так и не узнает, что его
+    # значение проигнорировано.
+    assert "wrapper_path" in caplog.text
+
+
+def test_wrapper_path_next_to_the_config_wins(isolated_env, tmp_path):
+    """Своя обёртка рядом с config_server.yml находится — как на develop.
+
+    В рабочей копии `config_server.yml` лежит в корне репозитория, поэтому такой
+    якорь дословно повторяет прежнее поведение: относительный путь считался от
+    `bundled_root()`, а он и был корнем.
+    """
+    own = tmp_path / "scripts" / "run-cli-in-sandbox.sh"
+    own.parent.mkdir(parents=True, exist_ok=True)
+    own.write_text("#!/bin/sh\n", encoding="utf-8")
+    own.chmod(0o755)
+
+    cfg = build_swarm_config(
+        {
+            "config_path": str(tmp_path / "config_server.yml"),
+            "swarm": {"enabled": True, "wrapper_path": "scripts/run-cli-in-sandbox.sh"},
+        }
+    )
+    assert Path(cfg["wrapper_path"]) == own

@@ -8,10 +8,11 @@ defaults:
   system: "generic"
 
 agent:
-  # Абсолютный путь — как есть; относительный резолвится от корня bundled-ассетов
-  # (в репозитории packages/core/assets, в колесе site-packages/gc_core/assets),
-  # а НЕ от корня репозитория — см. PROJECT_ROOT в rest_api/server_config.py.
-  # Поэтому "./prompts/..." попадает в bundled-промпт и работает в обеих раскладках.
+  # Абсолютный путь — как есть; относительный ищется сначала рядом с ЭТИМ файлом,
+  # потом среди bundled-ассетов (в репозитории packages/core/assets, в колесе
+  # site-packages/gc_core/assets). Поэтому "./prompts/..." попадает в bundled-промпт,
+  # а "./server_agent.md" — в файл, лежащий рядом с конфигом, как и ожидает человек.
+  # Не нашёлся нигде — WARNING: молча работать без инструкций сервер не будет.
   server_agentmd_path: "./prompts/demo_server_agent.md"
 
 logging:
@@ -55,8 +56,8 @@ threads_cleanup:
 
 swarm:
   enabled: false
-  # ВСЕ пути этой секции, кроме agentmd_path и wrapper_path (они целятся в файлы
-  # ВНУТРИ пакета), — пользовательские: абсолютный берётся как есть,
+  # ВСЕ пути этой секции, кроме agentmd_path (он целится в файл ВНУТРИ пакета),
+  # — пользовательские: абсолютный берётся как есть,
   # относительный резолвится от каталога ЭТОГО файла, пустой даёт дефолт под
   # XDG-каталогами (gc_paths(): state — для тредов и песочниц, data — для
   # скиллов). Раньше якорем был корень bundled-ассетов; до разбиения на пакеты он
@@ -79,11 +80,11 @@ swarm:
     timeout_seconds: 1800
   cli_command: "gc-cli"
   # Обёртка песочницы уехала из scripts/ внутрь пакета и едет в колесе как
-  # package data. Относительный путь резолвится от каталога gc_server/swarm/,
-  # поэтому прежнее "scripts/run-cli-in-sandbox.sh" указывало в
-  # gc_server/swarm/scripts/ — файла там нет, и Popen падал FileNotFoundError
-  # на первом же POST /swarm/run. Пусто → обёртка рядом с кодом, что и нужно
-  # из коробки; переопределять — только абсолютным путём.
+  # package data. Пусто → она и берётся, что и нужно из коробки. Относительный
+  # путь ищется рядом с ЭТИМ файлом, затем в каталоге gc_server/swarm/; не
+  # нашёлся нигде — WARNING и та же пакетная обёртка. Прежнее штатное значение
+  # develop, "scripts/run-cli-in-sandbox.sh", в установленном профиле не
+  # существует нигде, и без фолбэка каждый POST /swarm/run падал бы 500.
   #wrapper_path: "/opt/gc-cli/.venv/lib/python3.12/site-packages/gc_server/swarm/run-cli-in-sandbox.sh"
   sandbox_tool: "bubblewrap"
   # agentmd_path — файл из колеса: относительный путь резолвится от корня

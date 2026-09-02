@@ -60,7 +60,14 @@ import pytest
 # Исходники разъехались по пакетам — раскладку знает gc_testkit.paths.
 # Импорты абсолютные, как во всех остальных пакетах: относительные оставались
 # только здесь.
-from gc_testkit.paths import module_dir, package_dir, repo_root
+from gc_testkit.paths import (
+    _declares_gc_core,
+    module_dir,
+    package_dir,
+    repo_root,
+    repo_root_from,
+    use_repo_root,
+)
 from gc_testkit.sources import ensure_sources_on_path
 
 #: Собираем ли мы СВОЙ набор. Ставится в ``pytest_load_initial_conftests``:
@@ -69,21 +76,31 @@ from gc_testkit.sources import ensure_sources_on_path
 _OUR_SUITE = False
 
 
-def _suite_root_is_ours(rootpath) -> bool:
-    """Лежит ли корень собираемого набора в рабочей копии, где лежит плагин.
+def _suite_root(rootpath) -> Path | None:
+    """Корень рабочей копии, которой ПРИНАДЛЕЖИТ собираемый набор, иначе None.
 
     Наши прогоны дают ровно два вида rootdir: корень репозитория (запуск из
     корня) и ``packages/<имя>`` — у каждого пакета свой
     ``[tool.pytest.ini_options]``, поэтому корнем pytest объявляет его каталог.
-    Проверять «rootpath где-то внутри рабочей копии» нельзя: вендоренные
-    серверы лежат в ``external/vendor/`` НАШЕГО дерева, и такая проверка
-    пропустила бы ровно тот случай, ради которого гейт и переписан.
+    Отсюда и форма проверки. Смотреть «rootpath где-то внутри рабочей копии»
+    нельзя: вендоренные серверы лежат в ``external/vendor/`` НАШЕГО дерева, и
+    такая проверка пропустила бы ровно тот случай, ради которого гейт и заведён.
+
+    Корень берётся от САМОГО rootpath, а не от места плагина. Прежняя редакция
+    сверяла rootpath с ``repo_root()``, то есть с чекаутом, ОТКУДА УСТАНОВЛЕН
+    тест-кит. Пока чекаут один, разницы нет; при двух (git worktree, второй
+    клон, каталог ревью) venv чекаута A, запущенный в чекауте B, давал
+    несовпадение — и гейт объявлял наш же набор чужим. Предупреждения при этом
+    не было: его печатает только ветка ``repo_root() is None``, а тут корень
+    прекрасно находился, просто не тот. Бутстрап и все autouse-фикстуры молча
+    выключались, набор B шёл по исходникам A через ``.pth`` и был зелёным.
     """
-    root = repo_root()
-    if root is None:
-        return False
     rootpath = Path(rootpath).resolve()
-    return rootpath == root or rootpath.parent == root / "packages"
+    if _declares_gc_core(rootpath):
+        return rootpath
+    if rootpath.parent.name == "packages" and _declares_gc_core(rootpath.parent.parent):
+        return rootpath.parent.parent
+    return None
 
 
 _MINIMAL_PRELOADED = False
@@ -260,7 +277,8 @@ def pytest_load_initial_conftests(early_config) -> None:
     исходников соседних пакетов на ``sys.path`` не попадут сами.
     """
     global _OUR_SUITE
-    if not _suite_root_is_ours(early_config.rootpath):
+    suite_root = _suite_root(early_config.rootpath)
+    if suite_root is None:
         if repo_root() is None:
             # Отказ обязан называть себя. Молчание тут стоит дорого: плагин
             # приезжает через pytest11 и в не-editable установке (колесо без
@@ -276,6 +294,19 @@ def pytest_load_initial_conftests(early_config) -> None:
                 file=sys.stderr,
             )
         return
+
+    # Расхождение — не ошибка (запуск набора чужим venv законен), но и не то,
+    # о чём стоит молчать: дальше корнем всего тест-кита работает СОБИРАЕМЫЙ
+    # чекаут, и колёса в test_packaging_wheel соберутся тоже из него.
+    installed_root = repo_root_from(Path(__file__))
+    if installed_root is not None and installed_root != suite_root:
+        print(
+            f"[warn] gc_testkit: набор из {suite_root}, тест-кит установлен из "
+            f"{installed_root} — беру исходники набора.",
+            file=sys.stderr,
+        )
+    use_repo_root(suite_root)
+
     _OUR_SUITE = True
     ensure_sources_on_path()
     if not _mcp_runtime_available():

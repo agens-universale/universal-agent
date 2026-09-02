@@ -667,18 +667,21 @@ async def get_swarm_status(system: str, task_id: str):
     # Один strip() пропускал `../`, и обычный GET читал произвольный файл. Разбор
     # тот же, что у соседнего `/logs/{system}/{task_id}`; `system` не отвергаем, а
     # нормализуем — там законны пробелы и регистр.
-    sys_norm = sanitize_system_id(str(system or "").lower().strip())
+    # Пустоту проверяем ДО санитайзера: он на пустой строке кидает ValueError,
+    # а голый ValueError из хендлера — это 500, тогда как контракт эндпоинта
+    # (и тест на `%20`) обещает 400.
+    if not str(system or "").strip() or not str(task_id or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "system and task_id are required"},
+        )
+    sys_norm = sanitize_system_id(str(system).lower().strip())
     try:
-        task_norm = validate_thread_id(str(task_id or ""))
+        task_norm = validate_thread_id(str(task_id))
     except ValueError as e:
         raise HTTPException(
             status_code=400,
             detail={"status": "error", "payload": str(e)},
-        )
-    if not sys_norm or not task_norm:
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": "system and task_id are required"},
         )
 
     swarm_id = f"swarm_{sys_norm}_{task_norm}"
@@ -733,18 +736,21 @@ async def get_swarm_logs(system: str, task_id: str):
     # Один strip() пропускал `../`, и обычный GET читал произвольный файл. Разбор
     # тот же, что у соседнего `/logs/{system}/{task_id}`; `system` не отвергаем, а
     # нормализуем — там законны пробелы и регистр.
-    sys_norm = sanitize_system_id(str(system or "").lower().strip())
+    # Пустоту проверяем ДО санитайзера: он на пустой строке кидает ValueError,
+    # а голый ValueError из хендлера — это 500, тогда как контракт эндпоинта
+    # (и тест на `%20`) обещает 400.
+    if not str(system or "").strip() or not str(task_id or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "system and task_id are required"},
+        )
+    sys_norm = sanitize_system_id(str(system).lower().strip())
     try:
-        task_norm = validate_thread_id(str(task_id or ""))
+        task_norm = validate_thread_id(str(task_id))
     except ValueError as e:
         raise HTTPException(
             status_code=400,
             detail={"status": "error", "payload": str(e)},
-        )
-    if not sys_norm or not task_norm:
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": "system and task_id are required"},
         )
 
     swarm_id = f"swarm_{sys_norm}_{task_norm}"
@@ -778,6 +784,34 @@ async def healthcheck():
     return {"status": "ok"}
 
 
+#: Уровни, которые понимает uvicorn. `logging` знает и другие написания
+#: (`WARN`, `FATAL`), а uvicorn делает по значению прямой `LOG_LEVELS[level]` и
+#: падает KeyError. До этой ветки `server.log_level` читался и НИКУДА не
+#: передавался, поэтому конфиг с `warn` работал; передав его в uvicorn, мы бы
+#: уронили такие установки на старте.
+_UVICORN_LOG_LEVELS = frozenset({"critical", "error", "warning", "info", "debug", "trace"})
+
+#: Написания, которые logging принимает как синонимы, а uvicorn — нет.
+_LOG_LEVEL_ALIASES = {"warn": "warning", "fatal": "critical"}
+
+
+def _normalize_log_level(raw) -> str:
+    """Привести `server.log_level` к тому, что примет uvicorn.
+
+    Неизвестное значение не роняет старт, а даёт `info` и предупреждение:
+    поднятый сервер с неожиданной подробностью логов лучше, чем упавший.
+    """
+    level = str(raw if raw is not None else "info").strip().lower()
+    level = _LOG_LEVEL_ALIASES.get(level, level)
+    if level not in _UVICORN_LOG_LEVELS:
+        logger.warning(
+            "server.log_level=%r uvicorn не понимает (допустимы: %s) — беру info",
+            raw, ", ".join(sorted(_UVICORN_LOG_LEVELS)),
+        )
+        return "info"
+    return level
+
+
 def serve() -> int:
     """Поднять REST-сервер по config_server.yml. Тело точки входа gc-serve."""
     server_cfg = SERVER_CONFIG.get("server", {}) or {}
@@ -794,7 +828,7 @@ def serve() -> int:
     # никуда: uvicorn поднимает только СВОИ логгеры, а до stderr через
     # logging.lastResort пролезал лишь WARNING+. То есть строка «читаю такой-то
     # config_server.yml» существовала, но в проде её не видел никто.
-    log_level = str(server_cfg.get("log_level", "info")).lower()
+    log_level = _normalize_log_level(server_cfg.get("log_level"))
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

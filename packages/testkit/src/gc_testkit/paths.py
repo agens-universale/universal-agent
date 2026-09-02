@@ -66,9 +66,37 @@ def repo_root_from(start: Path) -> Path | None:
     return None
 
 
+#: Корень, назначенный извне — см. `use_repo_root`. None = считать от `__file__`.
+_SUITE_ROOT: Path | None = None
+
+
+def use_repo_root(root: Path) -> None:
+    """Назначить корень рабочей копии, которой принадлежит СОБИРАЕМЫЙ набор.
+
+    Зовёт бутстрап плагина, узнав корень из `config.rootpath`. По умолчанию
+    корень ищется вверх от `__file__`, то есть от места, откуда УСТАНОВЛЕН
+    тест-кит, — и это верно ровно до тех пор, пока чекаут один. При двух
+    (git worktree, второй клон, каталог ревью) venv из чекаута A, запущенный в
+    чекауте B, разводил их: rootdir — B, а `REPO`, `PACKAGE_SRC_DIRS` и всё, что
+    из них растёт (`import_health`, `module_literals`, сборка колёс), — A. Набор
+    B зеленел, ни разу не посмотрев на исходники B.
+
+    Ключом кто-либо считать не пытается: набор в прогоне ровно один, поэтому
+    один корень на процесс — не упрощение, а факт устройства pytest.
+    """
+    global _SUITE_ROOT
+    _SUITE_ROOT = Path(root).resolve()
+    repo_root.cache_clear()
+    # Ленивые константы могли уже осесть в globals() со старым корнем.
+    for name in _LAZY_PATHS:
+        globals().pop(name, None)
+
+
 @lru_cache(maxsize=1)
 def repo_root() -> Path | None:
     """Корень рабочей копии монорепозитория, иначе None. НЕ бросает."""
+    if _SUITE_ROOT is not None:
+        return _SUITE_ROOT
     return repo_root_from(Path(__file__))
 
 

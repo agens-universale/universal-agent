@@ -57,10 +57,19 @@ def make_server(tmp_path):
     """Создаёт изолированный экземпляр server с мокнутыми load_*_config + кастомным SWARM_CONFIG."""
 
     def factory(enabled=True):
-        # Сбрасываем кеш server и зависимостей.
+        # Сбрасываем кеш server: SERVER_CONFIG = load_server_config() исполняется
+        # НА ИМПОРТЕ, поэтому патчи ниже действуют только на свежий импорт.
+        #
+        # Условие тут дважды промахивалось мимо цели: имя "server" осталось от
+        # дореформенного расклада, а "gc_server.server." с точкой на конце не
+        # ловит сам ключ "gc_server.server" — только гипотетические подмодули,
+        # которых нет. Сброс был no-op: модуль, единожды импортированный любым
+        # другим тестом (например, test_trace_id_server.py), переживал фабрику, и
+        # тесты шли против настоящего config_server.yml хоста. Файл Linux-only,
+        # так что на macOS промах не проявлялся.
         for mod in list(sys.modules):
-            if mod in ("server",) or mod.startswith("gc_server.server."):
-                del sys.modules[mod]
+            if mod == "gc_server.server" or mod.startswith("gc_server.server."):
+                sys.modules.pop(mod, None)
 
         threads_dir = tmp_path / "threads"
         sandbox_dir = tmp_path / "sandbox"

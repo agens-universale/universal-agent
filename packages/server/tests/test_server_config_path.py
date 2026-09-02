@@ -127,3 +127,50 @@ def test_agent_overrides_other_keys_still_applied(monkeypatch):
 
     assert cfg["stop_tools"] == ["write_to_file"]
     assert cfg["max_steps"] == 7
+
+
+def _agent_md(server_agentmd_path, cfg_path):
+    """cfg["agent_md_path"] для заданной пары «значение поля, путь конфига»."""
+    return server_config.build_agent_config_for_server(
+        {
+            "config_path": str(cfg_path),
+            "agent": {"server_agentmd_path": server_agentmd_path},
+        }
+    )["agent_md_path"]
+
+
+def test_relative_agent_md_is_found_next_to_the_config(tmp_path):
+    """Пример из docs/server.md — файл рядом с config_server.yml — обязан находиться.
+
+    На develop `PROJECT_ROOT` был корнем репозитория, где лежит и сам
+    `config_server.yml`, поэтому `server_agentmd_path: "./server_agent.md"`
+    указывал на соседний файл. После переезда ассетов внутрь пакета тот же
+    якорь стал вести в `packages/core/assets`, и пример перестал работать —
+    молча: `build_instructions` возвращает пустой текст, а сервер продолжает
+    обслуживать запросы агентом БЕЗ системных инструкций.
+    """
+    own = tmp_path / "server_agent.md"
+    own.write_text("# инструкции\n", encoding="utf-8")
+    assert _agent_md("./server_agent.md", tmp_path / "config_server.yml") == str(own)
+
+
+def test_relative_agent_md_falls_back_to_bundled_assets(tmp_path):
+    """Рядом с конфигом нет — берём bundled-промпт дистрибутива."""
+    resolved = _agent_md("prompts/server_agent.md", tmp_path / "config_server.yml")
+    assert os.path.isfile(resolved), resolved
+    assert resolved.startswith(server_config.PROJECT_ROOT)
+
+
+def test_missing_agent_md_is_loud(tmp_path, caplog):
+    """Ненайденный файл кричит: тихо работать без инструкций сервер не должен."""
+    with caplog.at_level(logging.WARNING, logger=server_config.__name__):
+        _agent_md("./nowhere.md", tmp_path / "config_server.yml")
+    assert "server_agentmd_path" in caplog.text
+    assert str(tmp_path) in caplog.text
+
+
+def test_absolute_agent_md_is_taken_as_is(tmp_path):
+    explicit = tmp_path / "elsewhere" / "a.md"
+    explicit.parent.mkdir(parents=True, exist_ok=True)
+    explicit.write_text("x", encoding="utf-8")
+    assert _agent_md(str(explicit), tmp_path / "config_server.yml") == str(explicit)

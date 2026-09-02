@@ -48,9 +48,13 @@ import json
 
 
 def test_probe(request):
+    spec = importlib.util.find_spec("sentinel_gc_pkg")
     print("GATE " + json.dumps({
         "rootdir": str(request.config.rootpath),
-        "sentinel_importable": importlib.util.find_spec("sentinel_gc_pkg") is not None,
+        "sentinel_importable": spec is not None,
+        # Откуда именно взялся маркер: при двух копиях «нашёлся» мало, надо знать
+        # ЧЕЙ. Ровно этим и отличается починенный гейт от прежнего.
+        "sentinel_origin": spec.origin if spec is not None else None,
     }))
 """
 
@@ -82,14 +86,14 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _working_copy(tmp_path):
+def _working_copy(tmp_path, name="repo"):
     """Синтетическая рабочая копия: наш корень, наш пакет, чужой проект внутри.
 
     Дерево НЕПОЛНОЕ — из ``packages/core/src`` есть только модуль-маркер. Это не
     экономия: ровно так выглядит sparse-чекаут или bisect на коммит до
     появления ``gc_core/tools``, и на этом же дереве проверяется отказ заглушки.
     """
-    root = tmp_path / "repo"
+    root = tmp_path / name
     # Маркер рабочей копии — тот самый, по которому её ищет gc_testkit.paths.
     _write(root / "packages" / "core" / "pyproject.toml",
            '[project]\nname = "gc-core"\n\n' + _INI)
@@ -110,11 +114,11 @@ def _working_copy(tmp_path):
     return root
 
 
-def _run(root, rel, *, hide_mcp=False, tmp_path=None):
+def _run(root, rel, *, hide_mcp=False, tmp_path=None, testkit_root=None):
     env = dict(os.environ)
     # PYTHONPATH идёт ВПЕРЕДИ site-packages, поэтому gc_testkit резолвится в
     # копию, а не в editable-исходники репозитория.
-    entries = [str(root / "packages" / "testkit" / "src")]
+    entries = [str((testkit_root or root) / "packages" / "testkit" / "src")]
     if hide_mcp:
         hide = tmp_path / "hide"
         _write(hide / "sitecustomize.py", _HIDE_MCP)
@@ -208,3 +212,32 @@ def test_every_vendored_server_declares_its_own_rootdir():
         "trafilatura/readability — набор останется зелёным, потому что "
         "извлекать перестанет что бы то ни было."
     )
+
+
+def test_suite_from_another_checkout_is_still_ours(tmp_path):
+    """Набор чекаута B, запущенный тест-китом из чекаута A, проверяет B.
+
+    Ровно та конфигурация, в которой ветку и ревьюят: venv собран в одном
+    чекауте, pytest запущен в другом (git worktree, второй клон, каталог
+    ревью). Пока гейт сверял rootdir с корнем, вычисленным от ``__file__``
+    установленного тест-кита, он объявлял этот набор ЧУЖИМ — и молча, потому
+    что предупреждение печатала только ветка «рабочая копия не найдена вовсе».
+    Бутстрап выключался, autouse-фикстуры выключались, набор B шёл по
+    исходникам A через ``.pth`` и был зелёным.
+
+    Обе копии несут маркер под ОДНИМ именем: «маркер нашёлся» тут ничего не
+    доказывает, важно, из какой копии он приехал.
+    """
+    root_a = _working_copy(tmp_path, name="checkout_a")
+    root_b = _working_copy(tmp_path, name="checkout_b")
+
+    res = _run(root_b, "", testkit_root=root_a)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+    probe = _gate(res)
+    assert probe["rootdir"] == str(root_b), probe
+    assert probe["sentinel_importable"] is True, probe
+    assert probe["sentinel_origin"].startswith(str(root_b)), probe
+    # Расхождение чекаутов законно, но обязано называть себя: дальше корнем
+    # всего тест-кита работает B, включая сборку колёс в test_packaging_wheel.
+    assert "gc_testkit" in res.stderr and str(root_a) in res.stderr, res.stderr
