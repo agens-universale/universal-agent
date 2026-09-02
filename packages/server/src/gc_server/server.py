@@ -12,7 +12,13 @@ from gc_core.run_context import create_run_context
 from gc_core.agent_executor import AgentExecutor
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.config import build_auth_connector, cli_forces_legacy_model
-from gc_core.thread_store import load_thread_messages, load_thread_meta, resolve_threads_dir, validate_thread_id
+from gc_core.thread_store import (
+    load_thread_messages,
+    load_thread_meta,
+    resolve_threads_dir,
+    sanitize_system_id,
+    validate_thread_id,
+)
 from gc_server.rest_api.agent_execution_registry import agent_run_registry
 from gc_server.rest_api.server_config import build_agent_config_for_server, load_server_config
 from gc_server.rest_api.utils import ensure_task_id, normalize_system, patch_asyncio_run_for_fastapi
@@ -282,7 +288,15 @@ async def events_webhook(request: Request):
             detail={"status": "error", "payload": "JSON body must be an object"},
         )
 
-    task_id = ensure_task_id(payload)
+    try:
+        task_id = ensure_task_id(payload)
+    except ValueError as e:
+        # Присланный task_id уезжает в имя каталога и дальше в пути ФС.
+        # Отвергаем ДО любого побочного эффекта, а не падаем позже в сторе.
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": f"invalid task_id: {e}"},
+        )
 
     # trace_id — поле контекста задачи, а не часть запроса к модели: снимаем его
     # ДО json.dumps(payload) ниже, иначе значение уедет в промпт модели.
@@ -511,7 +525,15 @@ async def swarm_run(request: Request):
         )
 
     # Нормализуем system и task_id по тем же правилам, что и в вебхуке.
-    task_id = ensure_task_id(payload)
+    try:
+        task_id = ensure_task_id(payload)
+    except ValueError as e:
+        # Присланный task_id уезжает в имя каталога и дальше в пути ФС.
+        # Отвергаем ДО любого побочного эффекта, а не падаем позже в сторе.
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": f"invalid task_id: {e}"},
+        )
     # trace_id — поле контекста задачи, а не часть запроса к модели. Снимаем его
     # ДО того, как payload уедет в песочницу целиком: он доставляется ребёнку
     # аргументом `-q`, то есть оставленный в теле трейс попал бы в промпт модели
@@ -526,7 +548,14 @@ async def swarm_run(request: Request):
     source_value = payload.get("system")
     defaults = SERVER_CONFIG.get("defaults") or {}
     default_system = str(defaults.get("system", "generic"))
-    system = normalize_system(source_value, default_system=default_system)
+    # `system` тоже уезжает в имя каталога `swarm_<system>_<task_id>`, а
+    # `normalize_system` делает лишь strip+lower — `../` проходил насквозь.
+    # Здесь коэрсинг, а не отказ: в имени системы законны пробелы и регистр,
+    # 400 сломал бы живых клиентов. У `task_id` наоборот отказ — коэрсинг
+    # молча склеил бы разные задачи в один тред.
+    system = sanitize_system_id(
+        normalize_system(source_value, default_system=default_system)
+    )
     payload["system"] = system
     swarm_id = f"swarm_{system}_{task_id}"
 
@@ -634,8 +663,18 @@ async def get_swarm_status(system: str, task_id: str):
             detail={"status": "error", "reason": "swarm_disabled"},
         )
 
-    sys_norm = str(system or "").lower().strip()
-    task_norm = str(task_id or "").strip()
+    # `task_id` из URL уезжает в путь `threads_dir/swarm_<sys>_<task>/meta.json`.
+    # Один strip() пропускал `../`, и обычный GET читал произвольный файл. Разбор
+    # тот же, что у соседнего `/logs/{system}/{task_id}`; `system` не отвергаем, а
+    # нормализуем — там законны пробелы и регистр.
+    sys_norm = sanitize_system_id(str(system or "").lower().strip())
+    try:
+        task_norm = validate_thread_id(str(task_id or ""))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": str(e)},
+        )
     if not sys_norm or not task_norm:
         raise HTTPException(
             status_code=400,
@@ -690,8 +729,18 @@ async def get_swarm_logs(system: str, task_id: str):
             detail={"status": "error", "reason": "swarm_disabled"},
         )
 
-    sys_norm = str(system or "").lower().strip()
-    task_norm = str(task_id or "").strip()
+    # `task_id` из URL уезжает в путь `threads_dir/swarm_<sys>_<task>/meta.json`.
+    # Один strip() пропускал `../`, и обычный GET читал произвольный файл. Разбор
+    # тот же, что у соседнего `/logs/{system}/{task_id}`; `system` не отвергаем, а
+    # нормализуем — там законны пробелы и регистр.
+    sys_norm = sanitize_system_id(str(system or "").lower().strip())
+    try:
+        task_norm = validate_thread_id(str(task_id or ""))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": str(e)},
+        )
     if not sys_norm or not task_norm:
         raise HTTPException(
             status_code=400,
@@ -749,6 +798,17 @@ def serve() -> int:
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    # Какой конфиг прочитан — печатаем ЗДЕСЬ, а не в резолвере. `SERVER_CONFIG`
+    # вычисляется на уровне модуля, то есть ДО того, как `serve()` дойдёт до
+    # `basicConfig` выше: строка из резолвера уходила через `logging.lastResort`
+    # с порогом WARNING и не доходила никуда. Проверено живым `gc-serve` —
+    # конфиг был найден, а строки в выводе не было. Всё нужное уже лежит в
+    # `SERVER_CONFIG["config_path"]`, читать файл заново не требуется.
+    logger.info(
+        "config_server.yml: %s",
+        SERVER_CONFIG.get("config_path") or "не найден, взят минимальный дефолт",
     )
 
     # Тревога по СОСТОЯНИЮ, а не по факту «файл не найден». Прежде она жила в
