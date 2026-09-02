@@ -35,7 +35,7 @@ class FetchUrl(AbstractSimpleTool):
         self._state = state
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {
             "type": "function",
             "name": "exec_fetch_url",
@@ -91,7 +91,7 @@ class FetchUrl(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return f"""Tool name: exec_fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
 Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout_seconds": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}, "proxy": {{"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}}}, "required": ["url"], "additionalProperties": false}}

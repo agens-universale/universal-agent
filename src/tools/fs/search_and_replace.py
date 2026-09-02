@@ -1,7 +1,7 @@
 import json
 import functools
 import difflib
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from tools.simple_tool_base import AbstractSimpleTool
 from tools.fs.edit_line_endings import (
     collect_literal_matches,
@@ -56,7 +56,7 @@ class SearchAndReplace(AbstractSimpleTool):
         return diff_text[:max_chars], True
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_search_and_replace",
@@ -147,7 +147,7 @@ class SearchAndReplace(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         description = '''Tool name: fs_search_and_replace  
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}

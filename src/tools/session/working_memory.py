@@ -99,7 +99,7 @@ class WorkingMemory(AbstractSimpleTool):
         return default
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "session_memory",
@@ -197,7 +197,7 @@ class WorkingMemory(AbstractSimpleTool):
         )
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return """Tool name: session_memory
 Tool description: Thread/session memory for THIS dialogue only — not project-wide remember-forever.
 Persistent per-thread operational memory for the agent.

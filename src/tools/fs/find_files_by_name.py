@@ -8,6 +8,11 @@ import os
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from backends.protocol import WalkOutputTooLargeError
+from config_modules.fs_tools import (
+    FsFindFilesByNameConfig,
+    parse_find_files_by_name_config,
+)
 from security.path_policy import resolve_tool_context, _extract_config_dict
 from security.read_guard import (
     ReadGuardViolation,
@@ -31,12 +36,6 @@ from utils.tool_report_paths import tool_report_abspath
 
 _GLOB_META_RE = re.compile(r"[*?\[\]]")
 
-# Hard safety caps (not configurable in v1).
-DEFAULT_MAX_MATCHES = 100
-HARD_MAX_MATCHES = 200
-DEFAULT_MAX_VISITED = 500_000
-
-
 def _compile_glob_fullmatch(pattern: str, *, case_insensitive: bool) -> re.Pattern:
     flags = re.IGNORECASE if case_insensitive else 0
     return re.compile(f"^{glob_to_regex(pattern)}$", flags)
@@ -46,8 +45,10 @@ class FindFilesByName(AbstractSimpleTool):
     """Full-tree locate by basename, path glob, or path substring (not file contents)."""
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
+        _cfg = parse_find_files_by_name_config(config_dict)
+        _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
         return {
             "type": "function",
             "name": "fs_find_files_by_name",
@@ -64,7 +65,7 @@ class FindFilesByName(AbstractSimpleTool):
                 "directory whose name starts with '.'. "
                 "If path itself is such a directory, it is still searched. "
                 "case_insensitive defaults to true. "
-                "At most max_matches results (default 100, maximum 200); "
+                f"At most max_matches results (default {_dmm}, maximum {_hmm}); "
                 "truncated=true if the search stopped early."
             ),
             "parameters": {
@@ -102,9 +103,9 @@ class FindFilesByName(AbstractSimpleTool):
                     "max_matches": {
                         "type": "integer",
                         "minimum": 1,
-                        "maximum": 200,
+                        "maximum": _hmm,
                         "description": (
-                            "Maximum matches to return. Default 100, maximum 200. "
+                            f"Maximum matches to return. Default {_dmm}, maximum {_hmm}. "
                             "truncated=true if more matches may exist."
                         ),
                     },
@@ -116,8 +117,10 @@ class FindFilesByName(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         skip = hard_exclude_dir_names_for_prompt()
+        _cfg = parse_find_files_by_name_config(config_dict)
+        _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
         return (
             "Tool name: fs_find_files_by_name\n"
             "Find files/directories by name, path fragment, or glob under an absolute directory. "
@@ -129,10 +132,12 @@ class FindFilesByName(AbstractSimpleTool):
             "The mode is inferred: any of * ? [ ] makes it a glob, so 'config[1].yml' is a "
             "character class matching 'config1.yml' — for a literal bracketed name search a "
             "bracket-free fragment.\n"
-            "Args: path (required, absolute directory), query (required), "
-            "case_insensitive (default true), max_matches (default 100, maximum 200).\n"
-            "Response: ok, matches[{path, type, …}], count, truncated, "
-            "walk_stats (visited, stop_reason); guidance only when truncated.\n"
+            f"Args: path (required, absolute directory), query (required), "
+            f"case_insensitive (default true), max_matches (default {_dmm}, maximum {_hmm}).\n"
+            "Response: ok, matches[{path, size_bytes, …}], count, truncated, "
+            "walk_stats (visited, stop_reason); guidance only when truncated. "
+            "type/is_hidden/is_binary are omitted unless non-default "
+            "(directory / true / true).\n"
         )
 
     def _result(
@@ -162,7 +167,7 @@ class FindFilesByName(AbstractSimpleTool):
         if truncated:
             stop = (walk_stats or {}).get("stop_reason")
             if stop == "max_visited":
-                cap = (walk_stats or {}).get("max_visited", DEFAULT_MAX_VISITED)
+                cap = (walk_stats or {}).get("max_visited", 0)
                 payload["guidance"] = (
                     f"Search stopped after visiting {cap} entries (max_visited). "
                     "Narrow path or query; increasing max_matches will not help."
@@ -190,9 +195,8 @@ class FindFilesByName(AbstractSimpleTool):
         truncated: bool = False,
         walk_stats: Optional[Dict[str, Any]] = None,
         error: Optional[Dict[str, Any]] = None,
-        listing_backend: Optional[str] = None,
     ) -> str:
-        raw = self._result(
+        return self._result(
             path=path,
             query=query,
             case_insensitive=case_insensitive,
@@ -203,11 +207,12 @@ class FindFilesByName(AbstractSimpleTool):
             walk_stats=walk_stats,
             error=error,
         )
-        if listing_backend is None:
-            return raw
-        payload = json.loads(raw)
-        payload["listing_backend"] = listing_backend
-        return json.dumps(payload, ensure_ascii=False)
+
+    def _resolve_config(self) -> FsFindFilesByNameConfig:
+        """Load find_files_by_name limits from config (FsToolsConfig.find_files_by_name)."""
+        context = resolve_tool_context(self)
+        cfg_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
+        return parse_find_files_by_name_config(cfg_dict if isinstance(cfg_dict, dict) else {})
 
     def _resolve_read_guard(self) -> Tuple[Any, Any, Any]:
         context = resolve_tool_context(self)
@@ -275,34 +280,46 @@ class FindFilesByName(AbstractSimpleTool):
 
         return _match_sub
 
-    def _probe_file_meta(self, filepath: str) -> Dict[str, Any]:
-        """size / binary for a matched file; never raises."""
-        size_bytes: Optional[int] = None
+    def _probe_file_meta(
+        self, filepath: str, size_bytes: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """size / binary for a matched file; never raises.
+
+        ``size_bytes`` comes with the walk row when the backend knows it
+        (find -printf %s / lstat) — no second round trip per match.
+        """
         is_binary: Optional[bool] = None
-        try:
-            size_bytes = int(self._backend.getsize(filepath))
-        except OSError:
-            size_bytes = None
+        if size_bytes is None:
+            try:
+                size_bytes = int(self._backend.getsize(filepath))
+            except OSError:
+                size_bytes = None
         try:
             sample = self._backend.read_head_bytes(filepath, BINARY_SAMPLE_BYTES)
             classification = classify_content_from_sample(filepath, sample)
             is_binary = classification.is_binary
         except OSError:
             is_binary = None
-        return {
-            "size_bytes": size_bytes,
-            "is_binary": is_binary,
-        }
+        meta: Dict[str, Any] = {"size_bytes": size_bytes}
+        if is_binary:
+            meta["is_binary"] = True
+        return meta
 
-    def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
+    def _entry(
+        self, filepath: str, is_dir: bool, size: Optional[int] = None
+    ) -> Dict[str, Any]:
+        # Default match is a visible text file: omit type/is_hidden/is_binary
+        # unless they differ (directory / hidden / binary). size_bytes stays
+        # for triage.
         entry: Dict[str, Any] = {
             "path": tool_report_abspath(filepath, workspace=self._workspace),
-            "type": "directory" if is_dir else "file",
-            "is_hidden": self._backend.is_hidden(filepath),
         }
-        # Directories have no file meta; omit null size/binary fields.
+        if is_dir:
+            entry["type"] = "directory"
+        if self._backend.is_hidden(filepath):
+            entry["is_hidden"] = True
         if not is_dir:
-            entry.update(self._probe_file_meta(filepath))
+            entry.update(self._probe_file_meta(filepath, size))
         return entry
 
     @enforce_read_guard(path_arg="path")
@@ -313,16 +330,21 @@ class FindFilesByName(AbstractSimpleTool):
         case_insensitive: bool = True,
         max_matches: Optional[int] = None,
     ) -> str:
+        _ffbn_config = self._resolve_config()
+        default_max_matches = int(_ffbn_config.default_max_matches)
+        hard_max_matches = int(_ffbn_config.hard_max_matches)
+        max_visited = int(_ffbn_config.max_visited)
+
         query_coalesced = coalesce_optional_string(query)
         if query_coalesced is not None:
             query = query_coalesced
         if max_matches is None:
-            max_matches = DEFAULT_MAX_MATCHES
+            max_matches = default_max_matches
 
         path_for_report = path if isinstance(path, str) else ""
         query_for_report = query if isinstance(query, str) else None
         ci = case_insensitive if isinstance(case_insensitive, bool) else bool(case_insensitive)
-        mm = max_matches if isinstance(max_matches, int) else DEFAULT_MAX_MATCHES
+        mm = max_matches if isinstance(max_matches, int) else default_max_matches
 
         _rg_cfg, _rg_root, _rg_extra = self._resolve_read_guard()
         _result = functools.partial(
@@ -355,8 +377,8 @@ class FindFilesByName(AbstractSimpleTool):
             )
         if not isinstance(max_matches, int) or max_matches < 1:
             return _result(ok=False, error={"type": "invalid_argument", "field": "max_matches"})
-        if max_matches > HARD_MAX_MATCHES:
-            max_matches = HARD_MAX_MATCHES
+        if max_matches > hard_max_matches:
+            max_matches = hard_max_matches
 
         query = query.strip()
         path = self._backend.normpath(path)
@@ -381,7 +403,6 @@ class FindFilesByName(AbstractSimpleTool):
         root_norm = os.path.normpath(path)
         # Enumeration via backend.iter_walk only (Harbor: private walk channel
         # ~50M fail-closed; local: os.walk). No tool-exec find dump (60k).
-        listing_backend = "python"
 
         exclude_names = effective_exclude_dir_names()
 
@@ -402,15 +423,19 @@ class FindFilesByName(AbstractSimpleTool):
             return True
 
         try:
-            walk_iter = self._backend.iter_walk(
-                path, should_descend=_should_descend
+            walk_iter = self._backend.iter_walk_entries(
+                path,
+                should_descend=_should_descend,
+                prune_names=tuple(sorted(exclude_names)),
+                prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
             )
-            for rel, is_d in walk_iter:
+            for entry in walk_iter:
+                rel, is_d = entry.rel, entry.is_dir
                 base = os.path.basename(rel)
                 if is_agent_hidden(base):
                     continue
                 visited += 1
-                if visited > DEFAULT_MAX_VISITED:
+                if visited > max_visited:
                     truncated = True
                     stop_reason = "max_visited"
                     break
@@ -422,11 +447,16 @@ class FindFilesByName(AbstractSimpleTool):
                     continue
                 if not matcher(rel, base):
                     continue
-                matches.append(self._entry(abs_path, is_d))
+                matches.append(self._entry(abs_path, is_d, size=entry.size))
                 if len(matches) >= max_matches:
                     truncated = True
                     stop_reason = "max_matches"
                     break
+        except WalkOutputTooLargeError as e:
+            return _result(
+                ok=False,
+                error={"type": "walk_too_large", "message": str(e)},
+            )
         except PermissionError as e:
             return _result(
                 ok=False,
@@ -452,7 +482,6 @@ class FindFilesByName(AbstractSimpleTool):
             walk_stats={
                 "visited": visited,
                 "stop_reason": stop_reason,
-                "max_visited": DEFAULT_MAX_VISITED,
+                "max_visited": max_visited,
             },
-            listing_backend=listing_backend,
         )

@@ -68,7 +68,7 @@ class MemoryFiles(AbstractSimpleTool):
         return default
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "memory_files",

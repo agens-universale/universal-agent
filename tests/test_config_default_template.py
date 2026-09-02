@@ -75,6 +75,7 @@ EXPERT_ONLY_KEYS: set = {
     "agent.stored_tool_outputs_max_entries",  # размер стора больших tool-outputs
     "agent.exec_timeout_sec",                # таймаут execute_command / run_python_code
     "agent.exec_output_capture_max_chars",   # RAM-cap stdout/stderr на поток для exec
+    "agent.walk_output_max_chars",           # потолок приватного канала обхода дерева (Harbor)
     "agent.limit_project_metadata",           # скрыть проектные метаданные из системного промпта
     # Per-run лимиты надёжности (по умолчанию выключены); см. docs/configuration.md.
     "agent.session_token_limit",

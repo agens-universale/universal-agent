@@ -122,6 +122,13 @@ fs_tools:
     # node_modules, .git (clearing this list does not re-open them).
     exclude_dir_names: []
 
+  # fs_find_files_by_name — search files by name/path/glob under a directory.
+  # Matches names and paths only; does NOT search file contents.
+  find_files_by_name:
+    default_max_matches: 100          # max_matches if caller omits it
+    hard_max_matches: 300             # hard ceiling: max_matches_eff = min(requested, 300)
+    max_visited: 500000               # walk safety cap (not a caller argument)
+
 security:
   command_moderation:
     mode: deny

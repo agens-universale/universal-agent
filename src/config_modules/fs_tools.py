@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class FsFindInFilesConfig(BaseModel):
@@ -34,6 +36,14 @@ class FsFindInFilesConfig(BaseModel):
     max_candidates_complex: int = Field(
         default=50_000,
         description="Max walk candidates for complex (directory).",
+    )
+    max_unfiltered_host_reads: int = Field(
+        default=1000,
+        description=(
+            "Sandbox backends only: max candidate files read from the host without a "
+            "successful in-sandbox prefilter (it failed, or the pattern has no fixed "
+            "substring). Above it the search refuses with guidance to narrow."
+        ),
     )
     max_open_files_affix_or: int = Field(
         default=50_000,
@@ -77,6 +87,79 @@ class FsFindInFilesConfig(BaseModel):
     )
 
 
+def parse_find_in_files_config(
+    config_dict: Optional[dict[str, Any]] = None,
+) -> FsFindInFilesConfig:
+    """Read ``fs_tools.find_in_files`` from a raw config dict.
+
+    Invalid nested values fall back to class defaults (same as runtime tools).
+    """
+    fif_raw: Any = {}
+    if isinstance(config_dict, dict):
+        fs_raw = config_dict.get("fs_tools", {})
+        if isinstance(fs_raw, dict):
+            fif_raw = fs_raw.get("find_in_files", {}) or {}
+    try:
+        return FsFindInFilesConfig.model_validate(
+            fif_raw if isinstance(fif_raw, dict) else {}
+        )
+    except Exception:
+        return FsFindInFilesConfig()
+
+
+class FsFindFilesByNameConfig(BaseModel):
+    """Settings for ``fs_find_files_by_name`` — locate files/dirs by name or glob.
+
+    ``default_max_matches`` is used when the caller omits ``max_matches``.
+    ``hard_max_matches`` is the absolute ceiling: values above it are clamped.
+    ``max_visited`` is a walk safety cap, not a caller argument.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_max_matches: int = Field(
+        default=100,
+        ge=1,
+        description="``max_matches`` used when the caller does not provide one.",
+    )
+    hard_max_matches: int = Field(
+        default=300,
+        ge=1,
+        description="Hard ceiling: ``max_matches`` is clamped to this value.",
+    )
+    max_visited: int = Field(
+        default=500_000,
+        ge=1,
+        description="Walk safety cap: stop after this many directory entries.",
+    )
+
+    @model_validator(mode="after")
+    def _default_not_above_hard(self) -> "FsFindFilesByNameConfig":
+        if self.default_max_matches > self.hard_max_matches:
+            raise ValueError("default_max_matches must be <= hard_max_matches")
+        return self
+
+
+def parse_find_files_by_name_config(
+    config_dict: Optional[dict[str, Any]] = None,
+) -> FsFindFilesByNameConfig:
+    """Read ``fs_tools.find_files_by_name`` from a raw config dict.
+
+    Invalid nested values fall back to class defaults (same as runtime tools).
+    """
+    ffbn_raw: Any = {}
+    if isinstance(config_dict, dict):
+        fs_raw = config_dict.get("fs_tools", {})
+        if isinstance(fs_raw, dict):
+            ffbn_raw = fs_raw.get("find_files_by_name", {}) or {}
+    try:
+        return FsFindFilesByNameConfig.model_validate(
+            ffbn_raw if isinstance(ffbn_raw, dict) else {}
+        )
+    except Exception:
+        return FsFindFilesByNameConfig()
+
+
 class FsToolsConfig(BaseModel):
     """Caps for FS tools that load whole-file content into memory."""
 
@@ -97,4 +180,8 @@ class FsToolsConfig(BaseModel):
     find_in_files: FsFindInFilesConfig = Field(
         default_factory=FsFindInFilesConfig,
         description="Settings for fs_find_in_files (search text inside files).",
+    )
+    find_files_by_name: FsFindFilesByNameConfig = Field(
+        default_factory=FsFindFilesByNameConfig,
+        description="Settings for fs_find_files_by_name (locate files by name/glob).",
     )
