@@ -640,6 +640,18 @@ mcp:
       url: http://127.0.0.1:8765/mcp
       server-name: science
       description: Unified scientific literature search across 10 public APIs
+      # Где исполняется протокол этого сервера. Ось независима от transport.
+      #   agent      — в процессе агента (дефолт, нынешнее поведение);
+      #   os_backend — в окружении, где работают тулы (контейнер задачи), через
+      #                FsBackend.exec. Нужно, когда сервер поднят рядом с задачей
+      #                и с хоста агента недостижим (сайдкар в docker-сети).
+      # На sandbox-бэкенде поддержаны только http / stream_http / stdio: для
+      # sse / stream_sse / stream_stdio нужна живая сессия, и это ошибка резолва,
+      # а не тихий откат на агента. Материалы TLS (client-cert, путь к CA в
+      # verify-ssl) с os_backend тоже ошибка — файлы в контейнер не копируются,
+      # допустим только verify-ssl: false. На локальном бэкенде значение
+      # игнорируется: сеть и PATH там те же, что у агента.
+      # execute_on: os_backend
       # HTTP-headers для MCP (для transport: http/sse и stream_http/stream_sse).
       # Удобно хранить секреты в ENV и подставлять через ${ENV:...}.
       #

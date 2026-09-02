@@ -34,6 +34,11 @@ class McpServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     transport: Literal["http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"]
+    # Where this server's protocol is spoken. `agent` (default) = the agent's own
+    # process, today's behaviour. `os_backend` = the environment the tool layer
+    # works in (task container), reached through FsBackend.exec. Orthogonal to
+    # `transport`: the protocol does not change, only the locus.
+    execute_on: Literal["agent", "os_backend"] = "agent"
     url: str | None = None
     token: str | None = None
     # Дополнительные HTTP-headers для MCP HTTP/SSE транспортов.

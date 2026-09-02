@@ -264,7 +264,9 @@ def build_tools_data(
     for k, v in skills_tools_data.items():
         tools_data[k] = v
 
-    mcp_tools_data, mcp_status = get_mcp_tools_data(config_dict, on_progress=on_progress)
+    mcp_tools_data, mcp_status = get_mcp_tools_data(
+        config_dict, on_progress=on_progress, os_backend=os_backend
+    )
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 
@@ -311,6 +313,34 @@ def build_tools_data(
     tools_description = [v["description"] for v in tools_data.values()]
 
     return tools_data, tools_spec, tools_description, mcp_status
+
+
+def tool_arguments_valid(
+    tool_name: str,
+    arguments: Any,
+    tools_data_: Dict[str, Dict[str, Any]],
+) -> bool:
+    """True, если аргументы прошли бы валидацию apply_tool (те же правила и spec).
+
+    Неизвестный тул или запись без spec не судим (True): решать будет сам
+    apply_tool. Исключение ловится здесь же, поэтому результат не зависит от
+    того, какое поколение модуля держит вызывающая сторона.
+    """
+    entry = tools_data_.get(tool_name) or {}
+    spec = entry.get("spec")
+    if not isinstance(spec, dict):
+        return True
+    try:
+        parse_and_validate_tool_arguments(
+            tool_name=tool_name,
+            arguments=arguments,
+            tool_spec=spec,
+            allow_empty_for_empty_schema=True,
+            tool_fabric=entry.get("tool_fabric"),
+        )
+    except WrongFunctionArgumentsException:
+        return False
+    return True
 
 
 def apply_tool(
@@ -479,6 +509,7 @@ __all__ = [
     "INTERNAL_TOOL_ERROR",
     "build_tools_data",
     "apply_tool",
+    "tool_arguments_valid",
     "format_internal_tool_error_output",
     "format_unknown_tool_output",
     "is_internal_tool_error_output",
