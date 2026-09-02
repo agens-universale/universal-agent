@@ -103,3 +103,53 @@ def test_snapshot_modules_collect_every_test():
         f"собрано {len(collected)} из {expected} — модули пропускаются молча\n{out[-3000:]}"
     )
     assert "skipped" not in out, out[-3000:]
+
+
+def test_drift_list_can_only_shrink():
+    """Список разъехавшихся эталонов заморожен поимённо.
+
+    `strict=True` не даёт списку СОКРАЩАТЬСЯ незамеченно: починенный эталон даёт
+    XPASS, и он красный. А вот РОСТ не ловил никто. Сторож рядом
+    (`test_snapshot_modules_collect_every_test`) меряет `--collect-only`, где
+    xfail не уменьшает число собранных, — проверено: дописал имя, получил
+    `4 passed`.
+
+    То есть сломать композицию и заглушить это одной строкой было можно, а
+    список задумывался временным — до разбора N2.
+
+    Теперь убрать имя можно свободно (это и есть цель), а добавить — только
+    правкой этой константы, то есть осознанно и заметно в ревью.
+
+    Подмена, которую ловит тест: дописать в `_SNAPSHOT_DRIFT` любое имя.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_tui_conftest_probe", REPO / "packages" / "tui" / "tests" / "conftest.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    actual = set(module._SNAPSHOT_DRIFT)
+
+    expected = {
+        "test_confirm_banner_snapshot",
+        "test_empty_state_snapshot",
+        "test_event_focus_snapshot",
+        "test_main_full_dialog_snapshot",
+        "test_main_running_snapshot",
+        "test_palette_open_snapshot",
+        "test_sessions_picker_full_snapshot",
+        "test_settings_voice_url_presets_snapshot",
+        "test_unknown_command_snapshot",
+    }
+
+    added = sorted(actual - expected)
+    assert not added, (
+        f"в _SNAPSHOT_DRIFT добавлены имена: {added}. Список может только "
+        "сокращаться: он существует до разбора N2, и дописать туда эталон — "
+        "значит заглушить регрессию композиции, ничего не потревожив. Если "
+        "добавление осознанное, обновите ожидаемый состав здесь же."
+    )
+
+    removed = sorted(expected - actual)
+    assert not removed or len(actual) < len(expected), removed

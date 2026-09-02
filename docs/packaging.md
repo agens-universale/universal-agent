@@ -34,12 +34,25 @@
 
 ```bash
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"
-uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
-uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"       --with-executables-from gc-mcp
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"       --with-executables-from gc-mcp
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 ```
 
+`--with-executables-from gc-mcp` у узких профилей не украшение: `uv` выносит в
+`PATH` команды только запрошенного дистрибутива, а `gc-mcp` приезжает
+зависимостью и остаётся внутри venv инструмента. Без флага `gc-mcp` и
+`gc-mcp-install` в `PATH` не появятся. Мете он не нужен — она объявляет все шесть
+команд сама. Тот же флаг дописывает и обновление, см. `updater.runner`.
+
 Смена профиля — это переустановка, нужен `--force`.
+
+**Мету и листовой дистрибутив рядом не поставить.** `gc-ua` объявляет объединение
+команд всех листьев, поэтому `uv tool install gc-ua` поверх отдельно
+установленного `gc-mcp` (и наоборот) отвечает `error: Executables already exist`.
+Это ожидаемо: мета уже содержит всё, что даёт лист. Если всё же нужно
+переставить — `--force`; но после него на `gc-mcp` претендуют два инструмента, и
+`uv tool uninstall gc-mcp` унесёт команду у полного профиля.
 
 ### Почему у частичных профилей есть `#subdirectory=`, а у `gc-ua` нет
 

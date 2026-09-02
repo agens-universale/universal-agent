@@ -41,3 +41,38 @@ def test_loopback_client_ignores_socks_proxy_env(monkeypatch: pytest.MonkeyPatch
         assert client is not None
     finally:
         asyncio.run(client.aclose())
+
+
+def test_lookalike_host_is_not_loopback():
+    """`127.0.0.1.evil.com` — обычное DNS-имя, а не петля.
+
+    Здесь жила своя копия проверки с `hostname.startswith("127.")`, под которую
+    такое имя подходило. Следствие не косметическое: адрес признавался локальным,
+    `_trust_env_for_url` снимал `trust_env`, и запрос с `Authorization: Bearer`
+    уходил напрямую в интернет мимо корпоративного прокси — то есть токен
+    покидал периметр.
+
+    Канон `gc_core.utils.url_addr.is_loopback` разбирает адрес через
+    `ipaddress`, а не по префиксу строки, и был написан ровно против этой дыры;
+    сюда его забыли переключить.
+
+    Подмена, которую ловит тест: вернуть `hostname.startswith("127.")`.
+    """
+    from gc_core.tools.connect_mcp.stream_client import (
+        _is_loopback_url,
+        _trust_env_for_url,
+    )
+
+    for evil in (
+        "http://127.0.0.1.evil.com/mcp",
+        "http://127.0.0.1.attacker.example/mcp",
+        "https://localhost.evil.com/mcp",
+    ):
+        assert not _is_loopback_url(evil), evil
+        assert _trust_env_for_url(evil), f"{evil}: прокси снят, токен уйдёт мимо него"
+
+    # Положительный контроль: настоящая петля по-прежнему обходит прокси, иначе
+    # тест прошёл бы и на реализации «всё считать внешним».
+    for local in ("http://127.0.0.1:8765/mcp", "http://localhost:8765/mcp", "http://[::1]:8765/mcp"):
+        assert _is_loopback_url(local), local
+        assert not _trust_env_for_url(local), local

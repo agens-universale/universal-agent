@@ -42,6 +42,7 @@ from pathlib import Path
 
 import gc_testkit
 import gc_testkit.import_health as ih
+from gc_testkit.paths import REPO
 from gc_testkit.import_health import scan
 
 
@@ -234,3 +235,67 @@ def test_module_bindings_are_cached():
     scan()
     info = ih._module_bindings.cache_info()
     assert info.hits > info.misses, info
+
+
+def test_missing_module_is_a_finding_not_a_skip(monkeypatch, tmp_path):
+    """Импорт несуществующего модуля НАШЕГО пакета обязан быть находкой.
+
+    Он проходил мимо всех трёх проверок:
+
+        from gc_core.nosuch_xyz import thing        →  0 находок
+        from gc_core.config import nosuch_name_xyz  →  1 находка
+
+    Причина: `_module_bindings` возвращает `None`, когда модуля нет, а
+    `check_missing_names` трактовал любой `None` как «не смогли проверить» и
+    делал `continue`. Логика была написана против ложных срабатываний на чужих
+    зависимостях (N5) и заодно накрыла самый очевидный случай — тот, ради
+    которого сетка и существует.
+
+    Подмена, которую ловит тест: убрать ветку `if _module_exists(...) is False`.
+    """
+    findings = ih.check_missing_names(
+        REPO / "packages" / "core" / "tests" / "probe.py",
+        ast.parse("from gc_core.nosuch_module_xyz import thing\n"),
+        ih._our_prefixes(),
+    )
+
+    assert [f.kind for f in findings] == ["missing_module"], findings
+    assert "gc_core.nosuch_module_xyz" in findings[0].detail
+
+
+def test_absent_module_of_alien_package_stays_a_skip(monkeypatch):
+    """А вот чужой пакет, которого нет в окружении, находкой быть НЕ должен.
+
+    Положительный контроль к предыдущему тесту: без него он прошёл бы и на
+    реализации «объявлять находкой всё, чего не нашли», а это ровно те 173
+    ложных срабатывания, от которых уходили в N5. Судим только СВОИ префиксы.
+    """
+    findings = ih.check_missing_names(
+        REPO / "packages" / "core" / "tests" / "probe.py",
+        ast.parse("from some_alien_package_xyz.mod import thing\n"),
+        ih._our_prefixes(),
+    )
+
+    assert findings == [], findings
+
+
+def test_litellm_is_judged_like_its_neighbour():
+    """`external/litellm` попадает в обход, а вендоренные MCP — нет.
+
+    Соседняя сетка `module_literals` судит `external/` с самого начала, а
+    `import_health` перечислял корни включением и до litellm не доходил.
+    Расхождение двух сеток на ровном месте.
+
+    Вендоры при этом сознательно вне обхода: чужой код с собственной историей,
+    и `legacy_toplevel` знает имена `config`, `server`, `utils` — их синк красил
+    бы наш прогон.
+
+    Подмена: убрать `"external/litellm"` из `_SCAN_ROOTS` либо дописать туда
+    `"external"` целиком.
+    """
+    scanned = {str(p) for p in ih._python_files()}
+
+    assert any("external/litellm" in p for p in scanned), "litellm вне обхода"
+    assert not any("external/vendor" in p for p in scanned), (
+        "вендоренные MCP попали в обход — их синк будет красить наш прогон"
+    )

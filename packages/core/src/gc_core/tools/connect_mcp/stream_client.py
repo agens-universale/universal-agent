@@ -7,6 +7,8 @@ import threading
 import concurrent.futures
 from urllib.parse import urlsplit, urlunsplit
 
+from gc_core.utils.url_addr import is_loopback
+
 import httpx
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
@@ -157,19 +159,19 @@ class _PersistentSessionManager:
 
 _SESSION_MANAGER = _PersistentSessionManager()
 
-_LOOPBACK_HOSTS = frozenset({"localhost", "::1", "0.0.0.0"})
-
-
 def _is_loopback_url(url: str) -> bool:
-    """True для локальных MCP-daemon'ов (127.0.0.1, localhost, ::1)."""
-    hostname = (urlsplit((url or "").strip()).hostname or "").lower()
-    if not hostname:
-        return False
-    if hostname in _LOOPBACK_HOSTS:
-        return True
-    if hostname.startswith("127."):
-        return True
-    return False
+    """True для локальных MCP-daemon'ов (127.0.0.1, localhost, ::1).
+
+    Делегирует в `gc_core.utils.url_addr.is_loopback`. Своя копия проверки жила
+    здесь и содержала `hostname.startswith("127.")` — под неё подходил
+    `http://127.0.0.1.evil.com/mcp`, обычное DNS-имя. Следствие ниже, в
+    `_trust_env_for_url`: адрес признавался локальным, снимался `trust_env`, и
+    запрос с `Authorization: Bearer` уходил напрямую, минуя корпоративный прокси.
+
+    Канон в `url_addr` разбирает адрес через `ipaddress`, а не по префиксу
+    строки; он был написан ровно против этой дыры, но переключить сюда забыли.
+    """
+    return is_loopback(url)
 
 
 def _trust_env_for_url(url: str) -> bool:

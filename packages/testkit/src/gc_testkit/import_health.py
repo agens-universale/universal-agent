@@ -92,7 +92,7 @@ SKIP_DIRS = {
 class Finding:
     file: str
     line: int
-    kind: str      # dotted_bind | missing_name | legacy_toplevel
+    kind: str      # dotted_bind | missing_name | missing_module | legacy_toplevel
     detail: str
 
 
@@ -187,9 +187,20 @@ def _our_prefixes() -> set[str]:
     return names
 
 
+#: Корни обхода. `external/litellm` добавлен явно, а не через `REPO.rglob`:
+#: соседний `module_literals` судит его с самого начала (он обходит `external`
+#: как каталог верхнего уровня), и расхождение двух сеток на ровном месте —
+#: приглашение к ошибке. Остальное содержимое `external/` — вендоренные
+#: MCP-серверы, чужой код с собственной историей: судить его нашими правилами
+#: (`legacy_toplevel` знает имена `config`, `server`, `utils`) значит красить
+#: наш прогон на чужом синке.
+_SCAN_ROOTS = ("packages", "tests", "integrations", "external/litellm")
+
+
 def _python_files() -> list[Path]:
     out: list[Path] = []
-    for base in (REPO / "packages", REPO / "tests", REPO / "integrations"):
+    for rel in _SCAN_ROOTS:
+        base = REPO / rel
         if not base.is_dir():
             continue
         for p in base.rglob("*.py"):
@@ -317,6 +328,24 @@ def check_missing_names(path: Path, tree: ast.AST, ours: set[str]) -> list[Findi
             continue
         bindings = _module_bindings(node.module)
         if bindings is None:
+            # `None` от `_module_bindings` означает «модуль непрозрачен», и это
+            # обычно законно: namespace-пакет, C-расширение, неустановленная
+            # чужая зависимость. Но ТОТ ЖЕ `None` приходит и когда модуля просто
+            # НЕТ, — а это самая очевидная поломка импорта, ради которой сетка и
+            # написана. Она проходила мимо всех трёх проверок:
+            #
+            #     from gc_core.nosuch_xyz import thing        → 0 находок
+            #     from gc_core.config import nosuch_name_xyz  → 1 находка
+            #
+            # Различаем ровно тем же приёмом, каким уже различаются «своё
+            # отсутствующее имя» и «чужая зависимость»: спрашиваем модуль
+            # отдельно. `False` — уверенный ответ «его нет»; `None` — не смогли
+            # проверить, и тогда по-прежнему молчим.
+            if _module_exists(node.module) is False:
+                found.append(Finding(
+                    str(path.relative_to(REPO)), node.lineno, "missing_module",
+                    f"модуля `{node.module}` не существует",
+                ))
             continue
         for alias in node.names:
             if alias.name == "*" or alias.name in bindings:
