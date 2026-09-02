@@ -48,17 +48,26 @@ sysctl kernel.unprivileged_userns_clone   # должно вернуть 1
 ## Минимальная установка
 
 ```bash
-# 1. Системные зависимости
-sudo apt-get install -y bubblewrap coreutils jq
+# 1. Системные зависимости. bubblewrap — сама песочница, coreutils — `timeout`,
+#    которым обёртка ограничивает время жизни sworm'а.
+sudo apt-get install -y bubblewrap coreutils
 
-# 2. gc-cli в отдельный venv (важно: НЕ uv-venv, нужен системный python3 —
-#    он подхватится через ro-bind /usr внутри bwrap)
+# 2. Профиль сервера в отдельный venv. Ставит ТОЛЬКО uv: манифест пинит
+#    gc-core==0.5.0 / gc-cli==0.5.0 / gc-mcp==0.5.0, а те резолвятся через
+#    [tool.uv.sources] workspace = true и на PyPI не публикуются. Обычный pip
+#    этой секции не понимает и падает
+#    `No matching distribution found for gc-cli==0.5.0` — см. usage.md,
+#    «Через pip — не работает».
 python3 -m venv /opt/gc-cli/.venv
-# pip тут не годится: корневой манифест — мета gc-ua, её листья резолвятся
-# через uv-workspace и на PyPI не публикуются. Ставим профиль сервера из git.
-/opt/gc-cli/.venv/bin/pip install \
+uv pip install --python /opt/gc-cli/.venv/bin/python \
   "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
-/opt/gc-cli/.venv/bin/pip install psutil    # для memory/cpu enforcement
+# Ставить что-либо отдельно не нужно: gc-cli (его и запускает песочница),
+# psutil для memory/cpu enforcement и uvicorn объявлены зависимостями gc-server.
+
+# venv можно собрать и через `uv venv` — обёртка резолвит символическую ссылку
+# .venv/bin/python и добавляет --ro-bind на корень интерпретатора, поэтому
+# uv-managed python внутри песочницы виден. Системный python3 просто короче:
+# он уже лежит под /usr, а /usr обёртка биндит всегда.
 
 # 3. config_server.yml с включённым swarm (см. ниже)
 # 4. Запуск сервера. Профиль gc-server кладёт в PATH команду gc-serve;

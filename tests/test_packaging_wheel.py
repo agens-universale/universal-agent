@@ -11,6 +11,7 @@ tui/styles.tcss. Потом tui, cli, server и менеджер MCP уехал�
 test_versions_are_pinned_together).
 """
 import itertools
+import re
 import shutil
 import subprocess
 import tomllib
@@ -452,4 +453,47 @@ def test_vendored_sources_live_inside_their_package():
     assert not stale.exists(), (
         f"{stale} существует — переезд сделан наполовину, и два места будут "
         "расходиться"
+    )
+
+
+def test_docs_never_offer_bare_pip_for_our_distributions():
+    """Документация не должна советовать `pip install` для наших пакетов.
+
+    Манифесты профилей пинят листья (`gc-core==0.5.0` и соседей), а те
+    резолвятся через `[tool.uv.sources] workspace = true` и на PyPI не
+    публикуются. pip этой секции не понимает и падает
+    `No matching distribution found for gc-cli==0.5.0` — это описано в
+    docs/usage.md, раздел «Через pip — не работает».
+
+    Заведено после того, как docs/swarm.md пережил переезд с
+    `pip install -e .` (на develop это работало: дистрибутив был один) на
+    `pip install "gc-server @ git+…#subdirectory=packages/server"` — команду,
+    которая не работает вовсе. Соседняя строка комментария при этом честно
+    сообщала, что pip не годится. Проверено запуском обеих команд: pip падает,
+    `uv pip install` того же спека ставит профиль вместе с gc-cli, gc-mcp,
+    psutil и uvicorn.
+
+    Ошибка такого рода не ловится ничем: доку никто не исполняет, а человек,
+    который по ней ставит сервер, упирается в ошибку резолва и не понимает,
+    он что-то сделал не так или инструкция врёт.
+    """
+    offenders = []
+    for doc in sorted((REPO / "docs").rglob("*.md")) + [REPO / "readme.md"]:
+        if not doc.is_file():
+            continue
+        for num, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            # Только предлагаемые КОМАНДЫ. Строки, которые про pip рассказывают
+            # («pip install -e . падает»), обязаны остаться: они и объясняют,
+            # почему так нельзя.
+            if stripped.startswith(("#", ">", "*", "-", "`pip", "|")):
+                continue
+            if "pip install" not in stripped or "uv pip install" in stripped:
+                continue
+            if re.search(r"\bgc-(core|cli|tui|server|mcp|ua|testkit)\b", stripped):
+                offenders.append(f"{doc.relative_to(REPO)}:{num}: {stripped}")
+
+    assert not offenders, (
+        "в документации предлагается ставить наш дистрибутив обычным pip — "
+        "он не резолвит листья workspace и упадёт:\n  " + "\n  ".join(offenders)
     )
