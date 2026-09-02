@@ -85,16 +85,23 @@ class LocalFsBackend(FsBackend):
         return os.path.realpath(path)
 
     def is_hidden(self, path: str) -> bool:
+        """Точка в имени ИЛИ скрытый атрибут Windows.
+
+        Поле информационное (метка в выдаче list/by-name), и его значение обязано
+        совпадать с песочницей — там скрытость определяется только точкой
+        (тест паритета list_files это и требует). Одной атрибутной проверки мало:
+        на Windows у `.env` / `.gitignore` атрибута нет, а служебными они остаются.
+        """
         basename = os.path.basename(path)
+        if basename.startswith("."):
+            return True
         if os.name == "nt":
             try:
                 attrs = os.stat(path).st_file_attributes  # Windows-specific
-                return bool(attrs & stat_module.FILE_ATTRIBUTE_HIDDEN)
-            except AttributeError:
-                return basename.startswith(".")
-            except Exception:
+            except (AttributeError, OSError):
                 return False
-        return basename.startswith(".")
+            return bool(attrs & stat_module.FILE_ATTRIBUTE_HIDDEN)
+        return False
 
     # --- read ---
     def read(self, path: str) -> str:

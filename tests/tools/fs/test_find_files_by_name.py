@@ -75,10 +75,6 @@ def test_find_match_meta_binary_and_directory(tmp_path: Path):
     assert "encoding_guess" not in dm
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="на Windows скрытость — атрибут файла, а не точка в имени",
-)
 def test_find_match_meta_hidden_file(tmp_path: Path):
     hidden = tmp_path / ".notes.txt"
     hidden.write_text("secret", encoding="utf-8")
