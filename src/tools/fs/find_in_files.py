@@ -624,6 +624,116 @@ class FindInFiles(AbstractSimpleTool):
             list(lines[head_lo:head_hi]) + [marker] + list(lines[tail_lo:tail_hi])
         )
 
+    @staticmethod
+    def _native_context_line_range(
+        start_line: int,
+        end_line: int,
+        context_num: int = 5,
+    ) -> Tuple[int, int]:
+        """1-based inclusive window: start−N … end+N. Native hits are one line."""
+        if end_line < start_line:
+            end_line = start_line
+        return max(1, start_line - context_num), end_line + context_num
+
+    @staticmethod
+    def _extract_needed_lines(text: str, needed: Iterable[int]) -> Dict[int, str]:
+        """1-based lineno → keepends slice; scan stops after the last needed line."""
+        want = {int(n) for n in needed if int(n) >= 1}
+        if not want:
+            return {}
+        max_needed = max(want)
+        out: Dict[int, str] = {}
+        lineno = 1
+        i = 0
+        n = len(text)
+        while i < n and lineno <= max_needed:
+            j = text.find("\n", i)
+            if j == -1:
+                chunk = text[i:]
+                i = n
+            else:
+                chunk = text[i : j + 1]
+                i = j + 1
+            if lineno in want:
+                out[lineno] = chunk
+            lineno += 1
+        return out
+
+    def _join_native_context_window(
+        self,
+        line_map: Dict[int, str],
+        start_line: int,
+        end_line: int,
+        context_num: int = 5,
+    ) -> Optional[str]:
+        lo, hi = self._native_context_line_range(start_line, end_line, context_num)
+        chunks = [line_map[i] for i in range(lo, hi + 1) if i in line_map]
+        if not chunks:
+            return None
+        return self._join_context(chunks)
+
+    @staticmethod
+    def _omit_native_context(
+        hits: List[Dict[str, Any]],
+        reason: str,
+        size: Optional[int] = None,
+    ) -> None:
+        for m in hits:
+            m.pop("context", None)
+            m["context_omitted"] = reason
+            if size is not None:
+                m["size_bytes"] = size
+
+    def _attach_native_match_contexts(
+        self,
+        shown: List[Dict[str, Any]],
+        max_bytes: int,
+    ) -> None:
+        """Size-gate + one ``read_bytes`` per shown file; window ±5 on the host."""
+        by_file: Dict[str, List[Dict[str, Any]]] = {}
+        for m in shown:
+            by_file.setdefault(m["file"], []).append(m)
+
+        backend = self._backend
+        for abs_path, hits in by_file.items():
+            try:
+                size = backend.getsize(abs_path)
+            except OSError:
+                self._omit_native_context(hits, "read_error")
+                continue
+            if size > max_bytes:
+                self._omit_native_context(hits, "file_too_large", size)
+                continue
+            try:
+                raw = backend.read_bytes(abs_path)
+            except OSError:
+                self._omit_native_context(hits, "read_error", size)
+                continue
+            sample = raw[:BINARY_SAMPLE_BYTES]
+            if classify_content_from_sample(abs_path, sample).is_binary:
+                self._omit_native_context(hits, "binary", size)
+                continue
+            decoded = decode_text_bytes(raw, encoding=None)
+            if not decoded.ok:
+                self._omit_native_context(hits, "encoding", size)
+                continue
+            needed: List[int] = []
+            for m in hits:
+                start = int(m.get("line") or 1)
+                end = int(m.get("end_line") or start)
+                lo, hi = self._native_context_line_range(start, end)
+                needed.extend(range(lo, hi + 1))
+            line_map = self._extract_needed_lines(decoded.text or "", needed)
+            for m in hits:
+                start = int(m.get("line") or 1)
+                end = int(m.get("end_line") or start)
+                ctx = self._join_native_context_window(line_map, start, end)
+                m.pop("context", None)
+                if ctx:
+                    m["context"] = ctx
+                    m.pop("context_omitted", None)
+                    m.pop("size_bytes", None)
+
     def _run_regex(
         self,
         compiled: re.Pattern,
@@ -1362,6 +1472,7 @@ class FindInFiles(AbstractSimpleTool):
         limit_requested: int,
         limit_eff: int,
         limit_capped: bool,
+        max_bytes: int,
         config: FsFindInFilesConfig,
         report_path: str,
         show_excluded_dirs: bool,
@@ -1490,10 +1601,11 @@ class FindInFiles(AbstractSimpleTool):
         )
         shown = ranked[:limit_eff]
         for m in shown:
+            m["line_content"] = self._clip_line_content(m["line_content"])
+            m.pop("context", None)
+        self._attach_native_match_contexts(shown, max_bytes)
+        for m in shown:
             m["file"] = tool_report_abspath(m["file"], workspace=self._workspace)
-            clipped = self._clip_line_content(m["line_content"])
-            m["line_content"] = clipped
-            m["context"] = clipped if clipped.endswith("\n") else clipped + "\n"
 
         count = len(shown)
         if result.hit_capture_cap and count < limit_eff:
@@ -1651,6 +1763,7 @@ class FindInFiles(AbstractSimpleTool):
             limit_requested=limit_requested,
             limit_eff=limit_eff,
             limit_capped=limit_capped,
+            max_bytes=max_bytes,
             config=config,
             report_path=report_path,
             show_excluded_dirs=show_excluded_dirs,

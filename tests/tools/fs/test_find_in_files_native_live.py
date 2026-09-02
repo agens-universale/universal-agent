@@ -127,8 +127,8 @@ def test_find_prunes_hard_exclude_dirs(tmp_path, monkeypatch):
 
 
 @requires_find
-def test_native_context_is_the_match_line(tmp_path):
-    """Native has no ±N window: context is the clipped match line."""
+def test_native_context_is_a_plus_minus_five_window(tmp_path):
+    """After grep hits, context is the ±5 neighborhood, not a match-line duplicate."""
     (tmp_path / "app.py").write_text(
         "\n".join(f"line_{i}" for i in range(1, 21)) + "\n", encoding="utf-8"
     )
@@ -136,26 +136,172 @@ def test_native_context_is_the_match_line(tmp_path):
     data = _call_tool(tmp_path, pattern="line_10", query_mode="text")
 
     assert data["search_backend"] == "grep"
-    ctx = data["matches"][0]["context"]
+    match = data["matches"][0]
+    ctx = match["context"]
     assert "line_10" in ctx
-    assert "line_5" not in ctx
-    assert "line_15" not in ctx
+    assert "line_5" in ctx
+    assert "line_15" in ctx
+    assert "line_4" not in ctx
+    assert "line_16" not in ctx
+    assert ctx != match["line_content"]
+    assert ctx != match["line_content"] + "\n"
 
 
 @requires_find
-def test_native_dir_mode_does_not_apply_max_file_bytes(tmp_path):
-    """Size ceiling is a Python-walk signal; grep reads the file anyway."""
+def test_native_dir_mode_omits_context_when_file_exceeds_max_bytes(tmp_path, monkeypatch):
+    """Grep still locates the hit; oversize files skip the download for the window."""
     (tmp_path / "big.log").write_text("NEEDLE " * 40, encoding="utf-8")
     (tmp_path / "ok.py").write_text("nothing here\n", encoding="utf-8")
 
-    data = _call_tool(
-        tmp_path, {"max_file_bytes": 50}, pattern="NEEDLE", query_mode="text"
-    )
+    tool = _tool(tmp_path, {"max_file_bytes": 50})
+    reads: list[str] = []
+    orig_read = tool._backend.read_bytes
+
+    def _read(path):
+        reads.append(path)
+        return orig_read(path)
+
+    monkeypatch.setattr(tool._backend, "read_bytes", _read)
+    data = json.loads(tool(path=str(tmp_path), pattern="NEEDLE", query_mode="text"))
 
     assert data["search_backend"] == "grep"
     assert data["count"] >= 1
     assert "files_too_large" not in data
-    assert any(m["file"].endswith("big.log") for m in data["matches"])
+    hit = next(m for m in data["matches"] if m["file"].endswith("big.log"))
+    assert "NEEDLE" in hit["line_content"]
+    assert "context" not in hit
+    assert hit["context_omitted"] == "file_too_large"
+    assert hit["size_bytes"] > 50
+    assert reads == []
+
+
+@requires_find
+def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypatch):
+    body = "\n".join(
+        ["alpha", "TOKEN first", "beta", "gamma", "TOKEN second", "delta"]
+    ) + "\n"
+    (tmp_path / "app.py").write_text(body, encoding="utf-8")
+
+    tool = _tool(tmp_path)
+    reads: list[str] = []
+    sizes: list[str] = []
+    orig_read = tool._backend.read_bytes
+    orig_size = tool._backend.getsize
+
+    def _read(path):
+        reads.append(path)
+        return orig_read(path)
+
+    def _size(path):
+        sizes.append(path)
+        return orig_size(path)
+
+    monkeypatch.setattr(tool._backend, "read_bytes", _read)
+    monkeypatch.setattr(tool._backend, "getsize", _size)
+    data = json.loads(tool(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 2
+    assert all("context" in m for m in data["matches"])
+    assert all("TOKEN" in m["context"] for m in data["matches"])
+    assert len(reads) == 1
+    assert len(sizes) == 1
+
+
+@requires_find
+def test_native_context_omitted_on_read_error(tmp_path, monkeypatch):
+    (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+    orig_size = tool._backend.getsize
+
+    def _size(path):
+        return orig_size(path)
+
+    def _read(_path):
+        raise OSError("boom")
+
+    monkeypatch.setattr(tool._backend, "getsize", _size)
+    monkeypatch.setattr(tool._backend, "read_bytes", _read)
+    data = json.loads(tool(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 1
+    hit = data["matches"][0]
+    assert "TOKEN" in hit["line_content"]
+    assert "context" not in hit
+    assert hit["context_omitted"] == "read_error"
+    assert "size_bytes" in hit
+
+
+@requires_find
+def test_native_context_omitted_on_stat_error(tmp_path, monkeypatch):
+    (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
+    tool = _tool(tmp_path)
+
+    def _size(_path):
+        raise OSError("stat failed")
+
+    reads: list[str] = []
+
+    def _read(path):
+        reads.append(path)
+        raise AssertionError("read_bytes must not run after getsize failure")
+
+    monkeypatch.setattr(tool._backend, "getsize", _size)
+    monkeypatch.setattr(tool._backend, "read_bytes", _read)
+    data = json.loads(tool(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 1
+    hit = data["matches"][0]
+    assert "context" not in hit
+    assert hit["context_omitted"] == "read_error"
+    assert "size_bytes" not in hit
+    assert reads == []
+
+
+@requires_find
+def test_native_context_omitted_on_binary(tmp_path):
+    (tmp_path / "app.bin").write_bytes(b"TOKEN\x00binary\n")
+    data = _call_tool(tmp_path, pattern="TOKEN", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    if data["count"] == 0:
+        pytest.skip("host grep skipped the NUL file")
+    hit = data["matches"][0]
+    assert "context" not in hit
+    assert hit["context_omitted"] == "binary"
+    assert "size_bytes" in hit
+
+
+@requires_find
+def test_native_context_omitted_on_encoding(tmp_path):
+    (tmp_path / "legacy.txt").write_bytes("TOKEN привет\n".encode("cp1251"))
+    data = _call_tool(tmp_path, pattern="TOKEN", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 1
+    hit = data["matches"][0]
+    assert "TOKEN" in hit["line_content"]
+    assert "context" not in hit
+    assert hit["context_omitted"] == "encoding"
+    assert "size_bytes" in hit
+
+
+@requires_find
+def test_native_context_clips_long_lines_to_budget(tmp_path):
+    huge = "x" * 3000
+    lines = [f"pad_{i}" for i in range(1, 10)]
+    lines[4] = huge + "NEEDLE" + huge
+    (tmp_path / "one.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    data = _call_tool(tmp_path, pattern="NEEDLE", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 1
+    ctx = data["matches"][0]["context"]
+    assert "NEEDLE" in ctx or "line_truncated" in ctx or "context_truncated" in ctx
+    assert len(ctx) <= FindInFiles.max_context_chars
 
 
 @requires_find
