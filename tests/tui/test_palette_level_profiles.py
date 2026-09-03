@@ -530,6 +530,24 @@ def test_profile_picker_hint_shows_target_slots_not_effective(tmp_path, monkeypa
     assert "default gc" in hint and "глобальный" in hint
 
 
+def test_profile_picker_hint_survives_an_undecodable_profile(tmp_path, monkeypatch):
+    """Файл профиля в чужой кодировке не роняет палитру.
+
+    `UnicodeDecodeError` — подкласс `ValueError`, а не `OSError`, и мимо
+    перехвата `(OSError, yaml.YAMLError)` он уходил наружу: стрелка вниз по
+    списку профилей валила приложение трейсбеком (живой смок). Профиль при этом
+    даже не выбран — хинт строится на одном лишь наведении курсора.
+    """
+    from tui.toggles import profile_picker_hint
+
+    app = _picker_app(tmp_path, monkeypatch)
+    bad = tmp_path / "base" / "profiles" / "enc.yml"
+    bad.write_bytes("slots:\n  default: gc\n".encode("utf-16"))
+
+    hint = profile_picker_hint(app, "enc")
+    assert isinstance(hint, str)          # хинт без состава, а не крах
+
+
 def test_profile_picker_hint_none_value(tmp_path, monkeypatch):
     from tui.toggles import profile_picker_hint
 

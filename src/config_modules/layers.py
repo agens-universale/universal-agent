@@ -84,9 +84,13 @@ def _layer_document(path, subject: str) -> Dict[str, Any]:
 
 
 def _readable_layer_document(path, subject: str) -> Dict[str, Any]:
-    """`_layer_document` со своей границей по `OSError`: файл слоя НА МЕСТЕ (его
-    и отобрал `isfile`), но не открывается — права, каталог на месте файла,
-    отвалившийся сетевой диск.
+    """`_layer_document` со своей границей по «не прочитался»: файл слоя НА МЕСТЕ
+    (его и отобрал `isfile`), но не открывается (`OSError` — права, каталог на
+    месте файла, отвалившийся сетевой диск) или не декодируется
+    (`UnicodeDecodeError` — файл сохранён «блокнотом» в UTF-16). Второй класс —
+    подкласс `ValueError`, и точки входа его ловили, но БЕЗ пути в сообщении:
+    объяснение не могло опознать виноватый файл и называло базу, а совет
+    «откатить конфиг» подменил бы её, оставив нечитаемый оверлей на месте.
 
     Граница здесь, а не внутри `_layer_document`: голый `OSError` оттуда нужен
     чтению БАЗЫ (`config.py::load_config_ex`) — там своя формулировка, про
@@ -101,7 +105,7 @@ def _readable_layer_document(path, subject: str) -> Dict[str, Any]:
     сужение класса безразлично — откат к одному файлу срабатывает как прежде."""
     try:
         return _layer_document(path, subject)
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"{path}: не удалось прочитать: {exc}") from exc
 
 
@@ -411,10 +415,15 @@ def prospective_registry(text: str, *, target=None, base_path=None,
 def _safe_yaml_dict(path) -> Optional[Dict[str, Any]]:
     """Файл → YAML-словарь либо None: нечитаемый файл и документ не-словарь читаются
     сюда одинаково молча — оба читателя этой функции (стек следующего старта, общий
-    резолв указателя) находят по найденному, не по полноте обхода."""
+    резолв указателя) находят по найденному, не по полноте обхода.
+
+    «Нечитаемый» включает и НЕДЕКОДИРУЕМЫЙ (`UnicodeDecodeError` на файле в UTF-16):
+    он подкласс `ValueError`, а не `OSError`, и уходил мимо этого молчания — то есть
+    ронял трейсбеком САМО объяснение сломанного конфига, которое зовёт резолв
+    указателя первым делом."""
     try:
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
         return None
     return raw if isinstance(raw, dict) else None
 

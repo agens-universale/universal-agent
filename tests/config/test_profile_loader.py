@@ -9,8 +9,10 @@ import yaml
 from config_modules import env_vars
 from config_modules.env_vars import EnvVars
 from config_modules.profiles import (
+    discover_all_refs,
     discover_profiles,
     load_profile_document,
+    profile_display_summary,
     profile_roots,
     resolve_profile,
 )
@@ -157,6 +159,41 @@ def test_reserved_profile_name_ignored_and_pointer_errors(tmp_path):
 
     with pytest.raises(ValueError, match="зарезервировано"):
         resolve_profile("light", roots)
+
+
+def test_directory_named_like_a_profile_is_not_discovered(tmp_path):
+    """Каталог `work.yml` — не профиль: глоб отбирал его наравне с файлами, и
+    дальше он либо ронял открытие (`OSError` мимо всех сторожей), либо — как
+    тёзка из ПРИОРИТЕТНОГО корня — заслонял настоящий профиль из второго.
+    Managed/project слои от того же отбираются по `isfile`."""
+    project_dir = tmp_path / "proj"
+    base_config = tmp_path / "base" / "config.yml"
+    base_config.parent.mkdir(parents=True)
+    base_config.write_text("agent:\n  model: x\n", encoding="utf-8")
+    roots = profile_roots(project_dir, base_config)
+    (roots[0] / "work.yml").mkdir(parents=True)
+    _write_yaml(roots[1] / "work.yml", {"agent": {"model": "real"}})
+    _write_yaml(roots[0] / "corp.yml", {"agent": {"model": "corp"}})
+
+    discovered = discover_profiles(roots)
+    assert discovered["work"].path == roots[1] / "work.yml"
+    assert "corp" in discovered
+    assert [ref.path for ref in discover_all_refs(roots)["work"]] == [roots[1] / "work.yml"]
+    assert resolve_profile("work", roots).path == roots[1] / "work.yml"
+
+
+def test_unopenable_profile_file_is_a_value_error(tmp_path):
+    """Путь профиля НА МЕСТЕ, но не открывается (права, каталог на месте файла,
+    отвалившийся сетевой диск) — это `ValueError` с тем же «<path>: …», по
+    которому `explain_broken_config` опознаёт виноватый файл. Голый `OSError`
+    уходил мимо `except ValueError` обеих точек входа и мимо всех трёх ступеней
+    лестницы починки — человек получал трейсбек."""
+    unreadable = tmp_path / "profiles" / "work.yml"
+    unreadable.mkdir(parents=True)
+
+    with pytest.raises(ValueError) as exc_info:
+        load_profile_document(unreadable)
+    assert str(exc_info.value).startswith(f"{unreadable}: не удалось прочитать: ")
 
 
 # --- Интеграционный уровень: load_config_ex (base→managed→project→profile→compat→validate) ---
@@ -380,3 +417,39 @@ def test_model_inherits_from_backend_overridden_by_profile(isolated_cwd, tmp_pat
 
     assert resolved.alias == "bare"
     assert resolved.url == "http://from-profile/v1/chat/completions"
+
+
+def test_pointer_into_a_directory_named_like_a_profile_fails_as_value_error(
+    isolated_cwd, tmp_path
+):
+    """Раскладка ревью: указатель `profile: "work"` в базе, а `profiles/work.yml`
+    создан КАТАЛОГОМ. Загрузка обязана отказать `ValueError` — тем классом, что
+    ловят обе точки входа и лестница починки; `PermissionError`/`IsADirectoryError`
+    отсюда были бы трейсбеком вместо объяснения."""
+    from config import load_config_ex
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, {**_MINIMAL_BASE, "profile": "work"})
+    (tmp_path / "profiles" / "work.yml").mkdir(parents=True)
+
+    with pytest.raises(ValueError):
+        load_config_ex(str(base_config))
+def test_the_read_failure_is_self_sufficient(tmp_path):
+    """Текст отказа чтения профиля самодостаточен: путь + причина.
+
+    Витрина «Профили» и отказ открытия печатают его как есть, поэтому свой
+    префикс «не удалось прочитать» им добавлять нечего — иначе человек читает
+    «не удалось прочитать: <путь>: не удалось прочитать: …». Тот же канон, что у
+    отказа записи реестра: человеческий текст доезжает дословно."""
+    unreadable = tmp_path / "enc.yml"
+    unreadable.write_bytes("slots:\n  default: x\n".encode("utf-16"))
+    summary = profile_display_summary(unreadable)
+    assert summary.error is not None
+    assert str(unreadable) in summary.error
+    assert summary.error.count("не удалось прочитать") == 1
+
+    broken = tmp_path / "yaml.yml"
+    broken.write_text("a: : :\n", encoding="utf-8")
+    yaml_summary = profile_display_summary(broken)
+    assert yaml_summary.error is not None
+    assert str(broken) in yaml_summary.error       # и у YAML-ошибки путь свой

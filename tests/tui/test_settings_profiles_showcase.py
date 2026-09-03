@@ -95,6 +95,40 @@ async def test_profiles_section_lists_both_roots_with_source(tmp_path, monkeypat
         assert any("home" in l and "глобальный" in l for l in lines)
 
 
+async def test_an_unreadable_profile_is_named_once(tmp_path, monkeypatch):
+    """Отказ чтения профиля печатается ОДИН раз, а не вкладывается сам в себя.
+
+    Ядро отдаёт самодостаточный текст «<путь>: не удалось прочитать: <причина>»,
+    и витрина добавляла к нему свой префикс той же фразой — человек читал
+    «не удалось прочитать: <путь>: не удалось прочитать: …». Случай живой:
+    профиль в UTF-16 не участвует в загрузке, и до витрины его никто не проверял.
+    """
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    bad = tmp_path / "base" / "profiles" / "enc.yml"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes("slots:\n  default: x\n".encode("utf-16"))
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await _cursor_to(scr, "profile", "enc")
+        await pilot.pause()
+        blob = "\n".join(_profiles_rows_text(scr)) + "\n" + "\n".join(
+            str(w.render()) for w in scr.query("Static"))
+        assert "не удалось прочитать" in blob, blob
+        assert blob.count("не удалось прочитать") == 1, blob
+        # Путь стоит ПЕРВОЙ строкой блока — в строке причины он лишний: на экране
+        # это читалось как повтор, а не как уточнение.
+        assert blob.count(str(bad)) == 1, blob
+
+
 def _base_dict() -> dict:
     return {"completions_url": "http://host/v1/chat/completions", "model": "test-model"}
 
@@ -1326,11 +1360,25 @@ async def test_field_origins_judge_the_launch_stack_not_the_pointer(tmp_path, mo
         assert "перекрыто профилем" not in body, body
 
 
-async def test_overriding_layer_name_skips_the_profile_out_of_the_stack(tmp_path, monkeypatch):
-    """Имя перекрывшего слоя после записи: под `--profile ""` ключ перекрыт
-    managed-слоем, а профиль до стека не доехал. Витрина, судящая по диску,
-    называла профиль (он ложится ВЫШЕ managed) и посылала чинить файл, который в
-    этом запуске никого не перекрывает."""
+async def test_overriding_layer_name_answers_by_files_like_the_write_gate(tmp_path,
+                                                                         monkeypatch):
+    """ИСКЛЮЧЕНИЕ среди витрин происхождения экрана — и единственное: эта отвечает
+    на вопрос о ПЕРСИСТЕНТНОСТИ записи, а не о том, что действует сейчас.
+
+    Соседние три (маркеры ⚠ у полей, строка честности голоса, происхождение
+    реестра) говорят о ТЕКУЩЕМ запуске — «ваша правка не действует», «уровни
+    работают», — и обязаны судить стек, на котором окно запущено
+    (`_acting_profile`). Эта показывается сразу после сохранения и говорит о судьбе
+    записанного ключа: под `gc-ua --profile ""` профиль из файла в этом запуске не
+    действует, но записанное значение он перекроет на ЛЮБОМ другом запуске — и
+    послать чинить managed-файл значило бы отправить человека не туда.
+
+    Здесь же проходит второе обязательство: гейт перед записью резолвит указатель
+    ИЗ ФАЙЛОВ (`_stacked_app_config` судит следующий старт). Сообщение о судьбе
+    записи и гейт, её пропустивший, обязаны говорить одно и то же — разойдясь, они
+    оставляют человека с двумя противоположными ответами об одном ключе.
+
+    Свипу на заметку: `profile_override` этой витрине НЕ передаётся намеренно."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -1350,8 +1398,7 @@ async def test_overriding_layer_name_skips_the_profile_out_of_the_stack(tmp_path
 
         name = scr._overriding_layer_name({"tui.finish_gate_mode": "off"})
 
-        assert "профилем work" not in name, name
-        assert name == "~/.gc/config.local.yml"
+        assert "профилем work" in name, name
 
 
 async def test_voice_override_text_ignores_a_profile_out_of_the_stack(tmp_path, monkeypatch):

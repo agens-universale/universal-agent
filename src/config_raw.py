@@ -42,7 +42,12 @@ def read_document(path) -> Dict[str, Any]:
     """
     try:
         return parse_document(Path(path).read_text(encoding="utf-8"))
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # `UnicodeDecodeError` — подкласс `ValueError`, а не `OSError`, и мимо
+        # прежнего перехвата уходил наружу. Витрина профилей читает этим ЧУЖИЕ
+        # файлы корня, в том числе неактивные: такой профиль в загрузке не
+        # участвует, кодировку его никто не проверял, и экран настроек падал на
+        # файле, который в этом запуске даже не действует.
         return {}
 
 

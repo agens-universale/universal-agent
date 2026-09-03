@@ -26,7 +26,9 @@ class LoadedInstructions:
 def _read(path) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # Файл человека может лежать в любой кодировке; decode — подкласс
+        # `ValueError`, а не `OSError`, и уходил мимо перехвата.
         return None
 
 

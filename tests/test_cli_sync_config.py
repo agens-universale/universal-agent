@@ -59,6 +59,19 @@ def test_run_sync_config_raises_yaml_error_returns_1(monkeypatch, tmp_path, caps
     assert "НЕ обновлён" in err
 
 
+def test_run_sync_config_names_the_file_it_could_not_read(monkeypatch, tmp_path, capsys):
+    """Конфиг в чужой кодировке: отказ называет ФАЙЛ, а не голое «codec can't
+    decode». Чтение стояло вне перехвата: `OSError` уходил трейсбеком, а
+    `UnicodeDecodeError` доезжал лишь потому, что он подкласс `ValueError`, —
+    и без пути человек не понимал, о каком файле речь."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_bytes('backend:\n  completions_url: \"http://x\"\n'.encode("utf-16"))
+    monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(cfg)))
+    assert cli._run_sync_config() == 1
+    err = capsys.readouterr().err
+    assert "НЕ обновлён" in err and str(cfg) in err
+
+
 def test_run_sync_config_happy_path(monkeypatch, tmp_path, capsys):
     cfg = tmp_path / "config.yml"
     cfg.write_text("backend:\n  completions_url: \"http://x\"\n", encoding="utf-8")

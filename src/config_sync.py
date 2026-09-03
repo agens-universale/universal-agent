@@ -188,11 +188,29 @@ def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -
     return ResetReport(str(backup))
 
 
+def _read_or_explain(path: Path) -> str:
+    """Текст файла либо `ValueError` с ИМЕНЕМ файла.
+
+    Чтение конфига человека отказывает двумя разными классами — `OSError` (нет
+    прав, каталог на месте файла) и `UnicodeDecodeError` (сохранён в UTF-16), и
+    второй лишь по случайности подкласс `ValueError`. Без общего перевода один
+    уходил трейсбеком, а другой — сообщением без пути."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"{path}: не удалось прочитать: {exc}") from exc
+
+
 def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) -> SyncReport:
     path = Path(path)
     template_path = Path(template_path or _default_config_path())
-    user_text = path.read_text(encoding="utf-8")
-    template_text = template_path.read_text(encoding="utf-8")
+    # Оба чтения — под общим переводом в `ValueError`: вызывающий (`gc-cli
+    # --sync-config`) ловит именно его и печатает «config.yml НЕ обновлён: …».
+    # `OSError` мимо этого перехвата уходил трейсбеком, а `UnicodeDecodeError`
+    # хоть и подкласс `ValueError`, но без имени файла: на конфиге в чужой
+    # кодировке человек читал голое «codec can't decode» и не знал, о чём речь.
+    user_text = _read_or_explain(path)
+    template_text = _read_or_explain(template_path)
     try:
         user_raw = yaml.safe_load(user_text) or {}
         template_raw = yaml.safe_load(template_text) or {}

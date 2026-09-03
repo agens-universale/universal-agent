@@ -670,3 +670,41 @@ def test_the_culprit_is_judged_on_the_stack_the_validator_saw_not_on_the_disk(st
     message = str(exc.value)
     assert f'поправьте slots.default в профиле "work": {profile}' in message
     assert str(base) not in message
+def test_an_unreadable_target_is_a_write_error(tmp_path):
+    """Цель операции не читается — это отказ ЗАПИСИ, а не сюрприз вызывающему.
+
+    Чтение цели шло голым `read_text`: `OSError` уходил наружу мимо
+    `RegistryWriteError`, а `UnicodeDecodeError` (подкласс `ValueError`, не
+    `OSError`) — мимо и того перехвата `(RegistryWriteError, OSError)`, которым
+    секция ловит отказы. Цена: экран падал крэшем вместо строки отказа. Цель
+    достижима: файл НЕАКТИВНОГО профиля в загрузке не участвует, его кодировку
+    никто не проверял, а секция в него пишет."""
+    target = tmp_path / "profile.yml"
+    target.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-16")
+
+    with pytest.raises(RegistryWriteError) as exc:
+        rw.upsert_model(target, "b", {"model": "y"}, "", is_profile=True)
+    assert str(target) in str(exc.value)
+
+
+def test_the_default_slot_question_does_not_crash_on_an_unreadable_target(tmp_path):
+    """Тот же отказ на пути СПРАВКИ. `needs_default_slot` секция спрашивает до
+    записи и без перехвата — голая ошибка чтения оттуда бросать ей нельзя — экран
+    упал бы раньше, чем человек увидел отказ. Справка best-effort: свой перехват
+    `(RegistryWriteError, OSError)` отвечает «слот не спрашиваем», а внятную
+    причину человек получает от самой записи. До правки сюда прилетал голый
+    `UnicodeDecodeError` мимо этого перехвата."""
+    target = tmp_path / "profile.yml"
+    target.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-16")
+
+    assert rw.needs_default_slot(
+        target, [("upsert_model", "b", {"model": "y"})], "", is_profile=True) is False
+
+
+def test_a_readable_target_still_writes(tmp_path):
+    """Сторож: расширение перехвата не превращает нормальную запись в отказ."""
+    target = tmp_path / "profile.yml"
+    target.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
+
+    rw.upsert_model(target, "b", {"model": "y"}, "", is_profile=True)
+    assert "b:" in target.read_text(encoding="utf-8")

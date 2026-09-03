@@ -1940,10 +1940,15 @@ class ModelsSectionEditor(Vertical):
             return
         self._form = None
         self._close_picker()
+        # `_changed()` — ПЕРЕД перечиткой: он сбрасывает снимки экрана, из которых
+        # `_reload` тут же и собирает тело (происхождение реестра — первым делом,
+        # в `_legacy_default`). Обратный порядок судил бы о слое сверху состоянием
+        # ДО этой записи: снятая последняя запись базы под живым реестром слоя
+        # выше подняла бы легаси-редактор `agent.model`, который там не действует.
+        self._changed()
         self._reload()
         self._cursor_to(alias)
         self._refresh_rows()
-        self._changed()
         if not self._entry_address(alias):
             self._notice(f"⚠ запись «{alias}» сохранена в {Path(self._target).name}, "
                          f"но {_NO_ADDRESS_HINT}", ok=None)
@@ -1974,9 +1979,9 @@ class ModelsSectionEditor(Vertical):
         except (RegistryWriteError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}", ok=False)
             return
+        self._changed()             # снимки экрана — до перечитки (см. `_write`)
         self._reload()
         self._refresh_rows()        # подводка курсора — как у записи в реестр
-        self._changed()
         self._notice(f"{done} — {Path(self._target).name}", ok=True)
 
     @staticmethod
@@ -2104,8 +2109,8 @@ class ModelsSectionEditor(Vertical):
             self._notice(_NOTICE_REMOVE_REFUSED_INHERITED.format(alias=pending["alias"]),
                          ok=False)
             return
+        self._changed()             # снимки экрана — до перечитки (см. `_write`)
         self._reload()
-        self._changed()
         self._notice(f"Запись «{pending['alias']}» удалена — {Path(self._target).name}",
                      ok=True)
 

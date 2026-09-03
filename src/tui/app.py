@@ -555,6 +555,16 @@ class TuiApp(App):
         mtime_set = self._compute_mtime_set()
         if mtime_set == self._config_mtime_set:
             return
+        self._reload_config_or_notice()
+
+    def _reload_config_or_notice(self) -> None:
+        """Перечитка ПОД ГЕЙТОМ: отказ загрузчика (битый файл, непрочитанный слой,
+        не собравшийся стек флага `--profile`) — уведомление, а не крэш Textual.
+
+        Точка одна на всех вызывающих `reload_config` из UI: своя редакция того же
+        перехвата разъехалась бы с первой — а окно, роняющее себя из-за диагностики
+        чужого файла, теряет несохранённое у человека, который в этом файле не
+        виноват."""
         try:
             self.reload_config()
         except Exception as exc:
@@ -965,7 +975,10 @@ class TuiApp(App):
         """Финал онбординга (auto и review одинаково): reload_config + переход
         на главный экран — «завершил настройку → стартует агент»."""
         self.set_config_path(self._onboarding_config_path)
-        self.reload_config()
+        # Тем же гейтом, что и остальные перечитки из UI: файл могли сломать в зазоре
+        # между записью визарда и финалом, и трейсбек поверх только что законченной
+        # настройки — цена, несоразмерная поводу. Причина уходит в /notices.
+        self._reload_config_or_notice()
         self._onboarding_mode = None
         # OnboardingScreen — базовый экран (get_default_screen), у него нет result-callback,
         # из-за чего switch_screen падает на _pop_result_callback (IndexError: pop from empty).

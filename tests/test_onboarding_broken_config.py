@@ -169,6 +169,35 @@ def test_profile_override_that_names_no_file_blames_the_flag(isolated_cwd, tmp_p
     assert "(активен" not in text
 
 
+def test_schema_error_on_the_pointer_is_not_a_missing_profile(isolated_cwd, tmp_path):
+    """Ревью: `profile: 123` в базе (ошибка схемы — не строка) при живом и
+    исправном `work.yml` и запуске `--profile work`. Виноват ключ базы, а совет
+    объявлял несуществующим профиль, который на месте, и не называл ни одного
+    файла: ветка про флаг срабатывала по одному лишь факту флага, потому что
+    `key_origins` под override выбрасывает ключ `profile` и виновников не
+    остаётся."""
+    from config import load_config_ex
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "models:\n  flash: {}\n" "profile: 123\n", encoding="utf-8")
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    profile = profiles_dir / "work.yml"
+    profile.write_text("slots:\n  default: flash\n", encoding="utf-8")
+
+    try:
+        load_config_ex(str(base), profile_override="work")
+    except ValueError as exc:
+        text = explain_broken_config(str(base), exc, program="gc-ua", profile_override="work")
+    else:
+        pytest.fail("ожидался ValueError от load_config_ex")
+
+    assert f"поправить файл:  {base}" in text
+    assert "такого профиля нет" not in text
+    assert f"{profile}   (активен: --profile)" in text
+
+
 def test_empty_profile_override_means_no_profile_at_all(isolated_cwd, tmp_path):
     """`--profile ""` — профильный слой снят: указатель в файле инертен, и совет
     «запустить без профиля» бессмыслен (человек уже так запустил); карта без
@@ -215,6 +244,44 @@ def test_invalid_base_yaml_falls_back_to_naming_the_file(tmp_path):
     assert f"поправить файл:  {base}" in text
     assert '--profile ""' not in text
     assert "gc-cli --reset-config" in text
+
+
+def test_undecodable_base_is_explained_not_traced(tmp_path):
+    """Файл НА МЕСТЕ, но не декодируется (сохранён в UTF-16, «блокнотом») — это
+    тот же «существует, но не читается», что и права/каталог/сетевой диск, только
+    класс исключения другой (`UnicodeDecodeError` — подкласс `ValueError`, мимо
+    `except OSError`). Точки входа его ловят, а вот САМО объяснение падало
+    трейсбеком, читая тот же файл ещё раз: сперва резолвом указателя, потом
+    картой происхождения ключей."""
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text("backend:\n  api_mode: chat_completions\n", encoding="utf-16")
+
+    exc = _load_and_catch(str(base))
+    text = explain_broken_config(str(base), exc)
+
+    assert f"поправить файл:  {base}" in text
+    assert "gc-cli --reset-config" in text
+
+
+def test_undecodable_project_overlay_names_the_overlay_not_the_base(isolated_cwd, tmp_path):
+    """Не декодируется ПРОЕКТНЫЙ слой — виноват он, а совет называл базу и
+    предлагал откат: откат подменил бы базу (потеряв модели, MCP и голос), а
+    нечитаемый оверлей остался бы на месте."""
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
+    project = isolated_cwd / ".gc" / "config.yml"
+    project.parent.mkdir(parents=True)
+    project.write_text("agent:\n  model: x\n", encoding="utf-16")
+
+    exc = _load_and_catch(str(base))
+    text = explain_broken_config(str(base), exc)
+
+    assert f"поправить файл:  {project}" in text
+    assert "gc-cli --reset-config" not in text
 
 
 # --- Сценарий C: профиль не найден по указателю -----------------------------

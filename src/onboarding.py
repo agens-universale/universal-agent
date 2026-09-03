@@ -575,6 +575,15 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     active = profile_override if flagged else resolve_profile_pointer(config_path)
     participants = ([("base", config_path)]
                     + _overlay_paths(config_path, profile_override=profile_override))
+    # Имя из флага НЕ резолвится в файл — единственное, о чём вправе говорить совет
+    # «такого профиля нет». Признаком служил один лишь факт флага, и на сломанном
+    # САМОМ указателе (`profile: 123` в базе — ошибка схемы) совет объявлял
+    # несуществующим профиль, который лежит на месте и исправен, а виноватый файл
+    # не назывался вовсе: под override `key_origins` выбрасывает ключ `profile`, и
+    # виновников не остаётся. Пустой `active` (`--profile ""`) — профиля не
+    # запрашивали, и «такого профиля нет» не про что.
+    flagged_profile_missing = bool(flagged and active) and not any(
+        kind.startswith("profile:") for kind, _ in participants)
     participant_lines = [
         f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{_display_path(path)}"
         + (("   (активен: --profile)" if flagged else "   (активен)")
@@ -599,7 +608,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
         for culprit in culprits:
             fix_lines.append(
                 f"поправить {', '.join(culprit.keys)} в:  {_display_path(culprit.path)}")
-    elif flagged and "profile" in keys:
+    elif flagged_profile_missing and "profile" in keys:
         # Ошибка про сам указатель, а он пришёл из флага: файла-виновника нет
         # (не найден или зарезервирован — в обоих случаях такого профиля нет).
         fix_lines.append(
@@ -848,7 +857,7 @@ def _aliases_in_file(config_path) -> Dict[str, str]:
 
     try:
         raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
         return {}
     models = raw.get("models") if isinstance(raw, dict) else None
     if not isinstance(models, dict):

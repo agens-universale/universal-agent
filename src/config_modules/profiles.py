@@ -65,6 +65,24 @@ def profile_roots(project_dir: Path, base_config_path: Path) -> list[Path]:
     ]
 
 
+def _profile_files(root: Path) -> list[Path]:
+    """Файлы-кандидаты профиля в корне: имя `*.yml` И ФАКТ ФАЙЛА.
+
+    Отбор по `isfile` — то же правило, каким загрузчик отбирает managed-слой
+    (`layers._merge_layers`: `managed_path.is_file()`). Голый глоб отдавал сюда и
+    КАТАЛОГ с именем `work.yml`, а дальше он вредил дважды: открытие такого
+    «профиля» падало `OSError` мимо всех сторожей (трейсбек вместо объяснения), а
+    тёзка из ПРИОРИТЕТНОГО корня ещё и заслонял настоящий профиль из второго —
+    дедупликация ниже идёт по имени, и победитель уже не пересматривается. Первое
+    чинится и обёрткой чтения (она есть, `_read_yaml_document`), второе — только
+    здесь: витрина (`discover_all_refs`) и список «есть: …» тоже обязаны не
+    называть профилем то, что им не является.
+
+    Дом общий на оба обхода корней: вторая редакция того же отбора разъехалась бы
+    с первой ровно так, как разъехались управляемые слои и профили."""
+    return [path for path in sorted(root.glob("*.yml")) if path.is_file()]
+
+
 def discover_profiles(
     roots: list[Path], *, notices: Optional[list[str]] = None
 ) -> dict[str, "ProfileRef"]:
@@ -79,7 +97,7 @@ def discover_profiles(
         root = Path(root)
         if not root.is_dir():
             continue
-        for path in sorted(root.glob("*.yml")):
+        for path in _profile_files(root):
             name = path.stem
             if name in RESERVED_WORDS:
                 if notices is not None:
@@ -132,11 +150,26 @@ def _read_yaml_document(path: Path) -> dict:
     # тот же перевод уже держит для текста, а на файл его не распространили, и
     # `yaml.YAMLError` уходил мимо `except (OSError, ValueError)` у pre-write
     # валидации стека — то есть ронял UI вместо отката к одному файлу.
-    with open(path, "r", encoding="utf-8") as file:
-        try:
-            raw = yaml.safe_load(file) or {}
-        except yaml.YAMLError as exc:
-            raise ValueError(f"{path}: невалидный YAML: {exc}") from exc
+    #
+    # `OSError` — та же граница, что у слоёв (`layers._readable_layer_document`):
+    # путь НА МЕСТЕ (его отобрал `_profile_files`), но не открывается — права,
+    # каталог на месте файла, отвалившийся сетевой диск. Голым он уходил мимо
+    # `except ValueError` ОБЕИХ точек входа (`cli._run_init`, `tui.main`) и мимо
+    # всех трёх ступеней лестницы починки (`onboarding.load_config_for_repair`):
+    # человек получал трейсбек ровно там, где заводили объяснение. Формат
+    # сообщения — тот же «<path>: …», по которому `explain_broken_config`
+    # опознаёт виноватый файл. Слой профиля читается ОТСЮДА, а не через
+    # `_readable_layer_document`, и своей границы у него до сих пор не было.
+    # `UnicodeDecodeError` (профиль сохранён в UTF-16) — тот же «не прочитался»,
+    # только подкласс `ValueError`: без пути в сообщении объяснение винило базу.
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            try:
+                raw = yaml.safe_load(file) or {}
+            except yaml.YAMLError as exc:
+                raise ValueError(f"{path}: невалидный YAML: {exc}") from exc
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"{path}: не удалось прочитать: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: профиль должен быть YAML-документом (словарём)")
     return raw
@@ -253,7 +286,7 @@ def discover_all_refs(roots: list[Path]) -> dict[str, list["ProfileRef"]]:
         root = Path(root)
         if not root.is_dir():
             continue
-        for path in sorted(root.glob("*.yml")):
+        for path in _profile_files(root):
             name = path.stem
             if name in RESERVED_WORDS:
                 continue

@@ -207,16 +207,14 @@ def _profile_slots_summary(cfg: Dict[str, Any]) -> str:
 
 
 def _profile_mcp_rebuild_note(app: Any, value: str) -> str:
-    ref = _discovered_profiles(app).get(value)
-    if ref is None:
+    if _discovered_profiles(app).get(value) is None:
         return ""
-    try:
-        import yaml
-        raw = yaml.safe_load(ref.path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        # Битый профиль-файл (юзер правит руками, волна A) не должен ронять
-        # рендер hint'а /profiles — предупреждение о MCP просто не покажется.
-        return ""
+    # Читатель ОДИН на оба хинта (`_profile_file_doc`): вторая копия чтения жила
+    # рядом и разошлась с первой — она не знала про чужую кодировку и роняла
+    # палитру трейсбеком на одном наведении курсора, пока первую уже чинили.
+    # Битый или нечитаемый файл (человек правит руками) даёт пустой документ:
+    # предупреждение о MCP просто не покажется.
+    raw = _profile_file_doc(app, value)
     # Во ВХОДНОМ документе секция называется `mcp: servers:` — плоский `mcp-servers`
     # существует только в снимке flatten_app_config (config.py), а литеральный
     # верхнеуровневый `mcp-servers:` схема профиля отвергает (docs/configuration.md).
@@ -295,7 +293,9 @@ def _profile_file_doc(app: Any, name: str) -> Dict[str, Any]:
     try:
         import yaml
         raw = yaml.safe_load(ref.path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        # decode — подкласс `ValueError`, а не `OSError`: чужая кодировка
+        # роняла палитру на одном наведении курсора (живой смок).
         return {}
     return raw if isinstance(raw, dict) else {}
 

@@ -92,7 +92,16 @@ def _yaml_key(key: str) -> str:
 
 
 def _read(target) -> str:
-    return Path(target).read_text(encoding="utf-8")
+    """Текст цели. Нечитаемый файл — отказ ОПЕРАЦИИ (`RegistryWriteError`), а не
+    сюрприз вызывающему: голый `OSError` уходил мимо перехвата у одних читателей,
+    а `UnicodeDecodeError` (подкласс `ValueError`, не `OSError`) — мимо и того
+    `(RegistryWriteError, OSError)`, которым секция ловит отказы записи, и ронял
+    экран крэшем. Случай достижим: файл НЕАКТИВНОГО профиля в загрузке не
+    участвует, его кодировку никто не проверял, а секция в него пишет."""
+    try:
+        return Path(target).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise RegistryWriteError(f"{target}: не удалось прочитать: {exc}") from exc
 
 
 def _document(text: str) -> dict:

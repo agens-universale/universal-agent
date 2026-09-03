@@ -799,7 +799,7 @@ async def test_a_profile_whose_file_is_unreadable_never_lends_another_connection
     _project(tmp_path, monkeypatch)
     base_cfg = _write(tmp_path / "base" / "config.yml", _BASE_WITH_A_MODEL)
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
-    _write(tmp_path / "base" / "profiles" / "corp.yml", "backend: [не закрыт\n")
+    profile_file = _write(tmp_path / "base" / "profiles" / "corp.yml", "backend: [не закрыт\n")
 
     app = app_mod.TuiApp(config=_active_profile_runtime())
     async with app.run_test() as pilot:
@@ -807,7 +807,12 @@ async def test_a_profile_whose_file_is_unreadable_never_lends_another_connection
         await _put_cursor(pilot, scr, "profile", "corp")
         await pilot.press("enter")
         await pilot.pause()
-        assert "не удалось прочитать файл профиля" in _notice(scr)
+        # Отказ отвечает про ДЕЙСТВИЕ. Путь и причина уже стоят в блоке под
+        # курсором той же строки (`_profiles_row_hint`), и повтор давал их на
+        # экране третий раз подряд.
+        notice = _notice(scr)
+        assert "не открыто" in notice and "не читается" in notice
+        assert str(profile_file) not in notice
         assert scr._profiles_open is None
         endpoint, auth = scr._probe_args_from_config(scr._open_profile_config("corp"))[:2]
         assert endpoint == "http://host/v1/chat/completions"

@@ -2374,3 +2374,38 @@ async def test_registry_origin_reads_the_stack_once_per_ui_pass(tmp_path, monkey
         again = len(reads)
         scr._registry_origin()
         assert len(reads) > again, "кэш пережил проход — витрина ослепла"
+
+
+async def test_registry_origin_cache_does_not_survive_the_sections_own_write(
+        tmp_path, monkeypatch):
+    """Кэш происхождения живёт проход UI — и запись секции обязана сбросить его ДО
+    того, как секция перечитает себя: `_reload()` спрашивает витрину первым же
+    делом (`_legacy_default`), и ответ, снятый ДО записи, решает судьбу тела.
+
+    Цена ошибки — ровно та инверсия, от которой витрина и заведена: база и слой
+    сверху несут одну и ту же запись (`is_overridden=False`), человек снимает
+    последнюю запись базы — и под живым реестром проектного слоя поднимается
+    легаси-редактор `agent.model`, который в этом стеке не действует вовсе.
+
+    Кэш здесь греется ЯВНЫМ лишним чтением витрины: сегодня оба её читателя стоят
+    за ранним возвратом `_registry_overlay` (реестр непуст — слой сверху не
+    спрашивают), и проход со списком записей кэш не наполняет. Держится порядок
+    вызовов только этим — не обещанием докстринга; третий читатель витрины (или
+    снятый ранний возврат) включил бы дефект молча."""
+    from tui.editors.model import ModelEditor
+    async with _section_over_layers(tmp_path, monkeypatch, body=_PROJECT_REGISTRY,
+                                    project=_PROJECT_REGISTRY) as (pilot, scr, cfg_file):
+        scr._registry_origin()                  # второй читатель витрины в этом проходе
+        ed = _editor(scr)
+        ed._idx = next(i for i, row in enumerate(ed._rows()) if row["kind"] == "entry")
+        await pilot.press("delete")
+        await pilot.pause()
+        assert ed.awaiting_confirm
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert not (_doc(cfg_file).get("models") or {})     # файл базы: реестр снят
+        ed = _editor(scr)
+        assert not ed.legacy_open, "легаси-редактор поднялся под живым реестром слоя выше"
+        assert not scr.query(ModelEditor), "правка `agent.model`, которая не действует"
+        assert ".gc/config.yml в проекте" in _texts(scr), _texts(scr)
