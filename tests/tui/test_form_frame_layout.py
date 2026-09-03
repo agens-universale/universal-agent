@@ -60,6 +60,15 @@ def _assert_canon(scr, *, scroll_id, frame_id, footer_id):
     assert scroll.virtual_size.height > scroll.size.height, (
         f"{scroll_id}: контент влез ({scroll.virtual_size.height} ≤ {scroll.size.height}) — "
         f"сторож проверяет переполнение, подберите более тесное окно")
+    # (4) …и раз содержимое переполняет рамку — в ней есть что показывать (вьюпорт
+    #     не выродился в 0 строк, как было, когда коробка рамки съедала весь остаток
+    #     раньше, чем до неё доходило содержимое) и до остатка можно доехать скроллом
+    #     (переполнение само по себе не гарантия — именно `max_scroll_y == 0` при
+    #     переполненном содержимом и делало секцию непрокручиваемой).
+    assert scroll.content_region.height > 0, (
+        f"{scroll_id}: вьюпорт пуст — рамке (граница+паддинг) нечего показывать")
+    assert scroll.max_scroll_y > 0, (
+        f"{scroll_id}: контент переполняет вьюпорт, но max_scroll_y == 0 — непрокручиваемо")
 
 
 @pytest.mark.parametrize("section", ["Подключение", "Модели", "Профили",
@@ -356,7 +365,70 @@ async def test_notice_does_not_outrank_the_cursor(tmp_path, h):
             await _assert_revealed(pilot, scr, ".models-row.selected")
 
 
-@pytest.mark.parametrize("new_h", [30, 16, 12])
+@pytest.mark.parametrize("h", [7, 8, 9, 10, 11])
+async def test_frame_goes_compact_when_its_own_box_would_eat_the_viewport(tmp_path, h):
+    """Ниже 12 строк собственная коробка рамки (граница `round` + вертикальный
+    `padding: 1 2`, 4 строки разом) съедала остаток экрана РАНЬШЕ, чем до него
+    добиралось содержимое: потолок стоял (`available` было положительным), но
+    вьюпорт внутри рамки выходил 0-1 строка — рамка рисовалась пустой, набирать
+    было не во что. `.frame-compact` снимает границу и вертикальный паддинг на
+    таких высотах, отдавая остаток целиком содержимому."""
+    from tui.app import TuiApp
+    from tui.screens.settings import SettingsScreen
+    app = TuiApp(config=_cfg())
+    async with app.run_test(size=(80, h)) as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(tmp_path / "config.yml"),
+                             on_apply=lambda: None, probe_fn=ok_probe())
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Режимы работы")     # секция заведомо выше любого окна
+        await pilot.pause()
+        await pilot.pause()
+        scroll = scr.query_one("#set-scroll")
+        footer = scr.query_one("#set-footer")
+        assert scroll.content_region.height > 0, (
+            f"h={h}: вьюпорт рамки пуст — коробка (граница+паддинг) съела весь остаток")
+        assert scr.region.contains_region(footer.region), (
+            f"h={h}: футер за краем экрана: {footer.region} ⊄ {scr.region}")
+        assert scroll.virtual_size.height > scroll.size.height, (
+            f"h={h}: контент влез — сторож проверяет переполнение, подберите теснее")
+        assert scroll.max_scroll_y > 0, (
+            f"h={h}: контент переполняет вьюпорт, но скроллом до него не доехать "
+            f"(max_scroll_y=0) — секция непрокручиваема")
+
+
+async def test_frame_cap_is_never_left_stale_on_floor_height(tmp_path):
+    """Окно настолько тесное, что даже без рамки на содержимое не остаётся ни
+    строки (шапка+футер+отступы рамки уже съедают весь экран) — потолок обязан
+    ВСЕГДА выставляться заново, а не молчать. Молчаливый пропуск (`if available >
+    0`) на таких высотах оставлял ПРЕЖНИЙ потолок нетронутым: скролл разрастался
+    на всю высоту содержимого и становился НЕПРОКРУЧИВАЕМЫМ (`max_scroll_y == 0`
+    при контенте, который в вьюпорт заведомо не влезает) — то, что ниже края
+    экрана, было недостижимо совсем. Футер при этом ещё физически помещается —
+    в отличие от совсем экстремальных высот, здесь его отсутствие уже дефект."""
+    from tui.app import TuiApp
+    from tui.screens.settings import SettingsScreen
+    app = TuiApp(config=_cfg())
+    async with app.run_test(size=(80, 6)) as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(tmp_path / "config.yml"),
+                             on_apply=lambda: None, probe_fn=ok_probe())
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Режимы работы")
+        await pilot.pause()
+        await pilot.pause()
+        scroll = scr.query_one("#set-scroll")
+        footer = scr.query_one("#set-footer")
+        assert scroll.styles.max_height is not None, (
+            "потолок не выставлен вовсе — молчаливый пропуск оставит прежний (протухший)")
+        assert scr.region.contains_region(footer.region), (
+            f"футер физически помещается (6 строк ровно хватает на шапку+отступы+футер), "
+            f"но за краем: {footer.region} ⊄ {scr.region}")
+        assert scroll.max_scroll_y > 0, (
+            "контент длиннее вьюпорта, но max_scroll_y == 0 — секция непрокручиваема")
+
+
+@pytest.mark.parametrize("new_h", [30, 16, 12, 8, 6])
 async def test_canon_survives_live_resize(tmp_path, new_h):
     """Окно уменьшили НА ХОДУ — канон обязан устоять.
 

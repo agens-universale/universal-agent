@@ -548,6 +548,17 @@ TextArea.ask-human-mode { border: solid $run-color; }
    и /settings (см. `tui/form_frame.py`). */
 #pu-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
 #pu-frame { height: auto; width: 1fr; }
+
+/* Компактный режим рамки (`tui/form_frame.py::cap_frame_height`) — на тесных окнах
+   собственная коробка скролла (граница `round` + вертикальный `padding: 1 2`, 4
+   строки разом) съедала остаток экрана раньше, чем до неё доходило содержимое:
+   рамка рисовалась пустой уже при остатке в 4-5 строк. Без границы и вертикального
+   отступа тот же остаток достаётся содержимому целиком; горизонтальный отступ
+   сохранён — левый край текста не должен прыгать при переключении режима. */
+#set-scroll.frame-compact, #onb-scroll.frame-compact, #pu-scroll.frame-compact {
+    border: none;
+    padding: 0 1;
+}
 .pu-title { height: auto; padding: 0 0 1 0; border-bottom: solid $deep-dim; margin-bottom: 1; }
 .pu-title.solo { padding: 0; border-bottom: none; margin-bottom: 0; }   /* нечего обновлять — линии под заголовком нет */
 .post-update-hint { height: auto; color: $deep-dim; padding: 0; }
