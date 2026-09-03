@@ -73,6 +73,66 @@ def test_unresolvable_pointer_falls_back_to_the_single_file(stack):
     validate_config_text_with_sections(text, base_path=base)
 
 
+def _write_utf16(path: Path, text: str) -> Path:
+    """Файл, сохранённый «блокнотом» в UTF-16: читается ТОЛЬКО как «не удалось
+    прочитать» (`UnicodeDecodeError` — подкласс ValueError), синтаксис при этом
+    безупречен. Живая раскладка находки, а не выдуманная."""
+    path.write_bytes(text.encode("utf-16"))
+    return path
+
+
+def test_a_pointer_to_an_unreadable_profile_is_refused(stack):
+    """ГЛАВНОЕ: запись, которая САМА заводит в стек нечитаемый файл, обязана быть
+    отклонена. Раньше `_stacked_app_config` отвечала на неё тем же `None`, что и
+    на «цель в стек не входит», потребители читали его как «проверять нечего» —
+    указатель уезжал на диск, и следующий старт не поднимался вовсе."""
+    base, profiles = stack
+    body = 'models:\n  a:\n    model: "x"\nslots:\n  default: "a"\n'
+    base.write_text('profile: ""\n' + body, encoding="utf-8")   # стек ЖИВ до записи
+    _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
+
+    with pytest.raises(ValueError, match=r"broken-enc\.yml.*не удалось прочитать"):
+        validate_config_text_with_sections('profile: "broken-enc"\n' + body,
+                                           base_path=base)
+
+
+def test_editing_the_base_under_an_already_unreadable_profile_is_allowed(stack):
+    """Обратная цена той же ошибки: стек СЛОМАН И БЕЗ этой записи (нечитаемый
+    профиль уже активен) — правку базы не запрещаем, иначе человека запирает
+    внутри: чинить нечитаемый слой из /settings стало бы нечем."""
+    base, profiles = stack
+    base.write_text(
+        'profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
+    _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
+
+    validate_config_text_with_sections(
+        'profile: "broken-enc"\nmodels:\n  a:\n    model: "y"\n', base_path=base)
+
+
+def test_dropping_the_pointer_to_an_unreadable_profile_is_allowed(stack):
+    """Выход из ловушки: снятие указателя стек как раз ЧИНИТ — отказать здесь
+    значило бы отобрать единственную кнопку, которой человек выбирается."""
+    base, profiles = stack
+    base.write_text(
+        'profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
+    _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
+
+    validate_config_text_with_sections(
+        'profile: ""\nmodels:\n  a:\n    model: "x"\n', base_path=base)
+
+
+def test_writing_into_an_unreadable_active_profile_is_not_blocked(stack):
+    """Второй вход гейта: правится САМ нечитаемый профиль — его текст в стеке
+    подставляется кандидатом, читать файл незачем, отказывать не за что."""
+    base, profiles = stack
+    base.write_text(
+        'profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
+    target = _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
+
+    validate_profile_text_with_sections(
+        'slots:\n  default: "a"\n', target=target, base_path=base)
+
+
 def test_phase_one_stays_on_the_file_itself(stack):
     """Схему по-прежнему судят по правимому файлу: сообщение о чужом слое человеку
     в форме бесполезно."""

@@ -688,15 +688,9 @@ class TuiApp(App):
         base_name = (self._config or {}).get("profile") or None
         if name == base_name:
             return
-        from config import load_config_ex
         try:
-            # Проба, а не применение: ответ выбрасывается, спрашивается лишь
-            # «собирается ли». Побочки сбора (конвейер проекций, предупреждения
-            # TLS) глобальны — их несёт `_profile_remerge`, который профиль
-            # действительно применяет.
-            load_config_ex(self._config_path, profile_override=name,
-                           apply_to_process=False)
-        except Exception:
+            self.probe_profile_assembly(name)
+        except Exception as exc:
             acting = base_name or "без профиля"
             self._session_overrides.pop("profile", None)
             self._session_profile_cache = None
@@ -705,10 +699,33 @@ class TuiApp(App):
                 self.persist_session_overrides()
             except OSError:
                 pass   # тред недоступен — в памяти уже чисто, персист догонит позже
+            # Причина, а не один её частный случай: «не найден» посылало искать
+            # пропажу, когда файл лежит на месте и не читается (профиль в UTF-16,
+            # неразбираемый YAML) — человек шёл не туда и не находил чинить что.
+            # Причина самодостаточна («<путь>: …»), тот же приём, что у соседа
+            # `session_profile_remerge_failed`.
             push_runtime_notice(Notice(
                 "warning", "session_profile_stale",
-                f'профиль "{name}" из сессии не найден — действует "{acting}"', ()))
+                f'профиль "{name}" из сессии снят ({exc}) — действует "{acting}"', ()))
             self.invalidate_runner()
+
+    def probe_profile_assembly(self, name: str) -> None:
+        """Собирается ли конфиг с профилем `name` — проба, а не применение: ответ
+        выбрасывается, спрашивается лишь «собирается ли», исключение уходит
+        вызывающему как есть (`ValueError` с путём и причиной).
+
+        Побочки сбора (конвейер проекций, предупреждения TLS) глобальны и
+        необратимы — их несёт `_profile_remerge`, который профиль действительно
+        применяет. Проба, идущая другим поводом (санация, гейт выбора, витрина
+        пикера), не должна двигать рантайм: сорвавшийся следом персист оставил бы
+        процесс перепривязанным к профилю, которого нет ни в сессии, ни в мете.
+
+        Имя публичное: судья «годен ли профиль» ОДИН на всех, и метку пикера
+        (`toggles.profile_picker_options`) ставит он же. Вторая редакция правила
+        разошлась бы с первой — витрина звала бы Enter туда, где Enter отказывает."""
+        from config import load_config_ex
+        load_config_ex(self._config_path, profile_override=name,
+                       apply_to_process=False)
 
     def switch_session_profile(self, name: str) -> None:
         """Переключить профиль сессии (спека §9.1/§9.3): применяет как обычный
@@ -717,7 +734,21 @@ class TuiApp(App):
         и кэш пере-мержа сбрасывает `set_session_override`; здесь — то, что
         специфично для МОМЕНТА выбора: boot-frozen-diff notice и, при живом ране,
         notice отложенного применения (пересборка сама откладывается существующим
-        `invalidate_runner` — единый механизм с обычной перечиткой конфига)."""
+        `invalidate_runner` — единый механизм с обычной перечиткой конфига).
+
+        Профиль, с которым конфиг не собирается, отклоняется ДО применения:
+        `_profile_remerge` деградирует на прежнюю базу молча для рендера, и без
+        гейта выбор доезжал до футера и до меты треда — витрина называла профиль,
+        которого нет ни в одном запросе, а негодное имя восстанавливалось на
+        каждом attach. Проба идёт первой: после `apply_session_override` имя уже
+        в мете, и снимать его пришлось бы вторым действием, по дороге к которому
+        есть свои способы не доехать.
+
+        Снятие (`name == ""`) пробы не знает — это дверь наружу, и судить её по
+        сборке снимаемого значило бы запереть человека внутри битого выбора."""
+        base_name = (self._config or {}).get("profile") or None
+        if name and name != base_name:
+            self.probe_profile_assembly(name)
         old_effective = self.effective_config()
         self.apply_session_override("profile", name)
         self._notice_boot_frozen_diff(old_effective, self.effective_config())

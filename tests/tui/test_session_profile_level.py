@@ -817,3 +817,189 @@ def test_sanitize_does_not_apply_the_probed_profile_to_the_process(tmp_path):
 
     assert "profile" in app._session_overrides   # профиль здоров — санация не сняла
     assert message_projection._DEFAULT_FOR_MODEL is before
+
+
+# --- 10. Гейт сессионного выбора: несобираемый профиль отклоняется на месте --------
+
+
+def _write_unreadable_profile(tmp_path: Path, name: str = "broken-enc") -> Path:
+    """Профиль в UTF-16: файл на месте, в списке пикера есть, а прочитать нельзя
+    (живой смок владельца)."""
+    path = tmp_path / "profiles" / f"{name}.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump({"models": {"gc": {"url": "http://y", "token": ""}},
+                        "slots": {"default": "gc"}}),
+        encoding="utf-16",
+    )
+    return path
+
+
+def _meta_overrides(tmp_path: Path, task_id: str) -> dict:
+    from tui.session_settings import read_from_meta
+    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
+    return read_from_meta(store.get_task_meta(task_id))
+
+
+def test_switch_session_profile_refuses_a_profile_that_does_not_assemble(tmp_path):
+    """Выбор профиля, с которым конфиг не собирается, обязан быть отклонён
+    вызывающему исключением: тихий фоллбэк `_profile_remerge` оставлял имя в
+    футере и в мете треда, а работала при этом база — витрина называла профиль,
+    которого нет ни в одном запросе."""
+    path = _write_unreadable_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.tui_state.active_task_id = "t-gate"
+
+    with pytest.raises(ValueError) as excinfo:
+        app.switch_session_profile("broken-enc")
+
+    assert str(path) in str(excinfo.value)
+    assert "profile" not in app._session_overrides
+    assert "profile" not in _meta_overrides(tmp_path, "t-gate")
+
+
+def test_switch_session_profile_refuses_invalid_yaml_profile(tmp_path):
+    """Тот же класс, другой способ сломать файл: неразбираемый YAML."""
+    _write_yaml(tmp_path / "profiles" / "ok.yml", {"models": {}})
+    (tmp_path / "profiles" / "bad.yml").write_text("models: [broken", encoding="utf-8")
+    app = _app_with_base(tmp_path)
+    app.tui_state.active_task_id = "t-yaml"
+
+    with pytest.raises(ValueError):
+        app.switch_session_profile("bad")
+
+    assert "profile" not in app._session_overrides
+    assert "profile" not in _meta_overrides(tmp_path, "t-yaml")
+
+
+def test_switch_session_profile_refuses_profile_with_dangling_slot(tmp_path):
+    """Файл читается и разбирается, а конфиг всё равно не собирается: `slots.default`
+    указывает на алиас, которого нет в merged-словаре models. Гейт судит по сборке,
+    а не по читаемости файла."""
+    _write_yaml(tmp_path / "profiles" / "dangling.yml", {"slots": {"default": "nosuch"}})
+    app = _app_with_base(tmp_path)
+    app.tui_state.active_task_id = "t-slot"
+
+    with pytest.raises(ValueError):
+        app.switch_session_profile("dangling")
+
+    assert "profile" not in app._session_overrides
+    assert "profile" not in _meta_overrides(tmp_path, "t-slot")
+
+
+def test_switch_session_profile_still_applies_a_healthy_profile(tmp_path):
+    """Законный случай рядом с битым соседом: гейт не мешает здоровому выбору."""
+    _write_work_profile(tmp_path)
+    _write_unreadable_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+
+    app.switch_session_profile("work")
+
+    assert app._session_overrides["profile"] == "work"
+    assert "flash" in app.effective_config()["models"]
+
+
+def test_session_profile_removal_works_even_when_current_choice_is_broken(tmp_path):
+    """Снятие профиля — дверь наружу: она обязана открываться и тогда, когда в
+    сессии лежит негодное имя (его положила прежняя версия, до гейта). Судить
+    снятие по сборке снимаемого профиля значило бы запереть человека внутри."""
+    _write_unreadable_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.set_session_override("profile", "broken-enc")
+
+    app.switch_session_profile("")
+
+    assert app._session_overrides["profile"] == ""
+
+
+def test_session_profile_removal_does_not_probe_at_all(tmp_path):
+    """Та же дверь, вторая петля: снятие не спрашивает диск вовсе. Сломаться под
+    ногами может и сама база — и именно тогда снятие нужнее всего; проба на
+    снятии читала бы битый `config.yml` и запирала выход."""
+    _write_unreadable_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.set_session_override("profile", "broken-enc")
+    (tmp_path / "config.yml").write_text("backend: [broken", encoding="utf-8")
+
+    app.switch_session_profile("")
+
+    assert app._session_overrides["profile"] == ""
+
+
+def test_switch_session_profile_gate_probes_without_applying_to_process(tmp_path):
+    """Проба гейта не применяет профиль к процессу — иначе сорвавшийся персист
+    (каталог тредов недоступен) оставлял бы процесс перепривязанным к профилю,
+    которого нет ни в сессии, ни в мете: конвейер проекций режет теги по чужому
+    правилу, а витрины показывают прежнее."""
+    import message_projection
+
+    _write_yaml(tmp_path / "profiles" / "work.yml",
+                {"strip_tags_projection": {"tags": ["scratchpad"]}})
+    app = _app_with_base(tmp_path)
+
+    def _no_disk() -> None:
+        raise OSError("read-only")
+
+    app.persist_session_overrides = _no_disk
+    before = message_projection._DEFAULT_FOR_MODEL
+
+    with pytest.raises(OSError):
+        app.switch_session_profile("work")
+
+    assert "profile" not in app._session_overrides
+    assert message_projection._DEFAULT_FOR_MODEL is before
+
+
+def test_profile_broken_after_the_choice_still_degrades_to_the_base(tmp_path):
+    """Профиль сломали ПОСЛЕ выбора — отклонять уже нечего, выбор состоялся.
+    Существующее поведение `_profile_remerge` (notice + прежняя база) гейт не
+    трогает: он судит МОМЕНТ выбора, а не каждый кадр рендера."""
+    clear_runtime_notices()
+    _write_work_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.switch_session_profile("work")
+
+    (tmp_path / "profiles" / "work.yml").write_text("models: [broken", encoding="utf-8")
+    app._session_profile_cache = None
+
+    assert app._profile_remerge("work") == app._config
+    codes = [n.code for n in collect_runtime_notices()]
+    assert "session_profile_remerge_failed" in codes
+
+
+def test_sanitize_drops_an_unreadable_session_profile_naming_the_reason(tmp_path):
+    """Санация снимает не только ПРОПАВШИЙ профиль, но и нечитаемый — и говорит,
+    почему: «не найден» посылало искать файл, который лежит на месте."""
+    clear_runtime_notices()
+    path = _write_unreadable_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.set_session_override("profile", "broken-enc")
+
+    app.sanitize_session_profile()
+
+    assert "profile" not in app._session_overrides
+    msg = next(n.message for n in collect_runtime_notices()
+               if n.code == "session_profile_stale")
+    assert "broken-enc" in msg and str(path) in msg
+
+
+@pytest.mark.asyncio
+async def test_attach_sanitizes_an_unreadable_session_profile(tmp_path):
+    """Тред, в мету которого битый выбор положила прежняя версия: на attach он
+    обязан сняться, иначе восстанавливался бы на каждом открытии треда — и
+    каждый раз безуспешно."""
+    clear_runtime_notices()
+    base = tmp_path / "config.yml"
+    _write_yaml(base, _MINIMAL_BASE)
+    _write_unreadable_profile(tmp_path)
+    cfg, _meta = load_config_ex(str(base))
+    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
+    store.update_tui_meta("t-broken", {"session_settings": {"profile": "broken-enc"}})
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app.set_config_path(str(base))
+    async with app.run_test() as pilot:
+        pilot.app.screen.attach_active_task("t-broken")
+        await pilot.pause(0.1)
+        assert "profile" not in app._session_overrides
+        codes = [n.code for n in collect_runtime_notices()]
+        assert "session_profile_stale" in codes

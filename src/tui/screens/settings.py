@@ -997,7 +997,12 @@ class SettingsScreen(Screen):
         for path in paths:
             try:
                 snapshot.append((path, Path(path).read_text(encoding="utf-8")))
-            except OSError:
+            except (OSError, UnicodeDecodeError):
+                # «Нечитаемый» — это и НЕДЕКОДИРУЕМЫЙ (файл сохранён «блокнотом»
+                # в UTF-16): подкласс ValueError, а не OSError, и он уходил мимо
+                # этого молчания — то есть ронял ВЕСЬ экран настроек на рендере
+                # меню (ключ кэша считается для глифа «Модели»), ровно там, куда
+                # человек и приходит чинить такой профиль.
                 snapshot.append((path, None))
         return tuple(snapshot)
 
@@ -3577,7 +3582,8 @@ class SettingsScreen(Screen):
         try:
             self._write_profile_pointer(target, name)
         except ValueError as exc:
-            self._notice(f"✗ {self._profile_stack_write_refusal('включён', exc)}")
+            self._notice("✗ " + self._profile_stack_write_refusal(
+                "включён", exc, shown_path=ref.path))
             return
         except OSError as exc:
             self._notice(f"✗ не сохранено: {exc}")
@@ -3751,7 +3757,8 @@ class SettingsScreen(Screen):
     def _profile_write_refusal(self, done: str, reason: str) -> str:
         return self._PROFILE_FILE_WRITE_REFUSAL.format(done=done, reason=reason)
 
-    def _profile_stack_write_refusal(self, action: str, detail) -> str:
+    def _profile_stack_write_refusal(self, action: str, detail, *,
+                                     shown_path=None) -> str:
         """Отказ фазы 2 при записи указателя `profile:` (`_write_profile_pointer`) —
         называет несостоявшееся действие и куда идти чинить, деталь остаётся
         сырой строкой валидатора. Общая формулировка верна для ЛЮБОЙ причины
@@ -3762,6 +3769,20 @@ class SettingsScreen(Screen):
         Без "✗": решение о нём — за вызывающим (`_rollback_profile_pointers`
         собирает деталь `file_exc` СЮДА один раз для нескольких путей записи, и
         второй "✗" от этой функции задваивался бы)."""
+        from config_modules.layers import StackAssemblyError
+
+        if isinstance(detail, StackAssemblyError):
+            # Стек не собрался — значит дело в самих ФАЙЛАХ (кодировка, YAML,
+            # указатель в никуда), а не в реестре. Звать в «Модели» тут значит
+            # послать не по адресу; деталь ниже уже называет файл и причину.
+            # Путь этого профиля витрина печатает первой строкой блока под
+            # курсором, а причину — второй: повторяя обе, отказ давал их на
+            # экране трижды. `shown_path` задан — значит вызывающий знает,
+            # что показано, и повтор снимается.
+            return (f"профиль не {action} — конфиг стал бы нерабочим:\n  "
+                    f"{_without_path_prefix(str(detail), shown_path)}"
+                    if shown_path is not None else
+                    f"профиль не {action} — конфиг стал бы нерабочим:\n  {detail}")
         return (
             f"профиль не {action} — конфиг стал бы нерабочим. Поправьте в "
             f"разделе «Модели» и повторите:\n  {detail}"
@@ -3924,13 +3945,22 @@ class SettingsScreen(Screen):
         # внятным текстом (тот же приём, что и у соседних файловых точек этой
         # функции: `ref.path.rename` ниже и запись указателя ловят свои
         # `OSError`/`ValueError` так же, не давая им уйти необработанными).
+        #
+        # Отказ называет ФАЙЛ, форматом «<путь>: не удалось прочитать: …» — тем
+        # же, каким виноватый файл называют чтение слоёв и объяснение сломанного
+        # конфига. Голой жалобы кодека («'utf-8' codec can't decode byte 0xff» на
+        # профиле, сохранённом в UTF-16) человеку не хватает: он не знает, какой
+        # из профилей чинить. `UnicodeDecodeError` — подкласс ValueError, а не
+        # OSError, и ловится здесь вместе с ним.
         try:
-            profile_candidate = {
-                new_profile_path: _raw_from_text(
-                    ref.path.read_text(encoding="utf-8"), "профиль"),
-            }
-        except (ValueError, OSError) as exc:
-            self._notice(f"✗ не переименовано: {exc}")
+            profile_text = ref.path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            self._notice(f"✗ не переименовано: {ref.path}: не удалось прочитать: {exc}")
+            return
+        try:
+            profile_candidate = {new_profile_path: _raw_from_text(profile_text, "профиль")}
+        except ValueError as exc:
+            self._notice(f"✗ не переименовано: {ref.path}: {exc}")
             return
         written, error = self._repoint_profile_layers(
             layers, new_name, extra_candidates=profile_candidate)

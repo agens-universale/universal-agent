@@ -214,14 +214,32 @@ def test_clearing_the_project_pointer_is_refused_when_it_breaks_the_stack(stack)
     validate_config_text_with_sections('profile: ""\n')
 
 
-def test_an_unresolvable_pointer_via_the_project_layer_falls_back_to_the_single_file(stack):
-    """Стек не собрался (указатель называет несуществующий профиль) — фаза 2
-    откатывается к однофайловой, как и у базового/профильного входов гейта."""
+def test_an_unresolvable_pointer_written_into_the_project_layer_is_refused(stack):
+    """Стек не собрался — ответ по тому, КТО его сломал. Здесь ломает сама запись:
+    до неё проектного слоя нет и стек жив, после — указатель называет профиль,
+    которого нет ни в одном корне, а нерезолвимый `profile:` на холодном старте —
+    строгая ошибка (§3.1). Прежний безусловный откат к однофайловой фазе 2
+    пропускал такую запись: файл писался, а следующий старт не поднимался."""
     base, _profiles, project_config = stack
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
 
+    with pytest.raises(ValueError, match="нет-такого"):
+        validate_config_text_with_sections(
+            'profile: "нет-такого"\n', base_path=base, target=project_config)
+
+
+def test_an_already_dangling_pointer_still_falls_back_to_the_single_file(stack):
+    """Обратная сторона той же развилки: указатель уже висит на несуществующем
+    профиле (стек сломан и БЕЗ этой записи) — правку проектного слоя не
+    запрещаем, иначе чинить его из /settings стало бы нечем."""
+    base, _profiles, project_config = stack
+    base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
+    project_config.parent.mkdir(parents=True, exist_ok=True)
+    project_config.write_text('profile: "нет-такого"\n', encoding="utf-8")
+
     validate_config_text_with_sections(
-        'profile: "нет-такого"\n', base_path=base, target=project_config)
+        'profile: "нет-такого"\nlevel: default\n',
+        base_path=base, target=project_config)
 
 
 # --- куда ложится сам указатель: `profile_pointer_write_target` -----------------

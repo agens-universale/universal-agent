@@ -5,8 +5,8 @@
 `list[tuple[str, str] | tuple[str, str, str]]` (value, description[, status]) из
 `Command.arg_options` — открывает вызывающий код (TraceScreen) для любой команды с
 непустым arg_options. 2-tuple — простое value+описание (`/export` и т.п.); 3-tuple
-добавляет status-колонку справа, цветом OK (`/profiles`, задача 10 — активный
-профиль)."""
+добавляет status-колонку справа (`/profiles`, задача 10 — активный профиль,
+цветом OK; ✗-статус отказа — цветом ERR)."""
 from __future__ import annotations
 
 from typing import Callable, Optional
@@ -91,14 +91,19 @@ class ArgPicker(VerticalScroll):
         пикеры — /export и т.п. — не должны заметить правку). `(value, desc,
         status)` — опции со статус-колонкой (`/profiles`, задача 10): `Text` с
         правым статусом цветом OK, ровно как активный маркер в /settings
-        (`_profile_row_text`); статус пуст у неактивных строк."""
+        (`_profile_row_text`), и цветом ERR у ✗-отказа; статус пуст у строк,
+        которым нечего сказать."""
         if len(opt) == 3:
             value, desc, status = opt
             if not desc and not status:
                 return Text(f" {value}")
             t = Text(f" {value.ljust(self._value_col_w())}{desc.ljust(self._desc_col_w())}")
             if status:
-                t.append(status, style=_pal.OK)
+                # Цвет — по смыслу статуса: ✗-отказ («не применится») зелёным
+                # цветом достижения читался бы как «всё в порядке». Правило по
+                # глифу, а не по литералу: пикер не знает ни про профили, ни про
+                # их тексты.
+                t.append(status, style=_pal.ERR if status.startswith("✗") else _pal.OK)
             return t
         value, desc = opt
         if not desc:

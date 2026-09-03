@@ -290,8 +290,12 @@ async def test_activate_base_profile_writes_base_config_without_project_pointer(
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    # Токен — не украшение стенда: половина пары «адрес+токен» роняет чтение
+    # профиля, а гейт активации теперь отказывает по стеку, который ломает сама
+    # запись. Тест — про то, В КАКОЙ файл уходит указатель, и стенду положено
+    # нести профиль, с которым следующий старт поднимается.
     _write(tmp_path / "base" / "profiles" / "home.yml",
-          "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+          'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n')
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:

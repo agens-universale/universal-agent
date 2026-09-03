@@ -1010,9 +1010,10 @@ async def test_rollback_that_also_fails_does_not_promise_a_retry(tmp_path, monke
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    # Восстановление "ghost" тоже уходит в фазу 2, тоже не резолвится (нет такого
-    # профиля) и тоже падает на нерезолвимой базе — ту же дорогу проходит любой
-    # НЕуспешный `_write_profile_pointer`, откуда бы он ни был вызван.
+    # Восстановление "ghost" тоже уходит в фазу 2 и тоже отклоняется: указателя
+    # на несуществующий профиль стек следующего старта не переживёт — ту же
+    # дорогу проходит любой НЕуспешный `_write_profile_pointer`, откуда бы он ни
+    # был вызван.
     base_cfg = _write(tmp_path / "base" / "config.yml",
                       "models:\n"
                       '  a:\n    model: "x"\n'
@@ -1029,7 +1030,8 @@ async def test_rollback_that_also_fails_does_not_promise_a_retry(tmp_path, monke
     assert "повторите" not in notice, notice
     assert "переименовать не удалось" in notice, notice
     assert "автоматический откат" in notice, notice
-    assert "≥2" in notice, notice   # причина сбоя самого отката тоже видна, не проглочена
+    # причина сбоя самого отката тоже видна, не проглочена
+    assert "ghost" in notice and "не найден" in notice, notice
 
 
 # --- ревью Task 5 #2: переименование ПЕРЕВОЗИТ сессионный выбор -------------------
@@ -1715,3 +1717,177 @@ async def test_renaming_reports_a_clean_refusal_when_the_profile_file_vanishes_m
     assert "исчез" in notice, notice
     assert work.exists()                                     # ничего не тронуто
     assert not (tmp_path / "base" / "profiles" / "job.yml").exists()
+
+
+# --- нечитаемый файл профиля: запись указателя обязана отказать -------------------
+
+
+def _write_utf16(path: Path, text: str) -> Path:
+    """Профиль, сохранённый «блокнотом» в UTF-16: синтаксис безупречен, а
+    прочитать файл нельзя вовсе. Живая раскладка смока, а не выдуманная."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-16"))
+    return path
+
+
+def _loadable_base_text(profile: str = "") -> str:
+    """База, которая ГРУЗИТСЯ сама по себе: одна модель и заданный `slots.default`.
+    Иначе отказ активации нечем отличить от давнего «2+ моделей без слотов»."""
+    return (_base_config_text(profile)
+            + 'models:\n  a:\n    model: "x"\nslots:\n  default: "a"\n')
+
+
+async def test_activating_an_unreadable_profile_is_refused_and_names_the_file(
+        tmp_path, monkeypatch):
+    """ЖИВОЙ СМОК ВЛАДЕЛЬЦА: рядом с базой лежит профиль в UTF-16, человек жмёт
+    Space. Раньше запись указателя ПРОХОДИЛА (сборка стека падала, а гейт читал
+    её отказ как «проверять нечего»), и следующий `gc-ua` не поднимался вовсе —
+    выйти можно было только флагом `--profile ""`. Приложение не вправе
+    активировать профиль, с которым само же не стартует."""
+    import config as config_mod
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text())
+    before = base_cfg.read_text(encoding="utf-8")
+    bad = _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml",
+                 'slots:\n  default: "a"\n')
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "broken-enc")
+        await pilot.press("space")
+        await pilot.pause()
+        notice = _notice(scr)
+
+    assert "профиль не включён" in notice, notice
+    assert "не удалось прочитать" in notice, notice      # причина названа
+    # Адрес починки называется ТОЛЬКО там, где он верен: файл в чужой кодировке
+    # правят не в разделе «Модели», и звать туда значит послать не по адресу.
+    assert "разделе «Модели»" not in notice, notice
+    # Путь и причину витрина уже печатает для профиля под курсором — отказ,
+    # повторяя обе, давал их на экране трижды подряд.
+    # Имя файла человек уже видит в блоке под курсором (`_profiles_row_hint`):
+    # витрина печатает путь первой строкой, причину — второй.
+    assert notice.count(str(bad)) == 0, notice
+    assert str(bad) in scr._profiles_hint_text(scr._profiles_rows()), "путь остался в витрине"
+    assert notice.count("не удалось прочитать") == 1, notice
+    assert base_cfg.read_text(encoding="utf-8") == before   # указатель никуда не уехал
+    config_mod.load_config_ex(str(base_cfg))                # следующий старт по-прежнему жив
+
+
+async def test_deactivating_an_already_unreadable_profile_still_works(
+        tmp_path, monkeypatch):
+    """Выход из ловушки той же дверью, что и вход: указатель на нечитаемый профиль
+    уже записан (руками, прежней версией, чужой машиной) — снятие обязано
+    пройти. Гейт, отказывающий по одному лишь факту «стек не собрался», запер бы
+    человека внутри приложения ровно так же, как дефект запирал снаружи."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc"))
+    _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml",
+                 'slots:\n  default: "a"\n')
+
+    cfg = dict(_base_dict(), profile="broken-enc")
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "none")
+        await pilot.press("space")
+        await pilot.pause()
+        notice = _notice(scr)
+
+    assert notice == "", notice
+    assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_deleting_an_already_unreadable_profile_still_works(tmp_path, monkeypatch):
+    """Вторая дверь наружу из той же ловушки: удаление снимает указатель (пишет
+    `profile: ""`) и уносит файл в бэкап — стек оно ЧИНИТ, а не ломает."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc"))
+    broken = _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml",
+                          'slots:\n  default: "a"\n')
+
+    cfg = dict(_base_dict(), profile="broken-enc")
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "profile", "broken-enc")
+        await pilot.press("delete")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        notice = _notice(scr)
+
+    assert notice == "", notice
+    assert not broken.exists()
+    assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_creating_a_profile_beside_an_unreadable_one_is_untouched(
+        tmp_path, monkeypatch):
+    """Создание указателя не пишет вовсе — соседний нечитаемый профиль (даже
+    активный) ему не помеха. Сторож против «починки» гейта запретом всего
+    подряд: запереть человека без единственной кнопки «завести рабочий профиль»
+    было бы той же ловушкой с другой стороны."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc"))
+    _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml",
+                 'slots:\n  default: "a"\n')
+
+    cfg = dict(_base_dict(), profile="broken-enc")
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "add")
+        await pilot.press("n")
+        await pilot.pause()
+        await _type_name(pilot, scr, "fresh")
+        notice = _notice(scr)
+
+    assert notice == "", notice
+    assert (tmp_path / "base" / "profiles" / "fresh.yml").is_file()
+    assert 'profile: "broken-enc"' in base_cfg.read_text(encoding="utf-8")   # указатель не трогали
+
+
+async def test_renaming_an_unreadable_profile_is_refused_and_names_the_file(
+        tmp_path, monkeypatch):
+    """Переименование читает файл профиля само (готовит документ-кандидат на его
+    будущий путь) и отказывает ещё до записи указателей. Отказ обязан называть
+    ФАЙЛ: голая жалоба кодека («'utf-8' codec can't decode byte 0xff») не
+    говорит человеку, какой из профилей чинить."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc"))
+    before = base_cfg.read_text(encoding="utf-8")
+    broken = _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml",
+                          'slots:\n  default: "a"\n')
+
+    cfg = dict(_base_dict(), profile="broken-enc")
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "profile", "broken-enc")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "job")
+        notice = _notice(scr)
+
+    assert "не переименовано" in notice, notice
+    assert "broken-enc.yml" in notice, notice
+    assert broken.exists()                                  # файл не тронут
+    assert not (tmp_path / "base" / "profiles" / "job.yml").exists()
+    assert base_cfg.read_text(encoding="utf-8") == before   # и указатель тоже

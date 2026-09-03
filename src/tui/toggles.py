@@ -258,6 +258,28 @@ _PROFILE_NONE_HINT = "настройки берутся только из config
 # пикера красится тем же цветом (OK), правая колонка ArgPicker (задача 10,
 # решение смока 2026-08-10).
 _PROFILE_ACTIVE_STATUS = "● активен"
+# Тот же вердикт, что у гейта выбора (`TuiApp.probe_profile_assembly`), но ДО
+# нажатия: отказ после Enter — половина дела, человек уже успел выбрать
+# (решение владельца по живому смоку).
+_PROFILE_BROKEN_STATUS = "✗ не применится"
+
+
+def _profile_assembly_error(app: Any, name: str) -> str:
+    """Причина, по которой конфиг с профилем `name` не собирается («» — собирается).
+
+    Судья ОДИН на витрину и на гейт выбора: вторая редакция правила «годен ли
+    профиль» разошлась бы с первой, и пикер звал бы Enter туда, где Enter
+    отказывает. Метод достаётся ДО try: его отсутствие — поломка сборки, а не
+    вердикт о профиле, и молча красить им все строки нельзя."""
+    probe = app.probe_profile_assembly
+    try:
+        probe(name)
+    except Exception as exc:
+        # Любое исключение = не соберётся. Сужать до ValueError нечем: причина
+        # приходит из всей цепочки загрузки конфига, и незнакомый тип означал бы
+        # краш палитры на одном лишь открытии списка.
+        return str(exc)
+    return ""
 
 
 def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
@@ -267,7 +289,18 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     (value, описание, статус): описание — источник + «(как в конфиге)» у
     профиля конфиг-указателя; статус — «● активен» ОТДЕЛЬНЫМ элементом (не
     частью описания) у ровно одной строки — той, что действует сейчас
-    (`ArgPicker` красит его правой колонкой, см. `arg_picker.py`)."""
+    (`ArgPicker` красит его правой колонкой, см. `arg_picker.py`).
+
+    Второй статус — «✗ не применится» у профиля, с которым конфиг не собирается
+    (тот же судья, что у гейта выбора). Действующий профиль его не получает,
+    даже если его файл испортили под ногами: он УЖЕ применён и работает, а
+    «не применится» звало бы чинить выбор, который никуда не переключается —
+    статус описывает текущее состояние, и оно приоритетнее. Два статуса в одной
+    колонке не показываем: колонка одна, и вторая метка вытеснила бы первую.
+
+    Проба стоит ~3 мс на профиль, и это цена ОТКРЫТИЯ списка, а не кадра:
+    провайдер зовётся один раз (`main.py`, ветка `if self._arg_picker is None`),
+    стрелки и фильтр идут через `set_filter` по готовым опциям."""
     refs = _discovered_profiles(app)
     effective = str(_effective_cfg(app).get("profile") or "")
     base_pointer = str((getattr(app, "_config", None) or {}).get("profile") or "")
@@ -278,7 +311,10 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
         desc = "проектный" if ref.root_kind == "project" else "глобальный"
         if name == base_pointer:
             desc += " (как в конфиге)"
-        status = _PROFILE_ACTIVE_STATUS if name == effective else ""
+        if name == effective:
+            status = _PROFILE_ACTIVE_STATUS   # действующий уже собрался — пробы не надо
+        else:
+            status = _PROFILE_BROKEN_STATUS if _profile_assembly_error(app, name) else ""
         options.append((name, desc, status))
     return tuple(options)
 
@@ -314,6 +350,12 @@ def profile_picker_hint(app: Any, value: Any) -> str:
     effective_models = _effective_cfg(app).get("models") or {}
     merged_models = {**effective_models, **(doc.get("models") or {})}
     parts = []
+    # Статус строки говорит ЧТО («✗ не применится»), подсказка — ПОЧЕМУ. Причина
+    # идёт ПЕРВОЙ и целиком: текст ядра самодостаточен («<путь>: …»), а рядом с
+    # палитрой путь профиля не печатает никто — без него нечего чинить.
+    reason = _profile_assembly_error(app, name)
+    if reason:
+        parts.append(reason)
     summary = _profile_slots_summary({"slots": doc.get("slots") or {},
                                       "models": merged_models})
     if summary:

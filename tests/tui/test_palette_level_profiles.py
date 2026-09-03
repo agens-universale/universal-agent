@@ -463,10 +463,16 @@ def test_build_real_executor_force_legacy_false_without_cli_model_override(tmp_p
 # --- Пикер /profiles (спека §12.1, ревизия 2026-07-28) ----------------------
 
 def _picker_app(tmp_path, monkeypatch, *, base_profile="", session=None):
-    """App с двумя глобальными профилями (alpha, smoke) для тестов пикера."""
+    """App с двумя глобальными профилями (alpha, smoke) для тестов пикера.
+
+    `config.yml` кладётся НА ДИСК, а не только в `_config_path`: пикер и гейт
+    выбора судят профиль настоящей сборкой, и без базового файла не собирается
+    ни один профиль — стенд без него врал бы «не применится» про здоровых."""
     monkeypatch.chdir(tmp_path)
     profiles_dir = tmp_path / "base" / "profiles"
     profiles_dir.mkdir(parents=True)
+    (tmp_path / "base" / "config.yml").write_text(
+        "backend:\n  completions_url: http://b\n", encoding="utf-8")
     (profiles_dir / "smoke.yml").write_text(
         # token: "" — правило пары: свой адрес идёт со своим токеном (сервер ключа не требует).
         "models:\n  gc:\n    url: http://x\n    token: \"\"\nslots:\n  default: gc\n", encoding="utf-8")
@@ -589,6 +595,24 @@ async def test_arg_picker_dynamic_footer_hint_follows_selection(tmp_path):
         assert any("default gc" in t for t in texts)
 
 
+def test_arg_picker_paints_a_refusal_status_as_an_error(tmp_path):
+    """Статус-колонка красится по СМЫСЛУ статуса: «✗ не применится» зелёным цветом
+    достижения читалось бы как «всё в порядке». Правило — по глифу отказа, а не
+    по литералу: пикер не знает ни про профили, ни про их тексты."""
+    from tui import palette as p
+    from tui.widgets.arg_picker import ArgPicker
+
+    picker = ArgPicker([("normal", "глобальный", "● активен"),
+                        ("broken", "глобальный", "✗ не применится")])
+
+    spans = {}
+    for opt in picker._options:
+        row = picker._format_row(opt)
+        spans[opt[0]] = [row.plain[s.start:s.end] for s in row.spans if s.style == p.ERR]
+    assert spans["broken"] == ["✗ не применится"]
+    assert spans["normal"] == []
+
+
 def _bare_trace_screen(monkeypatch, app):
     from tui.screens.main import TraceScreen
     scr = TraceScreen()
@@ -673,6 +697,125 @@ def test_cmd_profiles_no_arg_opens_picker(tmp_path, monkeypatch):
     scr._open_profiles_picker = lambda *a, **k: opened.append(True)
     scr._cmd_profiles("")
     assert opened == [True]
+
+
+def _add_unassemblable_profile(tmp_path) -> None:
+    """К стенду `_picker_app` — профиль в UTF-16: в списке он есть, а собраться
+    с ним конфиг не может (файл не читается)."""
+    (tmp_path / "base" / "profiles" / "broken-enc.yml").write_text(
+        """models: {}
+""", encoding="utf-16")
+
+
+def test_cmd_profiles_refuses_a_profile_that_does_not_assemble(tmp_path, monkeypatch):
+    """Вход 1 (набранная команда), НАСТОЯЩИЙ `switch_session_profile`, не мок:
+    профиль, с которым конфиг не собирается, отклоняется на месте — тем же
+    «✗ не сохранено», что и сорвавшийся персист. Путь файла в отказе остаётся:
+    рядом с палитрой его, в отличие от раздела «Профили» в настройках, никто не
+    печатает — без него человеку нечего чинить."""
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+    hints = []
+    scr = _bare_trace_screen(monkeypatch, app)
+    scr._show_footer_hint = lambda text: hints.append(text)
+
+    scr._cmd_profiles("broken-enc")
+
+    assert hints and "не сохранено" in hints[0]
+    assert "broken-enc.yml" in hints[0]
+    assert "profile" not in app._session_overrides
+
+
+def test_apply_toggle_profiles_propagates_the_refusal(tmp_path, monkeypatch):
+    """Вход 2 (палитра): у `/profiles` ←/→ и Enter раскрывают пикер, а его выбор
+    уходит в тот же `_cmd_profiles` — но generic-путь `apply_toggle` остаётся
+    объявленным API тоггла. Он обязан ПРОПУСКАТЬ отказ наружу: оба обработчика в
+    `main.py` ловят `(ValueError, OSError)` и показывают «✗ не сохранено»;
+    проглоченное здесь исключение вернуло бы тихий фоллбэк через чёрный ход."""
+    from tui.toggles import apply_toggle
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_toggle(app, "profiles", "broken-enc")
+
+    assert "broken-enc.yml" in str(excinfo.value)
+    assert "profile" not in app._session_overrides
+
+
+def _add_unresolvable_slot_profile(tmp_path) -> None:
+    """Второй способ сломать профиль — не файлом, а СБОРКОЙ: файл читается, YAML
+    валиден, но `slots.default` зовёт алиас, которого нет в merged-реестре
+    моделей. Витрина обязана судить сборкой, а не читаемостью файла."""
+    (tmp_path / "base" / "profiles" / "broken-slot.yml").write_text(
+        "slots:\n  default: nope\n", encoding="utf-8")
+
+
+def test_profile_picker_marks_a_profile_that_does_not_assemble(tmp_path, monkeypatch):
+    """Профиль, который гейт выбора отклонит, помечен статусом ДО нажатия Enter:
+    отказ после нажатия — половина дела (решение владельца по живому смоку)."""
+    from tui.toggles import profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+
+    by_name = {name: status for name, _, status in profile_picker_options(app)}
+    assert by_name["broken-enc"] == "✗ не применится"
+
+
+def test_profile_picker_marks_a_profile_whose_slot_does_not_resolve(tmp_path, monkeypatch):
+    """Тот же статус там, где ломается не чтение файла, а сборка стека: судья —
+    полная сборка конфига, а не «читается ли файл» (иначе половина негодных
+    профилей проходила бы витрину молча)."""
+    from tui.toggles import profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unresolvable_slot_profile(tmp_path)
+
+    by_name = {name: status for name, _, status in profile_picker_options(app)}
+    assert by_name["broken-slot"] == "✗ не применится"
+
+
+def test_profile_picker_leaves_healthy_profiles_without_a_status(tmp_path, monkeypatch):
+    """Сторож: рядом с негодным соседом здоровые профили остаются без статуса.
+    Пометка «всех подряд» (например, когда не собирается сама база) обесценила бы
+    метку — по ней перестали бы отличать негодный профиль от годного."""
+    from tui.toggles import profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+    _add_unresolvable_slot_profile(tmp_path)
+
+    by_name = {name: status for name, _, status in profile_picker_options(app)}
+    assert by_name["alpha"] == "" and by_name["smoke"] == ""
+    assert by_name["без профиля"] == "● активен"
+
+
+def test_profile_picker_keeps_active_marker_on_a_broken_active_profile(tmp_path, monkeypatch):
+    """Действующий профиль помечен «● активен», даже если его файл испортили под
+    ногами: он УЖЕ применён и работает, а «не применится» звало бы человека
+    чинить выбор, который никуда не переключается. Два статуса в одной колонке
+    не показываем — приоритет у того, что описывает текущее состояние."""
+    from tui.toggles import profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch, base_profile="broken-enc")
+    _add_unassemblable_profile(tmp_path)
+
+    by_name = {name: status for name, _, status in profile_picker_options(app)}
+    assert by_name["broken-enc"] == "● активен"
+
+
+def test_profile_picker_hint_names_the_reason_a_profile_will_not_apply(tmp_path, monkeypatch):
+    """Статус говорит ЧТО, подсказка — ПОЧЕМУ: без причины человеку нечего чинить
+    (текст ядра самодостаточен — «<путь>: не удалось прочитать: …»)."""
+    from tui.toggles import profile_picker_hint
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+
+    hint = profile_picker_hint(app, "broken-enc")
+    assert "broken-enc.yml" in hint and "не удалось прочитать" in hint
 
 
 def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
