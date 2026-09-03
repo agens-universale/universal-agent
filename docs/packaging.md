@@ -112,18 +112,33 @@ packages = ["src/gc_tui"]
 Ровно та болезнь, ради лечения которой ядро и делали SDK: было 45 родовых имён,
 после разбиения осталось четыре, теперь два.
 
-`recommended_mcp` и `external` пока остаются наверху: первый — настоящий
-импортируемый пакет (его зовёт `recommended_mcp.runtime.daemon_autostart`),
-второй обязан быть его соседом. Исходники MCP-серверов лежат в
-`packages/mcp/external/vendor/<имя>` — внутри пакета-владельца, но в колесо
-`gc-mcp` через `force-include` едет
-**только `ddgs-mcp`** — одна строка в `packages/mcp/pyproject.toml`:
+Наверху остаётся один `recommended_mcp` — настоящий импортируемый пакет (его
+зовёт `recommended_mcp.runtime.daemon_autostart`). Исходники MCP-серверов лежат
+в `packages/mcp/external/vendor/<имя>` — внутри пакета-владельца, а в колесо
+`gc-mcp` через `force-include` едет **только `ddgs-mcp`**, и тоже внутрь пакета:
 
 ```toml
 [tool.hatch.build.targets.wheel.force-include]
-"external/vendor/ddgs-mcp/pyproject.toml" = "external/vendor/ddgs-mcp/pyproject.toml"
-"external/vendor/ddgs-mcp/src/ddgs_mcp"     = "external/vendor/ddgs-mcp/src/ddgs_mcp"
+"external/vendor/ddgs-mcp/pyproject.toml" = "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml"
+"external/vendor/ddgs-mcp/src/ddgs_mcp"   = "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp"
 ```
+
+**Почему цель внутри пакета.** До 03.09.2026 вендоры уезжали РЯДОМ с рецептами,
+и `gc-mcp` был единственным из семи дистрибутивов, кто занимал в `site-packages`
+второе родовое имя верхнего уровня — `external`. В Python 3 любой каталог на
+`sys.path` это namespace-пакет, поэтому у проекта со своим `external/` пути
+склеивались:
+
+```
+import external -> ['<проект>/external', '<venv>/site-packages/external']
+```
+
+а если у проекта `external/__init__.py` есть, то наоборот — обычный пакет
+затирал наш каталог целиком, и бандловый `ddgs-mcp` переставал находиться. Оба
+варианта воспроизведены в чистом venv. Лечится тем же приёмом, что и ассеты
+ядра (`gc_core/assets/`): цель уходит внутрь имени, которое дистрибутив и так
+занимает по праву. Третьего родового имени (`packages/…`) при этом не
+появляется — повторять путь манифеста по-прежнему нельзя.
 
 **Почему вендоры лежат внутри пакета, а не в корне.** Раньше они жили в
 `<repo>/external/vendor/`, и ключ выше выглядел как `../../external/…` — за
@@ -139,8 +154,8 @@ found`, причём ПОСЛЕ сборки остальных шести — �
 почему вендоры вообще оказались в корне — до разбиения корень И БЫЛ пакетом.
 
 Цена переезда — две константы вместо одной (`install.py`): в колесе исходники
-лежат рядом с рецептами (`site-packages/external/vendor/`), а `#subdirectory`
-для git-установки считается от корня репозитория
+лежат внутри пакета (`site-packages/recommended_mcp/external/vendor/`), а
+`#subdirectory` для git-установки считается от корня репозитория
 (`packages/mcp/external/vendor/`). Раньше оба ответа совпадали буквой, теперь
 нет; склеить их обратно значит сделать так, что в установленном колесе бандл
 перестанет находиться и установка молча уедет в git-метод.

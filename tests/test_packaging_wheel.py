@@ -110,8 +110,12 @@ def test_mcp_wheel_bundles_recipes_and_sources(wheels):
     names = wheels["gc_mcp"]
     assert "recommended_mcp/config.yml" in names
     assert any(n.startswith("recommended_mcp/") and n.endswith(".py") for n in names)
-    assert "external/vendor/ddgs-mcp/pyproject.toml" in names, "ddgs-mcp не поставляется"
-    assert "external/vendor/ddgs-mcp/src/ddgs_mcp/server.py" in names
+    # Внутри пакета, а не рядом: наверху `external` занимал бы родовое имя —
+    # см. test_core_wheel_does_not_squat_generic_names.
+    assert "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml" in names, (
+        "ddgs-mcp не поставляется"
+    )
+    assert "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp/server.py" in names
 
     core = wheels["gc_core"]
     assert not any(n.startswith("recommended_mcp/") for n in core), (
@@ -127,14 +131,24 @@ def test_core_wheel_does_not_squat_generic_names(wheels):
     резолвился в НАШИ промпты (проверено в чистом venv). Теперь они внутри
     gc_core/assets.
 
-    recommended_mcp и external пока остаются: первый — настоящий импортируемый
-    пакет, второй обязан быть его соседом. Их выносит отдельная задача.
+    `external` уехал внутрь пакета-владельца (`recommended_mcp/external/vendor/`)
+    03.09.2026 — по той же причине и тем же приёмом, что и ассеты ядра. Пока он
+    лежал наверху, проект со своим `external/` получал склейку путей
+    (`import external` → обе портянки), а с `external/__init__.py` — наоборот,
+    затирал наш каталог. Оба варианта воспроизведены в чистом venv.
+
+    `recommended_mcp` остаётся наверху законно: это настоящий импортируемый
+    пакет, имя дистрибутива.
 
     С 27.08.2026 ЯДРО их не импортирует вовсе: мост автозапуска daemon'ов уехал в
     сам дистрибутив рецептов (recommended_mcp.runtime.daemon_autostart), и прежняя
     оговорка «mcp_daemon_autostart тянет recommended_mcp.autostart» неверна.
     """
-    squatted = {"prompts", "skills", "config.default.yml", "assets", "tests", "src"}
+    squatted = {
+        "prompts", "skills", "config.default.yml", "assets", "tests", "src",
+        # external — вендоры MCP: с 03.09.2026 внутри recommended_mcp/.
+        "external",
+    }
     for dist, names in wheels.items():
         tops = {n.split("/")[0] for n in names}
         hit = tops & squatted
@@ -186,10 +200,13 @@ def test_vendored_ddgs_ships_without_build_junk(wheels):
     а воспроизводимость сборки — ровно то, ради чего колесо и собирают.
 
     Подмена, которую ловит тест: вернуть цель каталогом
-    (`"../../external/vendor/ddgs-mcp" = "external/vendor/ddgs-mcp"`) на копии,
-    где ddgs-mcp собирали.
+    (`"external/vendor/ddgs-mcp" = "recommended_mcp/external/vendor/ddgs-mcp"`)
+    на копии, где ddgs-mcp собирали.
     """
-    shipped = {n for n in wheels["gc_mcp"] if n.startswith("external/")}
+    shipped = {
+        n for n in wheels["gc_mcp"]
+        if n.startswith("recommended_mcp/external/")
+    }
     assert shipped, "исходники ddgs-mcp вообще не попали в колесо"
 
     junk = {
@@ -201,8 +218,8 @@ def test_vendored_ddgs_ships_without_build_junk(wheels):
     # Достаточность: без манифеста и исходников `pip install <path>` не соберёт
     # пакет, и локальная установка тихо свалится в git-метод.
     for needed in (
-        "external/vendor/ddgs-mcp/pyproject.toml",
-        "external/vendor/ddgs-mcp/src/ddgs_mcp/__init__.py",
+        "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml",
+        "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp/__init__.py",
     ):
         assert needed in shipped, f"{needed} нет в колесе; есть {sorted(shipped)}"
 

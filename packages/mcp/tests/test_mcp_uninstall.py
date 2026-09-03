@@ -18,13 +18,13 @@ from recommended_mcp.manifest import MCPEntry, InstallSpec
 
 
 def _wheel_layout(tmp_path: Path, name: str) -> Path:
-    """Раскладка колеса: site-packages/recommended_mcp/ и site-packages/external/vendor/.
+    """Раскладка колеса: site-packages/recommended_mcp/external/vendor/.
 
     Возвращает root — каталог рецептов, который получает _dist_name.
     """
     recipes = tmp_path / "recommended_mcp"
     recipes.mkdir(exist_ok=True)
-    src = tmp_path / "external" / "vendor" / name
+    src = recipes / "external" / "vendor" / name
     src.mkdir(parents=True)
     (src / "pyproject.toml").write_text(
         f'[project]\nname = "{name}"\nversion = "1.0"\n', encoding="utf-8")
@@ -133,8 +133,8 @@ def test_dist_name_skips_broken_pyproject_and_keeps_looking(tmp_path):
         '[project]\nname = "gc-core"\n', encoding="utf-8")
     root = tmp_path / "packages" / "mcp" / "src" / "recommended_mcp"
     root.mkdir(parents=True)
-    # Первый кандидат (раскладка колеса, root.parent/external/vendor) — битый.
-    broken = root.parent / "external" / "vendor" / "office-mcp"
+    # Первый кандидат (раскладка колеса, root/external/vendor) — битый.
+    broken = root / "external" / "vendor" / "office-mcp"
     broken.mkdir(parents=True)
     (broken / "pyproject.toml").write_text("[project\nname = ", encoding="utf-8")
     # Второй (рабочая копия) — целый.

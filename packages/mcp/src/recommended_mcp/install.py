@@ -276,9 +276,15 @@ def _install_docker(name: str, pkg_path: Path) -> None:
 #: в git-метод — то есть потребовала бы сети и закрытой аутентификации там, где
 #: обязана обойтись бандлом.
 #:
-#: В КОЛЕСЕ: `site-packages/recommended_mcp/` и рядом `site-packages/external/vendor/`.
-#: Цель force-include не может стать `packages/mcp/…` — в site-packages появилось
-#: бы родовое имя верхнего уровня `packages`.
+#: В КОЛЕСЕ: `site-packages/recommended_mcp/external/vendor/` — ВНУТРИ пакета.
+#: Раньше вендоры лежали рядом с ним, и дистрибутив занимал в site-packages
+#: второе родовое имя верхнего уровня, `external`. Любой каталог на sys.path в
+#: Python 3 — namespace-пакет, поэтому у проекта со своим `external/` пути
+#: склеивались, а при `external/__init__.py` наш каталог просто затирался
+#: (проверено в чистом venv на обоих вариантах). Повторять путь манифеста
+#: (`packages/mcp/…`) по-прежнему нельзя — тогда родовым именем стало бы
+#: `packages`; путь внутрь пакета снимает вопрос целиком, как это сделано с
+#: ассетами ядра (`gc_core/assets/`).
 VENDOR_REL_WHEEL = "external/vendor"
 
 #: В РЕПОЗИТОРИИ: путь от его корня. Тем же значением вычисляется
@@ -300,8 +306,10 @@ def _vendor_candidates(name: str, root: Path) -> list[Path]:
     список. Арифметики путей нет — переживёт следующий переезд.
     """
     candidates = [
-        # Колесо: site-packages/recommended_mcp/ и site-packages/external/vendor/
-        (root.parent / VENDOR_REL_WHEEL / name),
+        # Колесо: site-packages/recommended_mcp/external/vendor/<name>.
+        # От `root`, а не от `root.parent`: вендоры лежат ВНУТРИ пакета, чтобы
+        # не занимать `external` в корне site-packages (см. VENDOR_REL_WHEEL).
+        (root / VENDOR_REL_WHEEL / name),
     ]
     # Корень рабочей копии ищем ПО СТРОГОМУ МАРКЕРУ и общей реализацией.
     # Своя копия здесь была слабой («packages/ рядом с pyproject.toml») и в
