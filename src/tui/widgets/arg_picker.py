@@ -9,6 +9,7 @@
 цветом OK; ✗-статус отказа — цветом ERR)."""
 from __future__ import annotations
 
+import textwrap
 from typing import Callable, Optional
 
 from rich.text import Text
@@ -124,17 +125,41 @@ class ArgPicker(VerticalScroll):
         declared `height: auto`."""
         self.styles.min_height = self.desired_height
 
+    def _footer_line_count(self, text: str) -> int:
+        """Сколько СТРОК займёт строка подвала при текущей ширине.
+
+        Не «одна», как считалось раньше: `text-wrap: nowrap` стоит только у
+        `.palette-row`, а `.palette-hint` переносится. Причина отказа профиля
+        (путь + текст исключения, 130+ символов) не влезает в строку даже при 120
+        колонках, а клавиш-подсказка перестаёт влезать к 60.
+
+        Ширина текста = ширина пикера минус рамка (2) и `padding: 0 1` (2). До
+        первого layout-прохода ширины ещё нет — считаем по одной строке, тем же
+        ответом, что и раньше; `_apply_size` зовётся заново на каждой перерисовке
+        (`_rebuild`), а `main.py` спрашивает высоту уже после `call_after_refresh`.
+
+        Модель переноса — `textwrap` (жадная укладка по словам, длинное слово
+        ломается), а не деление длины на ширину: делением можно ЗАНИЗИТЬ, а занижение
+        и есть баг — подвал рисуется выше выданного места и накрывает хвост списка."""
+        width = self.size.width - 4
+        if width < 1 or not text:
+            return 1
+        return max(1, len(textwrap.wrap(text, width)))
+
     @property
     def desired_height(self) -> int:
         """Честная желаемая высота: строки списка (или одна no-match-строка) +
-        докнутый footer (margin-top hint'а(1) + строка hint'а(1)) + рамка .palette(2).
+        докнутый footer (у каждой его строки — свой margin-top(1) и СВОИ строки
+        после переноса) + рамка .palette(2).
         main.py::_sync_trace_max_height берёт это значение напрямую — недосчёт
         выдавливал бы нижнюю рамку пикера за экран."""
         rows = self._visible_rows()
         flow = len(rows) if rows else 1
-        # динамический хинт = строка + свой margin-top (palette-keys)
-        extra = 2 if self._hint_provider is not None else 0
-        return flow + 2 + 2 + extra
+        footer = 1 + self._footer_line_count(_HINT)
+        if self._hint_provider is not None:
+            footer += 1 + self._footer_line_count(
+                self._hint_provider(self.selected_value()) or "")
+        return flow + 2 + footer
 
     def set_filter(self, prefix: str) -> None:
         self._filter = prefix
