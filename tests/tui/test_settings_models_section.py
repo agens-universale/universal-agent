@@ -405,6 +405,39 @@ async def test_renaming_an_entry_moves_its_references(tmp_path):
         assert not scr.query(ModelEntryForm)
 
 
+async def test_editing_fields_without_renaming_keeps_the_edited_alias_a_candidate(
+        tmp_path):
+    """`prev` вычитается из кандидатов пикера ТОЛЬКО при переименовании: правка
+    формулы для rename задела и путь «правка полей БЕЗ переименования» — там
+    `prev == alias`, и `{*aliases, alias} - {prev}` вырождается в
+    `{*aliases, alias} - {alias}`, выкидывая из своего же списка алиас, чьи поля как
+    раз правит форма (тот никуда не девается — переименования нет). Реестр уже
+    2+ записей без единого слота ДО этой правки (обычное дело для руками
+    правленного файла) — гейт спрашивает дефолт независимо от того, что стало
+    причиной неоднозначности."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    body = ("models:\n"
+            '  a:\n    model: "m-a"\n'
+            '  b:\n    model: "m-b"\n')
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "entry", alias="a")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        assert form.original_alias == "a"
+        form.query_one("#mef-model", Input).value = "m-a-2"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                  # submit → должен спросить дефолт
+        await pilot.pause()
+
+        assert ed.picker_open, "правка полей без переименования не спросила дефолт-слот"
+        values = {row["value"] for row in ed._picker["rows"]}
+        assert values == {"a", "b"}, "правимый алиас пропал из своего же списка"
+
+
 async def test_renaming_to_a_taken_alias_leaves_the_file_untouched(tmp_path):
     """Занятое имя — ошибка В форме: транзакция не стартует, файл байт-в-байт."""
     from tui.editors.model_entry_form import ModelEntryForm

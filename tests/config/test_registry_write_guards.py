@@ -88,6 +88,29 @@ def test_unsetting_an_assign_absent_from_the_file_is_a_no_op(tmp_path):
     }
 
 
+# --- Многострочные значения соседних полей переживают точечную правку ---
+
+
+def test_editing_one_field_keeps_a_multiline_value_of_a_sibling_field_intact(tmp_path):
+    """`yaml.safe_dump` кодирует перенос строки внутри скаляра пустой строкой-
+    продолжением (`'\\n\\n'` → две пустые строки блока) — построчный фильтр
+    «непустых» строк принимал их за мусор и склеивал соседние переносы:
+    `token: "\\n\\nUser:"` → `" User:"`. Правка ЧУЖОГО поля (`model`) не должна
+    портить значение, которого вообще не касалась."""
+    text = ('models:\n'
+            '  gc:\n'
+            '    model: "old-model"\n'
+            '    url: "http://host/v1"\n'
+            '    token: "\\n\\nUser:"\n')
+    target = _target(tmp_path, text)
+
+    rw.upsert_model(target, "gc", {"model": "new-model"}, "")
+
+    doc = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert doc["models"]["gc"]["model"] == "new-model"
+    assert doc["models"]["gc"]["token"] == "\n\nUser:"
+
+
 def test_unsetting_a_nested_assign_written_as_a_line_still_works(tmp_path):
     text = (
         'models:\n  gc:\n    model: "x"\n'
@@ -304,6 +327,86 @@ def test_a_shadowed_alias_survives_its_own_removal_and_breaks_nothing(stack):
 
     assert rw.references_broken_by_removal(target, "gc", stack_base=base) == []
     rw.remove_model(target, "gc", force=True, is_profile=True, stack_base=base)
+
+
+# --- Указатель профиля из ПРОЕКТНОГО слоя, а не только из базы ---
+#
+# `stack_documents` резолвил `profile:` из СЫРОГО документа базы, тогда как
+# `_merge_layers` берёт его из мержа база+managed+project (§3). Раскладка
+# «указатель лежит в `.gc/config.yml`» не покрыта ни одним тестом выше — все
+# они кладут `profile:` прямо в базу, — и живёт именно там.
+
+
+def test_broken_references_see_a_profile_pointed_from_the_project_layer(stack):
+    """Ложное «можно»: указатель — в проектном `.gc/config.yml`, база о профиле
+    молчит. Справка обязана всё равно найти файл профиля и его ссылку — иначе
+    баннер обещал бы удаление, которое отвергнет запись (реальный валидатор
+    мержит слои правильно и откажет на фазе 2, а справка соврала бы раньше)."""
+    base, profiles = stack
+    base.write_text('models:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
+    gc_dir = Path.cwd() / ".gc"
+    gc_dir.mkdir()
+    (gc_dir / "config.yml").write_text('profile: "work"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+
+    assert rw.references_broken_by_removal(base, "gc") == [("work.yml", "slots.default")]
+
+
+def test_an_alias_surviving_via_a_project_pointed_profile_is_not_refused(stack):
+    """Обратная сторона: алиас переживает удаление через профиль, назначенный
+    ПРОЕКТНЫМ указателем, а видимая (проектная) ссылка на него — та же. Не
+    зная о профиле, справка решила бы, что ссылка повиснет, и заблокировала бы
+    легальное удаление наглухо, без обхода в UI."""
+    base, profiles = stack
+    base.write_text('models:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
+    gc_dir = Path.cwd() / ".gc"
+    gc_dir.mkdir()
+    (gc_dir / "config.yml").write_text(
+        'profile: "work"\nslots:\n  default: "gc"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('models:\n  gc:\n    model: "profile-y"\n',
+                                       encoding="utf-8")
+
+    assert rw.references_broken_by_removal(base, "gc") == []
+    rw.remove_model(base, "gc", force=True)
+
+
+def test_a_pointer_conflict_between_base_and_project_is_resolved_like_the_loader(stack):
+    """Указатель есть в ОБОИХ слоях и они расходятся: `_merge_layers` мержит
+    managed, ПОТОМ project — последний побеждает при конфликте одноимённых ключей.
+    `resolve_profile_pointer` (общий резолв `stack_documents`) обязан называть ТО ЖЕ
+    победившее имя, а не то, что лежит в самой базе."""
+    base, profiles = stack
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
+    gc_dir = Path.cwd() / ".gc"
+    gc_dir.mkdir()
+    (gc_dir / "config.yml").write_text('profile: "corp"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('models:\n  ghost:\n    model: "z"\n',
+                                       encoding="utf-8")
+    (profiles / "corp.yml").write_text('models:\n  gc:\n    model: "corp-y"\n',
+                                       encoding="utf-8")
+
+    # "gc" переживёт удаление ТОЛЬКО если резолвится "corp" (он её объявляет);
+    # "work" её не знает вовсе.
+    assert rw.alias_survives_removal(base, "gc") is True
+    assert rw.references_broken_by_removal(base, "gc") == []
+
+
+def test_resolve_profile_pointer_is_lenient_to_a_broken_base(stack):
+    """База невалидна (внешняя порча, недописанный YAML) — указатель всё равно
+    ищется в managed/project, тем же правилом, каким `config_raw.read_document`
+    трактует битый файл (пусто, а не отказ): конфиг уже деградировал, и молчать о
+    профиле, назначенном другим слоем, значило бы прятать ровно ту подсказку,
+    которая нужна для починки. Строгая редакция ничего не защищает — она не
+    сообщает о поломке, а тихо возвращает пусто."""
+    base, _profiles = stack
+    base.write_text(": : : битый yml : : :\n  - [оборван\n", encoding="utf-8")
+    gc_dir = Path.cwd() / ".gc"
+    gc_dir.mkdir()
+    (gc_dir / "config.yml").write_text('profile: "corp"\n', encoding="utf-8")
+
+    from config_modules.layers import resolve_profile_pointer
+    assert resolve_profile_pointer(base) == "corp"
 
 
 # --- Негодная секция в ЧУЖОМ файле стека: пропуск, а не крэш ---

@@ -103,7 +103,14 @@ def _merge_layers(
     `profile_doc` — готовый документ вместо чтения профиля с диска; подставляется,
     только если резолв указателя привёл ровно в `profile_doc_path`. Так валидатор
     ставит ещё не записанный текст профиля на его место в стеке, не рискуя
-    подсунуть его вместо чужого файла-тёзки из другого корня."""
+    подсунуть его вместо чужого файла-тёзки из другого корня.
+
+    Указатель резолвится тем же порядком, что и общая `resolve_profile_pointer`
+    ниже (база → managed → project, конфликт решает project): сюда она не
+    заходит — смерженный документ уже собран построчно, с интерполяцией и
+    валидацией пар на каждом слое, и второе чтение файлов ради одного лишь
+    имени было бы лишним, — но правило одно, просто выписанное дважды ради
+    экономии этого самого чтения."""
     base_path = Path(path)
     notices = notices if notices is not None else []
 
@@ -278,6 +285,60 @@ def prospective_registry(text: str, *, target=None, base_path=None,
     return cfg.models, cfg.slots
 
 
+def _safe_yaml_dict(path) -> Optional[Dict[str, Any]]:
+    """Файл → YAML-словарь либо None: нечитаемый файл и документ не-словарь читаются
+    сюда одинаково молча — оба читателя этой функции (стек следующего старта, общий
+    резолв указателя) находят по найденному, не по полноте обхода."""
+    try:
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def resolve_profile_pointer(base_path) -> str:
+    """Указатель `profile:` — какое имя назовут слои база → managed → project
+    (порядок `_merge_layers`), ЕСЛИ их удастся прочитать, БЕЗ резолва самого
+    профиля и без документов слоёв. НЕ симулятор старта: настоящий
+    `load_config_ex`/`_merge_layers` на битом managed или project падает
+    (`ValueError`/`OSError`), базу тоже читает без перехвата — эта функция
+    осознанно best-effort, потому что её потребители (витрина происхождения,
+    ключ кэша, guard ссылок) обязаны отвечать именно тогда, когда конфиг уже
+    деградировал.
+
+    ПРАВИЛО, а не деталь: битую/нечитаемую/не-словарную базу трактуем ПУСТЫМ
+    документом и всё равно ищем указатель в managed/project — тем же приёмом, каким
+    `config_raw.read_document` прощает битый слой (пусто, а не отказ), — вместо
+    немедленного `""`. Конфиг уже деградировал, а профиль вправе быть назначен
+    ДРУГИМ слоем: молчать о нём значит прятать ровно ту подсказку, которая нужна
+    для починки (витрина происхождения поля и ключ кэша вердикта обязаны работать
+    и на сломанном конфиге). Строгий отказ ничего не защищает — он не сообщает о
+    поломке, а тихо возвращает пусто. Пустой ответ этой функции значит «активного
+    профиля нет НИГДЕ в стеке», а не «база не читается».
+
+    Общий дом для `stack_documents` (там мерж — попутный продукт чтения тех же
+    документов слоёв) и `settings.py::_config_stack_texts` (там ни документы, ни
+    резолв профиля не нужны — только имя, чтобы включить кандидатные пути профиля в
+    набор отслеживаемых файлов). Раскладка «указатель лежит в managed/project, а не
+    в базе» и раскладка «указатель есть в обоих, и они расходятся» (конфликт решает
+    ПОСЛЕДНИЙ слой мержа — project, как и у загрузчика) написаны здесь один раз:
+    вторая редакция того же правила в интерфейсе уже разъезжалась с этой — читала
+    только сырой документ базы и в конфликте называла ПРОИГРАВШЕЕ имя (находка
+    ревью). Третья редакция (`config_origin._overlay_paths`, через
+    `config_raw.read_document`) была снисходительна к битой базе С САМОГО НАЧАЛА —
+    именно с ней разошлась ЭТА функция до сегодняшней правки, пока сама не переняла
+    то же правило."""
+    base = Path(base_path)
+    merged = _safe_yaml_dict(base) or {}
+    for path in (mcp_paths.managed_config_path(), env_vars.project_local_config_path()):
+        if not path or os.path.abspath(str(path)) == os.path.abspath(str(base)):
+            continue
+        raw = _safe_yaml_dict(path)
+        if raw is not None:
+            merged = deep_merge(merged, raw)
+    return str(merged.get("profile") or "").strip()
+
+
 def stack_documents(base_path) -> list:
     """Файлы стека следующего старта и их СЫРЫЕ документы — `(Path, dict)`, в порядке
     наложения. Нечитаемое и не-словари молча пропускаются: справке важно найденное, а
@@ -285,31 +346,30 @@ def stack_documents(base_path) -> list:
 
     Нужна тому, кому мало слитого результата и важно, В КАКОМ файле лежит найденное:
     отказ удаления обязан назвать файл, иначе человеку некуда идти."""
-    def _doc(path):
-        try:
-            raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError):
-            return None
-        return raw if isinstance(raw, dict) else None
-
     base = Path(base_path)
-    base_raw = _doc(base)
+    base_raw = _safe_yaml_dict(base)
     if base_raw is None:
         return []
     docs = [(base, base_raw)]
     for path in (mcp_paths.managed_config_path(), env_vars.project_local_config_path()):
         if not path or os.path.abspath(str(path)) == os.path.abspath(str(base)):
             continue
-        raw = _doc(path)
+        raw = _safe_yaml_dict(path)
         if raw is not None:
             docs.append((Path(path), raw))
-    pointer = str(base_raw.get("profile") or "").strip()
+    # Указатель — общим резолвом (`resolve_profile_pointer`): база → managed →
+    # project, тем же порядком, что и `_merge_layers`. Со СВОЕГО документа базы
+    # указатель видит только тот профиль, что назначен ею самой; профиль, назначенный
+    # проектным слоем (или победивший её при конфликте), для этой функции не
+    # существовал бы вовсе — и `alias_survives_removal`/`references_broken_by_
+    # removal` судили бы по неполному или неверному стеку в обе стороны.
+    pointer = resolve_profile_pointer(base)
     if pointer:
         try:
             ref = resolve_profile(pointer, profile_roots(Path(os.getcwd()), base))
         except ValueError:
             return docs
-        raw = _doc(ref.path)
+        raw = _safe_yaml_dict(ref.path)
         if raw is not None:
             docs.append((Path(ref.path), raw))
     return docs

@@ -148,7 +148,7 @@ def _entry_block_lines(alias_key: str, entry: dict) -> list[str]:
     if not entry:
         return [f"{alias_key}: {{}}"]
     body = yaml.safe_dump(entry, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    return [f"{alias_key}:"] + [f"  {line}" for line in body.splitlines() if line.strip()]
+    return [f"{alias_key}:"] + [f"  {line}" for line in body.splitlines()]
 
 
 def _assign_coordinate(consumer: str) -> tuple[str, str]:

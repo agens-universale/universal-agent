@@ -320,6 +320,92 @@ async def test_open_section_noop_when_config_is_empty():
         assert calls == {"raw": 0, "origins": 0}
 
 
+async def test_config_stack_texts_tracks_a_profile_pointed_from_the_project_layer(
+        tmp_path, monkeypatch):
+    """`_config_stack_texts` — половина ключа кэша `_models_verdict` (глиф «Модели» в
+    хабе) — обязана резолвить активный профиль свежим мержем база → managed →
+    project (`resolve_profile_pointer`), а не читать сырой документ базы в одиночку.
+    Раскладка «указатель лежит в проектном `.gc/config.yml`» — сырой документ базы о
+    нём ничего не скажет: набор отслеживаемых файлов не включал бы профиль вовсе, и
+    правка его файла извне не меняла бы ключ кэша — глиф врал бы до конца сессии."""
+    import tui.app as app_mod
+    monkeypatch.setattr(
+        "mcp_runtime.paths.managed_config_path",
+        lambda: tmp_path / "no-managed-overlay-here.yml")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    (project_dir / ".gc").mkdir()
+    (project_dir / ".gc" / "config.yml").write_text('profile: "work"\n', encoding="utf-8")
+    cfg_file = _write_cfg(tmp_path)                      # без profile — указатель только в проекте
+    profile_path = tmp_path / "profiles" / "work.yml"
+    profile_path.parent.mkdir()
+    profile_path.write_text(
+        'models:\n  glm:\n    url: "http://y"\n    token: "sk"\nslots:\n  default: "glm"\n',
+        encoding="utf-8")
+
+    app = app_mod.TuiApp(config={"model": "placeholder"})
+    app._config_path = str(cfg_file)
+    app.reload_config()                                  # мерж слоёв — как в проде
+    assert app._config.get("profile") == "work"           # предусловие: указатель резолвился
+    async with app.run_test() as pilot:
+        app.push_screen(_mk_screen(config=app._config, config_path=str(cfg_file)))
+        await pilot.pause()
+        scr = app.screen
+
+        before = scr._config_stack_texts()
+        profile_path.write_text(
+            'models:\n  glm:\n    url: "http://y"\n    token: "sk2"\nslots:\n  default: "glm"\n',
+            encoding="utf-8")
+        after = scr._config_stack_texts()
+        assert before != after, "правка файла профиля не изменила отслеживаемый набор"
+
+
+async def test_config_stack_texts_follows_the_project_layer_when_it_conflicts_with_the_base_pointer(
+        tmp_path, monkeypatch):
+    """Раскладка, из-за которой предыдущая версия правки была хуже исходного дефекта:
+    указатель есть в ОБОИХ слоях, и они расходятся. `_merge_layers` мержит managed,
+    ПОТОМ project — второй побеждает при конфликте одноимённого ключа
+    (`layers.py`: `deep_merge(raw_config, project_raw)` поверх уже смерженной базы).
+    Набор отслеживаемых файлов обязан следить за ПОБЕДИВШИМ профилем, а не за именем
+    из сырого документа базы: иначе кэш следит не за тем файлом вовсе."""
+    from pathlib import Path
+    import tui.app as app_mod
+    monkeypatch.setattr(
+        "mcp_runtime.paths.managed_config_path",
+        lambda: tmp_path / "no-managed-overlay-here.yml")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    (project_dir / ".gc").mkdir()
+    (project_dir / ".gc" / "config.yml").write_text('profile: "corp"\n', encoding="utf-8")
+    cfg_file = _write_cfg(tmp_path)
+    cfg_file.write_text(cfg_file.read_text(encoding="utf-8") + 'profile: "work"\n',
+                        encoding="utf-8")                  # база тоже называет указатель
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    (profiles_dir / "work.yml").write_text(
+        'models:\n  glm:\n    url: "http://y"\n    token: "sk"\nslots:\n  default: "glm"\n',
+        encoding="utf-8")
+    corp_path = profiles_dir / "corp.yml"
+    corp_path.write_text(
+        'models:\n  glm:\n    url: "http://y"\n    token: "sk"\nslots:\n  default: "glm"\n',
+        encoding="utf-8")
+
+    app = app_mod.TuiApp(config={"model": "placeholder"})
+    app._config_path = str(cfg_file)
+    app.reload_config()
+    assert app._config.get("profile") == "corp"            # предусловие: проект победил
+    async with app.run_test() as pilot:
+        app.push_screen(_mk_screen(config=app._config, config_path=str(cfg_file)))
+        await pilot.pause()
+        scr = app.screen
+
+        stack = scr._config_stack_texts()
+        assert (str(corp_path), corp_path.read_text(encoding="utf-8")) in stack
+        assert not any(Path(p).name == "work.yml" for p, _ in stack), stack
+
+
 async def test_settings_apply_endpoint_writes_and_reloads(tmp_path):
     import tui.app as app_mod
     from tui.screens.settings import SettingsScreen

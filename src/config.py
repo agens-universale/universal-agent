@@ -44,6 +44,7 @@ from config_modules.layers import (  # noqa: F401
     _app_config_from_text,
     _stacked_app_config,
     prospective_registry,
+    resolve_profile_pointer,
     stack_documents,
     validate_config_text_with_sections,
     validate_profile_text_with_sections,

@@ -902,3 +902,69 @@ async def test_an_open_profile_is_written_under_the_stack_gate(tmp_path, monkeyp
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "home")
         assert ed._stack_base == scr._config_path
+
+
+async def test_renaming_in_an_inactive_profile_still_asks_for_a_default_slot(
+        tmp_path, monkeypatch):
+    """Ветка rename возвращалась раньше гейта `_needs_default_slot`: для неактивного
+    профиля фаза 2 записи пропущена по дизайну (`validate_profile_text_with_sections`
+    остаётся на фазе 1, пока указатель базы не приводит именно в этот файл), и
+    транзакция, оставляющая реестр без резолвимого `default`, уходила бы на диск
+    молча — старт падал бы только после активации профиля. Гейт спрашивается
+    независимо от активности (`prospective_registry(profile_override="")`), и
+    переименование обязано спрашивать его так же, как обычный upsert.
+
+    Список ответов не должен предлагать исчезающий алиас: он снимается ЭТОЙ ЖЕ
+    транзакцией, и выбор его целил бы слот в запись, которой в реестре уже не
+    будет."""
+    import tui.app as app_mod
+    from tui.editors.model_entry_form import ModelEntryForm
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())  # без указателя
+    # У «prev» — вложенный `backend.completions_url`: формы этого поля нет вовсе
+    # (`ModelEntryForm` не умеет его показывать), и подмена источника превью на
+    # `alias` вместо `prev` потеряла бы его молча — ни один тест на плоском `model`
+    # этого не поймает, там `fields` эхом несёт то же значение независимо от источника.
+    body = ('models:\n'
+            '  prev:\n'
+            '    model: "prev-model"\n'
+            '    token: "prev-secret"\n'
+            '    backend:\n'
+            '      completions_url: "http://prev-host/v1/chat/completions"\n'
+            '  other:\n    model: "other-model"\n')
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml", body)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        _cursor_to(ed, "entry", alias="prev")
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        assert form.original_alias == "prev"
+        form.query_one("#mef-alias", Input).value = "newname"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                  # submit → должен спросить дефолт
+        await pilot.pause()
+
+        assert ed.picker_open, "рена́йм не спросил дефолт-слот при неактивном профиле"
+        values = {row["value"] for row in ed._picker["rows"]}
+        assert values == {"newname", "other"}        # "prev" исчезает этой транзакцией
+        # Превью строки, которой в файле ещё нет под этим именем, обязано показывать
+        # РЕАЛЬНЫЙ адрес старой записи (`backend.completions_url`, полю которого нет в
+        # форме — подмена источника на `alias` вместо `prev` потеряла бы его молча), а
+        # не пустоту: `_merged_entry` для превью берёт СТАРЫЙ алиас источником, как и
+        # сам `_rename_ops`, иначе показанное разошлось бы с тем, что уедет в файл.
+        newname_row = next(r for r in ed._picker["rows"] if r["value"] == "newname")
+        desc = newname_row["desc"].plain
+        assert "prev-model" in desc, desc
+        assert "prev-host" in desc, desc
+
+        await pilot.press("enter")                   # выбрать первую строку — "newname"
+        await pilot.pause()
+
+    doc = _doc(profile)
+    assert set(doc["models"]) == {"newname", "other"}
+    assert doc["slots"]["default"] == "newname"       # слот уехал той же транзакцией

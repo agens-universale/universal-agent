@@ -38,6 +38,7 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Rule, Static
 
+from config_modules.merge import deep_merge
 from config_modules.model_registry import (LEVEL_FALLBACK, LEVELS, connection_parts,
                                            resolve_entry_address)
 from config_modules.model_sections_validation import SUBAGENT_NAMES
@@ -764,7 +765,7 @@ class ModelsSectionEditor(Vertical):
 
         Чтение ВИТРИННОЕ. Правит секция только свой файл, и форме, писателю и
         ссылкам полагаются `_own_entry`/`_own_entries`."""
-        return {**self._base_entry(alias), **self._own_entry(alias)}
+        return deep_merge(self._base_entry(alias), self._own_entry(alias))
 
     @property
     def registry_empty(self) -> bool:
@@ -1796,22 +1797,37 @@ class ModelsSectionEditor(Vertical):
         if not ok:
             return                          # ошибка осталась В форме, писать нечего
         prev = self._form.original_alias
-        if prev is not None and alias != prev:
-            self._write(self._rename_ops(prev, alias, fields), alias)
-            return
-        ops = [("upsert_model", alias, fields)]
+        renaming = prev is not None and alias != prev
+        # Гейт спрашивается и у переименования: у неактивного профиля фаза 2 записи
+        # пропущена по дизайну (`validate_profile_text_with_sections` остаётся на
+        # фазе 1, пока указатель базы не приводит именно в этот файл), и транзакция,
+        # оставляющая реестр без резолвимого `default`, уходила бы на диск молча —
+        # старт падал бы только после активации профиля. Ранний `return` до этой
+        # проверки был как раз той дырой.
+        ops = self._rename_ops(prev, alias, fields) if renaming else [
+            ("upsert_model", alias, fields)]
         if self._needs_default_slot(ops):
             # Вторая модель делает реестр неоднозначным (спека §4): валидатор отвергнет
             # такую запись отдельной операцией — и правильно. Спрашиваем слот и уходим
             # ОДНОЙ транзакцией (решение Task 1). Выбор — из ЭФФЕКТИВНОГО реестра:
             # слот профиля законно указывает на запись основного конфига, и прятать
             # её из списка значило бы предлагать неполный набор ответов.
-            aliases = sorted({*self._effective_aliases, alias})
-            # Строку своей записи описывает то, что уедет в файл ЭТОЙ транзакцией:
-            # в файле её ещё нет (`upsert_model` уйдёт вместе с выбранным слотом).
-            # Описания собираются здесь и целиком — `_refresh_picker_rows` их только
-            # усекает, — поэтому подмена снимается сразу же.
-            self._writing_entry = (alias, self._merged_entry(alias, fields))
+            #
+            # `prev` вычитается ТОЛЬКО при переименовании: тогда этот алиас исчезает
+            # ЭТОЙ ЖЕ транзакцией, и выбор его отказал бы «slots.default: алиас не
+            # найден» — слот целился бы в запись, которой в реестре уже не будет.
+            # Правка полей БЕЗ переименования — другой случай: `prev == alias`, и
+            # огульное вычитание выкинуло бы из списка алиас, чьи поля как раз правит
+            # форма, хотя он никуда не девается (находка ревью).
+            aliases = sorted({*self._effective_aliases, alias} - ({prev} if renaming else set()))
+            # Строку своей записи описывает то, что уедет в файл ЭТОЙ транзакцией: в
+            # файле её ещё нет под этим именем — при переименовании содержимое берётся
+            # из СТАРОЙ записи (`prev`), как и у самого `_rename_ops`, иначе витрина
+            # потеряла бы нетронутые ключи. Описания собираются здесь и целиком —
+            # `_refresh_picker_rows` их только усекает, — поэтому подмена снимается
+            # сразу же.
+            self._writing_entry = (alias, self._merged_entry(prev if renaming else alias,
+                                                              fields))
             try:
                 model_w = max(len(self._entry_model(a)) for a in aliases)
                 rows = [self._picker_alias_item(a, model_w) for a in aliases]
@@ -1940,6 +1956,7 @@ class ModelsSectionEditor(Vertical):
         if row is None or row["kind"] != "entry":
             return False                    # резервную модель удалять нечем — она поле
         from config_modules.registry_write import (RegistryWriteError,
+                                                   alias_survives_removal,
                                                    references_broken_by_removal,
                                                    references_to)
         alias = row["alias"]
@@ -1986,10 +2003,18 @@ class ModelsSectionEditor(Vertical):
             # но и падать нельзя — говорим причину.
             self._notice(f"✗ не удалено: {exc}", ok=False)
             return False
-        # «Реестр станет пустым» — про ЭФФЕКТИВНЫЙ реестр (§5): своя запись может
-        # быть последней в файле профиля, а уровни продолжат работать записями
-        # основного конфига — обещать их выключение было бы ложью.
-        last = self._effective_aliases == [alias]
+        # Тёзка базовой записи (профиль перекрыл имя базы своей записью) переживает
+        # СВОЁ удаление: `alias_survives_removal` — тот же предикат, что уже решает
+        # отказ по чужому слою выше. Обе клаузы баннера обязаны знать про выживание:
+        # «реестр станет пустым» — про ЭФФЕКТИВНЫЙ реестр (§5), а `_effective_aliases`
+        # совпадает с `[alias]` и тогда, когда база продолжит отдавать ту же запись;
+        # «ссылки снимутся» — про СВОИ же слот/привязку на алиас, а каскад их не
+        # трогает (`keep_references=True` у `_apply_ops_to_text`) именно потому, что
+        # алиас продолжит резолвиться.
+        survives = alias_survives_removal(self._target, alias, stack_base=self._stack_base)
+        last = self._effective_aliases == [alias] and not survives
+        if survives:
+            references = []
         self._pending = {"alias": alias, "references": references, "last": last}
         return self._ask(self._confirm_text(alias, references, last), _FOOTER_CONFIRM)
 

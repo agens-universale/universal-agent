@@ -912,16 +912,21 @@ class SettingsScreen(Screen):
         приложение решает, устарел ли конфиг. Берётся из него именно СОСТАВ, а не
         мтаймы: снимок нужен ключом кэша вердикта, а устаревший глиф хуже медленных
         стрелок — разрешения `st_mtime` на Windows для этого не хватает, содержимое же
-        отвечает точно и дёшево (≈1 мс против ≈30 мс самой валидации). Профиль в
-        наборе — тот, которого называет указатель правимого файла; перенацелить его
-        способен только чужой слой, а тот лежит в наборе рядом со своим текстом."""
+        отвечает точно и дёшево (≈1 мс против ≈30 мс самой валидации). Указатель —
+        общим резолвом `resolve_profile_pointer` (свежий мерж база → managed → project,
+        порядок `_merge_layers`), а не сырым документом базы и не `self._config`
+        порознь: раскладка «указатель назначен проектным `.gc/config.yml`, база о нём
+        молчит» первому источнику не по зубам, а раскладка «указатель есть в обоих, и
+        они расходятся» — второму (`self._config` может быть собран в обход резолва,
+        как у синтетических сборок экрана; а победить при конфликте обязан проект,
+        а не выигравший по случайности источник)."""
         if not self._config_path:
             return None
         from pathlib import Path
-        from config import profile_mtime_set
+        from config import profile_mtime_set, resolve_profile_pointer
         try:
-            paths = profile_mtime_set(self._config_path,
-                                      self._target_document().get("profile") or None)
+            pointer = resolve_profile_pointer(self._config_path) or None
+            paths = profile_mtime_set(self._config_path, pointer)
         except OSError:
             return None
         snapshot = []

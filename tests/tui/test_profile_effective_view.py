@@ -280,6 +280,40 @@ async def test_an_own_entry_shows_the_keys_it_inherits_per_key(tmp_path, monkeyp
         assert ed._origin_cell("flash") == ""
 
 
+async def test_a_partial_backend_overlay_still_inherits_the_base_address(
+        tmp_path, monkeypatch):
+    """Слияние ПОКЛЮЧНОЕ даже внутри вложенного `backend` — не заменой словаря
+    целиком: страж выше бьёт по плоскому `model`, где поверхностный и рекурсивный
+    мёрдж неразличимы (у своей записи попросту нет ключа `backend`). Профиль,
+    задавший только `backend.proxy`, обязан сохранить унаследованный
+    `backend.completions_url` записи основного конфига — раскладка документирована
+    как легальная (`docs/configuration.md`), а мёртвой строку рисовать не за что."""
+    base = ('profile: ""\n'
+            "level: default\n"
+            "backend:\n"
+            f'  completions_url: "{_BASE_URL}"\n'
+            "agent:\n"
+            '  model: "test-model"\n'
+            "models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n'
+            "    backend:\n"
+            '      completions_url: "http://flash-host/v1/chat/completions"\n')
+    profile = ("models:\n"
+               "  flash:\n"
+               "    backend:\n"
+               '      proxy: "socks5://own-proxy:1080"\n')
+    async with _profile_view(tmp_path, monkeypatch, base=base, profile=profile) \
+            as (_p, _scr, ed):
+        ed._row_width = lambda: 100
+        assert ed._entry("flash")["backend"] == {
+            "completions_url": "http://flash-host/v1/chat/completions",
+            "proxy": "socks5://own-proxy:1080",
+        }
+        assert ed._entry_address("flash") == "http://flash-host/v1/chat/completions"
+        assert "из основного" not in ed._address_cell("flash")   # адрес — не общий
+
+
 async def test_an_own_address_keeps_the_inherited_model_id(tmp_path, monkeypatch):
     """Обратная половина того же: профиль задал только `url` — провайдерский id
     остаётся от записи основного конфига, а хвоста про адрес из «Подключения» у
@@ -414,6 +448,44 @@ async def test_the_last_own_entry_does_not_promise_an_empty_registry(
         assert "Удалить запись «glm» из реестра?" in banner
         assert "Реестр станет пустым" not in banner
         assert "Enter — удалить · Esc — отмена" in banner
+
+
+async def test_a_shadowed_own_entry_does_not_promise_an_empty_registry_or_broken_links(
+        tmp_path, monkeypatch):
+    """Тень под ТЕМ ЖЕ ИМЕНЕМ — не «другой алиас» соседнего стража, а ровно та
+    раскладка, где `last` и `references` обе лгут: своя запись «gc» перекрывает
+    базовую «gc», и `_effective_aliases` совпадает с `[alias]` СЛУЧАЙНО — она
+    переживёт удаление (запись базы остаётся), и каскад не снимает СВОИ же слот и
+    привязку на неё (`alias_survives_removal`, тот же предикат, что уже бережёт
+    отказ по чужому слою). Баннер не имеет права обещать ни то, ни другое."""
+    base = ('profile: ""\n'
+            "level: default\n"
+            "backend:\n"
+            f'  completions_url: "{_BASE_URL}"\n'
+            "agent:\n"
+            '  model: "test-model"\n'
+            "models:\n"
+            "  gc:\n"
+            '    model: "base-x"\n')
+    profile = ('models:\n'
+               '  gc:\n'
+               '    model: "profile-y"\n'
+               "slots:\n"
+               '  default: "gc"\n'
+               "assign:\n"
+               '  summary: "gc"\n')
+    async with _profile_view(tmp_path, monkeypatch, base=base, profile=profile) \
+            as (pilot, _s, ed):
+        assert ed._effective_aliases == ["gc"]        # тень и своя — один и тот же алиас
+        _cursor_to(ed, "entry", alias="gc")
+        await pilot.press("delete")
+        await pilot.pause()
+        banner = _confirm_banner(ed)
+        assert "Удалить запись «gc» из реестра?" in banner
+        assert "Реестр станет пустым" not in banner   # запись базы остаётся на месте
+        assert "ссылки снимутся" not in banner         # каскад их сохранит
+        assert "slots.default" not in banner
+        assert "assign.summary" not in banner
 
 
 async def test_the_registry_footer_promises_by_row_origin(tmp_path, monkeypatch):

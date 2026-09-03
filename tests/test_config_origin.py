@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from config_origin import Origin, origins
+from config_origin import Origin, _overlay_paths, origins
 
 
 def _write(path: Path, text: str) -> str:
@@ -170,3 +170,30 @@ def test_env_ref_stays_raw_in_base(tmp_path, monkeypatch):
 
     assert got.raw == "${ENV:GC_MODEL}"
     assert got.overlay_kind == ""
+
+
+def test_overlay_paths_agrees_with_resolve_profile_pointer_on_a_conflict(
+        tmp_path, monkeypatch):
+    """Указатель есть в ОБОИХ слоях, и они расходятся: `_overlay_paths` и общий
+    `resolve_profile_pointer` (`config_modules.layers`) обязаны сойтись на ОДНОМ
+    победителе (проектном, как у загрузчика, `layers.py`: `deep_merge(raw_config,
+    project_raw)` поверх уже смерженной базы) — вторая, независимая реализация
+    того же правила уже расходилась с первой на этой самой раскладке (находка
+    ревью), а тест на неё не заводил никто ни здесь, ни в showcase-наборе."""
+    from config_modules.layers import resolve_profile_pointer
+
+    base = _write(tmp_path / "config.yml", 'profile: "work"\nagent:\n  model: x\n')
+    proj_dir = tmp_path / "proj"
+    _write(proj_dir / ".gc" / "config.yml", 'profile: "corp"\n')
+    monkeypatch.chdir(proj_dir)
+    _write(tmp_path / "profiles" / "work.yml", "agent:\n  model: work-model\n")
+    _write(tmp_path / "profiles" / "corp.yml", "agent:\n  model: corp-model\n")
+
+    assert resolve_profile_pointer(base) == "corp"
+    paths = [path for _kind, path in _overlay_paths(base)]
+    assert any(Path(p).name == "corp.yml" for p in paths), paths
+    assert not any(Path(p).name == "work.yml" for p in paths), paths
+
+    got = origins(base, ["agent.model"])["agent.model"]
+    assert got.effective == "corp-model"
+    assert got.overlay_kind == "profile:base"
