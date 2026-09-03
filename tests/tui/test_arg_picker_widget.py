@@ -157,3 +157,67 @@ def test_set_filter_resets_selection_to_zero():
     assert p.selected_value() == "json"
     p.set_filter("")
     assert p.selected_value() == "txt"
+
+
+def test_hint_provider_not_called_twice_for_the_same_selection():
+    """`_build_footer` и `desired_height` спрашивали хинт КАЖДЫЙ по-своему —
+    два полных вызова провайдера на одну и ту же подсветку (найдено на
+    /profiles: провайдер внутри зовёт полную сборку конфига, ~6 мс). Один и тот
+    же выбор обязан стоить один вызов, кто бы из двух его первым ни спросил."""
+    pytest.importorskip("textual")
+    from tui.widgets.arg_picker import ArgPicker
+
+    calls = []
+
+    def hint(value):
+        calls.append(value)
+        return f"hint for {value}"
+
+    p = ArgPicker(_OPTS, initial_filter="", hint_provider=hint)
+    calls.clear()   # __init__ уже посчитал хинт один раз ради стартового desired_height
+    p._build_footer()
+    _ = p.desired_height
+    assert calls == [], f"выбор не менялся, а провайдер дёрнут снова: {calls}"
+
+
+def test_hint_provider_not_called_again_on_repeated_desired_height():
+    """`desired_height` дёргает поллинг главного экрана каждые 250 мс, пока
+    пикер просто открыт (`TraceScreen._poll_active` → `_sync_trace_max_height`).
+    Без кэша это провайдер (полная сборка конфига для /profiles) 4 раза в
+    секунду на UI-потоке — никто не нажимал ни одной клавиши."""
+    pytest.importorskip("textual")
+    from tui.widgets.arg_picker import ArgPicker
+
+    calls = []
+
+    def hint(value):
+        calls.append(value)
+        return "hint"
+
+    p = ArgPicker(_OPTS, initial_filter="", hint_provider=hint)
+    calls.clear()   # __init__ уже посчитал хинт один раз ради стартового desired_height
+    for _ in range(5):
+        _ = p.desired_height
+    assert calls == [], f"повторные обращения к desired_height дёрнули провайдер заново: {calls}"
+
+
+def test_hint_provider_called_again_after_selection_changes():
+    """Кэш — на ЗНАЧЕНИЕ выбора, не глобальный выключатель: смена подсветки
+    (стрелка) обязана посчитать хинт для НОВОГО пункта, а не отдать текст
+    прежнего."""
+    pytest.importorskip("textual")
+    from tui.widgets.arg_picker import ArgPicker
+
+    calls = []
+
+    def hint(value):
+        calls.append(value)
+        return f"hint for {value}"
+
+    p = ArgPicker(_OPTS, initial_filter="", hint_provider=hint)
+    calls.clear()
+    p.move_selection(1)
+    assert p.selected_value() == "json"
+    _ = p.desired_height
+    p._build_footer()
+    assert calls == ["json"], f"новый выбор не пересчитал хинт: {calls}"

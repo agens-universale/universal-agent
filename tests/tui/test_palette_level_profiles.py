@@ -833,6 +833,60 @@ def test_profile_picker_hint_names_the_reason_a_profile_will_not_apply(tmp_path,
     assert "broken-enc.yml" in hint and "не удалось прочитать" in hint
 
 
+def test_profile_picker_hint_reuses_the_opening_probe(tmp_path, monkeypatch):
+    """Открытие пикера (`profile_picker_options`) уже пробует сборку каждого
+    непроверенного профиля — хинт подвала (`profile_picker_hint`, зовётся на
+    каждый highlight И на каждый тик поллинга `ArgPicker.desired_height`, 0.25 с)
+    не имеет права звать вторую полную сборку конфига (`probe_profile_assembly` →
+    `load_config_ex`, ~6 мс на профиль) для профиля, который уже пробовала
+    витрина списка."""
+    from tui.toggles import profile_picker_hint, profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)   # alpha, smoke — здоровые; broken-enc — нет
+
+    calls: list = []
+    original = app.probe_profile_assembly
+
+    def counted(name):
+        calls.append(name)
+        return original(name)
+
+    monkeypatch.setattr(app, "probe_profile_assembly", counted)
+
+    options = profile_picker_options(app)             # «открытие» пикера
+    probed_on_open = list(calls)
+    assert probed_on_open, "открытие обязано пробовать хотя бы один профиль"
+    calls.clear()
+
+    names = [name for name, _, _ in options if name != "без профиля"]
+    for name in names:                                 # «наведение» — хинт каждой строки
+        profile_picker_hint(app, name)
+    assert calls == [], (
+        f"хинт перепробовал профили, уже проверенные открытием: {calls}")
+
+
+def test_profile_picker_hint_probes_once_across_repeated_polling(tmp_path, monkeypatch):
+    """Хинт одного и того же (ещё не пробованного открытием) профиля, спрошенный
+    повторно — как это делает поллинг `ArgPicker.desired_height` каждые 0.25 с,
+    пока список просто открыт, — не должен звать пробу заново."""
+    from tui.toggles import profile_picker_hint
+
+    app = _picker_app(tmp_path, monkeypatch, base_profile="smoke")   # smoke — эффективный,
+    calls: list = []                                                # options() его не трогает
+    original = app.probe_profile_assembly
+
+    def counted(name):
+        calls.append(name)
+        return original(name)
+
+    monkeypatch.setattr(app, "probe_profile_assembly", counted)
+
+    for _ in range(4):
+        profile_picker_hint(app, "smoke")
+    assert calls == ["smoke"], f"повторный хинт того же профиля пробует заново: {calls}"
+
+
 def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
     """§9.1 ревизия: сессионное "" при конфиг-указателе — чистый конфиг
     (пере-мерж БЕЗ профиля), а не база с профилем."""

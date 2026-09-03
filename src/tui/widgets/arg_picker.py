@@ -42,6 +42,13 @@ class ArgPicker(VerticalScroll):
         # Динамический хинт подсвеченного пункта (спека §12.1, /profiles: состав
         # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
         self._hint_provider = hint_provider
+        # Кэш последнего посчитанного хинта — на ОДИН выбор (см. `_hint_text`):
+        # `_build_footer` и `desired_height` спрашивали провайдер каждый по-своему,
+        # а поллинг главного экрана (0.25 с) дёргает `desired_height`, пока пикер
+        # просто открыт — без кэша полная проба (у /profiles — сборка конфига
+        # целиком) шла 4 раза в секунду на UI-потоке ради текста одного и того же
+        # пункта.
+        self._hint_cache: Optional[tuple] = None
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
     def compose(self) -> ComposeResult:
@@ -63,7 +70,7 @@ class ArgPicker(VerticalScroll):
         if self._hint_provider is not None:
             # palette-keys и у динамического хинта: воздух над ним, отделяющий
             # хинт от строк списка (ревизия 2026-07-28 по живому смоку).
-            children.append(Static(self._hint_provider(self.selected_value()),
+            children.append(Static(self._hint_text(self.selected_value()),
                                    classes="palette-hint palette-keys", markup=False))
         children.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
         return Vertical(*children, classes="palette-footer")
@@ -146,6 +153,22 @@ class ArgPicker(VerticalScroll):
             return 1
         return max(1, len(textwrap.wrap(text, width)))
 
+    def _hint_text(self, value: Optional[str]) -> str:
+        """Текст провайдера для `value`, посчитанный не чаще раза на выбор.
+
+        И `_build_footer`, и `desired_height` спрашивают хинт подсвеченного
+        пункта — а `desired_height` вдобавок дёргается поллингом главного экрана
+        (0.25 с) на каждом тике, пока пикер просто открыт. Кэш на одну запись
+        (значение → текст): смена подсветки — новый счёт, тот же пункт в том же
+        или следующем кадре — прежний ответ без второго вызова провайдера."""
+        if self._hint_provider is None:
+            return ""
+        if self._hint_cache is not None and self._hint_cache[0] == value:
+            return self._hint_cache[1]
+        text = self._hint_provider(value) or ""
+        self._hint_cache = (value, text)
+        return text
+
     @property
     def desired_height(self) -> int:
         """Честная желаемая высота: строки списка (или одна no-match-строка) +
@@ -157,8 +180,7 @@ class ArgPicker(VerticalScroll):
         flow = len(rows) if rows else 1
         footer = 1 + self._footer_line_count(_HINT)
         if self._hint_provider is not None:
-            footer += 1 + self._footer_line_count(
-                self._hint_provider(self.selected_value()) or "")
+            footer += 1 + self._footer_line_count(self._hint_text(self.selected_value()))
         return flow + 2 + footer
 
     def set_filter(self, prefix: str) -> None:

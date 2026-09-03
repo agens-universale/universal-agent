@@ -282,6 +282,42 @@ def _profile_assembly_error(app: Any, name: str) -> str:
     return ""
 
 
+def _profile_verdict_key(app: Any, name: str) -> Optional[tuple]:
+    """Снимок мтаймов файлов сборки профиля `name` (`config.profile_mtime_set`,
+    голый `stat()`, без парсинга) — ключ кэша `_cached_assembly_error`. Не
+    удалось выяснить состав (`OSError`) — `None`: кэш такой пробы не хранит,
+    решение то же, что у `_config_stack_texts`/`_models_verdict`
+    (`settings.py`) для вердикта секции «Модели»."""
+    from config import profile_mtime_set
+    try:
+        mtimes = profile_mtime_set(getattr(app, "_config_path", None), name)
+    except OSError:
+        return None
+    return tuple(sorted(mtimes.items()))
+
+
+def _cached_assembly_error(app: Any, name: str) -> str:
+    """`_profile_assembly_error(app, name)`, посчитанная не чаще, чем меняется
+    хоть один файл сборки этого профиля — общий кэш для витрины списка
+    (`profile_picker_options`, один проход на открытие) И хинта подвала
+    (`profile_picker_hint`): какая из них первой спросила про имя, та и платит
+    единственную полную сборку (`probe_profile_assembly` → `load_config_ex`,
+    ~6 мс), вторая берёт готовый ответ. Без этого хинт пересобирал конфиг
+    заново на каждый highlight и на каждый тик поллинга главного экрана
+    (`ArgPicker.desired_height`, 0.25 с) — 4 раза в секунду на UI-потоке, пока
+    список просто открыт, никто не нажал ни одной клавиши."""
+    key = _profile_verdict_key(app, name)
+    cache: Dict[str, tuple] = getattr(app, "_profile_assembly_cache", None) or {}
+    cached = cache.get(name)
+    if key is not None and cached is not None and cached[0] == key:
+        return cached[1]
+    reason = _profile_assembly_error(app, name)
+    if key is not None:
+        cache[name] = (key, reason)
+        app._profile_assembly_cache = cache
+    return reason
+
+
 def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     """Опции пикера `/profiles` (спека §12.1, ревизия 2026-07-28; статус-колонка —
     задача 10, решение смока 2026-08-10): первым — «— без профиля» (сессионное
@@ -298,9 +334,15 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     статус описывает текущее состояние, и оно приоритетнее. Два статуса в одной
     колонке не показываем: колонка одна, и вторая метка вытеснила бы первую.
 
-    Проба стоит ~3 мс на профиль, и это цена ОТКРЫТИЯ списка, а не кадра:
-    провайдер зовётся один раз (`main.py`, ветка `if self._arg_picker is None`),
-    стрелки и фильтр идут через `set_filter` по готовым опциям."""
+    Проба стоит ~6 мс на профиль — но не на КАДР: `_cached_assembly_error`
+    делит её с хинтом подвала (`profile_picker_hint`), и за одно открытие
+    списка профиль пробуется не больше раза, кто бы из двух его первым ни
+    спросил. Сам этот провайдер зовётся один раз на открытие (`main.py`,
+    ветка `if self._arg_picker is None`) — стрелки и фильтр идут через
+    `set_filter` по готовым опциям; хинт, в отличие от них, спрашивается на
+    каждый highlight И на каждый тик поллинга (`ArgPicker.desired_height`) —
+    без общего кэша с этим провайдером он звал бы пробу заново 4 раза в
+    секунду, пока список просто открыт."""
     refs = _discovered_profiles(app)
     effective = str(_effective_cfg(app).get("profile") or "")
     base_pointer = str((getattr(app, "_config", None) or {}).get("profile") or "")
@@ -314,7 +356,7 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
         if name == effective:
             status = _PROFILE_ACTIVE_STATUS   # действующий уже собрался — пробы не надо
         else:
-            status = _PROFILE_BROKEN_STATUS if _profile_assembly_error(app, name) else ""
+            status = _PROFILE_BROKEN_STATUS if _cached_assembly_error(app, name) else ""
         options.append((name, desc, status))
     return tuple(options)
 
@@ -354,7 +396,7 @@ def profile_picker_hint(app: Any, value: Any) -> str:
     # Статус строки говорит ЧТО («✗ не применится»), подсказка — ПОЧЕМУ. Причина
     # идёт ПЕРВОЙ и целиком: текст ядра самодостаточен («<путь>: …»), а рядом с
     # палитрой путь профиля не печатает никто — без него нечего чинить.
-    reason = _profile_assembly_error(app, name)
+    reason = _cached_assembly_error(app, name)
     if reason:
         parts.append(reason)
     summary = _profile_slots_summary({"slots": doc.get("slots") or {},
