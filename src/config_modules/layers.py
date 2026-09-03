@@ -20,7 +20,7 @@ from config_modules.compat import apply_compat
 from config_modules.env_interpolation import resolve_env_placeholders
 from config_modules import env_vars
 from config_modules.merge import deep_merge
-from config_modules.model_registry import validate_registry_pairs
+from config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
 from config_modules.model_sections_validation import validate_model_sections
 from config_modules.profiles import (
     ProfileRef,
@@ -78,13 +78,45 @@ def _layer_document(path, subject: str) -> Dict[str, Any]:
     return raw
 
 
+def _candidate_profile_ref(pointer: str, roots: list, candidates: Dict[Path, Dict[str, Any]]
+                           ) -> Optional[ProfileRef]:
+    """Кандидат, чьё ИМЯ ФАЙЛА совпадает с указателем, — фолбэк на случай, когда
+    `resolve_profile` не находит `pointer` НА ДИСКЕ вовсе (переименование пишет
+    указатель на новое имя ДО физического `rename()` файла профиля —
+    `settings.py::_rename_profile`, порядок намеренный: сбой записи указателя
+    ПОСЛЕ уже состоявшегося переименования оставлял бы висячее имя без файла
+    вообще без следа в логах). Без этой подстановки `new_name.yml` не резолвится
+    НИКОГДА — стек резолвится без профиля, и рабочая раскладка «модели в базе,
+    слот в профиле» отклоняется, хотя после `rename()` всё сойдётся.
+
+    Только ФОЛБЭК, не альтернативный путь резолва: зовущий код пробует диск
+    ПЕРВЫМ (`resolve_profile` в `_merge_layers`), сюда попадает только его отказ
+    «такого имени нет ни в одном корне» — реальный файл всегда выигрывает.
+    Коллизия «на диске есть файл с этим именем, и кандидат тоже» при этом не
+    встаёт на практике (её ДО записи отклоняет `_profile_name_error`), но
+    порядок вызова здесь не полагается на это — фолбэк есть фолбэк.
+
+    Зарезервированные имена — та же граница, что у `resolve_profile`: кандидат
+    с именем файла `light.yml` не обязан активировать несуществующий уровень."""
+    if pointer in RESERVED_WORDS:
+        return None
+    for cand_path in candidates:
+        if cand_path.stem != pointer:
+            continue
+        for idx, root in enumerate(roots):
+            if cand_path.parent == Path(root).resolve():
+                return ProfileRef(
+                    name=pointer, path=cand_path,
+                    root_kind="project" if idx == 0 else "base")
+    return None
+
+
 def _merge_layers(
     raw_config: Dict[str, Any],
     path: str,
     *,
     profile_override: Optional[str] = None,
-    profile_doc: Optional[Dict[str, Any]] = None,
-    profile_doc_path: Optional[Path] = None,
+    candidates: Optional[Dict[Any, Dict[str, Any]]] = None,
     notices: Optional[list[str]] = None,
     managed_path=_UNSET,
     project_path=_UNSET,
@@ -100,10 +132,28 @@ def _merge_layers(
     уровни в профиле». Судить надо ТОТ стек, который соберёт следующий старт, —
     один и тот же код на обе роли.
 
-    `profile_doc` — готовый документ вместо чтения профиля с диска; подставляется,
-    только если резолв указателя привёл ровно в `profile_doc_path`. Так валидатор
-    ставит ещё не записанный текст профиля на его место в стеке, не рискуя
-    подсунуть его вместо чужого файла-тёзки из другого корня.
+    `candidates` — {путь: готовый документ} вместо чтения СООТВЕТСТВУЮЩИХ файлов
+    слоёв (managed/project/профиль) с диска; для каждого из трёх слоёв, чей путь
+    совпал с одним из ключей, подставляется его документ. Словарь, а не пара
+    (было — `candidate_doc`/`candidate_path`, ОДИН кандидат): переименованию
+    профиля нужны СРАЗУ два — указатель на новое имя (в базе или в проектном
+    `.gc/config.yml`) и сам документ профиля на его будущем пути (см.
+    `_candidate_profile_ref` выше). Словарь, а не список пар — сравнение
+    «это мой путь?» ниже и так делает `Path(...).resolve()` на каждом слое;
+    держать кандидатов в словаре по РЕЗОЛВНУТОМУ пути превращает три отдельных
+    линейных перебора (managed/project/профиль) в три словарных чтения без
+    третьего вида структуры для точки, где кандидат применяется (профильный
+    фолбэк выше перебирает тот же словарь по имени файла, а не по факту пути,
+    так что словарь не создаёт для него разнобоя).
+
+    Сравнение путей — ОДНО правило на все три слоя, хотя вырученная им защита не
+    везде одинаково нужна: у профиля путь неоднозначен (`profile_roots` ищет в
+    ДВУХ корнях — проектном и рядом с базой, — и файл-тёзка из другого корня НЕ
+    обязан оказаться кандидатом), а у managed/project путь ДЕТЕРМИНИРОВАН
+    (`env_vars.project_local_config_path()`/`mcp_paths.managed_config_path()` —
+    ровно один кандидат), и то же сравнение там вырождается в тождество. Это
+    по-прежнему одна проверка, а не две склеенные: правило то же самое, просто у
+    профиля оно не работает вхолостую.
 
     Указатель резолвится тем же порядком, что и общая `resolve_profile_pointer`
     ниже (база → managed → project, конфликт решает project): сюда она не
@@ -113,6 +163,14 @@ def _merge_layers(
     экономии этого самого чтения."""
     base_path = Path(path)
     notices = notices if notices is not None else []
+
+    _candidates = {Path(p).resolve(): doc for p, doc in (candidates or {}).items()}
+
+    def _candidate_for(layer_path):
+        """Документ-кандидат для `layer_path` либо `_UNSET` — не `None`: пустой,
+        но НАСТОЯЩИЙ документ (`{}`) обязан отличаться от «кандидата здесь нет»,
+        а `dict.get(..., None)` их бы перепутал."""
+        return _candidates.get(Path(layer_path).resolve(), _UNSET)
 
     # Сохранить base-voice для дефекта перекрытия (до мержа managed). Тип НЕ приводим:
     # секция ещё не проходила схему, и `dict()` над «voice: строка» падал бы технической
@@ -131,7 +189,10 @@ def _merge_layers(
     managed_raw: Dict[str, Any] = {}
     if (managed_path is not None and managed_path.is_file()
             and os.path.abspath(str(managed_path)) != os.path.abspath(path)):
-        managed_raw = _layer_document(managed_path, "config.local.yml")
+        _cand = _candidate_for(managed_path)
+        managed_raw = (
+            _cand if _cand is not _UNSET
+            else _layer_document(managed_path, "config.local.yml"))
         managed_before_env = managed_raw
         managed_raw = resolve_env_placeholders(managed_raw)
         validate_registry_pairs(managed_raw, source=str(managed_path),
@@ -142,7 +203,10 @@ def _merge_layers(
     if project_path is _UNSET:
         project_path = env_vars.project_local_config_path()
     if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
-        project_raw = _layer_document(project_path, "проектный config.yml")
+        _cand = _candidate_for(project_path)
+        project_raw = (
+            _cand if _cand is not _UNSET
+            else _layer_document(project_path, "проектный config.yml"))
         project_before_env = project_raw
         project_raw = resolve_env_placeholders(project_raw)
         validate_registry_pairs(project_raw, source=project_path,
@@ -161,17 +225,21 @@ def _merge_layers(
     ref: Optional[ProfileRef] = None
     active_name: Optional[str] = pointer or None
     if pointer:
-        ref = resolve_profile(pointer, roots, notices=notices)
-        if profile_doc is not None and profile_doc_path is not None and (
-            Path(ref.path).resolve() == Path(profile_doc_path).resolve()
-        ):
-            profile_raw = profile_doc
-        else:
-            profile_raw = load_profile_document(
+        try:
+            ref = resolve_profile(pointer, roots, notices=notices)
+        except ValueError:
+            ref = _candidate_profile_ref(pointer, roots, _candidates)
+            if ref is None:
+                raise
+        _cand = _candidate_for(ref.path)
+        profile_raw = (
+            _cand if _cand is not _UNSET
+            else load_profile_document(
                 ref.path,
                 warn_literal_tokens=(ref.root_kind == "project"),
                 notices=notices,
             )
+        )
         # Контент профиля мержится ПОВЕРХ base/managed/project (ось 2).
         raw_config = deep_merge(raw_config, profile_raw)
 
@@ -220,22 +288,50 @@ def validate_config_text(text: str) -> None:
     _app_config_from_text(text)
 
 
-def _stacked_app_config(text: str, *, target=None, base_path, is_profile: bool = False):
+def _stacked_app_config(text: str, *, target=None, base_path, is_profile: bool = False,
+                        extra_candidates=None):
     """Merged AppConfig стека, который соберёт СЛЕДУЮЩИЙ СТАРТ, — или None, если цель
     в этот стек не входит либо он не собрался.
 
     Один путь сборки на обе pre-write валидации: второй раз выписанный мерж
-    разъехался бы с первым на первой же правке загрузчика."""
+    разъехался бы с первым на первой же правке загрузчика.
+
+    `target=None` — text считается содержимым САМОЙ БАЗЫ (обычный вызов
+    `validate_config_text_with_sections` без `target`). `target` задан:
+    `is_profile=False` — text садится в стек ПОДСТАНОВКОЙ на место проектного
+    `.gc/config.yml` (`_write_profile_pointer` пишет указатель `profile:` и туда,
+    не только в базу — база в этой ветке читается с диска, а не берётся из
+    `text`); `is_profile=True` — та же подстановка на место профиля, найденного
+    резолвом указателя (проверка ниже — тот же приём, что и у проекта, но нужна
+    по-настоящему: имя резолвится в файл неоднозначно, `target` мог не выиграть).
+
+    `extra_candidates` — дополнительные {путь: документ} СВЕРХ основного (`text`
+    на `target`), которые тоже садятся в стек подстановкой. Нужны переименованию
+    профиля: указатель пишется на новое имя ДО физического `rename()` файла
+    профиля, и без подстановки будущего документа профиля НА ЕГО будущем пути
+    указатель не резолвится вовсе (см. `_candidate_profile_ref` в
+    `_merge_layers`) — раскладка «модели в базе, слот в профиле» отклонялась бы,
+    хотя после `rename()` сходится. Ветка `target is None` (запись меняет саму
+    базу) кандидаты тоже принимает — тем же путём, тем же словарём."""
+    candidates = dict(extra_candidates or {})
     try:
-        if not is_profile:
+        if not is_profile and target is None:
             return _app_config_from_raw(
-                _merge_layers(_raw_from_text(text), str(base_path)).config)
+                _merge_layers(_raw_from_text(text), str(base_path),
+                             candidates=candidates or None).config)
         base_raw = _raw_from_text(
             Path(base_path).read_text(encoding="utf-8"), "config.yml")
+        if not is_profile:
+            candidates[Path(target)] = _raw_from_text(text, "config.yml")
+            layers = _merge_layers(
+                base_raw, str(base_path),
+                candidates=candidates,
+                project_path=str(target))
+            return _app_config_from_raw(layers.config)
+        candidates[Path(target)] = _raw_from_text(text, "профиль")
         layers = _merge_layers(
             base_raw, str(base_path),
-            profile_doc=_raw_from_text(text, "профиль"),
-            profile_doc_path=Path(target))
+            candidates=candidates)
         if layers.ref is None or (
             Path(layers.ref.path).resolve() != Path(target).resolve()
         ):
@@ -375,7 +471,8 @@ def stack_documents(base_path) -> list:
     return docs
 
 
-def validate_config_text_with_sections(text: str, *, base_path=None) -> None:
+def validate_config_text_with_sections(text: str, *, base_path=None, target=None,
+                                       extra_candidates=None) -> None:
     """Как validate_config_text (фаза 1), плюс фаза 2 — ссылочная целостность и
     правило резолвимости секций models/slots/assign (config_modules.
     model_sections_validation.validate_model_sections).
@@ -398,10 +495,26 @@ def validate_config_text_with_sections(text: str, *, base_path=None) -> None:
     соседний слой — не повод запрещать правку этого, а сообщение о чужом файле
     человеку в форме бесполезно. Стек не собрался (нет профиля по указателю,
     нечитаемый слой) — фаза 2 откатывается к однофайловой: хуже, чем было, не
-    станет."""
+    станет.
+
+    `target` — путь проектного `.gc/config.yml`, если `text` — это ОН, а не база
+    (`_write_profile_pointer` пишет указатель `profile:` в оба файла, и вопрос
+    «переживёт ли запись следующий старт» обязан спрашивать про ТОТ слой, в
+    который реально идёт запись). Кандидат тогда садится в стек ПОДСТАНОВКОЙ на
+    место проектного слоя (`_merge_layers`), а база читается с диска, а не из
+    `text`, — иначе вердикт судил бы не тот файл, который меняется на самом
+    деле. `target=None` (умолчание) — прежнее поведение: `text` считается базой
+    целиком.
+
+    `extra_candidates` — сверх основного (`text` на `target`/базе) документа,
+    ещё {путь: документ} для подстановки в тот же стек (см. `_stacked_app_config`
+    и `_merge_layers::_candidate_profile_ref`). Нужен переименованию профиля —
+    указатель на новое имя без будущего документа профиля на будущем пути не
+    резолвится вовсе."""
     app_cfg = _app_config_from_text(text)
     if base_path is not None:
-        stacked = _stacked_app_config(text, base_path=base_path)
+        stacked = _stacked_app_config(text, base_path=base_path, target=target,
+                                      extra_candidates=extra_candidates)
         if stacked is not None:
             app_cfg = stacked
     validate_model_sections(app_cfg)

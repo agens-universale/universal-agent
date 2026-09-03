@@ -332,11 +332,22 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     pending пуст → позитивное «настроен». program — имя бинаря (gc-cli / gc-ua).
     just_created=True → конфиг создан этим запуском (иначе уже существовал).
     Если модель уже задана (а адрес/токен — нет), добавляем ремарку: эти поля
-    нужны для preset-модели; либо укажи свою модель и адрес/токен под неё."""
+    нужны для preset-модели; либо укажи свою модель и адрес/токен под неё.
+
+    Путь показывается абсолютным (`_display_path`) — той же причиной, что и у
+    `explain_broken_config`: относительный бессмыслен вне момента запуска.
+    `config_path`, переданный дальше в `overriding_layer_note`, не трогаем —
+    у неё своя (нечувствительная к форме пути) нормализация через
+    `config_origin._overlay_paths`."""
+    import os
+
+    def _display_path(path) -> str:
+        return os.path.abspath(path) if path else path
+
     profile_note = overriding_layer_note(config, config_path)
     pending = pending_requirements(config)
     if not pending:
-        base = f"[gc] Конфиг настроен: {config_path} — можно запускать."
+        base = f"[gc] Конфиг настроен: {_display_path(config_path)} — можно запускать."
         return f"{base}\n[gc] {profile_note}." if profile_note else base
     fields = "\n".join(f"    • {r.hint}" for r in pending)
     note = ""
@@ -350,10 +361,10 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
         )
     if just_created:
         header = "  GigaCode — конфигурация создана, настройка не завершена\n\n"
-        location = f"  Создан файл конфигурации:\n    {config_path}\n\n"
+        location = f"  Создан файл конфигурации:\n    {_display_path(config_path)}\n\n"
     else:
         header = "  GigaCode — настройка не завершена\n\n"
-        location = f"  Конфигурация:\n    {config_path}\n\n"
+        location = f"  Конфигурация:\n    {_display_path(config_path)}\n\n"
     if profile_note:
         note += f"\n  {profile_note}.\n"
     return (
@@ -411,11 +422,26 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     нечитаемый файл, профиль не найден по указателю) — сопоставлять нечего,
     совет становится «поправить файл: <путь>», где путь — тот, что называет сама
     ошибка (слои пишут «<path>: …», см. layers.py::_layer_document), либо
-    базовый, если ни один известный файл в тексте не назван."""
+    базовый, если ни один известный файл в тексте не назван.
+
+    Показанные пути — всегда абсолютные (`_display_path`): относительный, как
+    из `--config .\\config.yml`, бессмыслен вне момента запуска (другой cwd,
+    копипаста в переписку) и рядом с уже абсолютным путём профиля читается
+    неряшливо. Нормализация — только на выходе, в f-строках ниже: `config_path`
+    и всё, что от него посчитано (`participants`, `named`, `file_path`),
+    остаются НЕТРОНУТЫМИ — на них стоит сравнение `error_text.startswith(...)`,
+    и здесь важно опознать файл ТЕМ же видом пути, каким его назвала сама
+    ошибка (см. `_layer_document`/`validate_registry_pairs`, которые пишут путь
+    без прогона через `os.path.abspath`)."""
+    import os
+
     from pydantic import ValidationError as _ValidationError
 
     from config_modules.layers import resolve_profile_pointer
     from config_origin import _overlay_paths, origins
+
+    def _display_path(path) -> str:
+        return os.path.abspath(path)
 
     error_text = (
         f"конфиг не проходит схему: {exc}" if isinstance(exc, _ValidationError) else str(exc)
@@ -423,7 +449,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
 
     participants = [("base", config_path)] + _overlay_paths(config_path)
     participant_lines = [
-        f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{path}"
+        f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{_display_path(path)}"
         + ("   (активен)" if kind.startswith("profile:") else "")
         for kind, path in participants
     ]
@@ -442,14 +468,14 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
             file_path = origin_map[key].overlay_path or config_path
             by_file.setdefault(file_path, []).append(key)
         for file_path, keys in by_file.items():
-            fix_lines.append(f"поправить {', '.join(keys)} в:  {file_path}")
+            fix_lines.append(f"поправить {', '.join(keys)} в:  {_display_path(file_path)}")
     else:
         named = config_path
         for _, candidate in participants:
             if error_text.startswith(f"{candidate}:"):
                 named = candidate
                 break
-        fix_lines.append(f"поправить файл:  {named}")
+        fix_lines.append(f"поправить файл:  {_display_path(named)}")
 
     if resolve_profile_pointer(config_path):
         fix_lines.append(f'запустить без профиля, ничего не потеряв:  {program} --profile ""')
@@ -460,7 +486,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     participants_block = "\n".join(participant_lines)
 
     return (
-        f"[gc] Конфиг не загружается: {config_path}\n\n"
+        f"[gc] Конфиг не загружается: {_display_path(config_path)}\n\n"
         f"{error_block}\n\n"
         f"  Участвуют:\n{participants_block}\n\n"
         f"  Что сделать:\n{fix_block}\n"

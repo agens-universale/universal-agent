@@ -376,12 +376,33 @@ def test_sentinels_match_default_yaml():
 
 
 def test_setup_guide_lists_pending_fields_and_path(tmp_path, monkeypatch):
+    """Путь в подсказке — абсолютный: относительный (или платформенно-чужой,
+    как POSIX-стиль на Windows) бессмыслен вне момента запуска."""
     cfg = _isolated_default(tmp_path, monkeypatch)
-    text = onboarding.setup_guide("/home/u/.gc/config.yml", cfg)
-    assert "/home/u/.gc/config.yml" in text
+    config_path = str(tmp_path / ".gc" / "config.yml")
+    text = onboarding.setup_guide(config_path, cfg)
+    assert config_path in text
     assert "backend.completions_url" in text
     assert "Authorization" in text
     assert "имя модели" in text   # модель тоже не задана в дефолте → выбирается в мастере
+
+
+def test_setup_guide_shows_a_relative_path_as_absolute(tmp_path, monkeypatch):
+    """Тот же вопрос, что и у `explain_broken_config` (соседняя функция, тот же
+    способ печати пути) — `--config .\\config.yml` не должен всплывать
+    относительным: он бессмыслен вне момента запуска этой команды."""
+    import os
+    cfg = _isolated_default(tmp_path, monkeypatch)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    config_abs = cwd / "config.yml"
+    relative = os.path.join(".", "config.yml")
+
+    text = onboarding.setup_guide(relative, cfg)
+
+    assert relative not in text
+    assert str(config_abs) in text
 
 
 def test_setup_guide_offers_init_config_helper_with_program():

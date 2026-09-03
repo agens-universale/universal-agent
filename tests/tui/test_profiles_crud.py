@@ -797,6 +797,251 @@ async def test_rename_moves_the_pointer_in_every_file_layer(tmp_path, monkeypatc
     assert _loads_outside_project(tmp_path, base_cfg, monkeypatch).get("profile") == "job"
 
 
+# --- находка ревьюера A (вторая половина): указатель в проекте — фаза 2 стека ----
+
+
+async def test_deactivating_via_the_project_layer_is_refused_when_it_breaks_the_stack(
+        tmp_path, monkeypatch):
+    """Ревью: модели — в базе, `slots.default` — в профиле (легальная раскладка),
+    указатель `profile:` живёт в проектном `.gc/config.yml`. Раньше запись шла
+    однофайловой валидацией (`validate_config_text`) — синтаксис `profile: ""`
+    безупречен, и снятие профиля молча ложилось на диск конфигом, который
+    следующий холодный старт не грузит (находка ревью, воспроизведено). Фаза 2
+    обязана поймать это ДО записи — так же, как у указателя в базе."""
+    import config as config_mod
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      "backend:\n"
+                      '  completions_url: "http://host/v1/chat/completions"\n'
+                      "agent:\n"
+                      '  model: "test-model"\n'
+                      "models:\n"
+                      '  a:\n    model: "x"\n'
+                      '  b:\n    model: "y"\n')
+    _write(tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n')
+    project_cfg = _write(project_dir / ".gc" / "config.yml", 'profile: "work"\n')
+
+    cfg = dict(_base_dict(), profile="work")
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "none")
+        await pilot.press("space")
+        await pilot.pause()
+        notice = _notice(scr)
+
+    assert "профиль не снят" in notice, notice
+    assert "раздел" in notice and "Модел" in notice, notice   # обёртка называет, где чинить
+    assert "slots.default" in notice, notice                  # деталь валидатора никуда не делась
+    # живой откат: файл проектного слоя — ровно тот же, что и до попытки записи
+    assert project_cfg.read_text(encoding="utf-8") == 'profile: "work"\n'
+    # и следующий холодный старт (внутри проекта — оверлей действует) всё ещё грузится
+    loaded, _meta = config_mod.load_config_ex(str(base_cfg))
+    assert loaded.get("profile") == "work"
+
+
+async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_the_stack(
+        tmp_path, monkeypatch):
+    """Тот же дефект, но хуже: `.gc/config.yml` ещё не существует, и писатель
+    уходит в `create_pointer_file`, у которой не было ВООБЩЕ никакой валидации —
+    ни фазы 1, ни фазы 2. Раскладка ревью: 2 модели в базе без слотов, проектный
+    профиль (ручная YAML-территория — приложение туда не пишет, значит такой
+    файл до активации ни разу не проходил проверку) со слотом на несуществующий
+    алиас. Активация обязана отказать ДО создания файла — не создать конфиг,
+    на котором следующий холодный старт падает необработанным ValueError."""
+    import config as config_mod
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      "backend:\n"
+                      '  completions_url: "http://host/v1/chat/completions"\n'
+                      "agent:\n"
+                      '  model: "test-model"\n'
+                      "models:\n"
+                      '  a:\n    model: "x"\n'
+                      '  b:\n    model: "y"\n')
+    _write(project_dir / ".gc" / "profiles" / "work.yml", 'slots:\n  default: "ghost"\n')
+    project_cfg = project_dir / ".gc" / "config.yml"
+    assert not project_cfg.exists()
+
+    cfg = dict(_base_dict())        # без активного профиля
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("space")
+        await pilot.pause()
+        notice = _notice(scr)
+
+    assert "профиль не включён" in notice, notice
+    assert "раздел" in notice and "Модел" in notice, notice   # обёртка называет, где чинить
+    assert "ghost" in notice, notice                          # деталь валидатора никуда не делась
+    assert not project_cfg.exists()   # файл не создан вовсе — не только не переписан
+    # живой откат: раз файла нет, следующий холодный старт падает по СТАРОЙ,
+    # НЕ связанной с этой находкой причине (2 модели без единого слота в самой
+    # базе — ожидаемо для ещё не настроенного проекта), а не тем необработанным
+    # ValueError про несуществующий алиас "ghost", которым бил старый дефект
+    # (тот указатель — из так и не созданного файла — реально подставил бы
+    # `work`, и стек уже пытался бы резолвить `ghost`).
+    with pytest.raises(ValueError, match=r"slots\.default.*≥2") as excinfo:
+        config_mod.load_config_ex(str(base_cfg))
+    assert "ghost" not in str(excinfo.value)
+
+
+async def test_renaming_the_active_profile_succeeds_when_the_base_needs_its_slot(
+        tmp_path, monkeypatch):
+    """СТРАЖ РЕГРЕССА: указатель пишется на НОВОЕ имя ДО физического rename()
+    файла профиля (`_rename_profile`) — в момент валидации `job.yml` на диске
+    ещё нет, `resolve_profile` его не находит. Раскладка «2+ моделей в базе,
+    слот — в профиле» (легальная, §4) раньше ВСЕГДА отклоняла переименование
+    активного профиля, каким бы безупречным ни было его содержимое: фаза 2
+    откатывалась к однофайловой и судила базу БЕЗ профиля (2 модели, ни
+    одного слота, «моделей ≥2» — читай ревью-регресс). Подстановка будущего
+    документа профиля НА ЕГО будущем пути (`extra_candidates`) закрывает
+    разрыв — содержимое профиля при переименовании не меняется, и это ровно
+    та же (уже резолвимая) раскладка, что и до переименования."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      'profile: "work"\n'
+                      "models:\n"
+                      '  a:\n    model: "x"\n'
+                      '  b:\n    model: "y"\n')
+    work = _write(tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n')
+
+    app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=dict(_base_dict(), profile="work"))
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "job")
+        notice = _notice(scr)
+        flash = _flash(scr)
+
+    assert "не переименован" not in notice, notice
+    assert "переименован в «job»" in flash, flash
+    job = tmp_path / "base" / "profiles" / "job.yml"
+    assert not work.exists()
+    assert job.exists() and job.read_text(encoding="utf-8") == 'slots:\n  default: "a"\n'
+    assert 'profile: "job"' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_renaming_a_profile_with_a_broken_slot_still_shows_the_wrapped_refusal(
+        tmp_path, monkeypatch):
+    """Подстановка чинит именно РАЗРЫВ резолва (имя ещё не на диске) — не
+    отменяет фазу 2 вовсе. Профиль сломан НЕЗАВИСИМО от переименования (слот
+    смотрит на несуществующий алиас) — будущий документ на новом пути несёт ТУ
+    ЖЕ поломку, отказ законен, и текст остаётся человеческим, а не сырым
+    сообщением валидатора."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      'profile: "work"\n'
+                      "models:\n"
+                      '  a:\n    model: "x"\n'
+                      '  b:\n    model: "y"\n')
+    work = _write(tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "ghost"\n')
+
+    app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=dict(_base_dict(), profile="work"))
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "job")
+        notice = _notice(scr)
+
+    assert "профиль не переименован" in notice, notice
+    assert "раздел" in notice and "Модел" in notice, notice
+    assert "ghost" in notice, notice
+    # живой откат: ни файл, ни указатель не тронуты
+    assert work.exists()
+    assert not (tmp_path / "base" / "profiles" / "job.yml").exists()
+    assert 'profile: "work"' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_deleting_the_sole_slot_provider_shows_the_wrapped_refusal(
+        tmp_path, monkeypatch):
+    """Находка соседей: `_delete_profile` шёл через `_repoint_profile_layers`
+    тем же путём, что и включение/снятие/переименование ДО их правки, и не
+    заворачивал отказ фазы 2 — человек видел сырое «✗ не удалить:
+    slots.default: ...» в одном действии и человеческий текст в трёх соседних.
+    Раскладка «2+ моделей в базе, слот в профиле»: удаление снимает указатель
+    ПЕРЕД перемещением файла (`_repoint_profile_layers(layers, "")`), рвёт
+    единственный слот — фаза 2 отказывает, текст обязан назвать действие и
+    место починки, как и у остальных трёх."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      'profile: "work"\n'
+                      "models:\n"
+                      '  a:\n    model: "x"\n'
+                      '  b:\n    model: "y"\n')
+    work = _write(tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n')
+
+    app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=dict(_base_dict(), profile="work"))
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("delete")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        notice = _notice(scr)
+
+    assert "профиль не удалён" in notice, notice
+    assert "раздел" in notice and "Модел" in notice, notice
+    assert "≥2" in notice, notice
+    # живой откат: ни файл, ни указатель не тронуты
+    assert work.exists()
+    assert 'profile: "work"' in base_cfg.read_text(encoding="utf-8")
+
+
+async def test_rollback_that_also_fails_does_not_promise_a_retry(tmp_path, monkeypatch):
+    """Аварийный откат (`_rollback_profile_pointers`) — восстановление ПОСЛЕ
+    чужого сбоя, не первая попытка: если восстановить старый указатель тоже не
+    удаётся, «поправьте и повторите» — обещание того, чего нет (состояние уже
+    смешанное). Вызывается напрямую: живой сценарий двойного сбоя (упавшая
+    файловая операция ПОСЛЕ упавшего же отката) требует двух независимых сбоев
+    подряд, а сам текст обёртки от их точной причины не зависит."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    # Восстановление "ghost" тоже уходит в фазу 2, тоже не резолвится (нет такого
+    # профиля) и тоже падает на нерезолвимой базе — ту же дорогу проходит любой
+    # НЕуспешный `_write_profile_pointer`, откуда бы он ни был вызван.
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      "models:\n"
+                      '  a:\n    model: "x"\n'
+                      '  b:\n    model: "y"\n')
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        scr._rollback_profile_pointers(
+            [base_cfg], "ghost", file_exc="исходная причина сбоя", action="переименовать")
+        await pilot.pause()
+        notice = _notice(scr)
+
+    assert "повторите" not in notice, notice
+    assert "переименовать не удалось" in notice, notice
+    assert "автоматический откат" in notice, notice
+    assert "≥2" in notice, notice   # причина сбоя самого отката тоже видна, не проглочена
+
+
 # --- ревью Task 5 #2: переименование ПЕРЕВОЗИТ сессионный выбор -------------------
 
 
@@ -1246,3 +1491,44 @@ async def test_name_prompt_hides_the_hint_about_the_row_under_cursor(tmp_path, m
         hints = [str(w.render()) for w in scr.query(".set-profiles-hint")]
         assert hints == [], hints
         assert "переименовать" in _footer(scr)             # роль клавиш называет футер
+
+
+async def test_renaming_reports_a_clean_refusal_when_the_profile_file_vanishes_mid_read(
+        tmp_path, monkeypatch):
+    """Находка ревью: чтение файла профиля для будущего документа-кандидата
+    (`_rename_profile`, готовит `extra_candidates`) не было обёрнуто, в отличие
+    от каждого другого файлового доступа этой функции (`rename()` ниже, запись
+    указателя) — гонка «файл исчез между проверкой строки и этим чтением» раньше
+    приводила бы к необработанному исключению вместо нотиса, хотя календарное
+    окно гонки не расширилось. Ничего ещё не записано — ждём чистый отказ, а
+    не краш."""
+    import pathlib
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    work = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    real_read_text = pathlib.Path.read_text
+
+    def _flaky_read_text(self, *args, **kwargs):
+        if self.name == "work.yml":
+            raise OSError("файл профиля исчез")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", _flaky_read_text)
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "job")
+        notice = _notice(scr)
+
+    assert "не переименовано" in notice, notice
+    assert "исчез" in notice, notice
+    assert work.exists()                                     # ничего не тронуто
+    assert not (tmp_path / "base" / "profiles" / "job.yml").exists()

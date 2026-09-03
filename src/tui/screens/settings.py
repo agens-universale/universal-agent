@@ -3431,21 +3431,66 @@ class SettingsScreen(Screen):
             return self._project_config_candidate_path()
         return self._profiles_base_path()
 
-    def _write_profile_pointer(self, path, name: str) -> None:
+    def _write_profile_pointer(self, path, name: str, *, extra_candidates=None) -> None:
         """Запись `profile: "<name>"`: якорь гарантируется `ensure_pointer_anchor`
         (топ-уровневый `profile:` из пакетного шаблона, идемпотентно), значение —
         существующим `write_values`. Файл, которого ещё нет (проектный
         `.gc/config.yml`), создаёт отдельная простая функция — `write_values` по
-        контракту требует существующего файла."""
+        контракту требует существующего файла.
+
+        Валидация — фаза 2 (`validate_config_text_with_sections`), а не синтаксис
+        одного файла (тот же принцип, что и у остальных записей реестра,
+        `config_modules/registry_write.py::_commit`): указатель кросс-слоен по
+        устройству (слот активного профиля вправе жить не в базе), и вердикт по
+        одному файлу пропустил бы запись, после которой стек следующего старта не
+        соберётся (легальная раскладка «модели в базе, слот в профиле» — снятие
+        профиля рвёт единственный слот). `path` бывает и проектным
+        `.gc/config.yml` (см. `_profile_activation_target`/`_deactivation_target`)
+        — тогда текст садится в стек ПОДСТАНОВКОЙ на место проектного слоя
+        (`target=path`), а не как содержимое базы, иначе вердикт судил бы не тот
+        файл, который реально меняется. То же самое — и у ветки создания: файл
+        ещё не существует (первая активация проектного профиля), но кандидат на
+        его будущее содержимое ровно тот же, что напишет `create_pointer_file`,
+        и подстановка на место проектного слоя работает и без файла на диске
+        (`_merge_layers` подставляет кандидат ДО чтения, а не после).
+
+        `extra_candidates` — доп. {путь: документ} сверх указателя, тоже
+        подставляемые при валидации (`config_modules.layers._merge_layers`,
+        приняв несколько кандидатов сразу). Нужны переименованию
+        (`_rename_profile`): указатель пишется на НОВОЕ имя ДО физического
+        `rename()` файла профиля, и без будущего документа профиля НА ЕГО
+        будущем пути указатель не резолвится вовсе — валидация судила бы стек
+        БЕЗ профиля, которого просто ещё нет под этим именем."""
         from pathlib import Path
         import onboarding_config_writer as ocw
-        from config import _default_config_path, validate_config_text
+        from config import _default_config_path, validate_config_text_with_sections
         path = Path(path)
+        base_path = self._profiles_base_path()
+        is_base = path.resolve() == Path(base_path).resolve()
         if not path.is_file():
+            candidate = f"profile: {ocw.quote_scalar(name)}\n"
+            if is_base:
+                validate_config_text_with_sections(
+                    candidate, base_path=path, extra_candidates=extra_candidates)
+            else:
+                validate_config_text_with_sections(
+                    candidate, base_path=base_path, target=path,
+                    extra_candidates=extra_candidates)
             ocw.create_pointer_file(path, name)
             return
         ocw.ensure_pointer_anchor(path, template_path=_default_config_path())
-        missing = ocw.write_values(path, {"profile": name}, validate=validate_config_text)
+        if is_base:
+
+            def validate(candidate: str) -> None:
+                validate_config_text_with_sections(
+                    candidate, base_path=path, extra_candidates=extra_candidates)
+        else:
+
+            def validate(candidate: str) -> None:
+                validate_config_text_with_sections(
+                    candidate, base_path=base_path, target=path,
+                    extra_candidates=extra_candidates)
+        missing = ocw.write_values(path, {"profile": name}, validate=validate)
         if missing:
             raise ValueError(f"не удалось записать: {', '.join(missing)}")
 
@@ -3472,7 +3517,10 @@ class SettingsScreen(Screen):
             return
         try:
             self._write_profile_pointer(target, "")
-        except (ValueError, OSError) as exc:
+        except ValueError as exc:
+            self._notice(f"✗ {self._profile_stack_write_refusal('снят', exc)}")
+            return
+        except OSError as exc:
             self._notice(f"✗ не сохранено: {exc}")
             return
         try:
@@ -3507,7 +3555,10 @@ class SettingsScreen(Screen):
             return
         try:
             self._write_profile_pointer(target, name)
-        except (ValueError, OSError) as exc:
+        except ValueError as exc:
+            self._notice(f"✗ {self._profile_stack_write_refusal('включён', exc)}")
+            return
+        except OSError as exc:
             self._notice(f"✗ не сохранено: {exc}")
             return
         try:
@@ -3587,14 +3638,19 @@ class SettingsScreen(Screen):
             layers.append(self._profiles_base_path())
         return layers
 
-    def _repoint_profile_layers(self, layers: list, value: str) -> tuple[list, str | None]:
+    def _repoint_profile_layers(self, layers: list, value: str, *,
+                                extra_candidates=None) -> tuple[list, str | None]:
         """Записать `profile: <value>` в каждый слой. Возвращает (записанные,
         текст ошибки | None) — откат частичной записи на вызывающем: только он
-        знает, каким глаголом назвать неслучившееся действие."""
+        знает, каким глаголом назвать неслучившееся действие.
+
+        `extra_candidates` пробрасывается в каждую запись как есть (см.
+        `_write_profile_pointer`) — переименование подставляет им будущий
+        документ профиля на его будущем пути."""
         written = []
         for target in layers:
             try:
-                self._write_profile_pointer(target, value)
+                self._write_profile_pointer(target, value, extra_candidates=extra_candidates)
             except (ValueError, OSError) as exc:
                 return written, str(exc)
             written.append(target)
@@ -3660,6 +3716,22 @@ class SettingsScreen(Screen):
 
     def _profile_write_refusal(self, done: str, reason: str) -> str:
         return self._PROFILE_FILE_WRITE_REFUSAL.format(done=done, reason=reason)
+
+    def _profile_stack_write_refusal(self, action: str, detail) -> str:
+        """Отказ фазы 2 при записи указателя `profile:` (`_write_profile_pointer`) —
+        называет несостоявшееся действие и куда идти чинить, деталь остаётся
+        сырой строкой валидатора. Общая формулировка верна для ЛЮБОЙ причины
+        отказа фазы 2 (не только «нет slots.default» — так же и слот на алиас,
+        живший в снятом/переименованном профиле, и привязки `assign`), поэтому
+        разбирать причину здесь не нужно — деталь сама называет её.
+
+        Без "✗": решение о нём — за вызывающим (`_rollback_profile_pointers`
+        собирает деталь `file_exc` СЮДА один раз для нескольких путей записи, и
+        второй "✗" от этой функции задваивался бы)."""
+        return (
+            f"профиль не {action} — конфиг стал бы нерабочим. Поправьте в "
+            f"разделе «Модели» и повторите:\n  {detail}"
+        )
 
     def _begin_profile_name_prompt(self, mode: str, original: str | None = None) -> None:
         """Поднять инлайн-ввод имени (контракт п.5): поле раскрывается на месте —
@@ -3767,7 +3839,15 @@ class SettingsScreen(Screen):
         Порядок: указатели ПЕРЕД файловой операцией. Обратный оставлял бы висячий
         `profile: <старое имя>` без файла при сбое записи указателя ПОСЛЕ уже
         состоявшегося rename, а холодный старт с нерезолвимым указателем — строгая
-        ошибка (§3.1)."""
+        ошибка (§3.1).
+
+        Указатель при этом пишется на НОВОЕ имя, а файл профиля физически ещё
+        лежит под СТАРЫМ — `resolve_profile` в момент валидации указателя новое
+        имя не находит вовсе (найдётся только после `rename()` ниже). Без
+        `profile_candidate` (будущий документ профиля НА ЕГО будущем пути,
+        содержимое то же — переименование его не меняет) фаза 2 резолвила бы
+        стек БЕЗ профиля и отклоняла бы рабочую раскладку «модели в базе, слот
+        в профиле» (найдено ревью: регресс более ранней правки этой сессии)."""
         if new_name == original:
             self._cancel_profile_name_prompt()      # ничего не изменилось — тихая отмена
             return
@@ -3786,16 +3866,34 @@ class SettingsScreen(Screen):
             return
         layers = self._profile_pointer_layers(original)
         session_before = self._session_profile_name()
-        written, error = self._repoint_profile_layers(layers, new_name)
+        from config import _raw_from_text
+        new_profile_path = ref.path.with_name(f"{new_name}.yml")
+        # Ничего ещё не записано — откатывать нечего, достаточно отказа с
+        # внятным текстом (тот же приём, что и у соседних файловых точек этой
+        # функции: `ref.path.rename` ниже и запись указателя ловят свои
+        # `OSError`/`ValueError` так же, не давая им уйти необработанными).
+        try:
+            profile_candidate = {
+                new_profile_path: _raw_from_text(
+                    ref.path.read_text(encoding="utf-8"), "профиль"),
+            }
+        except (ValueError, OSError) as exc:
+            self._notice(f"✗ не переименовано: {exc}")
+            return
+        written, error = self._repoint_profile_layers(
+            layers, new_name, extra_candidates=profile_candidate)
         if error is not None:
-            self._rollback_profile_pointers(written, original, file_exc=error,
-                                            action="переименовать")
+            self._rollback_profile_pointers(
+                written, original,
+                file_exc=self._profile_stack_write_refusal("переименован", error),
+                action="переименовать")
             return
         try:
             ref.path.rename(ref.path.with_name(f"{new_name}.yml"))
         except OSError as exc:
-            self._rollback_profile_pointers(written, original, file_exc=exc,
-                                            action="переименовать")
+            self._rollback_profile_pointers(
+                written, original, file_exc=f"не удалось переименовать: {exc}",
+                action="переименовать")
             return
         self._profiles_name_prompt = None
         if session_before == original:
@@ -3877,7 +3975,10 @@ class SettingsScreen(Screen):
         shadow = row.get("shadow")
         written, error = self._repoint_profile_layers(layers, "")
         if error is not None:
-            self._rollback_profile_pointers(written, name, file_exc=error, action="удалить")
+            self._rollback_profile_pointers(
+                written, name,
+                file_exc=self._profile_stack_write_refusal("удалён", error),
+                action="удалить")
             return
         path = ref.path
         backup = self._profile_backup_path(path)
@@ -3888,7 +3989,8 @@ class SettingsScreen(Screen):
             backup.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(path), str(backup))
         except OSError as exc:
-            self._rollback_profile_pointers(written, name, file_exc=exc, action="удалить")
+            self._rollback_profile_pointers(
+                written, name, file_exc=f"не удалось удалить: {exc}", action="удалить")
             return
         # Рост каталога ограничивает владелец конвенции — тем же числом, что и у
         # бэкапов конфига. Своей редакции правила здесь не заводим: разошлась бы с
@@ -3929,20 +4031,30 @@ class SettingsScreen(Screen):
         """Указатели уже переписаны, а файловая операция ПОСЛЕ них упала — вернуть
         каждый к тому, что действовало до начала операции. Иначе конфиг остаётся
         со ссылкой на несуществующее/непереименованное имя, а холодный старт с
-        нерезолвимым `profile:` — строгая ошибка (§3.1)."""
+        нерезолвимым `profile:` — строгая ошибка (§3.1).
+
+        `file_exc` — уже готовый к показу текст (вызывающий решает: сырая ошибка
+        файловой операции или обёрнутый отказ фазы 2, `_profile_stack_write_
+        refusal`) — единственный "✗" на весь notice добавляется здесь.
+
+        Откат сам не удался (`stuck`) — это АВАРИЙНОЕ восстановление после
+        чужого сбоя не сработало, а не первая попытка: «поправьте и повторите»
+        здесь неверно — повторять нечего, состояние уже смешанное. Формулировка
+        называет это прямо и отправляет чинить руками, не обещая, что то же
+        действие с той же кнопки сработает во второй раз."""
         stuck = []
         for target in layers:
             try:
                 self._write_profile_pointer(target, old_value)
             except (ValueError, OSError) as rollback_exc:
-                stuck.append(f"{target} ({rollback_exc})")
+                stuck.append(f"{target}: {rollback_exc}")
         if stuck:
             self._notice(
-                f"✗ не удалось {action}: {file_exc}; указатель НЕ откачен в "
-                f"{', '.join(stuck)} — конфиг может ссылаться на несуществующий "
-                "файл, поправьте вручную")
+                f"✗ {action} не удалось, а автоматический откат указателя тоже "
+                "не удался — конфиг может ссылаться на несуществующий профиль, "
+                "поправьте вручную в разделе «Модели»: " + "; ".join(stuck))
             return
-        self._notice(f"✗ не удалось {action}: {file_exc}")
+        self._notice(f"✗ {file_exc}")
 
     def _profiles_name_width(self, rows: list[dict]) -> int:
         names = [r["name"] for r in rows if r["kind"] == "profile"]

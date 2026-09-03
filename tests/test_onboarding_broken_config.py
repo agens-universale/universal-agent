@@ -80,6 +80,36 @@ def test_broken_slot_in_active_profile_names_key_and_profile_file(isolated_cwd, 
     )
 
 
+def test_relative_config_path_shown_as_absolute(isolated_cwd, tmp_path, monkeypatch):
+    """Ревью: `--config .\\config.yml` — заголовок и карта участников печатали
+    базу ОТНОСИТЕЛЬНЫМ путём, как его набрали в командной строке, — рядом с уже
+    абсолютным путём профиля (`_overlay_paths` резолвит его сама). Относительный
+    путь бессмыслен вне момента запуска (другой cwd, копипаста в переписку) —
+    все пути в объяснении обязаны быть абсолютными."""
+    from onboarding import explain_broken_config
+
+    base_abs = isolated_cwd / "config.yml"
+    base_abs.write_text(
+        _BACKEND + 'models:\n  gpt:\n    url: "http://host"\n' 'profile: "work"\n',
+        encoding="utf-8",
+    )
+    profiles_dir = isolated_cwd / "profiles"
+    profiles_dir.mkdir()
+    profile_abs = profiles_dir / "work.yml"
+    profile_abs.write_text("slots:\n  default: gpt\n", encoding="utf-8")
+
+    relative = os.path.join(".", "config.yml")
+    exc = _load_and_catch(relative)
+    assert "не задан токен" in str(exc)   # предпосылка: ошибка про адрес/токен, не про схему
+    text = explain_broken_config(relative, exc, program="gc-ua")
+
+    assert relative not in text
+    assert f"[gc] Конфиг не загружается: {base_abs}" in text
+    assert f"    база      {base_abs}" in text
+    assert f"{profile_abs}   (активен)" in text
+    assert f"поправить файл:  {base_abs}" in text
+
+
 # --- Сценарий B: битый YAML базы --------------------------------------------
 
 
