@@ -424,8 +424,15 @@ def _registry_ops(values: Dict[str, Any], existing: Optional[Dict[str, str]] = N
         model_id = values.get(key)
         if not model_id:
             continue
-        alias = next((name for name, planned_id in planned.items()
-                      if planned_id == model_id), None)
+        # Имя ищется и среди УЖЕ ЛЕЖАЩИХ в файле, а не только среди
+        # запланированного этой записью: иначе повторный прогон мастера не узнавал
+        # записи, названные человеком (`fast`, `brain`), и заводил рядом близнецов
+        # под расчётным именем. Слоты уезжали на новые записи — без своей пары
+        # «адрес и токен», — а прежние оставались осиротевшими: уровень, ходивший
+        # на локальный сервер, уходил на общий endpoint с id локальной модели.
+        # Порядок словарей важен: своё запланированное имя побеждает существующее.
+        alias = next((name for name, known_id in {**existing, **planned}.items()
+                      if known_id == model_id), None)
         if alias is None:
             alias = default_alias_for(model_id)
             if alias in planned or existing.get(alias, model_id) != model_id:

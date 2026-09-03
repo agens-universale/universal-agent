@@ -265,7 +265,8 @@ def _drop_entry_text(text: str, alias: str) -> str:
     return _drop_mapping_entry(text, "models", alias, f"записи «{alias}»")
 
 
-def _remove_model_text(text: str, _template: str, alias: str, force: bool = False) -> str:
+def _remove_model_text(text: str, _template: str, alias: str, force: bool = False,
+                      *, keep_references: bool = False) -> str:
     """Удалить запись реестра вместе со ссылающимися слотами/привязками. Записи нет
     — идемпотентный no-op. Ссылки есть, а `force` не задан — ошибка с их перечнем:
     у операции внутри транзакции нет канала отчёта, каким располагает `remove_model`,
@@ -291,6 +292,13 @@ def _remove_model_text(text: str, _template: str, alias: str, force: bool = Fals
     # Запись снимается ПЕРВОЙ: не снялась — транзакция обрывается здесь, и ссылки
     # остаются при живой записи, а не наоборот (`_drop_entry_text`).
     text = _drop_entry_text(text, alias)
+    if keep_references:
+        # Алиас объявляет ещё один слой стека: после снятия ЭТОЙ записи он
+        # останется, и ссылки на него продолжат резолвиться — сносить их значит
+        # ломать рабочую раскладку. Знание о стеке приходит сверху: текстовая
+        # операция его не добудет, а второй редакции правила заводить нельзя —
+        # именно так каскад и разошёлся со справкой об отказе.
+        return text
     for reference in references:
         # Каждая ссылка — с той же проверкой: снять запись и оставить ссылку на
         # неё висеть значит сделать ровно то, что этот каскад и предотвращает.
@@ -351,7 +359,17 @@ def _op_label(op: tuple) -> str:
     return " ".join(str(part) for part in op[:2])
 
 
-def _apply_ops_to_text(text: str, ops, template: str) -> str:
+def _surviving_aliases(target, ops, stack_base) -> frozenset:
+    """Алиасы снимаемых записей, которые переживут удаление (объявлены ещё одним
+    слоем стека). Их ссылки каскад не трогает: они продолжат резолвиться."""
+    return frozenset(
+        op[1] for op in ops
+        if op and op[0] == "remove_model"
+        and alias_survives_removal(target, op[1], stack_base=stack_base)
+    )
+
+
+def _apply_ops_to_text(text: str, ops, template: str, survivors=frozenset()) -> str:
     """Наложить операции на текст последовательно. Отдельно от коммита, потому что об
     ИТОГЕ спрашивают дважды: запись его пишет, а справка `needs_default_slot` только
     смотрит, что из него получилось бы."""
@@ -363,7 +381,10 @@ def _apply_ops_to_text(text: str, ops, template: str) -> str:
                 f"(есть: {', '.join(sorted(_OPERATIONS))})"
             )
         try:
-            text = transform(text, template, *op[1:])
+            if op[0] == "remove_model" and op[1] in survivors:
+                text = transform(text, template, *op[1:], keep_references=True)
+            else:
+                text = transform(text, template, *op[1:])
         except RegistryWriteError:
             # Операция отказала ОСОЗНАННО и уже сказала человеку, что не так
             # («строки записи «flash» в файле нет…»). Приписывать к готовой фразе
@@ -408,7 +429,8 @@ def apply_registry_ops(target, ops, template: str, *, is_profile: bool = False,
     человека, и служебное имя операции перед ним — шум в пользовательском
     сообщении."""
     ops = [tuple(op) for op in ops]
-    text = _apply_ops_to_text(_read(target), ops, template)
+    text = _apply_ops_to_text(_read(target), ops, template,
+                              _surviving_aliases(target, ops, stack_base))
     _commit(target, text, is_profile, label=" + ".join(_op_label(op) for op in ops),
             stack_base=stack_base)
 
@@ -434,6 +456,24 @@ def references_to(target, alias: str) -> list[str]:
     return _references(_document(_read(target)), alias)
 
 
+def alias_survives_removal(target, alias: str, *, stack_base=None) -> bool:
+    """Останется ли алиас в стеке после снятия записи из `target` — его объявляет
+    ещё один слой.
+
+    Один предикат на два вопроса: отказ удаления спрашивает «повиснут ли чужие
+    ссылки», каскад — «сносить ли свои». Обе редакции правила уже расходились:
+    справка знала про переживший алиас, а каскад считал по совпадению имени в
+    своём файле и сносил ссылку, которая продолжала резолвиться."""
+    target_path = Path(target).resolve()
+    for path, document in stack_documents(stack_base or target):
+        if Path(path).resolve() == target_path:
+            continue
+        models = document.get("models")
+        if isinstance(models, dict) and alias in models:
+            return True
+    return False
+
+
 def references_broken_by_removal(target, alias: str, *, stack_base=None) -> list:
     """Ссылки в ЧУЖИХ файлах стека, которые повиснут, если снять запись из `target`, —
     `(имя файла, координата)`. Свой файл сюда не попадает, его отдаёт `references_to`.
@@ -448,14 +488,12 @@ def references_broken_by_removal(target, alias: str, *, stack_base=None) -> list
     через файлы у слоя записи нет, — и спросить «точно удалить?» значило бы пообещать
     то, чего не случится ни при каком ответе. То же действующее правило, что и для
     унаследованной записи, распространённое на другой слой."""
+    if alias_survives_removal(target, alias, stack_base=stack_base):
+        return []               # алиас переживёт удаление — ничьи ссылки не повиснут
     target_path = Path(target).resolve()
     others = [(path, document)
               for path, document in stack_documents(stack_base or target)
               if Path(path).resolve() != target_path]
-    for _path, document in others:
-        models = document.get("models")
-        if isinstance(models, dict) and alias in models:
-            return []           # алиас переживёт удаление — ничьи ссылки не повиснут
     refs: list = []
     for path, document in others:
         refs += [(Path(path).name, coordinate)
@@ -479,7 +517,9 @@ def needs_default_slot(target, ops, template: str, *, is_profile: bool = False,
     поймает гейт своим отказом."""
     from config_modules.model_sections_validation import default_slot_required
     try:
-        text = _apply_ops_to_text(_read(target), [tuple(op) for op in ops], template)
+        prepared = [tuple(op) for op in ops]
+        text = _apply_ops_to_text(_read(target), prepared, template,
+                                  _surviving_aliases(target, prepared, stack_base))
     except (RegistryWriteError, OSError):
         return False
     view = prospective_registry(

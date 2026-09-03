@@ -1533,6 +1533,12 @@ class SettingsScreen(Screen):
                 template = ""       # шаблона нет — якорь секции синтезирует сам writer
             frame.mount(ModelsSectionEditor(
                 target=self._config_path, template=template,
+                # Что действует НАД основным конфигом: реестр активного профиля.
+                # Секции это нужно ровно затем, чтобы не обещать выключенные уровни
+                # там, где они работают записями профиля, — знание о рантайме есть
+                # только у экрана.
+                overlay_registry=lambda: (self._config or {}).get("models") or {},
+                overlay_profile=(self._config or {}).get("profile") or "",
                 effective_url=endpoint, effective_auth=auth, verify=verify,
                 config_proxy=proxy,
                 presets=endpoint_presets_from_config(self._config or {}),

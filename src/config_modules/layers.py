@@ -32,6 +32,13 @@ from config_modules.profiles import (
 from config_modules.root import AppConfig
 from mcp_runtime import paths as mcp_paths
 
+# `None` у пути слоя — законное значение («слоя нет»), поэтому «не передано»
+# отмечается отдельным маркером: иначе подмена, вернувшая None, читалась бы как
+# «спроси владельца сам» — ровно та ошибка, из-за которой глушение слоёв в тестах
+# не действовало.
+_UNSET = object()
+
+
 class _Layers(NamedTuple):
     """Итог наложения слоёв поверх базы: сам мерж плюс координаты слоёв — их
     просят и `ProfileMeta`, и снимок свежести."""
@@ -79,6 +86,8 @@ def _merge_layers(
     profile_doc: Optional[Dict[str, Any]] = None,
     profile_doc_path: Optional[Path] = None,
     notices: Optional[list[str]] = None,
+    managed_path=_UNSET,
+    project_path=_UNSET,
 ) -> _Layers:
     """Наложить на базу слои, которые накладывает загрузка: managed → project →
     профиль по указателю (оси 1-2 спеки §3). База приходит уже прочитанной и
@@ -106,9 +115,15 @@ def _merge_layers(
 
     # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
     # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
-    managed_path = mcp_paths.managed_config_path()
+    # Пути слоёв приходят ОТ ВЫЗЫВАЮЩЕГО, если он их знает: загрузчик добывает их
+    # своими именами, и подмена этих имён (тесты глушат слои машины разработчика)
+    # обязана действовать. Спрашивать владельца самим значило бы читать слой мимо
+    # подмены — сьют тогда проверяет не то состояние, которое считает своим.
+    if managed_path is _UNSET:
+        managed_path = mcp_paths.managed_config_path()
     managed_raw: Dict[str, Any] = {}
-    if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
+    if (managed_path is not None and managed_path.is_file()
+            and os.path.abspath(str(managed_path)) != os.path.abspath(path)):
         managed_raw = _layer_document(managed_path, "config.local.yml")
         managed_before_env = managed_raw
         managed_raw = resolve_env_placeholders(managed_raw)
@@ -117,7 +132,8 @@ def _merge_layers(
         raw_config = deep_merge(raw_config, managed_raw)
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
-    project_path = env_vars.project_local_config_path()
+    if project_path is _UNSET:
+        project_path = env_vars.project_local_config_path()
     if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
         project_raw = _layer_document(project_path, "проектный config.yml")
         project_before_env = project_raw

@@ -2010,3 +2010,102 @@ async def test_a_no_change_reply_does_not_resurrect_the_hidden_title(tmp_path):
         await pilot.pause()
         assert scr.query_one("#set-title", Static).display is False
         assert "ничего не изменено" in _texts(scr)
+
+
+async def test_delete_that_would_leave_the_registry_without_a_default_is_refused_at_once(
+        tmp_path):
+    """Каскад снимет единственный слот и оставит реестр без `default` — отказ
+    СРАЗУ, вместо вопроса, на который нет годного ответа.
+
+    Баннер обещал снять ссылку вместе с записью, а `remove_model(force=True)`
+    падал на правиле резолвимости: при трёх записях и единственном заданном
+    `slots.default` удалить запись было нельзя ни «да», ни «нет». Правило то же,
+    что спрашивает форма записи перед своей транзакцией, — здесь его просто не
+    спросили."""
+    body = ("models:\n"
+            '  a:\n    model: "m-a"\n'
+            '  b:\n    model: "m-b"\n'
+            '  c:\n    model: "m-c"\n'
+            "slots:\n"
+            '  default: "a"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        await pilot.press("delete")
+        await pilot.pause()
+
+        text = _texts(scr)
+        assert "не удалено" in text, text
+        assert "default" in text            # сказано, чего не хватит после удаления
+        assert "Enter — удалить" not in text        # вопроса нет — отвечать нечего
+        assert cfg_file.read_bytes() == before
+
+
+async def test_form_keys_are_dead_while_the_default_slot_picker_is_open(tmp_path):
+    """Пока висит вопрос «какая модель по умолчанию», клавиши формы молчат.
+
+    `move`, `enter`, `escape` и `alt_down` гейт пикера имеют, а `probe`, `space` и
+    `clear_token` — нет; форму же `_submit_form` до открытия пикера не снимает.
+    Итог: Ctrl+U отвечал «наследование возвращено» и чистил поле адреса, хотя
+    состав записи для транзакции уже зафиксирован — в файл уезжал прежний токен.
+    Человек видел подтверждение снятия того, что не снялось."""
+    body = ("models:\n"
+            '  a:\n    model: "m-a"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        from textual.widgets import Input
+
+        editor = scr._models_editor()
+        editor._open_form(None)                        # новая запись
+        await pilot.pause()
+        form = editor._form
+        form.query_one("#mef-alias", Input).value = "b"
+        form.query_one("#mef-model", Input).value = "m-b"
+        # Пара «адрес и токен» задаётся целиком: половина отвергается правилом пары,
+        # и до вопроса о слоте дело бы не дошло.
+        form.query_one("#mef-url", Input).value = "https://own/v1/chat/completions"
+        form.query_one("#mef-token", Input).value = "sk-OWN"
+        editor._submit_form()                          # вторая модель → спросят слот
+        await pilot.pause()
+        assert editor._picker is not None, "пикер default-слота обязан быть открыт"
+
+        assert editor.clear_token() is False
+        assert editor.probe() is False
+        assert editor.space() is False
+
+
+async def test_empty_state_does_not_claim_levels_are_off_under_a_profile_registry(
+        tmp_path, monkeypatch):
+    """Реестра нет в основном конфиге, но его несёт активный профиль — секция не
+    смеет обещать, что уровни выключены.
+
+    Предикат пустоты считался по одному документу цели: у основной секции тени нет
+    по устройству, и профиль-оверлей в него не входил вовсе. Итог — легаси-редактор
+    и подсказка «реестр пуст, уровни выключены», хотя уровни работают записями
+    профиля, а сам редактор инертен: `agent.model` под живым реестром не действует.
+    Для под-вида профиля тот же класс лжи закрыт осознанно, основная секция
+    симметричной правки не получила."""
+    import tui.app as app_mod
+    from tui.editors import models_section as m
+
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(_flat('"test-model"') + 'profile: "work"\n', encoding="utf-8")
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'models:\n  glm:\n    model: "z-ai/glm-5.3"\nslots:\n  default: "glm"\n',
+        encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    import config as config_mod
+    cfg, _meta = config_mod.load_config_ex(str(cfg_file))
+    assert (cfg.get("models") or {}), "предпосылка: реестр приходит из профиля"
+
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=cfg, config_path=str(cfg_file))
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, _SECTION)
+        await pilot.pause()
+
+        text = _texts(scr)
+        assert "уровни light/default/max выключены" not in text, text
+        assert "work" in text            # назван профиль, чьи записи действуют

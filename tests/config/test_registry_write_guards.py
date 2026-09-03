@@ -350,3 +350,29 @@ def test_a_broken_section_does_not_hide_the_sound_one_beside_it(stack):
 
     assert rw.references_broken_by_removal(base, "gc") == [
         ("work.yml", "assign.summarizer")]
+
+
+def test_cascade_keeps_a_reference_to_an_alias_that_survives_the_removal(stack):
+    """Каскад снимает ТОЛЬКО те ссылки, что повиснут. Перекрывшая запись профиля
+    снимается свободно: запись базы остаётся на месте, и слот, который на неё
+    смотрит, продолжает резолвиться.
+
+    Инвариант уже сформулирован соседней справкой (`references_broken_by_removal`:
+    «алиас переживёт удаление — ничьи ссылки не повиснут»), но каскад считал по
+    совпадению ИМЕНИ в своём файле — вторая, разъехавшаяся редакция одного правила.
+    Соседний страж ставит ту же конфигурацию, но кладёт слот в базу и проходит
+    мимо дефекта: снести каскадом можно лишь то, что лежит в правимом файле."""
+    base, profiles = stack
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
+    target = profiles / "work.yml"
+    target.write_text(
+        'models:\n  gc:\n    model: "profile-y"\nslots:\n  default: "gc"\n',
+        encoding="utf-8")
+
+    assert rw.references_broken_by_removal(target, "gc", stack_base=base) == []
+    rw.remove_model(target, "gc", force=True, is_profile=True, stack_base=base)
+
+    doc = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert (doc.get("models") or {}) == {}
+    assert (doc.get("slots") or {}) == {"default": "gc"}   # ссылка осталась валидной

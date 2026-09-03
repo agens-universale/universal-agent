@@ -30,7 +30,8 @@ from config_modules.profiles import (
 from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from config_modules import env_vars
 from bundled_assets import bundled_root
-from mcp_runtime.paths import managed_config_path
+from mcp_runtime import paths as mcp_paths
+from mcp_runtime.paths import managed_config_path  # noqa: F401  # re-export: зовут как config.managed_config_path
 # Наложение слоёв и pre-write валидация живут в `config_modules.layers` (слой записи
 # реестра спрашивает их напрямую, минуя агрегатор). Здесь — ре-экспорт: снаружи их
 # зовут как `config.<имя>`, и второй адрес у одного правила заводить незачем.
@@ -450,8 +451,11 @@ def profile_mtime_set(
     свежести."""
     path = resolve_config_path(config_path)
     base_path = Path(path)
-    managed_path = managed_config_path()
-    project_path = _project_local_config_path()
+    # Через модуль-дом, а не через импортированные сюда имена: адрес чтения
+    # один на весь загрузчик (`_merge_layers` спрашивает там же), и подмена
+    # дома в тестах действует на обе точки разом.
+    managed_path = mcp_paths.managed_config_path()
+    project_path = env_vars.project_local_config_path()
     roots = profile_roots(Path(os.getcwd()), base_path)
     return _build_mtime_set(base_path, managed_path, project_path, active_name, roots)
 
@@ -495,7 +499,14 @@ def load_config_ex(
 
     (raw_config, ref, active_name, roots, managed_path, project_path,
      managed_raw, _base_voice) = _merge_layers(
-        raw_config, path, profile_override=profile_override, notices=notices
+        raw_config, path, profile_override=profile_override, notices=notices,
+        # Пути слоёв добывает ЗАГРУЗЧИК — своими именами, теми же, что зовёт
+        # `profile_mtime_set` ниже и что подменяют тесты, глуша слои машины
+        # разработчика. Спроси их `_merge_layers` сам у модулей-владельцев —
+        # подмена бы не действовала, и «изолированный» тест читал бы реальный
+        # `~/.gc/config.local.yml` и проектный `.gc/config.yml`.
+        managed_path=mcp_paths.managed_config_path(),
+        project_path=env_vars.project_local_config_path(),
     )
 
     mtime_set = _build_mtime_set(base_path, managed_path, project_path, active_name, roots)

@@ -733,3 +733,38 @@ def test_write_wizard_values_reuses_the_alias_of_an_already_planned_model(tmp_pa
     }
     assert raw["slots"] == {"default": "qwen-plus", "light": "qwen-plus-2",
                             "max": "qwen-plus-2"}
+
+
+def test_write_wizard_values_reuses_an_existing_alias_named_by_a_human(tmp_path, monkeypatch):
+    """Повторный прогон мастера поверх готового реестра НЕ плодит близнецов.
+
+    Имя за той же моделью переиспользуется — так обещает докстринг, — но поиск шёл
+    только среди запланированного этой записью. Записи, названные человеком
+    (`fast`, `brain`), мастер не узнавал: обещание держалось, лишь когда имя
+    совпадало с рассчитанным `default_alias_for`.
+
+    Цена ошибки высокая: чтобы поменять протухший токен, достаточно запустить
+    мастер и пройти шаги Enter'ом — шаг «Модель» открывается с уже отмеченной
+    действующей моделью. Реестр вырастал вдвое, слоты переезжали на новые записи
+    без своей пары «адрес и токен», а прежние записи со своим адресом оставались
+    осиротевшими: уровень, ходивший на локальный сервер, начинал уходить на
+    облачный endpoint с id локальной модели."""
+    from config_modules.registry_write import apply_registry_ops
+
+    cfg_path = _wizard_config(tmp_path, monkeypatch)
+    apply_registry_ops(cfg_path, [
+        ("upsert_model", "fast", {"model": "qwen/qwen3-8b"}),
+        ("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
+        ("write_slot", "default", "brain"),
+    ], "")
+
+    onboarding.write_wizard_values(cfg_path, {
+        "completions_url": "https://x/v1/chat/completions",
+        "model": "qwen/qwen3-235b", "model_light": "qwen/qwen3-8b"})
+
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert raw["models"] == {
+        "fast": {"model": "qwen/qwen3-8b"},
+        "brain": {"model": "qwen/qwen3-235b"},
+    }
+    assert raw["slots"] == {"default": "brain", "light": "fast"}

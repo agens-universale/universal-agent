@@ -733,3 +733,46 @@ def test_write_values_leaves_the_file_untouched_when_a_key_cannot_be_written(tmp
 
     assert missing == ["nosuch.key"]
     assert cfg.read_text(encoding="utf-8") == before
+
+
+def test_remove_mapping_entry_keeps_a_dangling_comment_after_the_last_entry():
+    """Комментарий, отделённый от записи пустой строкой, ей не принадлежит —
+    удаление записи его не уносит.
+
+    `_exclude_next_attached_comment` защищает только прогон комментариев, вплотную
+    примыкающий к следующей содержательной строке И с её отступом. Комментарий с
+    отступом секции, висящий после последней записи перед топ-уровневым ключом,
+    под это правило не попадал и уезжал в удаляемый диапазон. Валидация потерю не
+    ловит — результат схемно валиден, — а бэкапа у записи реестра нет.
+
+    Концом диапазона записи считается конец её последней СОДЕРЖАТЕЛЬНОЙ строки:
+    удалять чужой текст безопаснее «недо-», чем «пере-»."""
+    text = ("models:\n"
+            '  a:\n    model: "m-a"\n'
+            '  b:\n    model: "m-b"\n'
+            "\n"
+            "  # ВАЖНЫЙ висячий комментарий\n"
+            'level: "default"\n')
+
+    out = w.remove_mapping_entry(text, "models", "b")
+
+    assert "# ВАЖНЫЙ висячий комментарий" in out
+    assert "b:" not in out and "m-b" not in out
+    assert 'level: "default"' in out
+    assert 'model: "m-a"' in out
+
+
+def test_remove_mapping_entry_still_drops_the_entrys_own_attached_comment():
+    """Сторож от чрезмерной осторожности: комментарий, вплотную примыкающий к
+    следующей записи, по-прежнему остаётся ей, а собственный комментарий
+    удаляемой записи уходит вместе с ней."""
+    text = ("models:\n"
+            "  # про a\n"
+            '  a:\n    model: "m-a"\n'
+            "  # про b\n"
+            '  b:\n    model: "m-b"\n')
+
+    out = w.remove_mapping_entry(text, "models", "a")
+
+    assert "# про a" not in out          # свой комментарий ушёл с записью
+    assert "# про b" in out              # чужой остался при своей записи

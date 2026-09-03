@@ -216,6 +216,15 @@ _PROFILE_EMPTY_HINT = (
     "light/default/max выключены, работает модель основного конфига.\n"
     "Добавьте запись клавишей n — реестр заведётся в профиле, уровни включатся."
 )
+# Своего реестра нет, но действует реестр активного профиля: уровни работают, и
+# обещать обратное нельзя. Говорим, ЧЕЙ реестр действует и что даст запись здесь —
+# без этого человек не поймёт, почему «пусто», а уровни живы.
+_EMPTY_UNDER_PROFILE_HINT = (
+    "Реестра моделей нет в основном конфиге — уровни light/default/max работают "
+    "записями активного профиля «{profile}».\n"
+    "Добавьте модель, чтобы завести реестр и здесь: записи основного конфига "
+    "действуют, когда профиль их не перекрывает."
+)
 _NO_ADDRESS_HINT = ("адрес не задан ни у записи, ни в «Подключении» — "
                     "по такой записи запрос не уйдёт")
 # Del и Enter на унаследованной строке: в файле профиля нет ни строки, которую
@@ -237,6 +246,12 @@ _NOTICE_EDIT_REFUSED_INHERITED = (
 _NOTICE_REMOVE_REFUSED_CROSS_LAYER = (
     "✗ не удалено: на «{alias}» ссылается {refs}. "
     "Снимите ссылку там — одной записью два файла не правятся.")
+# Третий род отказа удаления: снять запись мешает не чужая ссылка, а правило
+# резолвимости — после каскада уровни не на что было бы направить. Путь наружу
+# есть, поэтому его и называем: задать `default` на другую запись.
+_NOTICE_REMOVE_REFUSED_NEEDS_DEFAULT = (
+    "✗ не удалено: «{alias}» держит единственный slots.default. "
+    "Задайте default другой записи и повторите.")
 _NOTICE_ENTRY_SAVED = "Запись «{alias}» сохранена — {file}"
 # Ячейка адреса мёртвой записи: причина «мёртвости» видна в самой строке, длинное
 # объяснение (`_NO_ADDRESS_HINT`) остаётся в notice сохранения.
@@ -574,7 +589,9 @@ class ModelsSectionEditor(Vertical):
     """
 
     def __init__(self, *, target, template: str, is_profile: bool = False,
-                 base_registry=None, stack_base=None,
+                 base_registry=None,
+        overlay_registry=None,
+        overlay_profile: str = "", stack_base=None,
                  effective_url: str = "",
                  effective_auth: str | None = None, verify: bool = True,
                  config_proxy: str | None = None, presets=(),
@@ -599,6 +616,13 @@ class ModelsSectionEditor(Vertical):
         # тени нет вовсе (основная секция): эффективный список равен своему, и ни
         # одна строка секции не меняет поведения.
         self._base_registry = base_registry
+        # Реестр, действующий НАД файлом цели (активный профиль), и его имя. Это не
+        # тень: тень лежит ПОД целью и наследуется, а этот слой цель перекрывает.
+        # Знать про него секции нужно ровно затем, чтобы не врать о рантайме, когда
+        # своего реестра нет: уровни в этом случае работают, а легаси-редактор —
+        # нет, `agent.model` под живым реестром не действует.
+        self._overlay_registry = overlay_registry
+        self._overlay_profile = overlay_profile or ""
         self._effective_url = effective_url or ""
         self._effective_auth = effective_auth
         self._verify = verify
@@ -752,12 +776,26 @@ class ModelsSectionEditor(Vertical):
         реализации существовать не должно."""
         return not effective_registry_nonempty(self._document, self._shadow)
 
+    @property
+    def _overlaid_by_profile(self) -> bool:
+        """Своего реестра нет, а над файлом действует реестр активного профиля.
+
+        Тогда уровни РАБОТАЮТ, а легаси-редактор мёртв: `agent.model` под живым
+        реестром не действует. Ни то, ни другое пустое состояние само по себе не
+        знает — оно считает по одному документу цели."""
+        if not self.registry_empty or self._is_profile:
+            return False
+        return bool(self._overlay_registry() if self._overlay_registry else {})
+
     def _legacy_default(self) -> bool:
         """Состояние легаси-редактора «по умолчанию» для текущего файла: пустой реестр
         config.yml — это он и есть (секция поглотила легаси-«Модель»), а у профиля его
         не бывает вовсе. Решает ОДНО место: тот же вопрос задают конструктор, `_reload`
-        и выход из формы, и разойтись им нечем."""
-        return self.registry_empty and not self._is_profile
+        и выход из формы, и разойтись им нечем.
+
+        Реестр активного профиля выключает и его: править `agent.model`, который под
+        живым реестром не действует, — работа вхолостую."""
+        return self.registry_empty and not self._is_profile and not self._overlaid_by_profile
 
     def _reserve_model(self) -> str:
         """Легаси-модель `agent.model` из файла цели либо пусто.
@@ -1271,6 +1309,13 @@ class ModelsSectionEditor(Vertical):
             yield self._legacy
             yield from self._legacy_hint_widgets()
             return
+        if self._overlaid_by_profile:
+            # Вход в реестр — клавишей, как и в пустом состоянии профиля: строке
+            # «+ добавить модель…» здесь не на чем стоять, список пуст.
+            yield Static(
+                _EMPTY_UNDER_PROFILE_HINT.format(profile=self._overlay_profile),
+                classes="set-hint set-dyn", markup=False)
+            return
         if self.registry_empty:
             # Пустой реестр профиля: легаси-редактора, который держал бы это место в
             # config.yml, здесь не бывает — своё пустое состояние с входом в реестр.
@@ -1681,11 +1726,15 @@ class ModelsSectionEditor(Vertical):
     def probe(self) -> bool:
         """`Ctrl+Space` — проба соединения; она есть только у формы записи (у списка
         и у легаси-редактора пробы нет, §5.2 спеки клавиш)."""
+        if self._picker is not None:
+            return False        # вопрос о слоте висит — клавиши формы не её
         if self._form is not None:
             return self._form.probe_connection()
         return False
 
     def space(self) -> bool:
+        if self._picker is not None:
+            return False        # вопрос о слоте висит — клавиши формы не её
         if self._form is not None:
             return self._form.toggle_no_auth()
         return False
@@ -1694,7 +1743,14 @@ class ModelsSectionEditor(Vertical):
         """`Ctrl+U` — вернуть записи наследование: снять её адрес, токен и галку
         разом (§5). Клавиша есть только у формы записи и только на полях её пары
         (решает сама форма). False — состояние не наше, и клавишу съедать нельзя: в
-        полях легаси-редактора её штатный `delete_left_all` работает как обычно."""
+        полях легаси-редактора её штатный `delete_left_all` работает как обычно.
+
+        Гейт пикера — первым, как у `move`/`enter`/`escape`/`alt_down`: форму
+        `_submit_form` до вопроса о слоте не снимает, а состав записи для
+        транзакции уже зафиксирован. Без гейта Ctrl+U отвечал «наследование
+        возвращено» и чистил поле, пока в файл уезжал прежний токен."""
+        if self._picker is not None:
+            return False        # вопрос о слоте висит — клавиши формы не её
         if self._form is not None:
             return self._form.clear_token()
         return False
@@ -1902,6 +1958,20 @@ class ModelsSectionEditor(Vertical):
                 alias=alias,
                 refs=", ".join(f"{name}: {coordinate}" for name, coordinate in foreign)),
                 ok=False)
+            return False
+        if (not self._needs_default_slot([])
+                and self._needs_default_slot([("remove_model", alias, True)])):
+            # Третий случай того же рода: каскад снимет ссылку и оставит стек без
+            # резолвимого `default`. Валидатор такую транзакцию отвергает, и баннер
+            # обещал бы снятие, которого не случится ни при каком ответе — удалить
+            # запись было нельзя вовсе. Правило спрашивается там же, где его
+            # спрашивает форма записи перед своей транзакцией.
+            #
+            # Спрашиваем ДВАЖДЫ, потому что вопрос — «ухудшит ли транзакция», а не
+            # «будет ли плохо после». Реестр, которому слота не хватает и сейчас,
+            # удалением записи хуже не станет: запрещать тут значило бы держать
+            # человека в конфиге, который он как раз и разбирает.
+            self._notice(_NOTICE_REMOVE_REFUSED_NEEDS_DEFAULT.format(alias=alias), ok=False)
             return False
         try:
             references = references_to(self._target, alias)

@@ -343,3 +343,40 @@ def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
     cfg: dict = {"agentsmd_override": False}
     apply_cli_overrides(cfg)
     assert cfg["agentsmd_override"] is False
+
+
+def test_hiding_the_project_layer_works_from_its_home_module(
+        global_config_file, isolated_cwd, monkeypatch):
+    """Проектный слой глушится подменой у ВЛАДЕЛЬЦА пути — и подмена обязана
+    действовать на весь загрузчик.
+
+    Адрес чтения один: и `_merge_layers`, и снимок свежести спрашивают
+    `config_modules.env_vars`. Пока загрузчик звал импортированное к себе имя, а
+    слои — владельца, подмена одного адреса другой не задевала: тесты глушили
+    слой, который всё равно читался. Зелено было лишь потому, что машинный конфиг
+    разработчика совместим — на другой машине сьют проверял бы не то состояние,
+    которое считает своим."""
+    import config as config_mod
+    from config_modules import env_vars
+
+    _write_project_config(isolated_cwd, "agent:\n  max_steps: 4242\n")
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: None)
+
+    cfg = config_mod.load_config(str(global_config_file))
+
+    assert cfg["max_steps"] == 50          # значение базы, слой скрыт
+
+
+def test_pointing_the_managed_overlay_works_from_its_home_module(
+        global_config_file, isolated_cwd, monkeypatch, tmp_path):
+    """То же для machine-managed оверлея: подмена у владельца
+    (`mcp_runtime.paths`) действует и на слой, и на снимок свежести."""
+    import config as config_mod
+
+    managed = tmp_path / "managed.yml"
+    managed.write_text("agent:\n  max_steps: 777\n", encoding="utf-8")
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: managed)
+
+    cfg = config_mod.load_config(str(global_config_file))
+
+    assert cfg["max_steps"] == 777         # патч действует: оверлей взят отсюда

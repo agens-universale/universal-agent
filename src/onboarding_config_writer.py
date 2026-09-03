@@ -387,6 +387,28 @@ def _has_content(segment: str) -> bool:
     )
 
 
+def _trim_trailing_noise(text: str, start: int, end: int) -> int:
+    """`end` диапазона записи, откаченный назад через хвостовые пустые строки и
+    комментарии.
+
+    Концом записи считается конец её последней СОДЕРЖАТЕЛЬНОЙ строки: всё, что
+    висит следом, ей не принадлежит. `_exclude_next_attached_comment` защищает лишь
+    прогон, вплотную примыкающий к следующей строке И с её отступом, — комментарий,
+    отделённый пустой строкой, под это правило не попадал и уезжал в удаляемый
+    диапазон. Валидация потерю не ловит (результат схемно валиден), бэкапа у записи
+    реестра нет. Удалять чужой текст безопаснее «недо-», чем «пере-»."""
+    while end > start:
+        line_start = text.rfind("\n", start, end - 1) + 1
+        if line_start < start:
+            break
+        line = text[line_start:end]
+        if line.strip() == "" or line.strip().startswith("#"):
+            end = line_start
+            continue
+        break
+    return end
+
+
 def remove_mapping_entry(text: str, parent_dotted: str, key: str) -> str:
     """Удалить запись словаря `key` из-под `parent_dotted` (слот/привязка
     «не задан», модель из реестра — свой файл, не оверлей, правится свободно).
@@ -410,7 +432,9 @@ def remove_mapping_entry(text: str, parent_dotted: str, key: str) -> str:
     p_start, p_end, p_indent, p_rest = find_anchor(text, parent_dotted)  # родитель точно есть
     parent_key = parent_dotted.rsplit(".", 1)[-1]
     entry_start = _attached_comment_start(text, k_start, k_indent)
-    entry_end = _exclude_next_attached_comment(text, section_end(text, k_end, k_indent))
+    entry_end = _trim_trailing_noise(
+        text, k_start,
+        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
     block_end = _exclude_next_attached_comment(text, section_end(text, p_end, p_indent))
     remaining = text[p_end:entry_start] + text[entry_end:block_end]
     if not _has_content(remaining):
