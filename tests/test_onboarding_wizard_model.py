@@ -62,18 +62,6 @@ def test_model_warning_shown_when_non_tool_present():
     assert any("⚠ отмеченные модели" in m for m in out)
 
 
-def test_model_manual_entry_option():
-    """Выбор последнего пункта 'вписать вручную' → ручной ввод."""
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"}, "model": onboarding.MODEL_SENTINEL}
-    io, _ = _io(["3", "my-custom-model"])   # 2 модели → пункт 3 = вручную
-    values = {}
-    wz._collect_model(io, cfg, values, fetch=lambda *a, **k: [
-        ModelInfo("A", tool_capable=True), ModelInfo("B", tool_capable=True)
-    ])
-    assert values["model"] == "my-custom-model"
-
-
 def test_model_section_header_and_marker_consistent_when_no_list():
     # единый плоский стиль: заголовок «  Модель» даже без списка, приглашение «  > », без labeled-текста
     cfg = {"completions_url": "https://h/api/v2/chat/completions",
@@ -86,16 +74,161 @@ def test_model_section_header_and_marker_consistent_when_no_list():
     assert not any("Имя модели" in p for p in prompts)   # старое labeled-приглашение убрано
 
 
-def test_model_manual_prompt_marker_from_list():
-    # ручной ввод после выбора «вписать вручную» — тоже «  > »
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"}, "model": onboarding.MODEL_SENTINEL}
-    prompts = []
-    seq = iter(["3", "my-model"])
-    io = wz.WizardIO(reader=lambda p, s: (prompts.append(p), next(seq))[1], printer=lambda m: None)
-    values = {}
-    wz._collect_model(io, cfg, values, fetch=lambda *a, **k: [
-        ModelInfo("A", tool_capable=True), ModelInfo("B", tool_capable=True)])
-    assert values["model"] == "my-model"
-    assert "  > " in prompts
-    assert not any("Имя модели" in p for p in prompts)
+def _many(n: int) -> list:
+    """n моделей с предсказуемыми id: m001 … mNNN."""
+    return [ModelInfo(f"vendor/m{i:03d}", tool_capable=True) for i in range(1, n + 1)]
+
+
+def _models3() -> list:
+    """Три модели с говорящими именами — для тестов, где важен не размер списка,
+    а поведение выбора. В файле такого хелпера ещё нет."""
+    return [ModelInfo("gigacode", tool_capable=True),
+            ModelInfo("glm-5.2-fp8", tool_capable=True),
+            ModelInfo("openai/gpt-5.6-terra", tool_capable=True)]
+
+
+def test_short_list_is_shown_whole_without_a_counter():
+    models = _many(20)
+    shown, note = wz._view_initial(models)
+    assert shown == models
+    assert note == ""
+
+
+def test_long_list_is_cut_to_fifteen_with_a_counter():
+    models = _many(397)
+    shown, note = wz._view_initial(models)
+    assert len(shown) == 15
+    assert note == "показаны 15 из 397 · * — показать все"
+
+
+def test_empty_input_means_keep():
+    assert wz._interpret("", _many(3), _many(3)) == ("keep", "")
+
+
+def test_star_expands_the_whole_list():
+    assert wz._interpret("*", _many(30), _many(15))[0] == "all"
+
+
+def test_a_number_picks_the_shown_row():
+    models = _many(30)
+    shown = models[:15]
+    assert wz._interpret("2", models, shown) == ("pick", "vendor/m002")
+
+
+def test_a_number_out_of_range_is_treated_as_a_query():
+    """«99» строки не выбирает — и молча ничего не делать нельзя: это запрос,
+    который просто ничего не найдёт."""
+    models = _many(30)
+    assert wz._interpret("99", models, models[:15])[0] == "ask"
+
+
+def test_exact_id_is_picked_without_a_number():
+    models = _many(30)
+    assert wz._interpret("VENDOR/M007", models, models[:15]) == ("pick", "vendor/m007")
+
+
+def test_a_query_narrows_the_view():
+    models = _many(30) + [ModelInfo("qwen/qwen3-8b", tool_capable=True)]
+    kind, (rows, note) = wz._interpret("qwen", models, models[:15])
+    assert kind == "view"
+    assert [m.id for m in rows] == ["qwen/qwen3-8b"]
+    assert note == "найдено 1 из 31"
+
+
+def test_too_many_matches_are_cut_and_said_so():
+    models = _many(40)
+    kind, (rows, note) = wz._interpret("vendor", models, models[:15])
+    assert kind == "view"
+    assert len(rows) == 15
+    assert note == "показаны 15 из 40 совпадений · уточните запрос"
+
+
+def test_a_query_without_matches_asks_to_take_it_as_is():
+    assert wz._interpret("vllm/Own", _many(30), _many(15)) == ("ask", "vllm/Own")
+
+
+def test_current_line_names_the_registry_entry():
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
+           "slots": {"default": "fast"}}
+    assert wz._current_line(cfg, "default", "qwen/qwen3-8b") == (
+        "сейчас: qwen/qwen3-8b  (запись «fast») · Enter — оставить")
+
+
+def test_current_line_without_a_slot_has_no_entry_name():
+    assert wz._current_line({}, "default", "vllm/Own") == (
+        "сейчас: vllm/Own · Enter — оставить")
+
+
+def test_current_line_of_an_empty_level():
+    assert wz._current_line({}, "light", "") == "сейчас: не задана · Enter — оставить"
+
+
+def test_current_line_omits_the_entry_name_when_it_equals_the_id():
+    """Запись с именем, совпадающим с id модели (типовой конфиг `models: {gigacode:
+    {}}`), не должна повторять то же слово в скобках."""
+    cfg = {"models": {"gigacode": {}}, "slots": {"light": "gigacode"}}
+    assert wz._current_line(cfg, "light", "gigacode") == (
+        "сейчас: gigacode · Enter — оставить")
+
+
+def test_current_model_is_marked_in_the_list():
+    io, out = _io(["1"])
+    wz._choose_model(io, _models3(), current="glm-5.2-fp8")
+    assert any("glm-5.2-fp8" in m and "← сейчас" in m for m in out)
+
+
+def test_warning_note_is_printed_only_for_shown_models():
+    """Пояснение к ⚠ — про показанные строки. Помеченная модель есть в каталоге,
+    но в показанные пятнадцать не попала: объяснять пометку, которой человек не
+    видит, значит говорить про чужой экран."""
+    models = _many(20) + [ModelInfo("vendor/no-tools", tool_capable=False)]
+    io, out = _io([""])
+    wz._choose_model(io, models, current="")
+    assert not any("⚠" in m for m in out)
+
+
+def test_enter_keeps_the_current_model():
+    io, _ = _io([""])
+    assert wz._choose_model(io, _models3(), current="gigacode") is None
+
+
+def test_query_then_number_picks_from_the_matches():
+    models = _many(30) + [ModelInfo("qwen/qwen3-8b", tool_capable=True),
+                          ModelInfo("qwen/qwen3-235b", tool_capable=True)]
+    io, _ = _io(["qwen", "2"])
+    assert wz._choose_model(io, models, current="") == "qwen/qwen3-235b"
+
+
+def test_no_matches_taken_as_id_when_confirmed():
+    io, out = _io(["vllm/Own", "y"])
+    assert wz._choose_model(io, _models3(), current="") == "vllm/Own"
+    assert any("таких у провайдера нет." in m for m in out)
+    assert any("взять «vllm/Own» как есть?" in m for m in out)
+
+
+def test_no_matches_declined_is_treated_as_a_new_query():
+    """Отказ не должен стоить ещё одного ввода: ответ, который не «да» и не
+    пусто, — это уже следующий запрос."""
+    models = _models3() + [ModelInfo("qwen/qwen3-8b", tool_capable=True)]
+    io, _ = _io(["vllm/Own", "qwen", "1"])
+    assert wz._choose_model(io, models, current="") == "qwen/qwen3-8b"
+
+
+def test_no_matches_enter_keeps_the_current_model():
+    io, _ = _io(["vllm/Own", ""])
+    assert wz._choose_model(io, _models3(), current="gigacode") is None
+
+
+def test_star_prints_the_whole_list():
+    io, out = _io(["*", "397"])
+    models = _many(397)
+    assert wz._choose_model(io, models, current="") == "vendor/m397"
+    assert any("vendor/m397" in m for m in out)
+
+
+def test_model_step_names_its_level():
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer x"}}
+    io, out = _io([""])
+    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _models3())
+    assert any("уровень default" in m for m in out)

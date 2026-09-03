@@ -1680,6 +1680,12 @@ class ModelsSectionEditor(Vertical):
             return True
         if self._picker is not None:
             self._close_picker()
+            if self._form is not None:
+                # Вопрос снят, форма осталась — вернуть ей ввод, отобранный на время
+                # вопроса. Только здесь: по выбору значения форма уходит вместе с
+                # записью, и фокус на её поле стал бы фокусом на снесённом виджете
+                # (та же беда, что лечит `set_focus(None)` перед сносом тела).
+                self._form.refocus()
             return True
         if self._form is not None:
             if self._form.escape():
@@ -2189,6 +2195,14 @@ class ModelsSectionEditor(Vertical):
         # ключ, появляющийся после первой отрисовки, — иначе читателям пришлось бы
         # гадать `.get` он или `[...]`. `None` — ещё не измерено.
         self._picker = {"rows": rows, "idx": idx, "on_pick": on_pick, "width": None}
+        if self._form is not None:
+            # Вопрос формы («какая модель по умолчанию») висит НАД живой формой, и
+            # её поля остаются в фокусе. Гейты `probe`/`space`/`clear_token` держат
+            # только те клавиши, которые экран ведёт САМ; всё остальное — печать,
+            # Backspace, штатный `delete_left_all` у `Ctrl+U` — Textual доставляет
+            # прямо в поле, и человек правит текст, уже зафиксированный в
+            # транзакции. Снимаем фокус: пока вопрос висит, клавиатура его.
+            self.screen.set_focus(None)
         # Строка-якорь на время раскрытия теряет нижний воздух (.set-spaced):
         # список — продолжение строки и обязан стоять к ней вплотную.
         if after is not None:

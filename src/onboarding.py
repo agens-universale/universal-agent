@@ -260,6 +260,49 @@ def _registry_overridden_above(config_path) -> bool:
     return any(origin.overlay_kind for origin in found.values())
 
 
+def effective_model(config: Dict[str, Any]) -> str:
+    """Действующая модель конфига — ПРОВАЙДЕРСКИЙ id из резолва `ModelRouter`
+    (§6/§7), а не плоский `agent.model`: волна B пишет реестр (`models.<алиас>`
+    + `slots.default`), а плоский ключ оставляет шаблонным сентинелом — по нему
+    мастер на своём же настроенном конфиге видел бы «модель не задана» и молча
+    переставлял слот на первую модель сервера.
+
+    Канон витрин ветки (`config._effective_model_name`,
+    `main._footer_model_name`), но берётся `model`, а не `alias`: обе поверхности
+    мастера сверяются со списком С СЕРВЕРА, где модели названы провайдерскими id.
+
+    Резолв не удался (полусырой конфиг: пустой реестр без плоского ключа, слот
+    на несуществующий алиас) — фоллбэк на плоский ключ: мастер обязан
+    открываться на любом конфиге. Сентинел шаблона — «ещё не задано», а не
+    значение: отдаём пусто, как и на конфиге без модели вовсе."""
+    name = config.get("model")
+    try:
+        from model_router import ModelRouter
+        resolved = ModelRouter(
+            config, level_provider=lambda: config.get("level") or "default",
+        ).resolve("main", check_breaker=False)
+        name = resolved.model
+    except Exception:
+        pass
+    return "" if not name or name == MODEL_SENTINEL else name
+
+
+def assigned_level_model(config: Dict[str, Any], level: str) -> str:
+    """Провайдерский id модели, ЯВНО назначенной уровню, — или пусто, если слот
+    не задан.
+
+    Именно явный слот, а не резолв матрицей фоллбэков: незаданный `max` работает
+    моделью `default`, но написать против него её имя значило бы сказать
+    «уровень назначен» там, где он не назначен, — и следующий шаг закрепил бы
+    выдуманное."""
+    alias = (config.get("slots") or {}).get(level)
+    if not alias:
+        return ""
+    entry = (config.get("models") or {}).get(alias)
+    model = entry.get("model") if isinstance(entry, dict) else None
+    return model or alias
+
+
 def overriding_layer_note(config: Dict[str, Any], config_path=None) -> Optional[str]:
     """Спека §11: что перекроет выбор, сделанный в мастере (мастер пишет БАЗОВЫЙ
     config.yml, а конфиг собирается стопкой слоёв — ось 2, §2).

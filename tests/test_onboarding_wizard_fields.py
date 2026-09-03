@@ -33,14 +33,18 @@ def test_skip_leaves_field_out():
     assert wz.collect_fields(io, cfg, review_all=False) == {}
 
 
-def test_review_all_asks_all_three():
+def test_review_all_asks_all_three(monkeypatch):
     cfg = {
         "completions_url": "https://old/v1",
         "chat_completion_headers": {"Authorization": "Bearer old"},
         "model": "old-model",
     }
-    # Порядок: endpoint → auth-меню ("1" + токен) → model
-    io, _ = _io(["https://new/v1", "1", "sk-new", "new-model"])
+    # Список моделей не участвует в проверке — без подмены шаг «Модель» реально
+    # стучится на «https://new/v1» (зелёный тест сейчас — только потому, что DNS
+    # не резолвит этот хост).
+    monkeypatch.setattr("model_picker.fetch_models", lambda *a, **k: None)
+    # Порядок: endpoint → auth-меню ("1" + токен) → model → уровни (Enter — пропустить)
+    io, _ = _io(["https://new/v1", "1", "sk-new", "new-model", ""])
     values = wz.collect_fields(io, cfg, review_all=True)
     assert values == {
         "completions_url": "https://new/v1",

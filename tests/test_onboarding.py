@@ -768,3 +768,57 @@ def test_write_wizard_values_reuses_an_existing_alias_named_by_a_human(tmp_path,
         "brain": {"model": "qwen/qwen3-235b"},
     }
     assert raw["slots"] == {"default": "brain", "light": "fast"}
+
+
+def test_effective_model_reads_registry_not_the_flat_key():
+    """Волна B пишет реестр, а плоский ключ остаётся значением ШАБЛОНА: на
+    настроенном конфиге по нему мастер видел бы чужую модель."""
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
+           "slots": {"default": "fast"}, "model": "MiniMax-M2.7"}
+    assert onboarding.effective_model(cfg) == "qwen/qwen3-8b"
+
+
+def test_effective_model_resolves_single_entry_without_a_slot():
+    """Реестр из одной записи резолвится без явного слота — так же, как в рантайме."""
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {},
+           "model": "MiniMax-M2.7"}
+    assert onboarding.effective_model(cfg) == "qwen/qwen3-8b"
+
+
+def test_effective_model_falls_back_to_the_legacy_key():
+    cfg = {"models": {}, "slots": {}, "model": "vllm/Qwen3-Coder"}
+    assert onboarding.effective_model(cfg) == "vllm/Qwen3-Coder"
+
+
+def test_effective_model_survives_a_slot_pointing_nowhere():
+    """Резолв бросает ValueError на битом слоте — мастер обязан открываться на
+    любом конфиге, поэтому падение переходит в фоллбэк, а не наружу."""
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
+           "slots": {"default": "нет-такой"}, "model": "vllm/Qwen3-Coder"}
+    assert onboarding.effective_model(cfg) == "vllm/Qwen3-Coder"
+
+
+def test_effective_model_is_empty_on_the_template_sentinel():
+    cfg = {"models": {}, "slots": {}, "model": onboarding.MODEL_SENTINEL}
+    assert onboarding.effective_model(cfg) == ""
+
+
+def test_assigned_level_model_reports_only_explicit_slots():
+    """Незаданный `max` работает моделью `default`, но «назначен» он не был:
+    написать против него её имя значило бы закрепить выдуманное."""
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"},
+                      "brain": {"model": "qwen/qwen3-235b"}},
+           "slots": {"default": "brain", "light": "fast"}}
+    assert onboarding.assigned_level_model(cfg, "light") == "qwen/qwen3-8b"
+    assert onboarding.assigned_level_model(cfg, "max") == ""
+
+
+def test_assigned_level_model_falls_back_to_the_alias_itself():
+    """Запись без ключа `model` — законна: id равен имени записи (спека §4)."""
+    cfg = {"models": {"gigacode": {}}, "slots": {"light": "gigacode"}}
+    assert onboarding.assigned_level_model(cfg, "light") == "gigacode"
+
+
+def test_assigned_level_model_survives_a_broken_slot():
+    cfg = {"models": {}, "slots": {"light": "нет-такой"}}
+    assert onboarding.assigned_level_model(cfg, "light") == "нет-такой"

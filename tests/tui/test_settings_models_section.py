@@ -2109,3 +2109,62 @@ async def test_empty_state_does_not_claim_levels_are_off_under_a_profile_registr
         text = _texts(scr)
         assert "уровни light/default/max выключены" not in text, text
         assert "work" in text            # назван профиль, чьи записи действуют
+
+
+async def test_form_fields_are_deaf_while_the_default_slot_question_hangs(tmp_path):
+    """Вопрос «какая модель по умолчанию» висит НАД живой формой: `_submit_form` её
+    не снимает, а состав записи для транзакции уже зафиксирован. Пока поля держат
+    фокус, всякая не съеденная экраном клавиша правит текст, которому уже не уехать
+    в файл: человек чинит поле, которое ничего не решает."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        from tui.editors.model_entry_form import ModelEntryForm
+        await pilot.press("n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "opus"
+        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        form.query_one("#mef-url", Input).value = "https://own-host/v1/chat/completions"
+        form.query_one("#mef-token", Input).value = "sk-OWN"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                # submit → пикер default
+        await pilot.pause()
+        assert _editor(scr).picker_open
+        fields = ("alias", "model", "url", "token")
+        before = {f: form.query_one(f"#mef-{f}", Input).value for f in fields}
+        for key in ("space", "ctrl+u", "x", "backspace"):
+            await pilot.press(key)
+        await pilot.pause()
+        after = {f: form.query_one(f"#mef-{f}", Input).value for f in fields}
+        assert after == before, "клавиша дошла до поля формы сквозь висящий вопрос"
+
+
+async def test_form_takes_input_back_when_the_question_is_dismissed(tmp_path):
+    """Esc снимает вопрос, но не форму — и ввод обязан вернуться в поле под
+    курсором. Иначе лекарство от сквозных клавиш оставляет форму, которую видно и
+    нельзя править: клавиши уходят в никуда, а человек читает это как зависание."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, _cfg_file):
+        from tui.editors.model_entry_form import ModelEntryForm
+        await pilot.press("n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "opus"
+        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                # submit → пикер default
+        await pilot.pause()
+        assert _editor(scr).picker_open
+        before = _cfg_file.read_bytes()
+        await pilot.press("escape")               # вопрос снят, форма осталась
+        await pilot.pause()
+        assert not _editor(scr).picker_open
+        assert _cfg_file.read_bytes() == before, "отменённый вопрос тронул файл"
+        assert scr.query(ModelEntryForm), "форма ушла вместе с вопросом"
+        assert isinstance(scr.focused, Input), "ввод в форму не вернулся"

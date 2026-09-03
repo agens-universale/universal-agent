@@ -243,3 +243,36 @@ def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
     assert "схема не валидна" in output
     assert "конфиг не записан" not in output
     assert "модел" in output          # сказано, что записи моделей уже в файле
+
+
+def test_summary_reports_all_three_levels_from_the_fresh_config():
+    """Итог читается из конфига, а не из введённого: человеку важно состояние
+    файла, а не история его ответов."""
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"},
+                      "brain": {"model": "qwen/qwen3-235b"}},
+           "slots": {"default": "brain", "light": "fast"}}
+    lines = wz._summary_lines(cfg)
+    assert lines == [
+        "    модель       qwen/qwen3-235b  (запись «brain»)",
+        "    light        qwen/qwen3-8b  (запись «fast»)",
+        "    max          не задан",
+    ]
+
+
+def test_summary_of_an_empty_registry_says_nothing_is_set():
+    assert wz._summary_lines({}) == [
+        "    модель       не задан",
+        "    light        не задан",
+        "    max          не задан",
+    ]
+
+
+def test_summary_shows_the_resolved_model_when_the_default_slot_is_unset():
+    """Реестр из одной записи резолвится без явного слота — сводка обязана
+    показать работающую модель, а не «не задан».
+
+    Это сторож фоллбэка `assigned_level_model` → `effective_model`: без него
+    строка `default` врёт про конфиг, который прекрасно работает."""
+    cfg = {"models": {"only": {"model": "vendor/only"}}, "slots": {}}
+    lines = wz._summary_lines(cfg)
+    assert lines[0] == "    модель       vendor/only"

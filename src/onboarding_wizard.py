@@ -47,6 +47,66 @@ def parse_multi(raw: str, n: int) -> list:
     return sorted(seen)
 
 
+# Порог печати списка целиком и размер показываемого куска. Пятнадцать строк со
+# шапкой шага и приглашением укладываются в окно 24 строк; порог чуть выше
+# показа — чтобы не обрезать список ради двух строк.
+_LIST_WHOLE_MAX = 20
+_LIST_SHOWN = 15
+# Подтверждение «да». Канон `[y/N]` — у `cli.py:232-241`; `д`/`да` добавлены
+# потому, что на русской раскладке клавиша `y` печатает «н», и подтверждать
+# вслепую «нетом» человек не должен.
+_YES = frozenset({"y", "yes", "д", "да"})
+
+
+def _matching(models, query: str) -> list:
+    """Модели, чей id содержит `query` (регистр не важен)."""
+    needle = query.casefold()
+    return [m for m in models if needle in m.id.casefold()]
+
+
+def _exact_model(models, query: str):
+    """Модель с ровно таким id — или None. Точное совпадение выбирается сразу:
+    кто знает имя, не должен искать его номер в собственном же результате."""
+    needle = query.casefold()
+    return next((m for m in models if m.id.casefold() == needle), None)
+
+
+def _view_initial(models) -> tuple:
+    """Что показать на входе в шаг: короткий список целиком и без счётчика,
+    длинный — первым куском и со счётчиком. Молча резать нельзя: обрезанный
+    список без объяснения читается как «это всё, что есть»."""
+    if len(models) <= _LIST_WHOLE_MAX:
+        return list(models), ""
+    shown = list(models[:_LIST_SHOWN])
+    return shown, f"показаны {len(shown)} из {len(models)} · * — показать все"
+
+
+def _interpret(raw: str, models, shown) -> tuple:
+    """Что значит ввод шага выбора модели. Порядок разбора — из спеки §5.3:
+    пусто → оставить; `*` → весь список; номер показанной строки → выбор;
+    точный id → выбор; иначе поиск подстрокой; ничего не нашлось → спросить,
+    брать ли введённое как id.
+
+    Отдельной функцией, а не ветками в цикле: правило разбора — единственное
+    место, где решается судьба ввода, и проверять его надо без экрана."""
+    if not raw:
+        return "keep", ""
+    if raw == "*":
+        return "all", ""
+    if raw.isdigit() and 1 <= int(raw) <= len(shown):
+        return "pick", shown[int(raw) - 1].id
+    exact = _exact_model(models, raw)
+    if exact is not None:
+        return "pick", exact.id
+    found = _matching(models, raw)
+    if not found:
+        return "ask", raw
+    if len(found) <= _LIST_SHOWN:
+        return "view", (found, f"найдено {len(found)} из {len(models)}")
+    return "view", (found[:_LIST_SHOWN],
+                    f"показаны {_LIST_SHOWN} из {len(found)} совпадений · уточните запрос")
+
+
 @dataclass
 class WizardIO:
     reader: Callable[[str, bool], str]   # (prompt, secret) -> str
@@ -113,47 +173,154 @@ def _effective(values: dict, config: dict, key: str, header: bool = False):
     return values.get(key) if values.get(key) is not None else config.get(key)
 
 
-def _collect_model(io: WizardIO, config: dict, values: dict, *, fetch=None) -> None:
+def _print_models(io: WizardIO, shown, *, current: str) -> None:
+    """Нумерованные строки показанного куска. Ширина номера — по длине куска:
+    столбец id не должен прыгать между строками 9) и 10)."""
+    width = len(str(len(shown)))
+    for i, m in enumerate(shown, 1):
+        mark = " ⚠" if m.tool_capable is False else ""
+        here = "  ← сейчас" if current and m.id == current else ""
+        io.printer(f"  {i:>{width}}) {m.id}{mark}{here}")
+    if any(m.tool_capable is False for m in shown):
+        io.printer(f"  ⚠ {_of.MODEL_WARN}")
+
+
+def _current_line(config: dict, level: str, model_id: str) -> str:
+    """Строка «сейчас» шага. Имя записи в скобках — только когда слот задан:
+    модель из легаси `agent.model` имени не имеет, и выдумывать его нельзя."""
+    if not model_id:
+        return f"сейчас: {_of.LEVEL_UNSET} · Enter — оставить"
+    alias = (config.get("slots") or {}).get(level)
+    entry = f"  (запись «{alias}»)" if alias and alias != model_id else ""
+    return f"сейчас: {model_id}{entry} · Enter — оставить"
+
+
+def _ask_as_is(io: WizardIO, query: str) -> tuple:
+    """Совпадений нет — предложить взять введённое как id.
+    ('keep','') — Enter; ('take', query) — согласие; ('query', raw) — ответ,
+    который сам является следующим запросом."""
+    io.printer("")
+    io.printer("  таких у провайдера нет.")
+    io.printer(f"  взять «{query}» как есть?")
+    raw = io.reader("  > (y — да · другой запрос · Enter — оставить): ", False).strip()
+    if not raw:
+        return "keep", ""
+    if raw.casefold() in _YES:
+        return "take", query
+    return "query", raw
+
+
+def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
+    """Выбор модели из списка. Возвращает id либо None — «оставить как есть».
+
+    Цикл тонкий: решение об вводе принимает `_interpret`, а здесь остаётся
+    печать и удержание состояния показа."""
+    shown, note = _view_initial(models)
+    pending = None                  # ввод, полученный ответом на «взять как есть»
+    while True:
+        if pending is None:
+            _print_models(io, shown, current=current)
+            if note:
+                io.printer(f"  {note}")
+            raw = io.reader(f"  > (номер 1–{len(shown)} или часть имени): ",
+                            False).strip()
+        else:
+            raw, pending = pending, None
+        kind, payload = _interpret(raw, models, shown)
+        if kind == "keep":
+            return None
+        if kind == "pick":
+            return payload
+        if kind == "all":
+            shown, note = list(models), ""
+        elif kind == "view":
+            shown, note = payload
+        else:
+            what, value = _ask_as_is(io, payload)
+            if what == "keep":
+                return None
+            if what == "take":
+                return value
+            pending = value
+
+
+def _fetch_models(config: dict, values: dict, fetch=None):
+    """Список моделей у провайдера — по адресу и токену, УЖЕ введённым в этом
+    прогоне (иначе список пришёл бы со старого сервера). Сбой сети — None:
+    шаг обязан продолжаться свободным вводом."""
     from model_picker import fetch_models
     fetch = fetch or fetch_models
     endpoint = _effective(values, config, "completions_url") or ""
     auth = _effective(values, config, "Authorization", header=True)
     if auth == onboarding.TOKEN_SENTINEL:
         auth = None
-    verify = bool(config.get("use_ssl", True))
-    models = None
-    if endpoint:
-        try:
-            models = fetch(endpoint, auth, verify=verify)
-        except Exception:
-            models = None
+    if not endpoint:
+        return None
+    try:
+        return fetch(endpoint, auth, verify=bool(config.get("use_ssl", True)))
+    except Exception:
+        return None
+
+
+def _collect_model(io: WizardIO, config: dict, values: dict, *, fetch=None) -> list | None:
+    """Шаг «Модель». Возвращает полученный список моделей (или None) — шаг
+    уровней переиспользует его, второй поход в сеть за тем же ответом лишний."""
+    models = _fetch_models(config, values, fetch)
     io.printer("")
     io.printer(f"  {_of.ONBOARDING_FIELDS[2].label}")
+    io.printer(f"  {_of.MODEL_STEP_HINT}")
+    current = onboarding.effective_model(config)
+    if current:
+        io.printer(f"  {_current_line(config, 'default', current)}")
     if not models:
         io.printer(f"  {_of.MODEL_NO_LIST}")
         raw = io.reader("  > ", False).strip()
         if raw:
             values["model"] = raw
+        return models
+    chosen = _choose_model(io, models, current=current)
+    if chosen:
+        values["model"] = chosen
+    return models
+
+
+_LEVELS = ("light", "max")
+
+
+def _collect_levels(io: WizardIO, config: dict, values: dict, models) -> None:
+    """Шаг «Уровни моделей»: две независимые необязательные под-формы. Пропуск не
+    пишет НИЧЕГО — заданный ранее уровень переживает прогон, в котором его
+    пропустили (ключа нет в `values` → операции нет → слот не тронут).
+
+    Список моделей приходит от шага «Модель» и не перезапрашивается; `None`
+    значит, что его не было и там, — уровни спрашиваются свободным вводом."""
+    io.printer("")
+    io.printer(f"  {_of.LEVELS_TITLE}")
+    io.printer(f"  {_of.LEVELS_QUESTION}")
+    raw = io.reader("  > (y — да · Enter — пропустить): ", False).strip()
+    if raw.casefold() not in _YES:
         return
-    has_warn = any(m.tool_capable is False for m in models)
-    for i, m in enumerate(models, 1):
-        mark = " ⚠" if m.tool_capable is False else ""
-        io.printer(f"  {i}) {m.id}{mark}")
-    io.printer(f"  {len(models) + 1}) {_of.MANUAL_ENTRY}")
-    if has_warn:
-        io.printer(f"  ⚠ {_of.MODEL_WARN}")
-    choice = _select_single(io, f"введите номер 1–{len(models) + 1}", len(models) + 1, default=len(models) + 1)
-    if choice == len(models) + 1:
-        raw = io.reader("  > ", False).strip()
-        if raw:
-            values["model"] = raw
-    else:
-        values["model"] = models[choice - 1].id
+    for level in _LEVELS:
+        io.printer("")
+        io.printer(f"  {_of.LEVEL_FORM_LABEL[level]}")
+        current = onboarding.assigned_level_model(config, level)
+        io.printer(f"  {_current_line(config, level, current)}")
+        key = onboarding.MODEL_SLOT_KEYS[level]
+        if not models:
+            io.printer(f"  {_of.MODEL_NO_LIST}")
+            typed = io.reader("  > ", False).strip()
+            if typed:
+                values[key] = typed
+            continue
+        chosen = _choose_model(io, models, current=current)
+        if chosen:
+            values[key] = chosen
 
 
 def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
     pending = onboarding.pending_field_keys(config)
     values: dict = {}
+    models = None
     for field in _FIELDS:
         if not (review_all or field.leaf in pending):
             continue
@@ -161,7 +328,7 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
             _collect_auth(io, values)
             continue
         if field.kind == "model":
-            _collect_model(io, config, values)
+            models = _collect_model(io, config, values)
             continue
         if field.kind == "endpoint":
             io.printer("")
@@ -184,6 +351,10 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
                         field.secret).strip()
         if not raw:
             continue   # пропуск: авто → остаётся pending; review → оставить текущее
+    if review_all:
+        # Уровни не входят в требования запуска (`_FIELD_CHECKS`), и удлинять ими
+        # аварийную донастройку незачем: их спрашивает только режим сверки.
+        _collect_levels(io, config, values, models)
     return values
 
 
@@ -241,6 +412,27 @@ def _mcp_step(io: WizardIO, mcp) -> None:
             mcp.install(names[idx - 1])
 
 
+_SUMMARY_LABEL = {"default": "модель", "light": "light", "max": "max"}
+
+
+def _summary_lines(config: dict) -> list[str]:
+    """Итог прогона: три уровня СВЕЖЕГО конфига. Пропущенный шаг и пустой слот
+    выглядят одинаково — и это правда: сводка говорит, что лежит в файле, а не
+    что человек вводил."""
+    lines = []
+    for level in ("default", "light", "max"):
+        model = onboarding.assigned_level_model(config, level)
+        if not model and level == "default":
+            model = onboarding.effective_model(config)
+        if not model:
+            lines.append(f"    {_SUMMARY_LABEL[level]:<12} не задан")
+            continue
+        alias = (config.get("slots") or {}).get(level)
+        entry = f"  (запись «{alias}»)" if alias and alias != model else ""
+        lines.append(f"    {_SUMMARY_LABEL[level]:<12} {model}{entry}")
+    return lines
+
+
 def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) -> bool:
     _rule_header(io)
     try:
@@ -271,5 +463,7 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) 
         return False
     io.printer("")
     io.printer(f"  ✓ Готово. Конфиг: {config_path}")
+    for line in _summary_lines(fresh):
+        io.printer(line)
     io.printer("")
     return True

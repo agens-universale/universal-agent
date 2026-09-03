@@ -724,6 +724,18 @@ class ModelEntryForm(Vertical):
         else:
             self.query_one(f"#{target}", Input).focus()
 
+    def refocus(self) -> None:
+        """Вернуть ввод в поле под курсором — и только это.
+
+        Не `_focus_position`: тот ПРИЗЕМЛЯЕТ курсор на новую позицию (раскрывает
+        списки, а над пустым полем модели ещё и идёт за ними в сеть). Здесь курсор
+        никуда не двигался — вернулось лишь право поля принимать клавиши."""
+        target = self._positions[self._idx]
+        if target is None:
+            self.screen.set_focus(None)     # позиция галки: у неё поля нет
+        else:
+            self.query_one(f"#{target}", Input).focus()
+
     def toggle_no_auth(self) -> bool:
         """Space на позиции галки: переключить «без авторизации». True — курсор был
         на галке (переключено); False — клавиша не наша, хост её НЕ стопит (пробел

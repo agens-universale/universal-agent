@@ -15,6 +15,7 @@ from textual.widgets import Static
 from rich.text import Text
 
 import onboarding
+import onboarding_fields as _of
 from tui import branding
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 from tui.form_frame import cap_frame_height
@@ -32,7 +33,7 @@ _BASE_STEPS = (STEP_CONNECTION, STEP_MODEL, STEP_LEVELS, STEP_MCP, STEP_VOICE, S
 _STEP_TITLE = {
     STEP_CONNECTION: "Подключение",
     STEP_MODEL: "Модель",
-    STEP_LEVELS: "Уровни моделей",
+    STEP_LEVELS: _of.LEVELS_TITLE,
     STEP_MCP: "MCP-серверы",
     STEP_VOICE: "Голосовой ввод",
     STEP_CONFIRM: "Подтверждение",
@@ -49,23 +50,12 @@ _MARK_STEPS = (STEP_MODEL, STEP_LEVELS, STEP_VOICE)   # шаги с отдель
 # Шаг уровней (спека §11: «добавить лёгкую и максимальную модели?») — две
 # независимые под-формы, каждая необязательна: пропуск не пишет ничего.
 _LEVEL_ROWS = ("light", "max")
-_LEVELS_QUESTION = ("Добавить лёгкую и максимальную модели? Шаг можно пропустить — "
-                    "уровни настраиваются и позже, в настройках.")
-_LEVEL_UNSET = "не задана"
-# Шаг «Модель» задаёт тот же уровень, что и шаг «Уровни», — `default` (одна карта
-# `MODEL_SLOT_KEYS` на все три, один путь записи). Разведены они только по
-# обязательности: без `default` конфиг нерабочий. Подпись называет эту связь — иначе
-# слово «default» человек впервые встречает уже в итоговой сводке.
-_MODEL_STEP_HINT = ("основная модель — уровень default; light и max можно задать "
-                    "на следующем шаге")
 # Выход со шага строкой-действием, а не клавишей: Enter на этом шаге раскрывает форму
 # уровня под курсором, и «далее» ему взять неоткуда — курсор всегда стоит на уровне.
 # Идиома строки-действия — из секции «Модели» (`models_section._ADD_ROW_LABEL`):
 # глиф + подпись, приглушённо. Шаг необязательный, поэтому подпись одна на оба исхода
 # (уровни заданы / пропущены) — скачущее имя рассказывало бы про механику, не про выбор.
 _LEVELS_CONTINUE_LABEL = "→ продолжить"
-_LEVEL_FORM_LABEL = {"light": "Лёгкая модель (light)",
-                     "max": "Максимальная модель (max)"}
 
 _VOICE_OPTIONS = (
     ("local", "Локальный сервис (рекомендуется)", "распознаёт офлайн, на вашем компьютере"),
@@ -285,51 +275,14 @@ class OnboardingScreen(Screen):
         return t
 
     def _effective_model(self) -> str:
-        """Действующая модель конфига запуска — ПРОВАЙДЕРСКИЙ id из резолва
-        `ModelRouter` (§6/§7), а не плоский `agent.model`: волна B пишет реестр
-        (`models.<алиас>` + `slots.default`), а плоский ключ оставляет шаблонным
-        сентинелом — по нему мастер на своём же настроенном конфиге видел бы
-        «модель не задана» и молча переставлял слот на первую модель сервера.
-
-        Канон витрин ветки (`config._effective_model_name`,
-        `main._footer_model_name`), но берётся `model`, а не `alias`: и сводка, и
-        шаг сверяются со списком С СЕРВЕРА, где модели названы провайдерскими id.
-
-        Резолв не удался (полусырой конфиг: пустой реестр без плоского ключа,
-        слот на несуществующий алиас) — фоллбэк на плоский ключ: мастер обязан
-        открываться на любом конфиге. Сентинел шаблона — «ещё не задано», а не
-        значение: отдаём пусто, как и на конфиге без модели вовсе."""
-        config = self._config or {}
-        name = config.get("model")
-        try:
-            from model_router import ModelRouter
-            resolved = ModelRouter(
-                config, level_provider=lambda: config.get("level") or "default",
-            ).resolve("main", check_breaker=False)
-            name = resolved.model
-        except Exception:
-            pass
-        return "" if not name or name == onboarding.MODEL_SENTINEL else name
+        """Действующая модель конфига запуска (`onboarding.effective_model`).
+        Знание общее с плоским мастером и живёт в ядре: вторая его редакция
+        разошлась бы с первой на первой же правке."""
+        return onboarding.effective_model(self._config or {})
 
     def _assigned_level_model(self, level: str) -> str:
-        """Провайдерский id модели, ЯВНО назначенной уровню в конфиге запуска, — или
-        пусто, если слот не задан.
-
-        Именно явный слот, а не резолв матрицей фоллбэков: незаданный `max` работает
-        моделью `default`, но написать против него её имя значило бы сказать «уровень
-        назначен» там, где он не назначен, — и следующий PgDn закрепил бы выдуманное.
-
-        Тот же промах, что чинил `_effective_model` на шаге «Модель», только этажом
-        ниже: под-форма уровней читала ТОЛЬКО сессионные `_values`, и на повторном
-        заходе все уровни показывались «не задана» — даже те, что стоят в файле.
-        Человек переназначал их заново, не видя, что там уже есть."""
-        config = self._config or {}
-        alias = (config.get("slots") or {}).get(level)
-        if not alias:
-            return ""
-        entry = (config.get("models") or {}).get(alias)
-        model = entry.get("model") if isinstance(entry, dict) else None
-        return model or alias
+        """Модель, явно назначенная уровню (`onboarding.assigned_level_model`)."""
+        return onboarding.assigned_level_model(self._config or {}, level)
 
     def _level_value(self, level: str) -> str:
         """Что показать против уровня: набранное в этом прогоне мастера, иначе —
@@ -569,7 +522,7 @@ class OnboardingScreen(Screen):
                               classes="onb-hint onb-dyn set-group-gap onb-conn-probe"))
         elif step == STEP_MODEL:
             from tui.editors.model import ModelEditor
-            body.mount(Static(_MODEL_STEP_HINT, classes="onb-hint onb-dyn set-spaced",
+            body.mount(Static(_of.MODEL_STEP_HINT, classes="onb-hint onb-dyn set-spaced",
                               markup=False))
             endpoint, auth = self._endpoint_auth()
             cfg_model = self._effective_model()
@@ -814,7 +767,7 @@ class OnboardingScreen(Screen):
             # Воздух отделяет вопрос от строк-ответов, а сами строки идут вплотную —
             # грамматика блока настроек (`.set-hint` + `.set-row` без margin): плотный
             # список читается как один выбор, разреженный — как отдельные пункты.
-            body.mount(Static(_LEVELS_QUESTION, classes="onb-hint onb-dyn set-spaced",
+            body.mount(Static(_of.LEVELS_QUESTION, classes="onb-hint onb-dyn set-spaced",
                               markup=False))
             for i, level in enumerate(_LEVEL_ROWS):
                 cls = "onb-option onb-dyn" + (" selected" if i == self._levels_idx else "")
@@ -828,7 +781,7 @@ class OnboardingScreen(Screen):
             return
         from tui.editors.model import ModelEditor
         level = self._levels_stage
-        body.mount(Static(_LEVEL_FORM_LABEL[level], classes="onb-hint onb-dyn", markup=False))
+        body.mount(Static(_of.LEVEL_FORM_LABEL[level], classes="onb-hint onb-dyn", markup=False))
         endpoint, auth = self._endpoint_auth()
         current = self._level_value(level)
         # Тот же редактор, что на шаге «Модель», со своим id поля (иначе два поля с
@@ -857,7 +810,7 @@ class OnboardingScreen(Screen):
         head = slot_head_text(level)
         head.pad_right(max(0, width - len(head.plain)))
         t.append(head)
-        t.append(value or _LEVEL_UNSET, style=DIM if value else DEEP_DIM)
+        t.append(value or _of.LEVEL_UNSET, style=DIM if value else DEEP_DIM)
         return t
 
     def _levels_on_continue(self) -> bool:
