@@ -122,6 +122,64 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
     assert res_self == '{"tool":"session_read_stored_tool_output"}'
 
 
+def test_wrap_fs_read_file_long_output_goes_to_store():
+    state = _make_state()
+    cfg = {"tool_output_inline_max_chars": 80, "stored_tool_outputs_max_entries": 10}
+    tool_res = json.dumps(
+        {
+            "tool": "fs_read_file",
+            "ok": True,
+            "truncated": False,
+            "next_offset": None,
+            "content": "line\n" * 40,
+        },
+        ensure_ascii=False,
+    )
+    assert len(tool_res) > 80
+    res = maybe_store_and_wrap_tool_output(
+        tool_res,
+        call_id="call_read",
+        tool_name="fs_read_file",
+        state=state,
+        config=cfg,
+    )
+    payload = json.loads(res)
+    assert payload["type"] == "stored_tool_output"
+    assert payload["source_tool"] == "fs_read_file"
+    assert payload["truncated"] is True
+    assert payload["output_ref"]
+    assert state.tool_call_outputs_store.contains(payload["output_ref"])
+
+
+def test_wrap_fs_read_file_short_line_window_stays_inline():
+    state = _make_state()
+    cfg = {"tool_output_inline_max_chars": 20_000, "stored_tool_outputs_max_entries": 10}
+    content = "\n".join(f"code {i}" for i in range(60))
+    tool_res = json.dumps(
+        {
+            "tool": "fs_read_file",
+            "ok": True,
+            "start_line": 1,
+            "end_line": 60,
+            "truncated": True,
+            "next_offset": 61,
+            "content": content,
+        },
+        ensure_ascii=False,
+    )
+    res = maybe_store_and_wrap_tool_output(
+        tool_res,
+        call_id="call_window",
+        tool_name="fs_read_file",
+        state=state,
+        config=cfg,
+    )
+    assert res == tool_res
+    assert json.loads(res)["truncated"] is True
+    assert json.loads(res)["next_offset"] == 61
+    assert len(state.tool_call_outputs_store) == 0
+
+
 def test_store_lru_evicts_old_and_read_updates_recency():
     store = ToolCallOutputsStore(max_entries=2)
     r1 = ToolCallOutputRecord("r1", "t", "c1", 1, "a")

@@ -12,22 +12,10 @@ from gc_core.utils.fs_size_limits import (
     fs_read_max_bytes,
 )
 
-# Safety cap for one char-page of the selected line range. Normal sources/configs fit;
-# oversized blobs page via char_offset. Model-facing preview still goes through stored_tool_output.
-DEFAULT_READ_FILE_CHAR_LIMIT = 100_000
-
-
-def _default_char_limit(config: Optional[Dict[str, Any]]) -> int:
-    raw = (config or {}).get("read_file_default_char_limit", DEFAULT_READ_FILE_CHAR_LIMIT)
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_READ_FILE_CHAR_LIMIT
-    return value if value > 0 else DEFAULT_READ_FILE_CHAR_LIMIT
-
 
 class ReadFile(AbstractSimpleTool):
-    def _result(self, 
+    def _result(
+        self,
         *,
         path: str,
         content: str,
@@ -36,17 +24,10 @@ class ReadFile(AbstractSimpleTool):
         total_lines: int,
         truncated: bool,
         next_offset: Optional[int],
-        char_offset: int,
-        char_limit: int,
-        total_chars: int,
-        content_truncated: bool,
-        next_char_offset: Optional[int],
         file_size_bytes: Optional[int],
         sha256: str,
-        hint: Optional[str] = None,
         encoding_used: Optional[str] = None,
     ) -> str:
-        returned_chars = len(content)
         payload: Dict[str, Any] = {
             "tool": ReadFile.registered_tool_name(),
             "ok": True,
@@ -59,20 +40,14 @@ class ReadFile(AbstractSimpleTool):
             "total_lines": total_lines,
             "truncated": truncated,
             "next_offset": next_offset,
-            "char_offset": char_offset,
-            "char_limit": char_limit,
-            "total_chars": total_chars,
-            "returned_chars": returned_chars,
-            "content_truncated": content_truncated,
-            "next_char_offset": next_char_offset,
+            "returned_chars": len(content),
             "error": None,
             "content": content,
         }
-        if hint is not None:
-            payload["hint"] = hint
         return json.dumps(payload, ensure_ascii=False)
 
-    def _error_result(self, 
+    def _error_result(
+        self,
         *,
         path: str,
         error_type: str,
@@ -101,25 +76,13 @@ class ReadFile(AbstractSimpleTool):
             "total_lines": 0,
             "truncated": False,
             "next_offset": None,
-            "char_offset": 0,
-            "char_limit": 0,
-            "total_chars": 0,
             "returned_chars": 0,
-            "content_truncated": False,
-            "next_char_offset": None,
             "error": error_obj,
             "content": "",
         }
         if extra_fields:
             payload.update(extra_fields)
         return json.dumps(payload, ensure_ascii=False)
-
-    def _resolve_char_limit(self, char_limit: Optional[int]) -> int:
-        if char_limit is None:
-            return _default_char_limit(self._config_dict)
-        if char_limit < 1:
-            return 1
-        return char_limit
 
     def _lookup_file_size_bytes(self, path: str) -> Optional[int]:
         try:
@@ -135,9 +98,8 @@ class ReadFile(AbstractSimpleTool):
             "type": "function",
             "name": "fs_read_file",
             "description": (
-                "Read a text file with line and character pagination. "
-                "Without offset/limit the line range is the whole file; page long content with "
-                "char_offset/char_limit when content_truncated is true (continue from next_char_offset). "
+                "Read a text file. Optional offset (1-based, default 1) and limit "
+                "(default: to end of file) select a line window. "
                 "Always includes full-file sha256 (for expected_file_sha256 in edit tools)."
             ),
             "parameters": {
@@ -158,26 +120,12 @@ class ReadFile(AbstractSimpleTool):
                             "Default: to end of file."
                         ),
                     },
-                    "char_offset": {
-                        "type": "integer",
-                        "description": (
-                            "0-based character offset within the line range. Default 0. "
-                            "When content_truncated is true, continue with next_char_offset."
-                        ),
-                    },
-                    "char_limit": {
-                        "type": "integer",
-                        "description": (
-                            f"Max characters to return from char_offset. "
-                            f"Default {DEFAULT_READ_FILE_CHAR_LIMIT}."
-                        ),
-                    },
                     "encoding": {
                         "type": "string",
                         "description": (
-                            "Optional text encoding. Omit for UTF-8 (default; also UTF-16 with BOM). "
-                            "Otherwise: utf-8, utf-8-sig, cp1251, koi8-r, latin-1, utf-16, "
-                            "utf-16-le, utf-16-be (also windows-1251, iso-8859-1)."
+                            "Omit for UTF-8 (UTF-8/UTF-16 BOM is detected). "
+                            "Otherwise one of: utf-8-sig, cp1251, koi8-r, latin-1, "
+                            "utf-16, utf-16-le, utf-16-be."
                         ),
                     },
                 },
@@ -191,7 +139,7 @@ class ReadFile(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = '''Tool name: fs_read_file
-Tool description: Read a text file with line and character pagination. Without offset/limit the line range is the whole file; page with char_offset/char_limit when content_truncated (continue from next_char_offset). Always includes full-file sha256.
+Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256.
 Input schema: {
   "type": "object",
   "properties": {
@@ -206,14 +154,6 @@ Input schema: {
     "limit": {
       "type": "integer",
       "description": "Max lines to read starting from offset. Default: to end of file."
-    },
-    "char_offset": {
-      "type": "integer",
-      "description": "0-based character offset within the line range. Default 0. When content_truncated is true, continue with next_char_offset."
-    },
-    "char_limit": {
-      "type": "integer",
-      "description": "Max characters to return from char_offset. Default 100000."
     }
   },
   "required": ["path"],
@@ -227,20 +167,14 @@ Return format:
   - "start_line": integer — 1-based number of the first line returned.
   - "end_line": integer — 1-based number of the last line returned.
   - "total_lines": integer — total number of lines in the file.
-  - "truncated": boolean — true if more lines exist after this page.
-  - "next_offset": integer or null — suggested 1-based line offset for the next page.
-  - "char_offset", "char_limit": applied character slice within the line range.
-  - "total_chars": integer — length of the current line range (not always the whole file).
+  - "truncated": boolean — true if more lines exist after this window.
+  - "next_offset": integer or null — suggested 1-based line offset for the next window.
   - "returned_chars": integer — length of "content" in this response.
-  - "content_truncated": boolean — true if more characters remain in that range.
-  - "next_char_offset": integer or null — next char_offset when content_truncated is true.
-  - "hint": string (optional) — only when content was truncated; how much was returned vs total and how to continue.
-  - "content": string — text after line and character slicing.
+  - "content": string — text of the selected line range.
 
 Usage:
 - Always use this tool to inspect the contents of any file before modifying it.
 - Line range defaults to offset=1 through end of file; narrow with offset/limit when needed.
-- Page long ranges with char_offset/char_limit when content_truncated is true.
 - On file_too_large: file_size_bytes is set; error.max_bytes has the limit; follow error.message.
 '''
         return description
@@ -251,8 +185,6 @@ Usage:
         path: str,
         offset: Optional[int] = None,
         limit: Optional[int] = None,
-        char_offset: Optional[int] = None,
-        char_limit: Optional[int] = None,
         encoding: Optional[str] = None,
         **kwargs,
     ) -> str:
@@ -283,48 +215,6 @@ Usage:
                 error_type="invalid_argument",
                 field="limit",
                 message=f"Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})",
-                file_size_bytes=file_size_bytes,
-            )
-
-        if char_offset is not None and not isinstance(char_offset, int):
-            return self._error_result(
-                path=path,
-                error_type="invalid_argument",
-                field="char_offset",
-                message=(
-                    f"Argument 'char_offset' must be an integer or None. "
-                    f"Got: {type(char_offset)} ({char_offset})"
-                ),
-                file_size_bytes=file_size_bytes,
-            )
-
-        if char_limit is not None and not isinstance(char_limit, int):
-            return self._error_result(
-                path=path,
-                error_type="invalid_argument",
-                field="char_limit",
-                message=(
-                    f"Argument 'char_limit' must be an integer or None. "
-                    f"Got: {type(char_limit)} ({char_limit})"
-                ),
-                file_size_bytes=file_size_bytes,
-            )
-
-        if char_limit is not None and char_limit < 1:
-            return self._error_result(
-                path=path,
-                error_type="invalid_argument",
-                field="char_limit",
-                message="Argument 'char_limit' must be >= 1.",
-                file_size_bytes=file_size_bytes,
-            )
-
-        if char_offset is not None and char_offset < 0:
-            return self._error_result(
-                path=path,
-                error_type="invalid_argument",
-                field="char_offset",
-                message="Argument 'char_offset' must be >= 0.",
                 file_size_bytes=file_size_bytes,
             )
 
@@ -371,9 +261,6 @@ Usage:
                     file_size_bytes=file_size_bytes,
                 )
 
-        resolved_char_limit = self._resolve_char_limit(char_limit)
-        resolved_char_offset = 0 if char_offset is None else char_offset
-
         try:
             raw = self._backend.read_bytes(path)
         except OSError as e:
@@ -395,7 +282,6 @@ Usage:
                     "preview_encoding": err.get("preview_encoding"),
                     "preview_truncated": err.get("preview_truncated"),
                 }
-                # Keep error compact: type + message (+ guess fields for agents).
                 err = {
                     "type": "encoding_required",
                     "message": err.get("message"),
@@ -418,16 +304,18 @@ Usage:
         lines = full_text.splitlines(keepends=True)
         total_lines = len(lines)
 
-        # Line range: offset default 1, limit default = rest of file.
         start_1_based = 1 if offset is None else offset
         if start_1_based < 1:
             start_1_based = 1
 
+        if limit is not None and limit < 1:
+            # Ноль (и отрицательное) — «не задан»: strict-схема заставляет слать все
+            # поля, и «не использую» модель говорит нулём. Кламп до одной строки
+            # отдавал ОДНУ строку как успех — модель считала файл однострочным.
+            limit = None
         if limit is None:
             end_1_based = total_lines
         else:
-            if limit < 1:
-                limit = 1
             end_1_based = start_1_based + limit - 1
 
         if start_1_based > total_lines:
@@ -438,30 +326,11 @@ Usage:
             end_1_based = total_lines
 
         start_idx = max(0, start_1_based - 1)
-        end_idx_exclusive = end_1_based
-
-        selected_lines = lines[start_idx:end_idx_exclusive]
-        line_chunk = ''.join(selected_lines)
-        total_chars = len(line_chunk)
-
-        safe_char_offset = min(resolved_char_offset, total_chars)
-        char_end = min(safe_char_offset + resolved_char_limit, total_chars)
-        content = line_chunk[safe_char_offset:char_end]
+        selected_lines = lines[start_idx:end_1_based]
+        content = "".join(selected_lines)
 
         line_truncated = end_1_based < total_lines
         next_line_offset = end_1_based + 1 if line_truncated else None
-
-        content_truncated = char_end < total_chars
-        next_char_offset = char_end if content_truncated else None
-        returned_chars = len(content)
-        remaining_chars = total_chars - char_end
-        hint = None
-        if content_truncated:
-            hint = (
-                f"Character page truncated: returned {returned_chars} of {total_chars} chars "
-                f"in the selected line range ({remaining_chars} remain after this page). "
-                f"Continue with the same path/offset/limit and char_offset={next_char_offset}."
-            )
 
         return self._result(
             path=path,
@@ -471,13 +340,7 @@ Usage:
             total_lines=total_lines,
             truncated=line_truncated,
             next_offset=next_line_offset,
-            char_offset=safe_char_offset,
-            char_limit=resolved_char_limit,
-            total_chars=total_chars,
-            content_truncated=content_truncated,
-            next_char_offset=next_char_offset,
             file_size_bytes=file_size_bytes,
             sha256=file_sha256,
             encoding_used=encoding_used,
-            hint=hint,
         )
