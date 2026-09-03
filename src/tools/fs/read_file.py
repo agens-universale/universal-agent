@@ -308,11 +308,14 @@ Usage:
         if start_1_based < 1:
             start_1_based = 1
 
+        if limit is not None and limit < 1:
+            # Ноль (и отрицательное) — «не задан»: strict-схема заставляет слать все
+            # поля, и «не использую» модель говорит нулём. Кламп до одной строки
+            # отдавал ОДНУ строку как успех — модель считала файл однострочным.
+            limit = None
         if limit is None:
             end_1_based = total_lines
         else:
-            if limit < 1:
-                limit = 1
             end_1_based = start_1_based + limit - 1
 
         if start_1_based > total_lines:

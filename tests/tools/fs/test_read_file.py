@@ -147,7 +147,7 @@ def test_line_window_sixty_short_lines_is_inline_json(tmp_path):
     lines = [f"code {i}" for i in range(1, 121)]
     text = "\n".join(lines) + "\n"
     p = tmp_path / "mod.py"
-    p.write_text(text, encoding="utf-8")
+    p.write_text(text, encoding="utf-8", newline="")  # иначе на Windows на диске CRLF
     res = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=10, limit=60))
     assert res["ok"] is True
     assert res["start_line"] == 10
@@ -182,7 +182,8 @@ def test_read_offset_limit_validation_and_clamp(tmp_path):
     bad_limit = json.loads(tool(path=str(p), limit="2"))  # type: ignore[arg-type]
     assert bad_limit["ok"] is False and bad_limit["error"]["field"] == "limit"
     clamped = json.loads(tool(path=str(p), offset=0, limit=0))
-    assert clamped["start_line"] == 1 and clamped["end_line"] == 1
+    # offset=0 клампится к 1; limit=0 — «не задан» (до конца файла), не одна строка
+    assert clamped["start_line"] == 1 and clamped["end_line"] == 3
 
 
 def test_single_huge_line_not_sliced_by_read(tmp_path):
@@ -274,3 +275,20 @@ def test_schema_and_prompt_have_line_axis_only():
     assert "truncated" in prompt
     assert "next_offset" in prompt
     assert "session_read_stored_tool_output" not in prompt
+
+
+def test_limit_zero_means_unset_not_one_line(tmp_path):
+    """limit=0 — «не задан» (до конца файла): strict-схема заставляет модель слать
+    все поля, и «не использую» она говорит нулём. Кламп до одной строки отдавал
+    успех с неверными данными — модель считала файл однострочным."""
+    p = tmp_path / "f.txt"
+    p.write_text("l1\nl2\nl3\n", encoding="utf-8", newline="")
+    tool = with_local_ctx(ReadFile)
+
+    zero = json.loads(tool(path=str(p), limit=0))
+    assert zero["ok"] is True
+    assert zero["end_line"] == 3 and zero["content"] == "l1\nl2\nl3\n"
+
+    negative = json.loads(tool(path=str(p), offset=2, limit=-1))
+    assert negative["ok"] is True
+    assert negative["start_line"] == 2 and negative["end_line"] == 3
