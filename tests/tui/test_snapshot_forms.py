@@ -105,20 +105,6 @@ async def _wait_probe_settled(pilot, scr):
     await pilot.pause()
 
 
-def _isolate_config_layers(monkeypatch, tmp_path):
-    """Слои поверх базового config.yml — на tmp (тот же приём, что автофикстура
-    test_settings_voice). Нужны ВСЕМ секциям /settings, не только голосу:
-    `SettingsScreen.__init__` → `_read_origins()` → `config_origin._overlay_paths`
-    читает настоящие `~/.gc/config.local.yml` и `<cwd>/.gc/config.yml`, и стоит
-    любому из них перекрыть адрес, токен, модель или прокси — в кадр домонтируется
-    строка «⚠ действует … — перекрыто». Без подмены кадр чист лишь случайно."""
-    import config as config_mod
-    import mcp_runtime.paths as mcp_paths
-    monkeypatch.setattr(mcp_paths, "managed_config_path",
-                        lambda: tmp_path / "config.local.yml")
-    monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: None)
-
-
 def _app(tmp_path, config=None):
     """Приложение под снимок. Конфиг тот же, что у экрана: вход в секцию /settings
     забирает конфиг у приложения (`_sync_config_from_app`), и с пустым `config={}`
@@ -204,13 +190,12 @@ def test_wizard_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
 
 # --- /settings ---
 
-def test_settings_connection_snapshot(snap_compare, tmp_path, monkeypatch):
+def test_settings_connection_snapshot(snap_compare, tmp_path):
     """/settings → «Подключение»: три поля, галка «без авторизации», строка пробы.
 
     Пресет-лист здесь не раскрыт — в отличие от мастера: адрес уже настроен, а канон
     2026-08-17 поднимает список только на ПУСТОМ поле. Под адресом вместо списка стоит
     постоянная строка «Alt+↓ — показать список»."""
-    _isolate_config_layers(monkeypatch, tmp_path)
     app = _app(tmp_path, _cfg())
     cfg_file = _write_cfg(tmp_path)
 
@@ -233,7 +218,6 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
     # Инъекции fetch у секции «Модель» нет (список берёт `model_picker.fetch_models`
     # прямо на монтировании) — подменяем сам модуль-источник.
     monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **k: _models())
-    _isolate_config_layers(monkeypatch, tmp_path)
     app = _app(tmp_path, _cfg())
     cfg_file = _write_cfg(tmp_path)
 
@@ -252,7 +236,6 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
 
 def test_settings_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
     """/settings → «Голос»: курсор на «Свой endpoint», под ним — четыре поля."""
-    _isolate_config_layers(monkeypatch, tmp_path)
     _isolate_voice_state(monkeypatch, tmp_path)
     app = _app(tmp_path, {"voice": {}})
 

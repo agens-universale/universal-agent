@@ -203,6 +203,14 @@ def test_a_query_without_matches_asks_to_take_it_as_is():
     assert wz._interpret("vllm/Own", _many(30), _many(15)) == ("ask", "vllm/Own")
 
 
+def test_a_superscript_digit_is_a_query_not_a_crash():
+    """Ревью: проверка «это номер» была шире, чем умеет разобрать `int()` —
+    надстрочная `²` проходит `isdigit()`, а `int("²")` падает: мастер ронял
+    трейсбек, и все ответы до этого места терялись. Такой ввод — обычный запрос,
+    который ничего не найдёт."""
+    assert wz._interpret("²", _many(3), _many(3)) == ("ask", "²")
+
+
 def test_current_line_names_the_registry_entry():
     cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
            "slots": {"default": "fast"}}
@@ -336,3 +344,69 @@ def test_model_step_names_its_level():
     io, out = _io([""])
     wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _models3())
     assert any("уровень default" in m for m in out)
+
+
+# --- «сейчас» шага — про слот default, а не про активный уровень ---------------
+
+def _two_level_registry() -> dict:
+    return {"completions_url": "https://h/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer x"},
+            "models": {"fast": {"model": "qwen/qwen3-8b"},
+                       "brain": {"model": "qwen/qwen3-235b"}},
+            "slots": {"default": "fast", "max": "brain"}}
+
+
+def _qwen2() -> list:
+    return [ModelInfo("qwen/qwen3-8b", tool_capable=True),
+            ModelInfo("qwen/qwen3-235b", tool_capable=True)]
+
+
+def test_the_model_step_shows_the_default_slot_not_the_active_level():
+    """Ревью: «сейчас» бралось `effective_model` — резолвом АКТИВНОГО уровня
+    конфига. При `level: max` шаг про слот default показывал модель уровня max с
+    именем записи слота default, галочка «← сейчас» вставала не на ту строку, а
+    сводка после Enter называла другую модель. Шаг задаёт слот default — и
+    «сейчас» говорит про него."""
+    cfg = {**_two_level_registry(), "level": "max"}
+    io, out = _io([""])
+    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _qwen2())
+    assert "  сейчас: qwen/qwen3-8b  (имя записи «fast») · Enter — оставить" in out
+    assert "  1) qwen/qwen3-8b  ← сейчас" in out
+    assert not any("qwen3-235b" in m and "← сейчас" in m for m in out)
+
+
+def test_the_model_step_keeps_showing_the_legacy_model_on_a_flat_config():
+    """Сторож фоллбэка: без реестра слотов нет вовсе, единственная модель конфига —
+    легаси `agent.model`, и действует она на любом уровне (`level` её не сдвигает).
+    Не показать её значило бы отнять «сейчас» у всех конфигов до волны B."""
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer x"},
+           "model": "gigacode_agent_v1.6_rc", "level": "max"}
+    io, out = _io([""])
+    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: None)
+    assert "  сейчас: gigacode_agent_v1.6_rc · Enter — оставить" in out
+
+
+def test_an_unset_default_slot_is_not_shown_as_the_fallback_model():
+    """Реестр есть, слота default нет, а max задан: агент работает моделью max по
+    матрице фоллбэков, но назвать её «сейчас» на шаге про default значило бы
+    сказать «слот задан» там, где он не задан (то же правило, что у под-форм
+    уровней), — и при `level: light` с заданным light ответ зависел бы от уровня."""
+    cfg = {**_two_level_registry(), "slots": {"max": "brain"}}
+    io, out = _io([""])
+    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _qwen2())
+    assert not any(m.startswith("  сейчас:") for m in out)
+    assert not any("← сейчас" in m for m in out)
+
+
+def test_a_single_entry_registry_without_slots_is_still_shown_as_current():
+    """Живой стенд чинилки: слот default жил в отброшенном профиле, в базе — одна
+    запись реестра и ни одного слота. Резолв тут от уровня не зависит (единственная
+    модель реестра работает на любом), и «сейчас» обязана её назвать — как и до
+    правки про активный уровень; без имени записи в скобках: слот не задан."""
+    cfg = {**_two_level_registry(), "models": {"fast": {"model": "qwen/qwen3-8b"}},
+           "slots": {}, "level": "max"}
+    io, out = _io([""])
+    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _qwen2())
+    assert "  сейчас: qwen/qwen3-8b · Enter — оставить" in out
+    assert "  1) qwen/qwen3-8b  ← сейчас" in out

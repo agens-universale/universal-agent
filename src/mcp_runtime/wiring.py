@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from mcp_runtime.paths import managed_config_path
+from mcp_runtime import paths as mcp_paths
 
 _PLACEHOLDER_RE = re.compile(r"\{[a-z_]+\}")
 
@@ -40,14 +40,14 @@ def read_snippet(recipe_dir: Path) -> dict[str, Any]:
 
 
 def load_managed() -> dict[str, Any]:
-    path = managed_config_path()
+    path = mcp_paths.managed_config_path()
     if not path.is_file():
         return {}
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def save_managed(data: dict[str, Any]) -> None:
-    path = managed_config_path()
+    path = mcp_paths.managed_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 

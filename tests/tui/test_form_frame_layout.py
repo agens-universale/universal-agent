@@ -93,7 +93,6 @@ async def test_selected_row_is_pulled_into_the_capped_frame(tmp_path):
     import model_picker
     import tui.app as app_mod
     from model_picker import ModelInfo
-    from tests.tui.conftest import _isolated_config_layers
     from tests.tui.test_settings_models_section import _SECTION, _write_cfg
     from tests.tui.test_settings_screen import _loaded, _mk_screen
 
@@ -102,8 +101,7 @@ async def test_selected_row_is_pulled_into_the_capped_frame(tmp_path):
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
-    with _isolated_config_layers(tmp_path), \
-         mock.patch.object(model_picker, "fetch_models",
+    with mock.patch.object(model_picker, "fetch_models",
                            lambda *a, **k: [ModelInfo(id="test-model")]):
         async with app.run_test(size=_TINY) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))
@@ -177,7 +175,6 @@ async def test_delete_confirm_banner_is_pulled_into_view(tmp_path):
     import model_picker
     import tui.app as app_mod
     from model_picker import ModelInfo
-    from tests.tui.conftest import _isolated_config_layers
     from tests.tui.test_settings_models_section import _SECTION, _write_cfg
     from tests.tui.test_settings_screen import _loaded, _mk_screen
 
@@ -186,8 +183,7 @@ async def test_delete_confirm_banner_is_pulled_into_view(tmp_path):
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
-    with _isolated_config_layers(tmp_path), \
-         mock.patch.object(model_picker, "fetch_models",
+    with mock.patch.object(model_picker, "fetch_models",
                            lambda *a, **k: [ModelInfo(id="test-model")]):
         async with app.run_test(size=_TINY) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))
@@ -225,7 +221,6 @@ async def test_env_overwrite_confirm_is_pulled_into_view(tmp_path):
     его бы не застал (тот работает от пересборки). Цена промаха здесь выше обычной:
     Enter вслепую подменяет ссылку на переменную её значением, то есть кладёт секрет
     открытым текстом в файл, который коммитят."""
-    from tests.tui.conftest import _isolated_config_layers
     from tui.app import TuiApp
     from tui.screens.settings import SettingsScreen
 
@@ -238,22 +233,20 @@ async def test_env_overwrite_confirm_is_pulled_into_view(tmp_path):
         "agent:\n"
         '  model: "test-model"\n', encoding="utf-8")
     app = TuiApp(config=_cfg())
-    with _isolated_config_layers(tmp_path):
-        async with app.run_test(size=_TINY) as pilot:
-            scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
-                                 on_apply=lambda: None, probe_fn=ok_probe())
-            app.push_screen(scr)
-            await pilot.pause()
-            open_settings_section(scr, "Подключение")
-            await pilot.pause()
-            scr._do_save(0, {"completions_url": "http://new/v1/chat/completions"})
-            await pilot.pause()
-            await _assert_revealed(pilot, scr, "#set-envconfirm")
+    async with app.run_test(size=_TINY) as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=ok_probe())
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        scr._do_save(0, {"completions_url": "http://new/v1/chat/completions"})
+        await pilot.pause()
+        await _assert_revealed(pilot, scr, "#set-envconfirm")
 
 
 async def test_profile_name_prompt_is_pulled_into_view(tmp_path):
     """Поле ввода имени профиля — тот же канон: печатать вслепую нельзя."""
-    from tests.tui.conftest import _isolated_config_layers
     from tests.tui.test_settings_models_section import _write_cfg
     from tests.tui.test_settings_screen import _loaded, _mk_screen
     import tui.app as app_mod
@@ -263,16 +256,15 @@ async def test_profile_name_prompt_is_pulled_into_view(tmp_path):
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
-    with _isolated_config_layers(tmp_path):
-        async with app.run_test(size=_TINY) as pilot:
-            scr = _mk_screen(config=cfg, config_path=str(cfg_file))
-            app.push_screen(scr)
-            await pilot.pause()
-            open_settings_section(scr, "Профили")
-            await pilot.pause()
-            await pilot.press("n")
-            await pilot.pause()
-            await _assert_revealed(pilot, scr, "#set-profile-name")
+    async with app.run_test(size=_TINY) as pilot:
+        scr = _mk_screen(config=cfg, config_path=str(cfg_file))
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Профили")
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        await _assert_revealed(pilot, scr, "#set-profile-name")
 
 
 async def test_settings_menu_cursor_is_pulled_into_view(tmp_path):
@@ -341,7 +333,6 @@ async def test_notice_does_not_outrank_the_cursor(tmp_path, h):
     import model_picker
     import tui.app as app_mod
     from model_picker import ModelInfo
-    from tests.tui.conftest import _isolated_config_layers
     from tests.tui.test_settings_models_section import _SECTION, _write_cfg
     from tests.tui.test_settings_screen import _loaded, _mk_screen
 
@@ -350,8 +341,7 @@ async def test_notice_does_not_outrank_the_cursor(tmp_path, h):
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
-    with _isolated_config_layers(tmp_path), \
-         mock.patch.object(model_picker, "fetch_models",
+    with mock.patch.object(model_picker, "fetch_models",
                            lambda *a, **k: [ModelInfo(id="test-model")]):
         async with app.run_test(size=(80, h)) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))

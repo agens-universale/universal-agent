@@ -218,14 +218,18 @@ _PROFILE_EMPTY_HINT = (
     "light/default/max выключены, работает модель основного конфига.\n"
     "Добавьте запись клавишей n — реестр заведётся в профиле, уровни включатся."
 )
-# Своего реестра нет, но действует реестр активного профиля: уровни работают, и
-# обещать обратное нельзя. Говорим, ЧЕЙ реестр действует и что даст запись здесь —
-# без этого человек не поймёт, почему «пусто», а уровни живы.
-_EMPTY_UNDER_PROFILE_HINT = (
-    "Реестра моделей нет в основном конфиге — уровни light/default/max работают "
-    "записями активного профиля «{profile}».\n"
+# Своего реестра нет, но действует реестр слоя выше: уровни работают, и обещать
+# обратное нельзя. Говорим, ЧЕЙ реестр действует и что даст запись здесь — без
+# этого человек не поймёт, почему «пусто», а уровни живы. `{source}` — подпись
+# перекрывшего слоя словами происхождения (`config_origin.overlay_label`:
+# «профилем work (глобальным)», «.gc/config.yml в проекте», managed-файл): слоёв
+# над основным конфигом три, и звать любой из них «активным профилем» значило бы
+# врать о двух, а без профиля — подставлять пустое имя.
+_EMPTY_UNDER_OVERLAY_HINT = (
+    "Реестра моделей нет в основном конфиге, но уровни light/default/max работают — "
+    "реестр перекрыт {source}.\n"
     "Добавьте модель, чтобы завести реестр и здесь: записи основного конфига "
-    "действуют, когда профиль их не перекрывает."
+    "действуют, когда слой выше их не перекрывает."
 )
 _NO_ADDRESS_HINT = ("адрес не задан ни у записи, ни в «Подключении» — "
                     "по такой записи запрос не уйдёт")
@@ -599,9 +603,7 @@ class ModelsSectionEditor(Vertical):
     """
 
     def __init__(self, *, target, template: str, is_profile: bool = False,
-                 base_registry=None,
-        overlay_registry=None,
-        overlay_profile: str = "", stack_base=None,
+                 base_registry=None, overlay_origin=None, stack_base=None,
                  effective_url: str = "",
                  effective_auth: str | None = None, verify: bool = True,
                  config_proxy: str | None = None, presets=(),
@@ -626,13 +628,16 @@ class ModelsSectionEditor(Vertical):
         # тени нет вовсе (основная секция): эффективный список равен своему, и ни
         # одна строка секции не меняет поведения.
         self._base_registry = base_registry
-        # Реестр, действующий НАД файлом цели (активный профиль), и его имя. Это не
-        # тень: тень лежит ПОД целью и наследуется, а этот слой цель перекрывает.
-        # Знать про него секции нужно ровно затем, чтобы не врать о рантайме, когда
-        # своего реестра нет: уровни в этом случае работают, а легаси-редактор —
-        # нет, `agent.model` под живым реестром не действует.
-        self._overlay_registry = overlay_registry
-        self._overlay_profile = overlay_profile or ""
+        # Происхождение реестра НАД файлом цели (`config_origin.Origin` ключа `models`:
+        # какой слой перекрыл — профиль, проектный конфиг, managed-файл — и что
+        # действует) — ПРОВАЙДЕР, как и тень: спрашивается на каждую сборку тела и
+        # читает диск, а не снимок конфига приложения — тот отстаёт от записи ровно на
+        # зазор между перестройкой секции и перечиткой. Это не тень: тень лежит ПОД
+        # целью и наследуется, а этот слой цель перекрывает. Знать про него секции
+        # нужно ровно затем, чтобы не врать о рантайме, когда своего реестра нет:
+        # уровни в этом случае работают, а легаси-редактор — нет, `agent.model` под
+        # живым реестром не действует. `None` — слоёв над целью не бывает (профиль).
+        self._overlay_origin = overlay_origin
         self._effective_url = effective_url or ""
         self._effective_auth = effective_auth
         self._verify = verify
@@ -786,16 +791,23 @@ class ModelsSectionEditor(Vertical):
         реализации существовать не должно."""
         return not effective_registry_nonempty(self._document, self._shadow)
 
-    @property
-    def _overlaid_by_profile(self) -> bool:
-        """Своего реестра нет, а над файлом действует реестр активного профиля.
+    def _registry_overlay(self):
+        """Слой, перекрывший реестр цели непустым реестром, — `Origin` либо None:
+        своего реестра нет, а над файлом действуют записи слоя выше (активный
+        профиль, проектный `.gc/config.yml`, managed-файл — любой из трёх).
 
         Тогда уровни РАБОТАЮТ, а легаси-редактор мёртв: `agent.model` под живым
         реестром не действует. Ни то, ни другое пустое состояние само по себе не
-        знает — оно считает по одному документу цели."""
-        if not self.registry_empty or self._is_profile:
-            return False
-        return bool(self._overlay_registry() if self._overlay_registry else {})
+        знает — оно считает по одному документу цели. Какой именно слой — знает
+        только происхождение (`config_origin.origins`): секция его не переспрашивает
+        и не выдумывает — прежняя редакция звала любой слой «активным профилем» и
+        без профиля подставляла в подсказку пустое имя."""
+        if not self.registry_empty or self._is_profile or self._overlay_origin is None:
+            return None
+        origin = self._overlay_origin()
+        if origin is None or not origin.is_overridden or not origin.effective:
+            return None
+        return origin
 
     def _legacy_default(self) -> bool:
         """Состояние легаси-редактора «по умолчанию» для текущего файла: пустой реестр
@@ -803,9 +815,10 @@ class ModelsSectionEditor(Vertical):
         не бывает вовсе. Решает ОДНО место: тот же вопрос задают конструктор, `_reload`
         и выход из формы, и разойтись им нечем.
 
-        Реестр активного профиля выключает и его: править `agent.model`, который под
-        живым реестром не действует, — работа вхолостую."""
-        return self.registry_empty and not self._is_profile and not self._overlaid_by_profile
+        Реестр слоя выше выключает и его: править `agent.model`, который под живым
+        реестром не действует, — работа вхолостую."""
+        return (self.registry_empty and not self._is_profile
+                and self._registry_overlay() is None)
 
     def _reserve_model(self) -> str:
         """Легаси-модель `agent.model` из файла цели либо пусто.
@@ -1328,11 +1341,15 @@ class ModelsSectionEditor(Vertical):
             yield self._legacy
             yield from self._legacy_hint_widgets()
             return
-        if self._overlaid_by_profile:
+        overlay = self._registry_overlay()
+        if overlay is not None:
             # Вход в реестр — клавишей, как и в пустом состоянии профиля: строке
-            # «+ добавить модель…» здесь не на чем стоять, список пуст.
+            # «+ добавить модель…» здесь не на чем стоять, список пуст. Слой назван
+            # словами происхождения (`overlay_label`) — теми же, какими экран
+            # подписывает перекрытые поля: «перекрыто профилем work (глобальным)».
+            from config_origin import overlay_label
             yield Static(
-                _EMPTY_UNDER_PROFILE_HINT.format(profile=self._overlay_profile),
+                _EMPTY_UNDER_OVERLAY_HINT.format(source=overlay_label(overlay)),
                 classes="set-hint set-dyn", markup=False)
             return
         if self.registry_empty:
@@ -1734,12 +1751,15 @@ class ModelsSectionEditor(Vertical):
         return True
 
     def alt_down(self) -> bool:
+        # Гейт пикера — первым, как у `move`/`enter`/`escape`/`clear_token`: вопрос
+        # о слоте висит НАД живой формой, и спрошенная раньше него форма раскрывала
+        # под ним второй список (пресетов адреса) — две ленты на один Enter.
+        if self._picker is not None:
+            return False        # список уже раскрыт, а перечитывать в нём нечего
         if self._form is not None:
             return self._form.reload_models() or self._form.reload_presets()
         if self._legacy_open and self._legacy is not None:
             return bool(self._legacy.reload())
-        if self._picker is not None:
-            return False        # список уже раскрыт, а перечитывать в нём нечего
         row = self._row_at_cursor()
         if row is not None and row["kind"] in ("slot", "assign"):
             # Канон клавиш: `Alt+↓` — раскрыть список. Список у строки тот же, что и

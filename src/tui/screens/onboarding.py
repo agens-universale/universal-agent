@@ -147,7 +147,7 @@ class OnboardingScreen(Screen):
 
     def __init__(self, config, config_path, *, review_all, on_commit,
                  fetch=None, mcp=None, voice=None, probe=None,
-                 deactivate_profile=False) -> None:
+                 deactivate_profile=False, degraded_note=None) -> None:
         super().__init__()
         self._config = config
         self._config_path = config_path
@@ -158,6 +158,12 @@ class OnboardingScreen(Screen):
         # один флаг, а не копия `RepairLoad`: экрану от лестницы нужен ровно этот
         # ответ.
         self._deactivate_profile = deactivate_profile
+        # Текст деградации загрузки (`RepairLoad.message`, None — деградации не было).
+        # Показывается на самом экране, а не только рантайм-уведомлением: под мастером
+        # глобальная навигация заблокирована намеренно (`BLOCKS_GLOBAL_NAV`), и до его
+        # финала уведомление достать нечем — человек проходил все шаги, не понимая,
+        # почему поля выглядят иначе, чем его файл (живой смок).
+        self._degraded_note = degraded_note
         # Хранится ради теста на wiring (app.py передаёт флаг, но сам его не читает) —
         # сами гейты на review_all внутри экрана сняты (сырой документ различает
         # «первичный запуск / уже настроен» сам по себе, см. _raw_conn), поэтому
@@ -214,6 +220,16 @@ class OnboardingScreen(Screen):
                     yield Static(self._stepper_text(), id="onb-stepper", markup=False)
                     yield Static(self._summary_text(), id="onb-summary",
                                  classes="onb-hint", markup=False)
+                    # Обе плашки — отдельными строками одного вида, и деградация
+                    # стоит первой: она объясняет СОСТОЯНИЕ («вот почему поля не
+                    # такие, как в вашем файле»), а вердикт о слое — БУДУЩЕЕ записи
+                    # («вот что перекроет ваш выбор»); второе — следствие первого,
+                    # когда финал снимает профиль. Общим блоком с заголовком их не
+                    # сводим: заголовков у мастера нет нигде, а склеенные в один
+                    # абзац два длинных предложения читаются как одно.
+                    if self._degraded_note:
+                        yield Static(self._degraded_note, id="onb-degraded-warn",
+                                     classes="onb-warn", markup=False)
                     profile_note = self._layer_note()
                     if profile_note:
                         yield Static(profile_note, id="onb-profile-warn",
@@ -285,11 +301,12 @@ class OnboardingScreen(Screen):
             t.append(name, style=f"bold {style}" if i == self._step else style)
         return t
 
-    def _effective_model(self) -> str:
-        """Действующая модель конфига запуска (`onboarding.effective_model`).
-        Знание общее с плоским мастером и живёт в ядре: вторая его редакция
-        разошлась бы с первой на первой же правке."""
-        return onboarding.effective_model(self._config or {})
+    def _model_step_current(self) -> str:
+        """Что шаг «Модель» называет текущим (`onboarding.model_step_current`).
+        Знание общее с плоским мастером и живёт в ядре: вторая его редакция уже
+        расходилась с первой — тот же шаг здесь показывал модель АКТИВНОГО уровня,
+        хотя задаёт слот `default`."""
+        return onboarding.model_step_current(self._config or {})
 
     def _assigned_level_model(self, level: str) -> str:
         """Модель, явно назначенная уровню (`onboarding.assigned_level_model`)."""
@@ -306,9 +323,15 @@ class OnboardingScreen(Screen):
         """Чем витрины мастера (лента-сводка и подтверждение) заполняют то, чего
         человек сам не набрал, — резолвнутым конфигом запуска. При активном профиле
         это значения его слоя: витрина говорит о том, чем агент реально будет
-        работать, а плашка рядом объясняет, откуда они (спека §5)."""
+        работать, а плашка рядом объясняет, откуда они (спека §5).
+
+        Модель — та же, о которой говорит шаг «Модель» (слот `default`), а не резолв
+        активного уровня: обе витрины называют её именем СЛОТА («модель default:»
+        на подтверждении, «модель:» в ленте рядом с ним), и при `level: max` на одном
+        экране стояли «модель default: <модель max>» и «модель max: <она же>». Слой
+        профиля от этого никуда не девается — читается тот же `self._config`."""
         return {"completions_url": self._config.get("completions_url"),
-                "model": self._effective_model(),
+                "model": self._model_step_current(),
                 "Authorization": (self._config.get("chat_completion_headers") or {}
                                   ).get("Authorization")}
 
@@ -534,7 +557,7 @@ class OnboardingScreen(Screen):
             body.mount(Static(_of.MODEL_STEP_HINT, classes="onb-hint onb-dyn set-spaced",
                               markup=False))
             endpoint, auth = self._endpoint_auth()
-            cfg_model = self._effective_model()
+            cfg_model = self._model_step_current()
             ed = ModelEditor(current=self._values.get("model", ""), endpoint=endpoint,
                              auth=auth, verify=bool(self._config.get("use_ssl", True)),
                              fetch=self._fetch,
@@ -1554,10 +1577,14 @@ class OnboardingScreen(Screen):
                 self._config_path, values,
                 deactivate_profile=self._deactivate_profile)
         except onboarding.PartialWriteError as exc:
-            # Записи реестра ушли первой транзакцией и уже на диске — то же
-            # правило, что у ветки `missing` ниже: нетронутый файл не обещаем.
+            # Часть записи уже на диске — то же правило, что у ветки `missing` ниже:
+            # нетронутый файл не обещаем. ЧТО именно легло, знает только писатель
+            # (`written`): своя редакция состава называла реестр и там, где ушёл один
+            # указатель профиля, — человек оставался уверен, что профиль активен,
+            # пока следующий старт не шёл без него. Слова — общие с плоским мастером.
             self.query_one("#onb-body", Static).update(
-                f"✗ поля не записаны: {exc} — записи моделей при этом уже в конфиге")
+                f"✗ остальное не записано: {exc} — при этом уже: "
+                + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written))
             return False
         except ValueError as exc:
             self.query_one("#onb-body", Static).update(f"✗ конфиг не записан: {exc}")

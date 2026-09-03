@@ -329,9 +329,6 @@ async def test_config_stack_texts_tracks_a_profile_pointed_from_the_project_laye
     нём ничего не скажет: набор отслеживаемых файлов не включал бы профиль вовсе, и
     правка его файла извне не меняла бы ключ кэша — глиф врал бы до конца сессии."""
     import tui.app as app_mod
-    monkeypatch.setattr(
-        "mcp_runtime.paths.managed_config_path",
-        lambda: tmp_path / "no-managed-overlay-here.yml")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -371,9 +368,6 @@ async def test_config_stack_texts_follows_the_project_layer_when_it_conflicts_wi
     из сырого документа базы: иначе кэш следит не за тем файлом вовсе."""
     from pathlib import Path
     import tui.app as app_mod
-    monkeypatch.setattr(
-        "mcp_runtime.paths.managed_config_path",
-        lambda: tmp_path / "no-managed-overlay-here.yml")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -2253,17 +2247,6 @@ async def test_save_warns_that_session_counters_are_reset(tmp_path, monkeypatch)
 # --- перекрытие оверлеем: /settings правит базовый файл, а действует оверлей ---
 
 
-@pytest.fixture
-def no_managed_overlay(tmp_path, monkeypatch):
-    """Иначе тесты читают НАСТОЯЩИЙ ~/.gc/config.local.yml разработчика: на машине, где
-    managed-оверлей задаёт agent.model, «перекрытие» появится из ниоткуда (или наоборот).
-    Тем же приёмом, что и в tests/test_config_origin.py."""
-    monkeypatch.setattr(
-        "mcp_runtime.paths.managed_config_path",
-        lambda: tmp_path / "no-managed-overlay-here.yml",
-    )
-
-
 def _screen_text(scr):
     """Весь видимый текст экрана (подписи мы ищем среди Static)."""
     return " ".join(str(w.render()) for w in scr.query(Static))
@@ -2294,7 +2277,7 @@ def _project_overlay(tmp_path, monkeypatch, text="agent:\n  model: proj-model\n"
     return proj
 
 
-async def test_overridden_field_shows_effective_value_and_source(tmp_path, monkeypatch, no_managed_overlay):
+async def test_overridden_field_shows_effective_value_and_source(tmp_path, monkeypatch):
     """Поле перекрыто project-оверлеем → в поле значение файла, в подписи — действующее."""
     import tui.app as app_mod
     cfg_file = _write_cfg(tmp_path, model='"base-model"')
@@ -2311,7 +2294,7 @@ async def test_overridden_field_shows_effective_value_and_source(tmp_path, monke
         assert proj.exists()
 
 
-async def test_saving_overridden_field_warns_it_will_not_apply(tmp_path, monkeypatch, no_managed_overlay):
+async def test_saving_overridden_field_warns_it_will_not_apply(tmp_path, monkeypatch):
     """Сохранение перекрытого поля: записано в базовый файл, но не действует — сказать честно."""
     import tui.app as app_mod
     cfg_file = _write_cfg(tmp_path, model='"base-model"')
@@ -2333,7 +2316,7 @@ async def test_saving_overridden_field_warns_it_will_not_apply(tmp_path, monkeyp
     assert "proj-model" in (proj / ".gc" / "config.yml").read_text(encoding="utf-8")
 
 
-async def test_plain_value_has_no_origin_hint(tmp_path, monkeypatch, no_managed_overlay):
+async def test_plain_value_has_no_origin_hint(tmp_path, monkeypatch):
     """Ничего не перекрыто, ссылок нет → подписи нет: экран не шумит."""
     import tui.app as app_mod
     cfg_file = _write_cfg(tmp_path, model='"base-model"')
@@ -2348,7 +2331,7 @@ async def test_plain_value_has_no_origin_hint(tmp_path, monkeypatch, no_managed_
         assert "переменная подставилась" not in text
 
 
-async def test_auth_override_shows_masked_effective_value(tmp_path, monkeypatch, no_managed_overlay):
+async def test_auth_override_shows_masked_effective_value(tmp_path, monkeypatch):
     """Секция «Авторизация» перекрыта оверлеем → подпись есть, но секрет замаскирован
     (баг: подписи для секции 1 не было вовсе — экран молчал о перекрытии токена)."""
     import tui.app as app_mod
@@ -2368,7 +2351,7 @@ async def test_auth_override_shows_masked_effective_value(tmp_path, monkeypatch,
         assert "proj-token" not in text                    # секрет не открытым текстом
 
 
-async def test_env_ref_and_override_hints_stack(tmp_path, monkeypatch, no_managed_overlay):
+async def test_env_ref_and_override_hints_stack(tmp_path, monkeypatch):
     """В файле ссылка ${ENV:VAR} И поле перекрыто оверлеем → складываются обе строки."""
     import tui.app as app_mod
     monkeypatch.setenv("GC_MODEL", "resolved-model")
@@ -2384,7 +2367,7 @@ async def test_env_ref_and_override_hints_stack(tmp_path, monkeypatch, no_manage
         assert "перекрыто" in text
 
 
-async def test_model_picker_marks_env_ref_as_env_not_missing(tmp_path, monkeypatch, no_managed_overlay):
+async def test_model_picker_marks_env_ref_as_env_not_missing(tmp_path, monkeypatch):
     """model: ${ENV:VAR} — это ссылка, а не «модель пропала с сервера». Так и пометить."""
     import tui.app as app_mod
     monkeypatch.setenv("GC_MODEL", "resolved-model")
@@ -2400,7 +2383,7 @@ async def test_model_picker_marks_env_ref_as_env_not_missing(tmp_path, monkeypat
         assert "нет на сервере" not in text
 
 
-async def test_overridden_save_keeps_warn_detail(tmp_path, monkeypatch, no_managed_overlay):
+async def test_overridden_save_keeps_warn_detail(tmp_path, monkeypatch):
     """overridden-ветка _do_save раньше обрывалась до append(warn_detail) — предупреждение
     о непройденной probe-проверке молча терялось. Оба сообщения должны дойти."""
     import tui.app as app_mod
@@ -2422,8 +2405,7 @@ async def test_overridden_save_keeps_warn_detail(tmp_path, monkeypatch, no_manag
         assert "проверить не удалось" in text
 
 
-async def test_overridden_save_still_reports_reset_counters(tmp_path, monkeypatch,
-                                                            no_managed_overlay):
+async def test_overridden_save_still_reports_reset_counters(tmp_path, monkeypatch):
     """Перекрытие поля не отменяет побочных последствий сохранения: _on_apply пересобрал
     конфиг и обнулил счётчики сессии — сказать надо и об этом, а не одно вместо другого."""
     import tui.app as app_mod
@@ -2450,8 +2432,7 @@ async def test_overridden_save_still_reports_reset_counters(tmp_path, monkeypatc
         assert "счётчики токенов сессии обнулены" in text, f"потеряно предупреждение: {text!r}"
 
 
-async def test_non_string_auth_in_overlay_does_not_crash_section(tmp_path, monkeypatch,
-                                                                 no_managed_overlay):
+async def test_non_string_auth_in_overlay_does_not_crash_section(tmp_path, monkeypatch):
     """`Authorization: 12345` в оверлее — валидный YAML: маскирование не должно ронять
     монтирование секции (значение приходит из чужого файла, его тип не гарантирован)."""
     import tui.app as app_mod
@@ -2470,8 +2451,7 @@ async def test_non_string_auth_in_overlay_does_not_crash_section(tmp_path, monke
         assert "12345" not in text                      # секрет (пусть и числом) — под маской
 
 
-async def test_overridden_model_row_is_not_called_current(tmp_path, monkeypatch,
-                                                          no_managed_overlay):
+async def test_overridden_model_row_is_not_called_current(tmp_path, monkeypatch):
     """Модель из файла перекрыта → в списке она «в файле», а не «текущая»: экран не может
     одновременно утверждать, что действует она и что действует оверлей."""
     import tui.app as app_mod

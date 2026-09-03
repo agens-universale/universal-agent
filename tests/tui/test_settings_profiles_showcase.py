@@ -28,16 +28,6 @@ def _fake_probe(result=None):
     return probe_fn
 
 
-@pytest.fixture(autouse=True)
-def _no_managed_overlay(tmp_path, monkeypatch):
-    """Без этого value-origin/активация читают НАСТОЯЩИЙ ~/.gc/config.local.yml
-    разработчика (тот же приём, что и tests/test_config_origin.py)."""
-    monkeypatch.setattr(
-        "mcp_runtime.paths.managed_config_path",
-        lambda: tmp_path / "no-managed-overlay-here.yml",
-    )
-
-
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -717,7 +707,7 @@ def test_onboarding_note_for_registry_from_layer_above_base(tmp_path, monkeypatc
     """Спека §11 «любой источник»: действующий реестр пришёл проектным слоем — то,
     что мастер запишет в базовый config.yml, этот слой перекроет, и выбор человека
     не подействует. Молчать здесь нельзя."""
-    import config as cfg_mod
+    from config_modules import env_vars
     from onboarding import overriding_layer_note
     base = tmp_path / "config.yml"
     base.write_text('profile: ""\n', encoding="utf-8")
@@ -725,7 +715,7 @@ def test_onboarding_note_for_registry_from_layer_above_base(tmp_path, monkeypatc
     project.parent.mkdir(parents=True, exist_ok=True)
     project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
                        encoding="utf-8")
-    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: str(project))
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(project))
     note = overriding_layer_note({"models": {"proj": {}}}, str(base))
     assert note is not None and "перекроет" in note
 

@@ -30,16 +30,6 @@ _BASE_URL = "http://base-host/v1/chat/completions"
 _MERGED_URL = "http://merged-host/v1/chat/completions"
 
 
-@pytest.fixture(autouse=True)
-def _no_managed_overlay(tmp_path, monkeypatch):
-    """Без этого происхождение полей читает НАСТОЯЩИЙ ~/.gc/config.local.yml
-    разработчика (тот же приём, что в tests/tui/test_profiles_crud.py)."""
-    monkeypatch.setattr(
-        "mcp_runtime.paths.managed_config_path",
-        lambda: tmp_path / "no-managed-overlay-here.yml",
-    )
-
-
 def _base_config_text(*, registry: bool = True, assign: bool = False) -> str:
     """Базовый config.yml — цель ОСНОВНОЙ секции и источник тени.
 
@@ -487,6 +477,42 @@ async def test_a_shadowed_own_entry_does_not_promise_an_empty_registry_or_broken
         assert "ссылки снимутся" not in banner         # каскад их сохранит
         assert "slots.default" not in banner
         assert "assign.summary" not in banner
+
+
+async def test_removal_from_an_inactive_profile_is_judged_on_its_own_stack(
+        tmp_path, monkeypatch):
+    """Открыт НЕАКТИВНЫЙ профиль (указатель базы — на другой, `a`), у обоих есть
+    запись `x`, у открытого на неё смотрит `slots.default`. Стек вопросов об
+    удалении строился по указателю: «алиас переживёт» (он есть в `a`), баннер
+    молчал о ссылке, каскад её не трогал — в файле оставался висячий слот, и
+    валидатор (для неактивного — фаза 1) его не видел; падала уже активация.
+    Стек открытого профиля — «база + он сам»: баннер называет ссылку, каскад
+    снимает её вместе с записью."""
+    base = ('profile: "a"\n'
+            "level: default\n"
+            "backend:\n"
+            f'  completions_url: "{_BASE_URL}"\n'
+            "agent:\n"
+            '  model: "test-model"\n')
+    _write(tmp_path / "base" / "profiles" / "a.yml",
+           'models:\n  x:\n    model: "a-x"\n')
+    profile = 'models:\n  x:\n    model: "work-x"\nslots:\n  default: "x"\n'
+    async with _profile_view(tmp_path, monkeypatch, base=base, profile=profile) \
+            as (pilot, scr, ed):
+        assert (scr._config.get("profile") or None) != "work"     # предпосылка: не активен
+        _cursor_to(ed, "entry", alias="x")
+        await pilot.press("delete")
+        await pilot.pause()
+        banner = _confirm_banner(ed)
+        assert "На неё ссылаются slots.default — ссылки снимутся вместе с ней." in banner
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "удалена" in _flash(scr)
+    doc = _doc(_profile_path(tmp_path))
+    assert (doc.get("models") or {}) == {}
+    assert (doc.get("slots") or {}) == {}                # висячего слота нет
+    # Соседний профиль, объявлявший ту же запись, остался как был.
+    assert _doc(tmp_path / "base" / "profiles" / "a.yml")["models"] == {"x": {"model": "a-x"}}
 
 
 async def test_the_registry_footer_promises_by_row_origin(tmp_path, monkeypatch):

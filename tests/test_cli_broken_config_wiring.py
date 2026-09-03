@@ -63,6 +63,74 @@ def test_main_prints_explanation_for_missing_profile(monkeypatch, tmp_path, caps
     assert 'профиль "ghost" не найден' in err
 
 
+def test_main_explains_the_profile_from_the_flag_not_the_pointer(monkeypatch, tmp_path, capsys):
+    """Ревью (H1): `--profile broken`, сломан именно он — объяснение резолвило
+    профиль указателем из файла (его нет), карта называла одну базу, совет —
+    «поправить slots.default в базовом файле» (где ключ верный), подсказки
+    `--profile ""` не было. Объяснение обязано строиться по профилю, который
+    действовал в сессии."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
+                        lambda: tmp_path / "config.local.yml")
+    base = tmp_path / "base.yml"
+    base.write_text(
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n'
+        "models:\n  flash: {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "profiles").mkdir()
+    profile = tmp_path / "profiles" / "broken.yml"
+    profile.write_text("slots:\n  default: strong\n", encoding="utf-8")
+
+    _reload_arg_parser_with_argv(
+        ["gc-cli", "--config", str(base), "--profile", "broken", "-q", "x"], monkeypatch)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    rc = cli.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert f"поправить slots.default в:  {profile}" in err
+    assert f"в:  {base}" not in err
+    assert f"{profile}   (активен" in err
+    assert 'gc-cli --profile ""' in err
+
+
+def test_main_names_the_flag_when_the_profile_in_it_does_not_exist(monkeypatch, tmp_path, capsys):
+    """Ревью (H1): опечатка в `--profile` — советовали «поправить файл: <база>» и
+    `--reset-config`, которые ни при чём. Сказать прямо: имя пришло из флага,
+    такого профиля нет; исправить имя или запустить без профиля."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
+                        lambda: tmp_path / "config.local.yml")
+    base = tmp_path / "base.yml"
+    base.write_text(
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n'
+        "models:\n  flash: {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text("slots:\n  default: flash\n", encoding="utf-8")
+
+    _reload_arg_parser_with_argv(
+        ["gc-cli", "--config", str(base), "--profile", "wrok", "-q", "x"], monkeypatch)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    rc = cli.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert 'профиль "wrok" не найден' in err
+    assert "--profile" in err.split("Что сделать:")[1]
+    assert "поправить файл" not in err
+    assert "--reset-config" not in err
+    assert 'gc-cli --profile ""' in err
+
+
 # --- `--init-config` — «чинилка» обязана работать именно на сломанном конфиге ---
 
 
@@ -143,6 +211,50 @@ def test_run_init_returns_1_when_wizard_answers_cannot_fix_the_file(
     assert cli._run_init() == 1
 
 
+def _broken_project_layer_stand(tmp_path, monkeypatch):
+    """Ревью (H3): исправная база, в проектном `.gc/config.yml` слот на
+    несуществующий алиас — все ступени лестницы накладывают этот слой, и даже
+    шаблон не собирается."""
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "https://openrouter.ai/api/v1/chat/completions"\n'
+        "  chat_completion_headers:\n"
+        '    Authorization: "Bearer sk-user-token"\n'
+        "models:\n  fast:\n"
+        '    model: "qwen/qwen3-8b"\n',
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    (project / ".gc").mkdir(parents=True)
+    overlay = project / ".gc" / "config.yml"
+    overlay.write_text('slots:\n  default: "ghost"\n', encoding="utf-8")
+    monkeypatch.chdir(project)
+    return overlay
+
+
+def test_run_init_explains_a_broken_project_layer_instead_of_a_traceback(
+    monkeypatch, tmp_path, capsys
+):
+    """Ревью (H3): `--init-config` на сломанном проектном слое падал трейсбеком
+    (ступень шаблона не перехвачена), а обычный старт — человеческим
+    объяснением. Мастером это не чинится (он пишет в пользовательский файл, а
+    сломан оверлей): то же объяснение, что на обычном старте, с называнием
+    оверлея, код 1; до мастера не доходим."""
+    overlay = _broken_project_layer_stand(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    reached = []
+    import onboarding_wizard
+    monkeypatch.setattr(onboarding_wizard, "run", lambda *a, **k: reached.append(1) or True)
+
+    assert cli._run_init() == 1
+    assert reached == []
+    err = capsys.readouterr().err
+    assert "Конфиг не загружается" in err
+    assert f"поправить slots.default в:  {overlay}" in err
+    assert "Traceback" not in err
+
+
 # --- Сломан ТОЛЬКО профиль: данные человека не выбрасываются ----------------
 
 _STAND_BASE = (
@@ -208,6 +320,20 @@ def test_run_init_tells_which_layer_was_dropped(monkeypatch, tmp_path, capsys):
     assert "пакетном шаблоне" not in err     # шаблон не подставлялся — врать нельзя
 
 
+def test_run_init_passive_guide_on_broken_profile_tells_the_truth(monkeypatch, tmp_path, capsys):
+    """Ревью (Q): без TTY на ступени «без профиля» гайд печатал «Конфиг настроен —
+    можно запускать», хотя следующий старт (с профилем) упадёт той же ошибкой.
+    Гайд обязан сказать правду о деградировавшей ступени."""
+    _broken_profile_stand(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_interactive", lambda: False)
+
+    assert cli._run_init() == 0
+    err = capsys.readouterr().err
+    assert 'профилем "work"' in err            # сообщение лестницы — как прежде
+    assert "можно запускать" not in err
+    assert 'профиль "work"' in err and 'gc-cli --profile ""' in err
+
+
 def test_run_init_asks_the_wizard_to_deactivate_on_the_without_profile_stage(
     monkeypatch, tmp_path
 ):
@@ -246,4 +372,32 @@ def test_run_init_leaves_a_healthy_profile_alone(monkeypatch, tmp_path):
     )
 
     assert cli._run_init() == 0
+    assert seen["deactivate"] is False
+
+
+def test_run_init_does_not_promise_a_deactivation_the_writer_cannot_do(monkeypatch, tmp_path):
+    """Ревью (D3), вторая половина: ступень та же (`without_profile`), но указатель
+    лежит в managed-файле — правило адреса записи его не рассматривает. Признак,
+    выведенный из одной лишь ступени, обещал человеку деактивацию, писатель клал
+    пустой якорь в базу, а managed поднимал тот же сломанный профиль и гейт
+    отвергал запись: человек оставался и без починки, и с чужим якорем в конфиге.
+    Ответ у лестницы уже есть (`RepairLoad.deactivate_profile`) — берём его, а не
+    вычисляем заново."""
+    _broken_profile_stand(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(_STAND_BASE.replace('profile: "work"\n', ""),
+                                         encoding="utf-8")
+    (tmp_path / "config.local.yml").write_text('profile: "work"\n', encoding="utf-8")
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+
+    seen = {}
+    import onboarding_wizard
+    monkeypatch.setattr(
+        onboarding_wizard, "run",
+        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False:
+            seen.update(deactivate=deactivate_profile) or True,
+    )
+
+    assert cli._run_init() == 0
+    import onboarding
+    assert onboarding.load_config_for_repair().stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
     assert seen["deactivate"] is False

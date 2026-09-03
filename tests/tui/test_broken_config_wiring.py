@@ -67,6 +67,40 @@ def test_main_prints_explanation_for_missing_profile(monkeypatch, tmp_path, caps
     assert 'профиль "ghost" не найден' in err
 
 
+def test_main_explains_the_profile_from_the_flag_not_the_pointer(monkeypatch, tmp_path, capsys):
+    """Ревью (H1), gc-ua: `--profile broken` — объяснение строилось по указателю
+    из файла (его нет): карта без профиля, совет чинить базу, подсказки
+    `--profile ""` нет. Строится по профилю, который действовал в сессии."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
+                        lambda: tmp_path / "config.local.yml")
+    base = tmp_path / "config.yml"
+    base.write_text(
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n'
+        "models:\n  flash: {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "profiles").mkdir()
+    profile = tmp_path / "profiles" / "broken.yml"
+    profile.write_text("slots:\n  default: strong\n", encoding="utf-8")
+
+    created: list = []
+    _fake_app(monkeypatch, created)
+
+    from tui import main
+    rc = main(argv=["--config", str(base), "--profile", "broken"])
+
+    assert rc == 1
+    assert created == []
+    err = capsys.readouterr().err
+    assert f"поправить slots.default в:  {profile}" in err
+    assert f"в:  {base}" not in err
+    assert f"{profile}   (активен" in err
+    assert 'gc-ua --profile ""' in err
+
+
 # --- `--init-config` — «чинилка» обязана работать именно на сломанном конфиге ---
 
 
@@ -154,6 +188,37 @@ def test_init_config_reaches_review_mode_on_broken_config_interactive(
     import onboarding
     assert captured["config"].get("completions_url") == onboarding.URL_SENTINEL
     assert captured["notice_args"][0] == ""  # активного профиля нет — восстановление сняло его
+
+
+def test_init_config_explains_a_broken_project_layer_instead_of_a_traceback(
+    monkeypatch, tmp_path, capsys
+):
+    """Ревью (H3), gc-ua: `--init-config` на исправной базе со сломанным проектным
+    `.gc/config.yml` падал трейсбеком ступени шаблона. Мастером не чинится —
+    объяснение как на обычном старте (оверлей назван), код 1, TuiApp не создан."""
+    pytest.importorskip("textual")
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(_STAND_BASE.replace('profile: "work"\n', ""),
+                                         encoding="utf-8")
+    project = tmp_path / "project"
+    (project / ".gc").mkdir(parents=True)
+    overlay = project / ".gc" / "config.yml"
+    overlay.write_text('slots:\n  default: "ghost"\n', encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    created: list = []
+    _fake_app(monkeypatch, created)
+    import tui as tui_mod
+    monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
+
+    from tui import main
+    rc = main(argv=["--init-config"])
+
+    assert rc == 1
+    assert created == []
+    err = capsys.readouterr().err
+    assert "Конфиг не загружается" in err
+    assert f"поправить slots.default в:  {overlay}" in err
 
 
 # --- `--profile` у gc-ua: обход поломки, унесённой активным профилем ---------
@@ -283,6 +348,26 @@ def test_init_config_keeps_user_connection_when_only_profile_is_broken(
     assert list(cfg.get("models") or {}) == ["fast"]
 
 
+def test_init_config_passive_guide_on_broken_profile_tells_the_truth(
+    monkeypatch, tmp_path, capsys, clean_notices
+):
+    """Ревью (Q), gc-ua без TTY: на ступени «без профиля» гайд печатал «Конфиг
+    настроен — можно запускать», хотя следующий старт с профилем упадёт."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    import tui as tui_mod
+    monkeypatch.setattr(tui_mod, "_interactive", lambda: False, raising=False)
+    created: list = []
+    _fake_app(monkeypatch, created)
+
+    from tui import main
+    assert main(argv=["--init-config"]) == 0
+    assert created == []
+    err = capsys.readouterr().err
+    assert "можно запускать" not in err
+    assert 'профиль "work"' in err and 'gc-ua --profile ""' in err
+
+
 def test_init_config_degradation_reaches_notices(monkeypatch, tmp_path, clean_notices):
     """Задача D: сообщение обязано пережить старт TUI. В stderr его через мгновение
     стирает альтернативный буфер Textual — живой смок подтвердил, что человек не
@@ -347,3 +432,96 @@ def test_healthy_config_does_not_ask_the_master_to_deactivate(
     from tui import main
     assert main(argv=["--init-config"]) == 0
     assert captured["app"]._onboarding_deactivate_profile is False
+
+
+def test_init_config_carries_the_degradation_text_to_the_master(
+    monkeypatch, tmp_path, clean_notices
+):
+    """Текст деградации обязан доехать до мастера: рантайм-уведомление под ним
+    недостижимо (`OnboardingScreen.BLOCKS_GLOBAL_NAV` гасит F4), и до финала
+    показать его негде — человек проходит весь мастер, не понимая, почему поля
+    выглядят иначе, чем его файл."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    captured = _capturing_app(monkeypatch)
+
+    from tui import main
+    assert main(argv=["--init-config"]) == 0
+    assert 'профилем "work"' in captured["app"]._onboarding_degraded
+
+
+def test_healthy_config_hands_the_master_no_degradation_text(
+    monkeypatch, tmp_path, clean_notices
+):
+    """Отрицательный сторож: ступень `full` — деградации не было, показывать нечего."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "fast"\n', encoding="utf-8")
+    captured = _capturing_app(monkeypatch)
+
+    from tui import main
+    assert main(argv=["--init-config"]) == 0
+    assert captured["app"]._onboarding_degraded is None
+
+
+def test_a_managed_pointer_is_not_promised_to_the_master(
+    monkeypatch, tmp_path, clean_notices
+):
+    """Ревью (D3), вторая половина: ступень та же (`without_profile`), но указатель
+    лежит в managed-файле — правило адреса записи его не рассматривает. Признак,
+    выведенный из одной лишь ступени, обещал деактивацию на экране подтверждения,
+    писатель клал пустой якорь в базу, а managed поднимал тот же сломанный профиль
+    и гейт отвергал запись: человек оставался и без починки, и с чужим якорем.
+    Ответ у лестницы уже есть (`RepairLoad.deactivate_profile`) — берём его, а не
+    вычисляем заново."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(_STAND_BASE.replace('profile: "work"\n', ""),
+                                         encoding="utf-8")
+    (tmp_path / "config.local.yml").write_text('profile: "work"\n', encoding="utf-8")
+    captured = _capturing_app(monkeypatch)
+
+    from tui import main
+    assert main(argv=["--init-config"]) == 0
+    import onboarding
+    assert onboarding.load_config_for_repair().stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
+    assert captured["app"]._onboarding_deactivate_profile is False
+def test_the_repair_wizard_is_not_handed_the_profile_flag(monkeypatch, tmp_path):
+    """Зеркало проводки флага (`test_main_wiring`): обычный старт отдаёт
+    `--profile` приложению, чинилка — нет.
+
+    Она читает и пишет ПОЛЬЗОВАТЕЛЬСКИЙ файл, а не тот, что назван флагами
+    (см. комментарий в `tui.main`), и перечитывание после мастера обязано
+    собрать стек того конфига, который человек только что чинил. Страж нужен
+    именно отрицательный: мутация «передавать флаг всегда» проходила весь
+    набор молча."""
+    pytest.importorskip("textual")
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+
+    captured: dict = {}
+    from tui import app as tui_app
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def set_config_path(self, path):
+            pass
+
+        def _maybe_notice_profile_activation(self, *a, **k):
+            pass
+
+        def run(self):
+            captured["ran"] = True
+
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+
+    import tui as tui_mod
+    monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
+
+    rc = tui_mod.main(argv=["--init-config", "--profile", "work"])
+    assert rc == 0
+    assert captured.get("ran") is True                  # дошли до сборки приложения
+    assert captured.get("profile_override") is None     # …и флаг в неё не уехал

@@ -13,7 +13,7 @@ from config_modules.env_vars import EnvVars
 
 
 def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monkeypatch):
-    from config import _project_local_config_path
+    from config_modules.env_vars import project_local_config_path
 
     gc_dir = tmp_path / ".gc"
     gc_dir.mkdir()
@@ -21,26 +21,26 @@ def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monke
     project_cfg.write_text("agent:\n  max_steps: 100\n", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
-    result = _project_local_config_path()
+    result = project_local_config_path()
     assert result is not None
     assert os.path.abspath(result) == str(project_cfg.resolve())
 
 
 def test_project_local_config_path_returns_none_when_missing(tmp_path, monkeypatch):
-    from config import _project_local_config_path
+    from config_modules.env_vars import project_local_config_path
 
     monkeypatch.chdir(tmp_path)
     # Никакого .gc/config.yml в tmp_path нет.
-    assert _project_local_config_path() is None
+    assert project_local_config_path() is None
 
 
 def test_project_local_config_path_returns_none_when_gc_dir_is_file(tmp_path, monkeypatch):
-    from config import _project_local_config_path
+    from config_modules.env_vars import project_local_config_path
 
     # Краевой случай: <cwd>/.gc — это файл, а не директория. Нет config.yml внутри.
     (tmp_path / ".gc").write_text("not a dir", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    assert _project_local_config_path() is None
+    assert project_local_config_path() is None
 
 
 # Минимальный валидный глобальный config для всех тестов layered loading.

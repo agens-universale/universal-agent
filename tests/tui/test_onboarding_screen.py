@@ -1579,6 +1579,107 @@ async def test_review_on_registry_config_keeps_the_configured_model(tmp_path):
         assert raw["models"] == {"gpt-5.6-terra": {"model": "openai/gpt-5.6-terra"}}
 
 
+def _two_level_cfg(tmp_path, *, level):
+    """Конфиг с ДВУМЯ назначенными уровнями и активным `level`: единственная
+    раскладка, на которой видно, про какой уровень говорит шаг «Модель»."""
+    import yaml
+    from config_modules.registry_write import apply_registry_ops
+    cfg_path, cfg = _registry_cfg(tmp_path, "qwen/qwen3-8b", alias="fast")
+    apply_registry_ops(cfg_path, [("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
+                                  ("write_slot", "max", "brain")], "")
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
+    cfg["level"] = level
+    return cfg_path, cfg
+
+
+@pytest.mark.asyncio
+async def test_model_step_marks_the_default_slot_not_the_active_level(tmp_path):
+    """Тот же промах, что чинили в плоском мастере (M6), — здесь: «текущей» бралась
+    модель `onboarding.effective_model` — резолв АКТИВНОГО уровня. При `level: max` шаг про
+    слот `default` метил строку модели max, и Enter/PgDn отсюда переставлял `default`
+    на чужую модель.
+
+    Правило одно на обе поверхности и живёт в ядре (`onboarding.model_step_current`):
+    вторая его редакция — ровно то, из-за чего дефект и уцелел в TUI."""
+    pytest.importorskip("textual")
+    from model_picker import ModelInfo
+    from tests.tui.conftest import wait_until
+    from tui.app import TuiApp
+    from tui.editors.model import ModelEditor
+    from tui.screens.onboarding import STEP_MODEL
+    cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg,
+                      fetch=lambda *a, **k: [ModelInfo("qwen/qwen3-8b", tool_capable=True),
+                                             ModelInfo("qwen/qwen3-235b", tool_capable=True)])
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_MODEL)
+        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
+                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await pilot.pause()
+        rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
+        current = [r for r in rows if "текущая" in r]
+        assert current, f"строки «текущая» на шаге нет: {rows}"
+        assert "qwen/qwen3-8b" in current[0] and "235b" not in current[0]
+
+
+@pytest.mark.asyncio
+async def test_confirm_row_of_the_default_slot_ignores_the_active_level(tmp_path):
+    """Строка витрины названа `модель default:` — и обязана говорить про слот
+    `default`. Она читала `_shown_values`, то есть тот же резолв активного уровня:
+    на одном экране рядом стояли «модель default: <модель max>» и «модель max: <она
+    же>», а Enter записывал третье."""
+    pytest.importorskip("textual")
+    import re
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        flat = re.sub(r"\s+", " ", body)
+        assert "модель default: qwen/qwen3-8b" in flat
+        assert "модель max: qwen/qwen3-235b" in flat
+
+
+@pytest.mark.asyncio
+async def test_both_wizards_take_the_current_model_of_the_step_from_one_place(
+        tmp_path, monkeypatch):
+    """Инвариант межповерхностный, поэтому и тест один на оба мастера: у каждого в
+    отдельности своя редакция правила выглядела бы исправной — так дефект и жил,
+    починенный в плоском и уцелевший в TUI. Подменяем ЕДИНСТВЕННЫЙ дом правила и
+    ждём подмену в обоих."""
+    pytest.importorskip("textual")
+    import re
+    import onboarding
+    import onboarding_wizard as wz
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    sentinel = "модель-из-общего-дома"
+    monkeypatch.setattr(onboarding, "model_step_current", lambda config: sentinel)
+
+    printed: list = []
+    io = wz.WizardIO(reader=lambda p, secret: "", printer=printed.append)
+    wz._collect_model(io, {}, {}, fetch=lambda *a, **k: None)
+    assert any(sentinel in line for line in printed)
+
+    cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        assert f"модель default: {sentinel}" in re.sub(r"\s+", " ", body)
+
+
 # --- ссылки на переменные окружения ${ENV:VAR} (настоящий файл + настоящий os.environ) ---
 # Критический регресс: шаг «Подключение» показывал/писал РЕЗОЛВНУТОЕ значение
 # self._config, а не сырое из файла — непройденный проход мастера подменял ссылку
@@ -2659,14 +2760,27 @@ def test_layer_note_still_warns_about_the_profile_without_deactivation(tmp_path)
 
 def test_layer_note_keeps_warning_about_a_project_layer_despite_deactivation(tmp_path, monkeypatch):
     """Деактивация снимает ТОЛЬКО профиль. Проектный `.gc/config.yml` продолжит
-    перекрывать реестр — про него плашка молчать не имеет права."""
-    import config as cfg_mod
-    base = _broken_profile_layout(tmp_path)
+    перекрывать реестр — про него плашка молчать не имеет права.
+
+    Профиль правит ТЕ ЖЕ ключи, что и проектный слой, — самая дорогая раскладка:
+    происхождение называет лишь ПОСЛЕДНИЙ перекрывший слой, поэтому профиль,
+    ложась сверху, заслоняет собой проектный. Отбор по виду слоя («исключить
+    профильные origin'ы») выбрасывал их обоих, плашка молчала — а человек
+    выбирал модель, мастер писал её в базу и снимал профиль, после чего молча
+    побеждал слот из проектного слоя."""
+    from config_modules import env_vars
+    base = tmp_path / "config.yml"
+    base.write_text('profile: "work"\nmodels:\n  base:\n    model: b\n'
+                    "slots:\n  default: base\n", encoding="utf-8")
+    profile = tmp_path / "profiles" / "work.yml"
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_text("models:\n  wk:\n    model: w\nslots:\n  default: wk\n",
+                       encoding="utf-8")
     project = tmp_path / ".gc" / "config.yml"
     project.parent.mkdir(parents=True, exist_ok=True)
     project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
                        encoding="utf-8")
-    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: str(project))
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(project))
     scr = _screen(config={"profile": "", "models": {"proj": {}}}, config_path=str(base),
                   deactivate_profile=True)
     note = scr._layer_note()
@@ -2677,14 +2791,14 @@ def test_registry_layer_note_has_no_settings_address(tmp_path, monkeypatch):
     """Второй вердикт `overriding_layer_note` — про реестр из чужого слоя, и
     «Настройки · Профили» к нему отношения не имеют: хвост клеится только к
     профильной ветке (спека §3)."""
-    import config as cfg_mod
+    from config_modules import env_vars
     base = tmp_path / "config.yml"
     base.write_text('profile: ""\n', encoding="utf-8")
     project = tmp_path / ".gc" / "config.yml"
     project.parent.mkdir(parents=True, exist_ok=True)
     project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
                        encoding="utf-8")
-    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: str(project))
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(project))
     scr = _screen(config={"models": {"proj": {}}}, config_path=str(base))
     note = scr._layer_note()
     assert note is not None and "реестр моделей" in note
@@ -2710,6 +2824,50 @@ async def test_layer_note_shows_on_every_step_for_an_active_profile(tmp_path, mo
             await pilot.pause()
             note = str(scr.query_one("#onb-profile-warn", Static).render())
             assert 'действует профиль "work"' in note
+
+
+@pytest.mark.asyncio
+async def test_degraded_config_note_shows_on_every_step(tmp_path, monkeypatch):
+    """Сообщение о деградации загрузки видно НА ЭКРАНЕ мастера, на каждом шаге.
+
+    Единственный прежний адрес показа — рантайм-уведомление — под мастером
+    недостижим: `BLOCKS_GLOBAL_NAV` намеренно гасит F4, и текст всплывал уже
+    ПОСЛЕ финала, когда устаревал, а при выходе по Esc — не всплывал никогда.
+    Человек не видел ни строчки и не понимал, почему поля мастера выглядят иначе,
+    чем его файл (живой смок)."""
+    pytest.importorskip("textual")
+    from textual.widgets import Static
+    from tui.app import TuiApp
+    from tui.screens.onboarding import (STEP_CONFIRM, STEP_CONNECTION, STEP_MODEL)
+    monkeypatch.chdir(tmp_path)
+    message = ('config.yml не читается с профилем "work" (алиас "strong" не найден) — '
+               "профиль снят на этот запуск")
+    cfg_path = _profiles_cfg(tmp_path, "work")
+    scr = _screen(config_path=str(cfg_path), degraded_note=message)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        for step in (STEP_CONNECTION, STEP_MODEL, STEP_CONFIRM):
+            scr._goto(step)
+            await pilot.pause()
+            assert message in str(scr.query_one("#onb-degraded-warn", Static).render())
+
+
+@pytest.mark.asyncio
+async def test_healthy_load_shows_no_degradation_note(tmp_path, monkeypatch):
+    """Отрицательный сторож: конфиг собрался целиком — плашке о деградации на
+    экране взяться неоткуда."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    monkeypatch.chdir(tmp_path)
+    cfg_path = _profiles_cfg(tmp_path, "work")
+    scr = _screen(config_path=str(cfg_path))
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        assert len(scr.query("#onb-degraded-warn")) == 0
 
 
 @pytest.mark.asyncio
@@ -2901,7 +3059,7 @@ async def test_wizard_reprobes_after_token_cleared(tmp_path):
 
 @pytest.mark.asyncio
 async def test_review_levels_step_shows_the_levels_already_assigned(tmp_path):
-    """Тот же промах, что чинил `_effective_model` на шаге «Модель», — на под-форме
+    """Тот же промах, что чинили на шаге «Модель», — на под-форме
     уровней: она читала ТОЛЬКО сессионные `_values`, и на повторном заходе все уровни
     показывались «не задана», даже заданные в файле. Человек переназначал их заново, не
     видя, что там уже стоит.
@@ -2973,6 +3131,94 @@ async def test_commit_does_not_claim_an_untouched_config_after_the_registry_land
         assert "схема не валидна" in body
         assert "конфиг не записан" not in body
         assert "модел" in body
+
+
+@pytest.mark.asyncio
+async def test_commit_names_the_deactivation_when_only_the_pointer_landed(
+        tmp_path, monkeypatch):
+    """Та же ложь, что чинил плоский мастер: на ступени без профиля указатель
+    снимается ПЕРВЫМ и в откате не участвует. Отказ дальше по цепочке печатал
+    «✗ конфиг не записан» — неправда, профиль уже деактивирован, и человек уверен,
+    что он активен, пока следующий старт не пойдёт без него.
+
+    Что легло, экран читает у писателя (`PartialWriteError.written`), а не выводит
+    из его порядка: реестра здесь нет вовсе, и «записи моделей уже в конфиге» было
+    бы второй ложью на той же строке."""
+    pytest.importorskip("textual")
+    import onboarding_config_writer
+    import onboarding_fields as _of
+    import yaml
+    from textual.widgets import Static
+    from tui.app import TuiApp
+
+    cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions")
+    cfg_path.write_text(
+        cfg_path.read_text(encoding="utf-8").replace('profile: ""', 'profile: "work"'),
+        encoding="utf-8")
+    profile_file = tmp_path / "profiles" / "work.yml"
+    profile_file.parent.mkdir(parents=True, exist_ok=True)
+    profile_file.write_text('slots:\n  default: "strong"\n', encoding="utf-8")
+    real_write_values = onboarding_config_writer.write_values
+
+    def refusing_flat_write(path, values, **kwargs):
+        if "profile" in values:                      # снятие указателя — настоящее
+            return real_write_values(path, values, **kwargs)
+        raise ValueError("схема не валидна")
+
+    monkeypatch.setattr(onboarding_config_writer, "write_values", refusing_flat_write)
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path),
+                      config=_resolved_conn_cfg(cfg_path), deactivate_profile=True)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._values["Authorization"] = "Bearer sk"    # модели нет — реестр не пишется
+
+        assert scr._commit_config() is False
+
+        assert yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"] == ""
+        body = str(scr.query_one("#onb-body", Static).render())
+        assert "схема не валидна" in body
+        assert _of.LANDED_WORDS["profile_pointer"] in body
+        assert _of.LANDED_WORDS["registry"] not in body
+        assert "конфиг не записан" not in body
+
+
+@pytest.mark.asyncio
+async def test_both_wizards_name_the_landed_writes_from_one_place(tmp_path, monkeypatch):
+    """Инвариант межповерхностный, поэтому и тест один на оба мастера (тот же приём,
+    что у предупреждения о деактивации): об одном и том же событии они обязаны
+    говорить одними словами, а у каждого в отдельности своя копия выглядела бы
+    исправной."""
+    pytest.importorskip("textual")
+    import onboarding
+    import onboarding_fields as _of
+    import onboarding_wizard as wz
+    from textual.widgets import Static
+    from tui.app import TuiApp
+    sentinel = "СЛОВО-ИЗ-ОБЩЕГО-ДОМА"
+    monkeypatch.setattr(_of, "LANDED_WORDS", {"registry": sentinel})
+
+    def refusing_after_the_registry(config_path, values, *, deactivate_profile=False):
+        raise onboarding.PartialWriteError("схема не валидна", written=("registry",))
+
+    monkeypatch.setattr(onboarding, "write_wizard_values", refusing_after_the_registry)
+
+    printed: list = []
+    monkeypatch.setattr(wz, "_reload_config", lambda: {})
+    wz.run({}, tmp_path / "nowhere.yml", review_all=False,
+           io=wz.WizardIO(reader=lambda p, s: "https://h/v1/chat/completions",
+                          printer=printed.append))
+    assert any(sentinel in line for line in printed)
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        assert scr._commit_config() is False
+        assert sentinel in str(scr.query_one("#onb-body", Static).render())
 
 
 # --- ступень «без профиля»: мастер деактивирует профиль (спека починки) ------

@@ -17,13 +17,9 @@ def test_tui_config_text_answer_mode_rejects_unknown():
         TuiConfig(text_answer_mode="bogus")
 
 
-def test_flatten_exposes_tui_text_answer_mode(tmp_path, monkeypatch):
+def test_flatten_exposes_tui_text_answer_mode(tmp_path):
     """Значение из config.yml доходит до плоского config_dict (overlay-слои нейтрализованы)."""
     import config as cfgmod
-    import mcp_runtime.paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text("tui:\n  text_answer_mode: allow\n", encoding="utf-8")  # не дефолт → доказывает flatten

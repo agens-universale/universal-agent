@@ -16,8 +16,8 @@ pytest.importorskip("textual")
 import yaml
 from textual.widgets import Input, Static
 
-from tests.tui.conftest import (_isolated_config_layers, _rgb, _value_color,
-                                open_settings_section, wait_until)
+from tests.tui.conftest import (_rgb, _value_color, open_settings_section,
+                                wait_until)
 from tests.tui.test_settings_screen import _cfg, _loaded, _mk_screen
 
 _SECTION = "Модели"
@@ -113,8 +113,7 @@ async def _section(tmp_path, body: str = "", *, models=("test-model",),
     cfg_file = _write_cfg(tmp_path, body, model=model)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
-    with _isolated_config_layers(tmp_path), \
-         mock.patch.object(model_picker, "fetch_models",
+    with mock.patch.object(model_picker, "fetch_models",
                            lambda *a, **k: [ModelInfo(id=i) for i in models]):
         async with app.run_test(**({"size": size} if size else {})) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))
@@ -469,15 +468,14 @@ async def test_entry_without_any_address_is_shown_as_problematic(tmp_path):
                         "models:\n  flash:\n    model: \"m\"\n", encoding="utf-8")
     import tui.app as app_mod
     app = app_mod.TuiApp(config={"model": "test-model"})
-    with _isolated_config_layers(tmp_path):
-        async with app.run_test() as pilot:
-            scr = _mk_screen(config={"model": "test-model"}, config_path=str(cfg_file))
-            app.push_screen(scr)
-            await pilot.pause()
-            assert scr._menu_glyph(1) == ("—", DEEP_DIM)
-            open_settings_section(scr, _SECTION)
-            await pilot.pause()
-            assert "адрес" in _texts(scr)
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config={"model": "test-model"}, config_path=str(cfg_file))
+        app.push_screen(scr)
+        await pilot.pause()
+        assert scr._menu_glyph(1) == ("—", DEEP_DIM)
+        open_settings_section(scr, _SECTION)
+        await pilot.pause()
+        assert "адрес" in _texts(scr)
 
 
 async def test_hub_glyph_stays_quiet_about_a_foreign_config_error(tmp_path):
@@ -2021,16 +2019,15 @@ async def test_a_dead_entry_dims_its_level_pointer_too(tmp_path):
                         "slots:\n  default: \"flash\"\n", encoding="utf-8")
     import tui.app as app_mod
     app = app_mod.TuiApp(config={"model": "test-model"})
-    with _isolated_config_layers(tmp_path):
-        async with app.run_test() as pilot:
-            scr = _mk_screen(config={"model": "test-model"}, config_path=str(cfg_file))
-            app.push_screen(scr)
-            await pilot.pause()
-            open_settings_section(scr, _SECTION)
-            await pilot.pause()
-            row = _editor(scr)._row_text({"kind": "entry", "alias": "flash"}, False)
-            assert "← default" in row.plain
-            assert _spans_style(row) == {_rgb(DEEP_DIM)}
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config={"model": "test-model"}, config_path=str(cfg_file))
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, _SECTION)
+        await pilot.pause()
+        row = _editor(scr)._row_text({"kind": "entry", "alias": "flash"}, False)
+        assert "← default" in row.plain
+        assert _spans_style(row) == {_rgb(DEEP_DIM)}
 
 
 async def test_a_no_change_reply_does_not_resurrect_the_hidden_title(tmp_path):
@@ -2144,6 +2141,110 @@ async def test_empty_state_does_not_claim_levels_are_off_under_a_profile_registr
         assert "work" in text            # назван профиль, чьи записи действуют
 
 
+# --- пустое состояние под ЧУЖИМ реестром называет слой, который его перекрыл ------
+#
+# Признак «реестр перекрыт сверху» истинен для любого слоя над основным конфигом —
+# проектного `.gc/config.yml` и managed-файла тоже, — а подсказка называла только
+# профиль, и без активного профиля подставляла пустое имя: «записями активного
+# профиля «»». Тем же входом — удаление последней записи базы без профиля: секция
+# судила о слое сверху по снимку конфига приложения, где снятые записи ещё лежали,
+# и вместо легаси-редактора рисовала ту же подсказку с пустым именем.
+
+
+@asynccontextmanager
+async def _section_over_layers(tmp_path, monkeypatch, *, body: str = "",
+                               project: str | None = None, managed: str | None = None):
+    """Секция «Модели» на настоящем стеке слоёв: база в `tmp_path`, проектный
+    `.gc/config.yml` в рабочем каталоге, managed-файл в подменённом `GC_HOME`.
+    Конфиг экрана — настоящий `load_config_ex` (слои смержены, как у приложения),
+    `on_apply` — заглушка: снимок конфига приложения после записи НЕ обновляется,
+    ровно как в зазоре между перестройкой секции и перечиткой конфига."""
+    from unittest import mock
+
+    import model_picker
+    import tui.app as app_mod
+    from config_modules import env_vars
+    from config_modules.env_vars import EnvVars
+    from model_picker import ModelInfo
+
+    gc_home = tmp_path / "gc_home"
+    gc_home.mkdir()
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=gc_home))
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    if project is not None:
+        (project_dir / ".gc").mkdir()
+        (project_dir / ".gc" / "config.yml").write_text(project, encoding="utf-8")
+    if managed is not None:
+        (gc_home / "config.local.yml").write_text(managed, encoding="utf-8")
+    cfg_file = _write_cfg(tmp_path, body)
+    import config as config_mod
+    cfg, _meta = config_mod.load_config_ex(str(cfg_file))
+    app = app_mod.TuiApp(config=cfg)
+    with mock.patch.object(model_picker, "fetch_models",
+                           lambda *a, **k: [ModelInfo(id="test-model")]):
+        async with app.run_test() as pilot:
+            scr = _mk_screen(config=cfg, config_path=str(cfg_file))
+            app.push_screen(scr)
+            await pilot.pause()
+            open_settings_section(scr, _SECTION)
+            await pilot.pause()
+            yield pilot, scr, cfg_file
+
+
+_PROJECT_REGISTRY = 'models:\n  glm:\n    model: "z-ai/glm-5.3"\nslots:\n  default: "glm"\n'
+
+
+async def test_empty_state_names_the_project_layer_that_carries_the_registry(
+        tmp_path, monkeypatch):
+    async with _section_over_layers(tmp_path, monkeypatch, project=_PROJECT_REGISTRY) \
+            as (_pilot, scr, _cfg_file):
+        assert (scr._config.get("models") or {}), "предпосылка: реестр приходит из проекта"
+        text = _texts(scr)
+        assert "уровни light/default/max выключены" not in text, text
+        assert ".gc/config.yml в проекте" in text, text
+        assert "«»" not in text, text                    # пустого имени профиля нет
+        assert "профилем" not in text and "активного профиля" not in text, text
+
+
+async def test_empty_state_names_the_managed_file_that_carries_the_registry(
+        tmp_path, monkeypatch):
+    async with _section_over_layers(tmp_path, monkeypatch, managed=_PROJECT_REGISTRY) \
+            as (_pilot, scr, _cfg_file):
+        assert (scr._config.get("models") or {}), "предпосылка: реестр приходит из managed"
+        text = _texts(scr)
+        assert "уровни light/default/max выключены" not in text, text
+        assert "config.local.yml" in text, text
+        assert "«»" not in text, text
+
+
+async def test_removing_the_last_base_entry_without_a_profile_returns_the_legacy_editor(
+        tmp_path, monkeypatch):
+    """Второй вход: слоёв сверху нет, единственная запись базы удаляется — секция
+    обязана вернуться в пустое состояние с легаси-редактором, а не судить о слое
+    сверху по снимку конфига, где снятая запись ещё лежит."""
+    from tui.editors.model import ModelEditor
+    body = 'models:\n  a:\n    model: "m-a"\n'
+    async with _section_over_layers(tmp_path, monkeypatch, body=body) \
+            as (pilot, scr, cfg_file):
+        assert set(scr._config.get("models") or {}) == {"a"}   # снимок приложения: запись ещё есть
+        ed = _editor(scr)
+        ed._idx = next(i for i, row in enumerate(ed._rows()) if row["kind"] == "entry")
+        await pilot.press("delete")
+        await pilot.pause()
+        assert ed.awaiting_confirm
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not (_doc(cfg_file).get("models") or {})     # файл: реестр снят
+        ed = _editor(scr)
+        assert ed.legacy_open, "секция не вернулась в пустое состояние"
+        assert scr.query(ModelEditor), "легаси-редактор не поднялся"
+        text = _texts(scr)
+        assert "«»" not in text, text
+        assert "перекрыт" not in text, text
+
+
 async def test_form_fields_are_deaf_while_the_default_slot_question_hangs(tmp_path):
     """Вопрос «какая модель по умолчанию» висит НАД живой формой: `_submit_form` её
     не снимает, а состав записи для транзакции уже зафиксирован. Пока поля держат
@@ -2173,6 +2274,39 @@ async def test_form_fields_are_deaf_while_the_default_slot_question_hangs(tmp_pa
         await pilot.pause()
         after = {f: form.query_one(f"#mef-{f}", Input).value for f in fields}
         assert after == before, "клавиша дошла до поля формы сквозь висящий вопрос"
+
+
+async def test_alt_down_does_not_reach_the_form_while_the_default_slot_question_hangs(
+        tmp_path):
+    """`Alt+↓` — та же клавиша формы, что и Space/Ctrl+U соседнего стража, но её
+    обработчик спрашивал форму РАНЬШЕ висящего вопроса, вопреки контракту
+    (`clear_token`: «гейт пикера — первым, как у move/enter/escape/alt_down»).
+    Курсор формы стоит на адресе — клавиша раскрывала под ней список пресетов,
+    пока сверху ждал ответа вопрос о слоте: две раскрытые ленты на один Enter."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        from tui.editors.model_entry_form import ModelEntryForm
+        await pilot.press("n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "opus"
+        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        form.query_one("#mef-url", Input).value = "https://own-host/v1/chat/completions"
+        form.query_one("#mef-token", Input).value = "sk-OWN"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        assert form.on_url_field                  # там, где Alt+↓ форме есть что делать
+        await pilot.press("enter")                # submit → пикер default
+        await pilot.pause()
+        assert _editor(scr).picker_open
+        before = cfg_file.read_bytes()
+        await pilot.press("alt+down")
+        await pilot.pause()
+        assert _editor(scr).picker_open, "вопрос о слоте снят клавишей формы"
+        assert not form._presets_ctrl.is_open, "Alt+↓ дошёл до формы сквозь висящий вопрос"
+        assert cfg_file.read_bytes() == before
 
 
 async def test_form_takes_input_back_when_the_question_is_dismissed(tmp_path):

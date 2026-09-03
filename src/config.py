@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import urllib3
 
 from config_modules.auth import build_auth_connector
-from config_modules.env_vars import project_gc_dir, project_local_config_path
+from config_modules.env_vars import project_gc_dir
 from config_modules.backend import parse_chat_completions_max_tokens  # noqa: F401  # re-export: processing_responses импортирует из config
 from config_modules.common import (
     apply_swarm_env_overrides,
@@ -30,7 +30,6 @@ from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from config_modules import env_vars
 from bundled_assets import bundled_root
 from mcp_runtime import paths as mcp_paths
-from mcp_runtime.paths import managed_config_path  # noqa: F401  # re-export: зовут как config.managed_config_path
 # Наложение слоёв и pre-write валидация живут в `config_modules.layers` (слой записи
 # реестра спрашивает их напрямую, минуя агрегатор). Здесь — ре-экспорт: снаружи их
 # зовут как `config.<имя>`, и второй адрес у одного правила заводить незачем.
@@ -92,11 +91,6 @@ def resolve_tui_stream_enabled(config_dict: Dict[str, Any]) -> bool:
 def _default_config_path() -> str:
     # Floor: bundled дефолт-конфиг (едет в wheel через force-include).
     return os.path.join(str(bundled_root()), "config.default.yml")
-
-
-# Дом функции — `config_modules.env_vars` (вопрос раскладки каталогов). Здесь алиас:
-# её зовут как `config._project_local_config_path` из cli, swarm и config_origin.
-_project_local_config_path = project_local_config_path
 
 
 def _xdg_config_path() -> Optional[str]:

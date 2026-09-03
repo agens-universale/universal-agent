@@ -222,3 +222,68 @@ def test_an_unresolvable_pointer_via_the_project_layer_falls_back_to_the_single_
 
     validate_config_text_with_sections(
         'profile: "нет-такого"\n', base_path=base, target=project_config)
+
+
+# --- куда ложится сам указатель: `profile_pointer_write_target` -----------------
+#
+# Зеркало `resolve_profile_pointer` (кто указатель НАЗЫВАЕТ), и прямых тестов у него
+# не было ни одного: разъехавшись с зеркалом, правило отправляет запись в файл,
+# который следующий старт всё равно перекроет, — то есть выглядит как молчаливый
+# no-op, а профиль остаётся активным.
+
+
+def test_pointer_write_target_is_the_base_when_the_project_layer_is_silent(stack):
+    """Проектного слоя нет вовсе — писать некуда, кроме базы запуска."""
+    from config_modules.layers import profile_pointer_write_target
+    base, _profiles, _project_config = stack
+
+    assert profile_pointer_write_target(base) == Path(base)
+
+
+def test_pointer_write_target_is_the_project_file_that_carries_the_pointer(stack):
+    """Указатель задаёт проектный `.gc/config.yml` — он же и переписывается.
+    Запись в базу тут не меняет ничего: мерж отдаёт победу оверлею, и следующий
+    старт поднимает прежнее имя."""
+    from config_modules.layers import profile_pointer_write_target
+    base, _profiles, project_config = stack
+    project_config.parent.mkdir(parents=True, exist_ok=True)
+    project_config.write_text('profile: "work"\n', encoding="utf-8")
+
+    assert profile_pointer_write_target(base) == project_config
+
+
+def test_pointer_write_target_follows_an_empty_project_pointer_too(stack):
+    """Решает НАЛИЧИЕ ключа, а не его значение: `profile: ""` в проектном слое —
+    такая же победа оверлея по merge-контракту, и активация, записанная в базу,
+    не подействовала бы."""
+    from config_modules.layers import profile_pointer_write_target
+    base, _profiles, project_config = stack
+    project_config.parent.mkdir(parents=True, exist_ok=True)
+    project_config.write_text('profile: ""\n', encoding="utf-8")
+
+    assert profile_pointer_write_target(base) == project_config
+
+
+def test_pointer_write_target_ignores_the_managed_layer(stack):
+    """Managed-файл правило намеренно не рассматривает: указатель там — не
+    пользовательская настройка, и писать в чужой файл ради победы над ним мы не
+    станем. Раскладка редкая, а исход честен: запись отвергнет гейт стека."""
+    from config_modules.layers import profile_pointer_write_target
+    base, _profiles, _project_config = stack
+    managed = mcp_paths.managed_config_path()
+    managed.parent.mkdir(parents=True, exist_ok=True)
+    managed.write_text('profile: "work"\n', encoding="utf-8")
+
+    assert profile_pointer_write_target(base) == Path(base)
+
+
+def test_pointer_write_target_trusts_the_document_it_was_given(stack):
+    """`project_doc` — уже прочитанный документ слоя (кэш прохода секции
+    «Профили»): диск тогда не перечитывается вовсе, иначе футер ходил бы в файл
+    на каждый кадр."""
+    from config_modules.layers import profile_pointer_write_target
+    base, _profiles, project_config = stack
+    project_config.parent.mkdir(parents=True, exist_ok=True)
+    project_config.write_text('profile: "work"\n', encoding="utf-8")
+
+    assert profile_pointer_write_target(base, project_doc={}) == Path(base)

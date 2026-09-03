@@ -4,19 +4,6 @@ import pytest
 from config_modules.voice import VoiceConfig, voice_enabled, voice_section_filled
 
 
-@pytest.fixture(autouse=True)
-def _isolate_config_layers(monkeypatch, tmp_path):
-    """Слои поверх базового конфига — на tmp. Без этого load_config подмешивал бы
-    РЕАЛЬНЫЙ ~/.gc/config.local.yml разработчика (voice-секцию туда пишет наш же UI)
-    и .gc/config.yml рабочего каталога: тест «перекрытия нет» падал бы на машине, где
-    голосовой ввод настроен, — то есть ровно у того, кто его и разрабатывает."""
-    import config as config_mod
-    monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
-                        lambda: tmp_path / "config.local.yml")
-    monkeypatch.setattr("config_modules.env_vars.project_local_config_path",
-                        lambda: None)
-
-
 def test_voice_config_defaults():
     cfg = VoiceConfig()
     assert cfg.provider == "openai"

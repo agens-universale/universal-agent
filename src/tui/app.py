@@ -137,11 +137,24 @@ class TuiApp(App):
         threads_dir: Optional[str] = None,
         system: str = "cli",
         config: Optional[dict] = None,
+        profile_override: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._threads_dir = threads_dir
         self._system = system
         self._config = config or {}
+        # Профиль, выбранный флагом запуска `--profile` (`""` — «без профиля»), либо
+        # None — флага не было. Тот же оверрайд, что main() отдал загрузчику на
+        # старте: каждое перечитывание (`reload_config`) обязано отдавать его снова,
+        # иначе первое же сохранение из /settings молча возвращает указатель из файла
+        # — и совет «--profile "", чтобы обойти сломанный профиль» живёт до первой
+        # записи. Хранится ОТДЕЛЬНО от сессионного выбора, а не кладётся в него:
+        # сессионный выбор персистится в мету треда и переживает перезапуск, а флаг
+        # запуска — свойство ЭТОГО процесса (`gc-ua --profile ""` не имеет права
+        # прилипнуть к треду и обходить уже починенный профиль на следующем старте).
+        # Выбор из приложения (`/profiles`) остаётся сильнее: он ложится поверх
+        # базы, собранной под флагом (`_session_base_config`).
+        self._profile_override = profile_override
         # Сессионные переопределения конфига (спека 2026-07-20-session-scoped-settings):
         # база — self._config (файл), это — то, что переключено в текущем треде.
         # Хранятся по dotted-именам; накладываются в effective_config().
@@ -163,6 +176,10 @@ class TuiApp(App):
         # обязан снять указатель (ставит tui/__init__.py). Один признак, а не весь
         # `RepairLoad`: приложению от лестницы нужен ровно этот ответ.
         self._onboarding_deactivate_profile = False
+        # Текст деградации загрузки для экрана мастера (ставит tui/__init__.py;
+        # None — деградации не было). Тем же приёмом и по той же причине, что и
+        # признак выше: рантайм-уведомление под мастером недостижимо.
+        self._onboarding_degraded = None
         self._config_path = None              # путь к конфигу на диске; задаётся снаружи после __init__
         # Мтайм-набор активного указателя (спека §3.3): база/managed/проектный конфиг +
         # оба кандидатных пути активного профиля. Расширение прежнего одиночного
@@ -340,6 +357,7 @@ class TuiApp(App):
                 review_all=self._onboarding_mode == "review",
                 on_commit=self._finish_onboarding,
                 deactivate_profile=self._onboarding_deactivate_profile,
+                degraded_note=self._onboarding_degraded,
             )
         return TraceScreen()
 
@@ -416,6 +434,32 @@ class TuiApp(App):
         except OSError:
             return {}
 
+    def _load_base_config(self) -> dict:
+        """`load_config_ex` под флагом запуска `--profile` — база окна.
+
+        Профиль флага пропал или сломался под ногами (файл удалили/переименовали
+        извне, стек с ним не собрался) — флаг снимается с notice, и база собирается
+        указателем файла: та же санация, что у сессионного выбора (§9.4,
+        `sanitize_session_profile`), и по той же причине — перечитывание не имеет
+        права ни падать на каждом вызове (окно застыло бы на прежней базе до
+        перезапуска), ни молча подменять профиль. Не собралось и без флага —
+        ошибка про сам конфиг, её отдаём как есть."""
+        from config import load_config_ex
+        name = self._profile_override
+        if name is None:
+            return load_config_ex(self._config_path)[0]
+        try:
+            return load_config_ex(self._config_path, profile_override=name)[0]
+        except Exception as exc:
+            cfg, _meta = load_config_ex(self._config_path)
+            self._profile_override = None
+            what = f'профиль "{name}" из флага --profile' if name else 'флаг --profile ""'
+            acting = cfg.get("profile") or "без профиля"
+            push_runtime_notice(Notice(
+                "warning", "profile_flag_stale",
+                f'{what} больше не собирается ({exc}) — действует "{acting}"', ()))
+            return cfg
+
     def reload_config(self) -> None:
         """Hot-apply (спека B, B3): перечитать конфиг с диска и применить к app.
 
@@ -430,11 +474,15 @@ class TuiApp(App):
         файла) сбрасывает предохранитель моделей (починка мёртвой модели не должна
         пережить починку — «сброс: изменение конфиг-набора»); сессионный выбор
         профиля, ставший битым под новой базой, — санация (§9.4); boot-frozen-ключи,
-        разошедшиеся между старой и новой эффективной базой, — notice (§3.2)."""
-        from config import load_config_ex, apply_cli_overrides
+        разошедшиеся между старой и новой эффективной базой, — notice (§3.2).
+
+        База собирается под флагом запуска `--profile` (`_profile_override`) — тем
+        же оверрайдом, что и на старте: перечитывание без него молча возвращало
+        указатель из файла."""
+        from config import apply_cli_overrides
         from thread_store import resolve_threads_dir
         from tui.runtime_config import carry_over_runtime_fields
-        cfg, _meta = load_config_ex(self._config_path)
+        cfg = self._load_base_config()
         apply_cli_overrides(cfg)
         # launch_root и прочие поля рантайма TUI в файле конфига отсутствуют: без переноса
         # они исчезают при первом же сохранении настроек — /diff перестаёт работать, а

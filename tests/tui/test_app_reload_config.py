@@ -274,6 +274,119 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
     assert seen_cfg["completions_url"] == "http://x/v1"   # база НЕ перечитана из файла
 
 
+# --- флаг запуска --profile переживает перечитывание, как сессионный выбор ---
+#
+# Старт передавал выбранный флагом профиль в загрузчик, а горячее перечитывание —
+# нет: первое же сохранение из /settings молча возвращало указатель из файла. Совет
+# «gc-ua --profile "", чтобы обойти сломанный профиль» жил до первой записи — после
+# неё окно снова упиралось в него. Флаг хранится у приложения отдельно от сессионного
+# выбора (тот персистится в мету треда и переживает перезапуск сессии — у флага
+# запуска такого права нет) и передаётся загрузчику при каждом перечитывании.
+
+
+@pytest.fixture
+def _profile_stack(tmp_path, monkeypatch):
+    """База с указателем на профиль `work` и каталог профилей рядом, изолированные
+    от слоёв машины (тот же приём, что `stack` в tests/config)."""
+    from config_modules import env_vars
+    from config_modules.env_vars import EnvVars
+    from runtime_notices import clear_runtime_notices
+
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path / "gc_home"))
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        'profile: "work"\nbackend:\n  completions_url: "http://x/v1"\n'
+        'models:\n  gc:\n    model: "base-m"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "ghost"\n', encoding="utf-8")
+    clear_runtime_notices()
+    return cfg_file, profiles
+
+
+def _app_started_with(cfg_file, profile_override):
+    """Приложение, как его собирает main(): конфиг загружен С флагом, путь связан."""
+    import config as cfg_mod
+    cfg, _meta = cfg_mod.load_config_ex(str(cfg_file), profile_override=profile_override)
+    app = app_mod.TuiApp(config=cfg, profile_override=profile_override)
+    app.set_config_path(str(cfg_file))
+    return app
+
+
+def test_reload_config_keeps_the_profile_flag_that_bypasses_a_broken_pointer(_profile_stack):
+    """`gc-ua --profile ""` на сломанном профиле из указателя: перечитывание обязано
+    собираться так же, как старт, — без профиля. Без флага загрузчик падает на
+    `slots.default: ghost`, и окно упиралось бы в профиль, который флаг обошёл."""
+    cfg_file, _profiles = _profile_stack
+    app = _app_started_with(cfg_file, "")
+    assert app._config["profile"] == ""
+
+    app.reload_config()                      # без флага здесь ValueError
+
+    assert app._config["profile"] == ""
+    assert app.effective_config()["profile"] == ""
+
+
+def test_reload_config_keeps_the_profile_named_by_the_flag(_profile_stack):
+    cfg_file, profiles = _profile_stack
+    (profiles / "corp.yml").write_text(
+        'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n',
+        encoding="utf-8")
+    app = _app_started_with(cfg_file, "corp")
+
+    app.reload_config()
+
+    assert app._config["profile"] == "corp"
+    assert "corp" in app._config["models"]
+    # Мтайм-набор следит за файлом профиля флага, а не за указателем файла.
+    assert any("corp.yml" in path for path in app._config_mtime_set)
+
+
+def test_session_choice_still_wins_over_the_profile_flag(_profile_stack):
+    """Выбор из приложения (`/profiles`) сильнее флага запуска — как и сильнее
+    указателя файла: сессионное снятие профиля при флаге `corp` действует."""
+    cfg_file, profiles = _profile_stack
+    (profiles / "corp.yml").write_text(
+        'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n',
+        encoding="utf-8")
+    app = _app_started_with(cfg_file, "corp")
+    app.set_session_override("profile", "")
+
+    app.reload_config()
+
+    assert app._config["profile"] == "corp"            # база окна — по флагу
+    assert app.effective_config()["profile"] == ""     # действует выбор сессии
+
+
+def test_a_vanished_flag_profile_is_dropped_with_a_notice_not_a_dead_window(_profile_stack):
+    """Профиль флага удалили/переименовали под ногами: перечитывание не имеет права
+    ни падать на каждом вызове, ни молча подменять профиль. Флаг снимается с
+    уведомлением — той же санацией, что и сессионный выбор (§9.4), — и действует
+    указатель файла."""
+    from runtime_notices import collect_runtime_notices
+    cfg_file, profiles = _profile_stack
+    (profiles / "corp.yml").write_text(
+        'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n',
+        encoding="utf-8")
+    cfg_file.write_text(
+        'profile: ""\nbackend:\n  completions_url: "http://x/v1"\n'
+        'models:\n  gc:\n    model: "base-m"\n', encoding="utf-8")
+    app = _app_started_with(cfg_file, "corp")
+    (profiles / "corp.yml").unlink()
+
+    app.reload_config()                      # профиля флага больше нет
+
+    assert app._profile_override is None
+    assert app._config["profile"] == ""
+    codes = [n.code for n in collect_runtime_notices()]
+    assert "profile_flag_stale" in codes, codes
+    app.reload_config()                      # и дальше живёт указателем файла
+    assert app._config["profile"] == ""
+
+
 # --- screen_config: единая точка получения базы для ОТКРЫТИЯ экрана ---
 
 

@@ -92,14 +92,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     # Паритет с gc-cli: создать <cwd>/.gc/ (project-local слой: config overlay,
     # project skills). Тихо игнорит отсутствие прав на запись в cwd.
-    from config_modules.env_vars import ensure_project_gc_dir
+    from config_modules.env_vars import ensure_project_gc_dir, project_local_config_path
     ensure_project_gc_dir()
 
     from config import (
         load_config_ex,
         apply_cli_overrides,
         resolve_config_path,
-        _project_local_config_path,
         user_config_path,
         _bootstrap_user_config,
     )
@@ -108,6 +107,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     onb_write_path = user_config_path()
     onboarding_mode = None
     onboarding_deactivate_profile = False
+    onboarding_degraded = None
 
     if getattr(args, "init_config", False):
         just_created = _bootstrap_user_config()
@@ -117,20 +117,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # который ниже пишет мастер, поэтому --config/--profile здесь не в счёт:
         # читать один файл, а писать в другой значило бы показать человеку поля
         # не того конфига, который он чинит.
-        loaded = onboarding.load_config_for_repair()
+        try:
+            loaded = onboarding.load_config_for_repair()
+        except ValueError as exc:
+            # Лестница исчерпана: не собирается и шаблон — сломан слой, в
+            # который мастер не пишет (оверлей). Чинить его мастером нечем: то
+            # же объяснение, что на обычном старте, и код 1 — не трейсбек.
+            print(onboarding.explain_broken_config(
+                str(onb_write_path), exc, program="gc-ua"), file=sys.stderr)
+            return 1
         config_dict, profile_meta = loaded.config, loaded.meta
         if not _interactive():
             # TUI не стартует — stderr доезжает до человека и остаётся на экране.
+            # Гайд знает ступень лестницы: на деградировавшей «настроен — можно
+            # запускать» врало бы человеку, чей следующий старт падает.
             if loaded.message:
                 print(f"[gc] {loaded.message}", file=sys.stderr)
-            print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
+            print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua",
+                                         just_created=just_created, repair=loaded), file=sys.stderr)
             return 0
         if loaded.message:
             # А здесь stderr не живёт: через мгновение Textual занимает экран
             # альтернативным буфером и стирает строку — человек не видит НИЧЕГО
             # и не понимает, почему поля мастера ведут себя странно (живой смок
-            # это подтвердил). Тем же каналом, что и остальные рантайм-события:
-            # карточка + /notices.
+            # это подтвердил). Показываем НА САМОМ ЭКРАНЕ мастера, плашкой рядом с
+            # вердиктом о перекрывающем слое: рантайм-уведомления под мастером
+            # недостижимы — `OnboardingScreen.BLOCKS_GLOBAL_NAV` гасит F4 намеренно
+            # (справка с неработающими клавишами и уведомления по ещё не записанному
+            # конфигу), и первый раз текст всплывал уже ПОСЛЕ финала, когда устаревал,
+            # а при выходе по Esc — не всплывал никогда.
+            onboarding_degraded = loaded.message
+            # Уведомление остаётся: после финала навигация разблокирована, и там
+            # это уместная история запуска — почему конфиг собрался не целиком.
             from runtime_notices import push_runtime_notice
             from startup_notices import Notice
             push_runtime_notice(Notice(
@@ -138,9 +156,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # Ступень «без профиля» значит, что конфиг собрался только со снятым
         # профилем: финал мастера обязан снять и указатель, иначе гейт записи
         # отвергнет собранное (стек следующего старта поднимет тот же профиль) —
-        # чинилка дойдёт до конца и не запишет свою починку.
-        onboarding_deactivate_profile = (
-            loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
+        # чинилка дойдёт до конца и не запишет свою починку. Но снять его мастер
+        # может не всегда (указатель в managed-слое), и судит об этом лестница:
+        # своя редакция признака обещала бы на экране подтверждения деактивацию,
+        # которую писатель не сделает, — а пустой якорь в базу уже уехал бы (D3).
+        onboarding_deactivate_profile = loaded.deactivate_profile
         onboarding_mode = "review"
     else:
         just_created = _bootstrap_user_config() if args.config is None else False
@@ -150,8 +170,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый
             # traceback: падение здесь случается ДО создания TuiApp, так что
             # собственный crash-репорт Textual не включится (см. explain_broken_config).
+            # Профиль — тот же, что грузили: по указателю из файла объяснение
+            # описывало бы чужой стек.
             print(onboarding.explain_broken_config(
-                resolve_config_path(args.config), exc, program="gc-ua"), file=sys.stderr)
+                resolve_config_path(args.config), exc, program="gc-ua",
+                profile_override=args.profile), file=sys.stderr)
             return 1
         apply_cli_overrides(config_dict)
 
@@ -187,9 +210,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except Exception:
         voice_expected = False
 
-    app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict)
+    # Флаг запуска доезжает до приложения: `reload_config` отдаёт его КАЖДОМУ
+    # перечитыванию, иначе выбор живёт до первого сохранения из /settings —
+    # и совет «запустить без профиля, ничего не потеряв» переставал работать
+    # ровно там, где человек начинал чинить. У чинилки флага нет: она читает и
+    # пишет ПОЛЬЗОВАТЕЛЬСКИЙ файл, и `--profile` там не в счёт (см. выше).
+    app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict,
+                          profile_override=None if args.init_config else args.profile)
     app.set_config_path(onb_write_path if onboarding_mode else resolve_config_path(args.config))
-    app._config_project_local = _project_local_config_path()  # str | None
+    app._config_project_local = project_local_config_path()  # str | None
     # Подъём (`ensure_voice_service`: spawn + ожидание готовности, до 90 с на холодном
     # старте) идёт ЦЕЛИКОМ фоном: TuiApp запускает его после первого кадра
     # (on_mount → _start_voice_autostart), а main() только считает флаг ожидания —
@@ -204,6 +233,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     app._maybe_notice_profile_activation(profile_meta.active_name or "", profile_meta, config_dict)
     app._onboarding_mode = onboarding_mode
     app._onboarding_deactivate_profile = onboarding_deactivate_profile
+    app._onboarding_degraded = onboarding_degraded
     app._onboarding_config_path = onb_write_path
     import upgrade_gate
     app._upgrade_info = upgrade_gate.detect_upgrade()

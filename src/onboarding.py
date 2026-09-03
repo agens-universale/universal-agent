@@ -269,16 +269,21 @@ def _registry_overridden_above(config_path, *, ignore_profile: bool = False) -> 
     `without_profile` лестницы починки): перекрыть запись он уже не сможет, а
     `origins` судит по диску, где профиль ещё лежит. Не исключить его значит
     показать на одном экране два предупреждения, противоречащих друг другу
-    (живой смок). Прочие слои деактивация не трогает — они судятся как прежде."""
+    (живой смок).
+
+    «Исключить профиль» спрашивается СТЕКОМ БЕЗ ПРОФИЛЯ (`profile_override=""`,
+    тем же приёмом, каким его снимает лестница), а не отбором готового ответа по
+    виду слоя: `origins` называет ТОЛЬКО последний слой, изменивший значение, и
+    профиль, ложась сверху, заслоняет собой проектный (managed), правящий те же
+    ключи. Отбор выбрасывал их вместе с ним — плашка молчала, человек выбирал
+    модель, мастер писал её в базу и снимал профиль, а работал слот из проектного
+    слоя. Спрошенный без профиля стек называет реальный слой под ним."""
     if not config_path:
         return False
     from config_origin import origins
-    found = origins(str(config_path), ["models", "slots.default"])
-    return any(
-        origin.overlay_kind
-        and not (ignore_profile and origin.overlay_kind.startswith("profile:"))
-        for origin in found.values()
-    )
+    found = origins(str(config_path), ["models", "slots.default"],
+                    profile_override="" if ignore_profile else None)
+    return any(origin.overlay_kind for origin in found.values())
 
 
 def effective_model(config: Dict[str, Any]) -> str:
@@ -324,6 +329,30 @@ def assigned_level_model(config: Dict[str, Any], level: str) -> str:
     return model or alias
 
 
+def model_step_current(config: Dict[str, Any]) -> str:
+    """Что шаг «Модель» называет текущим (пусто — «нечего показать»).
+
+    Шаг задаёт слот `default` — про него и говорит. Не `effective_model`: та
+    резолвит АКТИВНЫЙ уровень конфига, и при `level: max` строка «сейчас»
+    показывала модель max с именем записи слота default, галочка в списке вставала
+    не на ту строку, а сводка после подтверждения называла третью.
+
+    Слота нет НИ ОДНОГО — резолв от уровня уже не зависит (легаси `agent.model` без
+    реестра; единственная запись реестра, чей слот жил в отброшенном профиле, —
+    живой стенд чинилки): показываем, чем работает агент, как и прежде. А вот при
+    заданном другом уровне такой ответ снова зависел бы от `level`, и выдавать
+    модель фоллбэка за назначенный `default` нельзя (то же правило, что у
+    `assigned_level_model`) — строки тогда нет.
+
+    Дом — здесь, потому что поверхностей две (плоский мастер и экран TUI), и
+    вторая редакция этого правила разошлась бы с первой на первой же правке: ровно
+    так дефект и жил — в плоском починен, в TUI остался."""
+    current = assigned_level_model(config, "default")
+    if not current and not any((config.get("slots") or {}).values()):
+        current = effective_model(config)
+    return current
+
+
 def overriding_layer_note(config: Dict[str, Any], config_path=None, *,
                           ignore_profile: bool = False) -> Optional[str]:
     """Спека §11: что перекроет выбор, сделанный в мастере (мастер пишет БАЗОВЫЙ
@@ -348,7 +377,7 @@ def overriding_layer_note(config: Dict[str, Any], config_path=None, *,
 
 
 def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli",
-                just_created: bool = False) -> str:
+                just_created: bool = False, *, repair: Optional["RepairLoad"] = None) -> str:
     """Подсказка по config_path.
 
     pending непуст → что вписать + как открыть помощник (`{program} --init-config`).
@@ -356,6 +385,15 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     just_created=True → конфиг создан этим запуском (иначе уже существовал).
     Если модель уже задана (а адрес/токен — нет), добавляем ремарку: эти поля
     нужны для preset-модели; либо укажи свою модель и адрес/токен под неё.
+
+    `repair` — итог лестницы `load_config_for_repair`, если конфиг пришёл от
+    неё (`--init-config` без TTY). На деградировавшей ступени `config` — не то,
+    что соберёт следующий старт: без профиля «настроен — можно запускать» врало
+    бы человеку, чей старт с профилем падает той же ошибкой (ревью), а на
+    шаблоне перечисленные поля — поля шаблона, а не его файла. Гайд говорит и
+    это. Ремарка о реестре из другого слоя на ступени без профиля судится без
+    профиля (`ignore_profile`): он снят, и второе предупреждение противоречило
+    бы первому.
 
     Путь показывается абсолютным (`_display_path`) — той же причиной, что и у
     `explain_broken_config`: относительный бессмыслен вне момента запуска.
@@ -367,10 +405,23 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     def _display_path(path) -> str:
         return os.path.abspath(path) if path else path
 
-    profile_note = overriding_layer_note(config, config_path)
+    stage = repair.stage if repair is not None else REPAIR_STAGE_FULL
+    dropped = repair.profile if repair is not None else ""
+    profile_note = overriding_layer_note(
+        config, config_path, ignore_profile=stage == REPAIR_STAGE_WITHOUT_PROFILE)
     pending = pending_requirements(config)
     if not pending:
-        base = f"[gc] Конфиг настроен: {_display_path(config_path)} — можно запускать."
+        if stage == REPAIR_STAGE_WITHOUT_PROFILE:
+            base = (f"[gc] Обязательные поля заполнены: {_display_path(config_path)} — но "
+                    f'профиль "{dropped}" сломан, и запуск с ним не поднимется: почините '
+                    f"профиль или снимите указатель; запуск без него — "
+                    f'{program} --profile "".')
+        elif stage == REPAIR_STAGE_TEMPLATE:
+            base = (f"[gc] config.yml не читается: {_display_path(config_path)} — показан "
+                    f"пакетный шаблон; поправьте файл руками или сбросьте его: "
+                    f"gc-cli --reset-config.")
+        else:
+            base = f"[gc] Конфиг настроен: {_display_path(config_path)} — можно запускать."
         return f"{base}\n[gc] {profile_note}." if profile_note else base
     fields = "\n".join(f"    • {r.hint}" for r in pending)
     note = ""
@@ -381,6 +432,17 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
             f"\n  Модель по умолчанию уже задана (agent.model = {config.get('model')}) —\n"
             f"  осталось указать для неё адрес и токен; либо укажите свою модель\n"
             f"  и соответствующие адрес/токен.\n"
+        )
+    if stage == REPAIR_STAGE_WITHOUT_PROFILE:
+        note += (
+            f'\n  Профиль "{dropped}" сломан — запуск с ним не поднимется, пока он не\n'
+            f'  починен или не снят (запуск без него: {program} --profile "").\n'
+        )
+    elif stage == REPAIR_STAGE_TEMPLATE:
+        note += (
+            "\n  Ваш config.yml не читается — поля выше показаны по пакетному шаблону,\n"
+            "  а не по вашему файлу; сначала поправьте его руками или сбросьте:\n"
+            "  gc-cli --reset-config.\n"
         )
     if just_created:
         header = "  GigaCode — конфигурация создана, настройка не завершена\n\n"
@@ -416,11 +478,17 @@ _BROKEN_CONFIG_LAYER_LABELS = {
 }
 
 
-def explain_broken_config(config_path: str, exc: Exception, *, program: str = "gc-cli") -> str:
+def explain_broken_config(config_path: str, exc: Exception, *, program: str = "gc-cli",
+                          profile_override: Optional[str] = None) -> str:
     """Человекочитаемое объяснение вместо трейсбека, когда `load_config_ex()` не
     смог собрать конфиг. `exc` — пойманный `ValueError` (pydantic `ValidationError`
     входит в него подклассом — единственный исход загрузки после защиты чтения
-    базы, см. config.py/layers.py::_layer_document).
+    базы, см. config.py/layers.py::_layer_document). `profile_override` — тот же,
+    что ушёл в `load_config_ex` (`--profile`): объяснение обязано описывать стек,
+    который грузила сессия, а не указатель из файла — иначе при `--profile broken`
+    карта называла одну базу и советовала чинить в ней ключ, который верен
+    (ревью). Имя из флага, не нашедшее файла, так и называется: чинить его во
+    флаге, а не в файле и не откатом базы.
 
     Собирается из трёх частей: сам текст ошибки (pydantic-дамп приводится к тому
     же читаемому виду, что и на путях записи, — `layers.py::_app_config_from_raw`)
@@ -431,12 +499,18 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
 
     Файл(ы) для починки называет `config_origin.error_origins` — общее с отказом
     записи ядро «текст ошибки → файлы, где лежат названные ею ключи» (закрытый
-    список подозреваемых, сверка префиксом "; "-сегмента, `origins()` за файлом).
-    Не нашли ни одного ключа (битый YAML, нечитаемый файл, профиль не найден по
-    указателю) — сопоставлять нечего, совет становится «поправить файл: <путь>»,
-    где путь — тот, что называет сама ошибка (слои пишут «<path>: …», см.
+    список подозреваемых, координата — голова "; "-сегмента, `origins()` за
+    файлом). Ошибка схемы координаты текстом не несёт — они в `loc` pydantic, и
+    их отдаёт то же ядро через `key_origins`: иначе дефект проектного оверлея
+    приписывался базе (ревью). Не нашли ни одного ключа (битый YAML, нечитаемый
+    файл) — сопоставлять нечего, совет становится «поправить файл: <путь>», где
+    путь — тот, что называет сама ошибка (слои пишут «<path>: …», см.
     layers.py::_layer_document), либо базовый, если ни один известный файл в
     тексте не назван.
+
+    Откат (`gc-cli --reset-config`) подменяет ОДНУ базу — советуется только когда
+    виновата она: на сломанном оверлее или профиле он ничего не чинит, а модели,
+    MCP и голос из базы теряет.
 
     Показанные пути — всегда абсолютные (`_display_path`): относительный, как
     из `--config .\\config.yml`, бессмыслен вне момента запуска (другой cwd,
@@ -452,40 +526,57 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     from pydantic import ValidationError as _ValidationError
 
     from config_modules.layers import resolve_profile_pointer
-    from config_origin import _overlay_paths, error_origins
+    from config_origin import _overlay_paths, error_keys, error_origins, key_origins
 
     def _display_path(path) -> str:
         return os.path.abspath(path)
 
-    error_text = (
-        f"конфиг не проходит схему: {exc}" if isinstance(exc, _ValidationError) else str(exc)
-    )
-
-    participants = [("base", config_path)] + _overlay_paths(config_path)
+    flagged = profile_override is not None
+    active = profile_override if flagged else resolve_profile_pointer(config_path)
+    participants = ([("base", config_path)]
+                    + _overlay_paths(config_path, profile_override=profile_override))
     participant_lines = [
         f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{_display_path(path)}"
-        + ("   (активен)" if kind.startswith("profile:") else "")
+        + (("   (активен: --profile)" if flagged else "   (активен)")
+           if kind.startswith("profile:") else "")
         for kind, path in participants
     ]
 
-    culprits = error_origins(config_path, error_text)
+    if isinstance(exc, _ValidationError):
+        error_text = f"конфиг не проходит схему: {exc}"
+        culprits = key_origins(
+            config_path,
+            [".".join(str(part) for part in err["loc"]) for err in exc.errors() if err["loc"]],
+            profile_override=profile_override)
+    else:
+        error_text = str(exc)
+        culprits = error_origins(config_path, error_text, profile_override=profile_override)
 
     fix_lines: list[str] = []
+    base_to_blame = any(culprit.kind == "base" for culprit in culprits)
     if culprits:
         for culprit in culprits:
             fix_lines.append(
                 f"поправить {', '.join(culprit.keys)} в:  {_display_path(culprit.path)}")
+    elif flagged and "profile" in error_keys(error_text):
+        # Ошибка про сам указатель, а он пришёл из флага: файла-виновника нет
+        # (не найден или зарезервирован — в обоих случаях такого профиля нет).
+        fix_lines.append(
+            f'профиль "{active}" задан флагом --profile — такого профиля нет, '
+            f"исправить имя во флаге")
     else:
         named = config_path
         for _, candidate in participants:
             if error_text.startswith(f"{candidate}:"):
                 named = candidate
                 break
+        base_to_blame = named == config_path
         fix_lines.append(f"поправить файл:  {_display_path(named)}")
 
-    if resolve_profile_pointer(config_path):
+    if active:
         fix_lines.append(f'запустить без профиля, ничего не потеряв:  {program} --profile ""')
-    fix_lines.append("откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --reset-config")
+    if base_to_blame:
+        fix_lines.append("откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --reset-config")
 
     error_block = "\n".join(f"  {line}" for line in error_text.splitlines())
     fix_block = "\n".join(f"    • {line}" for line in fix_lines)
@@ -508,27 +599,63 @@ REPAIR_STAGE_TEMPLATE = "template"
 
 class RepairLoad(NamedTuple):
     """Итог лестницы `load_config_for_repair`: конфиг, метаданные профиля,
-    ступень приземления и готовое сообщение человеку (None — деградации не было)."""
+    ступень приземления и готовое сообщение человеку (None — деградации не было).
+
+    `profile` — имя профиля, СНЯТОГО лестницей (ступень `without_profile`; иначе
+    пусто — на ступени `full` профиль активен, но не снимался): поверхности
+    называют его, не разбирая текст сообщения.
+
+    `deactivate_profile` — может ли финал мастера снять указатель этого профиля
+    (`write_wizard_values(deactivate_profile=...)`). True только на ступени
+    `without_profile`, когда указатель лежит там, куда правило адреса записи
+    (`layers.profile_pointer_write_target`) умеет писать, — в базе или проектном
+    слое. Указатель в managed-файле правило не рассматривает: снятие писало бы
+    пустой якорь в базу, а managed поднимал бы тот же сломанный профиль, и гейт
+    отвергал бы запись (ревью D3) — тогда False, и сообщение называет файл.
+    Обе точки входа (`cli._run_init`, `tui.main`) берут ИМЕННО это поле: признак,
+    выведенный из одной лишь ступени, обещал человеку деактивацию, которой не
+    будет, и успевал положить пустой якорь профиля в базу."""
     config: Dict[str, Any]
     meta: Any                      # ProfileMeta загрузчика
     stage: str
     message: Optional[str]
+    profile: str = ""              # умолчания = «ничего не снималось» (ступень full)
+    deactivate_profile: bool = False
 
 
-def _repair_message(stage: str, exc: Exception, profile: str) -> str:
+def _repair_message(stage: str, exc: Exception, profile: str,
+                    pinned_by: Optional[str] = None) -> str:
     """Текст деградации — ОДИН на все поверхности (stderr gc-cli, stderr gc-ua без
     TTY, runtime-notice мастера). Говорит не только «сломано», но и что именно
     отброшено: человек обязан понимать, почему поля мастера выглядят иначе, чем
-    его файл."""
+    его файл.
+
+    `pinned_by` — путь managed-файла, если указатель лежит в нём: деактивацию
+    тогда не обещаем (см. `RepairLoad.deactivate_profile`), а говорим, где
+    указатель и что снять его нужно там.
+
+    Ступень шаблона обещает ровно то, что делает писатель: ответы ложатся в файл
+    точечно, по якорям (`onboarding_config_writer`), целиком файл не
+    переписывается — поломка, которой ответы не касаются, остаётся, и
+    неразбираемый файл отвергает запись (ревью M8: текст «перепишет ваш файл»
+    вёл человека через все вопросы к отказу записи)."""
     if stage == REPAIR_STAGE_WITHOUT_PROFILE:
         named = f' "{profile}"' if profile else ""
-        return (
+        text = (
             f"config.yml не читается с профилем{named} ({exc}) — профиль снят на этот "
             f"запуск, остальные ваши настройки (адрес, токен, реестр моделей) действуют."
         )
+        if pinned_by:
+            text += (
+                f" Указатель на профиль лежит в managed-файле {pinned_by} — мастер его "
+                f"не снимет, снять нужно там."
+            )
+        return text
     return (
         f"config.yml не читается ({exc}) — продолжаю на пакетном шаблоне: ваших "
-        f"настроек в мастере не видно, он перепишет ваш файл."
+        f"настроек в мастере не видно. Ответы лягут в ваш файл точечно, целиком он "
+        f"не переписывается, и поломка, которой они не касаются, останется — тогда "
+        f"поправьте файл руками или сбросьте его: gc-cli --reset-config."
     )
 
 
@@ -555,27 +682,47 @@ def load_config_for_repair() -> RepairLoad:
 
     Про поломку рассказывает ПЕРВАЯ ошибка (та, что человек видит на обычном
     старте), а не отказ промежуточной ступени: вторая — диагноз уже урезанного
-    конфига."""
+    конфига.
+
+    Все три ступени накладывают верхние слои (managed, проектный `.gc/config.yml`)
+    — на сломанном оверлее не собирается и шаблон. Тогда лестница исчерпана и
+    наверх уходит та же ПЕРВАЯ ошибка (`ValueError`), а не отказ ступени шаблона:
+    мастер пишет в пользовательский файл, а сломан чужой слой — чинить его
+    мастером нечем, и вызывающий обязан объяснить поломку тем же
+    `explain_broken_config`, что и обычный старт (код 1, не трейсбек — ревью).
+    Не четвёртая ступень с пустым конфигом: конфига нет, и молчаливый `None`
+    в `RepairLoad.config` доехал бы до `resolve_threads_dir` следом."""
     from config import _default_config_path, load_config_ex, resolve_config_path
 
     try:
         config, meta = load_config_ex(None)
-        return RepairLoad(config, meta, REPAIR_STAGE_FULL, None)
+        return RepairLoad(config, meta, REPAIR_STAGE_FULL, None, "", False)
     except ValueError as exc:
         broken = exc
 
     try:
         config, meta = load_config_ex(None, profile_override="")
     except ValueError:
-        config, meta = load_config_ex(_default_config_path(), profile_override="")
+        try:
+            config, meta = load_config_ex(_default_config_path(), profile_override="")
+        except ValueError:
+            raise broken from None
         return RepairLoad(config, meta, REPAIR_STAGE_TEMPLATE,
-                          _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""))
+                          _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""), "", False)
 
     from config_modules.layers import resolve_profile_pointer
+    from config_origin import origins
 
-    profile = resolve_profile_pointer(resolve_config_path(None))
+    base_path = resolve_config_path(None)
+    profile = resolve_profile_pointer(base_path)
+    # Чей слой назвал указатель — тем же `origins`, что и витрина происхождения
+    # полей: managed правило адреса записи не рассматривает, и снятие оттуда
+    # мастеру недоступно (см. `RepairLoad.deactivate_profile`).
+    pointer = origins(base_path, ["profile"], profile_override="")["profile"]
+    pinned_by = pointer.overlay_path if pointer.overlay_kind == "managed" else None
     return RepairLoad(config, meta, REPAIR_STAGE_WITHOUT_PROFILE,
-                      _repair_message(REPAIR_STAGE_WITHOUT_PROFILE, broken, profile))
+                      _repair_message(REPAIR_STAGE_WITHOUT_PROFILE, broken, profile, pinned_by),
+                      profile, pinned_by is None)
 
 
 # --- Запись собранного мастером (волна B, спека §11) ----------------------
@@ -697,10 +844,24 @@ def _registry_ops(values: Dict[str, Any], existing: Optional[Dict[str, str]] = N
 
 
 class PartialWriteError(ValueError):
-    """Отказ ВТОРОЙ записи мастера — записи реестра при этом уже на диске.
+    """Отказ записи мастера, часть которой уже на диске.
+
+    `written` — имена состоявшихся записей в порядке исполнения:
+    `"profile_pointer"` (снятие указателя) и `"registry"` (транзакция реестра).
+    Что успело лечь, знает только писатель, и поверхности мастера обязаны читать
+    ответ здесь: выведенный из порядка записи состав разъедется с писателем на
+    первой же правке порядка — человек прочтёт про снятый профиль там, где его не
+    снимали. Голый `ValueError` — противоположный ответ: не легло НИЧЕГО.
+
+    Текст исключения — сам отказ, без служебных префиксов: обе поверхности
+    печатают его как есть.
 
     Подкласс `ValueError`: вызывающие ловят его прежними `except ValueError`, и
     ветку «конфиг не записан» разбирают те, кому есть что сказать иначе."""
+
+    def __init__(self, message: str, *, written) -> None:
+        super().__init__(message)
+        self.written = tuple(written)
 
 
 def write_wizard_values(config_path, values: Dict[str, Any], *,
@@ -743,7 +904,8 @@ def write_wizard_values(config_path, values: Dict[str, Any], *,
     токен этого прогона на диск ещё не уходил.
 
     Возвращает якоря плоских полей, которых в конфиге не нашлось (вызывающий
-    решает, показывать ли предупреждение); отказ записи — `ValueError`.
+    решает, показывать ли предупреждение); отказ записи — `ValueError`, а когда
+    часть уже легла — `PartialWriteError` с именами состоявшихся записей.
     """
     from pathlib import Path
 
@@ -752,12 +914,17 @@ def write_wizard_values(config_path, values: Dict[str, Any], *,
     from config_modules.layers import profile_pointer_write_target
     from config_modules.registry_write import apply_registry_ops
 
+    # Что успело лечь — счёт ведётся ЗДЕСЬ, по факту состоявшихся записей: только
+    # этот код знает порядок, и только он вправе о нём рассказывать
+    # (`PartialWriteError.written`).
+    landed: List[str] = []
     if deactivate_profile:
         # Куда ложится `profile: ""` и как — общие с секцией «Профили» правила
         # (`profile_pointer_write_target` + `ocw.write_profile_pointer`): своя
         # редакция писала бы в слой, который следующий старт всё равно перекроет.
         ocw.write_profile_pointer(
             profile_pointer_write_target(config_path), "", base_path=config_path)
+        landed.append("profile_pointer")
     template_path = _default_config_path()
     try:
         template = Path(template_path).read_text(encoding="utf-8")
@@ -772,20 +939,24 @@ def write_wizard_values(config_path, values: Dict[str, Any], *,
     flat = {FIELD_ANCHOR_PATHS.get(key, key): value
             for key, value in values.items() if key not in model_keys}
     ops = _registry_ops(values, _aliases_in_file(config_path))
-    registry_written = False
+    # Форма отказа — по одному признаку: легло ли уже что-нибудь. Не легло ничего
+    # (отказала самая первая запись) — исключение уходит наружу как было, и «конфиг
+    # не записан» тогда правда. Легло — правдой это уже не будет, и молча выдать
+    # одно за другое значит отправить человека искать нетронутый файл, где лежит
+    # новый реестр (а на ступени без профиля — ещё и снятый указатель).
     if ops:
-        apply_registry_ops(config_path, ops, template)
-        registry_written = True
+        try:
+            apply_registry_ops(config_path, ops, template)
+        except ValueError as exc:
+            if landed:
+                raise PartialWriteError(str(exc), written=landed) from exc
+            raise
+        landed.append("registry")
     try:
         return ocw.write_values(config_path, flat,
                                 template_path=template_path if template else None,
                                 validate=validate_config_text)
     except ValueError as exc:
-        # Какая из двух записей отказала — знает только этот код, а решают судьбу
-        # сообщения обе поверхности мастера. Отказ ПЕРВОЙ уходит наружу как был:
-        # файл не тронут, «конфиг не записан» — правда. Отказ ВТОРОЙ после
-        # состоявшейся первой правдой уже не будет, и молча выдать его за неё
-        # значит отправить человека искать нетронутый файл, где лежит новый реестр.
-        if registry_written:
-            raise PartialWriteError(str(exc)) from exc
+        if landed:
+            raise PartialWriteError(str(exc), written=landed) from exc
         raise

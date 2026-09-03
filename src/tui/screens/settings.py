@@ -709,6 +709,17 @@ class SettingsScreen(Screen):
         """Origin поля или None (путь конфига не задан)."""
         return self._origins.get(key)
 
+    def _registry_origin(self):
+        """Происхождение реестра `models` — тем же `origins`, что и поля визарда, но
+        свежим чтением на каждый вызов, а не из `_origins`: спрашивает его секция
+        «Модели» на каждую сборку тела, в том числе сразу после СВОЕЙ записи, когда
+        снимки экрана ещё не перечитаны. Судить по ним значило бы видеть снятую
+        запись живой — и рисовать подсказку о слое сверху вместо легаси-редактора."""
+        from config_origin import origins
+        if not self._config_path:
+            return None
+        return origins(self._config_path, ["models"])["models"]
+
     def _raw_value(self, key: str) -> str:
         """Сырое значение поля строкой; сентинел шаблона / отсутствие → "" (не задано)."""
         from onboarding import MODEL_SENTINEL, TOKEN_SENTINEL, URL_SENTINEL
@@ -1538,12 +1549,11 @@ class SettingsScreen(Screen):
                 template = ""       # шаблона нет — якорь секции синтезирует сам writer
             frame.mount(ModelsSectionEditor(
                 target=self._config_path, template=template,
-                # Что действует НАД основным конфигом: реестр активного профиля.
+                # Что действует НАД основным конфигом: реестр слоя выше и сам слой.
                 # Секции это нужно ровно затем, чтобы не обещать выключенные уровни
-                # там, где они работают записями профиля, — знание о рантайме есть
-                # только у экрана.
-                overlay_registry=lambda: (self._config or {}).get("models") or {},
-                overlay_profile=(self._config or {}).get("profile") or "",
+                # там, где они работают чужими записями, — а знание о слоях есть
+                # только у происхождения (`_registry_origin`), не у снимка конфига.
+                overlay_origin=self._registry_origin,
                 effective_url=endpoint, effective_auth=auth, verify=verify,
                 config_proxy=proxy,
                 presets=endpoint_presets_from_config(self._config or {}),
@@ -3393,8 +3403,8 @@ class SettingsScreen(Screen):
         cache = self._profiles_disk_cache
         if "project_doc" not in cache:
             import config_raw
-            from config import _project_local_config_path
-            project_path = _project_local_config_path()
+            from config_modules.env_vars import project_local_config_path
+            project_path = project_local_config_path()
             cache["project_doc"] = (
                 config_raw.read_document(project_path) if project_path is not None else {}
             )
@@ -3483,7 +3493,7 @@ class SettingsScreen(Screen):
         if session_name:
             effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profiles)'
         else:
-            effect = "применится со следующего хода агента"
+            effect = self._launch_profile_effect("") or "применится со следующего хода агента"
         self._render_view()
         self._flash(f"Профиль деактивирован — {target}. {effect}")
 
@@ -3521,7 +3531,7 @@ class SettingsScreen(Screen):
         if session_name and session_name != name:
             effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profiles)'
         else:
-            effect = "применится со следующего хода агента"
+            effect = self._launch_profile_effect(name) or "применится со следующего хода агента"
         self._render_view()
         self._flash(f"Профиль «{name}» активирован — {target}. {effect}")
 
@@ -3586,10 +3596,12 @@ class SettingsScreen(Screen):
         return layers
 
     def _repoint_profile_layers(self, layers: list, value: str, *,
-                                extra_candidates=None) -> tuple[list, str | None]:
+                                extra_candidates=None) -> tuple[list, Exception | None]:
         """Записать `profile: <value>` в каждый слой. Возвращает (записанные,
-        текст ошибки | None) — откат частичной записи на вызывающем: только он
-        знает, каким глаголом назвать неслучившееся действие.
+        ошибка | None) — откат частичной записи на вызывающем: только он знает,
+        каким глаголом назвать неслучившееся действие. Ошибка отдаётся САМА, не
+        текстом: её род (`_pointer_write_failure`) решает, что показать, а строка
+        его стирает.
 
         `extra_candidates` пробрасывается в каждую запись как есть (см.
         `_write_profile_pointer`) — переименование подставляет им будущий
@@ -3599,9 +3611,20 @@ class SettingsScreen(Screen):
             try:
                 self._write_profile_pointer(target, value, extra_candidates=extra_candidates)
             except (ValueError, OSError) as exc:
-                return written, str(exc)
+                return written, exc
             written.append(target)
         return written, None
+
+    def _pointer_write_failure(self, done: str, action: str, exc: Exception) -> str:
+        """Текст несостоявшейся записи указателя `profile:` — по РОДУ сбоя.
+        `OSError` — файл не записался (права, диск): честная файловая ошибка, как у
+        включения/снятия рядом; `ValueError` — стек не собрался: отказ фазы 2 с
+        адресом починки (`_profile_stack_write_refusal`). Одним текстом на оба
+        рода PermissionError звучал как «конфиг стал бы нерабочим — поправьте в
+        разделе «Модели»» и отправлял чинить реестр там, где не хватило прав."""
+        if isinstance(exc, OSError):
+            return f"не удалось {action}: {exc}"
+        return self._profile_stack_write_refusal(done, exc)
 
     def _profile_name_error(self, name: str, *, exclude: str | None = None) -> str | None:
         """Имя годится для создания/переименования — иначе текст ошибки. `exclude` —
@@ -3759,7 +3782,21 @@ class SettingsScreen(Screen):
     def _session_profile_name(self) -> str | None:
         return (getattr(self.app, "_session_overrides", None) or {}).get("profile")
 
-    def _profile_session_effect(self, before: str | None, *, pointer_changed: bool) -> str:
+    def _launch_profile_effect(self, pointer: str) -> str | None:
+        """Эффект записанного указателя `pointer` для ТЕКУЩЕГО ЗАПУСКА под флагом
+        `--profile` (`TuiApp._profile_override`, `""` — «без профиля»): флаг переживает
+        перечитывание, и записанное применится лишь со следующего запуска без
+        него. «Применится со следующего хода агента» здесь — та же ложь, что и под
+        сессионным выбором. None — флага нет либо он называет то же имя."""
+        launch = getattr(self.app, "_profile_override", None)
+        if launch is None or launch == pointer:
+            return None
+        if launch:
+            return f"текущий запуск остаётся на «{launch}» (флаг --profile)"
+        return 'текущий запуск остаётся без профиля (флаг --profile "")'
+
+    def _profile_session_effect(self, before: str | None, *, pointer_changed: bool,
+                                pointer: str = "") -> str:
         """Эффект операции для ТЕКУЩЕЙ сессии — в плашку, а не только в `/notices`
         (канон волны A, `_activate_profile`). Считается ПОСЛЕ перечитки: снял ли
         сессионный выбор санатор (§9.2) и куда он переехал, видно только по факту.
@@ -3768,7 +3805,9 @@ class SettingsScreen(Screen):
         хвост «применится со следующего хода агента» вставал бы и там, где для
         агента не изменилось НИЧЕГО (переименован профиль, на который не ссылается
         ни один слой), — тот же класс лжи, за который переписывались футеры. Нечего
-        сказать — пустая строка, а не вежливая неправда."""
+        сказать — пустая строка, а не вежливая неправда. `pointer` — что теперь
+        записано в указателе (новое имя у переименования, пусто у удаления): под
+        флагом запуска обещание про следующий ход уступает место эффекту флага."""
         after = self._session_profile_name()
         if after and after != before:
             return f'сессионный выбор /profiles переехал на «{after}»'
@@ -3777,7 +3816,9 @@ class SettingsScreen(Screen):
         if before:
             acting = (self._config.get("profile") or None) or "без профиля"
             return f'сессионный выбор «{before}» снят — действует «{acting}»'
-        return "применится со следующего хода агента" if pointer_changed else ""
+        if not pointer_changed:
+            return ""
+        return self._launch_profile_effect(pointer) or "применится со следующего хода агента"
 
     def _rename_profile(self, original: str, new_name: str) -> None:
         """`r` → новое имя: переименовываются файл И указатель в КАЖДОМ файловом
@@ -3832,7 +3873,7 @@ class SettingsScreen(Screen):
         if error is not None:
             self._rollback_profile_pointers(
                 written, original,
-                file_exc=self._profile_stack_write_refusal("переименован", error),
+                file_exc=self._pointer_write_failure("переименован", "переименовать", error),
                 action="переименовать")
             return
         try:
@@ -3853,12 +3894,18 @@ class SettingsScreen(Screen):
                 self.app.apply_session_override("profile", new_name)
             except OSError:
                 pass        # meta недоступна: оверрайд откачен, дальше его снимет санация
+        if getattr(self.app, "_profile_override", None) == original:
+            # Флаг запуска `--profile` едет за именем по той же причине: иначе
+            # перечитка ниже не нашла бы профиль флага и сняла бы его санацией —
+            # с уведомлением о пропаже профиля, который только что переименовали.
+            self.app._profile_override = new_name
         if not self._reload_after_profile_file_change("переименовано"):
             return
         self._render_view()
         self._flash(" ".join(filter(None, [
             f"Профиль «{original}» переименован в «{new_name}».",
-            self._profile_session_effect(session_before, pointer_changed=bool(layers)),
+            self._profile_session_effect(session_before, pointer_changed=bool(layers),
+                                         pointer=new_name),
         ])))
 
     def _request_delete_profile(self, name: str) -> None:
@@ -3924,7 +3971,7 @@ class SettingsScreen(Screen):
         if error is not None:
             self._rollback_profile_pointers(
                 written, name,
-                file_exc=self._profile_stack_write_refusal("удалён", error),
+                file_exc=self._pointer_write_failure("удалён", "удалить", error),
                 action="удалить")
             return
         path = ref.path

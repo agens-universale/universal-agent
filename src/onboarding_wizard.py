@@ -19,6 +19,13 @@ def _tokens(raw: str) -> list:
     return [t for t in re.split(r"[,\s]+", raw.strip()) if t]
 
 
+def _is_number(tok: str) -> bool:
+    """Ровно то, что разберёт `int()`. `isdigit()` шире: надстрочная `²` (и
+    прочие цифры вне категории Nd) проходит его, а `int("²")` падает голым
+    `ValueError` — мастер ронял трейсбек, и ответы до этого места терялись."""
+    return tok.isdecimal()
+
+
 def parse_single(raw: str, n: int):
     toks = _tokens(raw)
     if not toks:
@@ -26,7 +33,7 @@ def parse_single(raw: str, n: int):
     if len(toks) != 1:
         raise InvalidChoice(f"Выберите один пункт: 1–{n}.")
     t = toks[0]
-    if not t.isdigit():
+    if not _is_number(t):
         raise InvalidChoice(f"Введите номер 1–{n}.")
     v = int(t)
     if not (1 <= v <= n):
@@ -37,7 +44,7 @@ def parse_single(raw: str, n: int):
 def parse_multi(raw: str, n: int) -> list:
     seen: list = []
     for t in _tokens(raw):
-        if not t.isdigit():
+        if not _is_number(t):
             raise InvalidChoice(f"«{t}» — не номер, доступны 1–{n}.")
         v = int(t)
         if not (1 <= v <= n):
@@ -98,7 +105,7 @@ def _interpret(raw: str, models, shown) -> tuple:
         return "keep", ""
     if raw == "*":
         return "all", ""
-    if raw.isdigit() and 1 <= int(raw) <= len(shown):
+    if _is_number(raw) and 1 <= int(raw) <= len(shown):
         return "pick", shown[int(raw) - 1].id
     exact = _exact_model(models, raw)
     if exact is not None:
@@ -274,7 +281,10 @@ def _collect_model(io: WizardIO, config: dict, values: dict, *, fetch=None) -> l
     io.printer("")
     io.printer(f"  {_of.ONBOARDING_FIELDS[2].label}")
     io.printer(f"  {_of.MODEL_STEP_HINT}")
-    current = onboarding.effective_model(config)
+    # Что считать текущим на этом шаге — правило общее с экраном TUI и живёт в ядре
+    # (`onboarding.model_step_current`): вторая его редакция уже расходилась с
+    # первой — тот же шаг в TUI показывал модель активного уровня.
+    current = onboarding.model_step_current(config)
     if current:
         io.printer(f"  {_current_line(config, 'default', current)}")
     io.printer(f"  {_of.MODEL_FETCHING}")
@@ -427,18 +437,22 @@ def _mcp_step(io: WizardIO, mcp) -> None:
 _SUMMARY_LABEL = {"default": "модель", "light": "light", "max": "max"}
 
 
-def _unassigned_default_note(config: dict) -> str:
+def _unassigned_default(config: dict) -> tuple[str, str]:
     """`default` пуст, а строка «модель» всё равно показывает модель — она
-    выведена фоллбэком. Источник ищем тем же обходом матрицы `LEVEL_FALLBACK`
-    (`config_modules/model_registry.py`), что и резолв: первый уровень после
-    `default`, у которого задан слот. Не нашёлся ни один (реестр из одной
-    записи, например) — источник не выдумываем, пишем голый факт."""
+    выведена фоллбэком: (модель, подпись об источнике). Источник ищем тем же
+    обходом матрицы `LEVEL_FALLBACK` (`config_modules/model_registry.py`), что и
+    резолв: первый уровень после `default`, у которого задан слот, — и модель
+    берём из ЕГО слота, а не из `effective_model`: та резолвит АКТИВНЫЙ уровень
+    конфига, и при `level: light` с заданными обоими уровнями подпись называла
+    max, а модель показывала light. Не нашёлся ни один (реестр из одной записи,
+    например) — источник не выдумываем, пишем голый факт; резолв там от уровня
+    не зависит."""
     from config_modules.model_registry import LEVEL_FALLBACK
-    slots = config.get("slots") or {}
     for level in LEVEL_FALLBACK["default"][1:]:
-        if slots.get(level):
-            return f"(default не задан — работает {level})"
-    return "(default не задан)"
+        model = onboarding.assigned_level_model(config, level)
+        if model:
+            return model, f"(default не задан — работает {level})"
+    return onboarding.effective_model(config), "(default не задан)"
 
 
 def _summary_lines(config: dict) -> list[str]:
@@ -450,12 +464,12 @@ def _summary_lines(config: dict) -> list[str]:
         model = onboarding.assigned_level_model(config, level)
         via_fallback = not model and level == "default"
         if via_fallback:
-            model = onboarding.effective_model(config)
+            model, note = _unassigned_default(config)
         if not model:
             lines.append(f"    {_SUMMARY_LABEL[level]:<12} не задан")
             continue
         if via_fallback:
-            entry = f"  {_unassigned_default_note(config)}"
+            entry = f"  {note}"
         else:
             alias = (config.get("slots") or {}).get(level)
             entry = f"  (имя записи «{alias}»)" if alias and alias != model else ""
@@ -473,6 +487,12 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None,
         # там, человек читал бы уже как отчёт о случившемся.
         io.printer("")
         io.printer(f"  {_of.PROFILE_DEACTIVATION_WARNING}")
+    # Отказ записи — любая из трёх веток ниже — не даёт печатать «✓ Готово» и
+    # отдавать успех: отказ оставляет файл читаемым, проверка «конфиг не настроен»
+    # его не ловит, и `gc-cli --init-config && …` шёл бы дальше, считая выбор
+    # сохранённым (рулинг владельца у `cli._run_init`: код возврата отражает исход).
+    refused = False
+    wrote = False
     try:
         values = collect_fields(io, config, review_all=review_all)
         # Снятие указателя — само по себе повод к записи: человек прошёл мастер
@@ -481,40 +501,65 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None,
         if values or deactivate_profile:
             missing = onboarding.write_wizard_values(
                 config_path, values, deactivate_profile=deactivate_profile)
+            wrote = True
             if missing:
                 # Правило «всё или ничего» — про ПЛОСКУЮ запись; записи реестра ушли
                 # раньше отдельной транзакцией, поэтому файл уже не нетронут. Говорим
                 # о том, чего не хватает, а не о судьбе всего конфига.
                 io.printer("\n  [ошибка] не записаны поля: "
                            f"{', '.join(missing)} — впишите их в конфиг вручную")
+                refused = True
     except onboarding.PartialWriteError as exc:
-        # Записи реестра ушли первой транзакцией и уже на диске — обещать
-        # нетронутый файл нельзя (то же правило, что у ветки `missing` выше).
-        io.printer(f"\n  [ошибка] поля не записаны: {exc} — записи моделей "
-                   "при этом уже в конфиге")
+        # Часть записи уже на диске — обещать нетронутый файл нельзя (то же
+        # правило, что у ветки `missing` выше). Что именно легло, знает только
+        # `write_wizard_values` — читаем её ответ (`written`), а не выводим состав
+        # из её порядка записи: догадка разъедется с писателем на первой же правке
+        # порядка, и человек прочтёт про снятый профиль там, где его не снимали.
+        io.printer(f"\n  [ошибка] остальное не записано: {exc} — при этом уже: "
+                   + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written))
+        refused = True
     except ValueError as exc:
         io.printer(f"\n  [ошибка] конфиг не записан: {exc}")
+        refused = True
     except (KeyboardInterrupt, EOFError):
+        # Прерывание — исход, а не пауза: дальше мастер перечитывал конфиг и на
+        # настроенном печатал «✓ Готово» со сводкой и отдавал успех. Человек нажал
+        # Ctrl-C ровно затем, чтобы этого не случилось, а `gc-cli --init-config && …`
+        # шёл дальше, будто он всё подтвердил.
         io.printer("\nПрервано.")
+        return False
     else:
         if mcp is not None:
             _mcp_step(io, mcp)
     try:
         fresh = _reload_config()
     except ValueError as exc:
-        # Патч выше правит якоря текста, а не документ целиком — «запись»
-        # могла честно отчитаться об отказе (except выше) или тихо не
-        # затронуть уже сломанную часть файла. В обоих случаях второе,
-        # необработанное падение здесь было бы хуже первого: человек уже
+        # Второе, необработанное падение здесь было бы хуже первого: человек уже
         # потратил время на все вопросы мастера.
-        io.printer(
-            "\n  [ошибка] вы ответили на все вопросы, но записать поверх "
-            "сломанного файла не вышло — он остался в прежнем виде:"
-        )
+        #
+        # О судьбе файла говорим только то, что знаем, — исходов три, и общего
+        # текста у них нет. Запись СОСТОЯЛАСЬ: фаза 1 судит текст, а не собираемость
+        # стека (`slots.max` на несуществующий алиас её проходит), файл изменён — и
+        # «остался в прежнем виде» отправляло человека искать свои ответы в файле,
+        # где они уже лежат. Запись ОТКАЗАЛА: что легло, а что нет, ветка отказа
+        # сказала строкой выше — второй раз об этом не спорим. Писателя не звали
+        # (человек прошёл мастер, ничего не заполнив): файл и правда прежний.
+        if refused:
+            fate = ""
+        elif wrote:
+            fate = " — ваши ответы записаны, поломка мимо них осталась"
+        else:
+            fate = " — записывать было нечего, файл остался в прежнем виде"
+        io.printer("\n  [ошибка] вы ответили на все вопросы, но конфиг всё ещё "
+                   f"не загружается{fate}:")
         io.printer(onboarding.explain_broken_config(str(config_path), exc))
         return False
     if onboarding.is_unconfigured(fresh):
         io.printer(onboarding.setup_guide(str(config_path), fresh))
+        return False
+    if refused:
+        # Итог уже напечатан у отказа: что легло, что нет. Сводка «трёх уровней»
+        # здесь читалась бы как отчёт о записанном.
         return False
     io.printer("")
     io.printer(f"  ✓ Готово. Конфиг: {config_path}")

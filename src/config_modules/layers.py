@@ -472,13 +472,19 @@ def profile_pointer_write_target(base_path, *, project_doc=None) -> Path:
     return Path(base_path)
 
 
-def stack_documents(base_path) -> list:
+def stack_documents(base_path, *, profile_override=None) -> list:
     """Файлы стека следующего старта и их СЫРЫЕ документы — `(Path, dict)`, в порядке
     наложения. Нечитаемое и не-словари молча пропускаются: справке важно найденное, а
     не полнота обхода.
 
     Нужна тому, кому мало слитого результата и важно, В КАКОМ файле лежит найденное:
-    отказ удаления обязан назвать файл, иначе человеку некуда идти."""
+    отказ удаления обязан назвать файл, иначе человеку некуда идти.
+
+    `profile_override` — как у `_merge_layers`: имя профиля вместо указателя, `""` —
+    стек без слоя профиля вовсе. Нужен вопросам об удалении из файла ПРОФИЛЯ
+    (`registry_write`): они судятся стеком «база + этот профиль», а не тем, что
+    назначен указателем, — тем же приёмом, каким `prospective_registry` собирает
+    его для вопроса о слоте."""
     base = Path(base_path)
     base_raw = _safe_yaml_dict(base)
     if base_raw is None:
@@ -496,7 +502,8 @@ def stack_documents(base_path) -> list:
     # проектным слоем (или победивший её при конфликте), для этой функции не
     # существовал бы вовсе — и `alias_survives_removal`/`references_broken_by_
     # removal` судили бы по неполному или неверному стеку в обе стороны.
-    pointer = resolve_profile_pointer(base)
+    pointer = (profile_override if profile_override is not None
+               else resolve_profile_pointer(base))
     if pointer:
         try:
             ref = resolve_profile(pointer, profile_roots(Path(os.getcwd()), base))

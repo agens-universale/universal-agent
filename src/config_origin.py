@@ -59,7 +59,8 @@ class Origin:
         return self.overlay_kind != ""
 
 
-def _overlay_paths(base_path: str) -> list[tuple[str, str]]:
+def _overlay_paths(base_path: str, *, profile_override: Optional[str] = None
+                   ) -> list[tuple[str, str]]:
     """[(kind, path)] в порядке приоритета load_config: managed, project, затем
     (спека §2, ось 2 — контент профиля ложится ПОВЕРХ всех файловых слоёв) активный
     профиль, если указатель резолвится. Указатель — общим резолвом
@@ -70,9 +71,15 @@ def _overlay_paths(base_path: str) -> list[tuple[str, str]]:
     находка ревью), и её собственная копия молчала о профиле на битой базе иначе,
     чем резолвит следующий старт; теперь обе стороны — один код.
 
+    `profile_override` — как у `load_config_ex`: имя побеждает указатель, пустая
+    строка снимает слой профиля вовсе, None — указатель из файлов. Сессия с
+    `--profile` грузит не тот профиль, что назван в файле, и карта слоёв обязана
+    считаться по тому же стеку (ревью: объяснение сломанного конфига называло
+    базу вместо профиля из флага).
+
     Совпадающий с базовым файл пропускаем — ровно как load_config."""
     from pathlib import Path as _Path
-    from config import _project_local_config_path
+    from config_modules.env_vars import project_local_config_path
     from config_modules.layers import resolve_profile_pointer
     from config_modules.profiles import discover_profiles, profile_roots
     from mcp_runtime.paths import managed_config_path
@@ -84,11 +91,12 @@ def _overlay_paths(base_path: str) -> list[tuple[str, str]]:
     if managed.is_file() and os.path.abspath(str(managed)) != base_abs:
         out.append(("managed", str(managed)))
 
-    project = _project_local_config_path()
+    project = project_local_config_path()
     if project is not None and os.path.abspath(project) != base_abs:
         out.append(("project", project))
 
-    pointer = resolve_profile_pointer(base_path)
+    pointer = (profile_override if profile_override is not None
+               else resolve_profile_pointer(base_path))
     if pointer:
         roots = profile_roots(_Path(os.getcwd()), _Path(base_path))
         ref = discover_profiles(roots).get(pointer)
@@ -100,7 +108,8 @@ def _overlay_paths(base_path: str) -> list[tuple[str, str]]:
 
 
 def origins(base_path: str, dotted_keys: Iterable[str], *,
-            candidates: Optional[Dict[Any, Dict[str, Any]]] = None) -> Dict[str, Origin]:
+            candidates: Optional[Dict[Any, Dict[str, Any]]] = None,
+            profile_override: Optional[str] = None) -> Dict[str, Origin]:
     """{dotted-путь: Origin} — что в базовом файле, чем перекрыто, что действует.
 
     Действующее значение считаем ТЕМ ЖЕ deep_merge, что и load_config: накатываем
@@ -111,6 +120,7 @@ def origins(base_path: str, dotted_keys: Iterable[str], *,
     любого оверлея), тем же приёмом, что `layers._merge_layers`. Нужен отказу
     записи: его вердикт вынесен по стеку, где цель стоит ЕЩЁ НЕ ЗАПИСАННЫМ
     текстом, и ответ по диску назвал бы слой, которого валидатор не видел.
+    `profile_override` — как у `_overlay_paths`.
     """
     keys = list(dotted_keys)
     _candidates = {Path(p).resolve(): doc for p, doc in (candidates or {}).items()}
@@ -127,7 +137,7 @@ def origins(base_path: str, dotted_keys: Iterable[str], *,
     kinds: Dict[str, str] = {dotted: "" for dotted in keys}
     paths: Dict[str, Optional[str]] = {dotted: None for dotted in keys}
 
-    for overlay_kind, overlay_path in _overlay_paths(base_path):
+    for overlay_kind, overlay_path in _overlay_paths(base_path, profile_override=profile_override):
         merged = deep_merge(merged, _document(overlay_path))
         for dotted in keys:
             value = config_raw.value_at(merged, dotted)
@@ -145,7 +155,31 @@ def origins(base_path: str, dotted_keys: Iterable[str], *,
 # Закрытый список ключей-подозреваемых (спека решения по нерезолвимому конфигу):
 # текст ошибки не парсим, а сверяем с этими строками. Порядок задаёт порядок
 # ответа `error_origins`, когда поломка размазана по нескольким файлам.
-ERROR_SUSPECT_KEYS = ("slots.default", "slots.light", "slots.max", "models", "profile")
+#
+# Координата берётся у "; "-сегмента ЦЕЛИКОМ (голова до ": "), а подозреваемый —
+# её секция или она сама: `assign.subagents.<имя>` ищется в файлах именно этим
+# путём. Голая секция `assign` называла бы файл, где привязок больше, а не тот,
+# где лежит сломанная (ревью: смешанная ошибка теряла строку про привязки).
+ERROR_SUSPECT_KEYS = ("slots.default", "slots.light", "slots.max", "assign", "models", "profile")
+
+# Отказ резолва указателя (`profiles.resolve_profile`) ключа не называет — он
+# по-русски: 'профиль "<имя>" не найден; искал: …'. Без этой сверки файл с
+# указателем не назывался вовсе и виновником выходила база (ревью).
+_POINTER_NOT_FOUND = ('профиль "', '" не найден')
+
+
+def error_keys(error_text: str) -> list:
+    """Координаты ключей, названные текстом ошибки, — в порядке `ERROR_SUSPECT_KEYS`,
+    внутри одного подозреваемого — в порядке текста. Ошибка не про ключи — пусто."""
+    heads = [segment.split(": ", 1)[0] for segment in error_text.split("; ")]
+    heads = ["profile" if head.startswith(_POINTER_NOT_FOUND[0])
+             and head.endswith(_POINTER_NOT_FOUND[1]) else head for head in heads]
+    keys: list = []
+    for suspect in ERROR_SUSPECT_KEYS:
+        for head in heads:
+            if (head == suspect or head.startswith(f"{suspect}.")) and head not in keys:
+                keys.append(head)
+    return keys
 
 
 @dataclass(frozen=True)
@@ -160,31 +194,46 @@ class ErrorOrigin:
 
 
 def error_origins(base_path: str, error_text: str, *,
-                  candidates: Optional[Dict[Any, Dict[str, Any]]] = None) -> list:
+                  candidates: Optional[Dict[Any, Dict[str, Any]]] = None,
+                  profile_override: Optional[str] = None) -> list:
     """Текст ошибки → файлы, где лежат названные ею ключи (`ErrorOrigin`, по одному
-    на файл). `candidates` — как у `origins`.
+    на файл). `candidates` и `profile_override` — как у `origins`.
 
     Ключи ищутся не парсингом текста, а сверкой с закрытым списком
-    `ERROR_SUSPECT_KEYS`: какие упомянуты — как ПРЕФИКС одного из "; "-сегментов
+    `ERROR_SUSPECT_KEYS` (`error_keys`): голова "; "-сегмента до ": "
     (`model_sections_validation.py` склеивает несколько находок этим
-    разделителем), для тех и спрашивается `origins()` — она называет слой, чьё
-    наложение последним изменило значение. Префикс сегмента, а не вхождение где
-    угодно в тексте: хвост «не найден в merged-реестре models», общий для ЛЮБОЙ
-    ошибки слота, ложно приплетал бы секцию models к каждой поломке. Ключ,
-    которого не задал ни один оверлей, — на базе: чинить его там. Ни один ключ не
-    назван (битый YAML, нечитаемый файл, профиль не найден по указателю) —
-    сопоставлять нечего, ответ пуст: файл-виновник не выдумывается.
+    разделителем) — и есть координата, если её секция в списке; для найденных
+    спрашивается `origins()` — она называет слой, чьё наложение последним
+    изменило значение. Голова сегмента, а не вхождение где угодно в тексте:
+    хвост «не найден в merged-реестре models», общий для ЛЮБОЙ ошибки слота,
+    ложно приплетал бы секцию models к каждой поломке. Ключ, которого не задал ни
+    один оверлей, — на базе: чинить его там. Ни один ключ не назван (битый YAML,
+    нечитаемый файл) — сопоставлять нечего, ответ пуст: файл-виновник не
+    выдумывается. Ошибка схемы (pydantic) координаты несёт не текстом, а `loc`
+    — для неё тот же ответ даёт `key_origins`.
 
     Общий дом для объяснения нерезолвимого конфига при старте
     (`onboarding.explain_broken_config`) и отказа записи, вынесенного по стеку
     (`config_modules.registry_write`): вторая редакция правила «какой файл
     виноват» разошлась бы с первой на первой же правке списка подозреваемых."""
-    segments = error_text.split("; ")
-    keys = [key for key in ERROR_SUSPECT_KEYS
-            if any(segment.startswith(key) for segment in segments)]
+    return key_origins(base_path, error_keys(error_text), candidates=candidates,
+                       profile_override=profile_override)
+
+
+def key_origins(base_path: str, keys: Iterable[str], *,
+                candidates: Optional[Dict[Any, Dict[str, Any]]] = None,
+                profile_override: Optional[str] = None) -> list:
+    """Координаты ключей → файлы стека, где они лежат (`ErrorOrigin`, по одному на
+    файл, ключи — в порядке `keys`). Вторая половина `error_origins`, вынесенная
+    ради ошибок, у которых координаты уже есть без текста (pydantic `loc`).
+
+    Под `profile_override` указатель `profile` в файлах инертен — загрузчик его
+    не читает, имя пришло из флага — и виновником не называется: человека
+    послали бы править ключ, который в этой сессии ничего не решал."""
+    keys = [key for key in keys if not (profile_override is not None and key == "profile")]
     if not keys:
         return []
-    found = origins(base_path, keys, candidates=candidates)
+    found = origins(base_path, keys, candidates=candidates, profile_override=profile_override)
     by_file: Dict[str, tuple] = {}
     for key in keys:
         origin = found[key]

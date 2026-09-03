@@ -505,18 +505,40 @@ def references_to(target, alias: str) -> list[str]:
     return _references(_document(_read(target)), alias)
 
 
+def _other_stack_documents(target, stack_base) -> list:
+    """Файлы стека, которым судится удаление из `target`, БЕЗ самого `target` —
+    `(Path, dict)`.
+
+    Цель — основной конфиг (`stack_base` не задан): стек следующего старта, с
+    профилем по указателю — снятая в базе запись повиснет ровно у него. Цель —
+    ПРОФИЛЬ: стек «база + этот профиль» независимо от указателя (`stack_documents(…,
+    profile_override="")` — нижние слои; сам профиль и есть цель). Профиль по
+    указателю в него не входит: правится файл, который старт грузит только вместе с
+    нижними слоями, и что объявляет ДРУГОЙ профиль, его стеку не видно. По
+    указателю оба вопроса врали для неактивного профиля: запись, которую объявлял
+    ещё и активный, «переживала» удаление — каскад оставлял свой слот висеть, а
+    отказ молчал о ссылке базы, которую резолвил только этот файл; валидатор до
+    неактивного профиля не доходит, и всплывало это лишь при его активации.
+    Тот же стек, каким `prospective_registry` отвечает на вопрос о слоте, — иначе
+    каскад внутри справки и её итог считались бы по разным стекам."""
+    if stack_base is None:
+        docs = stack_documents(target)
+    else:
+        docs = stack_documents(stack_base, profile_override="")
+    target_path = Path(target).resolve()
+    return [(path, document) for path, document in docs
+            if Path(path).resolve() != target_path]
+
+
 def alias_survives_removal(target, alias: str, *, stack_base=None) -> bool:
     """Останется ли алиас в стеке после снятия записи из `target` — его объявляет
-    ещё один слой.
+    ещё один слой (какой стек — `_other_stack_documents`).
 
     Один предикат на два вопроса: отказ удаления спрашивает «повиснут ли чужие
     ссылки», каскад — «сносить ли свои». Обе редакции правила уже расходились:
     справка знала про переживший алиас, а каскад считал по совпадению имени в
     своём файле и сносил ссылку, которая продолжала резолвиться."""
-    target_path = Path(target).resolve()
-    for path, document in stack_documents(stack_base or target):
-        if Path(path).resolve() == target_path:
-            continue
+    for _path, document in _other_stack_documents(target, stack_base):
         models = document.get("models")
         if isinstance(models, dict) and alias in models:
             return True
@@ -539,12 +561,8 @@ def references_broken_by_removal(target, alias: str, *, stack_base=None) -> list
     унаследованной записи, распространённое на другой слой."""
     if alias_survives_removal(target, alias, stack_base=stack_base):
         return []               # алиас переживёт удаление — ничьи ссылки не повиснут
-    target_path = Path(target).resolve()
-    others = [(path, document)
-              for path, document in stack_documents(stack_base or target)
-              if Path(path).resolve() != target_path]
     refs: list = []
-    for path, document in others:
+    for path, document in _other_stack_documents(target, stack_base):
         refs += [(Path(path).name, coordinate)
                  for coordinate in _references(document, alias)]
     return refs

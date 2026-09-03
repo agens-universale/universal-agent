@@ -21,7 +21,6 @@ def _isolated_default(tmp_path, monkeypatch) -> dict:
         "config": tmp_path / "gc", "state": tmp_path / "s",
         "data": tmp_path / "d", "cache": tmp_path / "c",
     })
-    monkeypatch.setattr(config, "_project_local_config_path", lambda: None)
     return config.load_config(str(bundled_root() / "config.default.yml"))
 
 
@@ -223,7 +222,6 @@ def _loaded_with_registry(tmp_path, monkeypatch, extra: str, replace=()) -> dict
         "config": tmp_path / "gc", "state": tmp_path / "s",
         "data": tmp_path / "d", "cache": tmp_path / "c",
     })
-    monkeypatch.setattr(config, "_project_local_config_path", lambda: None)
     monkeypatch.chdir(tmp_path)
     text = (bundled_root() / "config.default.yml").read_text(encoding="utf-8")
     for old, new in replace:
@@ -363,6 +361,65 @@ def test_setup_guide_positive_when_all_covered():
     assert "•" not in text
 
 
+def _degraded(config, stage, profile=""):
+    """Итог лестницы для гайда: значения полей, не мок шва — сам гайд и есть
+    поверяемый шов; ступени лестницы на настоящих файлах проверяет
+    tests/test_config_repair_ladder.py."""
+    return onboarding.RepairLoad(config, None, stage, "config.yml не читается …",
+                                 profile, stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
+
+
+def test_setup_guide_on_the_without_profile_stage_does_not_say_ready():
+    """Ревью (Q): без TTY на ступени «без профиля» гайд печатал «Конфиг настроен —
+    можно запускать», хотя следующий старт (с профилем) упадёт. На
+    деградировавшей ступени гайд обязан сказать правду: поля заполнены, но
+    профиль сломан, запуск с ним не поднимется; без него — `--profile ""`."""
+    cfg = {
+        "completions_url": "https://real/v1/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer real-token"},
+        "model": "gigacode_agent_v1.6_rc",
+        "profile": "",
+    }
+    text = onboarding.setup_guide(
+        "/p", cfg, program="gc-ua",
+        repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, "work"))
+
+    assert "можно запускать" not in text
+    assert "настроен" not in text
+    assert 'профиль "work"' in text
+    assert 'gc-ua --profile ""' in text
+
+    healthy = onboarding.setup_guide(
+        "/p", cfg, program="gc-ua", repair=_degraded(cfg, onboarding.REPAIR_STAGE_FULL))
+    assert "можно запускать" in healthy
+
+
+def test_setup_guide_notes_the_degradation_next_to_the_pending_fields():
+    """Та же правда, когда поля не заполнены: на ступени шаблона перечислены поля
+    ШАБЛОНА, а не файла человека, — об этом сказано; на ступени без профиля —
+    что профиль сломан и запуск с ним не поднимется."""
+    cfg = {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "model": onboarding.MODEL_SENTINEL,
+    }
+    on_template = onboarding.setup_guide(
+        "/p", cfg, repair=_degraded(cfg, onboarding.REPAIR_STAGE_TEMPLATE))
+    assert "Не заполнены обязательные поля" in on_template
+    assert "по пакетному шаблону" in on_template
+    assert "gc-cli --reset-config" in on_template
+
+    without_profile = onboarding.setup_guide(
+        "/p", cfg, program="gc-ua",
+        repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, "work"))
+    assert "Не заполнены обязательные поля" in without_profile
+    assert 'Профиль "work" сломан' in without_profile
+    assert 'gc-ua --profile ""' in without_profile
+
+    plain = onboarding.setup_guide("/p", cfg)
+    assert "шаблону" not in plain and "сломан" not in plain
+
+
 # --- страж сентинелов vs config.default.yml ------------------------------
 
 def test_sentinels_match_default_yaml():
@@ -486,7 +543,6 @@ def _wizard_config(tmp_path, monkeypatch):
         "config": tmp_path / "gc", "state": tmp_path / "s",
         "data": tmp_path / "d", "cache": tmp_path / "c",
     })
-    monkeypatch.setattr(config, "_project_local_config_path", lambda: None)
     monkeypatch.chdir(tmp_path)   # проектный корень профилей — не реальный репозиторий
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
@@ -610,15 +666,45 @@ def test_write_wizard_values_leaves_no_token_when_the_registry_write_fails(
         raise rw.RegistryWriteError("запись реестра отказала")
 
     monkeypatch.setattr(rw, "apply_registry_ops", _refuse)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as info:
         onboarding.write_wizard_values(cfg_path, {
             "completions_url": "https://x/v1/chat/completions",
             "Authorization": "Bearer sk-secret",
             "model": "qwen/qwen3-coder",
         })
+    # Голый `ValueError` — форма ответа «не легло НИЧЕГО»: `PartialWriteError`
+    # здесь отправил бы человека искать в файле запись, которой там нет.
+    assert not isinstance(info.value, onboarding.PartialWriteError)
     text = cfg_path.read_text(encoding="utf-8")
     assert "sk-secret" not in text
     assert onboarding.TOKEN_SENTINEL in text
+
+
+def test_a_refused_flat_write_names_the_registry_as_landed(tmp_path, monkeypatch):
+    """Контракт `PartialWriteError.written`: состоявшиеся записи называет ПИСАТЕЛЬ —
+    только он знает, что успело лечь. Поверхности мастера выводили это из его порядка
+    записи, и такая догадка разъезжается с ним на первой же правке: человек прочитал
+    бы про снятый профиль там, где профиль не снимали.
+
+    Текст исключения — сам отказ, без служебных префиксов: его печатают как есть."""
+    import onboarding_config_writer as ocw
+
+    cfg_path = _wizard_config(tmp_path, monkeypatch)
+
+    def _refuse_flat(*_args, **_kwargs):
+        raise ValueError("схема не валидна")
+
+    monkeypatch.setattr(ocw, "write_values", _refuse_flat)
+    with pytest.raises(onboarding.PartialWriteError) as info:
+        onboarding.write_wizard_values(cfg_path, {
+            "completions_url": "https://x/v1/chat/completions",
+            "model": "qwen/qwen3-coder",
+        })
+    assert info.value.written == ("registry",)
+    assert str(info.value) == "схема не валидна"
+    # Реестр ушёл настоящей транзакцией — «уже легло» проверяется по диску.
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert raw["slots"]["default"] == "qwen3-coder"
 
 
 def test_write_wizard_values_survives_a_missing_template(tmp_path, monkeypatch):
@@ -685,6 +771,45 @@ def test_write_wizard_values_never_touches_the_profile_pointer(tmp_path):
         onboarding.MODEL_SLOT_KEYS["default"]: "m",
     })
     assert (yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}).get("profile") == "work"
+
+
+def test_deactivation_puts_the_pointer_where_the_next_start_will_read_it(tmp_path, monkeypatch):
+    """Живой тупик стенда: указатель на профиль лежит в ПРОЕКТНОМ `.gc/config.yml`,
+    а финал мастера снимает его в базе — следующий старт поднимает тот же профиль,
+    и починка не доезжает (гейт отвергает запись по стеку следующего старта).
+
+    Ветка выбора адреса (`layers.profile_pointer_write_target`) отрабатывала на
+    четырёх тестах деактивации, и ни один не клал указатель в проектный слой:
+    замена выбора на «всегда базовый файл» оставляла набор зелёным."""
+    from config_modules import env_vars as _ev
+    from config_modules.env_vars import EnvVars
+    from config_modules.layers import resolve_profile_pointer
+
+    home = tmp_path / "gc"
+    home.mkdir()
+    project = tmp_path / "project"
+    (project / ".gc" / "profiles").mkdir(parents=True)
+    monkeypatch.setattr(_ev, "env", EnvVars(gc_home=home))
+    monkeypatch.chdir(project)
+
+    base = home / "config.yml"
+    base.write_text((bundled_root() / "config.default.yml").read_text(encoding="utf-8"),
+                    encoding="utf-8")
+    project_config = project / ".gc" / "config.yml"
+    project_config.write_text('profile: "work"\n', encoding="utf-8")
+    (project / ".gc" / "profiles" / "work.yml").write_text(
+        "agent:\n  max_steps: 7\n", encoding="utf-8")
+    assert resolve_profile_pointer(base) == "work"          # предусловие раскладки
+
+    onboarding.write_wizard_values(str(base), {
+        "completions_url": "https://x/v1/chat/completions",
+        "Authorization": "Bearer sk-1",
+    }, deactivate_profile=True)
+
+    # Вопрос не «в какой файл легло», а «что поднимет следующий старт»: снятие,
+    # записанное не в тот слой, — молчаливый no-op.
+    assert resolve_profile_pointer(base) == ""
+    assert yaml.safe_load(project_config.read_text(encoding="utf-8"))["profile"] == ""
 
 
 def test_write_wizard_values_writes_level_models_with_slots(tmp_path, monkeypatch):
@@ -853,3 +978,35 @@ def test_assigned_level_model_falls_back_to_the_alias_itself():
 def test_assigned_level_model_survives_a_broken_slot():
     cfg = {"models": {}, "slots": {"light": "нет-такой"}}
     assert onboarding.assigned_level_model(cfg, "light") == "нет-такой"
+
+
+# --- «сейчас» шага «Модель»: одно правило на обе поверхности ----------------
+
+def test_model_step_current_speaks_about_the_default_slot_not_the_active_level():
+    """Шаг задаёт слот `default` — и «сейчас» говорит про него. `effective_model`
+    резолвит АКТИВНЫЙ уровень: при `level: max` строка показывала модель max с
+    именем записи слота default, а галочка в списке вставала не на ту строку."""
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"},
+                      "brain": {"model": "qwen/qwen3-235b"}},
+           "slots": {"default": "fast", "max": "brain"}, "level": "max"}
+    assert onboarding.model_step_current(cfg) == "qwen/qwen3-8b"
+
+
+def test_model_step_current_keeps_the_model_of_a_config_without_slots():
+    """Ни одного слота (легаси `agent.model`; единственная запись реестра, чей слот
+    жил в отброшенном профиле — живой стенд чинилки): резолв там от уровня не
+    зависит, и «сейчас» обязана назвать модель — иначе строка пропадает у всех
+    конфигов до волны B."""
+    flat = {"model": "gigacode_agent_v1.6_rc", "level": "max"}
+    assert onboarding.model_step_current(flat) == "gigacode_agent_v1.6_rc"
+    registry = {"models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {}, "level": "max"}
+    assert onboarding.model_step_current(registry) == "qwen/qwen3-8b"
+
+
+def test_model_step_current_is_empty_when_only_another_level_is_assigned():
+    """Слоты есть, но `default` среди них нет: агент работает моделью `max` по
+    матрице фоллбэков, однако назвать её «сейчас» на шаге про `default` значило бы
+    сказать «слот задан» там, где он не задан, — и ответ зависел бы от `level`."""
+    cfg = {"models": {"brain": {"model": "qwen/qwen3-235b"}},
+           "slots": {"max": "brain"}, "level": "max"}
+    assert onboarding.model_step_current(cfg) == ""

@@ -80,6 +80,81 @@ def test_broken_profile_only_drops_profile_and_keeps_user_connection(stand):
     assert "work" in loaded.message
 
 
+def test_without_profile_stage_names_the_dropped_profile_and_offers_deactivation(stand):
+    """Ступень «без профиля» отдаёт признак для финала мастера: указатель лежит
+    в базе, снять его мастер может — и имя снятого профиля, чтобы поверхности
+    называли его, не разбирая текст сообщения."""
+    (stand / "config.yml").write_text(_BASE_OK, encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+
+    assert loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
+    assert loaded.profile == "work"
+    assert loaded.deactivate_profile is True
+
+
+def test_pointer_in_managed_layer_is_named_and_no_deactivation_is_promised(stand):
+    """Ревью (D3): указатель `profile:` лежит в managed-файле — правило адреса
+    записи managed не рассматривает, и финал мастера писал бы пустой якорь в
+    базу, а запись всё равно отклонялась бы: managed поднимает тот же сломанный
+    профиль. Лестница обязана не обещать деактивацию: признак — «снять нельзя»,
+    сообщение называет файл с указателем и что снять его нужно там."""
+    (stand / "config.yml").write_text(_BASE_OK.replace('profile: "work"\n', ""),
+                                      encoding="utf-8")
+    managed = stand / "config.local.yml"
+    managed.write_text('profile: "work"\n', encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+
+    assert loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
+    assert loaded.config["completions_url"] == _USER_URL   # ступень та же: данные целы
+    assert loaded.profile == "work"
+    assert loaded.deactivate_profile is False
+    assert str(managed) in loaded.message
+    assert "мастер его не снимет" in loaded.message
+    assert "снять нужно там" in loaded.message
+
+
+def test_healthy_config_drops_no_profile(stand):
+    """Ступень `full`: снятого профиля нет и снимать нечего — оба поля пусты,
+    хотя профиль активен."""
+    (stand / "config.yml").write_text(_BASE_OK, encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text('slots:\n  default: "fast"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+
+    assert loaded.stage == onboarding.REPAIR_STAGE_FULL
+    assert loaded.profile == ""
+    assert loaded.deactivate_profile is False
+
+
+def test_template_stage_message_does_not_promise_a_rewrite(stand):
+    """Ревью (M8а): ступень шаблона говорила «мастер перепишет ваш файл», а
+    писатель только патчит текст по якорям: на неразбираемом файле человек
+    отвечает на все вопросы и получает отказ записи, файл не тронут. Текст обязан
+    говорить, что будет на самом деле: ответы ложатся точечно, целиком файл не
+    переписывается, поломка мимо них останется — чинить руками или сбросить."""
+    (stand / "config.yml").write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+
+    assert loaded.stage == onboarding.REPAIR_STAGE_TEMPLATE
+    assert "перепишет" not in loaded.message
+    assert "точечно" in loaded.message
+    assert "не переписывается" in loaded.message
+    assert "gc-cli --reset-config" in loaded.message
+    assert loaded.profile == ""
+    assert loaded.deactivate_profile is False
+
+
 def test_broken_base_falls_back_to_template_usable_by_runtime(stand):
     """Сломана база — ступень 3, и её результат пригоден рантайму: пустой `{}`
     здесь ронял `resolve_threads_dir` сразу следом (ловилось как Critical)."""
@@ -110,6 +185,33 @@ def test_broken_base_and_broken_profile_still_lands_on_template(stand):
     assert loaded.config["completions_url"] == onboarding.URL_SENTINEL
 
 
+def test_broken_project_layer_hands_the_caller_the_first_error_not_a_template_diagnosis(stand):
+    """Ревью (H3): все три ступени накладывают верхние слои, и третья (шаблон) не
+    была обёрнута перехватом — на сломанном проектном `.gc/config.yml` лестница
+    роняла вызывающего исключением ступени шаблона: диагнозом подставленного
+    стека (здесь без `slots.max` базы), которого человек нигде больше не видит.
+
+    Форма исхода — исключение, не четвёртая ступень с пустым конфигом: конфига
+    нет, и молчаливый `None` в `RepairLoad.config` рано или поздно доехал бы до
+    `resolve_threads_dir`. Отдаётся ПЕРВАЯ ошибка — та же, что на обычном
+    старте: сломан слой, в который мастер не пишет, и объяснение обязано быть
+    тем же, что печатает обычный старт."""
+    (stand / "config.yml").write_text(_BASE_OK.replace('profile: "work"\n', "")
+                                      + 'slots:\n  max: "ghost2"\n', encoding="utf-8")
+    project = stand.parent / "project"
+    (project / ".gc").mkdir()
+    (project / ".gc" / "config.yml").write_text('slots:\n  default: "ghost"\n', encoding="utf-8")
+
+    import onboarding
+    with pytest.raises(ValueError, match="slots.max") as info:
+        onboarding.load_config_for_repair()
+
+    from config import load_config_ex
+    with pytest.raises(ValueError) as first:
+        load_config_ex(None)
+    assert str(info.value) == str(first.value)
+
+
 # --- финал мастера на ступени «без профиля» --------------------------------
 
 _WIZARD_ANSWERS = {
@@ -122,6 +224,13 @@ _WIZARD_ANSWERS = {
 def _load_yaml(path):
     import yaml
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _refusing(message):
+    """Отказ записи тем же исключением, каким отказывают настоящие писатели."""
+    def _refuse(*_args, **_kwargs):
+        raise ValueError(message)
+    return _refuse
 
 
 def test_wizard_finish_on_without_profile_stage_deactivates_the_profile(stand):
@@ -144,7 +253,7 @@ def test_wizard_finish_on_without_profile_stage_deactivates_the_profile(stand):
 
     onboarding.write_wizard_values(
         stand / "config.yml", dict(_WIZARD_ANSWERS),
-        deactivate_profile=loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
+        deactivate_profile=loaded.deactivate_profile)
 
     raw = _load_yaml(stand / "config.yml")
     assert raw.get("profile") == ""                       # указатель снят
@@ -177,9 +286,88 @@ def test_wizard_finish_on_a_healthy_config_leaves_the_active_profile_alone(stand
 
     onboarding.write_wizard_values(
         stand / "config.yml", dict(_WIZARD_ANSWERS),
-        deactivate_profile=loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
+        deactivate_profile=loaded.deactivate_profile)
 
     assert _load_yaml(stand / "config.yml").get("profile") == "work"
     from config import load_config_ex
     _config, meta = load_config_ex(None)
     assert meta.active_name == "work"
+
+
+# --- что именно легло: контракт `PartialWriteError.written` ------------------
+#
+# Состав уже состоявшихся записей знает только писатель. Поверхности мастера
+# выводили его из порядка записи, и такая догадка разъезжается с писателем на
+# первой же правке порядка: человек читает про снятый профиль там, где его не
+# снимали, — или ищет нетронутый файл, в котором уже лежит новый реестр.
+
+
+def _broken_stand(stand):
+    """Раскладка ступени «без профиля»: снятие указателя тут — настоящая запись."""
+    (stand / "config.yml").write_text(_BASE_OK, encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+
+def test_a_refused_registry_after_the_deactivation_names_the_pointer(stand, monkeypatch):
+    """Указатель снят, транзакция реестра отказала: обещать «конфиг не записан»
+    нельзя — человек уверен, что профиль активен, а следующий старт идёт без него."""
+    import config_modules.registry_write as rw
+    _broken_stand(stand)
+
+    monkeypatch.setattr(rw, "apply_registry_ops", _refusing("реестр отказал"))
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    with pytest.raises(onboarding.PartialWriteError) as info:
+        onboarding.write_wizard_values(
+            stand / "config.yml", dict(_WIZARD_ANSWERS),
+            deactivate_profile=loaded.deactivate_profile)
+
+    assert info.value.written == ("profile_pointer",)
+    assert str(info.value) == "реестр отказал"
+    assert _load_yaml(stand / "config.yml").get("profile") == ""     # и правда снят
+    assert _load_yaml(stand / "config.yml").get("slots") is None     # а реестр — нет
+
+
+def test_a_refused_flat_write_after_the_deactivation_names_both(stand, monkeypatch):
+    """Легли обе первые записи, отказала плоская — названы обе, в порядке
+    исполнения."""
+    import onboarding_config_writer as ocw
+    _broken_stand(stand)
+    real_write_values = ocw.write_values
+
+    def refusing_flat_write(path, values, **kwargs):
+        if "profile" in values:                      # снятие указателя — настоящее
+            return real_write_values(path, values, **kwargs)
+        raise ValueError("схема не валидна")
+
+    monkeypatch.setattr(ocw, "write_values", refusing_flat_write)
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    with pytest.raises(onboarding.PartialWriteError) as info:
+        onboarding.write_wizard_values(
+            stand / "config.yml", dict(_WIZARD_ANSWERS),
+            deactivate_profile=loaded.deactivate_profile)
+
+    assert info.value.written == ("profile_pointer", "registry")
+    raw = _load_yaml(stand / "config.yml")
+    assert raw.get("profile") == "" and raw["slots"]["default"] == "claude-fable-5"
+
+
+def test_a_refused_pointer_write_landed_nothing(stand, monkeypatch):
+    """Отказала САМА первая запись — не легло ничего, и форма ответа это говорит:
+    голый `ValueError`. `PartialWriteError` с пустым списком был бы той же ложью,
+    только вывернутой наизнанку."""
+    import onboarding_config_writer as ocw
+    _broken_stand(stand)
+
+    monkeypatch.setattr(ocw, "write_profile_pointer", _refusing("указатель не записан"))
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    with pytest.raises(ValueError) as info:
+        onboarding.write_wizard_values(
+            stand / "config.yml", dict(_WIZARD_ANSWERS),
+            deactivate_profile=loaded.deactivate_profile)
+
+    assert not isinstance(info.value, onboarding.PartialWriteError)
+    assert _load_yaml(stand / "config.yml").get("profile") == "work"   # файл не тронут

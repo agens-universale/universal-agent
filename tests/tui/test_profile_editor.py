@@ -25,16 +25,6 @@ from tui.editors import models_section as m
 from tui.screens import settings as s
 
 
-@pytest.fixture(autouse=True)
-def _no_managed_overlay(tmp_path, monkeypatch):
-    """Без этого происхождение полей читает НАСТОЯЩИЙ ~/.gc/config.local.yml
-    разработчика (тот же приём, что в tests/tui/test_profiles_crud.py)."""
-    monkeypatch.setattr(
-        "mcp_runtime.paths.managed_config_path",
-        lambda: tmp_path / "no-managed-overlay-here.yml",
-    )
-
-
 # Секция-оверлей для стражей превью: НЕПУСТАЯ намеренно. Пустой якорь
 # (`security: {}`) переопределением по §11 не считается — писатель оставляет
 # такой после снятия последнего ключа, — и витрина о нём молчит по праву.

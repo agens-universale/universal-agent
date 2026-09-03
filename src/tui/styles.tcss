@@ -475,6 +475,10 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-tagline { height: auto; color: $deep-dim; margin-top: 1; padding: 0; }
 #onb-stepper { height: auto; padding: 2 0; }
 #onb-summary { height: 1; margin-bottom: 1; }   /* строка сводки — клип по краю, без переноса; воздух перед заголовком шага */
+/* Плашка о деградации загрузки: абзац в 2-3 строки, и под ним обязан быть воздух —
+   иначе она сливается со следующей за ней плашкой о перекрывающем слое (тоже
+   абзац, тоже цветом предупреждения) в одно нечитаемое полотно. */
+#onb-degraded-warn { height: auto; margin-bottom: 1; }
 #onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
 /* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
 #onb-model, #onb-level-model, #conn-url, #conn-token, #conn-proxy, #mef-alias, #mef-model, #mef-url, #mef-token, #set-profile-name, #voice-url, #voice-token, #voice-model, #voice-lang { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }

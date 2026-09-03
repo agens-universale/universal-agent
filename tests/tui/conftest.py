@@ -202,22 +202,21 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
     # приложения (SettingsScreen._sync_config_from_app), и с пустым конфигом
     # секция осталась бы без адреса.
     app = app_mod.TuiApp(config=_cfg())
-    with _isolated_config_layers(tmp_path):
-        async with app.run_test() as pilot:
-            scr = _mk_screen(config_path=str(cfg_file))
-            if probe is not None:
-                scr._probe_fn = probe      # иначе остаётся ok-проба из _mk_screen
-                # Вердикт «Подключения» идёт через отдельный слот: не подменив его,
-                # тест с фейком полез бы в сеть настоящей probe_auth.
-                scr._auth_probe_fn = probe
-            await pilot.app.push_screen(scr)
-            await pilot.pause()
-            open_settings_section(scr, "Подключение")
-            await pilot.pause()
-            if wait_probe:
-                await wait_until(pilot, lambda: scr._draft_checked is not None,
-                                 "автопроба секции «Подключение» осела")
-            yield pilot, scr
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config_path=str(cfg_file))
+        if probe is not None:
+            scr._probe_fn = probe      # иначе остаётся ok-проба из _mk_screen
+            # Вердикт «Подключения» идёт через отдельный слот: не подменив его,
+            # тест с фейком полез бы в сеть настоящей probe_auth.
+            scr._auth_probe_fn = probe
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        if wait_probe:
+            await wait_until(pilot, lambda: scr._draft_checked is not None,
+                             "автопроба секции «Подключение» осела")
+        yield pilot, scr
 
 
 @asynccontextmanager
@@ -242,7 +241,7 @@ async def settings_voice_section(tmp_path, *, mode="cloud", probe=None,
         model="Systran/faster-whisper-small" if installed else None,
         mode=mode)
     config_text = CLOUD_CONFIG if mode == "cloud" else "model: m\n"
-    with _isolated_config_layers(tmp_path), _isolated_voice_data(tmp_path):
+    with _isolated_voice_data(tmp_path):
         app = app_mod.TuiApp(config={"voice": {}})
         async with app.run_test() as pilot:
             scr, fake = _mk_screen(tmp_path, status, config_text=config_text)
@@ -287,8 +286,7 @@ async def settings_mcp_section(tmp_path, *, servers=()):
 
     cfg_file = _write_cfg(tmp_path)
     app = app_mod.TuiApp(config=_cfg())
-    with _isolated_config_layers(tmp_path), \
-         mock.patch.object(mcp_manager_mod, "McpManager", _FakeManager):
+    with mock.patch.object(mcp_manager_mod, "McpManager", _FakeManager):
         async with app.run_test() as pilot:
             scr = _mk_screen(config_path=str(cfg_file))
             await pilot.app.push_screen(scr)
@@ -427,24 +425,6 @@ def _row_style_set(text) -> set:
     return colors
 
 
-@contextmanager
-def _isolated_config_layers(tmp_path):
-    """Слои поверх базового config.yml — на tmp (тот же приём, что автофикстура
-    _isolate_config_layers в test_settings_voice). Нужны любой секции /settings:
-    `SettingsScreen.__init__` → `_read_origins()` читает настоящие
-    `~/.gc/config.local.yml` и `<cwd>/.gc/config.yml`, и перекрытое там поле
-    добавляет в секцию строку «⚠ действует … — перекрыто».
-
-    Патчатся ВЛАДЕЛЬЦЫ обеих функций: наложение слоёв живёт в
-    `config_modules.layers` и зовёт их через свои модули, поэтому подмена у
-    агрегатора `config` до загрузчика не доходит — тест продолжал бы мержить
-    настоящий `~/.gc/config.local.yml`. Пока он нёс только `mcp`, это было
-    незаметно; с тех пор как pre-write валидация судит стек, реестр из чужого
-    оверлея менял бы вердикт записи, и изоляция обязана быть настоящей."""
-    with mock.patch("mcp_runtime.paths.managed_config_path",
-                    lambda: tmp_path / "config.local.yml"), \
-         mock.patch("config_modules.env_vars.project_local_config_path", lambda: None):
-        yield
 @pytest.fixture
 def tui_app_factory():
     """Мини-хост с реальными стилями приложения — для проверки CSS-контракта.

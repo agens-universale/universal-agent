@@ -24,16 +24,6 @@ from tests.tui.conftest import open_settings_section
 from tui.screens import settings as s
 
 
-@pytest.fixture(autouse=True)
-def _no_managed_overlay(tmp_path, monkeypatch):
-    """Без этого активация/происхождение читают НАСТОЯЩИЙ ~/.gc/config.local.yml
-    разработчика (тот же приём, что в tests/test_config_origin.py)."""
-    monkeypatch.setattr(
-        "mcp_runtime.paths.managed_config_path",
-        lambda: tmp_path / "no-managed-overlay-here.yml",
-    )
-
-
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -1269,6 +1259,102 @@ async def test_rename_refuses_at_the_door_when_a_pointer_layer_is_read_only(tmp_
         assert str(base_cfg) in notice
 
 
+# --- сбой файловой системы при записи указателя — честный текст про файл ---------
+#
+# Дверь (`_profile_write_block`) сторожит пакетный шаблон, а не права на файл:
+# конфиг, который нельзя записать, проходит до самой записи указателя и падает
+# там `OSError`. Переименование и удаление заворачивали ЛЮБУЮ ошибку записи в
+# отказ фазы 2 «конфиг стал бы нерабочим — поправьте в разделе «Модели»» — и
+# отправляли чинить реестр там, где не хватает прав на файл.
+
+
+def _lock_against_writing(path: Path):
+    """Сделать `path` недоступным для записи и вернуть функцию, снимающую замок.
+
+    Файл — только чтение (на Windows именно это валит `os.replace` временного файла
+    на место цели); каталог — тоже (на POSIX замена файла в каталоге разрешена
+    правами каталога, а не файла). Ни один из двух приёмов не вредит другому."""
+    import os
+    import stat
+    file_mode = path.stat().st_mode
+    dir_mode = path.parent.stat().st_mode
+    os.chmod(path, stat.S_IREAD)
+    os.chmod(path.parent, stat.S_IREAD | stat.S_IEXEC)
+
+    def unlock() -> None:
+        os.chmod(path.parent, dir_mode)
+        os.chmod(path, file_mode)
+
+    return unlock
+
+
+def _assert_pointer_write_fails_with_oserror(base_cfg: Path) -> None:
+    """Предпосылка теста, а не его предмет: писатель указателя на этой раскладке
+    обязан получить именно `OSError`. Иначе тест прошёл бы мимо — проверял бы
+    текст отказа, которого не случилось."""
+    import onboarding_config_writer as ocw
+    with pytest.raises(OSError):
+        ocw.write_text(base_cfg, base_cfg.read_text(encoding="utf-8"))
+
+
+async def test_rename_reports_a_file_error_as_a_file_error(tmp_path, monkeypatch):
+    """PermissionError на записи указателя — «не удалось переименовать: …» (так было
+    на базе), а не совет поправить раздел «Модели»: конфиг нерабочим не становился,
+    ему просто не хватило прав."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+    unlock = _lock_against_writing(base_cfg)
+    try:
+        _assert_pointer_write_fails_with_oserror(base_cfg)
+        app = app_mod.TuiApp(config=_base_dict())
+        async with app.run_test() as pilot:
+            scr = await _profiles_screen(pilot, app, base_cfg)
+            await _put_cursor(pilot, scr, "profile", "work")
+            await pilot.press("r")
+            await pilot.pause()
+            await _type_name(pilot, scr, "work2")
+            notice = _notice(scr)
+    finally:
+        unlock()
+    assert "✗ не удалось переименовать:" in notice
+    assert "нерабочим" not in notice
+    assert "«Модели»" not in notice
+    assert profile.is_file() and not profile.with_name("work2.yml").exists()
+
+
+async def test_delete_reports_a_file_error_as_a_file_error(tmp_path, monkeypatch):
+    """То же у удаления: снять указатель не дали права на файл — «не удалось
+    удалить: …», файл профиля на месте, бэкапа нет."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+    unlock = _lock_against_writing(base_cfg)
+    try:
+        _assert_pointer_write_fails_with_oserror(base_cfg)
+        app = app_mod.TuiApp(config=_base_dict())
+        async with app.run_test() as pilot:
+            scr = await _profiles_screen(pilot, app, base_cfg)
+            await _put_cursor(pilot, scr, "profile", "work")
+            await pilot.press("delete")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            notice = _notice(scr)
+    finally:
+        unlock()
+    assert "✗ не удалось удалить:" in notice
+    assert "нерабочим" not in notice
+    assert "«Модели»" not in notice
+    assert profile.is_file() and not (profile.parent / "backups").exists()
+
+
 # --- ре-ревью: хвост «применится со следующего хода» — только когда применится ---
 
 
@@ -1341,6 +1427,103 @@ async def test_delete_of_the_active_profile_still_promises_the_next_turn(tmp_pat
         flash = _flash(scr)
 
     assert "применится со следующего хода агента" in flash
+
+
+# --- флаг запуска --profile: плашки не обещают того, что флаг не даст ---------------
+#
+# Флаг переживает перечитывание (`TuiApp._profile_override`), и записанный
+# указатель применится лишь со следующего запуска без флага — как и сессионный
+# выбор, флаг сильнее файла. «Применится со следующего хода агента» здесь — ложь
+# того же рода, за которую переписывались футеры; плашка называет, на чём
+# остаётся ТЕКУЩИЙ ЗАПУСК.
+
+
+def _app_with_flag(tmp_path, base_cfg, profile_override):
+    import tui.app as app_mod
+    from config import load_config_ex
+    cfg, _meta = load_config_ex(str(base_cfg), profile_override=profile_override)
+    app = app_mod.TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg,
+                         profile_override=profile_override)
+    app.set_config_path(str(base_cfg))
+    return app
+
+
+async def test_activation_under_the_profile_flag_names_the_launch_profile(tmp_path, monkeypatch):
+    """`gc-ua --profile work`, указатель файла пуст; Space на `corp` пишет указатель,
+    а запуск остаётся на `work` — плашка обязана сказать именно это."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+    _write(tmp_path / "base" / "profiles" / "corp.yml", _PROFILE_BODY)
+
+    app = _app_with_flag(tmp_path, base_cfg, "work")
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=app._config,
+                                     on_apply=app.reload_config)
+        await _put_cursor(pilot, scr, "profile", "corp")
+        await pilot.press("space")
+        await pilot.pause()
+        flash = _flash(scr)
+        assert app._config["profile"] == "work"          # запуск остался на флаге
+
+    assert 'profile: "corp"' in base_cfg.read_text(encoding="utf-8")
+    assert "текущий запуск остаётся на «work» (флаг --profile)" in flash
+    assert "применится со следующего хода" not in flash
+
+
+async def test_activation_under_an_empty_profile_flag_says_the_launch_stays_bare(
+        tmp_path, monkeypatch):
+    """`gc-ua --profile ""` — обход сломанного профиля: починили, включили Space —
+    указатель записан, но этот запуск профиля не поднимет."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = _app_with_flag(tmp_path, base_cfg, "")
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=app._config,
+                                     on_apply=app.reload_config)
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("space")
+        await pilot.pause()
+        flash = _flash(scr)
+        assert app._config["profile"] == ""
+
+    assert 'profile: "work"' in base_cfg.read_text(encoding="utf-8")
+    assert 'текущий запуск остаётся без профиля (флаг --profile "")' in flash
+    assert "применится со следующего хода" not in flash
+
+
+async def test_rename_of_the_flag_profile_moves_the_flag_with_it(tmp_path, monkeypatch):
+    """Переименован профиль, выбранный флагом: флаг едет за именем — как сессионный
+    выбор (ruling координатора), — иначе следующее перечитывание не нашло бы
+    профиль флага и сняло бы его санацией с уведомлением о пропаже."""
+    clear_runtime_notices()
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+
+    app = _app_with_flag(tmp_path, base_cfg, "work")
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=app._config,
+                                     on_apply=app.reload_config)
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "job")
+        flash = _flash(scr)
+
+        assert app._profile_override == "job"
+        assert app._config["profile"] == "job"
+        assert "profile_flag_stale" not in [n.code for n in collect_runtime_notices()]
+    assert "переименован" in flash
+    assert "не перечитан" not in _notice(scr)
 
 
 # --- ре-ревью: сбой персиста при переезде сессионного выбора ----------------------

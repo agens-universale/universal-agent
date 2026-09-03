@@ -60,15 +60,11 @@ def test_from_config_invalid_entries_fall_back_to_default():
     assert endpoint_presets_from_config({"endpoint_presets": "garbage"}) == list(DEFAULT_ENDPOINT_PRESETS)
 
 
-def test_load_config_flattens_custom_presets_into_config_dict(tmp_path, monkeypatch):
+def test_load_config_flattens_custom_presets_into_config_dict(tmp_path):
     """Регрессия (fix Important-1): flatten_app_config не пробрасывал
     endpoint_presets — TUI видел только кодовый дефолт, пользовательские
     пресеты из config.yml были мертвы."""
     import config as cfgmod
-    import mcp_runtime.paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(

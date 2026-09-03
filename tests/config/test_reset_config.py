@@ -128,8 +128,8 @@ def test_run_reset_config_refuses_project_local(monkeypatch, tmp_path, capsys):
     local_cfg = gc_dir / "config.yml"
     local_cfg.write_text("backend:\n  completions_url: \"http://x\"\n", encoding="utf-8")
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(local_cfg)))
-    import config as config_mod
-    monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: str(local_cfg))
+    from config_modules import env_vars
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(local_cfg))
     called = []
     monkeypatch.setattr(cli.config_sync, "reset_config", lambda *a, **k: called.append(1))
     assert cli._run_reset_config() == 1

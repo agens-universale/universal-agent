@@ -23,13 +23,9 @@ def test_tui_rejects_removed_flags():
         TuiConfig(show_reasoning_line=False)
 
 
-def test_flatten_exposes_tui_stream_display(tmp_path, monkeypatch):
+def test_flatten_exposes_tui_stream_display(tmp_path):
     """Значение из config.yml доходит до плоского config_dict (overlay нейтрализованы)."""
     import config as cfgmod
-    import mcp_runtime.paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text("tui:\n  stream_display: minimal\n", encoding="utf-8")
@@ -47,12 +43,8 @@ def test_tui_bang_shell_defaults():
     assert TuiConfig().bang_shell.max_output_lines == 200
 
 
-def test_flatten_exposes_tui_bang_shell(tmp_path, monkeypatch):
+def test_flatten_exposes_tui_bang_shell(tmp_path):
     import config as cfgmod
-    import mcp_runtime.paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(
@@ -73,12 +65,8 @@ def test_tui_file_view_defaults():
     assert TuiConfig().file_view.page_lines is None
 
 
-def test_flatten_exposes_tui_file_view(tmp_path, monkeypatch):
+def test_flatten_exposes_tui_file_view(tmp_path):
     import config as cfgmod
-    import mcp_runtime.paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(
@@ -92,12 +80,8 @@ def test_flatten_exposes_tui_file_view(tmp_path, monkeypatch):
     assert cfg["tui_file_view"]["page_lines"] == 40
 
 
-def test_flatten_file_view_page_lines_null(tmp_path, monkeypatch):
+def test_flatten_file_view_page_lines_null(tmp_path):
     import config as cfgmod
-    import mcp_runtime.paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(

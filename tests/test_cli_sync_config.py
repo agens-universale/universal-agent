@@ -40,9 +40,9 @@ def test_run_sync_config_refuses_project_local(monkeypatch, tmp_path, capsys):
     local_cfg = gc_dir / "config.yml"
     local_cfg.write_text("backend:\n  completions_url: \"http://x\"\n", encoding="utf-8")
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(local_cfg)))
-    # _project_local_config_path должна вернуть путь к этому файлу
-    import config as config_mod
-    monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: str(local_cfg))
+    # project_local_config_path должна вернуть путь к этому файлу
+    from config_modules import env_vars
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(local_cfg))
     assert cli._run_sync_config() == 1
     err = capsys.readouterr().err
     assert "project-local" in err

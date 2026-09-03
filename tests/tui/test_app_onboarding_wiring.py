@@ -244,3 +244,45 @@ async def test_onboarding_does_not_deactivate_by_default(tmp_path):
         scr = app.screen
         assert isinstance(scr, OnboardingScreen)
         assert scr._deactivate_profile is False
+
+
+@pytest.mark.asyncio
+async def test_review_mode_forwards_the_degradation_message(tmp_path):
+    """Текст деградации загрузки ставит атрибутом та же точка входа — приложение
+    обязано донести его до экрана: под мастером глобальная навигация заблокирована,
+    и другого адреса показа у текста нет."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import OnboardingScreen
+
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "review"
+    app._onboarding_config_path = tmp_path / "config.yml"
+    app._onboarding_degraded = "config.yml не читается с профилем \"work\""
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, OnboardingScreen)
+        assert scr._degraded_note == app._onboarding_degraded
+
+
+@pytest.mark.asyncio
+async def test_onboarding_has_no_degradation_message_by_default(tmp_path):
+    """Отрицательный сторож: обычный первый запуск — деградации не было, и
+    показывать нечего."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import OnboardingScreen
+
+    cfg = {"completions_url": "http://your-backend:PORT/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
+           "model": "<ВПИШИТЕ_МОДЕЛЬ>"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "auto"
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, OnboardingScreen)
+        assert scr._degraded_note is None

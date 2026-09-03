@@ -30,10 +30,16 @@ def _load_and_catch(base_path: str) -> ValueError:
 @pytest.fixture
 def isolated_cwd(tmp_path, monkeypatch):
     """cwd изолирован в подпапке tmp_path — profile_roots() не должен видеть
-    ни реальный `<repo>/.gc/profiles`, ни профили соседних тестов."""
+    ни реальный `<repo>/.gc/profiles`, ни профили соседних тестов; проектный
+    слой (`<cwd>/.gc/config.yml`) тем самым тоже пуст. Managed-слой — на tmp
+    (владелец пути — `mcp_runtime.paths`, у него его спрашивают и загрузчик, и
+    карта участников): иначе в стек лезет настоящий `~/.gc/config.local.yml`
+    машины, и «сломан только профиль» перестаёт быть правдой."""
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
+                        lambda: tmp_path / "config.local.yml")
     return cwd
 
 
@@ -66,18 +72,13 @@ def test_broken_slot_in_active_profile_names_key_and_profile_file(isolated_cwd, 
     # Совет чинить называет И ключ, И полный путь файла профиля в ОДНОЙ строке.
     assert f"поправить slots.default в:  {profile}" in text
     # Запуск без профиля — своим бинарём (program), не жёстко "gc-cli".
-    assert 'запустить без профиля, ничего не потеряв:  gc-ua --profile ""' in text
-    # Откат к шаблону — всегда последним и всегда через gc-cli (--reset-config
-    # есть только у него).
     assert text.rstrip().endswith(
-        "откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --reset-config"
-    )
-    # Порядок советов: починка → без профиля → откат.
-    assert (
-        text.index("поправить slots.default")
-        < text.index('--profile ""')
-        < text.index("--reset-config")
-    )
+        'запустить без профиля, ничего не потеряв:  gc-ua --profile ""')
+    # Порядок советов: починка → без профиля.
+    assert text.index("поправить slots.default") < text.index('--profile ""')
+    # Откат (`gc-cli --reset-config`) подменяет БАЗУ — сломан профиль, база ни при
+    # чём, и откат ей не поможет, а модели/MCP/голос потеряет (ревью).
+    assert "--reset-config" not in text
 
 
 def test_relative_config_path_shown_as_absolute(isolated_cwd, tmp_path, monkeypatch):
@@ -110,6 +111,91 @@ def test_relative_config_path_shown_as_absolute(isolated_cwd, tmp_path, monkeypa
     assert f"поправить файл:  {base_abs}" in text
 
 
+# --- Сценарий A2: профиль задан флагом, а не указателем ----------------------
+
+
+def test_profile_override_drives_the_map_and_the_advice(isolated_cwd, tmp_path):
+    """Ревью (H1): сессия шла с `--profile broken`, а объяснение резолвило
+    профиль указателем из файла — его там нет. Карта «Участвуют» и совет
+    строятся по профилю, переданному сессией: файл профиля назван, помечен
+    активным ОТ ФЛАГА, совет чинить — в нём, «без профиля» предлагается, а
+    откат базы — нет (она ни при чём)."""
+    from config import load_config_ex
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    profile = profiles_dir / "broken.yml"
+    profile.write_text("slots:\n  default: strong\n", encoding="utf-8")
+
+    try:
+        load_config_ex(str(base), profile_override="broken")
+    except ValueError as exc:
+        text = explain_broken_config(str(base), exc, program="gc-ua", profile_override="broken")
+    else:
+        pytest.fail("ожидался ValueError от load_config_ex")
+
+    assert f"{profile}   (активен: --profile)" in text
+    assert f"поправить slots.default в:  {profile}" in text
+    assert f"в:  {base}" not in text
+    assert 'запустить без профиля, ничего не потеряв:  gc-ua --profile ""' in text
+    assert "--reset-config" not in text
+
+
+def test_profile_override_that_names_no_file_blames_the_flag(isolated_cwd, tmp_path):
+    """Ревью (H1): опечатка в `--profile` — советовали «поправить файл: <база>»
+    и откат, которые ни при чём. Имя пришло из флага, и файла с ним нет —
+    сказать это прямо; чинить — имя во флаге либо запуск без профиля."""
+    from config import load_config_ex
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
+
+    try:
+        load_config_ex(str(base), profile_override="wrok")
+    except ValueError as exc:
+        text = explain_broken_config(str(base), exc, program="gc-ua", profile_override="wrok")
+    else:
+        pytest.fail("ожидался ValueError от load_config_ex")
+
+    assert 'профиль "wrok" не найден' in text
+    assert 'профиль "wrok" задан флагом --profile' in text
+    assert "поправить" not in text
+    assert 'запустить без профиля, ничего не потеряв:  gc-ua --profile ""' in text
+    assert "--reset-config" not in text
+    assert "(активен" not in text
+
+
+def test_empty_profile_override_means_no_profile_at_all(isolated_cwd, tmp_path):
+    """`--profile ""` — профильный слой снят: указатель в файле инертен, и совет
+    «запустить без профиля» бессмыслен (человек уже так запустил); карта без
+    профиля, откат уместен — сломана сама база."""
+    from config import load_config_ex
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "models:\n  flash: {}\n" "slots:\n  max: ghost\n" "profile: work\n",
+                    encoding="utf-8")
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    (profiles_dir / "work.yml").write_text("slots:\n  default: flash\n", encoding="utf-8")
+
+    try:
+        load_config_ex(str(base), profile_override="")
+    except ValueError as exc:
+        text = explain_broken_config(str(base), exc, program="gc-ua", profile_override="")
+    else:
+        pytest.fail("ожидался ValueError от load_config_ex")
+
+    assert f"поправить slots.max в:  {base}" in text
+    assert "(активен" not in text
+    assert '--profile ""' not in text
+    assert "gc-cli --reset-config" in text
+
+
 # --- Сценарий B: битый YAML базы --------------------------------------------
 
 
@@ -135,10 +221,10 @@ def test_invalid_base_yaml_falls_back_to_naming_the_file(tmp_path):
 
 
 def test_profile_not_found_suggests_running_without_profile(isolated_cwd, tmp_path):
-    """Профиль по указателю не резолвится — ключей не найти (текст на русском,
-    суспект-лист латиницей), совет откатывается к «поправить файл», НО «без
-    профиля» всё равно предлагается: пустой `--profile ""` — самый прямой фикс
-    именно для этой поломки, и указатель у неё есть (просто не резолвится)."""
+    """Профиль по указателю не резолвится — совет называет ключ указателя и файл,
+    где он лежит (здесь — база), и «без профиля»: пустой `--profile ""` — самый
+    прямой фикс именно для этой поломки, а указатель у неё есть (просто не
+    резолвится). Откат предлагается: указатель в базе, и откат его снимет."""
     from onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
@@ -148,12 +234,82 @@ def test_profile_not_found_suggests_running_without_profile(isolated_cwd, tmp_pa
     text = explain_broken_config(str(base), exc, program="gc-ua")
 
     assert 'профиль "work" не найден' in text
-    assert f"поправить файл:  {base}" in text
+    assert f"поправить profile в:  {base}" in text
     assert 'запустить без профиля, ничего не потеряв:  gc-ua --profile ""' in text
+    assert "gc-cli --reset-config" in text
     # Ненайденный профиль не резолвится в файл — карта участников не может
     # пометить несуществующий путь «активным» (маркер есть только у РЕЗОЛВНУВШЕГОСЯ
     # профиля, см. config_origin._overlay_paths).
     assert "(активен)" not in text
+
+
+def test_dangling_pointer_in_project_overlay_names_the_overlay_not_the_base(
+        isolated_cwd, tmp_path):
+    """Ревью (H2б): указатель на удалённый профиль лежит в проектном
+    `.gc/config.yml` — объяснение называло базу («поправить файл: <база>») и
+    советовало `--reset-config`, который проектный слой не трогает. Виновник —
+    файл с указателем; откат не предлагается: база ни при чём."""
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
+    (isolated_cwd / ".gc").mkdir()
+    project = isolated_cwd / ".gc" / "config.yml"
+    project.write_text('profile: "gone"\n', encoding="utf-8")
+
+    exc = _load_and_catch(str(base))
+    text = explain_broken_config(str(base), exc, program="gc-ua")
+
+    assert 'профиль "gone" не найден' in text
+    assert f"поправить profile в:  {project}" in text
+    assert f"поправить файл:  {base}" not in text
+    assert 'запустить без профиля, ничего не потеряв:  gc-ua --profile ""' in text
+    assert "--reset-config" not in text
+
+
+# --- Сценарий C2: ошибка схемы в оверлее ------------------------------------
+
+
+def test_schema_error_in_project_overlay_names_the_overlay(isolated_cwd, tmp_path):
+    """Ревью (H2а): ошибка схемы (pydantic) в проектном оверлее — координата из
+    текста не читалась, объяснение советовало «поправить файл: <база>» и
+    `--reset-config`, который оверлей не трогает. Координата у pydantic есть
+    (`loc`) — по ней виновник тот файл, что задал ключ."""
+    from pydantic import ValidationError
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
+    (isolated_cwd / ".gc").mkdir()
+    project = isolated_cwd / ".gc" / "config.yml"
+    project.write_text("agent:\n  max_steps: many\n", encoding="utf-8")
+
+    exc = _load_and_catch(str(base))
+    assert isinstance(exc, ValidationError)
+    text = explain_broken_config(str(base), exc, program="gc-ua")
+
+    assert "конфиг не проходит схему:" in text
+    assert f"поправить agent.max_steps в:  {project}" in text
+    assert f"поправить файл:  {base}" not in text
+    assert "--reset-config" not in text
+
+
+def test_schema_error_in_the_base_still_offers_the_reset(tmp_path, monkeypatch):
+    """Отрицательный сторож к правилу отката: тот же дефект схемы в самой базе —
+    ключ на базе, откат уместен."""
+    from onboarding import explain_broken_config
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
+                        lambda: tmp_path / "config.local.yml")
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "agent:\n  max_steps: many\n", encoding="utf-8")
+
+    exc = _load_and_catch(str(base))
+    text = explain_broken_config(str(base), exc)
+
+    assert f"поправить agent.max_steps в:  {base}" in text
+    assert "gc-cli --reset-config" in text
 
 
 # --- Сценарий D: два разных ключа в РАЗНЫХ файлах ---------------------------
@@ -185,6 +341,37 @@ def test_two_broken_keys_in_different_files_get_one_line_each(isolated_cwd, tmp_
     assert "models в:" not in text  # секция models сама по себе не сломана
     # Порядок — как в закрытом списке подозреваемых (slots.default раньше slots.max).
     assert text.index("slots.default") < text.index("slots.max")
+    # Один из виновников — база: откат уместен и идёт последним.
+    assert text.rstrip().endswith(
+        "откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --reset-config")
+    assert text.index('--profile ""') < text.index("--reset-config")
+
+
+def test_assign_keys_get_their_own_fix_line(isolated_cwd, tmp_path):
+    """Ревью (H2в, решение владельца): ключи привязок не участвовали — смешанная
+    ошибка «slots.max в базе + assign.* в профиле» теряла строку про привязки.
+    Координата — полная (`assign.subagents.subagent_worker`), файл — тот, где
+    привязка лежит."""
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(
+        _BACKEND + "models:\n  flash: {}\n" "slots:\n  max: ghost\n" "profile: work\n",
+        encoding="utf-8",
+    )
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    profile = profiles_dir / "work.yml"
+    profile.write_text(
+        "assign:\n  summary: nothere\n  subagents:\n    subagent_worker: nope\n",
+        encoding="utf-8",
+    )
+
+    exc = _load_and_catch(str(base))
+    text = explain_broken_config(str(base), exc)
+
+    assert f"поправить slots.max в:  {base}" in text
+    assert f"поправить assign.summary, assign.subagents.subagent_worker в:  {profile}" in text
 
 
 # --- Сценарий E: два ключа в ОДНОМ файле — одна строка ----------------------

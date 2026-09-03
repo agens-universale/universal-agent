@@ -7,18 +7,6 @@ pytest.importorskip("textual")
 from tui.services.voice_setup import ProbeResult, VoiceStatus
 
 
-@pytest.fixture(autouse=True)
-def _isolate_config_layers(monkeypatch, tmp_path):
-    """Слои поверх базового config.yml — на tmp. Без этого правило ⚠-строки читало бы
-    РЕАЛЬНЫЙ ~/.gc/config.local.yml разработчика (voice-секцию туда пишет наш же UI)
-    и .gc/config.yml рабочего каталога — вердикт зависел бы от машины."""
-    import config as config_mod
-    import mcp_runtime.paths as mcp_paths
-    monkeypatch.setattr(mcp_paths, "managed_config_path",
-                        lambda: tmp_path / "config.local.yml")
-    monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: None)
-
-
 class FakeVoiceSetup:
     """Фасад voice_setup: статус — изменяемый (действия меняют его, как в жизни)."""
 
@@ -520,15 +508,16 @@ async def test_fields_entered_from_a_row_keep_its_pane(tmp_path):
 # --- честность перекрытия ------------------------------------------------------
 
 def _overlay(monkeypatch, tmp_path, managed=None, project=None):
-    """СОДЕРЖИМОЕ слоёв поверх базового config.yml (пути изолирует автофикстура):
-    managed — ~/.gc/config.local.yml, project — .gc/config.yml проекта."""
+    """СОДЕРЖИМОЕ слоёв поверх базового config.yml (пути изолирует общая
+    автофикстура `tests/conftest.py::_isolated_config_layers`): managed —
+    ~/.gc/config.local.yml, project — .gc/config.yml проекта."""
     if managed is not None:
         (tmp_path / "config.local.yml").write_text(managed, encoding="utf-8")
     if project is not None:
-        import config as config_mod
+        from config_modules import env_vars
         path = tmp_path / "project.yml"
         path.write_text(project, encoding="utf-8")
-        monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: str(path))
+        monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(path))
 
 
 @pytest.mark.asyncio

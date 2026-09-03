@@ -481,6 +481,99 @@ def test_cascade_keeps_a_reference_to_an_alias_that_survives_the_removal(stack):
     assert (doc.get("slots") or {}) == {"default": "gc"}   # ссылка осталась валидной
 
 
+# --- Удаление из НЕАКТИВНОГО профиля судится стеком «база + этот профиль» ---
+#
+# Стек вопросов об удалении строился по действующему указателю, а не по тому
+# профилю, который открыт в редакторе. Активен профиль A, у обоих профилей есть
+# запись `x`, у неактивного B на неё смотрит `slots.default`: открыть B, удалить
+# `x` — «алиас переживёт» (он есть в A), каскад пропущен, в B остаётся висячий
+# слот; валидатор до неактивного профиля не доходит, а активация B потом падает.
+# Все тесты выше ставят на цель АКТИВНЫЙ профиль и мимо дефекта проходят.
+
+
+def _two_profiles(stack, *, active: str = "a"):
+    """База с указателем на `active` и два профиля: `a` и `b` оба объявляют `x`,
+    у `b` на неё смотрит `slots.default`. Отдаёт (база, файл b)."""
+    base, profiles = stack
+    base.write_text(f'profile: "{active}"\n', encoding="utf-8")
+    (profiles / "a.yml").write_text('models:\n  x:\n    model: "a-x"\n', encoding="utf-8")
+    other = profiles / "b.yml"
+    other.write_text(
+        'models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n', encoding="utf-8")
+    return base, other
+
+
+def test_an_alias_declared_only_by_the_active_profile_does_not_survive_removal_from_another(stack):
+    """Из стека открытого профиля B активный A не виден: снятая в B запись `x`
+    в стеке «база + B» не останется, что бы ни объявлял A."""
+    base, other = _two_profiles(stack)
+
+    assert rw.alias_survives_removal(other, "x", stack_base=base) is False
+
+
+def test_removal_from_an_inactive_profile_cascades_its_own_dangling_slot(stack):
+    """Каскад в B обязан снять `slots.default: x` вместе с записью: иначе файл
+    остаётся с висячей ссылкой, о которой не скажет никто до самой активации."""
+    base, other = _two_profiles(stack)
+
+    rw.remove_model(other, "x", force=True, is_profile=True, stack_base=base)
+
+    doc = yaml.safe_load(other.read_text(encoding="utf-8"))
+    assert (doc.get("models") or {}) == {}
+    assert (doc.get("slots") or {}) == {}
+
+
+def test_removal_from_an_inactive_profile_protects_a_base_reference_it_alone_resolves(stack):
+    """Тот же стек и у отказа по чужим ссылкам: слот БАЗЫ смотрит на `p`, которую
+    объявляют только профили. Снять `p` из неактивного B — значит сделать стек
+    «база + B» нерезолвимым: по указателю (база + A) справка отвечала «ничего не
+    повиснет» и отказ молчал."""
+    base, profiles = stack
+    base.write_text('profile: "a"\nslots:\n  default: "p"\n', encoding="utf-8")
+    (profiles / "a.yml").write_text('models:\n  p:\n    model: "a-p"\n', encoding="utf-8")
+    other = profiles / "b.yml"
+    other.write_text('models:\n  p:\n    model: "b-p"\n', encoding="utf-8")
+
+    assert rw.references_broken_by_removal(other, "p", stack_base=base) == [
+        ("config.yml", "slots.default")]
+
+
+def test_a_base_namesake_survives_removal_from_an_inactive_profile(stack):
+    """Обратная сторона: запись базы под тем же именем переживает удаление из
+    любого профиля — активного или нет, — и своя ссылка B остаётся на месте:
+    она продолжит резолвиться записью базы."""
+    base, profiles = stack
+    base.write_text('profile: "a"\nmodels:\n  x:\n    model: "base-x"\n', encoding="utf-8")
+    (profiles / "a.yml").write_text("slots: {}\n", encoding="utf-8")
+    other = profiles / "b.yml"
+    other.write_text(
+        'models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n', encoding="utf-8")
+
+    assert rw.alias_survives_removal(other, "x", stack_base=base) is True
+    assert rw.references_broken_by_removal(other, "x", stack_base=base) == []
+    rw.remove_model(other, "x", force=True, is_profile=True, stack_base=base)
+    doc = yaml.safe_load(other.read_text(encoding="utf-8"))
+    assert (doc.get("slots") or {}) == {"default": "x"}
+
+
+def test_needs_default_slot_for_an_inactive_profile_counts_its_own_cascade(stack):
+    """Справка о слоте и без того считала «база + этот файл», но каскад внутри неё
+    шёл по указателю: в B две записи, `default` смотрит на `x`, которую объявляет
+    ещё и активный A. Удаление `x` из B каскадом снимает единственный слот — при
+    оставшихся двух моделях (`y` в B и `x` базы) стек «база + B» без `default`
+    нерезолвим, и справка обязана ответить «да»."""
+    base, profiles = stack
+    base.write_text('profile: "a"\nmodels:\n  z:\n    model: "base-z"\n', encoding="utf-8")
+    (profiles / "a.yml").write_text('models:\n  x:\n    model: "a-x"\n', encoding="utf-8")
+    other = profiles / "b.yml"
+    other.write_text(
+        'models:\n  x:\n    model: "b-x"\n  y:\n    model: "b-y"\nslots:\n  default: "x"\n',
+        encoding="utf-8")
+
+    assert rw.needs_default_slot(other, [("remove_model", "x", True)], "",
+                                 is_profile=True, stack_base=base) is True
+
+
 # --- Отказ валидации называет файл, где лежит ключ ---
 #
 # Вердикт фазы 2 вынесен по СТЕКУ, и ключ, который он называет, может лежать не в
