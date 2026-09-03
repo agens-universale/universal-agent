@@ -233,6 +233,10 @@ mcp:
 - `agent.exec_output_capture_max_chars` — потолок RAM-буфера stdout/stderr на поток
   (decoded UTF-8 chars) для exec. По умолчанию `60000`. После cap вывод сливается и
   отбрасывается без kill процесса; page полного captured — через stream refs в ответе тулы.
+- `agent.walk_output_max_chars` — потолок приватного канала обхода дерева в Harbor
+  (`find -printf` для walk/listdir; decoded chars). По умолчанию `50000000`. При
+  переполнении обход не отдаёт частичный список, а завершается ошибкой `walk_too_large`
+  с советом сузить путь.
 
 ## Слои инструкций (AGENTS.md)
 

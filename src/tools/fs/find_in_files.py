@@ -9,16 +9,17 @@ Hits / context / stop A/B/C — FINAL-SPEC.
 from __future__ import annotations
 
 import bisect
-import copy
 import json
 import os
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from config_modules.fs_tools import FsFindInFilesConfig
+from backends.protocol import WalkOutputTooLargeError
+from backends.walk_util import WalkEntry
+from config_modules.fs_tools import FsFindInFilesConfig, parse_find_in_files_config
 from utils.find_in_files_scan_mode import (
     Needles,
     PatternMode,
@@ -50,6 +51,14 @@ from security.read_guard import (
     _resolve_skills_root,
 )
 from security.path_policy import resolve_tool_context, _extract_config_dict
+
+# Python-path fallbacks where an in-sandbox needle prefilter is worth a try: the
+# recipe exists (grep+find), only the pattern/glob could not be expressed natively.
+_PREFILTER_FALLBACK_REASONS = frozenset({"pattern_not_native", "file_pattern_not_native"})
+# Ответы, несущие candidate_count / candidate_limit / breakdown (карту по папкам).
+_REFUSE_STOP_REASONS = frozenset(
+    {"too_many_candidate_files", "unfiltered_host_reads", "output_capped"}
+)
 
 # affix_or re-open budget is the only per-mode open cap (spec §5 / §6.3).
 _MODE_CANDIDATE_LIMIT_ATTR = {
@@ -95,86 +104,95 @@ class FindInFiles(AbstractSimpleTool):
         {QUERY_MODE_TEXT, QUERY_MODE_RE, QUERY_MODE_RE_DOTALL}
     )
 
-    _PARAM_SCHEMA: Dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Absolute file or directory path.",
+    @classmethod
+    def _param_schema(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        cfg = parse_find_in_files_config(config_dict)
+        dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute file or directory path.",
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": (
+                        "What to search for. "
+                        "Default query_mode=python-re: Python regular expression. "
+                        "query_mode=text: exact substring (metacharacters literal). "
+                        "query_mode=python-re-dotall: regex where '.' also matches newline."
+                    ),
+                },
+                "query_mode": {
+                    "type": "string",
+                    "enum": ["text", "python-re", "python-re-dotall"],
+                    "default": "python-re",
+                    "description": (
+                        "How to interpret pattern. Default python-re. "
+                        "python-re: Python regular expression "
+                        "('.' does not match newline; ^/$ are line edges). "
+                        "text: exact substring only — metacharacters like "
+                        "| ( ) . * are literal; use when you need a fixed string "
+                        "that would be special in regex. "
+                        "python-re-dotall: same as python-re, but '.' also matches "
+                        "newline (only when a match must span lines)."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": mtot,
+                    "description": (
+                        f"Maximum matches to return. Default {dlim}, maximum {mtot}."
+                    ),
+                },
+                "case_insensitive": {
+                    "type": "boolean",
+                    "description": (
+                        "Ignore letter case when matching. Default false (case-sensitive, "
+                        "like grep). Set true for case-insensitive search."
+                    ),
+                    "default": False,
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": (
+                        "When path is a directory: only search files whose path relative to "
+                        "path matches this glob. Basename-only patterns (no '/') match at any "
+                        "depth: '*.py' ≡ '**/*.py'. Patterns with '/' are path-globs "
+                        "('src/*.ts' = one level under src/; 'src/**/*.ts' = recursive). "
+                        "Ignored when path is a single file."
+                    ),
+                },
+                "exclude_dirs": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Extra absolute directories to skip (each directory and everything under it). "
+                        "At most 32 entries."
+                    ),
+                },
+                "show_excluded_dirs": {
+                    "type": "boolean",
+                    "description": (
+                        "Include the full list of directories skipped during the walk. "
+                        "Default false. Turn on only when you need to verify which dirs "
+                        "were not entered (hard excludes, dot-dirs, call exclude_dirs). "
+                        "Does not include search_stats."
+                    ),
+                    "default": False,
+                },
             },
-            "pattern": {
-                "type": "string",
-                "description": (
-                    "What to search for. "
-                    "Default query_mode=python-re: Python regular expression. "
-                    "query_mode=text: exact substring (metacharacters literal). "
-                    "query_mode=python-re-dotall: regex where '.' also matches newline."
-                ),
-            },
-            "query_mode": {
-                "type": "string",
-                "enum": ["text", "python-re", "python-re-dotall"],
-                "default": "python-re",
-                "description": (
-                    "How to interpret pattern. Default python-re. "
-                    "python-re: Python regular expression "
-                    "('.' does not match newline; ^/$ are line edges). "
-                    "text: exact substring only — metacharacters like "
-                    "| ( ) . * are literal; use when you need a fixed string "
-                    "that would be special in regex. "
-                    "python-re-dotall: same as python-re, but '.' also matches "
-                    "newline (only when a match must span lines)."
-                ),
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Maximum matches to return. Default 100, maximum 300.",
-                "default": 100,
-            },
-            "case_insensitive": {
-                "type": "boolean",
-                "description": (
-                    "Ignore letter case when matching. Default false (case-sensitive, "
-                    "like grep). Set true for case-insensitive search."
-                ),
-                "default": False,
-            },
-            "file_pattern": {
-                "type": "string",
-                "description": (
-                    "When path is a directory: only search files whose path relative to "
-                    "path matches this glob. Basename-only patterns (no '/') match at any "
-                    "depth: '*.py' ≡ '**/*.py'. Patterns with '/' are path-globs "
-                    "('src/*.ts' = one level under src/; 'src/**/*.ts' = recursive). "
-                    "Ignored when path is a single file."
-                ),
-            },
-            "exclude_dirs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Extra absolute directories to skip (each directory and everything under it). "
-                    "At most 32 entries."
-                ),
-            },
-            "show_excluded_dirs": {
-                "type": "boolean",
-                "description": (
-                    "Include the full list of directories skipped during the walk. "
-                    "Default false. Turn on only when you need to verify which dirs "
-                    "were not entered (hard excludes, dot-dirs, call exclude_dirs). "
-                    "Does not include search_stats."
-                ),
-                "default": False,
-            },
-        },
-        "required": ["path", "pattern"],
-        "additionalProperties": False,
-    }
+            "required": ["path", "pattern"],
+            "additionalProperties": False,
+        }
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
+        cfg = parse_find_in_files_config(config_dict)
+        dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
         return {
             "type": "function",
             "name": "fs_find_in_files",
@@ -185,21 +203,31 @@ class FindInFiles(AbstractSimpleTool):
                 "python-re). Optional query_mode: python-re (default), text "
                 "(exact substring; metacharacters literal), python-re-dotall "
                 "(cross-line '.'). "
-                "At most limit matches (default 100, max 300); no pagination. "
+                f"At most limit matches (default {dlim}, max {mtot}); no pagination. "
                 "Skips binary/large files; no .gitignore. "
                 f"Does not enter nested `.gc`, dirs named {skip}, or nested dot-dirs "
                 "(path itself is still searched if it is one of those). "
                 "Empty matches ≠ absent if the scan stopped early — check "
-                "scan_complete / stop_* / guidance."
+                "scan_complete / stop_* / guidance. "
+                "search_backend=grep ran inside the sandbox; python read each "
+                "candidate file from the host (fallback_reason says why). "
+                "stop_reason=output_capped: grep output hit the transport ceiling — "
+                "narrow pattern/path/file_pattern, not limit. "
+                "prefilter=grep: candidate files were picked inside the sandbox by a "
+                "fixed-string needle before any host read (ASCII case folding); "
+                "prefilter=timeout|capped|failed: that pass gave up and every candidate "
+                "was read from the host — narrow path/file_pattern."
             ),
-            # Copy: callers (inject_tool_fields) mutate parameters in place.
-            "parameters": copy.deepcopy(cls._PARAM_SCHEMA),
+            # Fresh dict: callers (inject_tool_fields) mutate parameters in place.
+            "parameters": cls._param_schema(config_dict),
             "strict": True,
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         skip = hard_exclude_dir_names_for_prompt()
+        cfg = parse_find_in_files_config(config_dict)
+        dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
         return (
             "Tool name: fs_find_in_files\n"
             "Search file contents under an absolute file or directory (not file names).\n"
@@ -207,7 +235,7 @@ class FindInFiles(AbstractSimpleTool):
             "(query_mode defaults to python-re).\n"
             "Optional: query_mode (python-re default; text=exact substring; "
             "python-re-dotall=cross-line '.'), "
-            "limit (default 100, max 300; no pagination), "
+            f"limit (default {dlim}, max {mtot}; no pagination), "
             "case_insensitive (default false), "
             "file_pattern (directory only; basename-only like '*.py' matches any depth), "
             "exclude_dirs, "
@@ -216,6 +244,12 @@ class FindInFiles(AbstractSimpleTool):
             "no .gitignore. If path itself is a skipped-name dir, it is still searched.\n"
             "Empty matches ≠ proof the text is absent when the scan stops early — "
             "read scan_complete, stop_*, guidance; narrow path/file_pattern/pattern.\n"
+            "search_backend=grep ran inside the sandbox; python read each candidate "
+            "file from the host (fallback_reason says why). stop_reason=output_capped: "
+            "grep output hit the transport ceiling — narrow the query, not limit. "
+            "prefilter=grep: candidates were picked in the sandbox by a needle first "
+            "(ASCII case folding); prefilter=timeout|capped|failed: that pass gave up, "
+            "every candidate was read from the host — narrow path/file_pattern.\n"
         )
 
     @enforce_read_guard(path_arg="path")
@@ -245,18 +279,8 @@ class FindInFiles(AbstractSimpleTool):
     def _resolve_config(self) -> Tuple[Any, FsFindInFilesConfig, Dict[str, Any]]:
         rg_context = resolve_tool_context(self)
         cfg_dict = _extract_config_dict(self, getattr(rg_context, "ctx", None), {})
-        fif_raw = {}
-        if isinstance(cfg_dict, dict):
-            fs_raw = cfg_dict.get("fs_tools", {})
-            if isinstance(fs_raw, dict):
-                fif_raw = fs_raw.get("find_in_files", {}) or {}
-        try:
-            config = FsFindInFilesConfig.model_validate(
-                fif_raw if isinstance(fif_raw, dict) else {}
-            )
-        except Exception:
-            config = FsFindInFilesConfig()
-        return rg_context, config, cfg_dict if isinstance(cfg_dict, dict) else {}
+        cfg_dict = cfg_dict if isinstance(cfg_dict, dict) else {}
+        return rg_context, parse_find_in_files_config(cfg_dict), cfg_dict
 
     def _resolve_max_bytes(self, cfg_dict: Dict[str, Any]) -> int:
         return fs_find_in_files_max_bytes(cfg_dict)
@@ -286,6 +310,9 @@ class FindInFiles(AbstractSimpleTool):
                 "path",
                 "path must be absolute",
             )
+        # `find` печатает пути тем же префиксом, каким его позвали, а исключения
+        # уже нормализованы — без этого prune на нативном пути молча не срабатывал.
+        path = self._backend.normpath(path)
         if not isinstance(pattern, str):
             return self._error("invalid_argument", "pattern")
         if pattern == "":
@@ -595,6 +622,116 @@ class FindInFiles(AbstractSimpleTool):
             list(lines[head_lo:head_hi]) + [marker] + list(lines[tail_lo:tail_hi])
         )
 
+    @staticmethod
+    def _native_context_line_range(
+        start_line: int,
+        end_line: int,
+        context_num: int = 5,
+    ) -> Tuple[int, int]:
+        """1-based inclusive window: start−N … end+N. Native hits are one line."""
+        if end_line < start_line:
+            end_line = start_line
+        return max(1, start_line - context_num), end_line + context_num
+
+    @staticmethod
+    def _extract_needed_lines(text: str, needed: Iterable[int]) -> Dict[int, str]:
+        """1-based lineno → keepends slice; scan stops after the last needed line."""
+        want = {int(n) for n in needed if int(n) >= 1}
+        if not want:
+            return {}
+        max_needed = max(want)
+        out: Dict[int, str] = {}
+        lineno = 1
+        i = 0
+        n = len(text)
+        while i < n and lineno <= max_needed:
+            j = text.find("\n", i)
+            if j == -1:
+                chunk = text[i:]
+                i = n
+            else:
+                chunk = text[i : j + 1]
+                i = j + 1
+            if lineno in want:
+                out[lineno] = chunk
+            lineno += 1
+        return out
+
+    def _join_native_context_window(
+        self,
+        line_map: Dict[int, str],
+        start_line: int,
+        end_line: int,
+        context_num: int = 5,
+    ) -> Optional[str]:
+        lo, hi = self._native_context_line_range(start_line, end_line, context_num)
+        chunks = [line_map[i] for i in range(lo, hi + 1) if i in line_map]
+        if not chunks:
+            return None
+        return self._join_context(chunks)
+
+    @staticmethod
+    def _omit_native_context(
+        hits: List[Dict[str, Any]],
+        reason: str,
+        size: Optional[int] = None,
+    ) -> None:
+        for m in hits:
+            m.pop("context", None)
+            m["context_omitted"] = reason
+            if size is not None:
+                m["size_bytes"] = size
+
+    def _attach_native_match_contexts(
+        self,
+        shown: List[Dict[str, Any]],
+        max_bytes: int,
+    ) -> None:
+        """Size-gate + one ``read_bytes`` per shown file; window ±5 on the host."""
+        by_file: Dict[str, List[Dict[str, Any]]] = {}
+        for m in shown:
+            by_file.setdefault(m["file"], []).append(m)
+
+        backend = self._backend
+        for abs_path, hits in by_file.items():
+            try:
+                size = backend.getsize(abs_path)
+            except OSError:
+                self._omit_native_context(hits, "read_error")
+                continue
+            if size > max_bytes:
+                self._omit_native_context(hits, "file_too_large", size)
+                continue
+            try:
+                raw = backend.read_bytes(abs_path)
+            except OSError:
+                self._omit_native_context(hits, "read_error", size)
+                continue
+            sample = raw[:BINARY_SAMPLE_BYTES]
+            if classify_content_from_sample(abs_path, sample).is_binary:
+                self._omit_native_context(hits, "binary", size)
+                continue
+            decoded = decode_text_bytes(raw, encoding=None)
+            if not decoded.ok:
+                self._omit_native_context(hits, "encoding", size)
+                continue
+            needed: List[int] = []
+            for m in hits:
+                start = int(m.get("line") or 1)
+                end = int(m.get("end_line") or start)
+                lo, hi = self._native_context_line_range(start, end)
+                needed.extend(range(lo, hi + 1))
+            line_map = self._extract_needed_lines(decoded.text or "", needed)
+            for m in hits:
+                start = int(m.get("line") or 1)
+                end = int(m.get("end_line") or start)
+                ctx = self._join_native_context_window(line_map, start, end)
+                m.pop("context", None)
+                if ctx:
+                    m["context"] = ctx
+                    m.pop("context_omitted", None)
+                    m.pop("size_bytes", None)
+
     def _run_regex(
         self,
         compiled: re.Pattern,
@@ -651,6 +788,93 @@ class FindInFiles(AbstractSimpleTool):
             "requested_limit_capped",
             f"Requested limit {limit_requested} was capped to {limit_eff}; "
             f"scan finished within limit_eff with {count} matches.",
+        )
+
+    @staticmethod
+    def _needle_strings(needles: Needles) -> List[str]:
+        out: List[str] = []
+        if needles.required_literal is not None:
+            out.append(needles.required_literal)
+        if needles.or_group:
+            out.extend(needles.or_group)
+        return out
+
+    @staticmethod
+    def _relevance_key(
+        abs_path: str, depth: int, needle_strings: List[str], effective_ci: bool
+    ) -> Tuple[int, int, str]:
+        """Which matches survive ``limit`` — the one ranking for both engines:
+        files whose name carries the needle first, then shallower, then by path."""
+        basename = os.path.basename(abs_path)
+        if effective_ci:
+            bn = basename.casefold()
+            ns = [s.casefold() for s in needle_strings]
+        else:
+            bn = basename
+            ns = needle_strings
+        basename_hit = 0 if (ns and any(s in bn for s in ns)) else 1
+        return (basename_hit, depth, abs_path)
+
+    def _depth_under(self, root: str, abs_path: str) -> int:
+        root_n = self._backend.normpath(root).rstrip("/\\")
+        abs_n = self._backend.normpath(abs_path)
+        if abs_n.startswith(root_n) and len(abs_n) > len(root_n) and abs_n[len(root_n)] in "/\\":
+            rel = abs_n[len(root_n) + 1:]
+            return rel.count("/") + rel.count("\\")
+        return 0
+
+    def _blind_read_reason(
+        self,
+        *,
+        prefilter: Optional[str],
+        fallback_reason: Optional[str],
+        show_excluded_dirs: bool,
+        needles: Needles,
+        effective_ci: bool,
+    ) -> Tuple[str, bool]:
+        """Why nothing narrowed the candidates inside the sandbox → (reason, a needle would help).
+
+        ``prefilter_paths is None`` covers several states; the agent must hear the
+        real one — advising a fixed substring to a pattern that IS one misleads.
+        """
+        if prefilter:
+            return f"the in-sandbox prefilter {prefilter}", False
+        if show_excluded_dirs:
+            return "show_excluded_dirs forces the host walk, so the in-sandbox prefilter is skipped", False
+        if fallback_reason not in _PREFILTER_FALLBACK_REASONS:
+            return (
+                f"native grep is unavailable here ({fallback_reason}), so nothing narrowed "
+                "the candidates inside the sandbox"
+            ), False
+        backend = self._backend
+        if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
+            return "grep or find is unavailable in the sandbox, so no prefilter is possible", False
+        from utils.native_fs_search import prefilter_terms
+
+        if self._needle_strings(needles) and prefilter_terms(needles, case_insensitive=effective_ci) is None:
+            # Игла есть, но для sandbox-фильтра непригодна — совет «добавь
+            # фиксированную подстроку» здесь дезориентирует.
+            return (
+                "the pattern's fixed substring cannot drive the in-sandbox prefilter "
+                "(non-ASCII under case_insensitive, or control characters)"
+            ), False
+        return "the pattern has no fixed substring for an in-sandbox prefilter", True
+
+    def _native_failure_guidance(self, failure: str) -> str:
+        what = "timed out" if failure == "native_timeout" else "failed"
+        return (
+            f"Native grep {what}; the search is not complete and nothing was read "
+            "from the host. Narrow path or file_pattern, or simplify the pattern, "
+            "and retry."
+        )
+
+    @staticmethod
+    def _output_capped_guidance() -> str:
+        return (
+            "grep output hit the sandbox transport ceiling before the match limit: "
+            "the matches above are a prefix, not the full set, and a match flagged "
+            "line_content_truncated was cut mid-line. Raising limit cannot help — "
+            "narrow pattern, path or file_pattern instead."
         )
 
     @staticmethod
@@ -898,6 +1122,7 @@ class FindInFiles(AbstractSimpleTool):
             mode="file",
             effective_ci=effective_ci,
             search_backend="python",
+            fallback_reason="single_file",
         )
 
     # ------------------------------------------------------------------
@@ -1042,6 +1267,51 @@ class FindInFiles(AbstractSimpleTool):
             out["files_at_root"] = files_at_root
         return out
 
+    def _hit_dirs_breakdown(
+        self,
+        *,
+        start_path: str,
+        files: Iterable[str],
+        config: FsFindInFilesConfig,
+    ) -> Optional[Dict[str, Any]]:
+        """Карта «где густо» из уже разобранного вывода grep: файлы с
+        совпадениями на папку верхнего уровня. Ничего заново не обходится —
+        только группировка префикса, который и так в руках.
+        """
+        backend = self._backend
+        start_norm = backend.normpath(start_path)
+        prefix_len = len(start_norm.rstrip("/\\"))
+        dir_files: Dict[str, set] = {}
+        root_files: set = set()
+        for raw_file in files:
+            f = backend.normpath(str(raw_file or ""))
+            rel = f[prefix_len:].lstrip("/\\")
+            if not rel:
+                continue
+            head, sep, _rest = rel.replace("\\", "/").partition("/")
+            if not sep:
+                root_files.add(f)
+                continue
+            child = backend.normpath(backend.join(start_norm, head))
+            dir_files.setdefault(child, set()).add(f)
+        if not dir_files and not root_files:
+            return None
+        ranked = sorted(dir_files.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        top = ranked[: int(config.top_level_dirs_cap)]
+        out: Dict[str, Any] = {
+            "top_level_dirs": [
+                {
+                    "path": tool_report_abspath(p, workspace=self._workspace),
+                    "match_files": len(files),
+                }
+                for p, files in top
+            ],
+            "top_level_dirs_total": len(dir_files),
+        }
+        if root_files:
+            out["files_at_root"] = len(root_files)
+        return out
+
     def _refuse_guidance(
         self,
         *,
@@ -1120,6 +1390,71 @@ class FindInFiles(AbstractSimpleTool):
             key=lambda e: (e.get("reason") or "", e.get("path") or ""),
         )
 
+    def _prefilter_candidates(
+        self,
+        *,
+        path: str,
+        needles: Needles,
+        effective_ci: bool,
+        fallback_reason: Optional[str],
+        file_pattern: Optional[str],
+        accepted_excludes: List[str],
+        config: FsFindInFilesConfig,
+        show_excluded_dirs: bool,
+    ) -> Tuple[Optional[List[str]], Optional[str]]:
+        """``grep -l`` inside the sandbox → ``(candidate files, None)``;
+        ``(None, reason)`` when it was tried and gave up, ``(None, None)`` when
+        it does not apply — the caller walks as before either way.
+
+        Only when native grep declined the pattern itself (a sound fixed-string
+        needle still exists) and the walk is not needed for its own report
+        (show_excluded_dirs).
+        """
+        from utils.native_fs_search import (
+            hard_exclude_names_for_grep,
+            native_prefilter_candidates,
+            prefilter_terms,
+        )
+        from utils.pattern_native_gate import is_safe_grep_include
+
+        if show_excluded_dirs or fallback_reason not in _PREFILTER_FALLBACK_REASONS:
+            return None, None
+        terms = prefilter_terms(needles, case_insensitive=effective_ci)
+        if terms is None:
+            return None, None
+        backend = self._backend
+        try:
+            if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
+                return None, None
+        except Exception:
+            return None, None
+        native_glob = file_pattern if file_pattern and is_safe_grep_include(file_pattern) else None
+        return native_prefilter_candidates(
+            backend,
+            path,
+            terms=terms,
+            case_insensitive=effective_ci,
+            exclude_dir_names=hard_exclude_names_for_grep(config.exclude_dir_names),
+            exclude_nested_dot_dirs=True,
+            file_pattern=native_glob,
+            exclude_paths=accepted_excludes,
+        )
+
+    def _prefiltered_entries(self, root: str, abs_paths: List[str]):
+        """Prefilter hits as walk entries ``(relpath, is_dir=False)``."""
+        backend = self._backend
+        root_n = backend.normpath(root).rstrip("/\\")
+        for abs_path in abs_paths:
+            abs_n = backend.normpath(abs_path)
+            if abs_n == root_n:
+                rel = "."
+            elif abs_n.startswith(root_n) and abs_n[len(root_n)] in "/\\":
+                # Separator boundary: a sibling sharing the name prefix is not inside.
+                rel = abs_n[len(root_n) + 1:]
+            else:
+                rel = os.path.basename(abs_n)
+            yield WalkEntry(rel or ".", False)
+
     def _try_native_grep_directory(
         self,
         *,
@@ -1127,6 +1462,7 @@ class FindInFiles(AbstractSimpleTool):
         pattern: str,
         query_mode: str,
         pattern_mode: PatternMode,
+        needles: Needles,
         effective_ci: bool,
         file_pattern: Optional[str],
         accepted_excludes: List[str],
@@ -1134,60 +1470,63 @@ class FindInFiles(AbstractSimpleTool):
         limit_requested: int,
         limit_eff: int,
         limit_capped: bool,
+        max_bytes: int,
         config: FsFindInFilesConfig,
         report_path: str,
         show_excluded_dirs: bool,
         rg_pass: Callable[[str], bool],
-    ) -> Optional[str]:
-        """Attempt native grep. None → continue Python path."""
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Attempt native grep → (response, None); (None, reason) → Python path.
+
+        The reason is the agent-facing ``fallback_reason``: the Python path reads
+        every candidate file from the host, so the switch is never silent.
+        """
         from utils.native_fs_search import (
-            can_native_grep_content,
-            count_native_candidates,
             hard_exclude_names_for_grep,
+            native_grep_refusal,
             run_native_grep,
         )
         from utils.pattern_native_gate import is_grep_native_safe
 
+        # No grep at all: native is impossible whatever the pattern — say that,
+        # not "pattern_not_native" (which invites the agent to simplify the pattern).
+        try:
+            has_grep = bool(getattr(self._backend, "has_grep", False))
+        except Exception:
+            has_grep = False
+        if not has_grep:
+            return None, "no_grep"
+
         # Affix/complex open budgets and multi-hit regex semantics stay on Python.
         if pattern_mode in (PatternMode.AFFIX_OR, PatternMode.COMPLEX):
-            return None
+            return None, "pattern_not_native"
 
         # find prunes directories itself, so this path has no list of skipped
         # dirs to report. Answer such calls from the Python walk instead of
         # accepting the flag and dropping it.
         if show_excluded_dirs:
-            return None
+            return None, "show_excluded_dirs"
 
         plan = is_grep_native_safe(
             pattern, query_mode=query_mode, case_insensitive=effective_ci
         )
         exclude_names = hard_exclude_names_for_grep(config.exclude_dir_names)
         exclude_dot = True
-        if not can_native_grep_content(
+        refusal = native_grep_refusal(
             self._backend,
             plan=plan,
             exclude_dir_names=exclude_names,
             call_exclude_dirs=accepted_excludes,
             file_pattern=file_pattern,
             exclude_nested_dot_dirs=exclude_dot,
-        ):
-            return None
+        )
+        if refusal is not None:
+            return None, refusal
         assert plan is not None
 
-        # Same candidate ceiling as Python path (scan automaton refuse).
-        n = count_native_candidates(
-            self._backend,
-            path,
-            exclude_dir_names=exclude_names,
-            exclude_nested_dot_dirs=exclude_dot,
-            file_pattern=file_pattern,
-        )
-        if n is None:
-            return None
-        candidate_limit = self._candidate_limit_for_mode(pattern_mode, config)
-        if n > candidate_limit:
-            # Fall through to Python so refuse envelope/breakdown stay identical.
-            return None
+        # No find|wc -l here: that ceiling is the Python path's cost guard.
+        # Native grep already walks the same tree; a failed count used to
+        # fall through to host downloads (the Gigabench Problem 3 path).
 
         # Per-hit guard, memoized: one policy evaluation per file, not per hit.
         allowed_cache: Dict[str, bool] = {}
@@ -1199,6 +1538,16 @@ class FindInFiles(AbstractSimpleTool):
                 allowed_cache[real_abs] = cached
             return cached
 
+        # Same ranking as the Python path, applied INSIDE the grep run: the
+        # buffer is streamed and only the K best survive, so a 50M output does
+        # not become a million dicts for an answer of `limit` rows.
+        needle_strings = self._needle_strings(needles)
+
+        def _rank(abs_path: str):
+            return self._relevance_key(
+                abs_path, self._depth_under(path, abs_path), needle_strings, effective_ci
+            )
+
         result = run_native_grep(
             self._backend,
             path,
@@ -1206,30 +1555,101 @@ class FindInFiles(AbstractSimpleTool):
             exclude_dir_names=exclude_names,
             exclude_nested_dot_dirs=exclude_dot,
             file_pattern=file_pattern,
-            max_matches=limit_eff,
+            max_matches=None,
             report_path=lambda p: p,
             is_dir_target=True,
             allow_path=_hit_allowed,
+            exclude_paths=accepted_excludes,
+            rank_key=_rank,
+            top_k=limit_eff,
         )
-        if result is None:
-            return None
+        if result.failure and not result.hit_capture_cap:
+            # grep exists but timed out / failed. Отказ уместен ТОЛЬКО в песочнице:
+            # там чтение каждого кандидата с хоста — ровно та цена, ради которой
+            # этот путь и существует. На локальном бэкенде чтение бесплатно, и
+            # прежний откат на Python давал полный ответ; гейт тот же, что у
+            # соседнего порога max_unfiltered_host_reads.
+            if not getattr(self._backend, "is_sandbox", False):
+                return None, result.failure
+            return self._build_response(
+                matches=[],
+                count=0,
+                stop_reason=result.failure,
+                guidance=self._native_failure_guidance(result.failure),
+                scan_complete=False,
+                more_matches_may_exist=True,
+                limit_requested=limit_requested,
+                limit_eff=limit_eff,
+                limit_capped=limit_capped,
+                path=report_path,
+                pattern=pattern,
+                query_mode=query_mode,
+                mode="dir",
+                effective_ci=effective_ci,
+                file_pattern=file_pattern,
+                exclude_dir_errors=exclude_soft_errors or None,
+                search_backend="grep",
+            ), None
 
-        if result.hit_capture_cap and len(result.matches) < limit_eff:
-            # grep output was cut by the transport ceiling, not by the match
-            # limit: "match_limit / increase limit" would misname the cause and
-            # cannot help. Answer from the Python path instead.
-            return None
-
-        shown = result.matches
+        # The K survivors come back ranked; sorting them again is cheap and keeps
+        # the contract for results that did not go through the streaming path.
+        ranked = sorted(result.matches, key=lambda m: _rank(m["file"]))
+        total_matches = (
+            result.total_matches if result.total_matches is not None else len(ranked)
+        )
+        shown = ranked[:limit_eff]
+        for m in shown:
+            m["line_content"] = self._clip_line_content(m["line_content"])
+            m.pop("context", None)
+        self._attach_native_match_contexts(shown, max_bytes)
         for m in shown:
             m["file"] = tool_report_abspath(m["file"], workspace=self._workspace)
-            clipped = self._clip_line_content(m["line_content"])
-            m["line_content"] = clipped
-            m["context"] = clipped if clipped.endswith("\n") else clipped + "\n"
 
         count = len(shown)
+        if result.hit_capture_cap and count < limit_eff:
+            # grep output was cut by the transport ceiling, not by the match
+            # limit: "increase limit" cannot help, and a host-side rescan of
+            # every candidate is exactly the cost this path exists to avoid —
+            # report the prefix honestly instead. The parsed prefix already
+            # says WHERE it is dense — hand the agent that map for narrowing.
+            hit_dirs = self._hit_dirs_breakdown(
+                start_path=path,
+                files=(
+                    result.files_seen
+                    if result.files_seen is not None
+                    else [m["file"] for m in result.matches]
+                ),
+                config=config,
+            )
+            guidance = self._output_capped_guidance()
+            if hit_dirs and hit_dirs.get("top_level_dirs"):
+                dens = ", ".join(
+                    f"{d['path']} ({d['match_files']} files)"
+                    for d in hit_dirs["top_level_dirs"][:3]
+                )
+                guidance += f" Matches so far are densest in: {dens}."
+            return self._build_response(
+                matches=shown,
+                count=count,
+                stop_reason="output_capped",
+                guidance=guidance,
+                breakdown=hit_dirs,
+                scan_complete=False,
+                more_matches_may_exist=True,
+                limit_requested=limit_requested,
+                limit_eff=limit_eff,
+                limit_capped=limit_capped,
+                path=report_path,
+                pattern=pattern,
+                query_mode=query_mode,
+                mode="dir",
+                effective_ci=effective_ci,
+                file_pattern=file_pattern,
+                exclude_dir_errors=exclude_soft_errors or None,
+                search_backend="grep",
+            ), None
         # Parity with Python path: count >= limit_eff → match_limit (A boundary).
-        hit_limit = bool(result.truncated) or count >= limit_eff
+        hit_limit = bool(result.truncated) or total_matches > limit_eff or count >= limit_eff
         scan_complete = not hit_limit
         more = hit_limit
 
@@ -1263,7 +1683,7 @@ class FindInFiles(AbstractSimpleTool):
             file_pattern=file_pattern,
             exclude_dir_errors=exclude_soft_errors or None,
             search_backend="grep",
-        )
+        ), None
 
     # ------------------------------------------------------------------
     # directory (§3 / §5 / §6)
@@ -1328,11 +1748,12 @@ class FindInFiles(AbstractSimpleTool):
             return True
 
         # --- native grep (gates) before Python pipeline ---
-        native_resp = self._try_native_grep_directory(
+        native_resp, fallback_reason = self._try_native_grep_directory(
             path=path,
             pattern=pattern,
             query_mode=query_mode,
             pattern_mode=pattern_mode,
+            needles=needles,
             effective_ci=effective_ci,
             file_pattern=file_pattern,
             accepted_excludes=accepted_excludes,
@@ -1340,6 +1761,7 @@ class FindInFiles(AbstractSimpleTool):
             limit_requested=limit_requested,
             limit_eff=limit_eff,
             limit_capped=limit_capped,
+            max_bytes=max_bytes,
             config=config,
             report_path=report_path,
             show_excluded_dirs=show_excluded_dirs,
@@ -1404,22 +1826,57 @@ class FindInFiles(AbstractSimpleTool):
         # find_files_by_name. Left to apply_tool's blanket handler they came
         # back as internal_tool_error with "do not retry" guidance — the
         # opposite of what a WalkOutputTooLargeError asks the agent to do.
+        # Needle prefilter inside the sandbox: when native grep cannot answer
+        # the pattern but a sound fixed-string needle exists, grep -l names the
+        # candidate files first and only those are read from the host.
+        prefilter_paths, prefilter_failure = self._prefilter_candidates(
+            path=path,
+            needles=needles,
+            effective_ci=effective_ci,
+            fallback_reason=fallback_reason,
+            file_pattern=file_pattern,
+            accepted_excludes=accepted_excludes,
+            config=config,
+            show_excluded_dirs=show_excluded_dirs,
+        )
+        # "grep" — candidates came from the sandbox; a failure name — it was tried
+        # and the walk below read every candidate from the host; None — not applicable.
+        prefilter = "grep" if prefilter_paths is not None else prefilter_failure
+
+        # Hard-floor prune runs inside the backend traversal (find -prune / os.walk);
+        # show_excluded_dirs needs the host walk to see and report those dirs.
+        prune_names = () if show_excluded_dirs else tuple(sorted(exclude_names))
+        prune_dot = bool(exclude_dot) and not show_excluded_dirs
+
         try:
-            for relpath, is_dir in backend.iter_walk(
-                path, should_descend=_should_descend
-            ):
-                if is_dir:
+            entries = (
+                self._prefiltered_entries(path, prefilter_paths)
+                if prefilter_paths is not None
+                else backend.iter_walk_entries(
+                    path,
+                    should_descend=_should_descend,
+                    prune_names=prune_names,
+                    prune_dot_dirs=prune_dot,
+                )
+            )
+            for entry in entries:
+                if entry.is_dir:
                     continue
+                relpath = entry.rel
                 abs_path = backend.join(path, relpath)
 
                 if glob_matcher is not None and not glob_matcher(relpath):
                     continue
                 if not _rg_pass(abs_path):
                     continue
-                try:
-                    fsize = backend.getsize(abs_path)
-                except OSError:
-                    continue
+                # Size travels with the walk (find -printf %s / lstat); stat only
+                # when the backend did not know it.
+                fsize = entry.size
+                if fsize is None:
+                    try:
+                        fsize = backend.getsize(abs_path)
+                    except OSError:
+                        continue
                 if fsize > max_bytes:
                     # Single-file mode answers file_too_large here; the directory
                     # walk must not swallow it (empty matches ≠ absent).
@@ -1428,6 +1885,8 @@ class FindInFiles(AbstractSimpleTool):
 
                 depth = relpath.count("/") if relpath != "." else 0
                 candidates.append((abs_path, depth, relpath, fsize))
+        except WalkOutputTooLargeError as exc:
+            return self._error("walk_too_large", message=str(exc))
         except PermissionError as exc:
             return self._error("permission_denied", message=str(exc))
         except Exception as exc:
@@ -1435,6 +1894,56 @@ class FindInFiles(AbstractSimpleTool):
 
         n = len(candidates)
         candidate_limit = self._candidate_limit_for_mode(pattern_mode, config)
+
+        # --- blind host reads on a sandbox (D3) ---
+        # On a sandbox every content read is a download. Without a successful
+        # in-sandbox prefilter (it failed, or the pattern has no fixed
+        # substring) the walk would read every candidate from the host; above
+        # the threshold refuse before reading. Local backends read for free.
+        blind_limit = int(config.max_unfiltered_host_reads)
+        if (
+            bool(getattr(backend, "is_sandbox", False))
+            and prefilter_paths is None
+            and n > blind_limit
+        ):
+            breakdown = self._build_breakdown(
+                start_path=path, candidates=candidates, config=config
+            )
+            why, needle_helps = self._blind_read_reason(
+                prefilter=prefilter,
+                fallback_reason=fallback_reason,
+                show_excluded_dirs=show_excluded_dirs,
+                needles=needles,
+                effective_ci=effective_ci,
+            )
+            return self._build_response(
+                matches=[],
+                count=0,
+                stop_reason="unfiltered_host_reads",
+                guidance=(
+                    f"{n} candidate files would be read from the host one by one because "
+                    f"{why}; the limit is {blind_limit}. Nothing was read. Narrow path or "
+                    "file_pattern (see top_level_dirs)"
+                    + (", or give the pattern a fixed substring." if needle_helps else ".")
+                ),
+                scan_complete=False,
+                more_matches_may_exist=True,
+                limit_requested=limit_requested,
+                limit_eff=limit_eff,
+                limit_capped=limit_capped,
+                path=report_path,
+                pattern=pattern,
+                query_mode=query_mode,
+                mode="dir",
+                effective_ci=effective_ci,
+                file_pattern=file_pattern,
+                exclude_dir_errors=exclude_soft_errors or None,
+                fallback_reason=fallback_reason,
+                prefilter=prefilter,
+                candidate_count=n,
+                candidate_limit=blind_limit,
+                breakdown=breakdown,
+            )
 
         # --- gate before content (§5) ---
         if n > candidate_limit:
@@ -1464,6 +1973,8 @@ class FindInFiles(AbstractSimpleTool):
                 effective_ci=effective_ci,
                 file_pattern=file_pattern,
                 exclude_dir_errors=exclude_soft_errors or None,
+                fallback_reason=fallback_reason,
+                prefilter=prefilter,
                 candidate_count=n,
                 candidate_limit=candidate_limit,
                 breakdown=breakdown,
@@ -1475,25 +1986,10 @@ class FindInFiles(AbstractSimpleTool):
             )
 
         # --- sort (§6.1) ---
-        needle_strings: List[str] = []
-        if needles.required_literal is not None:
-            needle_strings.append(needles.required_literal)
-        if needles.or_group:
-            needle_strings.extend(needles.or_group)
-
-        def _basename_key(item: Tuple[str, int, str, int]) -> Tuple[int, int, str]:
-            abs_path, depth, _rel, _size = item
-            basename = os.path.basename(abs_path)
-            if effective_ci:
-                bn = basename.casefold()
-                ns = [s.casefold() for s in needle_strings]
-            else:
-                bn = basename
-                ns = needle_strings
-            basename_hit = 0 if (ns and any(s in bn for s in ns)) else 1
-            return (basename_hit, depth, abs_path)
-
-        candidates.sort(key=_basename_key)
+        needle_strings = self._needle_strings(needles)
+        candidates.sort(
+            key=lambda item: self._relevance_key(item[0], item[1], needle_strings, effective_ci)
+        )
 
         # --- content workers (§6.4) ---
         workers = 2 if n >= config.content_workers_threshold else 1
@@ -1628,6 +2124,16 @@ class FindInFiles(AbstractSimpleTool):
                 True, limit_requested, limit_eff, count=count
             )
 
+        if files_too_large or shared.skipped_encoding:
+            # Walk finished, but some candidates were never searched
+            # (too large / undecodable): "0 matches" is not absence.
+            scan_complete = False
+            more_matches_may_exist = True
+        if shared.skipped_encoding and guidance is None:
+            guidance = (
+                f"{shared.skipped_encoding} file(s) could not be decoded as text and were "
+                "not searched. Do not assume the pattern is absent from them."
+            )
         if files_too_large and guidance is None:
             guidance = (
                 f"{files_too_large} file(s) exceeded the size limit and were not "
@@ -1639,6 +2145,8 @@ class FindInFiles(AbstractSimpleTool):
             matches=all_matches,
             count=count,
             files_too_large=files_too_large or None,
+            skipped_binary=shared.skipped_binary or None,
+            skipped_encoding=shared.skipped_encoding or None,
             stop_reason=stop_reason,
             guidance=guidance,
             scan_complete=scan_complete,
@@ -1659,6 +2167,8 @@ class FindInFiles(AbstractSimpleTool):
                 else None
             ),
             search_backend="python",
+            fallback_reason=fallback_reason,
+            prefilter=prefilter,
         )
 
     # ------------------------------------------------------------------
@@ -1717,6 +2227,10 @@ class FindInFiles(AbstractSimpleTool):
         excluded_dirs: Optional[List[Dict[str, str]]] = None,
         search_backend: Optional[str] = None,
         files_too_large: Optional[int] = None,
+        skipped_binary: Optional[int] = None,
+        skipped_encoding: Optional[int] = None,
+        fallback_reason: Optional[str] = None,
+        prefilter: Optional[str] = None,
     ) -> str:
         """Slim agent-facing payload (RESPONSE-CONTRACT). Omit-if-absent."""
         payload: Dict[str, Any] = {
@@ -1753,11 +2267,21 @@ class FindInFiles(AbstractSimpleTool):
         # from "never opened".
         if files_too_large:
             payload["files_too_large"] = files_too_large
+        if skipped_binary:
+            payload["skipped_binary"] = skipped_binary
+        if skipped_encoding:
+            payload["skipped_encoding"] = skipped_encoding
         if search_backend is not None:
             payload["search_backend"] = search_backend
+        # Why the host-side Python path answered instead of in-sandbox grep.
+        if fallback_reason is not None:
+            payload["fallback_reason"] = fallback_reason
+        # Candidate files were named inside the sandbox first (grep -l on a needle).
+        if prefilter is not None:
+            payload["prefilter"] = prefilter
 
-        # Refuse breakdown only (too_many_candidate_files).
-        if stop_reason == "too_many_candidate_files":
+        # Refuse breakdown only (too_many_candidate_files / unfiltered_host_reads).
+        if stop_reason in _REFUSE_STOP_REASONS:
             if candidate_count is not None:
                 payload["candidate_count"] = candidate_count
             if candidate_limit is not None:

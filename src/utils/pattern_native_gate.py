@@ -100,6 +100,11 @@ def is_grep_native_safe(
             case_insensitive=bool(case_insensitive),
         )
 
+    # python-re: a backslash is an escape. Do not hand the raw string to
+    # grep -F (``\.py`` would search for a slash) or guess ERE. Canon is Python re.
+    if "\\" in pattern:
+        return None
+
     # python-re: denylist
     if _INLINE_GROUP.search(pattern):
         return None

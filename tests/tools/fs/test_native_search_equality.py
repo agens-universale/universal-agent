@@ -8,13 +8,13 @@ from tools.fs.find_files_by_name import FindFilesByName
 
 
 def test_list_files_walk_envelope(tmp_path):
-    """List uses backend traverse only; listing_backend is always python."""
+    """List uses backend traverse only; no listing_backend (agent cannot act on it)."""
     (tmp_path / "a.py").write_text("x", encoding="utf-8")
     (tmp_path / "b.txt").write_text("y", encoding="utf-8")
     data = json.loads(with_local_ctx(ListFiles)(path=str(tmp_path)))
     assert data["ok"] is True
     assert data["count"] == 2
-    assert data.get("listing_backend") == "python"
+    assert "listing_backend" not in data
 
 
 def test_find_by_name_walk_envelope(tmp_path):
@@ -25,7 +25,7 @@ def test_find_by_name_walk_envelope(tmp_path):
     )
     assert data["ok"] is True
     assert data["count"] >= 1
-    assert data.get("listing_backend") == "python"
+    assert "listing_backend" not in data
 
 
 def test_list_and_by_name_do_not_use_exec_for_tree(tmp_path, monkeypatch):
