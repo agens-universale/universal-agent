@@ -23,6 +23,7 @@ from security.read_guard import (
 )
 from tools.fs.agent_hidden import is_agent_hidden
 from tools.schema_optional import coalesce_optional_string
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 from utils.fs_search_walk import (
@@ -41,6 +42,7 @@ def _compile_glob_fullmatch(pattern: str, *, case_insensitive: bool) -> re.Patte
     return re.compile(f"^{glob_to_regex(pattern)}$", flags)
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class FindFilesByName(AbstractSimpleTool):
     """Full-tree locate by basename, path glob, or path substring (not file contents)."""
 

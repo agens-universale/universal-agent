@@ -1,11 +1,13 @@
 import json
 from typing import Any, Dict, Optional
 
+from loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 
 _THINK_FIELDS = ("thoughts", "critics", "doubts", "reflection")
 
 
+@loop_warn_on_repeat(**GENERIC_PROFILE)
 class Think(AbstractSimpleTool):
     @staticmethod
     def _result(

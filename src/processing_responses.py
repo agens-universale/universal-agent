@@ -25,6 +25,9 @@ from intent_guard.turn_finish_emit import (
     get_function_call_output_text,
 )
 from intent_scope.hook import maybe_update_intent_scope_from_tool
+from loop_detector.detector import flush as flush_loop_detector
+from loop_detector.detector import observe as observe_loop_detector
+from loop_detector.detector import clear as clear_loop_detector
 from intent_scope.final_answer import maybe_record_final_answer_intent
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from message_policy.stop_persist import is_persist_discarded
@@ -908,6 +911,7 @@ def process_tool_calls(
             config=getattr(ctx, "config_dict", {}) or {},
             logger=getattr(ctx, "logger", None),
         )
+        observe_loop_detector(state, ctx, tool_name, tool_arguments)
         if tool_name != FINISH_TOOL_NAME:
             maybe_update_intent_scope_from_tool(
                 tool_name=tool_name,
@@ -969,6 +973,15 @@ def process_tool_calls(
             technical_type=TECHNICAL_TYPE_TECHNICAL,
         )
         tools_outputs = [*preserved, resume]
+
+    notice = flush_loop_detector(state)
+    if notice:
+        tools_outputs.append(
+            _make_technical_feedback_user_message(
+                notice,
+                technical_type=TECHNICAL_TYPE_TECHNICAL,
+            )
+        )
 
     # C3: один collect на границе «батч тулов → LLM-шаг» — подбираем циклический
     # мусор между шагами. Default on для CLI/TUI, off для server; явный
@@ -1336,6 +1349,7 @@ def run_agent(
                                 # все завершают ход одинаково.
                                 state.steps += 1
                                 state.flush_current_user_intent()
+                                clear_loop_detector(state)
                                 if turn_end_compaction_hook is not None:
                                     turn_end_compaction_hook()
                                 # Сообщение, пришедшее во время (блокирующей) компакции, не
@@ -1350,6 +1364,7 @@ def run_agent(
                         else:
                             state.current_user_intent = []
                             state.steps += 1
+                            clear_loop_detector(state)
                             return finish_arguments
                     else:
                         messages = process_tool_calls(

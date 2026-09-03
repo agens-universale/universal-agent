@@ -1,3 +1,4 @@
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 import ast
 import json
@@ -93,6 +94,7 @@ def _eval_node(node: ast.AST) -> Any:
     raise _DisallowedSyntax(f"Node {type(node).__name__} is not allowed")
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class Calculator(AbstractSimpleTool):
     max_expression_chars = 2000
 

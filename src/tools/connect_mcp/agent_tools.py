@@ -6,6 +6,7 @@ import copy
 import logging
 from typing import Any, Dict
 
+from loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
 from tools.connect_mcp.api import call_mcp_tool
 from tools.connect_mcp.registry import ToolsCache
 from tools.schema_optional import apply_openai_strict_object
@@ -483,6 +484,7 @@ def get_mcp_tools_data_for_config(
             "tool_fabric": make_fabric(full_name),
             "spec": normalized_spec,
             "description": normalized_spec.get("description", ""),
+            LOOP_WARN_KEY: dict(GENERIC_PROFILE),
         }
     return result, status_map
 

@@ -17,6 +17,7 @@ from project_memory.status import fill_percent
 from project_memory.storage import ProjectMemoryError
 from message_policy.project_memory_notice.policy import touch_project_memory_baseline
 from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 
 _BACKUP_FILE_NAME = "GIGACODE_memory_backup.md"
@@ -49,6 +50,7 @@ _HIGH_FILL_HINT = (
 )
 
 
+@loop_warn_on_repeat(**GENERIC_PROFILE)
 class ProjectMemory(AbstractSimpleTool):
     tool_name = PROJECT_MEMORY_TOOL_NAME
 

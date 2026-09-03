@@ -1,6 +1,7 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from intent_log import serialize, serialize_for_meta, tail_preview
+from loop_detector.detector import clear as clear_loop_detector
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -348,6 +349,7 @@ def run_summary_compaction(
         memory_delta_chars=delta_chars,
         archive_suffix=archive_suffix,
     )
+    clear_loop_detector(state)
 
 
 def maybe_run_summary_compaction(

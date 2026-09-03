@@ -16,6 +16,7 @@ from config_modules.working_memory import (
     working_memory_limits_from_params,
 )
 from constants.tool_names import SESSION_MEMORY_TOOL_NAME
+from loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 
 REGISTER_GOAL = "goal"
@@ -57,6 +58,7 @@ def _total_chars(registers: Dict[str, str]) -> int:
     return sum(len(registers.get(name, "")) for name in REGISTER_ORDER)
 
 
+@loop_warn_on_repeat(**GENERIC_PROFILE)
 class WorkingMemory(AbstractSimpleTool):
     tool_name = SESSION_MEMORY_TOOL_NAME
 

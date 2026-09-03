@@ -1,3 +1,4 @@
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 from typing import Any, Dict, Optional
 import json
@@ -26,6 +27,7 @@ def _default_char_limit(config: Optional[Dict[str, Any]]) -> int:
     return value if value > 0 else DEFAULT_READ_FILE_CHAR_LIMIT
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class ReadFile(AbstractSimpleTool):
     def _result(self, 
         *,

@@ -13,6 +13,7 @@ import sys
 from typing import Any, Dict, Optional
 
 from config_modules.agent import exec_timeout_from_config_dict
+from loop_detector.constants import LOOP_WARN_ATTR, READ_PROFILE, loop_warn_on_repeat
 from tools.schema_optional import coalesce_optional_string
 from tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from utils.arg_decorators import parse_json_object_argument
@@ -59,6 +60,7 @@ def _wrap(
     return json.dumps(payload, ensure_ascii=False)
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class SkillsListTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
@@ -78,6 +80,7 @@ class SkillsListTool:
             )
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class LoadSkillTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
@@ -233,6 +236,7 @@ class RunSkillScriptTool:
         )
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class LoadReferenceTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
@@ -281,6 +285,7 @@ class LoadReferenceTool:
             )
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class LoadAssetTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
@@ -337,6 +342,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
         def fabric(**kwargs: Any):
             return tool_cls(skills_registry, **kwargs)
 
+        warn = getattr(tool_cls, LOOP_WARN_ATTR, None)
+        if warn is not None:
+            setattr(fabric, LOOP_WARN_ATTR, warn)
         return fabric
 
     tools: Dict[str, Dict[str, Any]] = {

@@ -42,6 +42,7 @@ from utils.fs_search_walk import (
 )
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 from security.read_guard import (
     enforce_read_guard,
@@ -85,6 +86,7 @@ class _ScanShared:
     shortlist_len: int = 0
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class FindInFiles(AbstractSimpleTool):
     """Поиск совпадений текста/регулярки внутри файлов файловой системы."""
 
