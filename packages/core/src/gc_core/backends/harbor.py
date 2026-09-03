@@ -8,23 +8,49 @@ read/list use shell through exec.
 """
 import asyncio
 import base64
+import posixpath
 import shlex
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    FIND_PRINTF_FORMAT,
     WALK_OUTPUT_MAX_CHARS,
     ExecResult,
     FsBackend,
     WalkOutputTooLargeError,
     bound_exec_result,
 )
-from gc_core.backends.capabilities import parse_find_printf_lines
+from gc_core.backends.capabilities import parse_find_printf_entries
 from gc_core.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
-from gc_core.utils.file_text import decode_text_best_effort, encode_text_for_append, encode_text_for_write
+from gc_core.utils.file_text import (
+    decode_text_best_effort,
+    encode_text_for_append,
+    encode_text_for_write,
+)
+from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
+
+
+def _build_find_walk_command(
+    path: str,
+    *,
+    prune_names: Sequence[str] = (),
+    prune_dot_dirs: bool = False,
+) -> str:
+    """``find -H PATH -mindepth 1 [( prunes ) -printf FMT -prune -o] -printf FMT``.
+
+    A pruned directory is printed BEFORE ``-prune``: the walk lists it (name
+    search finds ``node_modules`` itself), only its subtree is cut.
+    """
+    argv = find_walk_head(path)
+    group = find_prune_group(exclude_dir_names=prune_names, exclude_nested_dot_dirs=prune_dot_dirs)
+    if group:
+        argv.extend(group + ["-printf", FIND_PRINTF_FORMAT, "-prune", "-o"])
+    argv.extend(["-printf", FIND_PRINTF_FORMAT])
+    return " ".join(shlex.quote(a) for a in argv)
 
 
 class HarborBackend(FsBackend):
@@ -81,7 +107,7 @@ class HarborBackend(FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
-        """Internal exec. ``capture_max_chars=None`` → tool D2 cap (60k)."""
+        """Internal exec. ``capture_max_chars=None`` → tool-trace cap (~60k)."""
         # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
         if env:
             prefix = "env " + " ".join(
@@ -120,12 +146,24 @@ class HarborBackend(FsBackend):
         cwd: Optional[str] = None,
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
-        return self._exec(command, cwd=cwd, timeout=timeout, env=env)
+        return self._exec(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
+            capture_max_chars=capture_max_chars,
+        )
+
+    def _fs_exec(self, command: str) -> ExecResult:
+        """Internal FS helper (stat/head/mkdir). Walk ceiling, not tool-trace 60k."""
+        return self._exec(command, capture_max_chars=self.walk_output_max_chars)
 
     def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
                     env: Optional[dict] = None) -> ExecResult:
-        # Quoted heredoc → code body taken literally.
+        # Quoted heredoc → code body taken literally. Tool-trace 60k: this is
+        # the model-facing python tool, not an internal FS helper.
         command = f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
         return self.exec(command, cwd=cwd, timeout=timeout, env=env)
 
@@ -163,9 +201,12 @@ class HarborBackend(FsBackend):
         if n == 0:
             return b""
         # GNU coreutils in harbor images (same assumption as ``stat -c`` / ``find -printf``).
-        res = self.exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
+        # Capture at walk ceiling: append samples 100KiB (~137k base64) > tool 60k.
+        res = self._fs_exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"head failed: {path}")
+        if res.stdout_hit_capture_cap:
+            raise OSError(f"head output exceeded capture ceiling: {path}")
         try:
             return base64.b64decode(res.stdout or "", validate=False)
         except Exception as exc:
@@ -176,10 +217,10 @@ class HarborBackend(FsBackend):
 
     # --- stat: native BaseEnvironment handles where they exist, shell otherwise ---
     def exists(self, path: str) -> bool:
-        return self.exec(f"test -e {shlex.quote(path)}").return_code == 0
+        return self._fs_exec(f"test -e {shlex.quote(path)}").return_code == 0
 
     def lexists(self, path: str) -> bool:
-        return self.exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}").return_code == 0
+        return self._fs_exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}").return_code == 0
 
     def is_file(self, path: str) -> bool:
         return self._await(self._env.is_file(path))
@@ -188,10 +229,10 @@ class HarborBackend(FsBackend):
         return self._await(self._env.is_dir(path))
 
     def is_symlink(self, path: str) -> bool:
-        return self.exec(f"test -L {shlex.quote(path)}").return_code == 0
+        return self._fs_exec(f"test -L {shlex.quote(path)}").return_code == 0
 
     def realpath(self, path: str) -> str:
-        res = self.exec(f"readlink -f {shlex.quote(path)}")
+        res = self._fs_exec(f"readlink -f {shlex.quote(path)}")
         return res.stdout.strip() if res.return_code == 0 else path
 
     def readable(self, path: str) -> bool:
@@ -204,19 +245,19 @@ class HarborBackend(FsBackend):
         return path.rstrip("/").rsplit("/", 1)[-1].startswith(".")
 
     def getsize(self, path: str) -> int:
-        res = self.exec(f"stat -c %s {shlex.quote(path)}")
+        res = self._fs_exec(f"stat -c %s {shlex.quote(path)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"stat failed: {path}")
         return int(res.stdout.strip())
 
     def sha256(self, path: str) -> str:
-        res = self.exec(f"sha256sum {shlex.quote(path)}")
+        res = self._fs_exec(f"sha256sum {shlex.quote(path)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"sha256sum failed: {path}")
         return res.stdout.split()[0]
 
     def stat(self, path: str) -> dict:
-        res = self.exec(f"stat -c '%s|%Y|%a|%F' {shlex.quote(path)}")
+        res = self._fs_exec(f"stat -c '%s|%Y|%a|%F' {shlex.quote(path)}")
         if res.return_code != 0:
             raise FileNotFoundError(path)
         size, mtime, mode, kind = res.stdout.strip().split("|", 3)
@@ -234,13 +275,21 @@ class HarborBackend(FsBackend):
             "is_file": st["is_file"], "is_dir": st["is_dir"], "is_symlink": st["is_symlink"],
         }
 
-    def walk(self, path: str) -> list:
-        """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path).
-
-        Uses private traverse channel (50M chars). Hit ceiling → fail-closed.
+    def walk_entries(
+        self,
+        path: str,
+        *,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> list:
+        """Recursive listing with sizes (``find -printf %s``) via the private
+        traverse channel (50M chars). Pruned dirs are cut inside ``find`` so the
+        channel is not spent on junk trees. Hit ceiling → fail-closed.
         """
         res = self._exec(
-            f"find {shlex.quote(path)} -mindepth 1 -printf '%P\\t%y\\n'",
+            _build_find_walk_command(
+                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+            ),
             capture_max_chars=self.walk_output_max_chars,
         )
         if res.return_code != 0:
@@ -249,12 +298,19 @@ class HarborBackend(FsBackend):
             raise WalkOutputTooLargeError(
                 path, ceiling_chars=self.walk_output_max_chars
             )
-        return parse_find_printf_lines(res.stdout or "")
+        return parse_find_printf_entries(res.stdout or "")
+
+    def walk(self, path: str) -> list:
+        """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path)."""
+        return [(e.rel, e.is_dir) for e in self.walk_entries(path)]
 
     def listdir(self, path: str) -> list:
         """Immediate children via private traverse channel (same ceiling as walk)."""
+        # Тот же общий рецепт, что у обхода: без -H find не идёт по ссылке-аргументу,
+        # и каталог-ссылка выглядел пустым (пустой stdout при коде возврата 0).
+        head = " ".join(shlex.quote(a) for a in find_walk_head(path))
         res = self._exec(
-            f"find {shlex.quote(path)} -mindepth 1 -maxdepth 1 -printf '%f\\t%y\\n'",
+            f"{head} -maxdepth 1 -printf '%f\\t%y\\n'",
             capture_max_chars=self.walk_output_max_chars,
         )
         if res.return_code != 0:
@@ -300,7 +356,9 @@ class HarborBackend(FsBackend):
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:
-        return path.rstrip("/") or "/"
+        # find печатает пути префиксом вызова, prune сравнивает строки — «//» и
+        # «/./» в префиксе молча ломали исключения. Пути песочницы всегда POSIX.
+        return posixpath.normpath(path) if path else path
 
     def join(self, base: str, name: str) -> str:
         return base.rstrip("/") + "/" + name
@@ -339,7 +397,7 @@ class HarborBackend(FsBackend):
         try:
             self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
             self._await(self._env.upload_file(local_tmp, remote_tmp))
-            res = self.exec(
+            res = self._fs_exec(
                 f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; "
                 f"rm -f {shlex.quote(remote_tmp)}"
             )
@@ -349,16 +407,16 @@ class HarborBackend(FsBackend):
             local_tmp.unlink(missing_ok=True)
             # Best-effort: upload/exec may leave remote_tmp if the cat+rm line never ran.
             try:
-                self.exec(f"rm -f {shlex.quote(remote_tmp)}")
+                self._fs_exec(f"rm -f {shlex.quote(remote_tmp)}")
             except Exception:
                 pass
 
     def copy(self, src: str, dst: str) -> None:
-        res = self.exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
+        res = self._fs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"cp failed: {src} -> {dst}")
 
     def makedirs(self, path: str) -> None:
-        res = self.exec(f"mkdir -p {shlex.quote(path)}")
+        res = self._fs_exec(f"mkdir -p {shlex.quote(path)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"mkdir failed: {path}")

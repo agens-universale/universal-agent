@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
@@ -42,7 +42,7 @@ class Think(AbstractSimpleTool):
         return remapped
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
             "type": "function",
             "name": "session_think",
@@ -83,7 +83,7 @@ class Think(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = '''Tool name: session_think
 Tool description: Think out loud for the current turn. Supports structured multi-layer thinking: thoughts, critics, doubts, reflection.
 IMPORTANT: think content is NOT saved to thread memory and NOT saved to any durable storage. It only exists in the current dialogue context.

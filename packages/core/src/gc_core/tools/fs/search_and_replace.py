@@ -1,7 +1,7 @@
 import json
 import functools
 import difflib
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.tools.fs.edit_line_endings import (
     collect_literal_matches,
@@ -13,7 +13,13 @@ from gc_core.tools.fs.edit_suggestions import build_edit_miss_suggestions
 from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.schema_optional import coalesce_optional_string
-from gc_core.utils.file_text import check_expected_file_sha256, decode_text_bytes, is_valid_sha256_hex, sha256_hex_of_bytes, try_encode_text_bytes
+from gc_core.utils.file_text import (
+    check_expected_file_sha256,
+    decode_text_bytes,
+    is_valid_sha256_hex,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
+)
 from gc_core.utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
 
 class SearchAndReplace(AbstractSimpleTool):
@@ -50,7 +56,7 @@ class SearchAndReplace(AbstractSimpleTool):
         return diff_text[:max_chars], True
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_search_and_replace",
@@ -141,7 +147,7 @@ class SearchAndReplace(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         description = '''Tool name: fs_search_and_replace  
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}

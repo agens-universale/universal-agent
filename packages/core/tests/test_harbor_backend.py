@@ -106,6 +106,22 @@ def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
     assert result.return_code == 0
 
 
+def test_exec_per_call_capture_max_overrides_tool_cap(loop_in_thread):
+    """Internal post-processed exec (native grep) may raise the RAM cap."""
+    env = FakeEnv()
+    huge = "X" * 1000
+
+    async def big_exec(command, **kw):
+        return FakeExecResult(stdout=huge, return_code=0)
+
+    env.exec = big_exec
+    backend = HarborBackend(env, loop_in_thread)
+    backend.exec_output_capture_max_chars = 100
+    result = backend.exec("echo huge", capture_max_chars=500)
+    assert len(result.stdout) == 500
+    assert result.stdout_hit_capture_cap is True
+
+
 def test_exec_small_output_no_cap_hit(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
@@ -281,6 +297,56 @@ def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     )
 
 
+def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread):
+    """fs_append samples 100KiB; base64 (~137k) exceeds tool-exec 60k."""
+    import base64
+
+    from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    from gc_core.utils.file_text import APPEND_HEAD_SAMPLE_BYTES
+
+    env = FakeEnv()
+    raw = b"A" * APPEND_HEAD_SAMPLE_BYTES
+    encoded = base64.b64encode(raw).decode("ascii")
+    assert len(encoded) > DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+
+    async def head_exec(command, **kw):
+        env.calls.append(command)
+        if "head -c" in command and "base64" in command:
+            return FakeExecResult(stdout=encoded, return_code=0)
+        return FakeExecResult(stdout="", return_code=1)
+
+    env.exec = head_exec
+    backend = HarborBackend(env, loop_in_thread)
+    sample = backend.read_head_bytes("/work/big.txt", APPEND_HEAD_SAMPLE_BYTES)
+    assert sample == raw
+
+    async def huge_tool(command, **kw):
+        return FakeExecResult(stdout="Y" * 100_000, return_code=0)
+
+    env.exec = huge_tool
+    tool = backend.exec("echo y")
+    assert len(tool.stdout) == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    assert tool.stdout_hit_capture_cap is True
+
+
+def test_read_head_bytes_raises_if_capture_ceiling_hit(loop_in_thread):
+    import base64
+
+    env = FakeEnv()
+    raw = b"B" * 200
+    encoded = base64.b64encode(raw).decode("ascii")
+
+    async def head_exec(command, **kw):
+        if "head -c" in command and "base64" in command:
+            return FakeExecResult(stdout=encoded, return_code=0)
+        return FakeExecResult(stdout="", return_code=1)
+
+    env.exec = head_exec
+    backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=50)
+    with pytest.raises(OSError, match="capture ceiling"):
+        backend.read_head_bytes("/work/a.bin", 200)
+
+
 def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
     """D: raw bytes must survive exec (no utf-8/surrogateescape mangling)."""
     import base64
@@ -304,3 +370,48 @@ def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
     assert sample == raw
     assert b"\x00" in sample
     assert sample[0] == 0xCF
+
+
+# --- walk_entries: prune внутри find, размер из -printf %s ----------------------
+
+def test_walk_entries_prunes_in_find_and_parses_sizes(loop_in_thread):
+    env = FakeEnv()
+    env.exec = _make_exec_returning(env, "src\td\t4096\nsrc/a.py\tf\t12\n")
+    backend = HarborBackend(env, loop_in_thread)
+
+    entries = backend.walk_entries("/work", prune_names=("node_modules",), prune_dot_dirs=True)
+
+    assert [(e.rel, e.is_dir, e.size) for e in entries] == [("src", True, None), ("src/a.py", False, 12)]
+    cmd = env.calls[-1]
+    # -H: паритет с os.walk по симлинк-вершине; -printf ДО -prune: сам каталог в листинге остаётся.
+    assert cmd.startswith("find -H /work -mindepth 1 '(' -type d -name node_modules -o -type d -name '.*' ')' -printf")
+    assert " -prune -o -printf" in cmd
+    assert cmd.endswith(r"-printf '%P\t%y\t%s\n'")
+
+
+def test_walk_keeps_tuples_and_never_prunes(loop_in_thread):
+    env = FakeEnv()
+    env.exec = _make_exec_returning(env, "src\td\t4096\nsrc/a.py\tf\t12\n")
+    backend = HarborBackend(env, loop_in_thread)
+
+    assert backend.walk("/work") == [("src", True), ("src/a.py", False)]
+    assert "-prune" not in env.calls[-1]
+
+
+def test_walk_entries_hit_ceiling_raises(loop_in_thread):
+    from gc_core.backends.protocol import WalkOutputTooLargeError
+
+    env = FakeEnv()
+    env.exec = _make_exec_returning(env, "x\tf\t1\n" * 200)
+    backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=500)
+    with pytest.raises(WalkOutputTooLargeError):
+        backend.walk_entries("/work")
+
+
+def test_normpath_collapses_dot_and_double_slash(loop_in_thread):
+    """find печатает пути префиксом вызова; prune сравнивает строки —
+    rstrip-нормализация пропускала «/проект//x/./y»."""
+    backend = HarborBackend(FakeEnv(), loop_in_thread)
+    assert backend.normpath("/w//x/./y/") == "/w/x/y"
+    assert backend.normpath("/w/a/../b") == "/w/b"
+    assert backend.normpath("/") == "/"

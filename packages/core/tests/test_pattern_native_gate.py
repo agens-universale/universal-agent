@@ -62,6 +62,20 @@ def test_tab_and_other_control_chars_forbidden_in_text_mode():
     assert is_grep_native_safe("foo\x7fbar", query_mode="text") is None
 
 
+def test_python_re_backslash_goes_to_python():
+    """``\\.py`` is a literal dot in Python re; grep -F would search for a slash."""
+    assert is_grep_native_safe(r"\.py", query_mode="python-re") is None
+    assert is_grep_native_safe(r"foo\(bar", query_mode="python-re") is None
+    assert is_grep_native_safe(r"a\\b", query_mode="python-re") is None
+
+
+def test_text_mode_backslash_stays_fixed():
+    """query_mode=text: the agent asked for those bytes, including the slash."""
+    plan = is_grep_native_safe(r"\.py", query_mode="text")
+    assert plan is not None and plan.fixed is True
+    assert plan.pattern == r"\.py"
+
+
 def test_ordinary_patterns_keep_their_plans():
     text = is_grep_native_safe("a.b", query_mode="text")
     assert text is not None and text.fixed is True

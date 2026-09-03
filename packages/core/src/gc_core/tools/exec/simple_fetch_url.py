@@ -42,7 +42,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         self._state = state
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {
             "type": "function",
             "name": "exec_fetch_url",
@@ -75,7 +75,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return (
             "Tool name: exec_fetch_url\n"
             "Tool description: Downloads a URL and extracts readable text using a lightweight HTML cleaner. "

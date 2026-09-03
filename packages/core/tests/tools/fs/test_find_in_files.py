@@ -510,7 +510,11 @@ class TestSortOrder:
 
 class TestDirectoryLimits:
     def test_too_many_candidate_files(self, tmp_path):
-        """N > L(mode) → too_many_candidate_files + breakdown; content not read."""
+        """N > L(mode) → too_many_candidate_files + breakdown; content not read.
+
+        Native LIKE/text skips this ceiling (straight to grep). Force the
+        Python path via show_excluded_dirs — that is where the guard lives.
+        """
         cfg = {
             "fs_tools": {
                 "find_in_files": {
@@ -533,6 +537,7 @@ class TestDirectoryLimits:
             path=str(tmp_path),
             pattern="x",
             query_mode="text",
+            show_excluded_dirs=True,
         )
         assert data["ok"] is True
         assert data["count"] == 0
@@ -585,7 +590,10 @@ class TestDirectoryLimits:
         assert data["stop_reason"] != "pattern_too_broad"
 
     def test_refuse_top_level_dirs_cap_5(self, tmp_path):
-        """top_level_dirs capped at 5 with shown/total."""
+        """top_level_dirs capped at 5 with shown/total.
+
+        Python-path refuse only: native text search no longer counts first.
+        """
         cfg = {
             "fs_tools": {
                 "find_in_files": {
@@ -606,6 +614,7 @@ class TestDirectoryLimits:
             path=str(tmp_path),
             pattern="x",
             query_mode="text",
+            show_excluded_dirs=True,
         )
         assert data["stop_reason"] == "too_many_candidate_files"
         assert data["top_level_dirs_total"] == 8
@@ -1480,7 +1489,7 @@ class TestQueryMode:
         assert data["error"]["field"] == "query_mode"
 
     def test_schema_query_mode_optional_default_python_re(self):
-        schema = FindInFiles._PARAM_SCHEMA
+        schema = FindInFiles.tool_description()["parameters"]
         assert schema["required"] == ["path", "pattern"]
         assert "query_mode" not in schema["required"]
         qm = schema["properties"]["query_mode"]

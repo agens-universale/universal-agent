@@ -1,7 +1,7 @@
 import difflib
 import functools
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.utils.file_text import (
@@ -28,7 +28,7 @@ class ApplyFileEdits(AbstractSimpleTool):
     default_max_diff_chars = 12000
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_apply_file_edits",
@@ -105,7 +105,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return (
             "Tool name: fs_apply_file_edits\n"
             "Apply multiple exact literal edits to one file atomically.\n"

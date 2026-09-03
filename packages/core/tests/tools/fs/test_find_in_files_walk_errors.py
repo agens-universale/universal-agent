@@ -26,6 +26,11 @@ class _RaisingWalkBackend(FakeBackend):
         raise self._exc
         yield  # pragma: no cover - генератор
 
+    def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+        # find_in_files обходит дерево через iter_walk_entries (размеры + prune).
+        raise self._exc
+        yield  # pragma: no cover - генератор
+
 
 def _run(exc):
     tool = FindInFiles.__new__(FindInFiles)
@@ -46,8 +51,11 @@ def test_walk_output_too_large_keeps_its_actionable_message():
     data = _run(exc)
 
     assert data["ok"] is False
-    assert data["error"]["type"] == "unexpected_error"
+    assert data["error"]["type"] == "walk_too_large"
+    assert "incomplete" in data["error"]["message"]
+    assert "not proof" in data["error"]["message"]
     assert "narrow the path" in data["error"]["message"]
+    assert "raise the ceiling" not in data["error"]["message"]
 
 
 def test_missing_root_maps_to_a_domain_envelope():

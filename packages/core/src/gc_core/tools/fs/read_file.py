@@ -130,7 +130,7 @@ class ReadFile(AbstractSimpleTool):
         return None
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
             "type": "function",
             "name": "fs_read_file",
@@ -189,7 +189,7 @@ class ReadFile(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = '''Tool name: fs_read_file
 Tool description: Read a text file with line and character pagination. Without offset/limit the line range is the whole file; page with char_offset/char_limit when content_truncated (continue from next_char_offset). Always includes full-file sha256.
 Input schema: {

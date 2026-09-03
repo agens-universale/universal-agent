@@ -9,6 +9,12 @@ from gc_core.config_modules.stored_outputs import get_tool_output_inline_max_cha
 from gc_core.tools.exec.truncate_output import truncate_head_tail
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
 
+# Preview-only: transport capture cap drained the rest; total N is unknown.
+# Must not be written into the store — the stored body is the captured prefix.
+CAPTURE_CAP_MARKER = (
+    "\n... [CUT — capture cap, rest discarded, total unknown]"
+)
+
 
 def clamp_max_output_chars(max_output_chars: int, config_dict: Optional[dict] = None) -> int:
     """D7: preview budget ≤ tool_output_inline_max_chars, чтобы envelope обычно не wrap-ился."""
@@ -49,8 +55,11 @@ def process_exec_stream(
                     truncated_in_message=tr.truncated,
                 )
             )
+    preview = tr.text
+    if hit_capture_cap:
+        preview = preview + CAPTURE_CAP_MARKER
     return {
-        "text": tr.text,
+        "text": preview,
         "truncated": tr.truncated,
         "original_chars": tr.original_chars,
         "kept_head_chars": tr.kept_head_chars,

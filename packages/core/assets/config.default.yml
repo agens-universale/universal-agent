@@ -174,6 +174,7 @@ fs_tools:
     max_candidates_or_simple: 200000  # pure a|b|…
     max_candidates_affix_or: 300000   # one (group) + pure prefix/suffix
     max_candidates_complex: 50000     # no cheap prefilter
+    max_unfiltered_host_reads: 1000   # sandbox only: host reads without in-sandbox prefilter
     max_open_files_affix_or: 50000    # full-re opens budget (affix_or only)
     content_workers_threshold: 20000  # N >= → 2 workers; else 1
     max_exclude_dirs: 32
@@ -184,6 +185,13 @@ fs_tools:
     # Extra basenames only; hard floor always includes venv, __pycache__,
     # node_modules, .git (clearing this list does not re-open them).
     exclude_dir_names: []
+
+  # fs_find_files_by_name — search files by name/path/glob under a directory.
+  # Matches names and paths only; does NOT search file contents.
+  find_files_by_name:
+    default_max_matches: 100          # max_matches if caller omits it
+    hard_max_matches: 300             # hard ceiling: max_matches_eff = min(requested, 300)
+    max_visited: 500000               # walk safety cap (not a caller argument)
 
 # Чек-лист задачи (session_todo): каждые reminder_steps шагов без вызова тула —
 # напоминание. Есть незакрытые пункты — директивное «обнови список»; активного

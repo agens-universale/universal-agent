@@ -2,7 +2,13 @@
 import hashlib
 from types import SimpleNamespace
 
-from gc_core.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+from gc_core.backends.walk_util import (
+    WalkEntry,
+    iter_files_from_flat,
+    iter_walk_entries_from_flat,
+    iter_walk_from_flat,
+    prune_flat_entries,
+)
 
 
 class FakeBackend:
@@ -83,6 +89,27 @@ class FakeBackend:
                 dirs.add("/".join(parts[:i]))
             files.append(rel)
         return [(d, True) for d in sorted(dirs)] + [(f, False) for f in sorted(files)]
+
+    def walk_entries(self, p, *, prune_names=(), prune_dot_dirs=False):
+        """Sized rows like `find -printf %s`; prune like `( -type d -name … ) -prune`."""
+        base = p.rstrip("/") + "/"
+        entries = [
+            WalkEntry(
+                rel,
+                is_dir,
+                None if is_dir else len(self.files[base + rel].encode("utf-8")),
+            )
+            for rel, is_dir in self.walk(p)
+        ]
+        return prune_flat_entries(entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
+
+    def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+        yield from iter_walk_entries_from_flat(
+            self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        )
 
     def iter_walk(self, path, *, should_descend=None):
         yield from iter_walk_from_flat(

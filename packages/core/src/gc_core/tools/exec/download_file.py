@@ -47,7 +47,7 @@ class DownloadFile(AbstractSimpleTool):
         self._state = state
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         extensions = ", ".join(sorted(ext.lstrip(".") for ext in cls.ALLOWED_EXTENSIONS))
         return {
             "type": "function",
@@ -77,7 +77,7 @@ class DownloadFile(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return (
             "Tool name: download_file\n"
             "Tool description: Downloads a document or plain-text file from a URL into the configured download directory.\n\n"

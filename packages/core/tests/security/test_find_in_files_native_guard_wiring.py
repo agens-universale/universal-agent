@@ -50,7 +50,7 @@ def test_native_branch_hands_the_predicate_to_run_native_grep(tmp_path, monkeypa
     assert allow_path(str(tmp_path / "app.py")) is True
 
 
-def test_capture_cap_below_limit_falls_back_to_python(tmp_path, monkeypatch):
+def test_capture_cap_below_limit_stays_native_with_output_capped(tmp_path, monkeypatch):
     """Потолок вывода — не лимит совпадений: 'increase limit' не помогает."""
     (tmp_path / "app.py").write_text("KEY = 1\n", encoding="utf-8")
 
@@ -76,4 +76,6 @@ def test_capture_cap_below_limit_falls_back_to_python(tmp_path, monkeypatch):
 
     data = json.loads(tool(path=str(tmp_path), pattern="KEY", query_mode="text", limit=50))
 
-    assert data["search_backend"] == "python"
+    assert data["search_backend"] == "grep"
+    assert data["stop_reason"] == "output_capped"
+    assert data["scan_complete"] is False

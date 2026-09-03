@@ -2,11 +2,18 @@ import json
 import functools
 import os
 from typing import List, Dict, Any, Optional
+from gc_core.backends.protocol import WalkOutputTooLargeError
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.glob_to_regex import compile_glob
 from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.security.read_guard import enforce_read_guard, parse_read_guard_config, check_read_path_allowed, ReadGuardViolation, _resolve_skills_root
+from gc_core.security.read_guard import (
+    enforce_read_guard,
+    parse_read_guard_config,
+    check_read_path_allowed,
+    ReadGuardViolation,
+    _resolve_skills_root,
+)
 from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
 
@@ -15,7 +22,7 @@ class ListFiles(AbstractSimpleTool):
     """List files and directories under a path with optional depth and glob filter."""
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {
             "type": "function",
             "name": "fs_list_files",
@@ -70,7 +77,7 @@ class ListFiles(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = '''Tool name: fs_list_files
 List files and directories under an absolute directory path.
 Default max_depth=0 = immediate children only; raise max_depth to list nested entries.
@@ -123,7 +130,6 @@ Examples:
         if error is not None:
             payload["error"] = error
         payload["entries"] = entries if entries is not None else []
-        # listing_backend set by caller on success paths via optional kw — see __call__
 
         return json.dumps(payload, ensure_ascii=False)
 
@@ -138,9 +144,8 @@ Examples:
         entries: Optional[List[Dict[str, Any]]] = None,
         truncated: bool = False,
         error: Optional[Dict[str, Any]] = None,
-        listing_backend: Optional[str] = None,
     ) -> str:
-        raw = self._result(
+        return self._result(
             path=path,
             glob=glob,
             max_depth=max_depth,
@@ -150,11 +155,6 @@ Examples:
             truncated=truncated,
             error=error,
         )
-        if listing_backend is None:
-            return raw
-        payload = json.loads(raw)
-        payload["listing_backend"] = listing_backend
-        return json.dumps(payload, ensure_ascii=False)
 
     def _resolve_read_guard(self) -> tuple:
         """
@@ -277,6 +277,11 @@ Examples:
                     max_entries=scan_max_entries,
                     rg_cfg=_rg_cfg, rg_root=_rg_root, rg_extra=_rg_extra,
                 )
+        except WalkOutputTooLargeError as e:
+            return _result(
+                ok=False,
+                error={"type": "walk_too_large", "message": str(e)},
+            )
         except PermissionError as e:
             return _result(
                 ok=False,
@@ -299,7 +304,6 @@ Examples:
             ok=True,
             entries=result,
             truncated=hit_limit,
-            listing_backend="python",
         )
 
     def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
@@ -341,6 +345,8 @@ Examples:
         """List only immediate children of the directory."""
         try:
             entries = self._backend.listdir(root_path)
+        except WalkOutputTooLargeError:
+            raise  # domain envelope (walk_too_large) is built by the caller
         except PermissionError:
             raise PermissionError(f"Permission denied: cannot list contents of '{root_path}'")
         except Exception as e:

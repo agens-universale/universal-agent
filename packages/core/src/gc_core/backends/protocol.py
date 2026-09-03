@@ -6,7 +6,9 @@ import shlex
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional, Sequence
+
+from gc_core.backends.walk_util import WalkEntry, iter_walk_entries_from_flat, prune_flat_entries
 
 # Потолок captured-буфера на поток (decoded UTF-8 chars). Spec D2 / D8.
 DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS = 60_000
@@ -14,8 +16,9 @@ DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS = 60_000
 # Harbor walk/listdir private channel (B1). Not tool exec; fail-closed on hit.
 WALK_OUTPUT_MAX_CHARS = 50_000_000
 
-# Wire format for find listing (smoke ≡ production ≡ harbor walk).
-FIND_PRINTF_FORMAT = "%P\\t%y\\n"
+# Wire format of the harbor walk/listdir listing (find -printf): relpath, type, size.
+# Shell form for ``-printf '…'`` — find itself interprets the escapes.
+FIND_PRINTF_FORMAT = "%P\\t%y\\t%s\\n"
 
 
 class WalkOutputTooLargeError(OSError):
@@ -31,8 +34,10 @@ class WalkOutputTooLargeError(OSError):
         self.path = path
         self.ceiling_chars = ceiling_chars
         msg = message or (
-            f"directory listing under {path!r} exceeds walk output ceiling "
-            f"({ceiling_chars} chars); narrow the path or raise the ceiling"
+            f"directory listing under {path!r} is incomplete: it exceeded the "
+            f"walk output ceiling ({ceiling_chars} chars). This is not proof "
+            f"that a path or tree is absent — narrow the path, reduce depth, "
+            f"do not search from the repository root"
         )
         super().__init__(msg)
 
@@ -108,7 +113,7 @@ class FsBackend(ABC):
         """Usable ``find -print0 | xargs -0 -r grep`` wire (content search only).
 
         Gates exactly one thing — the native prune path in
-        ``can_native_grep_content``. Listing / by-name / walk go through
+        ``native_grep_refusal``. Listing / by-name / walk go through
         ``backend.walk`` / ``iter_walk`` and never consult this flag.
         """
         ov = self._cap_override("has_find")
@@ -263,6 +268,40 @@ class FsBackend(ABC):
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[str]: ...
 
+    def walk_entries(
+        self,
+        path: str,
+        *,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> list:
+        """Flat recursive listing as ``WalkEntry`` rows, sizes when the backend
+        learns them during the traversal.
+
+        Default: from ``walk()`` — no sizes (tools fall back to ``getsize``) and
+        host-side prune, so every backend yields the same tree for the same rules.
+        """
+        entries = [WalkEntry(rel, is_dir) for rel, is_dir in self.walk(path)]
+        return prune_flat_entries(
+            entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+        )
+
+    def iter_walk_entries(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> Iterable[WalkEntry]:
+        """``iter_walk`` order over ``walk_entries`` (sizes preserved)."""
+        yield from iter_walk_entries_from_flat(
+            self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        )
+
     # --- path semantics ---
     @abstractmethod
     def normpath(self, path: str) -> str: ...
@@ -284,23 +323,37 @@ class FsBackend(ABC):
     @abstractmethod
     def exec(self, command: str, *, cwd: Optional[str] = None,
              timeout: Optional[int] = None,
-             env: Optional[dict] = None) -> ExecResult: ...
+             env: Optional[dict] = None,
+             capture_max_chars: Optional[int] = None) -> ExecResult: ...
 
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
                   timeout: Optional[int] = None,
-                  env: Optional[dict] = None) -> ExecResult:
+                  env: Optional[dict] = None,
+                  capture_max_chars: Optional[int] = None) -> ExecResult:
         """Run a program from an argv list, optionally feeding ``stdin``.
 
         Default builds a POSIX shell string (valid for sandbox backends whose
         exec runs through a POSIX shell). Backends whose exec shell is not
         POSIX (e.g. local Windows cmd.exe) must override with a shell-less
         implementation.
+
+        ``capture_max_chars=None`` → ``exec_output_capture_max_chars`` (tool
+        trace, ~60k). Internal post-processed calls (native grep, walk) pass
+        the walk ceiling (~50M).
         """
         command = " ".join(shlex.quote(str(a)) for a in argv)
         if stdin is not None:
             command = f"printf '%s' {shlex.quote(stdin)} | {command}"
-        return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+        if capture_max_chars is None:
+            return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+        return self.exec(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
+            capture_max_chars=capture_max_chars,
+        )
 
     @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,
