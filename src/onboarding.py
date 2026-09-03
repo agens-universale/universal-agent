@@ -94,6 +94,17 @@ TOKEN_SENTINEL = "Bearer <ВПИШИТЕ_ТОКЕН>"
 MODEL_SENTINEL = "<ВПИШИТЕ_МОДЕЛЬ>"
 
 
+def configured_endpoint(raw: Any) -> str:
+    """Адрес, ЗАДАННЫЙ человеком, либо пусто: заглушка шаблона — «ещё ничего не
+    задано», а не значение.
+
+    Одно правило на всех, кто адрес показывает, И на всех, кто по нему стучится.
+    Витрины его знали, сетевой путь — нет: запрос за списком моделей уходил на
+    несуществующий `your-backend:PORT`, и мастер печатал «не удалось получить
+    список» человеку, у которого в поле виден его рабочий адрес."""
+    return "" if not raw or raw == URL_SENTINEL else str(raw)
+
+
 def _entry_carries_own_connection(entry: Dict[str, Any]) -> bool:
     """Запись ЗАГРУЖЕННОГО реестра несёт своё подключение целиком.
 
@@ -491,6 +502,85 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
         f"  Участвуют:\n{participants_block}\n\n"
         f"  Что сделать:\n{fix_block}\n"
     )
+
+
+# --- Загрузка конфига «чинилками» (--init-config) --------------------------
+
+REPAIR_STAGE_FULL = "full"
+REPAIR_STAGE_WITHOUT_PROFILE = "without_profile"
+REPAIR_STAGE_TEMPLATE = "template"
+
+
+class RepairLoad(NamedTuple):
+    """Итог лестницы `load_config_for_repair`: конфиг, метаданные профиля,
+    ступень приземления и готовое сообщение человеку (None — деградации не было)."""
+    config: Dict[str, Any]
+    meta: Any                      # ProfileMeta загрузчика
+    stage: str
+    message: Optional[str]
+
+
+def _repair_message(stage: str, exc: Exception, profile: str) -> str:
+    """Текст деградации — ОДИН на все поверхности (stderr gc-cli, stderr gc-ua без
+    TTY, runtime-notice мастера). Говорит не только «сломано», но и что именно
+    отброшено: человек обязан понимать, почему поля мастера выглядят иначе, чем
+    его файл."""
+    if stage == REPAIR_STAGE_WITHOUT_PROFILE:
+        named = f' "{profile}"' if profile else ""
+        return (
+            f"config.yml не читается с профилем{named} ({exc}) — профиль снят на этот "
+            f"запуск, остальные ваши настройки (адрес, токен, реестр моделей) действуют."
+        )
+    return (
+        f"config.yml не читается ({exc}) — продолжаю на пакетном шаблоне: ваших "
+        f"настроек в мастере не видно, он перепишет ваш файл."
+    )
+
+
+def load_config_for_repair() -> RepairLoad:
+    """Загрузка конфига для «чинилки» (`gc-cli --init-config`, `gc-ua --init-config`)
+    — лестница сверху вниз: полная загрузка → БЕЗ ПРОФИЛЯ → пакетный шаблон.
+
+    Дом — здесь, а не в `config.py`, потому что деградация загрузки — свойство
+    ПЕРВОГО ЗАПУСКА и починки, а не загрузчика: обычный старт обязан падать громко
+    (`explain_broken_config` + код 1), и лестница рядом с ним в config.py читалась
+    бы как «конфиг всегда как-нибудь да загрузится». Здесь же живёт родня —
+    политика «настроен ли конфиг» и весь текст, который эти же две поверхности
+    показывают человеку.
+
+    Ступень 2 — не украшение: поломка почти всегда сидит в профиле (слот на
+    несуществующий алиас), а не в базе, и падение сразу на шаблон стоило человеку
+    рабочих адреса и токена — мастер уходил в сеть на `your-backend:PORT` и не
+    получал список моделей при живом токене.
+
+    Ступень 3 отдаёт ШАБЛОН, а не пустой `{}`: рантайм TUI требует полей вроде
+    `threads_data_path`, и на пустом словаре `resolve_threads_dir` падает сразу
+    следом. Шаблон валиден по построению; мастер всё равно пишет в
+    ПОЛЬЗОВАТЕЛЬСКИЙ файл, а не в него.
+
+    Про поломку рассказывает ПЕРВАЯ ошибка (та, что человек видит на обычном
+    старте), а не отказ промежуточной ступени: вторая — диагноз уже урезанного
+    конфига."""
+    from config import _default_config_path, load_config_ex, resolve_config_path
+
+    try:
+        config, meta = load_config_ex(None)
+        return RepairLoad(config, meta, REPAIR_STAGE_FULL, None)
+    except ValueError as exc:
+        broken = exc
+
+    try:
+        config, meta = load_config_ex(None, profile_override="")
+    except ValueError:
+        config, meta = load_config_ex(_default_config_path(), profile_override="")
+        return RepairLoad(config, meta, REPAIR_STAGE_TEMPLATE,
+                          _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""))
+
+    from config_modules.layers import resolve_profile_pointer
+
+    profile = resolve_profile_pointer(resolve_config_path(None))
+    return RepairLoad(config, meta, REPAIR_STAGE_WITHOUT_PROFILE,
+                      _repair_message(REPAIR_STAGE_WITHOUT_PROFILE, broken, profile))
 
 
 # --- Запись собранного мастером (волна B, спека §11) ----------------------

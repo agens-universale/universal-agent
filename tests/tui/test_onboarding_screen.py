@@ -2165,6 +2165,73 @@ async def test_alt_down_on_the_model_step_goes_past_the_session_cache(tmp_path):
                          "перечитывание должно идти мимо сессионного кэша")
 
 
+# --- заглушка адреса из шаблона — не адрес: сетевой путь по ней не ходит -----
+
+
+def test_endpoint_auth_does_not_hand_out_the_placeholder_address():
+    """Нетронутый шаблонный конфиг: адреса ЕЩЁ НЕТ, и сетевой путь обязан это знать.
+    Заглушка, отданная как адрес, уводила запрос за списком моделей на несуществующий
+    `your-backend:PORT` — мастер печатал «не удалось получить список» при видимом в
+    поле рабочем адресе человека."""
+    scr = _screen()                       # config = шаблон: оба сентинела на месте
+    endpoint, auth = scr._endpoint_auth()
+    assert endpoint == ""
+    assert auth is None                   # заглушку токена путь фильтровал и раньше
+
+
+@pytest.mark.asyncio
+async def test_model_step_on_placeholder_address_behaves_as_on_empty_one(tmp_path):
+    """Шаг «Модель» на заглушке адреса = шаг «Модель» на чистой установке: в сеть не
+    идём, списка нет, остаётся ручной ввод."""
+    pytest.importorskip("textual")
+    from model_picker import ModelInfo
+    from tests.tui.conftest import wait_until
+    from tui.app import TuiApp
+    from tui.editors.model import ModelEditor
+    from tui.screens.onboarding import STEP_MODEL
+
+    dialed = []
+
+    def fetch(endpoint, auth, **kw):
+        dialed.append(endpoint)
+        return [ModelInfo("glm-5.2-fp8", tool_capable=True)]
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(fetch=fetch)
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_MODEL)
+        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
+                         and scr.query(ModelEditor).first().models_loaded, "шаг отработал")
+        assert dialed == []
+        assert scr.query(ModelEditor).first().has_models is False
+
+
+@pytest.mark.asyncio
+async def test_probe_verdict_is_pulled_into_frame_on_every_update(tmp_path, monkeypatch):
+    """Вердикт пробы обязан попадать в кадр — и на ПОВТОРНОЕ нажатие тоже.
+
+    Строка стоит ниже поля «Прокси», тело шага длиннее вьюпорта рамки: без подводки
+    человек жмёт Ctrl+Space и видит «вообще ничего не происходит» (живой смок).
+    Подводка живёт у единственного писателя строки — заказанная при монтаже тела, она
+    досталась бы только первому вердикту."""
+    pytest.importorskip("textual")
+    from rich.text import Text
+    import tui.screens.onboarding as onb
+    from tui.app import TuiApp
+
+    revealed = []
+    monkeypatch.setattr(onb, "reveal", lambda w: revealed.append(w), raising=False)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr); await pilot.pause()
+        line = scr.query_one(".onb-conn-probe")
+        scr._set_conn_probe_line(Text("проверяю…"))
+        scr._set_conn_probe_line(Text("✓ сервер отвечает"))
+        assert revealed == [line, line]
+
+
 # --- шаг уровней (в) — волна B, Task 8: две опциональные под-формы -----------
 # Шаг живёт в СОСТАВЕ шагов, а не поверх него: сравнения кода идут по именам
 # (`_step_id`), а не по номерам.

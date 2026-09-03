@@ -124,19 +124,13 @@ def _run_init() -> int:
     """`gc-cli --init-config`: настроить конфиг (интерактивно на TTY) и выйти."""
     path = user_config_path()
     just_created = _bootstrap_user_config()
-    try:
-        config_dict = load_config(None)
-    except ValueError as exc:
-        # «Чинилка» обязана работать именно тогда, когда конфиг сломан: не
-        # удалось прочитать — продолжаем с пустым конфигом, мастер (или гайд
-        # ниже) перепишет файл с нуля, вместо того же трейсбека, что и обычный
-        # запуск.
-        print(
-            f"[gc] config.yml не читается ({exc}) — продолжаю с пустым конфигом, "
-            f"мастер настройки перепишет файл.",
-            file=sys.stderr,
-        )
-        config_dict = {}
+    # «Чинилка» обязана работать именно тогда, когда конфиг сломан: лестница
+    # ступеней и текст деградации — общие с gc-ua (onboarding, один дом).
+    loaded = onboarding.load_config_for_repair()
+    config_dict = loaded.config
+    if loaded.message:
+        # Мастер gc-cli плоский, экран не занимает — stderr человек видит.
+        print(f"[gc] {loaded.message}", file=sys.stderr)
     if _interactive():
         import onboarding_wizard
         configured = onboarding_wizard.run(config_dict, path, review_all=True,

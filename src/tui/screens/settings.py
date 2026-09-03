@@ -1232,10 +1232,10 @@ class SettingsScreen(Screen):
         """(адрес, токен, ssl, модель, прокси) действующего конфига. По умолчанию —
         runtime экрана; `config` передаёт тот, кто спрашивает про ДРУГОЙ стек (под-вид
         открытого профиля — про свой, см. `_open_profile_config`)."""
-        from onboarding import MODEL_SENTINEL, TOKEN_SENTINEL, URL_SENTINEL
+        from onboarding import MODEL_SENTINEL, TOKEN_SENTINEL, configured_endpoint
         c = self._config if config is None else config
         url = c.get("completions_url") or ""
-        endpoint = url if url and url != URL_SENTINEL else ""
+        endpoint = configured_endpoint(url)
         auth = (c.get("chat_completion_headers") or {}).get("Authorization")
         if auth in (TOKEN_SENTINEL, ""):
             auth = None
@@ -4412,7 +4412,7 @@ class SettingsScreen(Screen):
         каждый раз: базовый файл правится и снаружи, пока открыт профиль."""
         import config_raw
         from config_modules.env_interpolation import resolve_env_placeholders
-        from onboarding import URL_SENTINEL
+        from onboarding import configured_endpoint
         if not self._config_path:
             return {}
         document = config_raw.read_document(self._config_path)
@@ -4426,7 +4426,7 @@ class SettingsScreen(Screen):
             "models": sections.get("models") or {},
             "slots": sections.get("slots") or {},
             "assign": sections.get("assign") or {},
-            "base_url": "" if url == URL_SENTINEL else url,
+            "base_url": configured_endpoint(url),
         }
 
     def _open_profile_config(self, name: str) -> dict | None:

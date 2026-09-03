@@ -99,7 +99,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         load_config_ex,
         apply_cli_overrides,
         resolve_config_path,
-        _default_config_path,
         _project_local_config_path,
         user_config_path,
         _bootstrap_user_config,
@@ -111,27 +110,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if getattr(args, "init_config", False):
         just_created = _bootstrap_user_config()
-        try:
-            config_dict, profile_meta = load_config_ex(None)
-        except ValueError as exc:
-            # «Чинилка» обязана работать именно тогда, когда конфиг сломан: не
-            # удалось прочитать — продолжаем на пакетном шаблоне, а не с пустым
-            # `{}` (рантайм TUI требует полей вроде threads_data_path, которых
-            # пустой словарь не даёт вовсе — resolve_threads_dir падал бы сразу
-            # следом). Шаблон валиден по построению; мастер ниже всё равно пишет
-            # в ПОЛЬЗОВАТЕЛЬСКИЙ файл (onb_write_path), не в сам шаблон.
-            # profile_override="" — восстановлению незачем спотыкаться ещё и о
-            # собственный сломанный профиль.
-            print(
-                f"[gc] config.yml не читается ({exc}) — продолжаю на пакетном шаблоне, "
-                f"мастер настройки перепишет ваш файл.",
-                file=sys.stderr,
-            )
-            config_dict, profile_meta = load_config_ex(
-                _default_config_path(), profile_override="")
+        # «Чинилка» обязана работать именно тогда, когда конфиг сломан: лестница
+        # ступеней и текст деградации — общие с gc-cli (onboarding, один дом).
+        # Целится она в ПОЛЬЗОВАТЕЛЬСКИЙ файл (`onb_write_path`) — тот же, в
+        # который ниже пишет мастер, поэтому --config/--profile здесь не в счёт:
+        # читать один файл, а писать в другой значило бы показать человеку поля
+        # не того конфига, который он чинит.
+        loaded = onboarding.load_config_for_repair()
+        config_dict, profile_meta = loaded.config, loaded.meta
         if not _interactive():
+            # TUI не стартует — stderr доезжает до человека и остаётся на экране.
+            if loaded.message:
+                print(f"[gc] {loaded.message}", file=sys.stderr)
             print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
             return 0
+        if loaded.message:
+            # А здесь stderr не живёт: через мгновение Textual занимает экран
+            # альтернативным буфером и стирает строку — человек не видит НИЧЕГО
+            # и не понимает, почему поля мастера ведут себя странно (живой смок
+            # это подтвердил). Тем же каналом, что и остальные рантайм-события:
+            # карточка + /notices.
+            from runtime_notices import push_runtime_notice
+            from startup_notices import Notice
+            push_runtime_notice(Notice(
+                "warning", "config_load_degraded", loaded.message, ("config.yml",)))
         onboarding_mode = "review"
     else:
         just_created = _bootstrap_user_config() if args.config is None else False

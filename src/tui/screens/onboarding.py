@@ -18,7 +18,7 @@ import onboarding
 import onboarding_fields as _of
 from tui import branding
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
-from tui.form_frame import cap_frame_height
+from tui.form_frame import cap_frame_height, reveal
 
 # Именованные шаги мастера. Состав статичен, но шаг адресуется ИМЕНЕМ, а не
 # номером: числовые сравнения врали бы при любой правке состава.
@@ -306,9 +306,8 @@ class OnboardingScreen(Screen):
         shown = self._shown_values()
         # Шаблонные заглушки конфига (…_SENTINEL) — это «ещё не задано», а не значение:
         # показываем прочерком, как редактор адреса трактует URL_SENTINEL пустым полем.
-        url = self._values.get("completions_url") or shown.get("completions_url") or ""
-        if url == onboarding.URL_SENTINEL:
-            url = ""
+        url = onboarding.configured_endpoint(
+            self._values.get("completions_url") or shown.get("completions_url"))
         model = self._values.get("model") or shown.get("model") or ""
         if model == onboarding.MODEL_SENTINEL:
             model = ""
@@ -504,8 +503,7 @@ class OnboardingScreen(Screen):
             raw = self._raw_conn()
             cur = self._values.get("completions_url")
             if not cur:
-                raw_url = raw.get("completions_url")
-                cur = raw_url if raw_url and raw_url != onboarding.URL_SENTINEL else ""
+                cur = onboarding.configured_endpoint(raw.get("completions_url"))
             auth = self._values.get("Authorization")
             if auth is None:
                 auth = raw.get("Authorization")
@@ -601,14 +599,13 @@ class OnboardingScreen(Screen):
         elif step == STEP_CONFIRM:
             from onboarding import mask_authorization
             shown = self._shown_values()
-            addr = self._values.get("completions_url") or shown.get("completions_url") or "—"
+            addr = onboarding.configured_endpoint(
+                self._values.get("completions_url") or shown.get("completions_url")) or "—"
             model = self._values.get("model") or shown.get("model") or "—"
             # Плейсхолдеры шаблона — не значения (тот же канон, что в строке-сводке
             # выше и в витринах базы): нетронутое поле в _values не попадает, а
             # `agent.model` мастер с волны B не пишет вовсе — у вернувшегося в мастер
             # человека оба плейсхолдера так и лежат в конфиге.
-            if addr == onboarding.URL_SENTINEL:
-                addr = "—"
             if model == onboarding.MODEL_SENTINEL:
                 model = "—"
             # Нетронутое поле токена в _values не попадает (см. _submit_connection) —
@@ -752,9 +749,13 @@ class OnboardingScreen(Screen):
         """Адрес и авторизация, известные мастеру ПРЯМО СЕЙЧАС: набранное на шаге
         «Подключение» первично, резолвнутый конфиг — фолбэк. Один источник на все
         шаги, которые ходят к серверу за списком моделей (шаг «Модель» и под-формы
-        уровней): у них один и тот же эндпоинт, переспрашивать его нечего."""
-        endpoint = (self._values.get("completions_url")
-                    or (self._config or {}).get("completions_url") or "")
+        уровней): у них один и тот же эндпоинт, переспрашивать его нечего.
+
+        Заглушка адреса — не адрес (`configured_endpoint`, то же правило, что у
+        витрин шага): по ней не стучимся, а ведём себя как на чистой установке —
+        адреса нет, списка нет, остаётся ручной ввод."""
+        endpoint = onboarding.configured_endpoint(
+            self._values.get("completions_url") or (self._config or {}).get("completions_url"))
         auth = self._values.get("Authorization")
         if auth is None:
             auth = ((self._config or {}).get("chat_completion_headers") or {}).get("Authorization")
@@ -1494,8 +1495,22 @@ class OnboardingScreen(Screen):
         self._set_conn_probe_line(connection_line_text(result))
 
     def _set_conn_probe_line(self, text) -> None:
+        """Единственный писатель строки вердикта — и потому единственное место, где
+        заказывается подводка.
+
+        Строка стоит ниже поля «Прокси», а тело шага длиннее вьюпорта рамки: без
+        подводки Ctrl+Space отрабатывал за нижней кромкой, и человек читал это как
+        «вообще ничего не происходит» (живой смок). Подводка обязана быть ЗДЕСЬ, а не
+        при монтаже тела: тело не пересобирается, и вердикт приезжает обновлением на
+        месте — второе нажатие осталось бы немым.
+
+        `reveal`, а не ярус `KEEP_IN_VIEW`: строка — СООБЩЕНИЕ-итог, ответа не ждёт, и
+        живёт до пересборки тела шага. Получив приоритет вопроса, она навсегда
+        перебивала бы курсор формы (канон `form_frame`, тот же довод, что у
+        `settings._singleton`)."""
         for w in self.query(".onb-conn-probe"):
             w.update(text)
+            reveal(w)
 
     def _commit_config(self) -> bool:
         # Голосовые ключи идут той же ЕДИНОЙ точкой записи, что и остальные поля

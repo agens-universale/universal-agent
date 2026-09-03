@@ -375,6 +375,16 @@ def test_sentinels_match_default_yaml():
     assert raw["agent"]["model"] == onboarding.MODEL_SENTINEL
 
 
+def test_configured_endpoint_drops_the_template_placeholder():
+    """«Адрес, заданный человеком, либо пусто» — одно правило на витрины И на сеть.
+    Заглушка, принятая за адрес, уводит запрос на несуществующий `your-backend:PORT`."""
+    assert onboarding.configured_endpoint(onboarding.URL_SENTINEL) == ""
+    assert onboarding.configured_endpoint(None) == ""
+    assert onboarding.configured_endpoint("") == ""
+    assert (onboarding.configured_endpoint("https://real/v1/chat/completions")
+            == "https://real/v1/chat/completions")
+
+
 def test_setup_guide_lists_pending_fields_and_path(tmp_path, monkeypatch):
     """Путь в подсказке — абсолютный: относительный (или платформенно-чужой,
     как POSIX-стиль на Windows) бессмыслен вне момента запуска."""

@@ -92,7 +92,12 @@ def test_run_init_reaches_wizard_on_broken_config_interactive(monkeypatch, tmp_p
     )
 
     assert cli._run_init() == 0
-    assert seen["cfg"] == {}  # пустой шаблон — мастер перепишет файл с нуля
+    # Пакетный шаблон, а не пустой словарь: `{}` рантайм не переживает
+    # (resolve_threads_dir падает на нём сразу следом), и обе «чинилки» обязаны
+    # приземляться на одно и то же — сентинел адреса тот же, каким
+    # onboarding_wizard/setup_guide узнают «не настроено».
+    import onboarding
+    assert seen["cfg"].get("completions_url") == onboarding.URL_SENTINEL
 
 
 def test_run_init_passive_guide_on_broken_config_non_interactive(monkeypatch, tmp_path, capsys):
@@ -136,3 +141,68 @@ def test_run_init_returns_1_when_wizard_answers_cannot_fix_the_file(
     monkeypatch.setattr(onboarding_wizard, "default_io", lambda: fake_io)
 
     assert cli._run_init() == 1
+
+
+# --- Сломан ТОЛЬКО профиль: данные человека не выбрасываются ----------------
+
+_STAND_BASE = (
+    'profile: "work"\n'
+    "backend:\n"
+    "  api_mode: chat_completions\n"
+    '  completions_url: "https://openrouter.ai/api/v1/chat/completions"\n'
+    "  chat_completion_headers:\n"
+    '    Authorization: "Bearer sk-user-token"\n'
+    "models:\n"
+    "  fast:\n"
+    '    model: "qwen/qwen3-8b"\n'
+)
+
+
+def _broken_profile_stand(tmp_path, monkeypatch):
+    """Раскладка живого смока: рабочие адрес/токен/реестр в базе, нерезолвимый
+    слот в профиле — весь стек не грузится, но виноват только профиль."""
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(_STAND_BASE, encoding="utf-8")
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+
+def test_run_init_keeps_user_connection_when_only_profile_is_broken(monkeypatch, tmp_path):
+    """Мастер открывается на НАСТОЯЩИХ адресе и токене человека, а не на
+    заглушках шаблона: иначе он ушёл бы в сеть на `your-backend:PORT` и не
+    получил список моделей при полностью рабочем токене."""
+    _broken_profile_stand(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+
+    seen = {}
+    import onboarding_wizard
+    monkeypatch.setattr(
+        onboarding_wizard, "run",
+        lambda cfg, path, *, review_all, io, mcp=None: seen.update(cfg=cfg) or True,
+    )
+
+    assert cli._run_init() == 0
+    cfg = seen["cfg"]
+    assert cfg.get("completions_url") == "https://openrouter.ai/api/v1/chat/completions"
+    assert (cfg.get("chat_completion_headers") or {}).get("Authorization") == "Bearer sk-user-token"
+    assert list(cfg.get("models") or {}) == ["fast"]
+
+
+def test_run_init_tells_which_layer_was_dropped(monkeypatch, tmp_path, capsys):
+    """Текст деградации приезжает из общего места (`_repair_message`) и называет
+    отброшенный профиль — у gc-cli мастер плоский, экран не занимает, поэтому
+    stderr здесь достаточен."""
+    _broken_profile_stand(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+
+    import onboarding_wizard
+    monkeypatch.setattr(
+        onboarding_wizard, "run",
+        lambda cfg, path, *, review_all, io, mcp=None: True,
+    )
+
+    assert cli._run_init() == 0
+    err = capsys.readouterr().err
+    assert 'профилем "work"' in err
+    assert "пакетном шаблоне" not in err     # шаблон не подставлялся — врать нельзя

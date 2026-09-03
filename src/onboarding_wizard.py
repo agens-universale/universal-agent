@@ -244,10 +244,15 @@ def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
 def _fetch_models(config: dict, values: dict, fetch=None):
     """Список моделей у провайдера — по адресу и токену, УЖЕ введённым в этом
     прогоне (иначе список пришёл бы со старого сервера). Сбой сети — None:
-    шаг обязан продолжаться свободным вводом."""
+    шаг обязан продолжаться свободным вводом.
+
+    Заглушка адреса — не адрес (`configured_endpoint`): по ней запрос уходил на
+    несуществующий `your-backend:PORT` и ждал таймаута, чтобы сказать «список не
+    получен» — при пустом адресе шаг честно говорит это сразу."""
     from model_picker import fetch_models
     fetch = fetch or fetch_models
-    endpoint = _effective(values, config, "completions_url") or ""
+    endpoint = onboarding.configured_endpoint(
+        _effective(values, config, "completions_url"))
     auth = _effective(values, config, "Authorization", header=True)
     if auth == onboarding.TOKEN_SENTINEL:
         auth = None
@@ -341,7 +346,11 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
             io.printer(f"  {_of.ONBOARDING_FIELDS[0].label}")
             if field.hint:
                 io.printer(f"  {field.hint}")
-            current = config.get("completions_url") or ""
+            # Заглушка шаблона — не значение (тот же нормализатор, что у сетевого
+            # пути ниже): показать её как действующий адрес значит соврать о том,
+            # куда пойдёт запрос. Сюда она доходит, когда требование адреса закрыл
+            # самодостаточный реестр, а плоский `backend` так и остался шаблонным.
+            current = onboarding.configured_endpoint(config.get("completions_url"))
             if review_all and field.leaf not in pending and current:
                 io.printer(f"  [текущее: {current}]")
             while True:

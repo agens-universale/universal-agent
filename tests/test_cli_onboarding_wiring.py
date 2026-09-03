@@ -7,11 +7,22 @@ sys.argv = ["gc-cli", "-q", "x"]
 import cli  # noqa: E402
 
 
+def _stub_repair_load(monkeypatch, config):
+    """Лестница загрузки «чинилки» подменяется одной ступенью «всё хорошо»:
+    предмет этих тестов — разводка мастера, а не загрузка конфига (её ступени
+    проверяет tests/test_config_repair_ladder.py на настоящих файлах)."""
+    import onboarding
+    monkeypatch.setattr(
+        onboarding, "load_config_for_repair",
+        lambda: onboarding.RepairLoad(config, None, onboarding.REPAIR_STAGE_FULL, None),
+    )
+
+
 def test_run_init_calls_wizard_review_all_when_interactive(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_interactive", lambda: True)
     monkeypatch.setattr(cli, "_bootstrap_user_config", lambda: True)
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
-    monkeypatch.setattr(cli, "load_config", lambda _=None: {"model": "m"})
+    _stub_repair_load(monkeypatch, {"model": "m"})
     seen = {}
     import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run",
@@ -24,7 +35,7 @@ def test_run_init_passive_when_not_interactive(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "_interactive", lambda: False)
     monkeypatch.setattr(cli, "_bootstrap_user_config", lambda: True)
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
-    monkeypatch.setattr(cli, "load_config", lambda _=None: {
+    _stub_repair_load(monkeypatch, {
         "completions_url": "http://your-backend:PORT/v1/chat/completions"})
     assert cli._run_init() == 0
     assert "config.yml" in capsys.readouterr().err
@@ -34,7 +45,7 @@ def test_run_init_no_mcp(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_interactive", lambda: True)
     monkeypatch.setattr(cli, "_bootstrap_user_config", lambda: True)
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
-    monkeypatch.setattr(cli, "load_config", lambda _=None: {"model": "m"})
+    _stub_repair_load(monkeypatch, {"model": "m"})
     seen = {}
     import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run",
@@ -50,7 +61,7 @@ def test_run_init_returns_1_when_wizard_leaves_config_unconfigured(monkeypatch, 
     monkeypatch.setattr(cli, "_interactive", lambda: True)
     monkeypatch.setattr(cli, "_bootstrap_user_config", lambda: True)
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
-    monkeypatch.setattr(cli, "load_config", lambda _=None: {"model": "m"})
+    _stub_repair_load(monkeypatch, {"model": "m"})
     import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run",
                         lambda cfg, path, *, review_all, io, mcp=None: False)

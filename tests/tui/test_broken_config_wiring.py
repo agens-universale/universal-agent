@@ -199,3 +199,120 @@ def test_profile_empty_flag_recovers_config_broken_by_active_profile(monkeypatch
     rc_ok = main(argv=["--config", str(base), "--profile", ""])
     assert rc_ok == 0
     assert len(created_ok) == 1
+
+
+# --- Сломан ТОЛЬКО профиль: данные человека не выбрасываются ----------------
+
+_STAND_BASE = (
+    'profile: "work"\n'
+    "backend:\n"
+    "  api_mode: chat_completions\n"
+    '  completions_url: "https://openrouter.ai/api/v1/chat/completions"\n'
+    "  chat_completion_headers:\n"
+    '    Authorization: "Bearer sk-user-token"\n'
+    "models:\n"
+    "  fast:\n"
+    '    model: "qwen/qwen3-8b"\n'
+)
+
+
+def _broken_profile_stand(tmp_path, monkeypatch):
+    """Раскладка живого смока: рабочие адрес/токен/реестр в базе, нерезолвимый
+    слот в профиле — весь стек не грузится, но виноват только профиль."""
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(_STAND_BASE, encoding="utf-8")
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+    monkeypatch.setattr("mcp_daemon_autostart.ensure_mcp_daemons", lambda cfg: None)
+    monkeypatch.setattr("mcp_daemon_autostart.shutdown_mcp_daemons", lambda: None)
+    import tui as tui_mod
+    monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
+
+
+def _capturing_app(monkeypatch):
+    captured: dict = {}
+    from tui import app as tui_app
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            captured["config"] = kw.get("config")
+
+        def set_config_path(self, path):
+            pass
+
+        def _maybe_notice_profile_activation(self, *a, **k):
+            pass
+
+        def run(self):
+            captured["ran"] = True
+
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+    return captured
+
+
+@pytest.fixture
+def clean_notices():
+    import runtime_notices
+    runtime_notices.clear_runtime_notices()
+    yield runtime_notices
+    runtime_notices.clear_runtime_notices()
+
+
+def test_init_config_keeps_user_connection_when_only_profile_is_broken(
+    monkeypatch, tmp_path, clean_notices
+):
+    """Мастер открывается на НАСТОЯЩИХ адресе, токене и реестре человека, а не на
+    заглушках пакетного шаблона: на шаблоне мастер уходил в сеть на
+    `your-backend:PORT` и не получал список моделей при рабочем токене, а сводка
+    шага «Подключение» расходилась с полем под ней (сводка — из шаблона, поле —
+    из сырого файла человека)."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    captured = _capturing_app(monkeypatch)
+
+    from tui import main
+    rc = main(argv=["--init-config"])
+
+    assert rc == 0
+    assert captured.get("ran") is True
+    cfg = captured["config"]
+    assert cfg.get("completions_url") == "https://openrouter.ai/api/v1/chat/completions"
+    assert (cfg.get("chat_completion_headers") or {}).get("Authorization") == "Bearer sk-user-token"
+    assert list(cfg.get("models") or {}) == ["fast"]
+
+
+def test_init_config_degradation_reaches_notices(monkeypatch, tmp_path, clean_notices):
+    """Задача D: сообщение обязано пережить старт TUI. В stderr его через мгновение
+    стирает альтернативный буфер Textual — живой смок подтвердил, что человек не
+    видит НИ СТРОЧКИ и не понимает, почему мастер ведёт себя странно. Значит, оно
+    едет тем же каналом, что и остальные рантайм-уведомления (F4 / `/notices`)."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    _capturing_app(monkeypatch)
+
+    from tui import main
+    assert main(argv=["--init-config"]) == 0
+
+    degraded = [n for n in clean_notices.collect_runtime_notices()
+                if n.code == "config_load_degraded"]
+    assert len(degraded) == 1
+    assert degraded[0].level == "warning"
+    assert 'профилем "work"' in degraded[0].message
+    # Не прочитано → бейдж /notices зажжётся.
+    assert degraded[0] in clean_notices.collect_unread_runtime_notices()
+
+
+def test_healthy_config_leaves_no_degradation_notice(monkeypatch, tmp_path, clean_notices):
+    """Здоровый конфиг — ступень 1: ни уведомления, ни строчки в stderr."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "fast"\n', encoding="utf-8")
+    _capturing_app(monkeypatch)
+
+    from tui import main
+    assert main(argv=["--init-config"]) == 0
+
+    assert [n for n in clean_notices.collect_runtime_notices()
+            if n.code == "config_load_degraded"] == []
