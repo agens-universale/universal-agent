@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 import logging
 
 import uvicorn
+import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -63,8 +64,19 @@ except (ModuleNotFoundError, ImportError) as e:
 patch_asyncio_run_for_fastapi()
 
 
-SERVER_CONFIG: Dict[str, Any] = load_server_config()
-BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
+try:
+    # Обе функции читают конфиг на импорте модуля: сломанный config_server.yml
+    # (load_server_config сам не защищён — голый open/yaml.safe_load) или
+    # сломанный агентский config.yml (build_agent_config_for_server → load_config)
+    # иначе роняли бы импорт server голым traceback'ом ещё до старта uvicorn —
+    # тот же приём, что config_modules/env_vars.py уже применяет к битым
+    # GC_*-переменным окружения.
+    SERVER_CONFIG: Dict[str, Any] = load_server_config()
+    BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
+except (ValueError, OSError, yaml.YAMLError) as exc:
+    raise SystemExit(
+        f"[gc] сервер не стартовал: конфиг не загружается ({exc})"
+    ) from exc
 if _SWARM_MODULES_AVAILABLE and build_swarm_config is not None:
     SWARM_CONFIG: Dict[str, Any] = build_swarm_config(SERVER_CONFIG)
 else:

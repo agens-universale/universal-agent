@@ -368,6 +368,105 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     )
 
 
+# --- Объяснение вместо трейсбека на нерезолвимом конфиге --------------------
+
+# Закрытый список ключей-подозреваемых (спека решения): текст ошибки не парсим,
+# а сверяем с этими строками. Порядок задаёт порядок строк «поправить», когда
+# поломка размазана по нескольким файлам — см. explain_broken_config.
+_BROKEN_CONFIG_SUSPECT_KEYS = ("slots.default", "slots.light", "slots.max", "models", "profile")
+
+# Подписи участников карты («Участвуют:») — kind из config_origin._overlay_paths
+# плюс своя "base" для самой базы (её _overlay_paths не называет — она точка
+# отсчёта, а не оверлей).
+_BROKEN_CONFIG_LAYER_LABELS = {
+    "base": "база",
+    "managed": "managed",
+    "project": "проект",
+    "profile:project": "профиль",
+    "profile:base": "профиль",
+}
+
+
+def explain_broken_config(config_path: str, exc: Exception, *, program: str = "gc-cli") -> str:
+    """Человекочитаемое объяснение вместо трейсбека, когда `load_config_ex()` не
+    смог собрать конфиг. `exc` — пойманный `ValueError` (pydantic `ValidationError`
+    входит в него подклассом — единственный исход загрузки после защиты чтения
+    базы, см. config.py/layers.py::_layer_document).
+
+    Собирается из трёх частей: сам текст ошибки (pydantic-дамп приводится к тому
+    же читаемому виду, что и на путях записи, — `layers.py::_app_config_from_raw`)
+    + карта участвующих файлов (сырые документы, переживающие сломанный конфиг:
+    `config_origin._overlay_paths` + `layers.resolve_profile_pointer`) + советы
+    «что сделать» — от точечной починки к обходу и лишь затем к грубому откату
+    (решение владельца: откат последний, он теряет модели, MCP и голос).
+
+    Файл(ы) для починки ищутся не парсингом текста, а сверкой с закрытым списком
+    ключей-подозреваемых `_BROKEN_CONFIG_SUSPECT_KEYS`: какие упомянуты — как
+    ПРЕФИКС одного из "; "-сегментов (`model_sections_validation.py` склеивает
+    несколько находок этим разделителем), для тех и спрашивается
+    `config_origin.origins()` — она называет файл, где ключ реально лежит. Префикс
+    сегмента, а не вхождение где угодно в тексте: иначе хвост «не найден в
+    merged-реестре models», общий для ЛЮБОЙ ошибки слота, ложно приплетал бы
+    секцию models к каждой поломке. Не нашли ни одного ключа (битый YAML,
+    нечитаемый файл, профиль не найден по указателю) — сопоставлять нечего,
+    совет становится «поправить файл: <путь>», где путь — тот, что называет сама
+    ошибка (слои пишут «<path>: …», см. layers.py::_layer_document), либо
+    базовый, если ни один известный файл в тексте не назван."""
+    from pydantic import ValidationError as _ValidationError
+
+    from config_modules.layers import resolve_profile_pointer
+    from config_origin import _overlay_paths, origins
+
+    error_text = (
+        f"конфиг не проходит схему: {exc}" if isinstance(exc, _ValidationError) else str(exc)
+    )
+
+    participants = [("base", config_path)] + _overlay_paths(config_path)
+    participant_lines = [
+        f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{path}"
+        + ("   (активен)" if kind.startswith("profile:") else "")
+        for kind, path in participants
+    ]
+
+    segments = error_text.split("; ")
+    matched_keys = [
+        key for key in _BROKEN_CONFIG_SUSPECT_KEYS
+        if any(segment.startswith(key) for segment in segments)
+    ]
+
+    fix_lines: list[str] = []
+    if matched_keys:
+        origin_map = origins(config_path, matched_keys)
+        by_file: dict[str, list[str]] = {}
+        for key in matched_keys:
+            file_path = origin_map[key].overlay_path or config_path
+            by_file.setdefault(file_path, []).append(key)
+        for file_path, keys in by_file.items():
+            fix_lines.append(f"поправить {', '.join(keys)} в:  {file_path}")
+    else:
+        named = config_path
+        for _, candidate in participants:
+            if error_text.startswith(f"{candidate}:"):
+                named = candidate
+                break
+        fix_lines.append(f"поправить файл:  {named}")
+
+    if resolve_profile_pointer(config_path):
+        fix_lines.append(f'запустить без профиля, ничего не потеряв:  {program} --profile ""')
+    fix_lines.append("откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --reset-config")
+
+    error_block = "\n".join(f"  {line}" for line in error_text.splitlines())
+    fix_block = "\n".join(f"    • {line}" for line in fix_lines)
+    participants_block = "\n".join(participant_lines)
+
+    return (
+        f"[gc] Конфиг не загружается: {config_path}\n\n"
+        f"{error_block}\n\n"
+        f"  Участвуют:\n{participants_block}\n\n"
+        f"  Что сделать:\n{fix_block}\n"
+    )
+
+
 # --- Запись собранного мастером (волна B, спека §11) ----------------------
 
 def default_alias_for(model_id: str) -> str:

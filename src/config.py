@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import urllib3
-import yaml
 
 from config_modules.auth import build_auth_connector
 from config_modules.env_vars import project_gc_dir, project_local_config_path
@@ -37,6 +36,7 @@ from mcp_runtime.paths import managed_config_path  # noqa: F401  # re-export: з
 # зовут как `config.<имя>`, и второй адрес у одного правила заводить незачем.
 from config_modules.layers import (  # noqa: F401
     _Layers,
+    _layer_document,
     validate_config_text,
     _merge_layers,
     _raw_from_text,
@@ -489,8 +489,16 @@ def load_config_ex(
     base_path = Path(path)
     notices: list[str] = []
 
-    with open(path, "r", encoding="utf-8") as file:
-        raw_config = yaml.safe_load(file) or {}
+    # Чтение базы — тем же приёмом, что и слои (`_layer_document`): невалидный YAML и
+    # не-словарь на верхнем уровне дают ValueError с именем файла и причиной, а не
+    # сырые yaml.YAMLError/AttributeError из глубины мержа. Голый open() снаружи
+    # `_layer_document` — сам он не оборачивает OSError (см. его докстринг), это
+    # остаётся на вызывающем; здесь единственный вызывающий, которому нужен
+    # непрочитанный файл тем же ValueError, что и остальные исходы базы.
+    try:
+        raw_config = _layer_document(base_path, "config.yml")
+    except OSError as exc:
+        raise ValueError(f"{base_path}: не удалось прочитать: {exc}") from exc
     # Дорезолвный вид держим для отказа правила пары: после подстановки от `${ENV:X}`
     # остаётся пустая строка, и назвать незаданную переменную уже нечем.
     base_before_env = raw_config

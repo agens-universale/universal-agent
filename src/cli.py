@@ -12,6 +12,7 @@ from config import (
     cli_forces_legacy_model,
     load_config,
     load_config_ex,
+    resolve_config_path,
     user_config_path,
     _bootstrap_user_config,
 )
@@ -123,11 +124,28 @@ def _run_init() -> int:
     """`gc-cli --init-config`: настроить конфиг (интерактивно на TTY) и выйти."""
     path = user_config_path()
     just_created = _bootstrap_user_config()
-    config_dict = load_config(None)
+    try:
+        config_dict = load_config(None)
+    except ValueError as exc:
+        # «Чинилка» обязана работать именно тогда, когда конфиг сломан: не
+        # удалось прочитать — продолжаем с пустым конфигом, мастер (или гайд
+        # ниже) перепишет файл с нуля, вместо того же трейсбека, что и обычный
+        # запуск.
+        print(
+            f"[gc] config.yml не читается ({exc}) — продолжаю с пустым конфигом, "
+            f"мастер настройки перепишет файл.",
+            file=sys.stderr,
+        )
+        config_dict = {}
     if _interactive():
         import onboarding_wizard
-        onboarding_wizard.run(config_dict, path, review_all=True,
+        configured = onboarding_wizard.run(config_dict, path, review_all=True,
                               io=onboarding_wizard.default_io())   # без mcp — gc-cli не ставит MCP
+        # run() отдаёт False не только на трейсбеке, но и когда человек прошёл
+        # мастер, а конфиг всё равно остался ненастроенным (пропущенные поля,
+        # отказ записи, файл, который не удалось перечитать) — код возврата
+        # обязан отражать это, а не рапортовать успех при честном stderr рядом.
+        return 0 if configured else 1
     else:
         print(onboarding.setup_guide(str(path), config_dict, just_created=just_created), file=sys.stderr)
     return 0
@@ -352,9 +370,16 @@ def main() -> int:
 
     config_arg = arg_parser.run_args.config
     just_created = _bootstrap_user_config() if config_arg is None else False
-    config_dict, _profile_meta = load_config_ex(
-        config_arg, profile_override=getattr(arg_parser.run_args, "profile", None)
-    )
+    try:
+        config_dict, _profile_meta = load_config_ex(
+            config_arg, profile_override=getattr(arg_parser.run_args, "profile", None)
+        )
+    except ValueError as exc:
+        # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый traceback
+        # из глубины загрузки (см. onboarding.explain_broken_config).
+        print(onboarding.explain_broken_config(resolve_config_path(config_arg), exc),
+              file=sys.stderr)
+        return 1
 
     # Единая точка применения CLI-override поверх config.yml.
     apply_cli_overrides(

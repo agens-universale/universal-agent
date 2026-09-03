@@ -478,7 +478,20 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) 
     else:
         if mcp is not None:
             _mcp_step(io, mcp)
-    fresh = _reload_config()
+    try:
+        fresh = _reload_config()
+    except ValueError as exc:
+        # Патч выше правит якоря текста, а не документ целиком — «запись»
+        # могла честно отчитаться об отказе (except выше) или тихо не
+        # затронуть уже сломанную часть файла. В обоих случаях второе,
+        # необработанное падение здесь было бы хуже первого: человек уже
+        # потратил время на все вопросы мастера.
+        io.printer(
+            "\n  [ошибка] вы ответили на все вопросы, но записать поверх "
+            "сломанного файла не вышло — он остался в прежнем виде:"
+        )
+        io.printer(onboarding.explain_broken_config(str(config_path), exc))
+        return False
     if onboarding.is_unconfigured(fresh):
         io.printer(onboarding.setup_guide(str(config_path), fresh))
         return False

@@ -317,6 +317,47 @@ def test_invalid_schema_in_project_loud_error(global_config_file, isolated_cwd):
         load_config(str(global_config_file))
 
 
+def test_invalid_yaml_in_base_loud_error(tmp_path):
+    """Невалидный YAML в БАЗОВОМ config.yml → громкая ValueError с путём файла и
+    причиной — симметрично test_invalid_yaml_in_project_loud_error, но для базы.
+
+    Раньше базу читали голыми open()/yaml.safe_load() (config.py:492-493) без
+    какой-либо защиты: наружу летел сырой yaml.ScannerError, а не ValueError —
+    ни один из входов (cli.py/tui/__init__.py) не смог бы поймать его одним
+    except ValueError."""
+    from config import load_config
+
+    base = tmp_path / "base_config.yml"
+    base.write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="невалидный YAML"):
+        load_config(str(base))
+
+
+def test_base_config_not_dict_loud_error(tmp_path):
+    """Список вместо словаря на верхнем уровне БАЗОВОГО config.yml → ValueError,
+    а не AttributeError из глубины мержа/схемы (`'list' object has no attribute
+    'get'`). `_layer_document` уже отвергает такой документ явно — базе того же
+    приёма не хватало."""
+    from config import load_config
+
+    base = tmp_path / "base_config.yml"
+    base.write_text("- a\n- b\n", encoding="utf-8")
+    with pytest.raises(ValueError) as exc_info:
+        load_config(str(base))
+    assert not isinstance(exc_info.value, AttributeError)
+
+
+def test_unreadable_base_config_loud_error(tmp_path):
+    """Несуществующий путь БАЗОВОГО config.yml → ValueError с именем файла, а не
+    сырой FileNotFoundError/OSError."""
+    from config import load_config
+
+    missing = tmp_path / "does_not_exist.yml"
+    with pytest.raises(ValueError) as exc_info:
+        load_config(str(missing))
+    assert str(missing) in str(exc_info.value)
+
+
 def test_empty_project_config_falls_back_to_global(global_config_file, isolated_cwd):
     """Пустой project config = пустой dict; deep_merge с global = global. Это нормальное поведение."""
     from config import load_config

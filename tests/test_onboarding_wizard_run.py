@@ -165,6 +165,50 @@ def test_run_with_registry_but_skipped_endpoint_stays_unconfigured(tmp_path, mon
     assert "backend.completions_url" in blob
 
 
+def test_run_reports_reload_failure_instead_of_crashing_after_all_answers(
+        tmp_path, monkeypatch):
+    """Ревью нашло: `_reload_config()` в конце run() не защищён вовсе. Файл на
+    диске синтаксически сломан НАСТОЛЬКО, что патч поверх него отклоняет сама
+    `validate_config_text` (первый except уже это ловит честно — «конфиг не
+    записан», файл не тронут) — а следом run() САМ зовёт `_reload_config()` и
+    падает ВТОРЫМ, уже необработанным исключением. Человек к этому моменту
+    ответил на все вопросы мастера.
+
+    `_reload_config` НЕ замокан (ревью нашло: прежний тест мокал `run()`
+    целиком лямбдой — реальная функция не выполнялась вовсе). Подменены только
+    reader/printer у `WizardIO` и сеть в `_collect_model`, как это делают
+    соседние тесты этого файла."""
+    from config_modules import env_vars
+    from config_modules.env_vars import EnvVars
+
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+    # `_reload_config()` зовёт load_config(None) — дефолтный путь, не cfg_file
+    # напрямую; изолируем его на ТОТ ЖЕ файл (ровно как в `_run_init()`, где
+    # config_path и путь `load_config(None)` — один и тот же файл).
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path))
+    monkeypatch.setattr("model_picker.fetch_models", lambda *a, **k: None)
+
+    answers = iter([
+        "https://x/v1/chat/completions",  # адрес
+        "1", "sk-1",                      # авторизация: токен
+        "qwen/qwen3-coder",                # модель (список не пришёл — вручную)
+        "", "",                            # уровни — пропустить
+    ])
+    printed = []
+    io = wz.WizardIO(reader=lambda p, s: next(answers, ""), printer=printed.append)
+
+    result = wz.run({}, cfg_file, review_all=True, io=io, mcp=None)
+
+    assert result is False
+    # Файл действительно НЕ тронут — патч был отклонён валидацией до записи.
+    assert cfg_file.read_text(encoding="utf-8") == "this is: : : not [valid yaml }\n"
+    output = "\n".join(printed)
+    assert "конфиг не записан" in output          # первый, уже работавший except
+    assert "ответили на все вопросы" in output    # новое сообщение о втором крахе
+    assert output.count("невалидный YAML") >= 2   # причина названа дважды: коротко и в explain
+
+
 def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(

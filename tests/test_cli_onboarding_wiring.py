@@ -43,6 +43,20 @@ def test_run_init_no_mcp(monkeypatch, tmp_path):
     assert seen["mcp"] is None and seen["review_all"] is True
 
 
+def test_run_init_returns_1_when_wizard_leaves_config_unconfigured(monkeypatch, tmp_path):
+    """run() отдаёт False и когда пользователь прошёл мастер, но конфиг остался
+    ненастроенным (пропущенные поля, отказ записи, файл так и не перечитался) —
+    _run_init() раньше отбрасывал этот результат и всегда рапортовал 0."""
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli, "_bootstrap_user_config", lambda: True)
+    monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
+    monkeypatch.setattr(cli, "load_config", lambda _=None: {"model": "m"})
+    import onboarding_wizard
+    monkeypatch.setattr(onboarding_wizard, "run",
+                        lambda cfg, path, *, review_all, io, mcp=None: False)
+    assert cli._run_init() == 1
+
+
 def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
     # неполный конфиг + интерактив → визард НЕ вызывается, печатается пассивный хинт
     monkeypatch.setattr(cli, "_interactive", lambda: True)
