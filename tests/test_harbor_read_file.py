@@ -18,7 +18,7 @@ def _harbor(files):
 
 def _base():
     t = ReadFile.__new__(ReadFile)
-    t._config_dict = None  # __new__ skips __init__; base uses this for _max_file_bytes/_resolve_char_limit
+    t._config_dict = None  # __new__ skips __init__; base uses this for fs_read_max_bytes
     return bind_os_backend(t, LocalFsBackend())
 
 
@@ -37,9 +37,8 @@ def _run_both(tmp_path, content, **kwargs):
 _CASES = [
     ("whole_file", CONTENT, {}),
     ("line_offset_limit", CONTENT, {"offset": 2, "limit": 2}),
-    ("char_window", CONTENT, {"char_offset": 0, "char_limit": 6}),
     ("not_found", None, {}),
-    ("bad_limit", CONTENT, {"char_limit": -1}),
+    ("bad_limit", CONTENT, {"limit": "x"}),
 ]
 
 

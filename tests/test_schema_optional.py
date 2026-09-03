@@ -66,7 +66,7 @@ def test_parameters_schema_for_local_validation_semantic_required():
     assert validation is not params
     assert params["required"] == api_required
     assert "path" in validation["required"]
-    for key in ("char_offset", "char_limit", "offset", "limit"):
+    for key in ("offset", "limit", "encoding"):
         assert key not in validation["required"]
         assert key in params["x-optional-keys"]
 
