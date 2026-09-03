@@ -7,7 +7,7 @@ from typing import Callable, TypeVar
 WINDOW_SIZE = 10
 LOOP_WARN_ATTR = "_loop_warn"
 LOOP_WARN_KEY = "loop_warn"
-READ_PROFILE = {"consecutive": 2, "in_window": 3}
+READ_PROFILE = {"consecutive": 2, "in_window": 4}
 GENERIC_PROFILE = {"consecutive": 3, "in_window": 4}
 
 _T = TypeVar("_T")
