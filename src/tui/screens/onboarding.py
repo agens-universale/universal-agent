@@ -629,12 +629,13 @@ class OnboardingScreen(Screen):
             # контекст, имя слота — то же, что уедет в файл (`slots.default`) и что
             # человек увидит в секции «Модели» и в `/level`.
             rows = [("адрес:", addr), ("модель default:", model)]
-            # Строки необязательных шагов — только когда на них что-то решено:
-            # подтверждают ровно то, что уедет в файл.
+            # Витрина показывает состояние КОНФИГА, а не историю ответов этого прогона:
+            # уровень, заданный раньше и не тронутый сейчас, обязан остаться видимым —
+            # иначе одна и та же модель то есть в сводке, то пропадает в зависимости от
+            # того, заходил ли человек на её под-форму (`_level_value`, см. выше).
             for level in _LEVEL_ROWS:
-                value = self._values.get(onboarding.MODEL_SLOT_KEYS[level])
-                if value:
-                    rows.append((f"модель {level}:", value))
+                value = self._level_value(level)
+                rows.append((f"модель {level}:", value or _of.LEVEL_UNSET))
             rows += [("токен:", tok), ("MCP:", mcp_val)]
             if self._voice_choice == "cloud":
                 host = (self._voice_cloud.get("url", "").split("/")[2]
@@ -653,7 +654,7 @@ class OnboardingScreen(Screen):
                     summary.append("\n")            # воздух между строками сводки
                 # Галочка — про ЗАПОЛНЕННОЕ: «✓ адрес: —» читается «готово» там, где
                 # ничего нет. Глиф гасим, а не убираем — колонка меток не съезжает.
-                summary.append("  " if val == "—" else "✓ ", style=OK)
+                summary.append("  " if val in ("—", _of.LEVEL_UNSET) else "✓ ", style=OK)
                 summary.append(f"{label:{label_width}}", style=DIM)
                 summary.append(f"{val}\n", style=INK)
             notice_parts = []

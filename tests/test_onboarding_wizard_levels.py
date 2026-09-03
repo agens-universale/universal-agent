@@ -42,12 +42,22 @@ def test_skipping_one_level_leaves_the_other_alone():
     assert values == {"model_max": "qwen/qwen3-235b"}
 
 
+def test_level_choice_is_confirmed_and_silent_on_skip():
+    """То же правило, что и на шаге «Модель»: подтверждение — сразу после
+    выбора, до записи в файл; пропущенный уровень остаётся немым — строка
+    «сейчас» уже сказала, что там останется."""
+    io, out = _io(["y", "1", ""])         # light = строка 1 · max — пропуск
+    wz._collect_levels(io, {}, {}, _models())
+    assert "  выбрано для light: qwen/qwen3-8b" in out
+    assert not any(m == "  выбрано для max: qwen/qwen3-235b" for m in out)
+
+
 def test_assigned_level_is_shown_as_current():
     cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
            "slots": {"light": "fast"}}
     io, out = _io(["y", "", ""])
     wz._collect_levels(io, cfg, {}, _models())
-    assert any("сейчас: qwen/qwen3-8b  (запись «fast»)" in m for m in out)
+    assert any("сейчас: qwen/qwen3-8b  (имя записи «fast»)" in m for m in out)
 
 
 def test_empty_level_says_it_is_unset():
@@ -62,6 +72,15 @@ def test_without_a_list_levels_are_typed_freely():
     wz._collect_levels(io, {}, values, None)
     assert values == {"model_light": "vllm/Small", "model_max": "vllm/Big"}
     assert any(wz._of.MODEL_NO_LIST in m for m in out)
+
+
+def test_choice_is_confirmed_after_manual_entry_when_no_list():
+    """Та же ветка без списка, но на уровнях: обе строки подтверждения
+    должны появиться, а не только на шаге «Модель»."""
+    io, out = _io(["y", "vllm/Small", "vllm/Big"])
+    wz._collect_levels(io, {}, {}, None)
+    assert "  выбрано для light: vllm/Small" in out
+    assert "  выбрано для max: vllm/Big" in out
 
 
 def test_the_model_list_is_fetched_once_for_both_steps(monkeypatch):

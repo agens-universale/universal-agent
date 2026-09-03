@@ -355,6 +355,59 @@ async def test_final_summary_glyph_only_for_filled_rows(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_final_summary_shows_a_level_assigned_in_the_config(tmp_path):
+    """Уровень, заданный в конфиге и не тронутый в ЭТОМ прогоне, обязан быть
+    виден на подтверждении — иначе одна и та же модель то есть в сводке, то
+    пропадает в зависимости от того, заходил ли человек на её под-форму.
+    Строка `default` уже читает резолвнутый конфиг (`_shown_values`) — здесь
+    та же дисциплина через `_level_value` (`tui/screens/onboarding.py:287`)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m",
+           "models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {"light": "fast"}}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(config=cfg)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        assert "model_light" not in scr._values   # уровень не тронут в этом прогоне
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        lines = [ln for w in scr.query("Static.onb-dyn")
+                 for ln in str(w.render()).splitlines()]
+        light_lines = [ln for ln in lines if "модель light:" in ln]
+        assert light_lines, f"строка уровня light отсутствует в сводке: {lines}"
+        assert "qwen/qwen3-8b" in light_lines[0]
+
+
+@pytest.mark.asyncio
+async def test_final_summary_unset_level_says_so_and_gates_the_glyph(tmp_path):
+    """Три строки уровней печатаются ВСЕГДА (решение владельца, уравнивает TUI
+    с CLI-сводкой): незаданный уровень не пропадает из сводки, а честно
+    называется `не задана` — и, как «✓ адрес: —», без галочки."""
+    pytest.importorskip("textual")
+    import onboarding_fields as _of
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()             # реестра нет вовсе — оба уровня не заданы
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        lines = [ln for w in scr.query("Static.onb-dyn")
+                 for ln in str(w.render()).splitlines()]
+        light_lines = [ln for ln in lines if "модель light:" in ln]
+        assert light_lines, f"строка уровня light отсутствует в сводке: {lines}"
+        light_line = light_lines[0]
+        assert _of.LEVEL_UNSET in light_line
+        assert light_line.startswith("  ") and "✓" not in light_line
+
+
+@pytest.mark.asyncio
 async def test_final_summary_shows_mcp_when_selected(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp

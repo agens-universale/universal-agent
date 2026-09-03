@@ -51,6 +51,51 @@ def test_model_manual_fallback_when_empty_list():
     assert values["model"] == "vllm/SomeModel"
 
 
+def test_choice_is_confirmed_after_a_pick_and_silent_on_skip():
+    """Промах на соседнюю строку (`claude-sonnet-5` / `claude-sonnet-5:batch`)
+    раньше всплывал только в финальной сводке — после успешной записи, когда
+    его уже не отменить не заметив. Подтверждение печатается сразу."""
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer x"}}
+    io, out = _io(["1"])
+    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _models3())
+    assert "  выбрано для default: gigacode" in out
+    io2, out2 = _io([""])
+    wz._collect_model(io2, cfg, {}, fetch=lambda *a, **k: _models3())
+    assert not any(m.startswith("  выбрано для") for m in out2)
+
+
+def test_choice_is_confirmed_after_manual_entry_when_no_list():
+    """Тот же риск, что и со списком, только на другой ветке: без списка
+    человек вписывает id вручную, и опечатка там всплыла бы только в
+    финальной сводке — после записи в файл — если бы не эта строка."""
+    cfg = {"completions_url": "https://h/api/v2/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer x"},
+           "model": onboarding.MODEL_SENTINEL}
+    io, out = _io(["vllm/Qwen3-Coder-Next-262k"])
+    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: None)
+    assert "  выбрано для default: vllm/Qwen3-Coder-Next-262k" in out
+
+
+def test_network_is_reached_only_after_the_header_is_printed():
+    """На недоступном эндпоинте мастер раньше уходил в сеть ДО заголовка и
+    молчал десятки секунд, выглядя зависшим (подтверждено живым замером).
+    `fetch` дописывает свою метку в тот же список вывода, что и `printer`, —
+    так виден точный порядок событий."""
+    out = []
+    io = wz.WizardIO(reader=lambda p, s: "", printer=out.append)
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer x"}}
+
+    def fake_fetch(url, auth, **k):
+        out.append("<fetch>")
+        return None
+
+    wz._collect_model(io, cfg, {}, fetch=fake_fetch)
+    assert out.index("  Модель") < out.index("<fetch>")
+    assert out.index(f"  {wz._of.MODEL_FETCHING}") < out.index("<fetch>")
+
+
 def test_model_warning_shown_when_non_tool_present():
     """⚠-подсказка появляется, если хотя бы одна модель tool_capable is False."""
     cfg = {"completions_url": "https://h/api/v2/chat/completions",
@@ -132,7 +177,7 @@ def test_a_query_narrows_the_view():
     kind, (rows, note) = wz._interpret("qwen", models, models[:15])
     assert kind == "view"
     assert [m.id for m in rows] == ["qwen/qwen3-8b"]
-    assert note == "найдено 1 из 31"
+    assert note == "найдено 1 из 31 · * — весь каталог"
 
 
 def test_too_many_matches_are_cut_and_said_so():
@@ -140,7 +185,18 @@ def test_too_many_matches_are_cut_and_said_so():
     kind, (rows, note) = wz._interpret("vendor", models, models[:15])
     assert kind == "view"
     assert len(rows) == 15
-    assert note == "показаны 15 из 40 совпадений · уточните запрос"
+    assert note == "показаны 15 из 40 совпадений · уточните запрос · * — весь каталог"
+
+
+def test_star_is_promised_in_both_result_counters():
+    """`*` работает всегда, но раньше был назван только в счётчике начального
+    показа — после запроса человек не знал, что клавиша всё ещё доступна, и
+    что она разворачивает ВЕСЬ каталог, а не только совпадения."""
+    models = _many(30) + [ModelInfo("qwen/qwen3-8b", tool_capable=True)]
+    _, (_, note_found) = wz._interpret("qwen", models, models[:15])
+    assert note_found.endswith(" · * — весь каталог")
+    _, (_, note_cut) = wz._interpret("vendor", _many(40), _many(40)[:15])
+    assert note_cut.endswith(" · * — весь каталог")
 
 
 def test_a_query_without_matches_asks_to_take_it_as_is():
@@ -151,7 +207,7 @@ def test_current_line_names_the_registry_entry():
     cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
            "slots": {"default": "fast"}}
     assert wz._current_line(cfg, "default", "qwen/qwen3-8b") == (
-        "сейчас: qwen/qwen3-8b  (запись «fast») · Enter — оставить")
+        "сейчас: qwen/qwen3-8b  (имя записи «fast») · Enter — оставить")
 
 
 def test_current_line_without_a_slot_has_no_entry_name():
@@ -192,6 +248,26 @@ def test_enter_keeps_the_current_model():
     assert wz._choose_model(io, _models3(), current="gigacode") is None
 
 
+def test_blank_line_separates_each_list_print():
+    """Экран не должен слипаться: пустая строка стоит перед КАЖДЫМ показом
+    списка (и первым, и повторным после запроса) и перед приглашением после
+    блока — а не между списком и его собственным счётчиком: счётчик подпись
+    к списку, отрывать её от того, что она описывает, нельзя."""
+    models = _models3() + [ModelInfo("qwen/qwen3-8b", tool_capable=True)]
+    io, out = _io(["qwen", "1"])
+    wz._choose_model(io, models, current="")
+
+    first_row = out.index("  1) gigacode")           # первая строка первого списка
+    last_row = out.index("  4) qwen/qwen3-8b")        # его последняя строка (счётчика нет)
+    second_row = out.index("  1) qwen/qwen3-8b")      # первая строка списка после запроса
+    counter = out.index("  найдено 1 из 4 · * — весь каталог")   # счётчик второго показа
+
+    assert first_row > 0 and out[first_row - 1] == ""            # воздух ПЕРЕД списком
+    assert last_row + 1 < len(out) and out[last_row + 1] == ""   # воздух ПОСЛЕ блока без счётчика
+    assert second_row > 0 and out[second_row - 1] == ""          # воздух перед повторным списком
+    assert counter + 1 < len(out) and out[counter + 1] == ""     # воздух ПОСЛЕ счётчика, не перед ним
+
+
 def test_query_then_number_picks_from_the_matches():
     models = _many(30) + [ModelInfo("qwen/qwen3-8b", tool_capable=True),
                           ModelInfo("qwen/qwen3-235b", tool_capable=True)]
@@ -208,10 +284,38 @@ def test_no_matches_taken_as_id_when_confirmed():
 
 def test_no_matches_declined_is_treated_as_a_new_query():
     """Отказ не должен стоить ещё одного ввода: ответ, который не «да» и не
-    пусто, — это уже следующий запрос."""
+    отказ («n»/«н»/«нет»), и не пусто, — это уже следующий запрос."""
     models = _models3() + [ModelInfo("qwen/qwen3-8b", tool_capable=True)]
     io, _ = _io(["vllm/Own", "qwen", "1"])
     assert wz._choose_model(io, models, current="") == "qwen/qwen3-8b"
+
+
+def test_no_matches_declined_by_n_returns_to_the_list():
+    """`n` — явный отказ, а против канона `[y/N]` (`cli.py:232-241`) поиск по
+    одной букве «н» в каталоге бессмысленен: отказ возвращает к прежнему
+    списку, а не превращается в запрос."""
+    io, _ = _io(["vllm/Own", "n", "1"])
+    assert wz._choose_model(io, _models3(), current="") == "gigacode"
+
+
+def test_almost_no_word_is_still_a_query_not_a_decline():
+    """Слово, похожее на отказ («но»), не входит в набор `n`/«н»/«нет»
+    буквально — и не должно совпасть с ним по подстроке: это новый
+    (безрезультатный) запрос, мастер снова спрашивает «взять как есть»."""
+    io, out = _io(["vllm/Own", "но", "y"])
+    assert wz._choose_model(io, _models3(), current="") == "но"
+    assert out.count("  таких у провайдера нет.") == 2
+
+
+def test_no_matches_prompt_names_three_outcomes():
+    """Приглашение называет ВСЕ три исхода. Раньше про `n` там не было ни
+    слова — и это самый вероятный промах живого прогона."""
+    prompts = []
+    seq = iter(["vllm/Own", "n", ""])
+    io = wz.WizardIO(reader=lambda p, s: (prompts.append(p), next(seq))[1],
+                     printer=lambda m: None)
+    wz._choose_model(io, _models3(), current="")
+    assert "  > (y — да · n — нет · другой запрос · Enter — пропустить шаг): " in prompts
 
 
 def test_no_matches_enter_keeps_the_current_model():

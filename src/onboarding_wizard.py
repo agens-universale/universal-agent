@@ -56,6 +56,11 @@ _LIST_SHOWN = 15
 # потому, что на русской раскладке клавиша `y` печатает «н», и подтверждать
 # вслепую «нетом» человек не должен.
 _YES = frozenset({"y", "yes", "д", "да"})
+# Явный отказ на приглашении «таких нет». `no` в набор не входит: пара букв
+# встречается в реальных id (`nousresearch/...`), и отняв её у поиска, сломаем
+# живой сценарий — а поиск по одной букве в каталоге из сотен моделей всё
+# равно бессмысленен.
+_NO = frozenset({"n", "н", "нет"})
 
 
 def _matching(models, query: str) -> list:
@@ -102,9 +107,10 @@ def _interpret(raw: str, models, shown) -> tuple:
     if not found:
         return "ask", raw
     if len(found) <= _LIST_SHOWN:
-        return "view", (found, f"найдено {len(found)} из {len(models)}")
+        return "view", (found, f"найдено {len(found)} из {len(models)} · * — весь каталог")
     return "view", (found[:_LIST_SHOWN],
-                    f"показаны {_LIST_SHOWN} из {len(found)} совпадений · уточните запрос")
+                    f"показаны {_LIST_SHOWN} из {len(found)} совпадений · "
+                    f"уточните запрос · * — весь каталог")
 
 
 @dataclass
@@ -116,34 +122,14 @@ class WizardIO:
 @dataclass(frozen=True)
 class _Field:
     leaf: str          # ключ-якорь для config-writer
-    label: str
     hint: str
-    secret: bool
     kind: str          # "endpoint" | "auth" | "model"
 
 
 _FIELDS = tuple(
-    _Field(fs.key, fs.label, fs.hint, secret=(fs.kind == "auth"), kind=fs.kind)
+    _Field(fs.key, fs.hint, kind=fs.kind)
     for fs in _of.ONBOARDING_FIELDS
 )
-
-
-def _current_value(config: dict, field: _Field) -> str:
-    if field.kind == "auth":
-        return (config.get("chat_completion_headers") or {}).get("Authorization") or ""
-    if field.kind == "endpoint":
-        return config.get("completions_url") or ""
-    return config.get("model") or ""
-
-
-def _field_prompt(field: _Field, current: str, review_all: bool) -> str:
-    parts = [field.label]
-    if review_all and current:
-        shown = mask_authorization(current) if field.kind == "auth" else current
-        parts.append(f"[текущее: {shown}]")
-    if field.hint:
-        parts.append(f"({field.hint})")
-    return " ".join(parts) + ": "
 
 
 def _collect_auth(io: WizardIO, values: dict) -> None:
@@ -191,22 +177,28 @@ def _current_line(config: dict, level: str, model_id: str) -> str:
     if not model_id:
         return f"сейчас: {_of.LEVEL_UNSET} · Enter — оставить"
     alias = (config.get("slots") or {}).get(level)
-    entry = f"  (запись «{alias}»)" if alias and alias != model_id else ""
+    entry = f"  (имя записи «{alias}»)" if alias and alias != model_id else ""
     return f"сейчас: {model_id}{entry} · Enter — оставить"
 
 
 def _ask_as_is(io: WizardIO, query: str) -> tuple:
     """Совпадений нет — предложить взять введённое как id.
-    ('keep','') — Enter; ('take', query) — согласие; ('query', raw) — ответ,
-    который сам является следующим запросом."""
+    ('keep','') — Enter; ('take', query) — согласие; ('decline','') — явный
+    отказ (`n`/«н»/«нет»); ('query', raw) — ответ, который сам является
+    следующим запросом."""
     io.printer("")
     io.printer("  таких у провайдера нет.")
     io.printer(f"  взять «{query}» как есть?")
-    raw = io.reader("  > (y — да · другой запрос · Enter — оставить): ", False).strip()
+    raw = io.reader(
+        "  > (y — да · n — нет · другой запрос · Enter — пропустить шаг): ", False
+    ).strip()
     if not raw:
         return "keep", ""
-    if raw.casefold() in _YES:
+    folded = raw.casefold()
+    if folded in _YES:
         return "take", query
+    if folded in _NO:
+        return "decline", ""
     return "query", raw
 
 
@@ -219,9 +211,11 @@ def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
     pending = None                  # ввод, полученный ответом на «взять как есть»
     while True:
         if pending is None:
+            io.printer("")
             _print_models(io, shown, current=current)
             if note:
                 io.printer(f"  {note}")
+            io.printer("")
             raw = io.reader(f"  > (номер 1–{len(shown)} или часть имени): ",
                             False).strip()
         else:
@@ -241,7 +235,10 @@ def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
                 return None
             if what == "take":
                 return value
-            pending = value
+            if what == "query":
+                pending = value
+            # "decline" — ничего не меняем: список и приглашение печатаются
+            # заново на следующем витке (pending остаётся None)
 
 
 def _fetch_models(config: dict, values: dict, fetch=None):
@@ -264,23 +261,30 @@ def _fetch_models(config: dict, values: dict, fetch=None):
 
 def _collect_model(io: WizardIO, config: dict, values: dict, *, fetch=None) -> list | None:
     """Шаг «Модель». Возвращает полученный список моделей (или None) — шаг
-    уровней переиспользует его, второй поход в сеть за тем же ответом лишний."""
-    models = _fetch_models(config, values, fetch)
+    уровней переиспользует его, второй поход в сеть за тем же ответом лишний.
+
+    Заголовок и строка «сейчас» печатаются ДО похода в сеть: на недоступном
+    эндпоинте запрос молчит десятки секунд, и без этого порядка мастер
+    выглядит зависшим (подтверждено живым замером владельца)."""
     io.printer("")
     io.printer(f"  {_of.ONBOARDING_FIELDS[2].label}")
     io.printer(f"  {_of.MODEL_STEP_HINT}")
     current = onboarding.effective_model(config)
     if current:
         io.printer(f"  {_current_line(config, 'default', current)}")
+    io.printer(f"  {_of.MODEL_FETCHING}")
+    models = _fetch_models(config, values, fetch)
     if not models:
         io.printer(f"  {_of.MODEL_NO_LIST}")
         raw = io.reader("  > ", False).strip()
         if raw:
             values["model"] = raw
+            io.printer(f"  выбрано для default: {raw}")
         return models
     chosen = _choose_model(io, models, current=current)
     if chosen:
         values["model"] = chosen
+        io.printer(f"  выбрано для default: {chosen}")
     return models
 
 
@@ -311,10 +315,12 @@ def _collect_levels(io: WizardIO, config: dict, values: dict, models) -> None:
             typed = io.reader("  > ", False).strip()
             if typed:
                 values[key] = typed
+                io.printer(f"  выбрано для {level}: {typed}")
             continue
         chosen = _choose_model(io, models, current=current)
         if chosen:
             values[key] = chosen
+            io.printer(f"  выбрано для {level}: {chosen}")
 
 
 def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
@@ -335,8 +341,9 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
             io.printer(f"  {_of.ONBOARDING_FIELDS[0].label}")
             if field.hint:
                 io.printer(f"  {field.hint}")
-            if review_all and field.leaf not in pending and _current_value(config, field):
-                io.printer(f"  [текущее: {_current_value(config, field)}]")
+            current = config.get("completions_url") or ""
+            if review_all and field.leaf not in pending and current:
+                io.printer(f"  [текущее: {current}]")
             while True:
                 raw = io.reader("  > ", False).strip()
                 if not raw:
@@ -347,10 +354,6 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
                 io.printer(f"  «{raw}» не похоже на URL (нужны http(s):// и хост). "
                            f"Введите ещё раз или Enter — пропустить.")
             continue
-        raw = io.reader(_field_prompt(field, _current_value(config, field), review_all),
-                        field.secret).strip()
-        if not raw:
-            continue   # пропуск: авто → остаётся pending; review → оставить текущее
     if review_all:
         # Уровни не входят в требования запуска (`_FIELD_CHECKS`), и удлинять ими
         # аварийную донастройку незачем: их спрашивает только режим сверки.
@@ -415,6 +418,20 @@ def _mcp_step(io: WizardIO, mcp) -> None:
 _SUMMARY_LABEL = {"default": "модель", "light": "light", "max": "max"}
 
 
+def _unassigned_default_note(config: dict) -> str:
+    """`default` пуст, а строка «модель» всё равно показывает модель — она
+    выведена фоллбэком. Источник ищем тем же обходом матрицы `LEVEL_FALLBACK`
+    (`config_modules/model_registry.py`), что и резолв: первый уровень после
+    `default`, у которого задан слот. Не нашёлся ни один (реестр из одной
+    записи, например) — источник не выдумываем, пишем голый факт."""
+    from config_modules.model_registry import LEVEL_FALLBACK
+    slots = config.get("slots") or {}
+    for level in LEVEL_FALLBACK["default"][1:]:
+        if slots.get(level):
+            return f"(default не задан — работает {level})"
+    return "(default не задан)"
+
+
 def _summary_lines(config: dict) -> list[str]:
     """Итог прогона: три уровня СВЕЖЕГО конфига. Пропущенный шаг и пустой слот
     выглядят одинаково — и это правда: сводка говорит, что лежит в файле, а не
@@ -422,13 +439,17 @@ def _summary_lines(config: dict) -> list[str]:
     lines = []
     for level in ("default", "light", "max"):
         model = onboarding.assigned_level_model(config, level)
-        if not model and level == "default":
+        via_fallback = not model and level == "default"
+        if via_fallback:
             model = onboarding.effective_model(config)
         if not model:
             lines.append(f"    {_SUMMARY_LABEL[level]:<12} не задан")
             continue
-        alias = (config.get("slots") or {}).get(level)
-        entry = f"  (запись «{alias}»)" if alias and alias != model else ""
+        if via_fallback:
+            entry = f"  {_unassigned_default_note(config)}"
+        else:
+            alias = (config.get("slots") or {}).get(level)
+            entry = f"  (имя записи «{alias}»)" if alias and alias != model else ""
         lines.append(f"    {_SUMMARY_LABEL[level]:<12} {model}{entry}")
     return lines
 

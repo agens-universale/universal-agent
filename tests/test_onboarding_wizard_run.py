@@ -253,8 +253,8 @@ def test_summary_reports_all_three_levels_from_the_fresh_config():
            "slots": {"default": "brain", "light": "fast"}}
     lines = wz._summary_lines(cfg)
     assert lines == [
-        "    модель       qwen/qwen3-235b  (запись «brain»)",
-        "    light        qwen/qwen3-8b  (запись «fast»)",
+        "    модель       qwen/qwen3-235b  (имя записи «brain»)",
+        "    light        qwen/qwen3-8b  (имя записи «fast»)",
         "    max          не задан",
     ]
 
@@ -272,7 +272,19 @@ def test_summary_shows_the_resolved_model_when_the_default_slot_is_unset():
     показать работающую модель, а не «не задан».
 
     Это сторож фоллбэка `assigned_level_model` → `effective_model`: без него
-    строка `default` врёт про конфиг, который прекрасно работает."""
+    строка `default` врёт про конфиг, который прекрасно работает. Источник
+    здесь не назвать — ни `light`, ни `max` слота не имеют вовсе, обход
+    матрицы `LEVEL_FALLBACK` не находит ничего, и выдумывать нельзя."""
     cfg = {"models": {"only": {"model": "vendor/only"}}, "slots": {}}
     lines = wz._summary_lines(cfg)
-    assert lines[0] == "    модель       vendor/only"
+    assert lines[0] == "    модель       vendor/only  (default не задан)"
+
+
+def test_summary_names_the_source_when_default_falls_back_to_a_level():
+    """Без `slots.default` строка «модель» раньше показывала модель уровня
+    `max` и отличалась от назначенной только отсутствием скобки — подсказка
+    была слишком тихой, владелец её не заметил сразу и переспросил."""
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
+           "slots": {"max": "fast"}}
+    lines = wz._summary_lines(cfg)
+    assert lines[0] == "    модель       qwen/qwen3-8b  (default не задан — работает max)"
