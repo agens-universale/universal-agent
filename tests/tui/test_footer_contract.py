@@ -79,21 +79,27 @@ def _all_hint_strings():
     return out
 
 
-def _all_notice_strings():
-    """Notice- и confirm-тексты редакторов — те же обещания клавиш, что в футерах,
-    только сказанные телом секции (спека эффективного вида §5, [Р2a-N15]).
+def _model_section_notice_strings():
+    """Notice- и confirm-константы редакторов моделей — те же обещания клавиш,
+    что в футерах, только сказанные телом секции (спека эффективного вида §5,
+    [Р2a-N15]).
 
-    Отдельный сборщик, а не расширение `_all_footer_strings`: бюджет двух строк —
-    про полосу футера, а вопрос-баннер живёт в теле и переносится законно. По ним
-    стоит проверять словарь клавиш и грамматику отказов.
+    Единственный модуль, который сегодня кладёт такие тексты module-level
+    константой под этим префиксом, — `models_section`: `settings`/`onboarding`
+    собирают свои отказы f-строкой по месту (в перебор по `dir()` они не
+    попадают в принципе), а `model_entry_form` отказов не заводит вовсе.
+    Перебор сужен до модуля, который реально даёт вклад, — иначе молчаливый
+    нулевой вклад остальных ничем не ловится (в отличие от `_all_footer_strings`
+    ниже, где вклад несут все перебираемые модули). Расширять охват на
+    settings/onboarding можно только вместе с переименованием их текстов под
+    этот префикс.
 
     Заодно это сторож «текст — module-level константа»: сообщение, собранное
     f-строкой по месту, в перебор не попадёт вовсе, и подмена клавиши в нём
     осталась бы незамеченной."""
-    from tui.editors import model_entry_form, models_section
-    from tui.screens import onboarding, settings
+    from tui.editors import models_section
     out = {}
-    for module in (settings, onboarding, models_section, model_entry_form):
+    for module in (models_section,):
         for name in dir(module):
             if not (name.startswith("_NOTICE") or name.startswith("_CONFIRM")):
                 continue
@@ -109,7 +115,7 @@ def test_notice_and_confirm_texts_are_collected_at_all():
     записи основного конфига: имя, не попавшее в перебор, оставило бы предмет
     стража за его же границей."""
     from tui.editors import models_section as m
-    collected = set(_all_notice_strings().values())
+    collected = set(_model_section_notice_strings().values())
     assert m._NOTICE_REMOVE_REFUSED_INHERITED in collected
     assert m._NOTICE_EDIT_REFUSED_INHERITED in collected
     # Итог записи — тоже константа: собранный f-строкой по месту, он в перебор не
@@ -121,7 +127,7 @@ def test_collected_refusals_follow_the_canon_grammar():
     """Канон отказов Global Constraints — «✗ не <глагол>: <причина>»: одна форма на
     все витрины, иначе отказ читается как сбой, а не как ответ."""
     import re
-    for name, value in _all_notice_strings().items():
+    for name, value in _model_section_notice_strings().items():
         if not value.startswith("✗"):
             continue
         assert re.match(r"^✗ не \w+: ", value), f"{name}: отказ мимо канона — {value}"
