@@ -3236,21 +3236,31 @@ class SettingsScreen(Screen):
         from utils.user_text import read_user_text_or_none
         return read_user_text_or_none(target)
 
-    def _restore_snapshot(self, target, snapshot) -> None:
-        """Вернуть файл к снимку. Не удалось — молчим: отказ уже показан, а вторая
-        жалоба поверх первой сказала бы человеку меньше, чем первая."""
+    def _restore_snapshot(self, target, snapshot) -> bool:
+        """Вернуть файл к снимку. Возвращает True, если откат не требовался или
+        удался, False — не удалось: тогда notice вызывающего обязан сказать об
+        этом отдельной строкой, а не промолчать поверх первого отказа (ревью
+        MR #80, L32).
+
+        Запись — атомарным писателем модуля (`onboarding_config_writer.write_text`),
+        как и любая другая запись конфига в этом экране: снимок и так лежал на
+        диске, второй валидации ему не нужно. Прежний прямой `Path.write_text`
+        усекал цель до нуля и только потом наполнял — прерывание между этими двумя
+        шагами оставляло config.yml пустым."""
         if snapshot is None:
-            return
-        from pathlib import Path
+            return True
         from utils.user_text import read_user_text_or_none
         # Нечитаемый текущий файл — не повод бросить откат: снимок писался ПЕРЕД
         # записью, значит вернуть его надо тем более. Сравнение экономит запись,
         # но не отменяет её.
-        if read_user_text_or_none(target) != snapshot:
-            try:
-                Path(target).write_text(snapshot, encoding="utf-8")
-            except OSError:
-                pass
+        if read_user_text_or_none(target) == snapshot:
+            return True
+        import onboarding_config_writer as ocw
+        try:
+            ocw.write_text(target, snapshot)
+        except OSError:
+            return False
+        return True
 
     def _overriding_layer_name(self, values: dict) -> str:
         """Как назвать слой, перекрывший записанное значение.
@@ -3360,14 +3370,20 @@ class SettingsScreen(Screen):
                 validate=validate_config_text,
             )
         except (ValueError, OSError) as exc:
-            self._restore_snapshot(target, snapshot)
-            self._notice(f"✗ не сохранено: {exc}")
+            restored = self._restore_snapshot(target, snapshot)
+            message = f"✗ не сохранено: {exc}"
+            if not restored:
+                message += f"; конфиг остался изменённым: {target}"
+            self._notice(message)
             return
         if missing:
             # Файл не тронут (запись «всё или ничего») — молчать нельзя, иначе слайдер
             # покажет новое значение, которого в конфиге нет (находка ревью коллеги).
-            self._restore_snapshot(target, snapshot)
-            self._notice(f"✗ не сохранено: не нашлись ключи {', '.join(missing)}")
+            restored = self._restore_snapshot(target, snapshot)
+            message = f"✗ не сохранено: не нашлись ключи {', '.join(missing)}"
+            if not restored:
+                message += f"; конфиг остался изменённым: {target}"
+            self._notice(message)
             return
         # Хвост записи — как у соседних секций (_do_save): перечитать сырые значения
         # файла и применить через инъектированный _on_apply, а не звать reload мимо него.

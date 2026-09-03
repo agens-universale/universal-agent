@@ -4225,6 +4225,42 @@ async def test_modes_write_leaves_the_file_untouched_when_it_fails(tmp_path, mon
         assert any("не сохранено" in n for n in notices), notices
 
 
+async def test_modes_restore_failure_is_reported_not_swallowed(tmp_path, monkeypatch):
+    """Ревью MR #80 (L32): откат на снимок идёт атомарным писателем модуля
+    (`onboarding_config_writer.write_text`), а не голым `Path.write_text` — падение
+    самого отката (диск, права, отвалившийся сетевой каталог) не может пройти молча
+    за плечами первого отказа. `write_text` монкипатчен, а не `atomic_replace`:
+    прямой `Path.write_text` (прежняя, чинимая форма) его не зовёт вовсе — если
+    правку откатят назад, монкипатч перестанет срабатывать, и это утверждение
+    провалится первым."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    app, base_cfg = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "off"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+        # правка руками, пока окно открыто: ключ вне схемы валит write_values ПОСЛЕ
+        # того, как якорь level: уже дописан — снимок и текущий текст расходятся,
+        # и без успешного отката файл остаётся с чужим значением уровня.
+        base_cfg.write_text(base_cfg.read_text(encoding="utf-8") + "ключ_вне_схемы: 1\n",
+                            encoding="utf-8")
+
+        def boom(*_a, **_kw):
+            raise OSError("disk full")
+        monkeypatch.setattr("onboarding_config_writer.write_text", boom)
+
+        scr._modes_apply(1)
+        await pilot.pause()
+
+        notices = [str(w.render()) for w in scr.query("#set-notice")]
+        assert any(
+            "не сохранено" in n and "конфиг остался изменённым" in n
+            and str(base_cfg.resolve()) in n
+            for n in notices
+        ), notices
+
+
 async def test_overriding_layer_names_the_key_that_actually_diverged(tmp_path, monkeypatch):
     """У пары пресета перекрытыми могут оказаться ОБА ключа — разными слоями.
     Называть надо тот, чьё действующее значение разошлось с записанным, а не
