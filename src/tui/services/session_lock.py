@@ -13,6 +13,7 @@ from typing import Any, Optional
 from thread_store import sanitize_system_id, validate_thread_id
 from tui.services.relative_time import parse_iso_utc
 from utils.atomic_io import atomic_replace
+from utils.user_text import read_user_text_or_none
 
 TTL_SECONDS = 10.0
 HEARTBEAT_MIN_INTERVAL_S = 1.0
@@ -35,10 +36,8 @@ def _now_iso(now: Optional[datetime] = None) -> str:
 
 def read_lock(path: str) -> Optional[dict[str, Any]]:
     """Прочитать lock. None = отсутствует / битый / пустой JSON (как stale)."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            raw = f.read()
-    except OSError:
+    raw = read_user_text_or_none(path)
+    if raw is None:
         return None
     if not raw.strip():
         return None

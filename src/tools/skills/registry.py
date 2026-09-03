@@ -162,7 +162,10 @@ def _load_pack_manifest(
 
     try:
         raw = yaml.safe_load(backend.read(manifest_path)) or {}
-    except (OSError, yaml.YAMLError):
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        # decode — подкласс `ValueError`, а не `OSError`: `backend.read`
+        # поднимает его на действительно бинарном `pack.yaml`, и пакет ронял
+        # весь обход реестра вместо того, чтобы выпасть из него одним пакетом.
         return defaults
 
     if not isinstance(raw, dict):

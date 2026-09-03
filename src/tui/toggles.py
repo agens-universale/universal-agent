@@ -326,12 +326,13 @@ def _profile_file_doc(app: Any, name: str) -> Dict[str, Any]:
     ref = _discovered_profiles(app).get(name)
     if ref is None:
         return {}
+    import yaml
+    from utils.user_text import read_user_text_or_none
+    # Нечитаемый файл роняет палитру на одном наведении курсора (живой смок):
+    # хинт строится на подсветке пункта, до всякого выбора.
     try:
-        import yaml
-        raw = yaml.safe_load(ref.path.read_text(encoding="utf-8")) or {}
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
-        # decode — подкласс `ValueError`, а не `OSError`: чужая кодировка
-        # роняла палитру на одном наведении курсора (живой смок).
+        raw = yaml.safe_load(read_user_text_or_none(ref.path) or "") or {}
+    except yaml.YAMLError:
         return {}
     return raw if isinstance(raw, dict) else {}
 

@@ -11,13 +11,13 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 import yaml
 
 # Синтаксис ${ENV:VAR} — единый источник истины (модуль-владелец резолва).
 from config_modules.env_interpolation import _ENV_MARKER
+from utils.user_text import read_user_text_or_none
 
 
 def parse_document(text: str) -> Dict[str, Any]:
@@ -40,15 +40,10 @@ def read_document(path) -> Dict[str, Any]:
     идёт документ, чей верхний уровень не словарь (список, скаляр): конфигом он не
     является, а вызывающие и `value_at` ждут словарь.
     """
-    try:
-        return parse_document(Path(path).read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError):
-        # `UnicodeDecodeError` — подкласс `ValueError`, а не `OSError`, и мимо
-        # прежнего перехвата уходил наружу. Витрина профилей читает этим ЧУЖИЕ
-        # файлы корня, в том числе неактивные: такой профиль в загрузке не
-        # участвует, кодировку его никто не проверял, и экран настроек падал на
-        # файле, который в этом запуске даже не действует.
-        return {}
+    # Витрина профилей читает этим ЧУЖИЕ файлы корня, в том числе неактивные: такой
+    # профиль в загрузке не участвует, кодировку его никто не проверял, и отказ
+    # ронял экран настроек на файле, который в этом запуске даже не действует.
+    return parse_document(read_user_text_or_none(path) or "")
 
 
 def value_at(document: Any, dotted: str) -> Any:

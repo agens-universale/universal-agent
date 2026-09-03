@@ -13,6 +13,7 @@ from intent_log.serialize import deserialize_list, records_to_jsonl_lines
 from message_format.dialog_history import truncate_text
 from summarize.llm import request_summary_text
 from bundled_assets import bundled_root
+from utils.user_text import read_user_text
 
 _logger = logging.getLogger(__name__)
 
@@ -39,8 +40,9 @@ def _resolve_final_answer_prompt_path(ctx: Any) -> str:
 def _load_prompt_file(path: str) -> str:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Intent scope prompt file not found: {path}")
-    with open(path, "r", encoding="utf-8") as fd:
-        system = fd.read().strip()
+    # Путь задаёт конфиг (`intent_scope_*_prompt_path`) — файл человека, его
+    # кодировку никто не проверял. Отказ обязан назвать файл.
+    system = read_user_text(path).strip()
     if not system:
         raise ValueError(f"Intent scope prompt file is empty: {path}")
     return system
@@ -69,8 +71,7 @@ def _load_system_prompt(ctx: Any) -> str:
         raise FileNotFoundError(
             f"Intent scope prompt file not found: {prompt_path}"
         )
-    with open(prompt_path, "r", encoding="utf-8") as fd:
-        system = fd.read().strip()
+    system = read_user_text(prompt_path).strip()
     if not system:
         raise ValueError(f"Intent scope prompt file is empty: {prompt_path}")
     return system

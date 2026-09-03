@@ -16,6 +16,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
+from utils.user_text import read_user_text
+
 # Имя сабагента = имя тула. Префикс обязателен: по нему `is_subagent_tool`
 # отличает вызов сабагента, а `_normalize_agent_kind` отрезает его, получая kind
 # для имени лог-файла.
@@ -252,10 +254,13 @@ def discover_subagent_definitions(
         if not os.path.isfile(path):
             continue
         try:
-            with open(path, "r", encoding="utf-8") as fd:
-                text = fd.read()
-            definition = parse_subagent_file(path, text)
-        except (OSError, SubagentDefinitionError) as exc:
+            # Файл определения пишет человек — значит и кодировка его, а не наша.
+            # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и мимо
+            # этого перехвата уходил наружу: один файл в чужой кодировке ронял
+            # весь старт агента, хотя обещание модуля — «битый файл не лишает
+            # оператора остальных».
+            definition = parse_subagent_file(path, read_user_text(path))
+        except (OSError, ValueError) as exc:   # ValueError ⊇ SubagentDefinitionError
             _warn(logger, "subagent_definition_invalid error=%s", exc,
                   event="subagent_definition_invalid", diagnostics=diagnostics,
                   path=path, reason=getattr(exc, "reason", str(exc)))

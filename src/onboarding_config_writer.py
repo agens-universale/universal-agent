@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from utils.atomic_io import atomic_replace
+from utils.user_text import read_user_text
 
 
 # Ключ строки — либо квотированный скаляр ЦЕЛИКОМ, либо плоский до первого
@@ -572,13 +573,18 @@ def ensure_pointer_anchor(path, template_path, key: str = "profile") -> None:
     его фоллбэк на шаблон работает только для dotted-ключей (`секция.поле`), а
     конфиги, созданные до появления ключа, этой строки просто не содержат."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    # Чтение — общим читателем: он переводит ОБА класса «не читается» в `ValueError`
+    # с именем файла. Вызывающие (мастер, секция «Режимы») ловят `(ValueError,
+    # OSError)` и печатают «✗ не сохранено: …», но `OSError` доезжал без пути, а
+    # `UnicodeDecodeError` — голой жалобой кодека: человек видел «'utf-8' codec
+    # can't decode byte 0xff» и не знал, какой из конфигов чинить.
+    text = read_user_text(path)
     try:
         find_anchor(text, key)
         return
     except KeyError:
         pass
-    template_text = Path(template_path).read_text(encoding="utf-8")
+    template_text = read_user_text(template_path)
     new_text = insert_missing(text, key, template_text)
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
@@ -629,7 +635,7 @@ def ensure_section_anchor(path, section: str, template_text: str) -> None:
     """`ensure_section_anchor_text` для файла: якорь уже есть — идемпотентный
     no-op (файл не переписывается), иначе атомарная запись текста с якорем."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = read_user_text(path)
     new_text = ensure_section_anchor_text(text, section, template_text)
     if new_text == text:
         return
@@ -700,7 +706,7 @@ def write_values(path, values: dict, *, template_path=None, validate=None) -> li
     Возвращает ключи, которые записать не удалось.
     """
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = read_user_text(path)
     template_text = None
     missing: list[str] = []
     for key, value in values.items():
@@ -712,7 +718,7 @@ def write_values(path, values: dict, *, template_path=None, validate=None) -> li
             pass
         if template_path is not None and "." in key:
             if template_text is None:
-                template_text = Path(template_path).read_text(encoding="utf-8")
+                template_text = read_user_text(template_path)
             try:
                 text = insert_missing(text, key, template_text)
                 text = setter(text, key, value)

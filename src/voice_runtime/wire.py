@@ -101,12 +101,11 @@ def base_config_raw() -> dict:
     import yaml
 
     from config import resolve_config_path
+    from utils.user_text import read_user_text_or_none
 
-    try:
-        with open(resolve_config_path(None), "r", encoding="utf-8") as fh:
-            return yaml.safe_load(fh) or {}
-    except OSError:
-        return {}
+    # Зовётся ПЕРЕД установкой голоса из трёх входов (CLI, мастер, /settings):
+    # непрочитанный конфиг значит «конфликта не видно», а не «установка упала».
+    return yaml.safe_load(read_user_text_or_none(resolve_config_path(None)) or "") or {}
 
 
 def user_voice_conflict(base_raw: dict, port: int) -> Optional[str]:

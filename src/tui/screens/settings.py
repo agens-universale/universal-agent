@@ -950,14 +950,15 @@ class SettingsScreen(Screen):
         что. Ключ — сам текст, поэтому «тот же документ» здесь значит буквально то же
         содержимое, а не «файл вроде бы не трогали»."""
         if self._menu_pass_snapshot is None:
-            from pathlib import Path
             import config_raw
+            from utils.user_text import read_user_text_or_none
             text = ""
             if self._config_path:
-                try:
-                    text = Path(self._config_path).read_text(encoding="utf-8")
-                except OSError:
-                    text = ""
+                # Читается на КАЖДОМ проходе отрисовки меню: отказ здесь роняет весь
+                # экран настроек — ровно там, куда человек и приходит чинить конфиг,
+                # сохранённый в чужой кодировке. Пустой текст = «показать меню без
+                # превью», и это единственный исход, который его не запирает.
+                text = read_user_text_or_none(self._config_path) or ""
             if self._parsed_target is None or self._parsed_target[0] != text:
                 self._parsed_target = (text, config_raw.parse_document(text))
             self._menu_pass_snapshot = self._parsed_target
@@ -986,25 +987,18 @@ class SettingsScreen(Screen):
         а не выигравший по случайности источник)."""
         if not self._config_path:
             return None
-        from pathlib import Path
         from config import profile_mtime_set, resolve_profile_pointer
+        from utils.user_text import read_user_text_or_none
         try:
             pointer = resolve_profile_pointer(self._config_path) or None
             paths = profile_mtime_set(self._config_path, pointer)
         except OSError:
             return None
-        snapshot = []
-        for path in paths:
-            try:
-                snapshot.append((path, Path(path).read_text(encoding="utf-8")))
-            except (OSError, UnicodeDecodeError):
-                # «Нечитаемый» — это и НЕДЕКОДИРУЕМЫЙ (файл сохранён «блокнотом»
-                # в UTF-16): подкласс ValueError, а не OSError, и он уходил мимо
-                # этого молчания — то есть ронял ВЕСЬ экран настроек на рендере
-                # меню (ключ кэша считается для глифа «Модели»), ровно там, куда
-                # человек и приходит чинить такой профиль.
-                snapshot.append((path, None))
-        return tuple(snapshot)
+        # None вместо текста — законная позиция снимка: «файл в наборе есть, но не
+        # читается». Отказ вместо неё ронял ВЕСЬ экран настроек на рендере меню
+        # (ключ кэша считается для глифа «Модели»), ровно там, куда человек и
+        # приходит чинить такой профиль.
+        return tuple((path, read_user_text_or_none(path)) for path in paths)
 
     def _models_verdict(self, text: str) -> str | None:
         """Вердикт валидации секций моделей: `"schema"` — файл не проходит схему (чужая
@@ -1596,15 +1590,13 @@ class SettingsScreen(Screen):
             frame.mount(Static(connection_line_text(self._probe_config),
                                classes="set-hint set-dyn set-probe"))
         elif section == _MODELS:
-            from pathlib import Path
             from config import _default_config_path
             from config_modules.endpoint_presets import endpoint_presets_from_config
             from tui.editors.models_section import ModelsSectionEditor
+            from utils.user_text import read_user_text_or_none
             endpoint, auth, verify, _m, proxy = self._probe_args_from_config()
-            try:
-                template = Path(_default_config_path()).read_text(encoding="utf-8")
-            except OSError:
-                template = ""       # шаблона нет — якорь секции синтезирует сам writer
+            # шаблона нет или он не читается — якорь секции синтезирует сам writer
+            template = read_user_text_or_none(_default_config_path()) or ""
             frame.mount(ModelsSectionEditor(
                 target=self._config_path, template=template,
                 # Что действует НАД основным конфигом: реестр слоя выше и сам слой.
@@ -3236,13 +3228,13 @@ class SettingsScreen(Screen):
             row.update(self._mode_row_text(names[i], i == self._modes_idx))
 
     def _file_snapshot(self, target):
-        """Текст файла до записи — или None, если его ещё нет (тогда откатывать
-        нечего: не было файла, не будет и следа)."""
-        from pathlib import Path
-        try:
-            return Path(target).read_text(encoding="utf-8")
-        except OSError:
-            return None
+        """Текст файла до записи — или None, если его ещё нет либо он не читается
+        (тогда откатывать нечего: не было файла, не будет и следа).
+
+        Зовётся ДО `try` вызывающего — исключение отсюда уходит мимо всех его
+        перехватов и роняет приложение целиком."""
+        from utils.user_text import read_user_text_or_none
+        return read_user_text_or_none(target)
 
     def _restore_snapshot(self, target, snapshot) -> None:
         """Вернуть файл к снимку. Не удалось — молчим: отказ уже показан, а вторая
@@ -3250,11 +3242,15 @@ class SettingsScreen(Screen):
         if snapshot is None:
             return
         from pathlib import Path
-        try:
-            if Path(target).read_text(encoding="utf-8") != snapshot:
+        from utils.user_text import read_user_text_or_none
+        # Нечитаемый текущий файл — не повод бросить откат: снимок писался ПЕРЕД
+        # записью, значит вернуть его надо тем более. Сравнение экономит запись,
+        # но не отменяет её.
+        if read_user_text_or_none(target) != snapshot:
+            try:
                 Path(target).write_text(snapshot, encoding="utf-8")
-        except OSError:
-            pass
+            except OSError:
+                pass
 
     def _overriding_layer_name(self, values: dict) -> str:
         """Как назвать слой, перекрывший записанное значение.
@@ -3950,12 +3946,12 @@ class SettingsScreen(Screen):
         # же, каким виноватый файл называют чтение слоёв и объяснение сломанного
         # конфига. Голой жалобы кодека («'utf-8' codec can't decode byte 0xff» на
         # профиле, сохранённом в UTF-16) человеку не хватает: он не знает, какой
-        # из профилей чинить. `UnicodeDecodeError` — подкласс ValueError, а не
-        # OSError, и ловится здесь вместе с ним.
+        # из профилей чинить.
+        from utils.user_text import read_user_text
         try:
-            profile_text = ref.path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            self._notice(f"✗ не переименовано: {ref.path}: не удалось прочитать: {exc}")
+            profile_text = read_user_text(ref.path)
+        except ValueError as exc:
+            self._notice(f"✗ не переименовано: {exc}")
             return
         try:
             profile_candidate = {new_profile_path: _raw_from_text(profile_text, "профиль")}

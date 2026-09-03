@@ -188,9 +188,14 @@ def load_swarm_stdout_stderr(
     _, _, stdout_path, stderr_path = _swarm_paths(threads_dir, swarm_id)
 
     def _read_lines(path: str) -> List[str]:
+        # `errors="replace"`, а не отказ: байты сюда пишет ПРОИЗВОЛЬНЫЙ CLI в
+        # песочнице, и один невалидный ронял чтение целиком — вместе с ответом
+        # эндпоинта диагностики, куда человек и пришёл за этими логами. Конфиг с
+        # битым байтом использовать нельзя, а лог — можно прочитать, пометив
+        # нечитаемое: тот же приём, что у вывода команд (`bang_shell`).
         if not os.path.exists(path):
             return []
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             return [line.rstrip("\n") for line in f]
 
     return _read_lines(stdout_path), _read_lines(stderr_path)

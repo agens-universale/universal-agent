@@ -53,6 +53,7 @@ from config_modules.layers import (prospective_registry, stack_documents,
 from config_modules.model_registry import LEVELS
 from config_modules.profiles import validate_profile_text
 from config_origin import error_origins
+from utils.user_text import read_user_text
 
 
 class RegistryWriteError(ValueError):
@@ -99,9 +100,9 @@ def _read(target) -> str:
     экран крэшем. Случай достижим: файл НЕАКТИВНОГО профиля в загрузке не
     участвует, его кодировку никто не проверял, а секция в него пишет."""
     try:
-        return Path(target).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise RegistryWriteError(f"{target}: не удалось прочитать: {exc}") from exc
+        return read_user_text(target)
+    except ValueError as exc:
+        raise RegistryWriteError(str(exc)) from exc
 
 
 def _document(text: str) -> dict:

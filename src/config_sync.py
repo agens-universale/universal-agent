@@ -22,6 +22,7 @@ from config import _default_config_path, validate_config_text
 from config_modules import compat
 from onboarding_config_writer import find_anchor, insert_missing, section_end
 from utils.atomic_io import atomic_replace
+from utils.user_text import read_user_text
 
 
 class ResetReport(NamedTuple):
@@ -169,7 +170,11 @@ def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -
     заменяет ровно один файл (`path`)."""
     path = Path(path)
     template_path = Path(template_path or _default_config_path())
-    template_text = template_path.read_text(encoding="utf-8")
+    # Тем же переводом, что и `sync_config`: вызывающий («Сбросить к умолчанию»
+    # в /settings) ловит `ValueError`. Голый `read_text` отдавал ему `OSError`
+    # трейсбеком, а на шаблоне в чужой кодировке (корп-сборка, правленный ассет) —
+    # `UnicodeDecodeError` без имени файла.
+    template_text = read_user_text(template_path)
     validate_config_text(template_text)
 
     ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
@@ -188,19 +193,6 @@ def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -
     return ResetReport(str(backup))
 
 
-def _read_or_explain(path: Path) -> str:
-    """Текст файла либо `ValueError` с ИМЕНЕМ файла.
-
-    Чтение конфига человека отказывает двумя разными классами — `OSError` (нет
-    прав, каталог на месте файла) и `UnicodeDecodeError` (сохранён в UTF-16), и
-    второй лишь по случайности подкласс `ValueError`. Без общего перевода один
-    уходил трейсбеком, а другой — сообщением без пути."""
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise ValueError(f"{path}: не удалось прочитать: {exc}") from exc
-
-
 def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) -> SyncReport:
     path = Path(path)
     template_path = Path(template_path or _default_config_path())
@@ -209,8 +201,8 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
     # `OSError` мимо этого перехвата уходил трейсбеком, а `UnicodeDecodeError`
     # хоть и подкласс `ValueError`, но без имени файла: на конфиге в чужой
     # кодировке человек читал голое «codec can't decode» и не знал, о чём речь.
-    user_text = _read_or_explain(path)
-    template_text = _read_or_explain(template_path)
+    user_text = read_user_text(path)
+    template_text = read_user_text(template_path)
     try:
         user_raw = yaml.safe_load(user_text) or {}
         template_raw = yaml.safe_load(template_text) or {}

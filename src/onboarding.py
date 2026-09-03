@@ -972,12 +972,11 @@ def write_wizard_values(config_path, values: Dict[str, Any], *,
     решает, показывать ли предупреждение); отказ записи — `ValueError`, а когда
     часть уже легла — `PartialWriteError` с именами состоявшихся записей.
     """
-    from pathlib import Path
-
     import onboarding_config_writer as ocw
     from config import _default_config_path, validate_config_text
     from config_modules.layers import profile_pointer_write_target
     from config_modules.registry_write import apply_registry_ops
+    from utils.user_text import read_user_text_or_none
 
     # Что успело лечь — счёт ведётся ЗДЕСЬ, по факту состоявшихся записей: только
     # этот код знает порядок, и только он вправе о нём рассказывать
@@ -991,15 +990,12 @@ def write_wizard_values(config_path, values: Dict[str, Any], *,
             profile_pointer_write_target(config_path), "", base_path=config_path)
         landed.append("profile_pointer")
     template_path = _default_config_path()
-    try:
-        template = Path(template_path).read_text(encoding="utf-8")
-    except OSError:
-        # Шаблон недоступен — это не повод уронить мастер трейсбеком (вызывающие
-        # ловят `ValueError`): якорь отсутствующей секции писатель синтезирует сам
-        # (`ensure_section_anchor_text`), а плоскому ключу без якоря останется
-        # отчёт «не записан». Путь недочитанного шаблона дальше не отдаём: тот же
-        # отказ ждал бы и `write_values`, только уже трейсбеком.
-        template = ""
+    # Шаблон недоступен (нет файла, нет прав, чужая кодировка) — это не повод
+    # уронить мастер трейсбеком: якорь отсутствующей секции писатель синтезирует
+    # сам (`ensure_section_anchor_text`), а плоскому ключу без якоря останется
+    # отчёт «не записан». Путь недочитанного шаблона дальше не отдаём: тот же
+    # отказ ждал бы и `write_values`, только уже трейсбеком.
+    template = read_user_text_or_none(template_path) or ""
     model_keys = set(MODEL_SLOT_KEYS.values())
     flat = {FIELD_ANCHOR_PATHS.get(key, key): value
             for key, value in values.items() if key not in model_keys}

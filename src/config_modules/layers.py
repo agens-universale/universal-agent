@@ -31,6 +31,7 @@ from config_modules.profiles import (
 )
 from config_modules.root import AppConfig
 from mcp_runtime import paths as mcp_paths
+from utils.user_text import read_user_text_or_none, unreadable_reason
 
 # `None` у пути слоя — законное значение («слоя нет»), поэтому «не передано»
 # отмечается отдельным маркером: иначе подмена, вернувшая None, читалась бы как
@@ -106,7 +107,7 @@ def _readable_layer_document(path, subject: str) -> Dict[str, Any]:
     try:
         return _layer_document(path, subject)
     except (OSError, UnicodeDecodeError) as exc:
-        raise ValueError(f"{path}: не удалось прочитать: {exc}") from exc
+        raise ValueError(unreadable_reason(path, exc)) from exc
 
 
 def _candidate_profile_ref(pointer: str, roots: list, candidates: Dict[Path, Dict[str, Any]]
@@ -469,9 +470,12 @@ def _safe_yaml_dict(path) -> Optional[Dict[str, Any]]:
     он подкласс `ValueError`, а не `OSError`, и уходил мимо этого молчания — то есть
     ронял трейсбеком САМО объяснение сломанного конфига, которое зовёт резолв
     указателя первым делом."""
+    text = read_user_text_or_none(path)
+    if text is None:
+        return None
     try:
-        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
         return None
     return raw if isinstance(raw, dict) else None
 

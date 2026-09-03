@@ -19,6 +19,7 @@ from config_modules.compat import apply_compat
 from config_modules.env_interpolation import resolve_env_placeholders
 from config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
 from config_modules.root import AppConfig
+from utils.user_text import unreadable_reason
 
 
 # Бланк нового файла профиля (`onboarding_config_writer.create_profile_file`):
@@ -169,7 +170,7 @@ def _read_yaml_document(path: Path) -> dict:
             except yaml.YAMLError as exc:
                 raise ValueError(f"{path}: невалидный YAML: {exc}") from exc
     except (OSError, UnicodeDecodeError) as exc:
-        raise ValueError(f"{path}: не удалось прочитать: {exc}") from exc
+        raise ValueError(unreadable_reason(path, exc)) from exc
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: профиль должен быть YAML-документом (словарём)")
     return raw
