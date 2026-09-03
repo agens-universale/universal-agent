@@ -67,7 +67,12 @@ def _layer_document(path, subject: str) -> Dict[str, Any]:
     одному файлу. Голый `yaml.safe_load` возвращал сюда `yaml.YAMLError` на
     неразбираемом файле и `dict`-подобное ничто на «- a\\n- b» — обе ошибки шли
     мимо отката и роняли /settings прямо на рендере меню. Не-модельные секции
-    правятся руками, так что негодный слой — рабочий сценарий, а не экзотика."""
+    правятся руками, так что негодный слой — рабочий сценарий, а не экзотика.
+
+    `OSError` наружу уходит ГОЛЫМ — он нужен чтению базы (`config.py::
+    load_config_ex`, своя формулировка). Слои читаются не отсюда напрямую, а
+    через `_readable_layer_document` ниже: граница по нечитаемому файлу стоит
+    там."""
     with open(path, "r", encoding="utf-8") as file:
         try:
             raw = yaml.safe_load(file) or {}
@@ -76,6 +81,28 @@ def _layer_document(path, subject: str) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: {subject} должен быть YAML-объектом")
     return raw
+
+
+def _readable_layer_document(path, subject: str) -> Dict[str, Any]:
+    """`_layer_document` со своей границей по `OSError`: файл слоя НА МЕСТЕ (его
+    и отобрал `isfile`), но не открывается — права, каталог на месте файла,
+    отвалившийся сетевой диск.
+
+    Граница здесь, а не внутри `_layer_document`: голый `OSError` оттуда нужен
+    чтению БАЗЫ (`config.py::load_config_ex`) — там своя формулировка, про
+    базовый файл, а не про слой. Без обёртки нечитаемый слой уходил мимо
+    `except ValueError` ОБЕИХ точек входа (`cli._run_init`, `tui.main`) и мимо
+    всех трёх ступеней лестницы починки (`onboarding.load_config_for_repair`):
+    человек получал трейсбек ровно там, где объяснение и заводили. Формат
+    сообщения — тот же «<path>: …», по которому `explain_broken_config`
+    опознаёт виноватый файл.
+
+    Потребителям, ловящим `(OSError, ValueError)` (pre-write валидация ниже),
+    сужение класса безразлично — откат к одному файлу срабатывает как прежде."""
+    try:
+        return _layer_document(path, subject)
+    except OSError as exc:
+        raise ValueError(f"{path}: не удалось прочитать: {exc}") from exc
 
 
 def _candidate_profile_ref(pointer: str, roots: list, candidates: Dict[Path, Dict[str, Any]]
@@ -192,7 +219,7 @@ def _merge_layers(
         _cand = _candidate_for(managed_path)
         managed_raw = (
             _cand if _cand is not _UNSET
-            else _layer_document(managed_path, "config.local.yml"))
+            else _readable_layer_document(managed_path, "config.local.yml"))
         managed_before_env = managed_raw
         managed_raw = resolve_env_placeholders(managed_raw)
         validate_registry_pairs(managed_raw, source=str(managed_path),
@@ -206,7 +233,7 @@ def _merge_layers(
         _cand = _candidate_for(project_path)
         project_raw = (
             _cand if _cand is not _UNSET
-            else _layer_document(project_path, "проектный config.yml"))
+            else _readable_layer_document(project_path, "проектный config.yml"))
         project_before_env = project_raw
         project_raw = resolve_env_placeholders(project_raw)
         validate_registry_pairs(project_raw, source=project_path,
@@ -392,7 +419,7 @@ def _safe_yaml_dict(path) -> Optional[Dict[str, Any]]:
     return raw if isinstance(raw, dict) else None
 
 
-def resolve_profile_pointer(base_path) -> str:
+def resolve_profile_pointer(base_path, *, candidates=None) -> str:
     """Указатель `profile:` — какое имя назовут слои база → managed → project
     (порядок `_merge_layers`), ЕСЛИ их удастся прочитать, БЕЗ резолва самого
     профиля и без документов слоёв. НЕ симулятор старта: настоящий
@@ -423,13 +450,27 @@ def resolve_profile_pointer(base_path) -> str:
     ревью). Третья редакция (`config_origin._overlay_paths`, через
     `config_raw.read_document`) была снисходительна к битой базе С САМОГО НАЧАЛА —
     именно с ней разошлась ЭТА функция до сегодняшней правки, пока сама не переняла
-    то же правило."""
+    то же правило.
+
+    `candidates` — {путь: документ} вместо чтения ЭТИХ файлов с диска, тем же
+    приёмом, что `_merge_layers` и `config_origin.origins`. Нужен вопросу «сотрёт
+    ли указатель запись вот в этот файл» (`onboarding.load_config_for_repair`):
+    ответ по диску говорит о том, что лежит СЕЙЧАС, а спрашивают о том, что
+    прочтёт следующий старт ПОСЛЕ записи. Считать это отдельной прикидкой нельзя
+    — она и есть четвёртая редакция резолва указателя."""
+    _candidates = {Path(p).resolve(): doc for p, doc in (candidates or {}).items()}
+
+    def _document(path):
+        # `{}` — настоящий (пустой) кандидат, а не «кандидата нет»: `or` их бы спутал.
+        doc = _candidates.get(Path(path).resolve())
+        return _safe_yaml_dict(path) if doc is None else doc
+
     base = Path(base_path)
-    merged = _safe_yaml_dict(base) or {}
+    merged = _document(base) or {}
     for path in (mcp_paths.managed_config_path(), env_vars.project_local_config_path()):
         if not path or os.path.abspath(str(path)) == os.path.abspath(str(base)):
             continue
-        raw = _safe_yaml_dict(path)
+        raw = _document(path)
         if raw is not None:
             merged = deep_merge(merged, raw)
     return str(merged.get("profile") or "").strip()

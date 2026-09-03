@@ -294,6 +294,33 @@ def test_schema_error_in_project_overlay_names_the_overlay(isolated_cwd, tmp_pat
     assert "--reset-config" not in text
 
 
+def test_schema_error_inside_a_list_in_the_overlay_names_the_overlay(isolated_cwd, tmp_path):
+    """Ревью: координата pydantic заходит В СПИСОК (`endpoint_presets.0.name`), и
+    склеенная как есть она не резолвится ни в одном документе — все слои выглядят
+    пустыми, виноватой назначается база, а совет становится
+    `gc-cli --reset-config`. Откат снёс бы модели, MCP и голос, оставив сломанный
+    оверлей на месте, — то есть человека ведут ломать целое ради чужой поломки.
+
+    Координата обрезается до первого нестрокового элемента: `endpoint_presets`
+    резолвится, и слой находится."""
+    from pydantic import ValidationError
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
+    (isolated_cwd / ".gc").mkdir()
+    project = isolated_cwd / ".gc" / "config.yml"
+    project.write_text("endpoint_presets:\n  - name: 1\n    url: u\n", encoding="utf-8")
+
+    exc = _load_and_catch(str(base))
+    assert isinstance(exc, ValidationError)
+    text = explain_broken_config(str(base), exc, program="gc-ua")
+
+    assert f"поправить endpoint_presets в:  {project}" in text
+    assert str(base) not in text.split("Что сделать:")[1]
+    assert "--reset-config" not in text
+
+
 def test_schema_error_in_the_base_still_offers_the_reset(tmp_path, monkeypatch):
     """Отрицательный сторож к правилу отката: тот же дефект схемы в самой базе —
     ключ на базе, откат уместен."""

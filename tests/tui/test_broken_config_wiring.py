@@ -1,7 +1,33 @@
 """gc-ua на сломанном конфиге: объяснение в stderr вместо трейсбека, TuiApp не
 создаётся (падение случается ДО неё — собственный crash-репорт Textual тут не
 поможет, см. tests/tui/test_main_wiring.py — тот же принцип для happy path)."""
+import getpass
+import os
+import subprocess
+
 import pytest
+
+
+def _make_layer_unreadable(path, request):
+    """Настоящий нечитаемый слой: файл НА МЕСТЕ (его пропускает `isfile`, которым
+    слой и отбирается), а `open()` отвечает OSError — права, каталог на месте
+    файла, отвалившийся сетевой диск. Мока намеренно нет: сторож заводили ровно
+    ради этого исхода, и подменённый `open()` доказывал бы только сам себя.
+    Права возвращаются финализатором — иначе tmp_path не уберётся."""
+    if os.name == "nt":
+        user = getpass.getuser()
+        subprocess.run(["icacls", str(path), "/inheritance:r", "/deny", f"{user}:(R)"],
+                       capture_output=True)
+        request.addfinalizer(lambda: subprocess.run(
+            ["icacls", str(path), "/remove:d", user], capture_output=True))
+    else:
+        os.chmod(path, 0)
+        request.addfinalizer(lambda: os.chmod(path, 0o600))
+    try:
+        path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    pytest.skip("слой остался читаемым (права ФС) — стенд негоден")
 
 
 def _fake_app(monkeypatch, created):
@@ -525,3 +551,71 @@ def test_the_repair_wizard_is_not_handed_the_profile_flag(monkeypatch, tmp_path)
     assert rc == 0
     assert captured.get("ran") is True                  # дошли до сборки приложения
     assert captured.get("profile_override") is None     # …и флаг в неё не уехал
+
+
+def test_main_explains_an_unreadable_layer_instead_of_a_traceback(
+    monkeypatch, tmp_path, capsys, request
+):
+    """Ревью, gc-ua: слои читались голым `open()`, и существующий, но
+    неоткрываемый `~/.gc/config.local.yml` уносил OSError мимо `except
+    ValueError` точки входа — трейсбек вместо объяснения, TuiApp ещё не создана,
+    так что и crash-репорт Textual не включился бы."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    base = tmp_path / "config.yml"
+    base.write_text(
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n',
+        encoding="utf-8",
+    )
+    overlay = tmp_path / "config.local.yml"      # managed-слой песочницы conftest
+    overlay.write_text("models:\n  fast: {}\n", encoding="utf-8")
+    _make_layer_unreadable(overlay, request)
+
+    created: list = []
+    _fake_app(monkeypatch, created)
+
+    from tui import main
+    rc = main(argv=["--config", str(base)])
+
+    assert rc == 1
+    assert created == []
+    err = capsys.readouterr().err
+    assert "Конфиг не загружается" in err
+    assert str(overlay) in err
+    assert "не удалось прочитать" in err
+    assert "Traceback" not in err
+
+
+def test_init_config_explains_an_unreadable_layer_instead_of_a_traceback(
+    monkeypatch, tmp_path, capsys, request
+):
+    """Та же поломка на «чинилке» gc-ua: лестница починки ловит ValueError на
+    каждой ступени, и OSError уносил мимо всех трёх. Чужой нечитаемый слой
+    мастером не чинится — объяснение, код 1, TuiApp не создана."""
+    pytest.importorskip("textual")
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "https://openrouter.ai/api/v1/chat/completions"\n',
+        encoding="utf-8",
+    )
+    overlay = tmp_path / "config.local.yml"
+    overlay.write_text("models:\n  fast: {}\n", encoding="utf-8")
+    _make_layer_unreadable(overlay, request)
+
+    created: list = []
+    _fake_app(monkeypatch, created)
+    import tui as tui_mod
+    monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
+
+    from tui import main
+    rc = main(argv=["--init-config"])
+
+    assert rc == 1
+    assert created == []
+    err = capsys.readouterr().err
+    assert "Конфиг не загружается" in err
+    assert str(overlay) in err
+    assert "не удалось прочитать" in err
+    assert "Traceback" not in err

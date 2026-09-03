@@ -1224,3 +1224,151 @@ async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choic
         assert "чистый конфиг" not in hint, hint
         assert "home" in hint            # назван тот профиль, что реально в силе
         assert "сесси" in hint
+
+
+# --- витрины происхождения судят стек ЗАПУСКА, а не указатель из файла ---------
+#
+# `gc-ua --profile ""` — путь отхода, который советует `explain_broken_config`:
+# профиль в файле назван, но в ЭТОМ запуске не работает. Витрина, спросившая диск
+# без действующего оверрайда, называет слой, которого в стеке нет, — и прячет за
+# ним точку починки. Сессионный выбор `/profiles` — та же ось: он тоже часть
+# «действующего», и витрина обязана видеть его немедленно.
+
+
+def _app_launched_with(base_cfg, profile_override):
+    """Приложение, как его собирает `main()` под флагом `--profile`.
+
+    Определение одно на набор — `test_app_reload_config._app_started_with`:
+    вторая копия «как стартует окно» разошлась бы с первой на первой же правке."""
+    from tests.tui.test_app_reload_config import _app_started_with
+    return _app_started_with(base_cfg, profile_override)
+
+
+async def test_registry_origin_judges_the_launch_stack_not_the_pointer(tmp_path, monkeypatch):
+    """`gc-ua --profile ""` при `profile: work` в файле: реестр живёт только в
+    профиле, и в этом запуске уровни НЕ работают. Витрина происхождения, судящая
+    по диску, печатала «реестр перекрыт профилем work» и прятала легаси-редактор
+    вместе с точкой добавления модели — единственное, чем этот конфиг чинится."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    _write(tmp_path / "base" / "profiles" / "work.yml",
+           'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n')
+
+    app = _app_launched_with(base_cfg, "")
+    assert app._config["profile"] == ""          # стек запуска — без профиля
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+
+        origin = scr._registry_origin()
+
+        assert origin.is_overridden is False, origin
+        open_settings_section(scr, "Модели")
+        await pilot.pause()
+        from tui.editors.models_section import ModelsSectionEditor
+        editor = scr.query(ModelsSectionEditor).last()
+        assert editor._legacy_default() is True   # редактор модели на месте
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "реестр перекрыт" not in body, body
+
+
+async def test_registry_origin_sees_the_session_choice(tmp_path, monkeypatch):
+    """Обратная сторона того же правила: указатель в файле пуст, а профиль выбран
+    в сессии (`/profiles`) — реестр перекрыт ИМ, и витрина обязана сказать это
+    сразу, не дожидаясь записи выбора в файл (её не будет)."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml",
+           'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n')
+
+    app = _app_launched_with(base_cfg, None)
+    async with app.run_test() as pilot:
+        # ПОСЛЕ старта: запуск приложения перечитывает набор сессионных ключей и
+        # затирает выставленное до него.
+        app.set_session_override("profile", "home")
+        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+
+        origin = scr._registry_origin()
+
+        assert origin.is_overridden is True, origin
+        assert origin.overlay_kind == "profile:base"
+
+
+async def test_field_origins_judge_the_launch_stack_not_the_pointer(tmp_path, monkeypatch):
+    """Тот же класс у полей визарда (`_read_origins` → маркеры ⚠ «перекрыто»):
+    под `--profile ""` адрес из профиля не действует, и обещание «ваша правка не
+    подействует» — ложь ровно там, где человек чинит конфиг."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    _write(tmp_path / "base" / "profiles" / "work.yml",
+           'backend:\n  completions_url: "http://profile/v1"\n')
+
+    app = _app_launched_with(base_cfg, "")
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+
+        assert scr._origin("completions_url").is_overridden is False
+
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "перекрыто профилем" not in body, body
+
+
+async def test_overriding_layer_name_skips_the_profile_out_of_the_stack(tmp_path, monkeypatch):
+    """Имя перекрывшего слоя после записи: под `--profile ""` ключ перекрыт
+    managed-слоем, а профиль до стека не доехал. Витрина, судящая по диску,
+    называла профиль (он ложится ВЫШЕ managed) и посылала чинить файл, который в
+    этом запуске никого не перекрывает."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      _base_config_text("work") + 'tui:\n  finish_gate_mode: "off"\n')
+    _write(tmp_path / "base" / "profiles" / "work.yml",
+           'tui:\n  finish_gate_mode: "smart"\n')
+    # Managed-слой теста — `tmp_path/config.local.yml` (автофикстура
+    # `_isolated_config_layers`): достаточно его записать.
+    _write(tmp_path / "config.local.yml", 'tui:\n  finish_gate_mode: "on"\n')
+
+    app = _app_launched_with(base_cfg, "")
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+
+        name = scr._overriding_layer_name({"tui.finish_gate_mode": "off"})
+
+        assert "профилем work" not in name, name
+        assert name == "~/.gc/config.local.yml"
+
+
+async def test_voice_override_text_ignores_a_profile_out_of_the_stack(tmp_path, monkeypatch):
+    """Строка честности голосовой секции — та же витрина: под `--profile ""` адрес
+    профиля не действует, и ⚠ о нём — ложная тревога о чужом файле."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml",
+                      _base_config_text("work") + 'voice:\n  url: "http://base-voice/v1"\n')
+    _write(tmp_path / "base" / "profiles" / "work.yml",
+           'voice:\n  url: "http://profile-voice/v1"\n')
+
+    app = _app_launched_with(base_cfg, "")
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+
+        assert scr._voice_override_text() is None

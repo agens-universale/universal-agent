@@ -420,6 +420,31 @@ def test_setup_guide_notes_the_degradation_next_to_the_pending_fields():
     assert "шаблону" not in plain and "сломан" not in plain
 
 
+def test_setup_guide_names_a_nameless_dropped_profile_without_empty_quotes():
+    """Имя снятого профиля подставлялось в оба текста гайда без охраны: пустое
+    имя (указатель есть, а имени за ним нет) печаталось как `профиль "" сломан` —
+    человек читает про профиль с пустым именем и ищет несуществующий файл.
+    У соседа по модулю (`_repair_message`) охрана есть, тексты гайда обязаны
+    вести себя так же."""
+    ready = {
+        "completions_url": "https://real/v1/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer real-token"},
+        "model": "gigacode_agent_v1.6_rc",
+    }
+    pending = {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "model": onboarding.MODEL_SENTINEL,
+    }
+    for cfg in (ready, pending):
+        text = onboarding.setup_guide(
+            "/p", cfg, program="gc-ua",
+            repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, ""))
+        assert "сломан" in text                       # сказать о поломке всё равно надо
+        assert 'профиль "" ' not in text
+        assert 'Профиль "" ' not in text
+
+
 # --- страж сентинелов vs config.default.yml ------------------------------
 
 def test_sentinels_match_default_yaml():

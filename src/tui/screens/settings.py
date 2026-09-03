@@ -380,7 +380,7 @@ class SettingsScreen(Screen):
         self._menu_idx = 0
         self._modes_idx = 0             # курсор строки подэкрана «Режимы работы»
         self._profiles_idx = 0          # курсор строки подэкрана «Профили»
-        self._profiles_disk_cache: dict = {}   # дисковые чтения секции «Профили» на один проход UI
+        self._profiles_disk_cache: dict = {}   # дисковые чтения экрана на один проход UI
         # Под-состояния секции «Профили» (волна B): открытый инлайн-ввод имени
         # ({"mode": "create"|"rename", "original": имя|None}), имя профиля,
         # ждущего подтверждения удаления, и имя ОТКРЫТОГО в редакторе профиля
@@ -693,6 +693,29 @@ class SettingsScreen(Screen):
         values = config_raw.read_values(self._config_path, FIELD_ANCHOR_PATHS.values())
         return {leaf: values[dotted] for leaf, dotted in FIELD_ANCHOR_PATHS.items()}
 
+    def _acting_profile(self):
+        """Профиль, под которым СОБРАН конфиг этого окна, — для `config_origin.origins`
+        (`""` — «без профиля», None — судить нечем, пусть спрашивает указатель у файлов).
+
+        Ответ один на всё приложение — плоский ключ `profile` из `effective_config()`:
+        загрузчик кладёт туда ДЕЙСТВУЮЩЕЕ имя (флаг запуска `--profile` и сессионный
+        выбор `/profiles` включительно), а не указатель из файла; своей редакции
+        вопроса «какой профиль действует» здесь не заводим — она разошлась бы с
+        футером и `/config` на первой же правке.
+
+        Витрины происхождения обязаны судить тот стек, на котором окно ЗАПУЩЕНО:
+        под `gc-ua --profile ""` (путь отхода, который советует сломанный конфиг)
+        диск по-прежнему говорит `profile: work` — и ответ по нему прятал бы точку
+        починки за «перекрыто профилем work», профилем, которого в этом запуске нет.
+
+        Приложения рядом нет (экран собран вне запущенного TUI — так его зовут
+        юнит-тесты витрин) — None: судить не по чему, остаётся ответ по файлам."""
+        try:
+            profile = self.app.effective_config().get("profile")
+        except Exception:
+            return None                  # диагностика не обязана ронять экран
+        return profile if isinstance(profile, str) else None
+
     def _read_origins(self) -> dict:
         """Происхождение полей визарда: что в базовом файле, чем перекрыто, что действует.
 
@@ -702,7 +725,8 @@ class SettingsScreen(Screen):
         from onboarding import FIELD_ANCHOR_PATHS
         if not self._config_path:
             return {}
-        by_dotted = origins(self._config_path, FIELD_ANCHOR_PATHS.values())
+        by_dotted = origins(self._config_path, FIELD_ANCHOR_PATHS.values(),
+                            profile_override=self._acting_profile())
         return {leaf: by_dotted[dotted] for leaf, dotted in FIELD_ANCHOR_PATHS.items()}
 
     def _origin(self, key: str):
@@ -711,14 +735,26 @@ class SettingsScreen(Screen):
 
     def _registry_origin(self):
         """Происхождение реестра `models` — тем же `origins`, что и поля визарда, но
-        свежим чтением на каждый вызов, а не из `_origins`: спрашивает его секция
+        свежим чтением на каждый проход UI, а не из `_origins`: спрашивает его секция
         «Модели» на каждую сборку тела, в том числе сразу после СВОЕЙ записи, когда
         снимки экрана ещё не перечитаны. Судить по ним значило бы видеть снятую
-        запись живой — и рисовать подсказку о слое сверху вместо легаси-редактора."""
+        запись живой — и рисовать подсказку о слое сверху вместо легаси-редактора.
+
+        Ответ живёт проход — в том же кэше, что и дисковые сводки профилей
+        (`_profiles_disk_cache`): за один проход его спрашивают дважды
+        (`_legacy_default()` и тело секции), а стоит он stat managed-слоя, резолва
+        указателя, обхода корней профилей и разбора каждого файла стека. Свежесть та
+        же: кэш сбрасывается там же, где и соседние чтения, — на входе в
+        `_render_view` и сразу после записи секции."""
         from config_origin import origins
         if not self._config_path:
             return None
-        return origins(self._config_path, ["models"])["models"]
+        cache = self._profiles_disk_cache
+        if "registry_origin" not in cache:
+            cache["registry_origin"] = origins(
+                self._config_path, ["models"],
+                profile_override=self._acting_profile())["models"]
+        return cache["registry_origin"]
 
     def _raw_value(self, key: str) -> str:
         """Сырое значение поля строкой; сентинел шаблона / отсутствие → "" (не задано)."""
@@ -1081,7 +1117,7 @@ class SettingsScreen(Screen):
 
     # --- рендер (полная замена тела фрейма, кроме персистентного #set-title) ---
     def _render_view(self) -> None:
-        self._profiles_disk_cache = {}   # новый кадр — данные секции «Профили» перечитываются
+        self._profiles_disk_cache = {}   # новый кадр — дисковые данные экрана перечитываются
         self._menu_pass_snapshot = None  # и цель записи секции «Модели» — тоже
         if self._report_section != self._view:
             # Отчёт живёт в СВОЕЙ секции: сменили — закрылся. А вот перерисовка
@@ -2065,7 +2101,8 @@ class SettingsScreen(Screen):
             return None
         try:
             from config_origin import origins, overlay_label
-            origin = origins(self._config_path, ["voice.url"])["voice.url"]
+            origin = origins(self._config_path, ["voice.url"],
+                             profile_override=self._acting_profile())["voice.url"]
         except Exception:
             return None                  # диагностика не обязана ронять секцию
         if not origin.is_overridden or not origin.effective:
@@ -3215,7 +3252,8 @@ class SettingsScreen(Screen):
             return general
         try:
             from config_origin import origins, overlay_label
-            found = origins(self._config_path, list(values))
+            found = origins(self._config_path, list(values),
+                            profile_override=self._acting_profile())
         except Exception:
             return general              # диагностика не обязана ронять запись
         # Ключ выбираем по РАСХОЖДЕНИЮ с записанным, а не первый перекрытый: у пары

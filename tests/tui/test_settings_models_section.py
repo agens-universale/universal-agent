@@ -2335,3 +2335,42 @@ async def test_form_takes_input_back_when_the_question_is_dismissed(tmp_path):
         assert _cfg_file.read_bytes() == before, "отменённый вопрос тронул файл"
         assert scr.query(ModelEntryForm), "форма ушла вместе с вопросом"
         assert isinstance(scr.focused, Input), "ввод в форму не вернулся"
+
+
+async def test_registry_origin_reads_the_stack_once_per_ui_pass(tmp_path, monkeypatch):
+    """Происхождение реестра стоит целого прохода по стеку — stat managed-слоя,
+    резолв указателя, обход корней профилей и разбор каждого файла, — а за один
+    проход UI его спрашивают дважды: `_legacy_default()` и тело секции.
+
+    Кэш на проход (`_profiles_disk_cache`, тот же, что у сводок профилей) снимает
+    повтор, не трогая свежесть: следующий проход — снова с диска."""
+    import config_raw
+    import tui.app as app_mod
+
+    cfg_file = _write_cfg(tmp_path)
+    cfg = _loaded(cfg_file)
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=cfg, config_path=str(cfg_file))
+        app.push_screen(scr)
+        await pilot.pause()
+        reads: list = []
+        real = config_raw.read_document
+        monkeypatch.setattr(config_raw, "read_document",
+                            lambda path: reads.append(path) or real(path))
+
+        scr._render_view()                 # начало прохода: кэш сброшен
+        await pilot.pause()
+        opened = len(reads)
+        scr._registry_origin()
+        first = len(reads)
+        scr._registry_origin()
+
+        assert first > opened, "первый вызов прохода обязан идти на диск"
+        assert len(reads) == first, "второй вызов того же прохода — из кэша"
+
+        scr._render_view()                 # следующий проход — новый взгляд на диск
+        await pilot.pause()
+        again = len(reads)
+        scr._registry_origin()
+        assert len(reads) > again, "кэш пережил проход — витрина ослепла"

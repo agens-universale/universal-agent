@@ -9,6 +9,7 @@ from typing import Callable
 import onboarding
 import onboarding_fields as _of
 from onboarding import authorization_header, mask_authorization, _valid_endpoint_url  # re-export
+from utils.is_number import is_number
 
 
 class InvalidChoice(ValueError):
@@ -19,13 +20,6 @@ def _tokens(raw: str) -> list:
     return [t for t in re.split(r"[,\s]+", raw.strip()) if t]
 
 
-def _is_number(tok: str) -> bool:
-    """Ровно то, что разберёт `int()`. `isdigit()` шире: надстрочная `²` (и
-    прочие цифры вне категории Nd) проходит его, а `int("²")` падает голым
-    `ValueError` — мастер ронял трейсбек, и ответы до этого места терялись."""
-    return tok.isdecimal()
-
-
 def parse_single(raw: str, n: int):
     toks = _tokens(raw)
     if not toks:
@@ -33,7 +27,7 @@ def parse_single(raw: str, n: int):
     if len(toks) != 1:
         raise InvalidChoice(f"Выберите один пункт: 1–{n}.")
     t = toks[0]
-    if not _is_number(t):
+    if not is_number(t):
         raise InvalidChoice(f"Введите номер 1–{n}.")
     v = int(t)
     if not (1 <= v <= n):
@@ -44,7 +38,7 @@ def parse_single(raw: str, n: int):
 def parse_multi(raw: str, n: int) -> list:
     seen: list = []
     for t in _tokens(raw):
-        if not _is_number(t):
+        if not is_number(t):
             raise InvalidChoice(f"«{t}» — не номер, доступны 1–{n}.")
         v = int(t)
         if not (1 <= v <= n):
@@ -105,7 +99,7 @@ def _interpret(raw: str, models, shown) -> tuple:
         return "keep", ""
     if raw == "*":
         return "all", ""
-    if _is_number(raw) and 1 <= int(raw) <= len(shown):
+    if is_number(raw) and 1 <= int(raw) <= len(shown):
         return "pick", shown[int(raw) - 1].id
     exact = _exact_model(models, raw)
     if exact is not None:

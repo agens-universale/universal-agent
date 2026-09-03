@@ -121,6 +121,108 @@ def test_pointer_in_managed_layer_is_named_and_no_deactivation_is_promised(stand
     assert "снять нужно там" in loaded.message
 
 
+def test_pointer_named_by_two_layers_is_deactivated_where_the_write_lands(stand):
+    """Ревью: признак деактивации спрашивал, ЧЕЙ слой назвал профиль, — а вопрос
+    стоит иначе: сотрёт ли указатель запись в тот файл, куда мастер пишет.
+
+    Ответы расходятся, когда указатель называют два слоя ОДИНАКОВО: managed
+    задаёт значение первым, проектный повторяет его — и слоем-изменившим числится
+    managed, хотя при чтении побеждает проектный. Туда же (правило адреса записи)
+    ложится и снятие, то есть указатель стирается. Мастер отказывался снимать то,
+    что снял бы, и оставлял человека в тупике, ради которого лестница заведена.
+
+    Доказательство — не признаком, а концом: с этим признаком мастер дописывает
+    починку, и следующий старт настоящим загрузчиком поднимается БЕЗ профиля."""
+    (stand / "config.yml").write_text(_BASE_OK.replace('profile: "work"\n', ""),
+                                      encoding="utf-8")
+    (stand / "config.local.yml").write_text('profile: "work"\n', encoding="utf-8")
+    project_gc = stand.parent / "project" / ".gc"
+    project_gc.mkdir()
+    (project_gc / "config.yml").write_text('profile: "work"\n', encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+
+    assert loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
+    assert loaded.profile == "work"
+    assert loaded.deactivate_profile is True
+    assert "мастер его не снимет" not in loaded.message
+
+    onboarding.write_wizard_values(
+        stand / "config.yml", dict(_WIZARD_ANSWERS),
+        deactivate_profile=loaded.deactivate_profile)
+
+    assert _load_yaml(project_gc / "config.yml").get("profile") == ""
+    from config import load_config_ex
+    _config, meta = load_config_ex(None)
+    assert meta.active_name in (None, "")
+
+
+def test_a_pointer_repeated_by_managed_over_the_base_is_not_promised(stand):
+    """Обратная раскладка того же вопроса: указатель назвала база, а managed
+    повторил его. Адрес записи — база, но снятие там managed перекроет, и
+    указатель переживёт запись: обещать деактивацию нельзя.
+
+    Признак по виду слоя отвечал здесь True — база задала значение первой, а
+    managed его «не менял», — и мастер клал в базу пустой якорь, после которого
+    гейт всё равно отвергал собственную починку."""
+    (stand / "config.yml").write_text(_BASE_OK, encoding="utf-8")
+    managed = stand / "config.local.yml"
+    managed.write_text('profile: "work"\n', encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+
+    assert loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
+    assert loaded.profile == "work"
+    assert loaded.deactivate_profile is False
+    assert str(managed) in loaded.message
+
+
+def test_guide_keeps_the_registry_note_when_the_profile_is_not_deactivated(stand):
+    """Ревью: гайд без TTY (`gc-cli --init-config`) выводил «профиль будет снят» из
+    СТУПЕНИ лестницы, а экран мастера — из признака деактивации. На managed-стадии
+    они расходятся: указатель мастеру не снять, профиль переживёт запись и
+    продолжит перекрывать реестр, — а ремарка «действует реестр моделей из другого
+    слоя» на этой поверхности глохла. Человек выбирал модель, мастер писал её в
+    базу, работал слот профиля, и никто об этом не предупреждал; экран мастера на
+    том же конфиге предупреждал. Признак — один, тот же, что у экрана."""
+    (stand / "config.yml").write_text(_BASE_OK.replace('profile: "work"\n', ""),
+                                      encoding="utf-8")
+    (stand / "config.local.yml").write_text('profile: "work"\n', encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    assert loaded.deactivate_profile is False          # предпосылка расхождения
+
+    guide = onboarding.setup_guide(str(stand / "config.yml"), loaded.config,
+                                   program="gc-cli", repair=loaded)
+    assert "действует реестр моделей из другого слоя" in guide
+
+
+def test_guide_drops_the_registry_note_when_the_profile_will_be_deactivated(stand):
+    """Обратный сторож: указатель в базе, финал его снимет — перекрыть выбор
+    профиль уже не сможет, и ремарка о чужом реестре противоречила бы соседней
+    строке о деактивации (живой смок)."""
+    (stand / "config.yml").write_text(_BASE_OK, encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    assert loaded.deactivate_profile is True           # предпосылка
+
+    guide = onboarding.setup_guide(str(stand / "config.yml"), loaded.config,
+                                   program="gc-cli", repair=loaded)
+    assert "действует реестр моделей из другого слоя" not in guide
+
+
 def test_healthy_config_drops_no_profile(stand):
     """Ступень `full`: снятого профиля нет и снимать нечего — оба поля пусты,
     хотя профиль активен."""
@@ -169,6 +271,37 @@ def test_broken_base_falls_back_to_template_usable_by_runtime(stand):
     from thread_store import resolve_threads_dir
     assert resolve_threads_dir(loaded.config)
     assert loaded.message
+
+
+def test_template_stage_still_says_so_when_the_overlays_cover_every_field(stand):
+    """Шаблон несёт сентинелы всех обязательных полей — но закрывают их ВЕРХНИЕ
+    слои, и «ступень шаблона, требований не осталось» вполне достижима: база не
+    читается, а проектный `.gc/config.yml` задаёт адрес, токен и модель.
+
+    Сторож ветки, а не новое поведение: её уже принимали за мёртвую. Без неё гайд
+    печатает «Конфиг настроен — можно запускать» поверх нечитаемого файла
+    человека, о котором не сказано ни слова."""
+    (stand / "config.yml").write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+    project_gc = stand.parent / "project" / ".gc"
+    project_gc.mkdir()
+    (project_gc / "config.yml").write_text(
+        "backend:\n"
+        "  api_mode: chat_completions\n"
+        '  completions_url: "https://real/v1/chat/completions"\n'
+        "  chat_completion_headers:\n"
+        '    Authorization: "Bearer sk-real"\n'
+        "agent:\n"
+        '  model: "real-model"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+
+    assert loaded.stage == onboarding.REPAIR_STAGE_TEMPLATE
+    assert onboarding.pending_requirements(loaded.config) == []
+    guide = onboarding.setup_guide(str(stand / "config.yml"), loaded.config, repair=loaded)
+    assert "можно запускать" not in guide
+    assert "показан пакетный шаблон" in guide
+    assert "gc-cli --reset-config" in guide
 
 
 def test_broken_base_and_broken_profile_still_lands_on_template(stand):

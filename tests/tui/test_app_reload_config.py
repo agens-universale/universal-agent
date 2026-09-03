@@ -361,30 +361,103 @@ def test_session_choice_still_wins_over_the_profile_flag(_profile_stack):
     assert app.effective_config()["profile"] == ""     # действует выбор сессии
 
 
-def test_a_vanished_flag_profile_is_dropped_with_a_notice_not_a_dead_window(_profile_stack):
-    """Профиль флага удалили/переименовали под ногами: перечитывание не имеет права
-    ни падать на каждом вызове, ни молча подменять профиль. Флаг снимается с
-    уведомлением — той же санацией, что и сессионный выбор (§9.4), — и действует
-    указатель файла."""
-    from runtime_notices import collect_runtime_notices
-    cfg_file, profiles = _profile_stack
-    (profiles / "corp.yml").write_text(
-        'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n',
-        encoding="utf-8")
+_CORP = 'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n'
+
+
+def _app_that_could_lose_the_flag(cfg_file, profiles):
+    """Стек, из которого флаг РЕАЛЬНО может выпасть: указатель базы пуст (без
+    профиля база собирается), профиль флага `corp` — на диске.
+
+    Дефолтный `_profile_stack` для этого не годится: там указатель ведёт на битый
+    `work`, и подмена профиля указателем упала бы сама — «флаг на месте» зеленело
+    бы, ничего не проверив."""
     cfg_file.write_text(
         'profile: ""\nbackend:\n  completions_url: "http://x/v1"\n'
         'models:\n  gc:\n    model: "base-m"\n', encoding="utf-8")
-    app = _app_started_with(cfg_file, "corp")
-    (profiles / "corp.yml").unlink()
+    (profiles / "corp.yml").write_text(_CORP, encoding="utf-8")
+    return _app_started_with(cfg_file, "corp")
 
-    app.reload_config()                      # профиля флага больше нет
 
-    assert app._profile_override is None
-    assert app._config["profile"] == ""
-    codes = [n.code for n in collect_runtime_notices()]
-    assert "profile_flag_stale" in codes, codes
-    app.reload_config()                      # и дальше живёт указателем файла
-    assert app._config["profile"] == ""
+def test_a_vanished_flag_profile_keeps_the_flag_and_the_previous_base(_profile_stack):
+    """Профиль флага пропал под ногами: окно остаётся на прежней базе с причиной в
+    `/notices` — той же деградацией, что и на битом config.yml, — и НЕ подменяет
+    профиль указателем из файла.
+
+    Флаг переживает отказ: он свойство запуска, а не файла, и снятый однажды не
+    возвращается — `--profile ""` тем же вечером молча воскресил бы сломанный
+    профиль на первом сохранении из /settings. Снимок мтайм-набора отказ не
+    двигает, поэтому следующий заход в Настройки пробует снова: вернули файл —
+    окно чинится само."""
+    from runtime_notices import collect_runtime_notices
+    cfg_file, profiles = _profile_stack
+    corp = profiles / "corp.yml"
+    app = _app_that_could_lose_the_flag(cfg_file, profiles)
+    corp.unlink()
+
+    app.reload_config_if_changed()           # профиля флага больше нет
+
+    assert app._profile_override == "corp"
+    assert app._config["profile"] == "corp"          # база — прежняя, не подменённая
+    notices = [n for n in collect_runtime_notices() if n.code == "config_reload_failed"]
+    assert notices, collect_runtime_notices()
+    # Причина названа флагом, а не одним лишь config.yml: чинить надо профиль.
+    assert 'профиль "corp" из флага --profile' in notices[-1].message
+
+    corp.write_text(_CORP, encoding="utf-8")
+    _bump_mtime(corp)
+    app.reload_config_if_changed()           # вернули файл — окно чинится само
+
+    assert app._profile_override == "corp"
+    assert "corp" in app._config["models"]
+
+
+def test_a_broken_write_race_on_the_flag_profile_does_not_lose_the_flag(_profile_stack):
+    """Соседнее окно (или редактор) пишет файл профиля в момент перечитки: половина
+    YAML — это не «профиль исчез навсегда», и отличить одно от другого одной
+    неудачной попыткой нечем. Поэтому не гасим ничего: прежняя база, причина в
+    уведомлении, следующая попытка — на дописанном файле."""
+    cfg_file, profiles = _profile_stack
+    corp = profiles / "corp.yml"
+    app = _app_that_could_lose_the_flag(cfg_file, profiles)
+    corp.write_text("models:\n  corp:\n   model: [\n", encoding="utf-8")   # недописанный файл
+    _bump_mtime(corp)
+
+    app.reload_config_if_changed()
+
+    assert app._profile_override == "corp"
+    assert app._config["profile"] == "corp"          # и профиль не подменён базой
+    corp.write_text(                                                       # запись дописана
+        'models:\n  corp:\n    model: "corp-m"\n  extra:\n    model: "x"\n'
+        'slots:\n  default: "corp"\n', encoding="utf-8")
+    _bump_mtime(corp, seconds=10.0)
+    app.reload_config_if_changed()
+
+    assert "extra" in app._config["models"]
+
+
+def test_a_bug_inside_the_loader_is_not_relabelled_as_a_stale_profile(
+        _profile_stack, monkeypatch):
+    """`TypeError`/`KeyError` из загрузчика — дефект кода, а не «профиль больше не
+    собирается»: под флагом ловим только классы, которыми загрузчик докладывает о
+    СОСТОЯНИИ файлов (`ValueError`/`OSError`), остальное летит как есть — иначе
+    первый же баг в схеме живёт под видом сломанного профиля."""
+    import config as cfg_mod
+    cfg_file, profiles = _profile_stack
+    app = _app_that_could_lose_the_flag(cfg_file, profiles)
+    real = cfg_mod.load_config_ex
+
+    def boom(path=None, **kw):
+        # Ломается ТОЛЬКО сборка под флагом: сборка по указателю обязана
+        # оставаться рабочей, иначе тест краснел бы на её отказе, а не на том,
+        # проглочен ли дефект кода под видом протухшего профиля.
+        if kw.get("profile_override") is not None:
+            raise TypeError("схема поехала")
+        return real(path, **kw)
+
+    monkeypatch.setattr(cfg_mod, "load_config_ex", boom)
+
+    with pytest.raises(TypeError):
+        app.reload_config()
 
 
 # --- screen_config: единая точка получения базы для ОТКРЫТИЯ экрана ---

@@ -5,8 +5,13 @@
 такого стража на точке входа раньше не было вовсе (см. tests/tui/
 test_main_wiring.py: тот же принцип для gc-ua).
 """
+import getpass
 import importlib
+import os
+import subprocess
 import sys
+
+import pytest
 
 # `import cli` парсит sys.argv на импорте — пин валидного argv, чтобы файл
 # гонялся детерминированно при любом способе запуска pytest (тот же приём,
@@ -14,6 +19,28 @@ import sys
 sys.argv = ["gc-cli", "-q", "x"]
 
 import cli  # noqa: E402
+
+
+def _make_layer_unreadable(path, request):
+    """Настоящий нечитаемый слой: файл НА МЕСТЕ (его пропускает `isfile`, которым
+    слой и отбирается), а `open()` отвечает OSError — права, каталог на месте
+    файла, отвалившийся сетевой диск. Мока намеренно нет: сторож заводили ровно
+    ради этого исхода, и подменённый `open()` доказывал бы только сам себя.
+    Права возвращаются финализатором — иначе tmp_path не уберётся."""
+    if os.name == "nt":
+        user = getpass.getuser()
+        subprocess.run(["icacls", str(path), "/inheritance:r", "/deny", f"{user}:(R)"],
+                       capture_output=True)
+        request.addfinalizer(lambda: subprocess.run(
+            ["icacls", str(path), "/remove:d", user], capture_output=True))
+    else:
+        os.chmod(path, 0)
+        request.addfinalizer(lambda: os.chmod(path, 0o600))
+    try:
+        path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    pytest.skip("слой остался читаемым (права ФС) — стенд негоден")
 
 
 def _reload_arg_parser_with_argv(argv, monkeypatch):
@@ -401,3 +428,64 @@ def test_run_init_does_not_promise_a_deactivation_the_writer_cannot_do(monkeypat
     import onboarding
     assert onboarding.load_config_for_repair().stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
     assert seen["deactivate"] is False
+
+
+def test_main_explains_an_unreadable_layer_instead_of_a_traceback(
+    monkeypatch, tmp_path, capsys, request
+):
+    """Ревью: сторож точки входа ловит только ValueError, а слои читались голым
+    `open()` — существующий, но неоткрываемый `~/.gc/config.local.yml` уносил
+    OSError мимо него, и человек получал трейсбек ровно там, где объяснение и
+    заводили. Исход обязан быть тот же, что на битом YAML: код 1, имя файла."""
+    base = tmp_path / "base.yml"
+    base.write_text(
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n',
+        encoding="utf-8",
+    )
+    overlay = tmp_path / "config.local.yml"      # managed-слой песочницы conftest
+    overlay.write_text("models:\n  fast: {}\n", encoding="utf-8")
+    _make_layer_unreadable(overlay, request)
+
+    _reload_arg_parser_with_argv(["gc-cli", "--config", str(base), "-q", "x"], monkeypatch)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    rc = cli.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Конфиг не загружается" in err
+    assert str(overlay) in err
+    assert "не удалось прочитать" in err
+    assert "Traceback" not in err
+
+
+def test_run_init_explains_an_unreadable_layer_instead_of_a_traceback(
+    monkeypatch, tmp_path, capsys, request
+):
+    """Та же поломка на «чинилке»: лестница починки ловит ValueError на каждой
+    ступени, и OSError уносил мимо всех трёх. Мастером нечитаемый чужой слой не
+    чинится — объяснение и код 1, до мастера не доходим."""
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "https://openrouter.ai/api/v1/chat/completions"\n',
+        encoding="utf-8",
+    )
+    overlay = tmp_path / "config.local.yml"
+    overlay.write_text("models:\n  fast: {}\n", encoding="utf-8")
+    _make_layer_unreadable(overlay, request)
+
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    reached = []
+    import onboarding_wizard
+    monkeypatch.setattr(onboarding_wizard, "run", lambda *a, **k: reached.append(1) or True)
+
+    assert cli._run_init() == 1
+    assert reached == []
+    err = capsys.readouterr().err
+    assert "Конфиг не загружается" in err
+    assert str(overlay) in err
+    assert "не удалось прочитать" in err
+    assert "Traceback" not in err

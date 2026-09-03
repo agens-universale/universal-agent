@@ -391,9 +391,10 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
     что соберёт следующий старт: без профиля «настроен — можно запускать» врало
     бы человеку, чей старт с профилем падает той же ошибкой (ревью), а на
     шаблоне перечисленные поля — поля шаблона, а не его файла. Гайд говорит и
-    это. Ремарка о реестре из другого слоя на ступени без профиля судится без
-    профиля (`ignore_profile`): он снят, и второе предупреждение противоречило
-    бы первому.
+    это. Ремарка о реестре из другого слоя судится без профиля (`ignore_profile`)
+    ровно тогда, когда финал его СНИМЕТ (`repair.deactivate_profile`): второе
+    предупреждение противоречило бы первому. Неснимаемый профиль перекрывать не
+    перестанет — там ремарка остаётся.
 
     Путь показывается абсолютным (`_display_path`) — той же причиной, что и у
     `explain_broken_config`: относительный бессмыслен вне момента запуска.
@@ -406,14 +407,24 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
         return os.path.abspath(path) if path else path
 
     stage = repair.stage if repair is not None else REPAIR_STAGE_FULL
-    dropped = repair.profile if repair is not None else ""
+    # Имя снятого профиля — под охраной: пустое (указатель есть, а имени за ним
+    # нет) печаталось как `профиль "" сломан` и отправляло человека искать
+    # несуществующий файл. Та же охрана — у соседнего `_repair_message`.
+    named = f' "{repair.profile}"' if repair is not None and repair.profile else ""
+    # Перекроет ли профиль выбор человека — вопрос к признаку деактивации, а не к
+    # ступени: на ступени без профиля указатель бывает неснимаемым (лежит в
+    # managed), и тогда профиль переживает запись и продолжает перекрывать реестр.
+    # Тот же признак спрашивает вторая поверхность (экран мастера,
+    # `tui/screens/onboarding.py::_layer_note`) — выведенный из ступени, он глушил
+    # ремарку там, где экран её показывает.
     profile_note = overriding_layer_note(
-        config, config_path, ignore_profile=stage == REPAIR_STAGE_WITHOUT_PROFILE)
+        config, config_path,
+        ignore_profile=repair.deactivate_profile if repair is not None else False)
     pending = pending_requirements(config)
     if not pending:
         if stage == REPAIR_STAGE_WITHOUT_PROFILE:
             base = (f"[gc] Обязательные поля заполнены: {_display_path(config_path)} — но "
-                    f'профиль "{dropped}" сломан, и запуск с ним не поднимется: почините '
+                    f"профиль{named} сломан, и запуск с ним не поднимется: почините "
                     f"профиль или снимите указатель; запуск без него — "
                     f'{program} --profile "".')
         elif stage == REPAIR_STAGE_TEMPLATE:
@@ -435,7 +446,7 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
         )
     if stage == REPAIR_STAGE_WITHOUT_PROFILE:
         note += (
-            f'\n  Профиль "{dropped}" сломан — запуск с ним не поднимется, пока он не\n'
+            f"\n  Профиль{named} сломан — запуск с ним не поднимется, пока он не\n"
             f'  починен или не снят (запуск без него: {program} --profile "").\n'
         )
     elif stage == REPAIR_STAGE_TEMPLATE:
@@ -478,6 +489,33 @@ _BROKEN_CONFIG_LAYER_LABELS = {
 }
 
 
+def _schema_error_keys(exc) -> List[str]:
+    """Координаты ошибок схемы (pydantic `err["loc"]`) → dotted-пути, РЕЗОЛВИМЫЕ в
+    документах слоёв, без повторов.
+
+    `loc` заходит внутрь списков (`endpoint_presets.0.name`,
+    `tool_usage_notice.2`), а поиск по документу идёт только ключами словарей
+    (`config_raw.value_at`) — склеенная как есть такая координата не находится
+    НИГДЕ, все слои выглядят пустыми, и виновником назначается база. Человеку
+    тогда советуют откатить конфиг: откат подменит базу, потеряв его модели, MCP
+    и голос, а сломанный оверлей останется на месте — то есть ломать целое ради
+    чужой поломки. Обрезаем по первому нестроковому элементу: секция списка —
+    самая точная координата, которую слои ещё умеют показать. Обрезка сливает
+    соседей по одному списку в один путь, поэтому повторы отсеиваются: иначе
+    строка совета называла бы одну и ту же секцию дважды."""
+    keys: List[str] = []
+    for err in exc.errors():
+        parts: List[str] = []
+        for part in err["loc"]:
+            if not isinstance(part, str):
+                break
+            parts.append(part)
+        key = ".".join(parts)
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
 def explain_broken_config(config_path: str, exc: Exception, *, program: str = "gc-cli",
                           profile_override: Optional[str] = None) -> str:
     """Человекочитаемое объяснение вместо трейсбека, когда `load_config_ex()` не
@@ -497,11 +535,13 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     «что сделать» — от точечной починки к обходу и лишь затем к грубому откату
     (решение владельца: откат последний, он теряет модели, MCP и голос).
 
-    Файл(ы) для починки называет `config_origin.error_origins` — общее с отказом
-    записи ядро «текст ошибки → файлы, где лежат названные ею ключи» (закрытый
-    список подозреваемых, координата — голова "; "-сегмента, `origins()` за
-    файлом). Ошибка схемы координаты текстом не несёт — они в `loc` pydantic, и
-    их отдаёт то же ядро через `key_origins`: иначе дефект проектного оверлея
+    Файл(ы) для починки называет общее с отказом записи ядро «названные ошибкой
+    ключи → файлы, где они лежат»: координаты — `config_origin.error_keys`
+    (закрытый список подозреваемых, координата — голова "; "-сегмента), файлы —
+    `key_origins()` за ними. Разбор текста ОДИН на всё объяснение: те же
+    координаты решают и совет про профиль из флага. Ошибка схемы координаты
+    текстом не несёт — они в `loc` pydantic, и к резолвимому виду их приводит
+    `_schema_error_keys`; дальше то же ядро, иначе дефект проектного оверлея
     приписывался базе (ревью). Не нашли ни одного ключа (битый YAML, нечитаемый
     файл) — сопоставлять нечего, совет становится «поправить файл: <путь>», где
     путь — тот, что называет сама ошибка (слои пишут «<path>: …», см.
@@ -526,7 +566,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     from pydantic import ValidationError as _ValidationError
 
     from config_modules.layers import resolve_profile_pointer
-    from config_origin import _overlay_paths, error_keys, error_origins, key_origins
+    from config_origin import _overlay_paths, error_keys, key_origins
 
     def _display_path(path) -> str:
         return os.path.abspath(path)
@@ -542,15 +582,16 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
         for kind, path in participants
     ]
 
+    # Координаты названных ошибкой ключей — ОДИН разбор на всё объяснение: их
+    # спрашивают и виновники, и совет про профиль из флага. Второе чтение той же
+    # строки — второе прочтение одного правила, и разъезжаются они молча.
     if isinstance(exc, _ValidationError):
         error_text = f"конфиг не проходит схему: {exc}"
-        culprits = key_origins(
-            config_path,
-            [".".join(str(part) for part in err["loc"]) for err in exc.errors() if err["loc"]],
-            profile_override=profile_override)
+        keys = _schema_error_keys(exc)
     else:
         error_text = str(exc)
-        culprits = error_origins(config_path, error_text, profile_override=profile_override)
+        keys = error_keys(error_text)
+    culprits = key_origins(config_path, keys, profile_override=profile_override)
 
     fix_lines: list[str] = []
     base_to_blame = any(culprit.kind == "base" for culprit in culprits)
@@ -558,7 +599,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
         for culprit in culprits:
             fix_lines.append(
                 f"поправить {', '.join(culprit.keys)} в:  {_display_path(culprit.path)}")
-    elif flagged and "profile" in error_keys(error_text):
+    elif flagged and "profile" in keys:
         # Ошибка про сам указатель, а он пришёл из флага: файла-виновника нет
         # (не найден или зарезервирован — в обоих случаях такого профиля нет).
         fix_lines.append(
@@ -605,13 +646,16 @@ class RepairLoad(NamedTuple):
     пусто — на ступени `full` профиль активен, но не снимался): поверхности
     называют его, не разбирая текст сообщения.
 
-    `deactivate_profile` — может ли финал мастера снять указатель этого профиля
-    (`write_wizard_values(deactivate_profile=...)`). True только на ступени
-    `without_profile`, когда указатель лежит там, куда правило адреса записи
-    (`layers.profile_pointer_write_target`) умеет писать, — в базе или проектном
-    слое. Указатель в managed-файле правило не рассматривает: снятие писало бы
-    пустой якорь в базу, а managed поднимал бы тот же сломанный профиль, и гейт
-    отвергал бы запись (ревью D3) — тогда False, и сообщение называет файл.
+    `deactivate_profile` — СОТРЁТ ли указатель этого профиля запись, которую
+    сделает финал мастера (`write_wizard_values(deactivate_profile=...)`). True
+    только на ступени `without_profile` и только когда `profile: ""`, легший по
+    правилу адреса записи (`layers.profile_pointer_write_target`), действительно
+    обнуляет указатель для следующего старта. Признак, выведенный из ВИДА слоя,
+    отвечал не на тот вопрос: указатель, названный двумя слоями одинаково,
+    приписан первому из них, а при чтении побеждает последний. Не сотрёт
+    (указатель держит слой, в который правило адреса писать не станет, — managed:
+    снятие ушло бы в базу, а managed поднимал бы тот же сломанный профиль, и гейт
+    отверг бы запись, ревью D3) — тогда False, и сообщение называет файл.
     Обе точки входа (`cli._run_init`, `tui.main`) берут ИМЕННО это поле: признак,
     выведенный из одной лишь ступени, обещал человеку деактивацию, которой не
     будет, и успевал положить пустой якорь профиля в базу."""
@@ -710,16 +754,28 @@ def load_config_for_repair() -> RepairLoad:
         return RepairLoad(config, meta, REPAIR_STAGE_TEMPLATE,
                           _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""), "", False)
 
-    from config_modules.layers import resolve_profile_pointer
+    from config_modules.layers import profile_pointer_write_target, resolve_profile_pointer
     from config_origin import origins
 
     base_path = resolve_config_path(None)
     profile = resolve_profile_pointer(base_path)
-    # Чей слой назвал указатель — тем же `origins`, что и витрина происхождения
-    # полей: managed правило адреса записи не рассматривает, и снятие оттуда
-    # мастеру недоступно (см. `RepairLoad.deactivate_profile`).
-    pointer = origins(base_path, ["profile"], profile_override="")["profile"]
-    pinned_by = pointer.overlay_path if pointer.overlay_kind == "managed" else None
+    # Сотрёт ли указатель запись финала мастера — спрашивается ПОДСТАНОВКОЙ: в стек
+    # кандидатом кладётся документ адреса записи со снятым указателем, и тот же
+    # резолв, каким указатель читает следующий старт, отвечает, что от него
+    # останется. Вопрос «чей слой назвал профиль» (`origins`) на это не отвечает:
+    # он приписывает значение ПЕРВОМУ слою, задавшему его, а при чтении побеждает
+    # ПОСЛЕДНИЙ — указатель, названный managed и повторённый проектным слоем,
+    # выглядел неснимаемым, хотя запись легла бы в проектный и сработала.
+    target = profile_pointer_write_target(base_path)
+    erased = dict(config_raw.read_document(target))
+    erased["profile"] = ""
+    pinned_by = None
+    if resolve_profile_pointer(base_path, candidates={target: erased}):
+        # Указатель запись переживёт — человеку нужен файл, где он лежит: слой
+        # называет та же витрина происхождения, спрошенная по тому же стеку.
+        survivor = origins(base_path, ["profile"], candidates={target: erased},
+                           profile_override="")["profile"]
+        pinned_by = survivor.overlay_path or str(base_path)
     return RepairLoad(config, meta, REPAIR_STAGE_WITHOUT_PROFILE,
                       _repair_message(REPAIR_STAGE_WITHOUT_PROFILE, broken, profile, pinned_by),
                       profile, pinned_by is None)

@@ -1500,8 +1500,8 @@ async def test_activation_under_an_empty_profile_flag_says_the_launch_stays_bare
 
 async def test_rename_of_the_flag_profile_moves_the_flag_with_it(tmp_path, monkeypatch):
     """Переименован профиль, выбранный флагом: флаг едет за именем — как сессионный
-    выбор (ruling координатора), — иначе следующее перечитывание не нашло бы
-    профиль флага и сняло бы его санацией с уведомлением о пропаже."""
+    выбор (ruling координатора), — иначе следующее перечитывание не нашло бы профиль
+    флага и отказалось бы собирать базу, оставив окно на прежней («не перечитан»)."""
     clear_runtime_notices()
     project_dir = tmp_path / "project"
     project_dir.mkdir()
