@@ -268,13 +268,14 @@ async def test_an_own_entry_shows_the_keys_it_inherits_per_key(tmp_path, monkeyp
     """Строки слиты по алиасу ПОКЛЮЧНО — тем же `deep_merge`, каким собирает
     запись загрузчик, и витрина обязана показывать то же, что будет работать.
     Профиль задал только `model` — адрес продолжает доставаться от записи
-    основного конфига, а хвост ячейки честно говорит, что он не свой."""
+    основного конфига, а хвост ячейки честно говорит, что он не свой и ОТКУДА он:
+    от заслонённой записи, а не из «Подключения»."""
     profile = ("models:\n"
                "  flash:\n"
                '    model: "google/gemini-3.0-flash"\n')
     async with _profile_view(tmp_path, monkeypatch, profile=profile) as (_p, _scr, ed):
         ed._row_width = lambda: 100
-        assert ed._address_cell("flash") == "flash-host · адрес из «Подключения»"
+        assert ed._address_cell("flash") == "flash-host · адрес из основного конфига"
         flash = _entry_row(ed, "flash")
         assert "google/gemini-3.0-flash" in flash.plain    # id — свой, он заслоняет
         assert ed._origin_cell("flash") == ""
@@ -1177,3 +1178,263 @@ async def test_opening_a_profile_does_not_silence_tls_warnings_process_wide(
                              base=_BASE_ONE_MODEL) as (_p, scr, _ed):
         scr._open_profile_config("work")
         assert calls == []
+
+
+# --- тёзка: источник наследования — заслонённая запись (стенд smoke-shadow) ----
+#
+# Профиль перекрывает запись основного конфига ПОД ТЕМ ЖЕ именем частью ключей, а
+# остальное тёзка наследует у заслонённой записи — так собирает её загрузчик
+# (`deep_merge`, профиль поверх основного). Источник наследования у такой записи —
+# ЗАПИСЬ, а не раздел «Подключение», и каждая поверхность, называющая источник,
+# обязана назвать его правильно (живой смок: строка и форма `gpt` звали
+# «Подключение», показывая при этом адрес `base.example`).
+#
+# Три записи стенда — три случая: `gpt` — тень несёт своё подключение (пара, адрес
+# и id достаются от неё); `fast` — тень БЕЗ своего подключения (пара по-прежнему
+# из «Подключения», id — от тени); `glm` — тени нет вовсе, все прежние слова верны.
+
+_SHADOW_BASE = ('profile: ""\n'
+                "level: default\n"
+                "backend:\n"
+                f'  completions_url: "{_BASE_URL}"\n'
+                "  chat_completion_headers:\n"
+                '    Authorization: "Bearer SMOKE"\n'
+                "agent:\n"
+                '  model: "test-model"\n'
+                "models:\n"
+                "  gpt:\n"
+                '    model: "openai/gpt-5.5"\n'
+                '    url: "https://base.example/v1/chat/completions"\n'
+                '    token: "BASE-TOKEN"\n'
+                "  fast:\n"
+                '    model: "qwen/qwen3-8b"\n'
+                "slots:\n"
+                '  default: "gpt"\n')
+_NAMESAKE_PROFILE = ("models:\n"
+                     "  gpt:\n"
+                     "    backend:\n"
+                     "      use_ssl: false\n"
+                     "  fast:\n"
+                     '    model: "qwen/qwen3-14b"\n'
+                     "  glm:\n"
+                     '    model: "zhipu/glm-4"\n')
+_SHADOWED_URL = "https://base.example/v1/chat/completions"
+
+
+@asynccontextmanager
+async def _namesake_view(tmp_path, monkeypatch, *, profile: str = _NAMESAKE_PROFILE):
+    async with _profile_view(tmp_path, monkeypatch, base=_SHADOW_BASE,
+                             profile=profile) as (pilot, scr, ed):
+        ed._row_width = lambda: 120          # грамматика строки, а не геометрия окна
+        yield pilot, scr, ed
+
+
+async def _open_entry_form(pilot, scr, ed, alias: str):
+    """Форма записи — по Enter на её строке, путём человека, а не конструктором:
+    что форма узнаёт о тени, решает секция (`_open_form`), и это её предмет."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    _cursor_to(ed, "entry", alias=alias)
+    await pilot.press("enter")
+    await pilot.pause()
+    return scr.query(ModelEntryForm).last()
+
+
+def _placeholder(form, field_id: str) -> str:
+    from textual.widgets import Input
+    return form.query_one(f"#{field_id}", Input).placeholder
+
+
+def _form_text(form, widget_id: str) -> str:
+    return str(form.query_one(f"#{widget_id}", Static).render())
+
+
+def _inherit_row(form) -> str:
+    """Первая строка раскрытого пресет-листа адреса — пункт «наследовать»: над
+    пустым полем список раскрыт с входа в форму (курсор стоит на адресе)."""
+    rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
+    assert rows, "пресет-лист над пустым адресом не раскрыт"
+    return rows[0]
+
+
+async def test_a_namesake_row_names_the_shadowed_record_as_the_address_source(
+        tmp_path, monkeypatch):
+    """Строка тёзки, у которой тень несёт СВОЁ подключение: адрес ей достаётся от
+    заслонённой записи, и хвост зовёт её, а не «Подключение», — иначе он называет
+    не тот хост, на который уйдёт запрос (живой смок: `base.example · адрес из
+    «Подключения»`)."""
+    async with _namesake_view(tmp_path, monkeypatch) as (_p, _scr, ed):
+        assert ed._entry_origin("gpt") == "own"            # тёзка — своя строка
+        assert ed._entry_address("gpt") == _SHADOWED_URL
+        cell = ed._address_cell("gpt")
+        assert cell == "base.example · адрес из основного конфига"
+        assert "Подключени" not in cell
+        assert cell in _entry_row(ed, "gpt").plain
+
+
+async def test_a_namesake_over_a_record_without_a_connection_keeps_the_old_tail(
+        tmp_path, monkeypatch):
+    """Сторож: у `fast` тень своего подключения не несёт — адрес по-прежнему из
+    «Подключения» (стека открытого профиля), и хвост прежний. Судится по
+    ПОДКЛЮЧЕНИЮ тени, а не по её наличию: тень есть у обеих тёзок стенда."""
+    async with _namesake_view(tmp_path, monkeypatch) as (_p, _scr, ed):
+        assert ed._base_entry("fast")                       # тень есть, подключения нет
+        assert ed._entry_address("fast") == _BASE_URL
+        assert ed._address_cell("fast") == "base-host · адрес из «Подключения»"
+        assert ed._address_cell("glm") == "base-host · адрес из «Подключения»"
+
+
+async def test_the_namesake_form_says_the_pair_comes_from_the_shadowed_record(
+        tmp_path, monkeypatch):
+    """Шапка пары тёзки: наследуется от записи основного конфига, не от раздела."""
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        form = await _open_entry_form(pilot, scr, ed, "gpt")
+        assert form.own_connection() is False
+        assert _form_text(form, "mef-pair") == (
+            "Адрес и токен: наследуются из записи основного конфига")
+
+
+async def test_the_namesake_form_names_the_shadowed_address_under_the_field(
+        tmp_path, monkeypatch):
+    """Под пустым адресом — тот, что реально действует: адрес заслонённой записи,
+    а не «Подключения» открытого профиля. Пункт «наследовать» первым в списке —
+    тем же источником и тем же адресом: два входа в одно действие (§5) не имеют
+    права называть разное."""
+    from textual.widgets import Input
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        form = await _open_entry_form(pilot, scr, ed, "gpt")
+        assert form.query_one("#mef-url", Input).value == ""
+        assert _placeholder(form, "mef-url") == f"наследуется: {_SHADOWED_URL}"
+        row = _inherit_row(form)
+        assert "запись основного конфига · наследовать" in row, row
+        assert "base.example" in row and "base-host" not in row, row
+        assert "Подключени" not in row, row
+
+
+async def test_the_namesake_form_masks_the_shadowed_token_under_the_field(
+        tmp_path, monkeypatch):
+    """Под токеном — маска того, что уйдёт с запросом: токен заслонённой записи
+    (маской, как и всякий секрет), а не общий «Bearer SMO***». Строка галки
+    называет тот же источник."""
+    from textual.widgets import Input
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        form = await _open_entry_form(pilot, scr, ed, "gpt")
+        token = form.query_one("#mef-token", Input)
+        assert token.placeholder == "наследуется: Bearer BAS***"
+        assert "BASE-TOKEN" not in token.placeholder
+        assert "SMO" not in token.placeholder
+        assert token.has_class("has-saved")                 # маска, не подсказка
+        assert token.disabled is True and token.value == ""
+        assert "токен приходит из записи основного конфига" in _form_text(form, "mef-noauth")
+
+
+async def test_the_namesake_form_names_the_shadowed_model_id_as_the_default(
+        tmp_path, monkeypatch):
+    """Пустое поле id у тёзки — не «равен алиасу»: действует `model` заслонённой
+    записи, так сливает запись загрузчик."""
+    from textual.widgets import Input
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        form = await _open_entry_form(pilot, scr, ed, "gpt")
+        assert form.query_one("#mef-model", Input).value == ""
+        assert _placeholder(form, "mef-model") == (
+            "если не указать — openai/gpt-5.5 из основного конфига")
+
+
+async def test_a_form_over_a_record_without_a_shadow_keeps_every_old_text(
+        tmp_path, monkeypatch):
+    """Сторож: `glm` — своя запись без тени. Все прежние слова на месте: пара из
+    раздела «Подключение», адрес и токен стека открытого профиля, id равен алиасу,
+    пункт «наследовать» зовёт раздел."""
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        form = await _open_entry_form(pilot, scr, ed, "glm")
+        assert _form_text(form, "mef-pair") == (
+            "Адрес и токен: наследуются из раздела «Подключение»")
+        assert _placeholder(form, "mef-url") == f"наследуется: {_BASE_URL}"
+        assert _placeholder(form, "mef-token") == "наследуется: Bearer SMO***"
+        assert "токен приходит из раздела «Подключение»" in _form_text(form, "mef-noauth")
+        assert _placeholder(form, "mef-model") == "если не указать — id модели равен алиасу"
+        row = _inherit_row(form)
+        assert "раздел «Подключение» · наследовать" in row and "base-host" in row, row
+
+
+async def test_a_namesake_over_a_record_without_a_connection_inherits_the_pair_from_the_section(
+        tmp_path, monkeypatch):
+    """`fast`: тень есть, своего подключения в ней нет — пара по-прежнему из раздела
+    «Подключение» (прежние слова), а id — от тени: источник у пары и у id разный, и
+    судятся они порознь."""
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        form = await _open_entry_form(pilot, scr, ed, "fast")
+        assert _form_text(form, "mef-pair") == (
+            "Адрес и токен: наследуются из раздела «Подключение»")
+        assert _placeholder(form, "mef-url") == f"наследуется: {_BASE_URL}"
+        assert _placeholder(form, "mef-token") == "наследуется: Bearer SMO***"
+        assert "токен приходит из раздела «Подключение»" in _form_text(form, "mef-noauth")
+        assert _placeholder(form, "mef-model") == (
+            "если не указать — qwen/qwen3-8b из основного конфига")
+        assert "раздел «Подключение» · наследовать" in _inherit_row(form)
+
+
+async def test_the_namesake_form_keeps_inherited_fields_empty_and_writes_none_of_them(
+        tmp_path, monkeypatch):
+    """Форма говорит о тени, но не пишет её: поля унаследованного пусты, `submit()`
+    без правок не отдаёт ни одного ключа, и после Enter в файле профиля у тёзки
+    ровно то, что было, — унаследованное копией в профиль не уезжает. Основной
+    файл не тронут байт-в-байт."""
+    from textual.widgets import Input
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        base_file = tmp_path / "base" / "config.yml"
+        base_before = base_file.read_bytes()
+        form = await _open_entry_form(pilot, scr, ed, "gpt")
+        for field_id in ("mef-url", "mef-token", "mef-model"):
+            assert form.query_one(f"#{field_id}", Input).value == "", field_id
+        assert form.query_one("#mef-alias", Input).value == "gpt"
+        assert form.is_dirty() is False
+        assert form.submit() == (True, "gpt", {})
+        form._presets_ctrl.close()          # раскрытый на входе пресет-лист съел бы Enter
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not _editor(scr).form_open
+        assert base_file.read_bytes() == base_before
+    document = _doc(_profile_path(tmp_path))
+    assert document["models"]["gpt"] == {"backend": {"use_ssl": False}}
+
+
+async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(
+        tmp_path, monkeypatch):
+    """Ctrl+U на тёзке со СВОЕЙ парой ведёт себя как прежде: снимает адрес и токен
+    разом, `submit()` отдаёт удаление обоих ключей, файл теряет их оба. Новое здесь
+    только слово: возвращается запись к паре ЗАСЛОНЁННОЙ записи, и шапка с
+    подсказками с этого момента зовут её. На тёзке БЕЗ своей пары клавиша, как и
+    прежде, не наша — возвращать нечего."""
+    from textual.widgets import Input
+    profile = ("models:\n"
+               "  gpt:\n"
+               '    url: "https://own.example/v1/chat/completions"\n'
+               '    token: "OWN-TOKEN"\n')
+    async with _namesake_view(tmp_path, monkeypatch, profile=profile) as (pilot, scr, ed):
+        form = await _open_entry_form(pilot, scr, ed, "gpt")
+        assert form.own_connection() is True
+        assert _form_text(form, "mef-pair") == "Адрес и токен: свои"
+        assert form.on_url_field and form.can_return_shared_pair
+        assert form.clear_token() is True
+        await pilot.pause()
+        assert form.query_one("#mef-url", Input).value == ""
+        assert form.query_one("#mef-token", Input).disabled is True
+        assert form.own_connection() is False
+        assert _form_text(form, "mef-pair") == (
+            "Адрес и токен: наследуются из записи основного конфига")
+        assert _placeholder(form, "mef-url") == f"наследуется: {_SHADOWED_URL}"
+        assert _placeholder(form, "mef-token") == "наследуется: Bearer BAS***"
+        ok, alias, fields = form.submit()
+        assert (ok, alias) == (True, "gpt")
+        assert fields == {"url": None, "token": None}
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not _editor(scr).form_open
+    entry = _doc(_profile_path(tmp_path))["models"]["gpt"]
+    assert "url" not in entry and "token" not in entry, entry
+
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        form = await _open_entry_form(pilot, scr, ed, "gpt")
+        assert form.can_return_shared_pair is False
+        assert form.clear_token() is False                  # пары нет — клавиша не наша

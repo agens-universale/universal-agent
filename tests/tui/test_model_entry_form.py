@@ -1251,6 +1251,99 @@ async def test_editing_an_own_entry_named_like_a_base_one_is_allowed():
         assert str(form.query_one("#mef-error", Static).render()) == mef._ALIAS_TAKEN_BY_BASE
 
 
+# --- тень: тёзка без своей пары наследует её у заслонённой записи ---------------
+#
+# Профиль перекрыл запись основного конфига под тем же именем частью ключей; пару,
+# адрес и id тёзка берёт у ЗАСЛОНЁННОЙ записи (`base_entry`), а не у «Подключения»
+# — так сливает запись загрузчик. Стенд с настоящими файлами и словами формы —
+# `test_profile_effective_view`; здесь — то, что видно только с сетевой заглушкой
+# и на втором написании тени.
+
+_SHADOWED = {"model": "openai/gpt-5.5", "url": "https://base.example/v1/chat/completions",
+             "token": "BASE-TOKEN"}
+
+
+def _namesake_form(**kwargs):
+    """Тёзка стенда smoke-shadow: в профиле у `gpt` один под-ключ `backend`."""
+    kwargs.setdefault("base_entry", _SHADOWED)
+    return _form(initial={"alias": "gpt", "backend": {"use_ssl": False}},
+                 existing_aliases={"gpt"}, base_aliases=frozenset({"gpt"}),
+                 effective_url="https://openrouter.ai/api/v1/chat/completions",
+                 effective_auth="Bearer SMOKE", **kwargs)
+
+
+async def test_the_probe_and_the_model_list_of_a_namesake_go_to_the_shadowed_pair():
+    """Поле и проба обязаны говорить об одной связи: под адресом тёзки назван адрес
+    заслонённой записи — значит и Ctrl+Space, и автоподгрузка списка идут туда и
+    её токеном, а не на «Подключение» общим ключом. Иначе «✓ доступен» стоял бы
+    под адресом, который никто не проверял."""
+    seen, calls = [], []
+
+    def fake_probe(endpoint, auth, verify, model, **kwargs):
+        seen.append((endpoint, auth))
+        return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+
+    form = _namesake_form(probe=fake_probe,
+                          fetch=lambda url, auth, **k: calls.append((url, auth)) or None)
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.probe_connection() is True
+        for _ in range(3):
+            await pilot.pause()
+        assert seen and all(e == _SHADOWED["url"] for e, _ in seen), seen
+        assert [auth for _, auth in seen] == [None, "Bearer BASE-TOKEN"], seen
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        assert calls == [(_SHADOWED["url"], "Bearer BASE-TOKEN")], calls
+
+
+async def test_the_shadowed_record_is_read_in_its_second_writing_too():
+    """Тень несёт пару вторым написанием (`backend.completions_url` /
+    `chat_completion_headers.Authorization`) — форма читает её тем же ядровым
+    определением §2, что и своё: иначе тёзка над такой записью звала бы
+    «Подключение», показывая при этом её хост."""
+    base = {"model": "x", "backend": {
+        "completions_url": "https://hdr.example/v1/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer HDR-SECRET"}}}
+    form = _namesake_form(base_entry=base)
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert str(form.query_one("#mef-pair", Static).render()) == (
+            "Адрес и токен: наследуются из записи основного конфига")
+        assert form.query_one("#mef-url", Input).placeholder == (
+            "наследуется: https://hdr.example/v1/chat/completions")
+        token = form.query_one("#mef-token", Input)
+        assert token.placeholder == "наследуется: Bearer HDR***"
+        assert token.has_class("has-saved")
+        assert form._current_url() == "https://hdr.example/v1/chat/completions"
+        assert form._current_auth_header() == "Bearer HDR-SECRET"
+
+
+async def test_a_shadowed_record_without_a_token_is_explained_not_masked():
+    """`token: ""` у заслонённой записи — «сервер не требует авторизации» (§2), и
+    тёзка наследует ровно это: маски нет (маскировать нечего, и `***` обещал бы
+    секрет), поле говорит, что будет, а проба идёт без токена."""
+    seen = []
+
+    def fake_probe(endpoint, auth, verify, model, **kwargs):
+        seen.append((endpoint, auth))
+        return ProbeResult("ok", 200, [], 5, "доступен")
+
+    form = _namesake_form(base_entry={**_SHADOWED, "token": ""}, probe=fake_probe)
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        token = form.query_one("#mef-token", Input)
+        assert token.placeholder == (
+            "запись основного конфига без токена — запросы идут без авторизации")
+        assert not token.has_class("has-saved")
+        assert form.probe_connection() is True
+        for _ in range(3):
+            await pilot.pause()
+        assert seen == [(_SHADOWED["url"], None)], seen
+
+
 async def test_empty_model_id_means_the_alias_is_the_id():
     """Пусто в поле id — легально: алиас и есть провайдерский id (`model_router`:
     `entry.get("model") or alias`), ключ `model` не отдаётся."""

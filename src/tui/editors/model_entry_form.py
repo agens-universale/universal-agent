@@ -95,12 +95,22 @@ _ALIAS_OR_MODEL_EMPTY = "укажите id модели или алиас"
 _ALIAS_RENAME_HINT = "переименование обновит уровни и привязки записи"
 _MODEL_LABEL = "Провайдерский id модели"
 _MODEL_PLACEHOLDER = "если не указать — id модели равен алиасу"
+# Тёзка — своя запись профиля под именем записи основного конфига: пустое поле id у
+# неё значит не «равен алиасу», а `model` ЗАСЛОНЁННОЙ записи (так сливает запись
+# загрузчик — профиль поверх основного, поключно). Прежний текст обещал бы имя, которым
+# запись не пойдёт.
+_MODEL_PLACEHOLDER_BASE = "если не указать — {model} из основного конфига"
 _URL_LABEL = "Адрес API-сервера"
 # Своё подключение задаётся ЦЕЛИКОМ (спека 2026-08-19 §2): адрес и токен принадлежат
 # одному провайдеру, и половина пары либо уносит общий ключ на чужой хост, либо уезжает
 # вслед за сменой общего адреса. Состояние пары не переключается отдельным элементом —
 # оно ВЫВОДИТСЯ из полей, а строка над ними называет, откуда пара взята (§4).
 _PAIR_SHARED = "Адрес и токен: наследуются из раздела «Подключение»"
+# Тёзка над записью, несущей СВОЁ подключение: пару без своей она берёт у заслонённой
+# записи, а не у раздела — «Подключение» здесь называло бы адрес и токен, которые для
+# этой записи не действуют (смок владельца: форма звала раздел, показывая при этом хост
+# тени). Судит `_inherits_from_base`; тень без своего подключения источника не меняет.
+_PAIR_SHARED_BASE = "Адрес и токен: наследуются из записи основного конфига"
 _PAIR_OWN = "Адрес и токен: свои"
 # Второе написание пары (§2): она живёт в секции `backend` записи, и форма её НЕ правит
 # — ни поля, ни клавиша «вернуть наследование» до неё не достают. Молчать об этом нельзя:
@@ -111,12 +121,18 @@ _PAIR_OWN_BACKEND = "Адрес и токен: свои — заданы сек�
 # она не поле, и её собственная клавиша (Space) на этой строке уже занята.
 _PAIR_FIELDS = ("mef-url", "mef-token")
 _TOKEN_SHARED_HINT = "токен приходит из раздела «Подключение»"
+# Тот же источник, что у шапки пары (`_PAIR_SHARED_BASE`): две подписи одного состояния
+# не имеют права называть два разных источника.
+_TOKEN_BASE_HINT = "токен приходит из записи основного конфига"
 _TOKEN_NEEDED = "укажите токен для этого адреса"
 # `Authorization: ""` и сентинел приведены к None ещё в `settings.py:854-856` — маски в
 # этом случае не бывает, а молчать нельзя: поле обязано сказать, что теперь будет.
 # Наследование пустого общего токена законно: запись не задаёт ничего — значит наследует
 # пару целиком и работает без авторизации.
 _COMMON_TOKEN_EMPTY = "общий токен не задан — запросы идут без авторизации"
+# Заслонённая запись с `token: ""` («сервер не требует авторизации», §2): тёзка
+# наследует ровно это, маскировать нечего — а `***` обещал бы секрет, которого нет.
+_BASE_TOKEN_EMPTY = "запись основного конфига без токена — запросы идут без авторизации"
 # Отказ формы — то же правило §2, что у валидатора конфига, укороченное до одной строки
 # формы: имена ключей файла человеку здесь ни к чему, перед ним поля и галка.
 _PAIR_NEEDS_TOKEN = ("задан свой адрес, но не задан токен — укажите токен "
@@ -149,6 +165,11 @@ _TOKEN_LABEL_INHERIT = f"{_TOKEN_LABEL}   {CTRL_U_PAIR}"
 # разные последствия — литерал в файле против пустого поля (ревизия владельца
 # по смоку).
 _INHERIT_PRESET_NAME = "раздел «Подключение» · наследовать"
+# Тот же пункт у тёзки над записью со своим подключением: пустое поле возвращает её к
+# паре ЗАСЛОНЁННОЙ записи, и пункт зовёт этот источник (адрес рядом — её адрес). Пункт
+# и `Ctrl+U` — два входа в одно действие (§5), а шапка пары называет его же: три
+# витрины одного состояния не имеют права звать три разных источника.
+_INHERIT_PRESET_NAME_BASE = "запись основного конфига · наследовать"
 _PROBE_RUNNING = "проверяю…"
 _PROBE_NO_URL = "сначала укажите адрес — проверка стучится на него"
 _LIST_NO_URL = "сначала укажите адрес — список приходит с него"
@@ -156,6 +177,27 @@ _LIST_NO_URL = "сначала укажите адрес — список при
 
 def _inherited(value: str) -> str:
     return f"наследуется: {value}"
+
+
+def entry_has_own_connection(entry) -> bool:
+    """Несёт ли СЫРАЯ запись реестра своё подключение — ядровым определением §2
+    (`connection_parts`) по обоим написаниям пары: `url`/`token` и
+    `backend.completions_url`/`proxy`/`chat_completion_headers.Authorization`. По
+    совокупности, как `own_connection` формы: правило пары половин не пропускает.
+
+    ОДИН предикат на всех, кто судит ЗАСЛОНЁННУЮ запись основного конфига под тёзкой:
+    форма (шапка пары, подсказки, пункт «наследовать», проба) и хвост строки реестра
+    (`models_section._address_cell`). Разойдясь хотя бы во втором написании, они
+    назвали бы один источник двумя именами. Не-словарь — запись без ничего."""
+    if not isinstance(entry, dict):
+        entry = {}
+    backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+    headers = (backend.get("chat_completion_headers")
+               if isinstance(backend.get("chat_completion_headers"), dict) else {})
+    return any(connection_parts(
+        url=entry.get("url"), token=entry.get("token"),
+        completions_url=backend.get("completions_url"), proxy=backend.get("proxy"),
+        authorization=headers.get("Authorization")))
 
 
 def _resolved_for_request(url: str, auth: str | None) -> tuple[str, str | None]:
@@ -199,7 +241,7 @@ class ModelEntryForm(Vertical):
                  fetch=None, probe=None, presets: list | None = None,
                  effective_url: str = "", effective_auth: str | None = None,
                  verify: bool = True, config_proxy: str | None = None,
-                 base_aliases=frozenset()) -> None:
+                 base_aliases=frozenset(), base_entry: dict | None = None) -> None:
         super().__init__(classes="onb-dyn")
         initial = initial or {}
         # Эффективные адрес/Authorization основного конфига — то, что реально
@@ -207,6 +249,14 @@ class ModelEntryForm(Vertical):
         # ими же ходят проба и подбор списка, пока своих значений у записи нет.
         self._effective_url = effective_url or ""
         self._effective_auth = effective_auth
+        # Заслонённая запись основного конфига под ТЕМ ЖЕ именем (`{}` — тени нет).
+        # Форма её не правит и в поля не кладёт — значения уехали бы копией в файл
+        # профиля (`models_section._open_form`); нужна она ровно затем, чтобы называть
+        # источник наследования правильно: пару, адрес и id тёзка берёт у неё, а не у
+        # «Подключения», и туда же идут проба и подбор списка. Тень — по алиасу, с
+        # которым форма открыта: переименование выводит запись из-под неё, и что
+        # действует после, показывает строка реестра.
+        self._base0 = base_entry if isinstance(base_entry, dict) else {}
         # Алиасы записей основного конфига: занятое ими имя — не «дубль своей»
         # (своей такой нет), у него свой отказ, и призрак пустого алиаса обязан
         # уникализироваться против ЭФФЕКТИВНОГО набора имён, а не одних своих.
@@ -273,14 +323,16 @@ class ModelEntryForm(Vertical):
         # им нужны только в работе (`_field()` ищет по id лениво), а «ещё не заведён»
         # — состояние, о котором пришлось бы помнить каждому вызову хозяина.
         presets_items = list(presets) if presets is not None else []
-        if self._effective_url and not self._pair_in_backend():
-            # Пункт-наследование первым и с РЕАЛЬНЫМ адресом основного конфига: Enter
-            # на нём осознанно ОЧИЩАЕТ поле (`_apply_preset`), а пустое поле и значит
-            # «наследовать». Запись с собственным адресом — не исключение, наоборот:
-            # ей этот путь и нужен, другого явного возврата к наследованию нет
-            # (решение 7). Над ЛЮБЫМ заданным адресом — своим или каталожным —
-            # список сам не раскрывается (канон 2026-08-17, `can_open`): там его
-            # раскрывает `reload_presets` (Alt+↓).
+        inherited_url = self._inherited_url()
+        if inherited_url and not self._pair_in_backend():
+            # Пункт-наследование первым и с РЕАЛЬНЫМ унаследованным адресом (тени
+            # либо основного конфига — `_inherited_url`): Enter на нём осознанно
+            # ОЧИЩАЕТ поле (`_apply_preset`), а пустое поле и значит «наследовать».
+            # Запись с собственным адресом — не исключение, наоборот: ей этот путь и
+            # нужен, другого явного возврата к наследованию нет (решение 7). Над ЛЮБЫМ
+            # заданным адресом — своим или каталожным — список сам не раскрывается
+            # (канон 2026-08-17, `can_open`): там его раскрывает `reload_presets`
+            # (Alt+↓).
             #
             # Пара во втором написании (секция `backend`) пункта не получает: он и
             # `Ctrl+U` — два входа в ОДНО действие (§5), а форма `backend` не правит,
@@ -290,8 +342,10 @@ class ModelEntryForm(Vertical):
             # Гейт — статическая половина того же предиката: динамическая
             # (`own_connection`) к списку, собранному один раз, неприменима, а при общей
             # паре пункт законен — он держит живую связь с основным конфигом.
-            presets_items.insert(0, SimpleNamespace(name=_INHERIT_PRESET_NAME,
-                                                    url=self._effective_url, inherit=True))
+            presets_items.insert(0, SimpleNamespace(
+                name=(_INHERIT_PRESET_NAME_BASE if self._inherits_from_base()
+                      else _INHERIT_PRESET_NAME),
+                url=inherited_url, inherit=True))
         self._presets_ctrl = preset_list_controller(
             self, presets=presets_items, row_class="mef-preset-row", input_id="mef-url",
             hint=_PRESET_HINT, on_pick=self._apply_preset,
@@ -350,6 +404,51 @@ class ModelEntryForm(Vertical):
         for w in self.query("#mef-alias"):
             w.placeholder = self._alias_placeholder(self._model_value())
 
+    def _inherits_from_base(self) -> bool:
+        """Пару без своей запись берёт у ЗАСЛОНЁННОЙ записи основного конфига: та несёт
+        своё подключение (§2, тем же предикатом, каким хвост строки реестра судит
+        источник адреса). Нет — источник по-прежнему «Подключение», и все прежние
+        слова о нём верны: тень без пары источника пары не меняет."""
+        return entry_has_own_connection(self._base0)
+
+    def _inherited_url(self) -> str:
+        """Адрес, который запись БЕЗ своего унаследует: `url` заслонённой записи, её
+        второе написание `backend.completions_url`, иначе действующий из
+        «Подключения» — той же ядровой цепочкой (`resolve_entry_address`), какой
+        рантайм резолвит слитую запись. Пусто — наследовать нечего."""
+        backend = self._base0.get("backend")
+        backend = backend if isinstance(backend, dict) else {}
+        return str(resolve_entry_address(url=self._base0.get("url"),
+                                         completions_url=backend.get("completions_url"),
+                                         inherited=self._effective_url) or "")
+
+    def _inherited_auth(self) -> str | None:
+        """Authorization, с которым уйдёт запись без своей пары: от заслонённой записи,
+        если пара её (`_inherits_from_base`), иначе действующий из «Подключения».
+
+        Собирается так же, как его соберёт загрузчик (`ModelEntry.authorization_header`):
+        голый `token` → Bearer, `""` → без авторизации, заголовок из `backend` — как
+        есть. Поле, проба и подбор списка обязаны говорить об одной связи — все трое
+        спрашивают здесь."""
+        if not self._inherits_from_base():
+            return self._effective_auth
+        token = self._base0.get("token")
+        if token is not None:
+            return onboarding.authorization_header(token) if token else ""
+        backend = self._base0.get("backend")
+        backend = backend if isinstance(backend, dict) else {}
+        headers = backend.get("chat_completion_headers")
+        return (headers if isinstance(headers, dict) else {}).get("Authorization")
+
+    def _model_placeholder(self) -> str:
+        """Пустое поле id: провайдерским id служит алиас — либо, у тёзки, `model`
+        заслонённой записи (так сливает запись загрузчик). Источник id судится
+        отдельно от источника пары: тень без подключения id всё равно даёт."""
+        model = self._base0.get("model")
+        if isinstance(model, str) and model:
+            return _MODEL_PLACEHOLDER_BASE.format(model=model)
+        return _MODEL_PLACEHOLDER
+
     def _url_placeholder(self) -> str:
         """Placeholder поля адреса виден ровно в один момент — когда поле ПУСТО (в
         режиме правки это значит «стёрли, чтобы снять»), поэтому он говорит про
@@ -365,13 +464,16 @@ class ModelEntryForm(Vertical):
         Что сильнее чего — решает ядровая цепочка (`resolve_entry_address`), та же, что
         у витрины реестра и у рантайма; своего порядка у формы быть не должно. Спрашиваем
         её без `url`: placeholder виден ровно при пустом поле, а собственного `url` в
-        записи с адресом в `backend` не бывает — схема запрещает два написания разом."""
+        записи с адресом в `backend` не бывает — схема запрещает два написания разом.
+        Унаследованный адрес — у `_inherited_url`: у тёзки это адрес заслонённой
+        записи, и общий здесь тоже был бы НЕдействующим."""
         own_url = resolve_entry_address(
             url=None, completions_url=self._backend0.get("completions_url"))
         if own_url:
             return str(own_url)
-        if self._effective_url:
-            return _inherited(self._effective_url)
+        inherited = self._inherited_url()
+        if inherited:
+            return _inherited(inherited)
         return _ADDRESS_HINT
 
     @staticmethod
@@ -490,20 +592,22 @@ class ModelEntryForm(Vertical):
         значения (спека §3.4), и врать им нельзя."""
         if self._own_token_active():
             return True
-        return not self.own_connection() and bool(self._effective_auth)
+        return not self.own_connection() and bool(self._inherited_auth())
 
     def _token_placeholder(self) -> str:
         """Поле токена говорит ровно то, с чем реально уйдёт запрос, — тем же правилом,
         каким его собирает `_current_auth_header`: свой токен записи — маской; над своим
         адресом без токена — что его надо указать (унаследованный сюда не пойдёт, §4);
-        над унаследованным адресом — маска того, что придёт вместе с ним."""
+        над унаследованным адресом — маска того, что придёт вместе с ним
+        (`_inherited_auth`: у тёзки — токен заслонённой записи)."""
         if self._own_token_active():
             return onboarding.display_secret(self._token_current)
         if self.own_connection():
             return _TOKEN_NEEDED
-        if self._effective_auth:
-            return _inherited(onboarding.display_secret(self._effective_auth))
-        return _COMMON_TOKEN_EMPTY
+        inherited = self._inherited_auth()
+        if inherited:
+            return _inherited(onboarding.display_secret(inherited))
+        return _BASE_TOKEN_EMPTY if self._inherits_from_base() else _COMMON_TOKEN_EMPTY
 
     def _token_label(self) -> str:
         """Подпись поля токена. Клавиша обещается ровно там, где по ней можно нажать и
@@ -532,7 +636,10 @@ class ModelEntryForm(Vertical):
         # переключить» там, где переключать нечего, — то же враньё, что мёртвая клавиша.
         t = Text()
         t.append(("● " if self._no_auth else "○ ") + _NO_AUTH_LABEL)
-        hint = _NO_AUTH_TOGGLE_HINT if self.own_connection() else _TOKEN_SHARED_HINT
+        if self.own_connection():
+            hint = _NO_AUTH_TOGGLE_HINT
+        else:
+            hint = _TOKEN_BASE_HINT if self._inherits_from_base() else _TOKEN_SHARED_HINT
         t.append("   " + hint, style=DEEP_DIM)
         return t
 
@@ -569,7 +676,7 @@ class ModelEntryForm(Vertical):
         # Поле id — со списком моделей (автоподгрузка при входе, Alt+↓ — перечитать),
         # значит внутри рамки-группы: рамка одна на поле и его список (спека §3.1).
         with Vertical(classes="field-group onb-dyn", id="mef-model-group"):
-            yield PasteInput(value=self._model0, placeholder=_MODEL_PLACEHOLDER,
+            yield PasteInput(value=self._model0, placeholder=self._model_placeholder(),
                              id="mef-model", classes="onb-dyn group-field")
         # Строка состояния списка (загрузка/сбой/счётчик) — пустая не занимает места
         # (`display`), как статусы `ModelEditor`.
@@ -627,9 +734,10 @@ class ModelEntryForm(Vertical):
     def _pair_row_text(self, own: bool) -> str:
         """Строка НАД парой: откуда пара взята (§4). У своей два происхождения, и
         читаются они по-разному — знакомые поля формы либо секция `backend`, до которой
-        форма не достаёт."""
+        форма не достаёт. У общей — тоже два: раздел «Подключение» либо заслонённая
+        запись основного конфига, у которой тёзка берёт пару."""
         if not own:
-            return _PAIR_SHARED
+            return _PAIR_SHARED_BASE if self._inherits_from_base() else _PAIR_SHARED
         return _PAIR_OWN_BACKEND if self._pair_in_backend() else _PAIR_OWN
 
     def _sync_token_visibility(self) -> None:
@@ -1027,8 +1135,9 @@ class ModelEntryForm(Vertical):
 
     # --- проба (Ctrl+Space) ---
     def _current_url(self) -> str:
-        """Адрес пробы и списка: поле, иначе эффективный из основного конфига — то,
-        по чему запись реально пойдёт (наследование).
+        """Адрес пробы и списка: поле, иначе унаследованный (`_inherited_url`: у тёзки
+        — адрес заслонённой записи, иначе эффективный из основного конфига) — то, по
+        чему запись реально пойдёт.
 
         Пара своя, а адрес не набран — собранной пары нет вовсе: общий адрес такой
         записи не достанется (её просто не сохранить), и проба на него отвечала бы не
@@ -1036,12 +1145,12 @@ class ModelEntryForm(Vertical):
         own_url = self._url_value()
         if own_url:
             return own_url
-        return "" if self.own_connection() else self._effective_url
+        return "" if self.own_connection() else self._inherited_url()
 
     def _current_auth_header(self) -> str | None:
         """Authorization тем же правилом, каким будет жить запись: ● — честно без
-        токена; введённый текст; собственный токен записи; иначе унаследованный.
-        Поле и проба обязаны говорить об одной и той же связи.
+        токена; введённый текст; собственный токен записи; иначе унаследованный
+        (`_inherited_auth`). Поле и проба обязаны говорить об одной и той же связи.
 
         В сеть уходит только СОБРАННАЯ пара (§4): унаследованный токен принадлежит
         унаследованному адресу и уходит только вместе с ним, а свой — своему. Иначе
@@ -1050,7 +1159,7 @@ class ModelEntryForm(Vertical):
         if self._no_auth:
             return None
         if not self.own_connection():
-            return self._effective_auth
+            return self._inherited_auth() or None
         token_raw = self._field_value("mef-token")
         if token_raw:
             return onboarding.authorization_header(token_raw)
@@ -1067,7 +1176,8 @@ class ModelEntryForm(Vertical):
 
         УНАСЛЕДОВАННЫЙ токен сюда не попадает, и это не забывчивость: `effective_auth`
         приезжает из УЖЕ РЕЗОЛВНУТОГО конфига (`settings._probe_args_from_config`
-        читает `self._config`, а не файл) — ссылки в нём физически нет, называть
+        читает `self._config`, а не файл), тень — из резолвнутого снимка
+        (`settings._base_registry_snapshot`) — ссылки в них физически нет, называть
         нечего, и выдуманное имя переменной было бы хуже молчания. Гейт наследованной
         половины возможен только вместе с сырым значением, приехавшим сюда с ней."""
         if self._no_auth or not self.own_connection():

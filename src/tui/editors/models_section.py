@@ -42,7 +42,8 @@ from config_modules.merge import deep_merge
 from config_modules.model_registry import (LEVEL_FALLBACK, LEVELS, connection_parts,
                                            resolve_entry_address)
 from config_modules.model_sections_validation import SUBAGENT_NAMES
-from tui.editors.model_entry_form import CTRL_U_PAIR, ModelEntryForm
+from tui.editors.model_entry_form import (CTRL_U_PAIR, ModelEntryForm,
+                                          entry_has_own_connection)
 from tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
 
@@ -279,6 +280,14 @@ _LEVEL_TAIL_SEP = ", "
 # так из основного конфига — колонка происхождения говорит это словом, — и рядом с
 # ней хвост про адрес читался бы вторым происхождением той же строки.
 _INHERITED_TAIL = " · адрес из «Подключения»"
+# Тёзка — своя запись профиля под именем записи основного конфига: пока своего адреса
+# у неё нет, адрес ей достаётся от ЗАСЛОНЁННОЙ записи (так сливает запись загрузчик),
+# и хвост зовёт этот источник по имени. «Подключение» здесь называло бы не тот хост,
+# на который уйдёт запрос (смок владельца: `base.example · адрес из «Подключения»`).
+# Тавтологии основного экрана (см. выше) у этого хвоста нет: тёзки бывают только под
+# тенью, то есть только в под-виде профиля. Колонка происхождения у тёзки пуста —
+# строка своя, — и вторым происхождением хвост не читается.
+_BASE_ENTRY_TAIL = " · адрес из основного конфига"
 # Колонка происхождения строки реестра (§4): смысл несёт СЛОВО, а не цвет — замер
 # ревью развёл DIM и DEEP_DIM на неразличимые 1.26 контраста, и без колонки
 # унаследованная строка отличалась бы от своей одним неразличимым оттенком.
@@ -919,8 +928,14 @@ class ModelsSectionEditor(Vertical):
         (`backend.completions_url`, `proxy`) — тоже своё, и запись, задавшая адрес
         так, показывала свой хост И хвост «из «Подключения»» разом. Своего
         определения у витрины быть не должно — им же считают пару обе точки
-        валидации и форма записи. Хвост стоит, пока адрес достаётся записи от
-        «Подключения» либо от заслонённой записи основного конфига.
+        валидации и форма записи.
+
+        Хвост стоит, пока адрес не свой, и называет ИСТОЧНИК — их два, и слово на
+        каждый своё: заслонённая запись основного конфига, если та несёт своё
+        подключение (тёзка берёт адрес у неё — `entry_has_own_connection`, тот же
+        предикат, каким форма записи судит источник пары), иначе «Подключение».
+        Одно слово на оба источника называло бы не тот хост, на который уйдёт
+        запрос (живой смок тёзки над записью со своим адресом).
 
         У УНАСЛЕДОВАННОЙ строки хвоста нет никогда (§4): её происхождение уже
         названо своей колонкой, и хвост про источник адреса читался бы вторым
@@ -933,8 +948,11 @@ class ModelsSectionEditor(Vertical):
         own_address, _ = connection_parts(
             url=own.get("url"), token=None, authorization=None,
             completions_url=backend.get("completions_url"), proxy=backend.get("proxy"))
-        inherited = not own_address and self._entry_origin(alias) != "base"
-        return address_host(address) + (_INHERITED_TAIL if inherited else "")
+        if own_address or self._entry_origin(alias) == "base":
+            return address_host(address)
+        tail = (_BASE_ENTRY_TAIL if entry_has_own_connection(self._base_entry(alias))
+                else _INHERITED_TAIL)
+        return address_host(address) + tail
 
     def _entry_levels(self, alias: str) -> list:
         """Уровни, которые указывают на эту запись, — в каноническом порядке `LEVELS`,
@@ -1770,7 +1788,12 @@ class ModelsSectionEditor(Vertical):
         от набранных и уехали копией в файл профиля.
 
         Алиасы тени формa получает отдельно (`base_aliases`): имя, занятое записью
-        основного конфига, — не «дубль своей», и отказ у него свой (§5)."""
+        основного конфига, — не «дубль своей», и отказ у него свой (§5).
+
+        Тень ПОД ИМЕНЕМ записи (`base_entry`) форма получает целиком, но витринно:
+        в поля она не кладётся (см. выше), а называет источник наследования — тёзка
+        берёт пару, адрес и id у заслонённой записи, не у «Подключения», и туда же
+        форма шлёт пробу. Без неё форма звала раздел под чужим хостом (смок)."""
         initial = None
         if alias is not None:
             # Запись едет ЦЕЛИКОМ, а не четырьмя знакомыми ключами: своё подключение
@@ -1783,7 +1806,8 @@ class ModelsSectionEditor(Vertical):
             initial=initial, existing_aliases=self._own_aliases, presets=self._presets,
             effective_url=self._effective_url, effective_auth=self._effective_auth,
             verify=self._verify, config_proxy=self._config_proxy,
-            base_aliases=frozenset(self._base_entries))
+            base_aliases=frozenset(self._base_entries),
+            base_entry=self._base_entry(alias) if alias is not None else {})
         self._legacy_open = False           # форма занимает тело целиком
         self._rebuild()
 
