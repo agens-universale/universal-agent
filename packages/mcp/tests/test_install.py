@@ -155,10 +155,10 @@ def _source_entry(
 
 
 def test_source_calls_pip_install(tmp_path: Path) -> None:
-    # Раскладка колеса: каталог рецептов и external/vendor — соседи.
+    # Раскладка колеса: вендоры ВНУТРИ каталога рецептов.
     recipes = tmp_path / "recommended_mcp"
     recipes.mkdir()
-    src = tmp_path / "external" / "vendor" / "x-mcp"
+    src = recipes / "external" / "vendor" / "x-mcp"
     src.mkdir(parents=True)
     (src / "pyproject.toml").write_text("[project]\nname = 'x'\n")
 
@@ -177,7 +177,7 @@ def test_source_calls_pip_install(tmp_path: Path) -> None:
 def test_source_editable_appends_dash_e(tmp_path: Path) -> None:
     recipes = tmp_path / "recommended_mcp"
     recipes.mkdir()
-    src = tmp_path / "external" / "vendor" / "x-mcp"
+    src = recipes / "external" / "vendor" / "x-mcp"
     src.mkdir(parents=True)
     (src / "pyproject.toml").write_text("[project]\nname = 'x'\n")
 

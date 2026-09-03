@@ -94,7 +94,7 @@ def test_local_sources_preferred_over_git(tmp_path, monkeypatch):
     # Раскладка колеса: recipes/ и external/vendor/ — соседи.
     recipes = tmp_path / "recommended_mcp"
     recipes.mkdir()
-    src = tmp_path / "external" / "vendor" / "office-mcp"
+    src = recipes / "external" / "vendor" / "office-mcp"
     src.mkdir(parents=True)
     (src / "pyproject.toml").write_text("[project]\nname='office-mcp'\n", encoding="utf-8")
 
@@ -140,7 +140,7 @@ def test_legacy_source_installs_instead_of_being_skipped(tmp_path, monkeypatch, 
 
     recipes = tmp_path / "recommended_mcp"
     recipes.mkdir()
-    src = tmp_path / "external" / "vendor" / "office-mcp"
+    src = recipes / "external" / "vendor" / "office-mcp"
     src.mkdir(parents=True)
     (src / "pyproject.toml").write_text("[project]\nname='office-mcp'\n", encoding="utf-8")
 
