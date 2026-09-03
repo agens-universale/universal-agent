@@ -53,10 +53,10 @@ sysctl kernel.unprivileged_userns_clone   # должно вернуть 1
 sudo apt-get install -y bubblewrap coreutils
 
 # 2. Профиль сервера в отдельный venv. Ставит ТОЛЬКО uv: манифест пинит
-#    gc-core==0.5.0 / gc-cli==0.5.0 / gc-mcp==0.5.0, а те резолвятся через
+#    gc-core==0.3.0 / gc-cli==0.3.0 / gc-mcp==0.3.0, а те резолвятся через
 #    [tool.uv.sources] workspace = true и на PyPI не публикуются. Обычный pip
 #    этой секции не понимает и падает
-#    `No matching distribution found for gc-cli==0.5.0` — см. usage.md,
+#    `No matching distribution found for gc-cli==0.3.0` — см. usage.md,
 #    «Через pip — не работает».
 python3 -m venv /opt/gc-cli/.venv
 uv pip install --python /opt/gc-cli/.venv/bin/python \

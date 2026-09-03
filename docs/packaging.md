@@ -167,7 +167,7 @@ found`, причём ПОСЛЕ сборки остальных шести — �
 
 ```bash
 uv build --wheel -o dist packages/core
-python -c "import zipfile;print(sorted(zipfile.ZipFile('dist/gc_core-0.5.0-py3-none-any.whl').namelist())[:20])"
+python -c "import zipfile;print(sorted(zipfile.ZipFile('dist/gc_core-0.3.0-py3-none-any.whl').namelist())[:20])"
 ```
 
 ## Главный инвариант: колёса не пересекаются
@@ -315,7 +315,7 @@ URL и форки работают без дополнительной наст�
 ## Версии
 
 Версия во всех семи манифестах обязана совпадать, пины друг на друга —
-точные (`gc-core==0.5.0`). Иначе можно собрать установку из разных коммитов.
+точные (`gc-core==0.3.0`). Иначе можно собрать установку из разных коммитов.
 Закреплено тестом `test_versions_are_pinned_together`.
 
 Релиз становится атомарной операцией над семью файлами: бампать надо все

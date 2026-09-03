@@ -332,16 +332,16 @@ def test_versions_are_pinned_together():
     """Профили обязаны собираться из одного коммита: пины друг на друга точные.
 
     packages/mcp тут не ради полноты списка. Пока его в цикле не было, подмена
-    его версии не красила В ЭТОМ ФАЙЛЕ ничего: при 0.5.1 у менеджера и 0.5.0 у
+    его версии не красила В ЭТОМ ФАЙЛЕ ничего: при 0.3.1 у менеджера и 0.3.0 у
     остальных манифестов прочие 14 тестов файла проходили (проверено подменой
     28.08.2026). Разработчик поломки тоже не видит — на рабочем дереве её гасит
     `[tool.uv.sources] gc-mcp = { workspace = true }`, и `uv sync` спокойно ставит
-    менеджера 0.5.1 рядом с gc-tui, который пинит 0.5.0.
+    менеджера 0.3.1 рядом с gc-tui, который пинит 0.3.0.
 
     А на КОЛЁСНОМ пути, по которому едет пользователь, поломка настоящая:
-    METADATA собранного gc_tui-0.5.0 несёт `Requires-Dist: gc-mcp==0.5.0`, в
-    выпуске лежит gc_mcp-0.5.1, и `uv pip install --no-index` отвечает «No
-    solution found ... gc-tui==0.5.0 cannot be used» (тоже проверено).
+    METADATA собранного gc_tui-0.3.0 несёт `Requires-Dist: gc-mcp==0.3.0`, в
+    выпуске лежит gc_mcp-0.3.1, и `uv pip install --no-index` отвечает «No
+    solution found ... gc-tui==0.3.0 cannot be used» (тоже проверено).
     """
     root = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     ver = root["project"]["version"]
@@ -459,10 +459,10 @@ def test_vendored_sources_live_inside_their_package():
 def test_docs_never_offer_bare_pip_for_our_distributions():
     """Документация не должна советовать `pip install` для наших пакетов.
 
-    Манифесты профилей пинят листья (`gc-core==0.5.0` и соседей), а те
+    Манифесты профилей пинят листья (`gc-core==0.3.0` и соседей), а те
     резолвятся через `[tool.uv.sources] workspace = true` и на PyPI не
     публикуются. pip этой секции не понимает и падает
-    `No matching distribution found for gc-cli==0.5.0` — это описано в
+    `No matching distribution found for gc-cli==0.3.0` — это описано в
     docs/usage.md, раздел «Через pip — не работает».
 
     Заведено после того, как docs/swarm.md пережил переезд с
