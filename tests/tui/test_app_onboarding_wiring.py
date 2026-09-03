@@ -198,3 +198,49 @@ async def test_onboarding_is_modal_for_help_and_notices(tmp_path):
         await pilot.press("f4")
         await pilot.pause()
         assert isinstance(app.screen, OnboardingScreen), "F4 открыл /notices поверх мастера"
+
+
+# ---------------------------------------------------------------------------
+# Test 7: признак ступени «без профиля» доезжает до экрана мастера
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_review_mode_forwards_the_deactivation_flag(tmp_path):
+    """`tui/__init__.py` ставит признак атрибутом приложения — приложение обязано
+    донести его до экрана: иначе финал мастера не снимет указатель и упрётся в
+    отказ записи (стек следующего старта поднимет сломанный профиль)."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import OnboardingScreen
+
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "review"
+    app._onboarding_config_path = tmp_path / "config.yml"
+    app._onboarding_deactivate_profile = True
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, OnboardingScreen)
+        assert scr._deactivate_profile is True
+
+
+@pytest.mark.asyncio
+async def test_onboarding_does_not_deactivate_by_default(tmp_path):
+    """Отрицательный сторож: обычный первый запуск (признак не ставился) — мастер
+    к указателю профиля не прикасается."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import OnboardingScreen
+
+    cfg = {"completions_url": "http://your-backend:PORT/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
+           "model": "<ВПИШИТЕ_МОДЕЛЬ>"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "auto"
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, OnboardingScreen)
+        assert scr._deactivate_profile is False

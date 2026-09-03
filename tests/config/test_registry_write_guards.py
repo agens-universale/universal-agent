@@ -479,3 +479,101 @@ def test_cascade_keeps_a_reference_to_an_alias_that_survives_the_removal(stack):
     doc = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert (doc.get("models") or {}) == {}
     assert (doc.get("slots") or {}) == {"default": "gc"}   # ссылка осталась валидной
+
+
+# --- Отказ валидации называет файл, где лежит ключ ---
+#
+# Вердикт фазы 2 вынесен по СТЕКУ, и ключ, который он называет, может лежать не в
+# том файле, который правится. Живой тупик стенда: мастер пишет реестр в основной
+# конфиг, а отказ «write_slot default + upsert_model … + write_slot max:
+# slots.default: алиас "strong" не найден в merged-реестре models» — про активный
+# профиль. Человек не мог понять, про конфиг это или про профиль, а служебные
+# имена операций впереди ему ничего не говорили.
+
+
+def test_a_refusal_caused_by_the_profile_names_the_profile_and_its_file(stack):
+    """Текст валидатора остаётся дословно; за ним — слой словами («в профиле
+    "work"») и ПОЛНЫЙ путь его файла: файлов в стеке несколько, и «в файле выше»
+    не называет ни одного."""
+    base, profiles = stack
+    text = 'profile: "work"\nmodels:\n  fast:\n    model: "qwen/qwen3-8b"\n'
+    base.write_text(text, encoding="utf-8")
+    profile = profiles / "work.yml"
+    profile.write_text('slots:\n  default: "strong"\n', encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError) as exc:
+        rw.apply_registry_ops(base, [
+            ("write_slot", "default", "fast"),
+            ("upsert_model", "claude", {"model": "anthropic/claude"}),
+            ("write_slot", "max", "claude"),
+        ], "")
+
+    message = str(exc.value)
+    assert message.startswith(
+        'slots.default: алиас "strong" не найден в merged-реестре models')
+    assert f'поправьте slots.default в профиле "work": {profile}' in message
+    assert base.read_text(encoding="utf-8") == text
+
+
+def test_a_refusal_caused_by_the_base_names_the_base_file(stack):
+    """Обратная раскладка: правится АКТИВНЫЙ профиль, а стек ломает слот основного
+    конфига. Назван основной конфиг, а не файл, который человек правит."""
+    base, profiles = stack
+    base.write_text(
+        'profile: "work"\nmodels:\n  fast:\n    model: "x"\nslots:\n  default: "ghost"\n',
+        encoding="utf-8")
+    profile = profiles / "work.yml"
+    text = 'slots:\n  max: "fast"\n'
+    profile.write_text(text, encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError) as exc:
+        rw.write_slot(profile, "light", "fast", "", is_profile=True, stack_base=base)
+
+    message = str(exc.value)
+    assert message.startswith('slots.default: алиас "ghost" не найден')
+    assert f"поправьте slots.default в основном конфиге: {base}" in message
+    assert str(profile) not in message
+    assert profile.read_text(encoding="utf-8") == text
+
+
+def test_a_validation_refusal_carries_no_operation_names(stack):
+    """Секция «Модели» на том же стенде показывала «upsert_model fast:
+    slots.default: …». Отказ валидации написан для человека — как и осознанный
+    отказ операции, он начинается с собственного текста, а не со служебного
+    имени; подпись операцией остаётся у МЕХАНИЧЕСКОГО сбоя (см.
+    test_registry_write.py::test_a_deliberate_refusal_reaches_the_user_without_
+    the_operation_name — сторож на ту ветку)."""
+    base, profiles = stack
+    base.write_text(
+        'profile: "work"\nmodels:\n  fast:\n    model: "qwen/qwen3-8b"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "strong"\n', encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError) as exc:
+        rw.upsert_model(base, "fast", {"model": "qwen/qwen3-14b"}, "")
+
+    message = str(exc.value)
+    assert message.startswith("slots.default:")
+    for op_name in rw._OPERATIONS:
+        assert op_name not in message
+
+
+def test_the_culprit_is_judged_on_the_stack_the_validator_saw_not_on_the_disk(stack):
+    """Каскад снимает ссылку в правимом файле, а тёзка-ссылка профиля остаётся
+    висеть. По ДИСКУ значение slots.default «не менялось» от базы к профилю, и
+    виновником вышел бы основной конфиг — файл, из которого ссылка как раз
+    уходит. Виновник считается по стеку, где цель стоит ещё не записанным
+    текстом, — тому же, что судил валидатор."""
+    base, profiles = stack
+    base.write_text(
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n'
+        'slots:\n  default: "a"\n',
+        encoding="utf-8")
+    profile = profiles / "work.yml"
+    profile.write_text('slots:\n  default: "a"\n', encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError) as exc:
+        rw.remove_model(base, "a", force=True)
+
+    message = str(exc.value)
+    assert f'поправьте slots.default в профиле "work": {profile}' in message
+    assert str(base) not in message

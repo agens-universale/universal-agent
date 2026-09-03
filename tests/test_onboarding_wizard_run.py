@@ -332,3 +332,87 @@ def test_summary_names_the_source_when_default_falls_back_to_a_level():
            "slots": {"max": "fast"}}
     lines = wz._summary_lines(cfg)
     assert lines[0] == "    модель       qwen/qwen3-8b  (default не задан — работает max)"
+
+
+# --- ступень «без профиля»: плоский мастер предупреждает и деактивирует -------
+
+_STAND_BASE = (
+    'profile: "work"\n'
+    "backend:\n"
+    "  api_mode: chat_completions\n"
+    '  completions_url: "https://openrouter.ai/api/v1/chat/completions"\n'
+    "  chat_completion_headers:\n"
+    '    Authorization: "Bearer sk-user-token"\n'
+    "models:\n"
+    "  fast:\n"
+    '    model: "qwen/qwen3-8b"\n'
+)
+
+
+def _broken_profile_stand(tmp_path, monkeypatch, *, slot="strong"):
+    """Раскладка живого смока на НАСТОЯЩИХ файлах: рабочие адрес/токен/реестр в
+    базе, слот профиля — на алиас, которого нет нигде. Изолированный ~/.gc и
+    чистый cwd, иначе в стек лезут слои машины, где гоняется тест."""
+    from config_modules import env_vars
+    from config_modules.env_vars import EnvVars
+
+    home = tmp_path / "gc"
+    (home / "profiles").mkdir(parents=True)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=home))
+    monkeypatch.chdir(project)
+    (home / "config.yml").write_text(_STAND_BASE, encoding="utf-8")
+    (home / "profiles" / "work.yml").write_text(
+        f'slots:\n  default: "{slot}"\n', encoding="utf-8")
+    monkeypatch.setattr("model_picker.fetch_models", lambda *a, **k: None)
+    return home
+
+
+_ANSWERS = ["https://openrouter.ai/api/v1/chat/completions",   # адрес
+            "1", "sk-user-token",                              # авторизация: токен
+            "claude-fable-5",                                  # модель
+            "", ""]                                            # уровни — пропустить
+
+
+def test_run_on_the_without_profile_stage_warns_and_deactivates(tmp_path, monkeypatch):
+    """Живой тупик стенда у плоской чинилки: без снятия указателя запись отвергается
+    («алиас "strong" не найден»), потому что гейт судит стек СЛЕДУЮЩЕГО старта.
+    Финал снимает указатель — починка ложится в файл, а файл профиля остаётся на
+    диске. Предупреждение печатается до записи, тем же текстом, что и в TUI."""
+    import onboarding_fields as _of
+    home = _broken_profile_stand(tmp_path, monkeypatch)
+
+    loaded = onboarding.load_config_for_repair()
+    assert loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
+
+    printed: list = []
+    it = iter(_ANSWERS)
+    io = wz.WizardIO(reader=lambda p, secret: next(it, ""), printer=printed.append)
+    configured = wz.run(loaded.config, home / "config.yml", review_all=True, io=io,
+                        deactivate_profile=True)
+
+    assert any(_of.PROFILE_DEACTIVATION_WARNING in line for line in printed)
+    raw = yaml.safe_load((home / "config.yml").read_text(encoding="utf-8"))
+    assert raw["profile"] == ""                                 # указатель снят
+    assert (home / "profiles" / "work.yml").is_file()           # …а файл профиля цел
+    assert raw["slots"]["default"] == "claude-fable-5"          # настройки записаны
+    assert configured is True                                   # конфиг перечитан и настроен
+
+
+def test_run_without_the_flag_leaves_the_pointer_and_says_nothing(tmp_path, monkeypatch):
+    """Отрицательный сторож: здоровый профиль — ни предупреждения, ни снятия."""
+    home = _broken_profile_stand(tmp_path, monkeypatch, slot="fast")
+
+    loaded = onboarding.load_config_for_repair()
+    assert loaded.stage == onboarding.REPAIR_STAGE_FULL
+
+    printed: list = []
+    it = iter(_ANSWERS)
+    io = wz.WizardIO(reader=lambda p, secret: next(it, ""), printer=printed.append)
+    wz.run(loaded.config, home / "config.yml", review_all=True, io=io,
+           deactivate_profile=False)
+
+    assert not any("деактив" in line.lower() for line in printed)
+    raw = yaml.safe_load((home / "config.yml").read_text(encoding="utf-8"))
+    assert raw["profile"] == "work"

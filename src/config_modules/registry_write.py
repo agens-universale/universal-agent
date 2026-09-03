@@ -38,18 +38,21 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
+import config_raw
 import onboarding_config_writer as ocw
 from config_modules.layers import (prospective_registry, stack_documents,
                                    validate_config_text_with_sections,
                                    validate_profile_text_with_sections)
 from config_modules.model_registry import LEVELS
 from config_modules.profiles import validate_profile_text
+from config_origin import error_origins
 
 
 class RegistryWriteError(ValueError):
@@ -119,7 +122,49 @@ def _document(text: str) -> dict:
     return raw
 
 
-def _commit(target, text: str, is_profile: bool, label: str, stack_base=None) -> None:
+# Слой, где лежит ключ, — словами, которыми человек его знает в интерфейсе; за
+# словами всегда полный путь: файлов в стеке несколько, и «в файле выше» не
+# называет ни одного (ревизия владельца по живому смоку).
+_LAYER_WORDS = {
+    "base": "в основном конфиге",
+    "managed": "в managed-файле",
+    "project": "в проектном конфиге",
+    "profile:project": 'в профиле "{name}"',
+    "profile:base": 'в профиле "{name}"',
+}
+
+
+def _name_culprits(message: str, target, text: str, is_profile: bool, stack_base) -> str:
+    """Текст отказа валидации плюс файл(ы) стека, где лежат названные им ключи:
+    «… — поправьте slots.default в профиле "work": <полный путь>».
+
+    Вердикт вынесен по СТЕКУ, и ключ, который он называет, может лежать не в
+    правимом файле: мастер пишет реестр в основной конфиг, а «slots.default:
+    алиас "strong" не найден» — про активный профиль. Без файла человек читал
+    «конфиг не записан: …» и не понимал, про конфиг это или про профиль.
+
+    Виновник считается по тому стеку, что судил валидатор: цель стоит в нём ещё
+    не записанным текстом (`candidates`), а не своим дисковым содержимым. По
+    диску каскад, снявший ссылку в цели, показывал бы значение «не менявшимся»
+    до самого профиля — и виновником выходил бы файл, из которого ссылка как
+    раз уходит. Неактивный профиль без `stack_base` стека не имеет — ключи не
+    ищутся; ошибка не про ключи — текст остаётся как есть: виновника не
+    выдумываем."""
+    if is_profile and stack_base is None:
+        return message
+    culprits = error_origins(stack_base if is_profile else target, message,
+                             candidates={target: config_raw.parse_document(text)})
+    if not culprits:
+        return message
+    advice = "; ".join(
+        f"{', '.join(culprit.keys)} "
+        f"{_LAYER_WORDS[culprit.kind].format(name=Path(culprit.path).stem)}: "
+        f"{os.path.abspath(culprit.path)}"
+        for culprit in culprits)
+    return f"{message} — поправьте {advice}"
+
+
+def _commit(target, text: str, is_profile: bool, stack_base=None) -> None:
     # Локальный импорт: `config` — агрегатор, импортирующий config_modules.*;
     # модульный импорт отсюда замкнул бы цикл.
     if is_profile and stack_base is None:
@@ -138,7 +183,11 @@ def _commit(target, text: str, is_profile: bool, label: str, stack_base=None) ->
     except RegistryWriteError:
         raise
     except ValueError as exc:
-        raise RegistryWriteError(f"{label}: {exc}") from exc
+        # Отказ валидации написан для человека — как и осознанный отказ операции
+        # (`_apply_ops_to_text`), он доезжает без служебных имён операций: «write_slot
+        # default + upsert_model …:» впереди — служебный лог в пользовательском тексте.
+        raise RegistryWriteError(
+            _name_culprits(str(exc), target, text, is_profile, stack_base)) from exc
 
 
 def _entry_block_lines(alias_key: str, entry: dict) -> list[str]:
@@ -423,16 +472,16 @@ def apply_registry_ops(target, ops, template: str, *, is_profile: bool = False,
     (см. докстринг модуля). Для самой config.yml не нужен — там стек строится от
     цели. Не задан у профиля — валидация остаётся фазой 1, как прежде.
 
-    механический сбой называет свою операцию, провал итоговой валидации — состав
-    транзакции и причину от валидатора. ОСОЗНАННЫЙ отказ операции (она сама
-    подняла `RegistryWriteError`) доезжает дословно: его текст написан для
-    человека, и служебное имя операции перед ним — шум в пользовательском
-    сообщении."""
+    Механический сбой называет свою операцию. Провал итоговой валидации — причину
+    от валидатора и файл стека, где лежит названный ею ключ (`_name_culprits`):
+    вердикт вынесен по стеку, и виноват может быть не правимый файл. ОСОЗНАННЫЙ
+    отказ операции (она сама подняла `RegistryWriteError`) доезжает дословно.
+    Ни тому, ни другому имя операции не приписывается: их тексты написаны для
+    человека, и служебное имя перед ними — шум в пользовательском сообщении."""
     ops = [tuple(op) for op in ops]
     text = _apply_ops_to_text(_read(target), ops, template,
                               _surviving_aliases(target, ops, stack_base))
-    _commit(target, text, is_profile, label=" + ".join(_op_label(op) for op in ops),
-            stack_base=stack_base)
+    _commit(target, text, is_profile, stack_base=stack_base)
 
 
 def upsert_model(target, alias: str, fields: dict, template: str, *,

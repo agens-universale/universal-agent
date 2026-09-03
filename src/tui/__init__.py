@@ -107,6 +107,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     onb_write_path = user_config_path()
     onboarding_mode = None
+    onboarding_deactivate_profile = False
 
     if getattr(args, "init_config", False):
         just_created = _bootstrap_user_config()
@@ -134,6 +135,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             from startup_notices import Notice
             push_runtime_notice(Notice(
                 "warning", "config_load_degraded", loaded.message, ("config.yml",)))
+        # Ступень «без профиля» значит, что конфиг собрался только со снятым
+        # профилем: финал мастера обязан снять и указатель, иначе гейт записи
+        # отвергнет собранное (стек следующего старта поднимет тот же профиль) —
+        # чинилка дойдёт до конца и не запишет свою починку.
+        onboarding_deactivate_profile = (
+            loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
         onboarding_mode = "review"
     else:
         just_created = _bootstrap_user_config() if args.config is None else False
@@ -196,6 +203,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # единственном старте загрузки, до создания app/треда.
     app._maybe_notice_profile_activation(profile_meta.active_name or "", profile_meta, config_dict)
     app._onboarding_mode = onboarding_mode
+    app._onboarding_deactivate_profile = onboarding_deactivate_profile
     app._onboarding_config_path = onb_write_path
     import upgrade_gate
     app._upgrade_info = upgrade_gate.detect_upgrade()

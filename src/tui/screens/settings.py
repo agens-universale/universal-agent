@@ -3423,85 +3423,32 @@ class SettingsScreen(Screen):
 
     def _profile_activation_target(self, ref):
         """Единое правило записи: проектный профиль → проектный конфиг (создаётся
-        при отсутствии); профиль «рядом с базой» → базовый конфиг запуска, ЕСЛИ
-        проектный конфиг уже не задаёт указатель сам — иначе тоже проектный (иначе
-        активация была бы молчаливым no-op: проектный слой всё равно победит).
-        Никогда не пишет указатель на проектный профиль в базовый конфиг."""
-        if ref.root_kind == "project" or self._project_sets_profile_pointer():
+        при отсутствии) — указатель на него никогда не уходит в базовый. Всё
+        остальное — тем же общим правилом, что и снятие (`_deactivation_target`):
+        слой, где запись возымеет эффект. Спрашиваем его, а не повторяем условие
+        своими словами: своя редакция уже разъезжалась бы с чужой на первой правке,
+        а цена расхождения — молчаливый no-op (проектный слой перекроет запись)."""
+        if ref.root_kind == "project":
             return self._project_config_candidate_path()
-        return self._profiles_base_path()
+        return self._deactivation_target()
 
     def _write_profile_pointer(self, path, name: str, *, extra_candidates=None) -> None:
-        """Запись `profile: "<name>"`: якорь гарантируется `ensure_pointer_anchor`
-        (топ-уровневый `profile:` из пакетного шаблона, идемпотентно), значение —
-        существующим `write_values`. Файл, которого ещё нет (проектный
-        `.gc/config.yml`), создаёт отдельная простая функция — `write_values` по
-        контракту требует существующего файла.
-
-        Валидация — фаза 2 (`validate_config_text_with_sections`), а не синтаксис
-        одного файла (тот же принцип, что и у остальных записей реестра,
-        `config_modules/registry_write.py::_commit`): указатель кросс-слоен по
-        устройству (слот активного профиля вправе жить не в базе), и вердикт по
-        одному файлу пропустил бы запись, после которой стек следующего старта не
-        соберётся (легальная раскладка «модели в базе, слот в профиле» — снятие
-        профиля рвёт единственный слот). `path` бывает и проектным
-        `.gc/config.yml` (см. `_profile_activation_target`/`_deactivation_target`)
-        — тогда текст садится в стек ПОДСТАНОВКОЙ на место проектного слоя
-        (`target=path`), а не как содержимое базы, иначе вердикт судил бы не тот
-        файл, который реально меняется. То же самое — и у ветки создания: файл
-        ещё не существует (первая активация проектного профиля), но кандидат на
-        его будущее содержимое ровно тот же, что напишет `create_pointer_file`,
-        и подстановка на место проектного слоя работает и без файла на диске
-        (`_merge_layers` подставляет кандидат ДО чтения, а не после).
-
-        `extra_candidates` — доп. {путь: документ} сверх указателя, тоже
-        подставляемые при валидации (`config_modules.layers._merge_layers`,
-        приняв несколько кандидатов сразу). Нужны переименованию
-        (`_rename_profile`): указатель пишется на НОВОЕ имя ДО физического
-        `rename()` файла профиля, и без будущего документа профиля НА ЕГО
-        будущем пути указатель не резолвится вовсе — валидация судила бы стек
-        БЕЗ профиля, которого просто ещё нет под этим именем."""
-        from pathlib import Path
+        """Запись `profile: "<name>"` — общей склейкой примитивов указателя
+        (`onboarding_config_writer.write_profile_pointer`, там же и все доводы):
+        её второй потребитель — финал мастера на сломанном профиле, и своя
+        редакция здесь разъехалась бы с ним на первой же правке."""
         import onboarding_config_writer as ocw
-        from config import _default_config_path, validate_config_text_with_sections
-        path = Path(path)
-        base_path = self._profiles_base_path()
-        is_base = path.resolve() == Path(base_path).resolve()
-        if not path.is_file():
-            candidate = f"profile: {ocw.quote_scalar(name)}\n"
-            if is_base:
-                validate_config_text_with_sections(
-                    candidate, base_path=path, extra_candidates=extra_candidates)
-            else:
-                validate_config_text_with_sections(
-                    candidate, base_path=base_path, target=path,
-                    extra_candidates=extra_candidates)
-            ocw.create_pointer_file(path, name)
-            return
-        ocw.ensure_pointer_anchor(path, template_path=_default_config_path())
-        if is_base:
-
-            def validate(candidate: str) -> None:
-                validate_config_text_with_sections(
-                    candidate, base_path=path, extra_candidates=extra_candidates)
-        else:
-
-            def validate(candidate: str) -> None:
-                validate_config_text_with_sections(
-                    candidate, base_path=base_path, target=path,
-                    extra_candidates=extra_candidates)
-        missing = ocw.write_values(path, {"profile": name}, validate=validate)
-        if missing:
-            raise ValueError(f"не удалось записать: {', '.join(missing)}")
+        ocw.write_profile_pointer(path, name, base_path=self._profiles_base_path(),
+                                  extra_candidates=extra_candidates)
 
     def _deactivation_target(self):
-        """Куда пишется `profile: ""` при деактивации — то же единое правило, что
-        у активации: слой, где запись возымеет эффект. Проектный конфиг задаёт
-        указатель → туда (запись в базовый была бы молчаливым no-op); иначе —
-        базовый конфиг запуска."""
-        if self._project_sets_profile_pointer():
-            return self._project_config_candidate_path()
-        return self._profiles_base_path()
+        """Куда пишется `profile: ""` при деактивации — общее правило
+        (`config_modules.layers.profile_pointer_write_target`, там же доводы), то
+        же самое, что у активации: слой, где запись возымеет эффект. Проектный
+        документ отдаём из кэша прохода — файл уже прочитан этим кадром."""
+        from config_modules.layers import profile_pointer_write_target
+        return profile_pointer_write_target(self._profiles_base_path(),
+                                            project_doc=self._project_config_doc())
 
     def _deactivate_profile(self) -> None:
         """Space на «— без профиля» (клавиша перевешена решением В1 волны B):

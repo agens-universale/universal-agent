@@ -146,10 +146,18 @@ class OnboardingScreen(Screen):
     ]
 
     def __init__(self, config, config_path, *, review_all, on_commit,
-                 fetch=None, mcp=None, voice=None, probe=None) -> None:
+                 fetch=None, mcp=None, voice=None, probe=None,
+                 deactivate_profile=False) -> None:
         super().__init__()
         self._config = config
         self._config_path = config_path
+        # Лестница загрузки приземлилась на ступень «без профиля»: конфиг собрался
+        # только потому, что профиль сняли на этот запуск, и финал обязан снять
+        # указатель совсем — иначе гейт записи отвергнет собранное мастером
+        # (стек следующего старта снова поднимет сломанный профиль). Признак —
+        # один флаг, а не копия `RepairLoad`: экрану от лестницы нужен ровно этот
+        # ответ.
+        self._deactivate_profile = deactivate_profile
         # Хранится ради теста на wiring (app.py передаёт флаг, но сам его не читает) —
         # сами гейты на review_all внутри экрана сняты (сырой документ различает
         # «первичный запуск / уже настроен» сам по себе, см. _raw_conn), поэтому
@@ -224,7 +232,10 @@ class OnboardingScreen(Screen):
         действия дописывает поверхность, и только профильному вердикту: экран
         «Настройки · Профили» правит профиль, а не чужой слой реестра."""
         config = self._config or {}
-        note = onboarding.overriding_layer_note(config, self._config_path)
+        # Профиль, который финал деактивирует, перекрыть выбор уже не сможет — и
+        # плашка о нём противоречила бы предупреждению о деактивации строкой ниже.
+        note = onboarding.overriding_layer_note(
+            config, self._config_path, ignore_profile=self._deactivate_profile)
         if note and config.get("profile"):
             note += self._NOTE_SETTINGS_TAIL
         return note
@@ -654,6 +665,14 @@ class OnboardingScreen(Screen):
                 summary.append("  " if val in ("—", _of.LEVEL_UNSET) else "✓ ", style=OK)
                 summary.append(f"{label:{label_width}}", style=DIM)
                 summary.append(f"{val}\n", style=INK)
+            if self._deactivate_profile:
+                # Enter отсюда не только пишет настройки, но и снимает указатель
+                # профиля — предупреждение стоит ДО нажатия, а не в отчёте после:
+                # человек не должен узнавать о потере своей настройки постфактум.
+                # Текст — общий с плоским мастером (`_of`), цветом предупреждения:
+                # это единственная строка финала, говорящая об отнятом.
+                summary.append("\n")
+                summary.append(_of.PROFILE_DEACTIVATION_WARNING + "\n", style=WARN)
             notice_parts = []
             if self._mcp_selected:
                 notice_parts.append(f"MCP ({mcp_val})")
@@ -1531,7 +1550,9 @@ class OnboardingScreen(Screen):
                     else str(self._voice_raw_cloud().get("token") or "")))
             values["voice.model"] = self._voice_cloud["model"]
         try:
-            missing = onboarding.write_wizard_values(self._config_path, values)
+            missing = onboarding.write_wizard_values(
+                self._config_path, values,
+                deactivate_profile=self._deactivate_profile)
         except onboarding.PartialWriteError as exc:
             # Записи реестра ушли первой транзакцией и уже на диске — то же
             # правило, что у ветки `missing` ниже: нетронутый файл не обещаем.

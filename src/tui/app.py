@@ -159,6 +159,10 @@ class TuiApp(App):
         self.last_terminal_outcome: Optional[str] = None
         self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
         self._onboarding_mode = None          # None | "auto" | "review"; ставит tui/__init__.py
+        # Лестница загрузки приземлилась на ступень «без профиля» — финал мастера
+        # обязан снять указатель (ставит tui/__init__.py). Один признак, а не весь
+        # `RepairLoad`: приложению от лестницы нужен ровно этот ответ.
+        self._onboarding_deactivate_profile = False
         self._config_path = None              # путь к конфигу на диске; задаётся снаружи после __init__
         # Мтайм-набор активного указателя (спека §3.3): база/managed/проектный конфиг +
         # оба кандидатных пути активного профиля. Расширение прежнего одиночного
@@ -335,6 +339,7 @@ class TuiApp(App):
                 config_path=self._onboarding_config_path,
                 review_all=self._onboarding_mode == "review",
                 on_commit=self._finish_onboarding,
+                deactivate_profile=self._onboarding_deactivate_profile,
             )
         return TraceScreen()
 

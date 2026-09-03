@@ -133,8 +133,13 @@ def _run_init() -> int:
         print(f"[gc] {loaded.message}", file=sys.stderr)
     if _interactive():
         import onboarding_wizard
-        configured = onboarding_wizard.run(config_dict, path, review_all=True,
-                              io=onboarding_wizard.default_io())   # без mcp — gc-cli не ставит MCP
+        configured = onboarding_wizard.run(
+            config_dict, path, review_all=True,
+            io=onboarding_wizard.default_io(),   # без mcp — gc-cli не ставит MCP
+            # Ступень «без профиля» значит, что конфиг собрался только со снятым
+            # профилем: финал обязан снять и указатель, иначе записать починку
+            # некуда. Признак — один ответ лестницы, а не весь `RepairLoad`.
+            deactivate_profile=loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
         # run() отдаёт False не только на трейсбеке, но и когда человек прошёл
         # мастер, а конфиг всё равно остался ненастроенным (пропущенные поля,
         # отказ записи, файл, который не удалось перечитать) — код возврата

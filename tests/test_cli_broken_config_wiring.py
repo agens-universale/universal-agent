@@ -88,7 +88,7 @@ def test_run_init_reaches_wizard_on_broken_config_interactive(monkeypatch, tmp_p
     import onboarding_wizard
     monkeypatch.setattr(
         onboarding_wizard, "run",
-        lambda cfg, path, *, review_all, io, mcp=None: seen.update(cfg=cfg) or True,
+        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: seen.update(cfg=cfg) or True,
     )
 
     assert cli._run_init() == 0
@@ -179,7 +179,7 @@ def test_run_init_keeps_user_connection_when_only_profile_is_broken(monkeypatch,
     import onboarding_wizard
     monkeypatch.setattr(
         onboarding_wizard, "run",
-        lambda cfg, path, *, review_all, io, mcp=None: seen.update(cfg=cfg) or True,
+        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: seen.update(cfg=cfg) or True,
     )
 
     assert cli._run_init() == 0
@@ -199,10 +199,51 @@ def test_run_init_tells_which_layer_was_dropped(monkeypatch, tmp_path, capsys):
     import onboarding_wizard
     monkeypatch.setattr(
         onboarding_wizard, "run",
-        lambda cfg, path, *, review_all, io, mcp=None: True,
+        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: True,
     )
 
     assert cli._run_init() == 0
     err = capsys.readouterr().err
     assert 'профилем "work"' in err
     assert "пакетном шаблоне" not in err     # шаблон не подставлялся — врать нельзя
+
+
+def test_run_init_asks_the_wizard_to_deactivate_on_the_without_profile_stage(
+    monkeypatch, tmp_path
+):
+    """Ступень лестницы обязана доехать до мастера: без этого признака он проходит
+    все вопросы и не может записать собственную починку — гейт судит стек
+    следующего старта, а там указатель снова поднимает сломанный профиль."""
+    _broken_profile_stand(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+
+    seen = {}
+    import onboarding_wizard
+    monkeypatch.setattr(
+        onboarding_wizard, "run",
+        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False:
+            seen.update(deactivate=deactivate_profile) or True,
+    )
+
+    assert cli._run_init() == 0
+    assert seen["deactivate"] is True
+
+
+def test_run_init_leaves_a_healthy_profile_alone(monkeypatch, tmp_path):
+    """Отрицательный сторож: тот же стенд, но профиль исправен (ступень `full`) —
+    мастеру нечего снимать, и просить его об этом нельзя."""
+    _broken_profile_stand(tmp_path, monkeypatch)
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "fast"\n', encoding="utf-8")
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+
+    seen = {}
+    import onboarding_wizard
+    monkeypatch.setattr(
+        onboarding_wizard, "run",
+        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False:
+            seen.update(deactivate=deactivate_profile) or True,
+    )
+
+    assert cli._run_init() == 0
+    assert seen["deactivate"] is False

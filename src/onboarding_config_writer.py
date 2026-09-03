@@ -1,5 +1,7 @@
 """Технический хелпер: точечная запись скаляров в config.yml по ключу-якорю
-с сохранением комментариев. Бизнес-логики нет."""
+с сохранением комментариев. Бизнес-логики нет — кроме `write_profile_pointer`:
+склейку примитивов указателя (якорь → значение → валидация стека) держим здесь
+одну на всех, потому что её потребители порознь уже разъезжались."""
 import re
 from pathlib import Path
 
@@ -445,6 +447,77 @@ def remove_mapping_entry(text: str, parent_dotted: str, key: str) -> str:
         return (text[:p_start] + f"{p_indent}{parent_key}: {{}}{tail}\n"
                 + remaining + text[block_end:])
     return text[:entry_start] + text[entry_end:]
+
+
+def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) -> None:
+    """Запись `profile: "<name>"` (пустое имя — деактивация): якорь гарантируется
+    `ensure_pointer_anchor` (топ-уровневый `profile:` из пакетного шаблона,
+    идемпотентно), значение — существующим `write_values`. Файл, которого ещё нет
+    (проектный `.gc/config.yml`), создаёт отдельная простая функция —
+    `write_values` по контракту требует существующего файла.
+
+    Дом — здесь, у примитивов указателя, которые она и склеивает: потребителей
+    двое (секция «Профили» `/settings` и финал мастера, снимающий указатель на
+    ступени `without_profile`), и вторая редакция этой склейки разъехалась бы с
+    первой на первой же правке — тем же способом, каким расходились редакции
+    резолва указателя. Куда писать, отвечает
+    `config_modules.layers.profile_pointer_write_target` (вопрос слоёв, не
+    файла) — оба потребителя спрашивают её.
+
+    Валидация — фаза 2 (`validate_config_text_with_sections`), а не синтаксис
+    одного файла (тот же принцип, что и у остальных записей реестра,
+    `config_modules/registry_write.py::_commit`): указатель кросс-слоен по
+    устройству (слот активного профиля вправе жить не в базе), и вердикт по
+    одному файлу пропустил бы запись, после которой стек следующего старта не
+    соберётся (легальная раскладка «модели в базе, слот в профиле» — снятие
+    профиля рвёт единственный слот). `path` бывает и проектным `.gc/config.yml`
+    — тогда текст садится в стек ПОДСТАНОВКОЙ на место проектного слоя
+    (`target=path`), а не как содержимое базы, иначе вердикт судил бы не тот
+    файл, который реально меняется. То же самое — и у ветки создания: файл
+    ещё не существует (первая активация проектного профиля), но кандидат на
+    его будущее содержимое ровно тот же, что напишет `create_pointer_file`,
+    и подстановка на место проектного слоя работает и без файла на диске
+    (`_merge_layers` подставляет кандидат ДО чтения, а не после).
+
+    `base_path` — базовый конфиг ЭТОГО запуска: относительно него собирается
+    стек, когда пишется не он сам.
+
+    `extra_candidates` — доп. {путь: документ} сверх указателя, тоже
+    подставляемые при валидации (`config_modules.layers._merge_layers`,
+    приняв несколько кандидатов сразу). Нужны переименованию профиля: указатель
+    пишется на НОВОЕ имя ДО физического `rename()` файла профиля, и без будущего
+    документа профиля НА ЕГО будущем пути указатель не резолвится вовсе —
+    валидация судила бы стек БЕЗ профиля, которого просто ещё нет под этим
+    именем."""
+    from config import _default_config_path, validate_config_text_with_sections
+    path = Path(path)
+    is_base = path.resolve() == Path(base_path).resolve()
+    if not path.is_file():
+        candidate = f"profile: {quote_scalar(name)}\n"
+        if is_base:
+            validate_config_text_with_sections(
+                candidate, base_path=path, extra_candidates=extra_candidates)
+        else:
+            validate_config_text_with_sections(
+                candidate, base_path=base_path, target=path,
+                extra_candidates=extra_candidates)
+        create_pointer_file(path, name)
+        return
+    ensure_pointer_anchor(path, template_path=_default_config_path())
+    if is_base:
+
+        def validate(candidate: str) -> None:
+            validate_config_text_with_sections(
+                candidate, base_path=path, extra_candidates=extra_candidates)
+    else:
+
+        def validate(candidate: str) -> None:
+            validate_config_text_with_sections(
+                candidate, base_path=base_path, target=path,
+                extra_candidates=extra_candidates)
+    missing = write_values(path, {"profile": name}, validate=validate)
+    if missing:
+        raise ValueError(f"не удалось записать: {', '.join(missing)}")
 
 
 def create_pointer_file(path, name: str) -> None:

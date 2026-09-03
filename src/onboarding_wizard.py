@@ -463,12 +463,24 @@ def _summary_lines(config: dict) -> list[str]:
     return lines
 
 
-def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None) -> bool:
+def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None,
+        deactivate_profile: bool = False) -> bool:
     _rule_header(io)
+    if deactivate_profile:
+        # Тот же текст, что на экране подтверждения TUI (`_of` — общий дом), и
+        # ДО вопросов, а не перед самой записью: здесь нет шага подтверждения, и
+        # после последнего ответа мастер пишет сразу — предупреждение, стоящее
+        # там, человек читал бы уже как отчёт о случившемся.
+        io.printer("")
+        io.printer(f"  {_of.PROFILE_DEACTIVATION_WARNING}")
     try:
         values = collect_fields(io, config, review_all=review_all)
-        if values:
-            missing = onboarding.write_wizard_values(config_path, values)
+        # Снятие указателя — само по себе повод к записи: человек прошёл мастер
+        # ради починки, и оставить конфиг несобираемым потому, что все поля он
+        # пропустил, значит не сделать ровно то, что обещано строкой выше.
+        if values or deactivate_profile:
+            missing = onboarding.write_wizard_values(
+                config_path, values, deactivate_profile=deactivate_profile)
             if missing:
                 # Правило «всё или ничего» — про ПЛОСКУЮ запись; записи реестра ушли
                 # раньше отдельной транзакцией, поэтому файл уже не нетронут. Говорим

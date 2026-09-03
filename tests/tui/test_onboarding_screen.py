@@ -2624,6 +2624,55 @@ async def test_no_active_profile_shows_no_warning_plaque(tmp_path, monkeypatch):
             scr.query_one("#onb-profile-warn")
 
 
+def _broken_profile_layout(tmp_path):
+    """База с указателем на профиль, который один задаёт `slots.default` — та
+    самая раскладка живого стенда, на которой лестница приземляется на ступень
+    `without_profile`: конфиг в памяти уже без профиля, а на диске он ещё есть."""
+    base = tmp_path / "config.yml"
+    base.write_text('profile: "work"\nmodels:\n  fast:\n    model: q\n', encoding="utf-8")
+    profile = tmp_path / "profiles" / "work.yml"
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_text('slots:\n  default: "strong"\n', encoding="utf-8")
+    return base
+
+
+def test_layer_note_is_silent_about_the_profile_that_will_be_deactivated(tmp_path):
+    """Финал мастера деактивирует профиль — значит, перекрыть выбор человека он
+    уже не сможет. Плашка «этот слой его перекроет» судит по диску, где профиль
+    ещё лежит, и на одном экране с предупреждением о деактивации прямо ему
+    противоречила (живой смок)."""
+    base = _broken_profile_layout(tmp_path)
+    scr = _screen(config={"profile": "", "models": {"fast": {}}}, config_path=str(base),
+                  deactivate_profile=True)
+    assert scr._layer_note() is None
+
+
+def test_layer_note_still_warns_about_the_profile_without_deactivation(tmp_path):
+    """Сторож: без деактивации профиль на диске действительно перекроет запись —
+    плашка обязана остаться."""
+    base = _broken_profile_layout(tmp_path)
+    scr = _screen(config={"profile": "", "models": {"fast": {}}}, config_path=str(base),
+                  deactivate_profile=False)
+    note = scr._layer_note()
+    assert note is not None and "реестр моделей" in note
+
+
+def test_layer_note_keeps_warning_about_a_project_layer_despite_deactivation(tmp_path, monkeypatch):
+    """Деактивация снимает ТОЛЬКО профиль. Проектный `.gc/config.yml` продолжит
+    перекрывать реестр — про него плашка молчать не имеет права."""
+    import config as cfg_mod
+    base = _broken_profile_layout(tmp_path)
+    project = tmp_path / ".gc" / "config.yml"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
+                       encoding="utf-8")
+    monkeypatch.setattr(cfg_mod, "_project_local_config_path", lambda: str(project))
+    scr = _screen(config={"profile": "", "models": {"proj": {}}}, config_path=str(base),
+                  deactivate_profile=True)
+    note = scr._layer_note()
+    assert note is not None and "реестр моделей" in note
+
+
 def test_registry_layer_note_has_no_settings_address(tmp_path, monkeypatch):
     """Второй вердикт `overriding_layer_note` — про реестр из чужого слоя, и
     «Настройки · Профили» к нему отношения не имеют: хвост клеится только к
@@ -2924,3 +2973,106 @@ async def test_commit_does_not_claim_an_untouched_config_after_the_registry_land
         assert "схема не валидна" in body
         assert "конфиг не записан" not in body
         assert "модел" in body
+
+
+# --- ступень «без профиля»: мастер деактивирует профиль (спека починки) ------
+
+
+@pytest.mark.asyncio
+async def test_confirm_step_warns_that_the_profile_will_be_deactivated(tmp_path):
+    """Enter на подтверждении снимет указатель профиля — человек обязан узнать об
+    этом ДО нажатия, а не обнаружить постфактум. Текст берётся из общего дома."""
+    pytest.importorskip("textual")
+    import onboarding_fields as _of
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(deactivate_profile=True)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        assert _of.PROFILE_DEACTIVATION_WARNING in blob
+
+
+@pytest.mark.asyncio
+async def test_confirm_step_says_nothing_about_the_profile_on_a_healthy_config(tmp_path):
+    """Отрицательный сторож: конфиг собрался целиком (ступень `full`) — мастер
+    профиля не касается, и обещать его снятие нельзя."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()                       # признак не передан — ступень не «без профиля»
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        assert "деактив" not in blob.lower()
+
+
+@pytest.mark.asyncio
+async def test_confirm_commits_the_deactivation_along_with_the_settings(tmp_path):
+    """Финал доводит признак до записи: указатель снят, файл профиля цел,
+    настройки в файле. Без этого мастер доходил до конца и не мог записать
+    собственную починку — гейт судит стек следующего старта, а там профиль."""
+    pytest.importorskip("textual")
+    import yaml
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    from tests.tui.conftest import wait_until
+    committed = []
+    cfg_path, scr = _levels_screen(
+        tmp_path, on_commit=lambda: committed.append(True), deactivate_profile=True)
+    text = cfg_path.read_text(encoding="utf-8").replace('profile: ""', 'profile: "work"')
+    cfg_path.write_text(text, encoding="utf-8")
+    profile_file = tmp_path / "profiles" / "work.yml"
+    profile_file.parent.mkdir(parents=True, exist_ok=True)
+    profile_file.write_text('slots:\n  default: "strong"\n', encoding="utf-8")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        await pilot.press("enter")
+        await wait_until(pilot, lambda: committed, "commit done")
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        assert raw["profile"] == ""                     # указатель снят
+        assert profile_file.is_file()                   # …а файл профиля цел
+        assert raw["slots"]["default"] == "Qwen"        # настройки записаны
+
+
+@pytest.mark.asyncio
+async def test_both_wizards_take_the_deactivation_warning_from_one_place(tmp_path, monkeypatch):
+    """Инвариант межповерхностный, поэтому и тест один на оба мастера: у каждого
+    в отдельности своя копия текста выглядела бы исправной. Подменяем ЕДИНСТВЕННЫЙ
+    дом текста и ждём подмену в обоих."""
+    pytest.importorskip("textual")
+    import onboarding_fields as _of
+    import onboarding_wizard as wz
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    sentinel = "СТРОКА-ИЗ-ОБЩЕГО-ДОМА"
+    monkeypatch.setattr(_of, "PROFILE_DEACTIVATION_WARNING", sentinel)
+
+    printed: list = []
+    monkeypatch.setattr(wz, "_reload_config", lambda: {})
+    wz.run({}, tmp_path / "nowhere.yml", review_all=False,
+           io=wz.WizardIO(reader=lambda p, s: "", printer=printed.append),
+           deactivate_profile=True)
+    assert any(sentinel in line for line in printed)
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(deactivate_profile=True)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        assert sentinel in blob

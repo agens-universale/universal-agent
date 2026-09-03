@@ -26,7 +26,7 @@ def test_run_init_calls_wizard_review_all_when_interactive(monkeypatch, tmp_path
     seen = {}
     import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run",
-                        lambda cfg, path, *, review_all, io, mcp=None: seen.update(review_all=review_all) or True)
+                        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: seen.update(review_all=review_all) or True)
     assert cli._run_init() == 0
     assert seen["review_all"] is True
 
@@ -49,7 +49,7 @@ def test_run_init_no_mcp(monkeypatch, tmp_path):
     seen = {}
     import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run",
-                        lambda cfg, path, *, review_all, io, mcp=None: seen.update(mcp=mcp, review_all=review_all) or True)
+                        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: seen.update(mcp=mcp, review_all=review_all) or True)
     assert cli._run_init() == 0
     assert seen["mcp"] is None and seen["review_all"] is True
 
@@ -64,7 +64,7 @@ def test_run_init_returns_1_when_wizard_leaves_config_unconfigured(monkeypatch, 
     _stub_repair_load(monkeypatch, {"model": "m"})
     import onboarding_wizard
     monkeypatch.setattr(onboarding_wizard, "run",
-                        lambda cfg, path, *, review_all, io, mcp=None: False)
+                        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: False)
     assert cli._run_init() == 1
 
 

@@ -108,3 +108,78 @@ def test_broken_base_and_broken_profile_still_lands_on_template(stand):
 
     assert loaded.stage == onboarding.REPAIR_STAGE_TEMPLATE
     assert loaded.config["completions_url"] == onboarding.URL_SENTINEL
+
+
+# --- финал мастера на ступени «без профиля» --------------------------------
+
+_WIZARD_ANSWERS = {
+    "completions_url": "https://openrouter.ai/api/v1/chat/completions",
+    "Authorization": "Bearer sk-user-token",
+    "model": "claude-fable-5",
+}
+
+
+def _load_yaml(path):
+    import yaml
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def test_wizard_finish_on_without_profile_stage_deactivates_the_profile(stand):
+    """Живой тупик стенда: лестница сняла профиль НА ЗАПУСК, мастер дошёл до
+    конца — и запись отказана («slots.default: алиас "strong" не найден»), потому
+    что гейт судит стек СЛЕДУЮЩЕГО старта, а там указатель снова поднимает
+    сломанный профиль. Чинилка запускалась, спрашивала всё и не могла записать
+    собственную починку.
+
+    Финал обязан снять указатель — тогда починка ложится в файл, а следующий
+    старт поднимается. Файл профиля при этом остаётся на диске: человек чинит
+    его позже и включает обратно."""
+    (stand / "config.yml").write_text(_BASE_OK, encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    assert loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
+
+    onboarding.write_wizard_values(
+        stand / "config.yml", dict(_WIZARD_ANSWERS),
+        deactivate_profile=loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
+
+    raw = _load_yaml(stand / "config.yml")
+    assert raw.get("profile") == ""                       # указатель снят
+    assert (stand / "profiles" / "work.yml").is_file()    # …а файл профиля цел
+    assert _load_yaml(stand / "profiles" / "work.yml") == {"slots": {"default": "strong"}}
+    # Настройки мастера действительно записаны, а не потеряны ради деактивации.
+    assert raw["models"]["claude-fable-5"] == {"model": "claude-fable-5"}
+    assert raw["slots"]["default"] == "claude-fable-5"
+
+    # Главное: следующий старт поднимается. Настоящий загрузчик, не мок — тупик
+    # был именно в том, что стек следующего старта не собирался.
+    from config import load_config_ex
+    config, meta = load_config_ex(None)
+    assert meta.active_name in (None, "")
+    assert onboarding.effective_model(config) == "claude-fable-5"
+    assert config["completions_url"] == _USER_URL
+
+
+def test_wizard_finish_on_a_healthy_config_leaves_the_active_profile_alone(stand):
+    """Отрицательный сторож: конфиг здоров (ступень `full`), профиль активен и
+    ничего не ломает — мастер к указателю не прикасается. Деактивация тут была бы
+    молчаливым отъёмом чужой настройки."""
+    (stand / "config.yml").write_text(_BASE_OK, encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "fast"\n', encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    assert loaded.stage == onboarding.REPAIR_STAGE_FULL
+
+    onboarding.write_wizard_values(
+        stand / "config.yml", dict(_WIZARD_ANSWERS),
+        deactivate_profile=loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
+
+    assert _load_yaml(stand / "config.yml").get("profile") == "work"
+    from config import load_config_ex
+    _config, meta = load_config_ex(None)
+    assert meta.active_name == "work"

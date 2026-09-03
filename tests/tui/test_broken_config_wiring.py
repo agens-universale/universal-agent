@@ -237,6 +237,7 @@ def _capturing_app(monkeypatch):
     class _FakeApp:
         def __init__(self, **kw):
             captured["config"] = kw.get("config")
+            captured["app"] = self      # признаки ставятся атрибутами уже после создания
 
         def set_config_path(self, path):
             pass
@@ -316,3 +317,33 @@ def test_healthy_config_leaves_no_degradation_notice(monkeypatch, tmp_path, clea
 
     assert [n for n in clean_notices.collect_runtime_notices()
             if n.code == "config_load_degraded"] == []
+
+
+def test_init_config_carries_the_without_profile_stage_to_the_master(
+    monkeypatch, tmp_path, clean_notices
+):
+    """Ступень лестницы обязана доехать до мастера: без признака его финал упрётся
+    в тот же отказ записи, что и на живом стенде («алиас "strong" не найден») —
+    гейт судит стек следующего старта, а там указатель поднимает сломанный профиль."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    captured = _capturing_app(monkeypatch)
+
+    from tui import main
+    assert main(argv=["--init-config"]) == 0
+    assert captured["app"]._onboarding_deactivate_profile is True
+
+
+def test_healthy_config_does_not_ask_the_master_to_deactivate(
+    monkeypatch, tmp_path, clean_notices
+):
+    """Отрицательный сторож: профиль исправен (ступень `full`) — снимать нечего."""
+    pytest.importorskip("textual")
+    _broken_profile_stand(tmp_path, monkeypatch)
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "fast"\n', encoding="utf-8")
+    captured = _capturing_app(monkeypatch)
+
+    from tui import main
+    assert main(argv=["--init-config"]) == 0
+    assert captured["app"]._onboarding_deactivate_profile is False

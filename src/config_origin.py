@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 import config_raw
@@ -98,15 +99,28 @@ def _overlay_paths(base_path: str) -> list[tuple[str, str]]:
     return out
 
 
-def origins(base_path: str, dotted_keys: Iterable[str]) -> Dict[str, Origin]:
+def origins(base_path: str, dotted_keys: Iterable[str], *,
+            candidates: Optional[Dict[Any, Dict[str, Any]]] = None) -> Dict[str, Origin]:
     """{dotted-путь: Origin} — что в базовом файле, чем перекрыто, что действует.
 
     Действующее значение считаем ТЕМ ЖЕ deep_merge, что и load_config: накатываем
     слои на сырые документы и смотрим dotted-путь в результате. Перекрывшим слоем
     считается последний, после наложения которого значение изменилось.
+
+    `candidates` — {путь: документ} вместо чтения этих файлов с диска (базы или
+    любого оверлея), тем же приёмом, что `layers._merge_layers`. Нужен отказу
+    записи: его вердикт вынесен по стеку, где цель стоит ЕЩЁ НЕ ЗАПИСАННЫМ
+    текстом, и ответ по диску назвал бы слой, которого валидатор не видел.
     """
     keys = list(dotted_keys)
-    merged = config_raw.read_document(base_path)
+    _candidates = {Path(p).resolve(): doc for p, doc in (candidates or {}).items()}
+
+    def _document(path):
+        # `{}` — настоящий (пустой) кандидат, а не «кандидата нет»: `or` их бы спутал.
+        doc = _candidates.get(Path(path).resolve())
+        return config_raw.read_document(path) if doc is None else doc
+
+    merged = _document(base_path)
     raw = {dotted: config_raw.value_at(merged, dotted) for dotted in keys}
 
     effective = dict(raw)
@@ -114,7 +128,7 @@ def origins(base_path: str, dotted_keys: Iterable[str]) -> Dict[str, Origin]:
     paths: Dict[str, Optional[str]] = {dotted: None for dotted in keys}
 
     for overlay_kind, overlay_path in _overlay_paths(base_path):
-        merged = deep_merge(merged, config_raw.read_document(overlay_path))
+        merged = deep_merge(merged, _document(overlay_path))
         for dotted in keys:
             value = config_raw.value_at(merged, dotted)
             if value != effective[dotted]:
@@ -126,3 +140,56 @@ def origins(base_path: str, dotted_keys: Iterable[str]) -> Dict[str, Origin]:
                        overlay_path=paths[dotted], effective=effective[dotted])
         for dotted in keys
     }
+
+
+# Закрытый список ключей-подозреваемых (спека решения по нерезолвимому конфигу):
+# текст ошибки не парсим, а сверяем с этими строками. Порядок задаёт порядок
+# ответа `error_origins`, когда поломка размазана по нескольким файлам.
+ERROR_SUSPECT_KEYS = ("slots.default", "slots.light", "slots.max", "models", "profile")
+
+
+@dataclass(frozen=True)
+class ErrorOrigin:
+    """Файл стека, где лежат ключи, названные ошибкой: `kind` — слой («base» для
+    самой базы, иначе kind оверлея из `_overlay_paths`), `path` — его файл,
+    `keys` — какие из подозреваемых он задаёт, в порядке `ERROR_SUSPECT_KEYS`."""
+
+    kind: str
+    path: str
+    keys: tuple
+
+
+def error_origins(base_path: str, error_text: str, *,
+                  candidates: Optional[Dict[Any, Dict[str, Any]]] = None) -> list:
+    """Текст ошибки → файлы, где лежат названные ею ключи (`ErrorOrigin`, по одному
+    на файл). `candidates` — как у `origins`.
+
+    Ключи ищутся не парсингом текста, а сверкой с закрытым списком
+    `ERROR_SUSPECT_KEYS`: какие упомянуты — как ПРЕФИКС одного из "; "-сегментов
+    (`model_sections_validation.py` склеивает несколько находок этим
+    разделителем), для тех и спрашивается `origins()` — она называет слой, чьё
+    наложение последним изменило значение. Префикс сегмента, а не вхождение где
+    угодно в тексте: хвост «не найден в merged-реестре models», общий для ЛЮБОЙ
+    ошибки слота, ложно приплетал бы секцию models к каждой поломке. Ключ,
+    которого не задал ни один оверлей, — на базе: чинить его там. Ни один ключ не
+    назван (битый YAML, нечитаемый файл, профиль не найден по указателю) —
+    сопоставлять нечего, ответ пуст: файл-виновник не выдумывается.
+
+    Общий дом для объяснения нерезолвимого конфига при старте
+    (`onboarding.explain_broken_config`) и отказа записи, вынесенного по стеку
+    (`config_modules.registry_write`): вторая редакция правила «какой файл
+    виноват» разошлась бы с первой на первой же правке списка подозреваемых."""
+    segments = error_text.split("; ")
+    keys = [key for key in ERROR_SUSPECT_KEYS
+            if any(segment.startswith(key) for segment in segments)]
+    if not keys:
+        return []
+    found = origins(base_path, keys, candidates=candidates)
+    by_file: Dict[str, tuple] = {}
+    for key in keys:
+        origin = found[key]
+        kind, path = ((origin.overlay_kind, origin.overlay_path)
+                      if origin.overlay_path else ("base", str(base_path)))
+        by_file.setdefault(path, (kind, []))[1].append(key)
+    return [ErrorOrigin(kind=kind, path=path, keys=tuple(file_keys))
+            for path, (kind, file_keys) in by_file.items()]

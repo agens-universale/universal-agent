@@ -197,3 +197,66 @@ def test_overlay_paths_agrees_with_resolve_profile_pointer_on_a_conflict(
     got = origins(base, ["agent.model"])["agent.model"]
     assert got.effective == "corp-model"
     assert got.overlay_kind == "profile:base"
+
+
+def test_candidates_stand_in_for_the_files_on_disk(tmp_path, monkeypatch):
+    """Отказ записи судит стек, где цель стоит ещё не записанным текстом:
+    кандидат подменяет дисковый документ и у базы, и у оверлея. Пустой `{}` —
+    настоящий кандидат, а не «кандидата нет»: дисковое значение профиля сквозь
+    него просачиваться не должно."""
+    base = _write(tmp_path / "config.yml", 'profile: "work"\nagent:\n  model: base-model\n')
+    profile = _write(tmp_path / "profiles" / "work.yml", "agent:\n  model: work-model\n")
+    monkeypatch.chdir(tmp_path)
+
+    on_disk = origins(base, ["agent.model"])["agent.model"]
+    assert (on_disk.effective, on_disk.overlay_kind) == ("work-model", "profile:base")
+
+    emptied = origins(base, ["agent.model"], candidates={profile: {}})["agent.model"]
+    assert (emptied.effective, emptied.overlay_kind) == ("base-model", "")
+
+    rebased = origins(base, ["agent.model"],
+                      candidates={base: {"profile": "work", "agent": {"model": "work-model"}}})
+    assert rebased["agent.model"].raw == "work-model"
+    assert rebased["agent.model"].overlay_kind == ""   # профиль ничего не изменил
+
+
+# --- error_origins: текст ошибки → файлы, где лежат названные ею ключи -------
+
+
+def test_error_origins_groups_the_named_keys_by_the_file_that_sets_them(tmp_path, monkeypatch):
+    """Ядро объяснения сломанного конфига (`onboarding.explain_broken_config`) и
+    отказа записи (`registry_write._commit`): ключ из "; "-сегмента ошибки → слой,
+    чьё наложение задало его значение. Ключи профиля приходят с видом слоя и
+    ПОЛНЫМ путём файла профиля, ключ базы — с базой; два ключа одного файла —
+    одной записью, порядок — закрытого списка подозреваемых. Хвост «в
+    merged-реестре models» секцию models не приплетает: ключ ищется ПРЕФИКСОМ."""
+    from config_origin import error_origins
+
+    base = _write(tmp_path / "config.yml",
+                  'profile: "work"\nmodels:\n  flash: {}\nslots:\n  max: ghost2\n')
+    profile = _write(tmp_path / "profiles" / "work.yml",
+                     "slots:\n  default: ghost1\n  light: ghost3\n")
+    monkeypatch.chdir(tmp_path)      # нет .gc/ → проектного оверлея нет
+
+    got = error_origins(base, (
+        'slots.default: алиас "ghost1" не найден в merged-реестре models; '
+        'slots.light: алиас "ghost3" не найден в merged-реестре models; '
+        'slots.max: алиас "ghost2" не найден в merged-реестре models'))
+
+    assert [(o.kind, o.path, o.keys) for o in got] == [
+        ("profile:base", profile, ("slots.default", "slots.light")),
+        ("base", base, ("slots.max",)),
+    ]
+
+
+def test_error_origins_names_no_file_for_an_error_that_names_no_key(tmp_path, monkeypatch):
+    """Ошибка не про ключи (битый YAML, профиль не найден) — сопоставлять нечего:
+    пустой ответ, а не выдуманный файл. Слово «models» в хвосте сегмента — не
+    улика: иначе секция models приплеталась бы к любой ошибке слота."""
+    from config_origin import error_origins
+
+    base = _write(tmp_path / "config.yml", "models:\n  flash: {}\n")
+    monkeypatch.chdir(tmp_path)
+
+    assert error_origins(base, f"{base}: невалидный YAML: while parsing a block") == []
+    assert error_origins(base, 'алиас "ghost" не найден в merged-реестре models') == []

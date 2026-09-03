@@ -258,17 +258,27 @@ def is_unconfigured(config: Dict[str, Any]) -> bool:
     return bool(pending_requirements(config))
 
 
-def _registry_overridden_above(config_path) -> bool:
+def _registry_overridden_above(config_path, *, ignore_profile: bool = False) -> bool:
     """Действующий реестр пришёл НЕ из того файла, который правит мастер: слой выше
     (проектный `.gc/config.yml`, managed) переопределил `models`/`slots.default`.
 
     Считает тем же `origins`, что и витрина происхождения полей в Settings, —
-    отдельного знания о слоях мастеру заводить не нужно."""
+    отдельного знания о слоях мастеру заводить не нужно.
+
+    `ignore_profile` — финал мастера деактивирует профиль (ступень
+    `without_profile` лестницы починки): перекрыть запись он уже не сможет, а
+    `origins` судит по диску, где профиль ещё лежит. Не исключить его значит
+    показать на одном экране два предупреждения, противоречащих друг другу
+    (живой смок). Прочие слои деактивация не трогает — они судятся как прежде."""
     if not config_path:
         return False
     from config_origin import origins
     found = origins(str(config_path), ["models", "slots.default"])
-    return any(origin.overlay_kind for origin in found.values())
+    return any(
+        origin.overlay_kind
+        and not (ignore_profile and origin.overlay_kind.startswith("profile:"))
+        for origin in found.values()
+    )
 
 
 def effective_model(config: Dict[str, Any]) -> str:
@@ -314,7 +324,8 @@ def assigned_level_model(config: Dict[str, Any], level: str) -> str:
     return model or alias
 
 
-def overriding_layer_note(config: Dict[str, Any], config_path=None) -> Optional[str]:
+def overriding_layer_note(config: Dict[str, Any], config_path=None, *,
+                          ignore_profile: bool = False) -> Optional[str]:
     """Спека §11: что перекроет выбор, сделанный в мастере (мастер пишет БАЗОВЫЙ
     config.yml, а конфиг собирается стопкой слоёв — ось 2, §2).
 
@@ -324,12 +335,13 @@ def overriding_layer_note(config: Dict[str, Any], config_path=None) -> Optional[
     и предупреждать там не о чем, а проектный слой молча оставил бы выбор человека
     без эффекта. Без `config_path` слой не различить — тогда только профиль."""
     profile = config.get("profile") or None
-    if profile:
+    if profile and not ignore_profile:
         # Текст — общий для всех поверхностей (экран мастера и подсказка gc-cli),
         # поэтому это чистый факт без адреса действия: звать в «Настройки · Профили»
         # там, где TUI нет, значит врать. Адрес дописывает поверхность (спека §3).
         return f'действует профиль "{profile}" — он перекроет модельные настройки'
-    if config.get("models") and _registry_overridden_above(config_path):
+    if config.get("models") and _registry_overridden_above(config_path,
+                                                            ignore_profile=ignore_profile):
         return ("действует реестр моделей из другого слоя конфигурации — ваш выбор "
                 "ляжет в основной конфиг, но этот слой его перекроет")
     return None
@@ -392,11 +404,6 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
 
 # --- Объяснение вместо трейсбека на нерезолвимом конфиге --------------------
 
-# Закрытый список ключей-подозреваемых (спека решения): текст ошибки не парсим,
-# а сверяем с этими строками. Порядок задаёт порядок строк «поправить», когда
-# поломка размазана по нескольким файлам — см. explain_broken_config.
-_BROKEN_CONFIG_SUSPECT_KEYS = ("slots.default", "slots.light", "slots.max", "models", "profile")
-
 # Подписи участников карты («Участвуют:») — kind из config_origin._overlay_paths
 # плюс своя "base" для самой базы (её _overlay_paths не называет — она точка
 # отсчёта, а не оверлей).
@@ -422,24 +429,20 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     «что сделать» — от точечной починки к обходу и лишь затем к грубому откату
     (решение владельца: откат последний, он теряет модели, MCP и голос).
 
-    Файл(ы) для починки ищутся не парсингом текста, а сверкой с закрытым списком
-    ключей-подозреваемых `_BROKEN_CONFIG_SUSPECT_KEYS`: какие упомянуты — как
-    ПРЕФИКС одного из "; "-сегментов (`model_sections_validation.py` склеивает
-    несколько находок этим разделителем), для тех и спрашивается
-    `config_origin.origins()` — она называет файл, где ключ реально лежит. Префикс
-    сегмента, а не вхождение где угодно в тексте: иначе хвост «не найден в
-    merged-реестре models», общий для ЛЮБОЙ ошибки слота, ложно приплетал бы
-    секцию models к каждой поломке. Не нашли ни одного ключа (битый YAML,
-    нечитаемый файл, профиль не найден по указателю) — сопоставлять нечего,
-    совет становится «поправить файл: <путь>», где путь — тот, что называет сама
-    ошибка (слои пишут «<path>: …», см. layers.py::_layer_document), либо
-    базовый, если ни один известный файл в тексте не назван.
+    Файл(ы) для починки называет `config_origin.error_origins` — общее с отказом
+    записи ядро «текст ошибки → файлы, где лежат названные ею ключи» (закрытый
+    список подозреваемых, сверка префиксом "; "-сегмента, `origins()` за файлом).
+    Не нашли ни одного ключа (битый YAML, нечитаемый файл, профиль не найден по
+    указателю) — сопоставлять нечего, совет становится «поправить файл: <путь>»,
+    где путь — тот, что называет сама ошибка (слои пишут «<path>: …», см.
+    layers.py::_layer_document), либо базовый, если ни один известный файл в
+    тексте не назван.
 
     Показанные пути — всегда абсолютные (`_display_path`): относительный, как
     из `--config .\\config.yml`, бессмыслен вне момента запуска (другой cwd,
     копипаста в переписку) и рядом с уже абсолютным путём профиля читается
     неряшливо. Нормализация — только на выходе, в f-строках ниже: `config_path`
-    и всё, что от него посчитано (`participants`, `named`, `file_path`),
+    и всё, что от него посчитано (`participants`, `named`, `culprit.path`),
     остаются НЕТРОНУТЫМИ — на них стоит сравнение `error_text.startswith(...)`,
     и здесь важно опознать файл ТЕМ же видом пути, каким его назвала сама
     ошибка (см. `_layer_document`/`validate_registry_pairs`, которые пишут путь
@@ -449,7 +452,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     from pydantic import ValidationError as _ValidationError
 
     from config_modules.layers import resolve_profile_pointer
-    from config_origin import _overlay_paths, origins
+    from config_origin import _overlay_paths, error_origins
 
     def _display_path(path) -> str:
         return os.path.abspath(path)
@@ -465,21 +468,13 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
         for kind, path in participants
     ]
 
-    segments = error_text.split("; ")
-    matched_keys = [
-        key for key in _BROKEN_CONFIG_SUSPECT_KEYS
-        if any(segment.startswith(key) for segment in segments)
-    ]
+    culprits = error_origins(config_path, error_text)
 
     fix_lines: list[str] = []
-    if matched_keys:
-        origin_map = origins(config_path, matched_keys)
-        by_file: dict[str, list[str]] = {}
-        for key in matched_keys:
-            file_path = origin_map[key].overlay_path or config_path
-            by_file.setdefault(file_path, []).append(key)
-        for file_path, keys in by_file.items():
-            fix_lines.append(f"поправить {', '.join(keys)} в:  {_display_path(file_path)}")
+    if culprits:
+        for culprit in culprits:
+            fix_lines.append(
+                f"поправить {', '.join(culprit.keys)} в:  {_display_path(culprit.path)}")
     else:
         named = config_path
         for _, candidate in participants:
@@ -708,7 +703,8 @@ class PartialWriteError(ValueError):
     ветку «конфиг не записан» разбирают те, кому есть что сказать иначе."""
 
 
-def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
+def write_wizard_values(config_path, values: Dict[str, Any], *,
+                        deactivate_profile: bool = False) -> List[str]:
     """Записать собранное мастером в `config_path` — ОДИН путь записи на обе
     поверхности (CLI-визард и TUI-мастер), политика живёт здесь.
 
@@ -731,6 +727,21 @@ def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
     модели без подключения — `is_unconfigured` вернёт человека в мастер, а секрета
     на диске нет.
 
+    `deactivate_profile` — лестница приземлилась на ступень
+    `REPAIR_STAGE_WITHOUT_PROFILE`: конфиг собрался ТОЛЬКО потому, что профиль сняли
+    на этот запуск. Тогда финал снимает и указатель — иначе чинилка не может
+    записать собственную починку: обе записи ниже судятся по стеку СЛЕДУЮЩЕГО
+    старта, а там указатель снова поднимает сломанный профиль, и запись честно
+    отвергается («slots.default: алиас ... не найден» — живой тупик стенда). Файл
+    профиля не трогаем: человек чинит его позже и включает обратно.
+
+    Снятие указателя идёт ПЕРЕД обеими записями, и это не вопрос удобства. Порядок
+    наоборот невозможен физически: пока указатель на месте, гейт отвергает всё, что
+    мастер собрал. А частичный исход честен: ступень `without_profile` значит, что
+    без профиля база грузится, — то есть после одного лишь снятия конфиг ПОДНИМЕТСЯ
+    (было: не грузился вовсе), настройки человека останутся прежними и рабочими, а
+    токен этого прогона на диск ещё не уходил.
+
     Возвращает якоря плоских полей, которых в конфиге не нашлось (вызывающий
     решает, показывать ли предупреждение); отказ записи — `ValueError`.
     """
@@ -738,8 +749,15 @@ def write_wizard_values(config_path, values: Dict[str, Any]) -> List[str]:
 
     import onboarding_config_writer as ocw
     from config import _default_config_path, validate_config_text
+    from config_modules.layers import profile_pointer_write_target
     from config_modules.registry_write import apply_registry_ops
 
+    if deactivate_profile:
+        # Куда ложится `profile: ""` и как — общие с секцией «Профили» правила
+        # (`profile_pointer_write_target` + `ocw.write_profile_pointer`): своя
+        # редакция писала бы в слой, который следующий старт всё равно перекроет.
+        ocw.write_profile_pointer(
+            profile_pointer_write_target(config_path), "", base_path=config_path)
     template_path = _default_config_path()
     try:
         template = Path(template_path).read_text(encoding="utf-8")
