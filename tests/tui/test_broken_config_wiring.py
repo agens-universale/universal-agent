@@ -124,7 +124,9 @@ def test_main_explains_the_profile_from_the_flag_not_the_pointer(monkeypatch, tm
     assert f"поправить slots.default в:  {profile}" in err
     assert f"в:  {base}" not in err
     assert f"{profile}   (активен" in err
-    assert 'gc-ua --profile ""' in err
+    # Сессия шла с --config — совет обязан нести его (M9), иначе `--profile ""`
+    # запустит не тот конфиг.
+    assert f'gc-ua --config "{base}" --profile ""' in err
 
 
 # --- `--init-config` — «чинилка» обязана работать именно на сломанном конфиге ---
@@ -214,6 +216,36 @@ def test_init_config_reaches_review_mode_on_broken_config_interactive(
     import onboarding
     assert captured["config"].get("completions_url") == onboarding.URL_SENTINEL
     assert captured["notice_args"][0] == ""  # активного профиля нет — восстановление сняло его
+
+
+def test_init_config_refuses_before_questions_when_a_pointer_survives_the_template_stage(
+    monkeypatch, tmp_path, capsys
+):
+    """Ревью (M10), gc-ua: ступень шаблона + живой указатель профиля — экран
+    мастера открывался, человек проходил все шаги (с вводом токена) и получал
+    отказ записи. Честный отказ ДО вопросов: stderr с причиной, код 1, TuiApp
+    не создаётся."""
+    pytest.importorskip("textual")
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(
+        _STAND_BASE + 'slots:\n  light: "nope-prof"\n', encoding="utf-8")
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    created: list = []
+    _fake_app(monkeypatch, created)
+    import tui as tui_mod
+    monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
+
+    from tui import main
+    rc = main(argv=["--init-config"])
+
+    assert rc == 1
+    assert created == []
+    err = capsys.readouterr().err
+    assert "не починит" in err
+    assert '"work"' in err
 
 
 def test_init_config_explains_a_broken_project_layer_instead_of_a_traceback(

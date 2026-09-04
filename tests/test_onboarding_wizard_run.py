@@ -317,6 +317,43 @@ def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
     assert "схема не валидна" in output
 
 
+def test_run_reports_an_oserror_without_traceback(tmp_path, monkeypatch):
+    """Близнец теста выше для OSError (ревью L33): запись штатно кидает его
+    (диск, права, win-лок открытого файла), а перехват держал только ValueError —
+    человек отвечал на все вопросы и получал голый трейсбек вместо
+    «конфиг не записан»."""
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        "backend:\n"
+        '  completions_url: "http://your-backend:PORT/v1/chat/completions"\n'
+        "  chat_completion_headers:\n"
+        '    Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"\n'
+        "agent:\n  model: \"m\"\n", encoding="utf-8")
+
+    def failing_write_values(*args, **kwargs):
+        raise OSError("[WinError 5] отказано в доступе")
+
+    monkeypatch.setattr(onboarding_config_writer, "write_values", failing_write_values)
+    monkeypatch.setattr(wz, "_reload_config", lambda: {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": "Bearer real"},
+        "model": "m",
+    })
+
+    printed = []
+    io = wz.WizardIO(reader=lambda p, s: "https://x/v1", printer=lambda m: printed.append(m))
+    cfg = {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": "Bearer real"},
+        "model": "m",
+    }
+    wz.run(cfg, cfg_file, review_all=False, io=io)
+
+    output = "\n".join(printed)
+    assert "конфиг не записан" in output
+    assert "[WinError 5] отказано в доступе" in output
+
+
 def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
         tmp_path, monkeypatch):
     """Брат теста выше, второй полюс: там плоская запись — единственная, и «конфиг

@@ -283,6 +283,40 @@ def test_query_then_number_picks_from_the_matches():
     assert wz._choose_model(io, models, current="") == "qwen/qwen3-235b"
 
 
+def test_exact_id_pick_of_a_non_tool_model_still_warns():
+    """Ревью (M13): точный ввод id выбирает модель ДО всякой печати — на длинном
+    каталоге 41-я модель с ⚠ в показанные 15 не попадала, и человек забирал
+    модель без инструментов, ни разу не увидев предупреждения. Печатаем строку
+    модели с ⚠ и пояснение в момент выбора."""
+    models = _many(40) + [ModelInfo("vendor/legacy-no-tools", tool_capable=False)]
+    io, out = _io(["vendor/legacy-no-tools"])
+    assert wz._choose_model(io, models, current="") == "vendor/legacy-no-tools"
+    assert any("vendor/legacy-no-tools ⚠" in m for m in out)
+    assert any(wz._of.MODEL_WARN in m for m in out)
+
+
+def test_exact_id_pick_of_a_tool_capable_model_stays_silent():
+    """Отрицательный сторож: точный выбор модели С инструментами предупреждение
+    не печатает — иначе ⚠ обесценивается."""
+    models = _many(40)
+    io, out = _io(["vendor/m031"])
+    assert wz._choose_model(io, models, current="") == "vendor/m031"
+    assert not any("⚠" in m for m in out)
+
+
+def test_number_pick_of_a_shown_non_tool_model_does_not_double_warn():
+    """Ревью #15: `_print_models` уже дорисовал ⚠ к строке и напечатал
+    предупреждение под КОРОТКИМ каталогом (весь целиком в `shown`) — выбор ТОЙ ЖЕ
+    строки номером не должен печатать его ещё раз. `_warn_if_tool_incapable`
+    нацелен на путь точного id, который печать каталога обходит вовсе (см.
+    `test_exact_id_pick_of_a_non_tool_model_still_warns`) — строка из `shown`
+    предупреждение уже получила."""
+    models = [ModelInfo("vendor/no-tools", tool_capable=False)] + _many(2)
+    io, out = _io(["1"])
+    assert wz._choose_model(io, models, current="") == "vendor/no-tools"
+    assert out.count(f"  ⚠ {wz._of.MODEL_WARN}") == 1
+
+
 def test_no_matches_taken_as_id_when_confirmed():
     io, out = _io(["vllm/Own", "y"])
     assert wz._choose_model(io, _models3(), current="") == "vllm/Own"
@@ -387,16 +421,21 @@ def test_the_model_step_keeps_showing_the_legacy_model_on_a_flat_config():
     assert "  сейчас: gigacode_agent_v1.6_rc · Enter — оставить" in out
 
 
-def test_an_unset_default_slot_is_not_shown_as_the_fallback_model():
-    """Реестр есть, слота default нет, а max задан: агент работает моделью max по
-    матрице фоллбэков, но назвать её «сейчас» на шаге про default значило бы
-    сказать «слот задан» там, где он не задан (то же правило, что у под-форм
-    уровней), — и при `level: light` с заданным light ответ зависел бы от уровня."""
-    cfg = {**_two_level_registry(), "slots": {"max": "brain"}}
+def test_an_unset_default_slot_shows_the_fallback_model_with_its_source():
+    """Ревью (M12): слота default нет, а max задан — строки «сейчас» не было
+    вовсе, и человек шёл по шагу вслепую. Показываем модель, которой default
+    работает СЕЙЧАС по фоллбэку, С ПОДПИСЬЮ об источнике (та же, что в сводке):
+    «слот задан» строка не утверждает, а «← сейчас» встаёт на неё — Enter
+    насквозь ничего не пишет. Обход матрицы фиксирован от default, от активного
+    `level` ответ не зависит."""
+    cfg = {**_two_level_registry(), "slots": {"max": "brain"}, "level": "light"}
     io, out = _io([""])
-    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _qwen2())
-    assert not any(m.startswith("  сейчас:") for m in out)
-    assert not any("← сейчас" in m for m in out)
+    values = {}
+    wz._collect_model(io, cfg, values, fetch=lambda *a, **k: _qwen2())
+    assert ("  сейчас: qwen/qwen3-235b  (default не задан — работает max)"
+            " · Enter — оставить") in out
+    assert any("qwen3-235b" in m and "← сейчас" in m for m in out)
+    assert values == {}                                   # проход насквозь не пишет
 
 
 def test_a_single_entry_registry_without_slots_is_still_shown_as_current():

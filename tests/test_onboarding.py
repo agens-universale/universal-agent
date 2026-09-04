@@ -1035,3 +1035,31 @@ def test_model_step_current_is_empty_when_only_another_level_is_assigned():
     cfg = {"models": {"brain": {"model": "qwen/qwen3-235b"}},
            "slots": {"max": "brain"}, "level": "max"}
     assert onboarding.model_step_current(cfg) == ""
+
+
+def test_model_step_display_names_the_fallback_when_default_is_unset():
+    """Ревью (M12): слота `default` нет, а другой уровень задан — строка «сейчас»
+    пустела, предвыбор редактора вставал на ПЕРВУЮ модель сервера, и проход
+    насквозь молча писал `slots.default` на неё. Шаг обязан показать модель,
+    которой default работает СЕЙЧАС по фоллбэку, с подписью об источнике, — и
+    предвыбор ведётся к ней: проход насквозь означает «оставить как есть».
+    Обход матрицы фиксирован от default и от активного `level` не зависит."""
+    cfg = {"models": {"slim": {"model": "vendor/slim"}},
+           "slots": {"light": "slim"}, "level": "light"}
+    assert onboarding.model_step_display(cfg) == (
+        "vendor/slim", "(default не задан — работает light)")
+
+
+def test_model_step_display_is_plain_when_the_default_slot_is_assigned():
+    """Слот задан — подписи нет: строка «сейчас» как раньше (тесты «default
+    задан» не меняются)."""
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
+           "slots": {"default": "fast"}}
+    assert onboarding.model_step_display(cfg) == ("qwen/qwen3-8b", "")
+
+
+def test_model_step_display_keeps_the_slotless_config_behaviour():
+    """Ни одного слота — прежнее правило `model_step_current` (легаси/одна запись
+    реестра), без подписи: там резолв от уровня не зависит."""
+    flat = {"model": "gigacode_agent_v1.6_rc", "level": "max"}
+    assert onboarding.model_step_display(flat) == ("gigacode_agent_v1.6_rc", "")

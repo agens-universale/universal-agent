@@ -122,7 +122,9 @@ def test_main_explains_the_profile_from_the_flag_not_the_pointer(monkeypatch, tm
     assert f"поправить slots.default в:  {profile}" in err
     assert f"в:  {base}" not in err
     assert f"{profile}   (активен" in err
-    assert 'gc-cli --profile ""' in err
+    # Сессия шла с --config — совет обязан нести его (M9), иначе `--profile ""`
+    # запустит не тот конфиг.
+    assert f'gc-cli --config "{base}" --profile ""' in err
 
 
 def test_main_names_the_flag_when_the_profile_in_it_does_not_exist(monkeypatch, tmp_path, capsys):
@@ -155,7 +157,7 @@ def test_main_names_the_flag_when_the_profile_in_it_does_not_exist(monkeypatch, 
     assert "--profile" in err.split("Что сделать:")[1]
     assert "поправить файл" not in err
     assert "--reset-config" not in err
-    assert 'gc-cli --profile ""' in err
+    assert f'gc-cli --config "{base}" --profile ""' in err   # --config сессии (M9)
 
 
 # --- `--init-config` — «чинилка» обязана работать именно на сломанном конфиге ---
@@ -236,6 +238,33 @@ def test_run_init_returns_1_when_wizard_answers_cannot_fix_the_file(
     monkeypatch.setattr(onboarding_wizard, "default_io", lambda: fake_io)
 
     assert cli._run_init() == 1
+
+
+def test_run_init_refuses_before_questions_when_a_pointer_survives_the_template_stage(
+    monkeypatch, tmp_path, capsys
+):
+    """Ревью (M10): ступень шаблона + живой указатель профиля — мастер вёл через
+    все вопросы (с вводом токена) к отказу записи: гейт судит стек следующего
+    старта, а там указатель поднимает сломанный профиль поверх несобираемой базы.
+    Честный отказ ДО вопросов: печать причины, код 1, мастер не запускается."""
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(
+        _STAND_BASE + 'slots:\n  light: "nope-prof"\n', encoding="utf-8")
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    reached = []
+    import onboarding_wizard
+    monkeypatch.setattr(onboarding_wizard, "run", lambda *a, **k: reached.append(1) or True)
+
+    assert cli._run_init() == 1
+    assert reached == []                              # до вопросов не дошли
+    err = capsys.readouterr().err
+    assert "не починит" in err
+    assert '"work"' in err
+    assert "Traceback" not in err
 
 
 def _broken_project_layer_stand(tmp_path, monkeypatch):

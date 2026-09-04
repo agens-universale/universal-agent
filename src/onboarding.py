@@ -353,6 +353,50 @@ def model_step_current(config: Dict[str, Any]) -> str:
     return current
 
 
+def default_fallback_model(config: Dict[str, Any]) -> tuple:
+    """`slots.default` пуст: чем уровень default работает СЕЙЧАС — (модель,
+    подпись об источнике). Источник ищем тем же обходом матрицы `LEVEL_FALLBACK`
+    (`config_modules/model_registry.py`), что и резолв: первый уровень после
+    `default`, у которого задан слот, — и модель берём из ЕГО слота, а не из
+    `effective_model`: та резолвит АКТИВНЫЙ уровень конфига, и при `level: light`
+    с заданными обоими уровнями подпись называла max, а модель показывала light.
+    Не нашёлся ни один (реестр из одной записи, например) — источник не
+    выдумываем, пишем голый факт; резолв там от уровня не зависит.
+
+    Дом — здесь: подпись печатают сводка плоского мастера и строка «сейчас» шага
+    «Модель» обеих поверхностей (`model_step_display`) — вторая редакция обхода
+    разошлась бы с первой на первой же правке."""
+    from config_modules.model_registry import LEVEL_FALLBACK
+    for level in LEVEL_FALLBACK["default"][1:]:
+        model = assigned_level_model(config, level)
+        if model:
+            return model, f"(default не задан — работает {level})"
+    return effective_model(config), "(default не задан)"
+
+
+def model_step_display(config: Dict[str, Any]) -> tuple:
+    """Строка «сейчас» шага «Модель»: (модель, подпись об источнике или пусто).
+
+    Слот `default` задан (или слотов нет вовсе — прежнее правило
+    `model_step_current`) — модель без подписи. Слоты есть, а `default` не задан
+    — модель, которой default работает СЕЙЧАС по фоллбэку, С ПОДПИСЬЮ: пустая
+    строка «сейчас» оставляла предвыбор редактора на ПЕРВОЙ модели сервера, и
+    проход насквозь молча писал `slots.default` на неё — резолв default уезжал с
+    рабочей модели фоллбэка на чужую (ревью M12). Предвыбор обеих поверхностей
+    ведётся к модели этой строки: проход насквозь означает «оставить как есть».
+    «Слот задан» подпись не утверждает — то же правило честности, что у
+    `assigned_level_model`, только сказанное словами.
+
+    Дом — здесь, по той же причине, что у `model_step_current`: поверхностей две,
+    и вторая редакция правила уже расходилась с первой."""
+    current = model_step_current(config)
+    if current:
+        return current, ""
+    if any((config.get("slots") or {}).values()):
+        return default_fallback_model(config)
+    return "", ""
+
+
 def overriding_layer_note(config: Dict[str, Any], config_path=None, *,
                           ignore_profile: bool = False) -> Optional[str]:
     """Спека §11: что перекроет выбор, сделанный в мастере (мастер пишет БАЗОВЫЙ
@@ -623,10 +667,29 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
         base_to_blame = named == config_path
         fix_lines.append(f"поправить файл:  {_display_path(named)}")
 
+    # Советы-команды целятся в ФАЙЛ СЕССИИ, а не в дефолтный (ревью M9): при
+    # `--config <путь>` фиксированный `gc-cli --reset-config` сбрасывал ЧУЖОЙ
+    # исправный `~/.gc/config.yml`, оставляя сломанный на месте, а `--profile ""`
+    # запускал не тот конфиг. Кавычки — пробелы в путях; сравнение — normcase от
+    # абсолютного вида (`--config .\\config.yml` называет тот же файл, Windows
+    # к регистру нечувствителен).
+    from config import _default_config_path, user_config_path
+
+    def _same_path(a, b) -> bool:
+        return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(
+            os.path.abspath(str(b)))
+
+    config_flag = ("" if _same_path(config_path, user_config_path())
+                   else f' --config "{_display_path(config_path)}"')
     if active:
-        fix_lines.append(f'запустить без профиля, ничего не потеряв:  {program} --profile ""')
-    if base_to_blame:
-        fix_lines.append("откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --reset-config")
+        fix_lines.append(f'запустить без профиля, ничего не потеряв:  '
+                         f'{program}{config_flag} --profile ""')
+    # Пакетному шаблону сброс не предлагается вовсе: `--reset-config` его не
+    # правит и честно откажет — совет вёл бы в тупик.
+    if base_to_blame and not (config_flag
+                              and _same_path(config_path, _default_config_path())):
+        fix_lines.append(f"откатить конфиг к шаблону (старый уйдёт в бэкап):  "
+                         f"gc-cli{config_flag} --reset-config")
 
     error_block = "\n".join(f"  {line}" for line in error_text.splitlines())
     fix_block = "\n".join(f"    • {line}" for line in fix_lines)
@@ -674,6 +737,51 @@ class RepairLoad(NamedTuple):
     message: Optional[str]
     profile: str = ""              # умолчания = «ничего не снималось» (ступень full)
     deactivate_profile: bool = False
+
+
+class RepairRefused(Exception):
+    """Честный отказ чинилки ДО вопросов (ревью M10): ступень шаблона при живом
+    указателе `profile:`.
+
+    Запись мастера здесь обречена целиком: гейт записи судит стек СЛЕДУЮЩЕГО
+    старта, а в нём указатель поднимает профиль поверх базы, которая не
+    собирается и без него, — прогон ревьюера: человек отвечает на все вопросы,
+    вводит токен, а запись отвергается («конфиг не записан»), md5 файла не
+    меняется. «Просто снять указатель» финалом не работает: снятие — отдельная
+    запись с той же фазой 2, и без профиля база не собирается тоже. Один
+    транзакционный акт (указатель + реестр + плоские поля одним валидируемым
+    кандидатом) требует либо второй редакции сборки YAML вне писателей, либо
+    смены порядка записей, при котором токен ложится на диск до вердикта
+    реестра, — оба пути отвергнуты, отказ честнее.
+
+    НЕ ValueError намеренно: на ValueError точки входа печатают
+    `explain_broken_config`, и отказ утонул бы в чужом объяснении с советом
+    `--profile ""`, который здесь не помогает. Текст исключения — готовое
+    сообщение человеку: печатать как есть, код 1."""
+
+
+def _refusal_message(exc: Exception, profile: str, base_path, pointer_path) -> str:
+    """Текст отказа `RepairRefused` — один на обе точки входа (stderr gc-cli и
+    stderr gc-ua до создания TuiApp). Советы — от точечного к грубому (правило
+    `explain_broken_config`); `--profile ""` не советуем: база не грузится и без
+    профиля, флаг тупика не снимает — а вот снять указатель В ФАЙЛЕ можно, и это
+    ровно тот шаг, после которого мастер способен дописать починку (прогон
+    ревьюера). Пути — абсолютные, по той же причине, что у
+    `explain_broken_config`."""
+    import os
+    base_shown = os.path.abspath(str(base_path))
+    pointer_shown = os.path.abspath(str(pointer_path))
+    return (
+        f"[gc] Мастер эту раскладку не починит: config.yml не читается и без "
+        f'профиля ({exc}), а профиль "{profile}" останется активным — стек '
+        f"следующего старта отвергнет запись мастера целиком.\n"
+        f"  Что сделать:\n"
+        f"    • поправить файл руками:  {base_shown}\n"
+        f'    • снять указатель профиля (строкой profile: "") в:  {pointer_shown} '
+        f"— и запустить мастер снова\n"
+        f"    • либо откатить конфиг к шаблону (старый уйдёт в бэкап):  "
+        f"gc-cli --reset-config"
+    )
 
 
 def _repair_message(stage: str, exc: Exception, profile: str,
@@ -760,6 +868,23 @@ def load_config_for_repair() -> RepairLoad:
             config, meta = load_config_ex(_default_config_path(), profile_override="")
         except ValueError:
             raise broken from None
+        # Живой указатель на ступени шаблона — тупик записи (M10): гейт судит
+        # стек следующего старта, где профиль лежит поверх несобираемой базы, и
+        # отвергнет всё, что мастер соберёт (включая отдельное снятие
+        # указателя). Отказываем ДО вопросов; файл указателя называет та же
+        # витрина происхождения, что у ступени «без профиля» ниже. Резолв
+        # указателя best-effort (битую базу прощает): пустой ответ значит
+        # «профиля нет нигде в стеке» — тогда мастер работает по контракту
+        # ступени шаблона, отказывать не в чем.
+        from config_modules.layers import resolve_profile_pointer
+        from config_origin import origins
+        base_path = resolve_config_path(None)
+        profile = resolve_profile_pointer(base_path)
+        if profile:
+            survivor = origins(base_path, ["profile"], profile_override="")["profile"]
+            pointer_path = survivor.overlay_path or str(base_path)
+            raise RepairRefused(
+                _refusal_message(broken, profile, base_path, pointer_path)) from broken
         return RepairLoad(config, meta, REPAIR_STAGE_TEMPLATE,
                           _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""), "", False)
 
@@ -1005,10 +1130,15 @@ def write_wizard_values(config_path, values: Dict[str, Any], *,
     # не записан» тогда правда. Легло — правдой это уже не будет, и молча выдать
     # одно за другое значит отправить человека искать нетронутый файл, где лежит
     # новый реестр (а на ступени без профиля — ещё и снятый указатель).
+    # OSError — штатный отказ всех трёх записей (диск, права, win-лок открытого
+    # файла), а не невозможный случай: мимо перехвата он уходил голым трейсбеком
+    # (CLI) и падением Textual (TUI), при уже лежащих на диске `profile: ""` и
+    # реестре — снятый указатель не назывался нигде (ревью L33). Форма ответа та
+    # же, что у ValueError: legло что-то — PartialWriteError, нет — как есть.
     if ops:
         try:
             apply_registry_ops(config_path, ops, template)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             if landed:
                 raise PartialWriteError(str(exc), written=landed) from exc
             raise
@@ -1017,7 +1147,7 @@ def write_wizard_values(config_path, values: Dict[str, Any], *,
         return ocw.write_values(config_path, flat,
                                 template_path=template_path if template else None,
                                 validate=validate_config_text)
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         if landed:
             raise PartialWriteError(str(exc), written=landed) from exc
         raise

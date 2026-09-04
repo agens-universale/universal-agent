@@ -1579,6 +1579,58 @@ async def test_review_on_registry_config_keeps_the_configured_model(tmp_path):
         assert raw["models"] == {"gpt-5.6-terra": {"model": "openai/gpt-5.6-terra"}}
 
 
+@pytest.mark.asyncio
+async def test_model_step_passthrough_keeps_the_fallback_when_default_is_unset(tmp_path):
+    """Прогон ревьюера (M12): `slots: {light: slim}`, default не задан. Строки
+    «текущая» не было, предвыбор вставал на ПЕРВУЮ модель сервера, и один PgDn
+    молча писал `slots.default` на неё — резолв default уезжал с vendor/slim
+    (фоллбэк) на srv/first. Строка «сейчас» обязана показать модель фоллбэка с
+    подписью об источнике (правило — в ядре, общее с плоским мастером), предвыбор
+    — встать на неё, а проход насквозь — оставить резолв прежним."""
+    pytest.importorskip("textual")
+    import yaml
+    from pathlib import Path
+    from config import _default_config_path
+    from config_modules.registry_write import apply_registry_ops
+    from model_picker import ModelInfo
+    from tests.tui.conftest import wait_until
+    from tui.app import TuiApp
+    from tui.editors.model import ModelEditor
+    from tui.screens.onboarding import STEP_MODEL
+    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
+                               auth="Bearer tok")
+    template = Path(_default_config_path()).read_text(encoding="utf-8")
+    apply_registry_ops(cfg_path, [("upsert_model", "slim", {"model": "vendor/slim"}),
+                                  ("write_slot", "light", "slim")], template)
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    cfg = _resolved_conn_cfg(cfg_path)
+    cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg,
+                      fetch=lambda *a, **k: [ModelInfo("srv/first", tool_capable=True),
+                                             ModelInfo("vendor/slim", tool_capable=True)])
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_MODEL)
+        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
+                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await pilot.pause()
+        rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
+        current = [r for r in rows if "текущая" in r]
+        assert current, f"строки «текущая» на шаге нет: {rows}"
+        assert "vendor/slim" in current[0]
+        assert current[0].startswith("▸")              # предвыбор — на модели фоллбэка
+        hints = " ".join(str(w.render()) for w in scr.query(".onb-hint"))
+        assert "default не задан — работает light" in hints
+        await pilot.press("pagedown")                  # проход насквозь, ничего не выбирая
+        await pilot.pause()
+        assert scr._values.get("model") == "vendor/slim"
+        assert scr._commit_config() is True
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        assert raw["models"] == {"slim": {"model": "vendor/slim"}}   # близнецов не завелось
+        assert raw["slots"] == {"light": "slim", "default": "slim"}  # резолв — прежний vendor/slim
+
+
 def _two_level_cfg(tmp_path, *, level):
     """Конфиг с ДВУМЯ назначенными уровнями и активным `level`: единственная
     раскладка, на которой видно, про какой уровень говорит шаг «Модель»."""
@@ -1646,6 +1698,46 @@ async def test_confirm_row_of_the_default_slot_ignores_the_active_level(tmp_path
         flat = re.sub(r"\s+", " ", body)
         assert "модель default: qwen/qwen3-8b" in flat
         assert "модель max: qwen/qwen3-235b" in flat
+
+
+@pytest.mark.asyncio
+async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(tmp_path):
+    """Ревью #14: M12 (`onboarding.model_step_display`) переехал на шаг «Модель» —
+    строка «сейчас» уже пишет «сейчас: qwen/qwen3-235b (default не задан —
+    работает max)», — но не на сводку/ленту подтверждения: `_shown_values`
+    по-прежнему звала старый `onboarding.model_step_current`, который при
+    незаданном `default` и заданном другом уровне честно отвечает пусто (правило
+    «не выдумывать назначенное»), и витрина показывала «модель default: —» на
+    том же экране, где шаг уже назвал модель фоллбэка. Плоский мастер
+    (`_summary_lines`) на `default_fallback_model` переехал раньше — TUI-близнец
+    остался на старом резолве."""
+    pytest.importorskip("textual")
+    import re
+    import yaml
+    from pathlib import Path
+    from config import _default_config_path
+    from config_modules.registry_write import apply_registry_ops
+    from tui.app import TuiApp
+    from tui.screens.onboarding import STEP_CONFIRM
+    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
+                               auth="Bearer tok")
+    template = Path(_default_config_path()).read_text(encoding="utf-8")
+    apply_registry_ops(cfg_path, [("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
+                                  ("write_slot", "max", "brain")], template)
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    cfg = _resolved_conn_cfg(cfg_path)
+    cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
+    cfg["level"] = "max"
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
+        await pilot.app.push_screen(scr); await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
+        flat = re.sub(r"\s+", " ", body)
+    assert "модель default: qwen/qwen3-235b" in flat, flat
+    assert "модель default: —" not in flat, flat
 
 
 @pytest.mark.asyncio
@@ -3131,6 +3223,36 @@ async def test_commit_does_not_claim_an_untouched_config_after_the_registry_land
         assert "схема не валидна" in body
         assert "конфиг не записан" not in body
         assert "модел" in body
+
+
+@pytest.mark.asyncio
+async def test_commit_reports_an_oserror_instead_of_crashing(tmp_path, monkeypatch):
+    """Близнец соседнего ValueError-кейса (ревью L33): OSError записи (диск,
+    права, win-лок открытого файла) уходил мимо перехвата — падал весь Textual.
+    «✗ конфиг не записан» — тот же честный отказ, что и на ValueError: реестра
+    здесь нет, не легло ничего."""
+    pytest.importorskip("textual")
+    import onboarding_config_writer
+    from textual.widgets import Static
+    from tui.app import TuiApp
+
+    cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions",
+                               auth="Bearer t", model="m")
+    monkeypatch.setattr(onboarding_config_writer, "write_values",
+                        lambda *a, **kw: (_ for _ in ()).throw(OSError("нет прав на файл")))
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(review_all=True, config_path=str(cfg_path),
+                      config=_resolved_conn_cfg(cfg_path))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._values["Authorization"] = "Bearer sk"    # только плоская запись, реестра нет
+
+        assert scr._commit_config() is False
+        body = str(scr.query_one("#onb-body", Static).render())
+        assert "конфиг не записан" in body
+        assert "нет прав на файл" in body
 
 
 @pytest.mark.asyncio

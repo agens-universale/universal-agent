@@ -318,6 +318,66 @@ def test_broken_base_and_broken_profile_still_lands_on_template(stand):
     assert loaded.config["completions_url"] == onboarding.URL_SENTINEL
 
 
+def test_template_stage_with_an_active_pointer_refuses_before_the_questions(stand):
+    """Ревью (M10): база не собирается и без профиля (ступень шаблона), а
+    указатель `profile:` жив — гейт записи судит стек СЛЕДУЮЩЕГО старта, и при
+    сломанном профиле отвергнет всё, что мастер соберёт: человек отвечал на все
+    вопросы (включая токен), а файл не менялся (md5 тот же, прогон ревьюера).
+    «Просто снять указатель» финалом тоже не работает: снятие — отдельная
+    запись с фазой 2, а без профиля база не собирается и так.
+
+    Честный отказ ДО вопросов: назвать профиль и файлы, предложить ручную
+    правку/сброс — и НЕ советовать `--profile ""` (без профиля база не грузится
+    тоже)."""
+    (stand / "config.yml").write_text(
+        _BASE_OK + 'slots:\n  light: "nope-prof"\n', encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    with pytest.raises(onboarding.RepairRefused) as info:
+        onboarding.load_config_for_repair()
+
+    text = str(info.value)
+    assert "не починит" in text
+    assert 'профиль' in text and '"work"' in text
+    assert str(stand / "config.yml") in text          # файл починки назван
+    assert "gc-cli --reset-config" in text
+    assert '--profile ""' not in text                 # флаг тут не помогает
+
+
+def test_template_stage_refusal_names_the_file_of_the_pointer(stand):
+    """Указатель может жить не в базе: снять его человеку нужно в СВОЁМ файле —
+    отказ называет его (проектный `.gc/config.yml`)."""
+    (stand / "config.yml").write_text(
+        _BASE_OK.replace('profile: "work"\n', "") + 'slots:\n  light: "nope-prof"\n',
+        encoding="utf-8")
+    project_gc = stand.parent / "project" / ".gc"
+    project_gc.mkdir()
+    (project_gc / "config.yml").write_text('profile: "work"\n', encoding="utf-8")
+    (stand / "profiles" / "work.yml").write_text(
+        'slots:\n  default: "strong"\n', encoding="utf-8")
+
+    import onboarding
+    with pytest.raises(onboarding.RepairRefused) as info:
+        onboarding.load_config_for_repair()
+
+    assert str(project_gc / "config.yml") in str(info.value)
+
+
+def test_template_stage_without_a_pointer_still_runs_the_wizard(stand):
+    """Отрицательный сторож: та же поломка базы, указателя нет — отказывать не в
+    чем, лестница отдаёт ступень шаблона, мастер работает по её контракту."""
+    (stand / "config.yml").write_text(
+        _BASE_OK.replace('profile: "work"\n', "") + 'slots:\n  light: "nope-prof"\n',
+        encoding="utf-8")
+
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+
+    assert loaded.stage == onboarding.REPAIR_STAGE_TEMPLATE
+
+
 def test_broken_project_layer_hands_the_caller_the_first_error_not_a_template_diagnosis(stand):
     """Ревью (H3): все три ступени накладывают верхние слои, и третья (шаблон) не
     была обёрнута перехватом — на сломанном проектном `.gc/config.yml` лестница
@@ -498,6 +558,85 @@ def test_a_refused_pointer_write_landed_nothing(stand, monkeypatch):
     import onboarding
     loaded = onboarding.load_config_for_repair()
     with pytest.raises(ValueError) as info:
+        onboarding.write_wizard_values(
+            stand / "config.yml", dict(_WIZARD_ANSWERS),
+            deactivate_profile=loaded.deactivate_profile)
+
+    assert not isinstance(info.value, onboarding.PartialWriteError)
+    assert _load_yaml(stand / "config.yml").get("profile") == "work"   # файл не тронут
+
+
+# --- те же три исхода, но исключением файловой системы (ревью L33) -----------
+#
+# Все три записи штатно кидают OSError (диск, права, win-лок открытого файла), а
+# перехваты писателя держали только ValueError: наружу уходил голый OSError —
+# CLI печатал трейсбек, TUI падал, при этом на диске уже лежали `profile: ""` и
+# реестр, и снятый указатель не назывался нигде.
+
+
+def _os_refusing(message):
+    def _refuse(*_args, **_kwargs):
+        raise OSError(message)
+    return _refuse
+
+
+def test_an_oserror_of_the_registry_after_the_deactivation_names_the_pointer(
+        stand, monkeypatch):
+    """Близнец ValueError-кейса выше: форма ответа не зависит от класса отказа —
+    указатель уже снят, и об этом обязан сказать PartialWriteError, не трейсбек."""
+    import config_modules.registry_write as rw
+    _broken_stand(stand)
+
+    monkeypatch.setattr(rw, "apply_registry_ops", _os_refusing("диск недоступен"))
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    with pytest.raises(onboarding.PartialWriteError) as info:
+        onboarding.write_wizard_values(
+            stand / "config.yml", dict(_WIZARD_ANSWERS),
+            deactivate_profile=loaded.deactivate_profile)
+
+    assert info.value.written == ("profile_pointer",)
+    assert str(info.value) == "диск недоступен"
+    assert _load_yaml(stand / "config.yml").get("profile") == ""     # и правда снят
+
+
+def test_an_oserror_of_the_flat_write_after_the_deactivation_names_both(
+        stand, monkeypatch):
+    """Близнец: легли указатель и реестр, плоская запись упала OSError —
+    названы обе состоявшиеся записи, в порядке исполнения."""
+    import onboarding_config_writer as ocw
+    _broken_stand(stand)
+    real_write_values = ocw.write_values
+
+    def failing_flat_write(path, values, **kwargs):
+        if "profile" in values:                      # снятие указателя — настоящее
+            return real_write_values(path, values, **kwargs)
+        raise OSError("диск недоступен")
+
+    monkeypatch.setattr(ocw, "write_values", failing_flat_write)
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    with pytest.raises(onboarding.PartialWriteError) as info:
+        onboarding.write_wizard_values(
+            stand / "config.yml", dict(_WIZARD_ANSWERS),
+            deactivate_profile=loaded.deactivate_profile)
+
+    assert info.value.written == ("profile_pointer", "registry")
+    raw = _load_yaml(stand / "config.yml")
+    assert raw.get("profile") == "" and raw["slots"]["default"] == "claude-fable-5"
+
+
+def test_an_oserror_of_the_pointer_write_stays_an_oserror(stand, monkeypatch):
+    """Отрицательный сторож: отказала САМАЯ первая запись — не легло ничего, и
+    OSError уходит как есть (его ловят поверхности); PartialWriteError с пустым
+    списком был бы ложью, вывернутой наизнанку."""
+    import onboarding_config_writer as ocw
+    _broken_stand(stand)
+
+    monkeypatch.setattr(ocw, "write_profile_pointer", _os_refusing("нет прав"))
+    import onboarding
+    loaded = onboarding.load_config_for_repair()
+    with pytest.raises(OSError) as info:
         onboarding.write_wizard_values(
             stand / "config.yml", dict(_WIZARD_ANSWERS),
             deactivate_profile=loaded.deactivate_profile)

@@ -34,12 +34,18 @@ def isolated_cwd(tmp_path, monkeypatch):
     слой (`<cwd>/.gc/config.yml`) тем самым тоже пуст. Managed-слой — на tmp
     (владелец пути — `mcp_runtime.paths`, у него его спрашивают и загрузчик, и
     карта участников): иначе в стек лезет настоящий `~/.gc/config.local.yml`
-    машины, и «сломан только профиль» перестаёт быть правдой."""
+    машины, и «сломан только профиль» перестаёт быть правдой.
+
+    База тестов файла ОБЪЯВЛЯЕТСЯ дефолтным пользовательским конфигом (M9):
+    советы-команды короткой формы (`--reset-config`, `--profile ""` без
+    `--config`) законны только для него — на чужом пути они целятся не в тот
+    файл, и объяснение обязано нести `--config` сессии."""
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
     monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
                         lambda: tmp_path / "config.local.yml")
+    monkeypatch.setattr("config.user_config_path", lambda: tmp_path / "base.yml")
     return cwd
 
 
@@ -228,14 +234,17 @@ def test_empty_profile_override_means_no_profile_at_all(isolated_cwd, tmp_path):
 # --- Сценарий B: битый YAML базы --------------------------------------------
 
 
-def test_invalid_base_yaml_falls_back_to_naming_the_file(tmp_path):
+def test_invalid_base_yaml_falls_back_to_naming_the_file(tmp_path, monkeypatch):
     """Ошибка не про ключ (битый YAML) — сопоставлять нечего, совет становится
     «поправить файл: <путь>», путь берётся из текста ошибки (`_layer_document`
-    называет файл первым). «Без профиля» не предлагается — профиля нет нигде."""
+    называет файл первым). «Без профиля» не предлагается — профиля нет нигде.
+    База — дефолтный пользовательский файл (M9): короткая форма
+    `gc-cli --reset-config` законна только для него."""
     from onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
     base.write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+    monkeypatch.setattr("config.user_config_path", lambda: base)
 
     exc = _load_and_catch(str(base))
     text = explain_broken_config(str(base), exc)
@@ -246,17 +255,18 @@ def test_invalid_base_yaml_falls_back_to_naming_the_file(tmp_path):
     assert "gc-cli --reset-config" in text
 
 
-def test_undecodable_base_is_explained_not_traced(tmp_path):
+def test_undecodable_base_is_explained_not_traced(tmp_path, monkeypatch):
     """Файл НА МЕСТЕ, но не декодируется (сохранён в UTF-16, «блокнотом») — это
     тот же «существует, но не читается», что и права/каталог/сетевой диск, только
     класс исключения другой (`UnicodeDecodeError` — подкласс `ValueError`, мимо
     `except OSError`). Точки входа его ловят, а вот САМО объяснение падало
     трейсбеком, читая тот же файл ещё раз: сперва резолвом указателя, потом
-    картой происхождения ключей."""
+    картой происхождения ключей. База — дефолтный пользовательский файл (M9)."""
     from onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
     base.write_text("backend:\n  api_mode: chat_completions\n", encoding="utf-16")
+    monkeypatch.setattr("config.user_config_path", lambda: base)
 
     exc = _load_and_catch(str(base))
     text = explain_broken_config(str(base), exc)
@@ -398,12 +408,69 @@ def test_schema_error_in_the_base_still_offers_the_reset(tmp_path, monkeypatch):
                         lambda: tmp_path / "config.local.yml")
     base = tmp_path / "base.yml"
     base.write_text(_BACKEND + "agent:\n  max_steps: many\n", encoding="utf-8")
+    monkeypatch.setattr("config.user_config_path", lambda: base)
 
     exc = _load_and_catch(str(base))
     text = explain_broken_config(str(base), exc)
 
     assert f"поправить agent.max_steps в:  {base}" in text
     assert "gc-cli --reset-config" in text
+
+
+# --- M9: советы-команды несут `--config` сессии ------------------------------
+
+
+def test_advice_carries_the_config_flag_of_the_session(isolated_cwd, tmp_path, monkeypatch):
+    """Ревью (M9): сессия шла с `--config <путь>`, а советы печатались
+    фиксированными строками — `gc-cli --reset-config` сбросил бы ЧУЖОЙ исправный
+    `~/.gc/config.yml`, оставив сломанный на месте, а `--profile ""` запустил бы
+    не тот конфиг. Оба совета обязаны нести `--config` сессии; путь — в кавычках
+    (пробелы в путях)."""
+    from onboarding import explain_broken_config
+
+    monkeypatch.setattr("config.user_config_path",
+                        lambda: tmp_path / "home-config.yml")
+    based = tmp_path / "with space"
+    based.mkdir()
+    base = based / "cfg.yml"
+    base.write_text(
+        _BACKEND + "models:\n  flash: {}\n" "slots:\n  max: ghost\n" "profile: work\n",
+        encoding="utf-8",
+    )
+    (based / "profiles").mkdir()
+    (based / "profiles" / "work.yml").write_text("slots:\n  default: flash\n",
+                                                 encoding="utf-8")
+
+    exc = _load_and_catch(str(base))
+    text = explain_broken_config(str(base), exc, program="gc-ua")
+
+    assert (f'запустить без профиля, ничего не потеряв:  '
+            f'gc-ua --config "{base}" --profile ""') in text
+    assert (f'откатить конфиг к шаблону (старый уйдёт в бэкап):  '
+            f'gc-cli --config "{base}" --reset-config') in text
+    # Короткие формы без --config целятся в другой файл — их быть не должно.
+    assert 'gc-ua --profile ""' not in text.replace(f'gc-ua --config "{base}"', "")
+    assert "gc-cli --reset-config" not in text.replace(f'gc-cli --config "{base}"', "")
+
+
+def test_reset_is_not_offered_for_the_bundled_template(tmp_path, monkeypatch):
+    """Ревью (M9): `--reset-config` на пакетном шаблоне отказывает («его не
+    правим») — советовать сброс для этого пути значит слать человека в тупик."""
+    from onboarding import explain_broken_config
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path",
+                        lambda: tmp_path / "config.local.yml")
+    base = tmp_path / "config.default.yml"
+    base.write_text(_BACKEND + "agent:\n  max_steps: many\n", encoding="utf-8")
+
+    exc = _load_and_catch(str(base))
+    monkeypatch.setattr("config._default_config_path", lambda: str(base))
+    monkeypatch.setattr("config.user_config_path", lambda: tmp_path / "elsewhere.yml")
+    text = explain_broken_config(str(base), exc)
+
+    assert f"поправить agent.max_steps в:  {base}" in text
+    assert "--reset-config" not in text
 
 
 # --- Сценарий D: два разных ключа в РАЗНЫХ файлах ---------------------------

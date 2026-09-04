@@ -302,11 +302,19 @@ class OnboardingScreen(Screen):
         return t
 
     def _model_step_current(self) -> str:
-        """Что шаг «Модель» называет текущим (`onboarding.model_step_current`).
+        """Что шаг «Модель» называет текущим (`onboarding.model_step_display`, M12).
         Знание общее с плоским мастером и живёт в ядре: вторая его редакция уже
         расходилась с первой — тот же шаг здесь показывал модель АКТИВНОГО уровня,
-        хотя задаёт слот `default`."""
-        return onboarding.model_step_current(self._config or {})
+        хотя задаёт слот `default`.
+
+        `model_step_display`, а не голый `model_step_current` (ревью #14): при
+        незаданном `default` с заданным другим уровнем вторая честно отвечает
+        пусто (правило «не выдумывать назначенное»), а строка «сейчас» самого
+        шага (`_render_body`) уже показывает модель фоллбэка — единственный
+        читатель этого метода, `_shown_values`, обязан называть ТО ЖЕ САМОЕ, иначе
+        сводка и лента подтверждения одного экрана говорят «—» там, где шаг рядом
+        уже назвал модель."""
+        return onboarding.model_step_display(self._config or {})[0]
 
     def _assigned_level_model(self, level: str) -> str:
         """Модель, явно назначенная уровню (`onboarding.assigned_level_model`)."""
@@ -557,7 +565,16 @@ class OnboardingScreen(Screen):
             body.mount(Static(_of.MODEL_STEP_HINT, classes="onb-hint onb-dyn set-spaced",
                               markup=False))
             endpoint, auth = self._endpoint_auth()
-            cfg_model = self._model_step_current()
+            # Строка «сейчас» шага — правило ядра, общее с плоским мастером
+            # (`onboarding.model_step_display`, M12): при незаданном default с
+            # заданным другим уровнем cfg_model — модель фоллбэка, и предвыбор
+            # редактора ведётся к ней (проход насквозь = «оставить как есть»),
+            # а не к первой модели сервера; подпись об источнике — строкой-хинтом
+            # (в строку списка её не вставить — слово «текущая» рисует редактор).
+            cfg_model, fallback_note = onboarding.model_step_display(self._config or {})
+            if fallback_note:
+                body.mount(Static(f"сейчас: {cfg_model}  {fallback_note}",
+                                  classes="onb-hint onb-dyn", markup=False))
             ed = ModelEditor(current=self._values.get("model", ""), endpoint=endpoint,
                              auth=auth, verify=bool(self._config.get("use_ssl", True)),
                              fetch=self._fetch,
@@ -1586,7 +1603,9 @@ class OnboardingScreen(Screen):
                 f"✗ остальное не записано: {exc} — при этом уже: "
                 + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written))
             return False
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
+            # OSError — штатный отказ записи (диск, права, win-лок открытого
+            # файла): мимо перехвата он ронял весь Textual (ревью L33).
             self.query_one("#onb-body", Static).update(f"✗ конфиг не записан: {exc}")
             return False
         if missing:

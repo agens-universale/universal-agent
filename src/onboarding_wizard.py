@@ -172,14 +172,39 @@ def _print_models(io: WizardIO, shown, *, current: str) -> None:
         io.printer(f"  ⚠ {_of.MODEL_WARN}")
 
 
-def _current_line(config: dict, level: str, model_id: str) -> str:
+def _current_line(config: dict, level: str, model_id: str, note: str = "") -> str:
     """Строка «сейчас» шага. Имя записи в скобках — только когда слот задан:
-    модель из легаси `agent.model` имени не имеет, и выдумывать его нельзя."""
+    модель из легаси `agent.model` имени не имеет, и выдумывать его нельзя.
+    `note` — подпись об источнике модели фоллбэка (M12): слот тогда не задан,
+    и с именем записи она не встречается."""
     if not model_id:
         return f"сейчас: {_of.LEVEL_UNSET} · Enter — оставить"
     alias = (config.get("slots") or {}).get(level)
     entry = f"  (имя записи «{alias}»)" if alias and alias != model_id else ""
+    if note:
+        entry = f"  {note}"
     return f"сейчас: {model_id}{entry} · Enter — оставить"
+
+
+def _warn_if_tool_incapable(io: WizardIO, models, shown, model_id: str) -> None:
+    """Предупреждение в момент ВЫБОРА: точный ввод id минует печать каталога, а ⚠
+    живёт только в ней (`_print_models`) и только у показанного куска — на длинном
+    каталоге модель без инструментов выбиралась без предупреждения вовсе (ревью
+    M13). Один перехват на оба шага: и модель, и уровни выбирают через
+    `_choose_model`.
+
+    Гейт «id не был в `shown`» (ревью #15): номер строки — это ВСЕГДА строка из
+    `shown`, и `_print_models` уже дорисовал ей ⚠ и напечатал это же
+    предупреждение под списком; печатать его здесь ещё раз на тот же id —
+    дублировать то, что человек только что видел. Печати не было только у
+    точного id — тот обходит каталог целиком (`_interpret`: `_exact_model` ищет
+    по ВСЕМ моделям, не по `shown`)."""
+    if any(m.id == model_id for m in shown):
+        return
+    m = next((m for m in models if m.id == model_id), None)
+    if m is not None and m.tool_capable is False:
+        io.printer(f"  {m.id} ⚠")
+        io.printer(f"  ⚠ {_of.MODEL_WARN}")
 
 
 def _ask_as_is(io: WizardIO, query: str) -> tuple:
@@ -225,6 +250,7 @@ def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
         if kind == "keep":
             return None
         if kind == "pick":
+            _warn_if_tool_incapable(io, models, shown, payload)
             return payload
         if kind == "all":
             shown, note = list(models), ""
@@ -276,11 +302,13 @@ def _collect_model(io: WizardIO, config: dict, values: dict, *, fetch=None) -> l
     io.printer(f"  {_of.ONBOARDING_FIELDS[2].label}")
     io.printer(f"  {_of.MODEL_STEP_HINT}")
     # Что считать текущим на этом шаге — правило общее с экраном TUI и живёт в ядре
-    # (`onboarding.model_step_current`): вторая его редакция уже расходилась с
-    # первой — тот же шаг в TUI показывал модель активного уровня.
-    current = onboarding.model_step_current(config)
+    # (`onboarding.model_step_display`): вторая его редакция уже расходилась с
+    # первой — тот же шаг в TUI показывал модель активного уровня. Подпись —
+    # источник модели фоллбэка при незаданном default (M12): без неё строка
+    # пустела, и «оставить как есть» было не на чем.
+    current, fallback_note = onboarding.model_step_display(config)
     if current:
-        io.printer(f"  {_current_line(config, 'default', current)}")
+        io.printer(f"  {_current_line(config, 'default', current, note=fallback_note)}")
     io.printer(f"  {_of.MODEL_FETCHING}")
     models = _fetch_models(config, values, fetch)
     if not models:
@@ -431,24 +459,6 @@ def _mcp_step(io: WizardIO, mcp) -> None:
 _SUMMARY_LABEL = {"default": "модель", "light": "light", "max": "max"}
 
 
-def _unassigned_default(config: dict) -> tuple[str, str]:
-    """`default` пуст, а строка «модель» всё равно показывает модель — она
-    выведена фоллбэком: (модель, подпись об источнике). Источник ищем тем же
-    обходом матрицы `LEVEL_FALLBACK` (`config_modules/model_registry.py`), что и
-    резолв: первый уровень после `default`, у которого задан слот, — и модель
-    берём из ЕГО слота, а не из `effective_model`: та резолвит АКТИВНЫЙ уровень
-    конфига, и при `level: light` с заданными обоими уровнями подпись называла
-    max, а модель показывала light. Не нашёлся ни один (реестр из одной записи,
-    например) — источник не выдумываем, пишем голый факт; резолв там от уровня
-    не зависит."""
-    from config_modules.model_registry import LEVEL_FALLBACK
-    for level in LEVEL_FALLBACK["default"][1:]:
-        model = onboarding.assigned_level_model(config, level)
-        if model:
-            return model, f"(default не задан — работает {level})"
-    return onboarding.effective_model(config), "(default не задан)"
-
-
 def _summary_lines(config: dict) -> list[str]:
     """Итог прогона: три уровня СВЕЖЕГО конфига. Пропущенный шаг и пустой слот
     выглядят одинаково — и это правда: сводка говорит, что лежит в файле, а не
@@ -458,7 +468,9 @@ def _summary_lines(config: dict) -> list[str]:
         model = onboarding.assigned_level_model(config, level)
         via_fallback = not model and level == "default"
         if via_fallback:
-            model, note = _unassigned_default(config)
+            # Модель и подпись — из ядра (переехали туда для M12): те же слова
+            # печатает строка «сейчас» шага «Модель» обеих поверхностей.
+            model, note = onboarding.default_fallback_model(config)
         if not model:
             lines.append(f"    {_SUMMARY_LABEL[level]:<12} не задан")
             continue
@@ -512,7 +524,10 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None,
         io.printer(f"\n  [ошибка] остальное не записано: {exc} — при этом уже: "
                    + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written))
         refused = True
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
+        # OSError — штатный отказ записи (диск, права, win-лок), не невозможный
+        # случай: мимо перехвата человек получал голый трейсбек после всех
+        # ответов (ревью L33).
         io.printer(f"\n  [ошибка] конфиг не записан: {exc}")
         refused = True
     except (KeyboardInterrupt, EOFError):
