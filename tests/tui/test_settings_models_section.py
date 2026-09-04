@@ -93,6 +93,11 @@ def _notice(scr) -> str:
     return " ".join(str(w.render()) for w in scr.query("#set-notice"))
 
 
+def _flash(scr) -> str:
+    """Плашка удачи (`_models_notice`: ok=True → `_flash`) — второй канал итога."""
+    return " ".join(str(w.render()) for w in scr.query("#set-flash"))
+
+
 @asynccontextmanager
 async def _section(tmp_path, body: str = "", *, models=("test-model",),
                    model: str = '"test-model"', size=None):
@@ -551,6 +556,36 @@ async def test_removing_an_entry_the_profile_points_at_is_refused_at_once(
         assert "work.yml" in notice and "slots.default" in notice, notice
         assert cfg_file.read_bytes() == before
         assert "gc" in ed._aliases                      # строка на месте
+
+
+async def test_a_raced_removal_tells_the_truth_and_refreshes_the_list(tmp_path):
+    """Гонка: запись исчезла из файла между баннером и Enter (L20 ревью MR #80).
+    Единственный текст ветки `removed=False` врал «запись основного конфига —
+    удалите в секции «Модели»» человеку, который в ней и стоит (тени у основной
+    секции не бывает вовсе), а строка-призрак оставалась на экране — `_reload`
+    не звался."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "entry", alias="opus")
+        await pilot.press("delete")
+        await pilot.pause()
+        assert ed.awaiting_confirm
+        # Файл изменился под ногами: запись «opus» унесли извне.
+        raced = ("models:\n"
+                 "  flash:\n"
+                 '    model: "google/gemini-2.5-flash"\n'
+                 "slots:\n"
+                 '  default: "flash"\n')
+        cfg_file.write_text(_flat() + raced, encoding="utf-8")
+        await pilot.press("enter")
+        await pilot.pause()
+        notice = _notice(scr)
+        assert "✗ не удалено" in notice and "opus" in notice, notice
+        assert "больше нет" in notice and "config.yml" in notice, notice
+        assert "основного конфига" not in notice, notice
+        ed = _editor(scr)
+        assert all(r.get("alias") != "opus" for r in ed._rows()), \
+            "строка-призрак осталась: список не перечитан"
 
 
 # --- резервная модель ---------------------------------------------------------
@@ -1244,6 +1279,67 @@ async def test_active_removes_the_assign_key(tmp_path):
         assign = _doc(cfg_file).get("assign") or {}
         assert "finish_gate" not in assign
         assert assign.get("summary") == "opus"      # соседняя привязка цела
+
+
+async def test_enter_on_an_unset_slot_is_an_honest_no_op(tmp_path):
+    """Пикер незаданного слота открывается курсором на «не задан»; Enter без
+    движения — no-op, и рапортовать зелёным «✓ Слот снят» о ключе, которого в
+    файле не было, нельзя: файл не менялся (L21 ревью MR #80). Канон честного
+    no-op — легаси-Enter секции: «ничего не изменено»."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")            # light в _REGISTRY не задан
+        await pilot.pause()
+        await pilot.press("enter")                  # раскрыть (курсор на «не задан»)
+        await pilot.press("enter")                  # Enter без движения
+        await pilot.pause()
+        assert cfg_file.read_bytes() == before
+        assert "снят" not in _flash(scr), _flash(scr)
+        assert "ничего не изменено" in _notice(scr), _notice(scr)
+        assert not _editor(scr).picker_open
+
+
+async def test_enter_on_the_current_binding_value_is_an_honest_no_op(tmp_path):
+    """Симметрия для ЗАДАННОГО значения (обещание `_open_picker` дословно: «Enter
+    без движения — no-op записи того же значения») и для привязок: курсор
+    открывается на текущем значении, Enter не пишет и не рапортует «→»."""
+    async with _section(tmp_path, _REGISTRY + _ASSIGNED) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        ed = _editor(scr)
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        assert ed._picker["idx"] == 1               # курсор на текущем значении (light)
+        await pilot.press("enter")                  # Enter без движения
+        await pilot.pause()
+        assert cfg_file.read_bytes() == before
+        assert "Привязка" not in _flash(scr), _flash(scr)
+        assert "ничего не изменено" in _notice(scr), _notice(scr)
+
+
+async def test_enter_on_an_unset_slot_removes_a_junk_value(tmp_path):
+    """Слот с мусорным/пустым значением (`slots.light: ""`) нормализуется в None
+    той же `_slot_value`, что и честно отсутствующий ключ — но в файле ключ ЕСТЬ.
+    No-op обязан судить по факту записи в файл, а не по нормализованному
+    значению (L21 ревью MR #80, находка #6): иначе снятие такого ключа никогда
+    не доезжает до `apply_registry_ops`, и мусор остаётся в файле навсегда."""
+    junk = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n'
+            "slots:\n"
+            '  light: ""\n'
+            '  default: "flash"\n')
+    async with _section(tmp_path, junk) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")                  # раскрыть (курсор на «не задан»)
+        assert ed._picker["idx"] == 0
+        await pilot.press("enter")                  # Enter без движения по нормализованному значению
+        await pilot.pause()
+        assert "light" not in (_doc(cfg_file).get("slots") or {}), _doc(cfg_file)
+        assert "ничего не изменено" not in _notice(scr), _notice(scr)
 
 
 async def test_wildcard_row_writes_the_subagents_star_key(tmp_path):

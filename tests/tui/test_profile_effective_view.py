@@ -1464,3 +1464,88 @@ async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(
         form = await _open_entry_form(pilot, scr, ed, "gpt")
         assert form.can_return_shared_pair is False
         assert form.clear_token() is False                  # пары нет — клавиша не наша
+
+
+async def test_a_raced_removal_of_a_namesake_names_the_shadow_and_reloads(
+        tmp_path, monkeypatch):
+    """Вторая половина ветки `removed=False` (L20): тёзку унесли из файла профиля
+    между баннером и Enter, строка ПРОДОЛЖАЕТ стоять тенью — прежний текст
+    («запись основного конфига — удалите в секции «Модели»») здесь правда, но
+    экран обязан догнать диск: без `_reload` строка читалась своей записью
+    профиля, которой в файле уже нет."""
+    async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
+        _cursor_to(ed, "entry", alias="gpt")
+        await pilot.press("delete")
+        await pilot.pause()
+        assert ed.awaiting_confirm
+        profile_file = _profile_path(tmp_path)
+        raced = ("models:\n"
+                 "  fast:\n"
+                 '    model: "qwen/qwen3-14b"\n'
+                 "  glm:\n"
+                 '    model: "zhipu/glm-4"\n')
+        profile_file.write_text(raced, encoding="utf-8")
+        await pilot.press("enter")
+        await pilot.pause()
+        notice = _notice(scr)
+        assert "✗ не удалено" in notice and "основного конфига" in notice, notice
+        ed = _editor(scr)
+        assert ed._entry_origin("gpt") == "base", \
+            "список не перечитан: строка всё ещё читается своей записью профиля"
+
+
+# --- секрет-политика: литеральный токен в ПРОЕКТНОМ профиле (M14 ревью MR #80) ---
+
+
+async def _write_literal_token_entry(pilot, scr):
+    """Запись с собственной парой и ЛИТЕРАЛЬНЫМ токеном — путём человека (n → поля
+    → Enter). Пара целиком: половину без адреса отвергло бы правило §2, и до
+    предмета стража дело бы не дошло."""
+    from textual.widgets import Input
+    from tui.editors.model_entry_form import ModelEntryForm
+    await pilot.press("n")
+    await pilot.pause()
+    form = scr.query(ModelEntryForm).last()
+    form.query_one("#mef-alias", Input).value = "sec"
+    form.query_one("#mef-model", Input).value = "prov/model-x"
+    form.query_one("#mef-url", Input).value = "http://own-host/v1/chat/completions"
+    form.query_one("#mef-token", Input).value = "sk-LITERAL-SECRET-999"
+    form._presets_ctrl.close()          # раскрытый на входе пресет-лист съел бы Enter
+    await pilot.pause()
+    await pilot.press("enter")
+    await pilot.pause()
+
+
+async def test_writing_a_literal_token_into_a_project_profile_warns_with_the_path(
+        tmp_path, monkeypatch):
+    """Политика docs/configuration.md: «литеральный токен в проектном профиле даёт
+    предупреждение» — но загрузчик (`load_profile_document(warn_literal_tokens=…)`)
+    срабатывает только при сборке стека и только для АКТИВНОГО профиля. Запись из
+    формы — момент, когда секрет ложится в файл РЕПОЗИТОРИЯ, и для неактивного
+    профиля этот момент единственный: молчание здесь значит узнать об утечке после
+    git push (M14 ревью MR #80). Текст — тот же, что у загрузчика (сверка с ним
+    самим, а не со списанной строкой), плюс ПОЛНЫЙ путь файла."""
+    from pathlib import Path
+
+    from config_modules.profiles import load_profile_document
+    async with _profile_view(tmp_path, monkeypatch, root="project") as (pilot, scr, ed):
+        target = Path(ed._target)
+        await _write_literal_token_entry(pilot, scr)
+        assert _doc(target)["models"]["sec"]["token"] == "sk-LITERAL-SECRET-999"
+        assert "сохранена" in _flash(scr)               # запись состоялась, рядом — ⚠
+        loader_notices: list = []
+        load_profile_document(target, warn_literal_tokens=True, notices=loader_notices)
+        assert loader_notices, "предпосылка: загрузчик сам ругается на этот файл"
+        notice = _notice(scr)
+        assert f"⚠ {loader_notices[0]}" in notice, notice   # слова загрузчика, один в один
+        assert str(target) in notice                        # полный путь, не basename
+
+
+async def test_writing_a_literal_token_into_a_base_profile_stays_quiet(
+        tmp_path, monkeypatch):
+    """Сторож границы политики: тот же литеральный токен в профиле БАЗОВОГО корня —
+    без предупреждения (файл вне репозитория, политика — про проектный)."""
+    async with _profile_view(tmp_path, monkeypatch) as (pilot, scr, _ed):
+        await _write_literal_token_entry(pilot, scr)
+        assert "сохранена" in _flash(scr)
+        assert "литеральный токен" not in _notice(scr), _notice(scr)

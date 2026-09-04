@@ -258,6 +258,19 @@ _NOTICE_REMOVE_REFUSED_CROSS_LAYER = (
 _NOTICE_REMOVE_REFUSED_NEEDS_DEFAULT = (
     "✗ не удалено: «{alias}» держит единственный slots.default. "
     "Задайте default другой записи и повторите.")
+# Гонка вместо тени: записи в файле цели уже нет (файл изменили между баннером и
+# Enter), и строка не стоит из тени — у основной секции тени не бывает вовсе.
+# Единственный прежний текст ветки слал «удалите в секции «Модели»» человека,
+# который в ней и стоит; «список обновлён» — правда ровно потому, что обе ветки
+# зовут `_reload` (`confirm_pending`).
+_NOTICE_REMOVE_RACED = (
+    "✗ не удалено: записи «{alias}» больше нет в {file} — "
+    "файл изменился, список обновлён")
+# Enter на ТЕКУЩЕМ значении пикера — записи нет, и рапортовать нечего: зелёное
+# «✓ Слот снят» о ключе, которого в файле не было, — ложь витрины (пикер
+# незаданного слота открывается курсором как раз на «не задан»). Слова — канон
+# честного no-op секции (`settings._save_legacy_model`, Enter без правок).
+_NOTICE_NO_CHANGE = "ничего не изменено"
 _NOTICE_ENTRY_SAVED = "Запись «{alias}» сохранена — {file}"
 # Ячейка адреса мёртвой записи: причина «мёртвости» видна в самой строке, длинное
 # объяснение (`_NO_ADDRESS_HINT`) остаётся в notice сохранения.
@@ -880,6 +893,20 @@ class ModelsSectionEditor(Vertical):
     def _base_assign_value(self, consumer: str):
         """Значение привязки из ТЕНИ либо None — близнец `_base_slot_value`."""
         return assign_value(self._base_assign, consumer)
+
+    def _binding_key_present(self, kind: str, key: str) -> bool:
+        """Ключ ЕСТЬ в файле цели — сырым видом, БЕЗ нормализации `_slot_value`/
+        `assign_value` (те стирают разницу между «ключа нет» и «ключ есть, но
+        значение пустое/нестроковое» — обоим итог один и тот же `None`).
+        Единственный потребитель — `_write_binding`: там честный no-op снятия
+        обязан судить по факту записи в файл, а не по нормализованному значению."""
+        if kind == "write_slot":
+            return key in self._slots
+        if key == "*" or key.startswith("subagents."):
+            name = "*" if key == "*" else key.split(".", 1)[1]
+            nested = self._assign.get("subagents")
+            return isinstance(nested, dict) and name in nested
+        return key in self._assign
 
     # --- строки списка --------------------------------------------------------
     def _rows(self) -> list:
@@ -1974,6 +2001,23 @@ class ModelsSectionEditor(Vertical):
         тронут, отказ называет причину от валидатора."""
         from config_modules.registry_write import RegistryWriteError, apply_registry_ops
         self._close_picker()
+        kind, key, chosen = op
+        current = (self._slot_value(key) if kind == "write_slot"
+                   else self._assign_value(key))
+        if chosen == current and not (chosen is None and self._binding_key_present(kind, key)):
+            # Выбрано ТЕКУЩЕЕ значение файла (обещание `_open_picker` дословно:
+            # «Enter без движения — no-op записи того же значения») — файл не
+            # изменится, и `done` рапортовал бы «✓ Слот снят» о ключе, которого
+            # в файле не было. Значение файла — теми же аксессорами, какими пикер
+            # открывался на нём (`current=` в `_open_value_picker`).
+            #
+            # Исключение — ключ в файле ЕСТЬ, но мусорный/пустой (`_slot_value`/
+            # `_assign_value` нормализуют его в тот же `None`, что и честное
+            # отсутствие ключа): снятие такого ключа МЕНЯЕТ файл, и судить no-op
+            # надо по факту записи (`_binding_key_present`), а не по значению
+            # после нормализации (L21 ревью MR #80, находка #6).
+            self._notice(_NOTICE_NO_CHANGE, ok=None)
+            return
         try:
             apply_registry_ops(self._target, [op], self._template,
                                is_profile=self._is_profile,
@@ -2106,10 +2150,20 @@ class ModelsSectionEditor(Vertical):
             return
         if not report.removed:
             # Записи нет в ФАЙЛЕ ЦЕЛИ — писатель отвечает отчётом, а не исключением
-            # (`RemovalReport(removed=False)`), и рапорт об удалении был бы ложным:
-            # строка стоит из тени, файл не тронут.
-            self._notice(_NOTICE_REMOVE_REFUSED_INHERITED.format(alias=pending["alias"]),
-                         ok=False)
+            # (`RemovalReport(removed=False)`), и рапорт об удалении был бы ложным.
+            # Файл менялся под ногами (сюда попадают только гонкой: отказ по тени
+            # `request_remove` даёт до баннера) — экран обязан догнать диск, и
+            # текст судится по СВЕЖЕМУ состоянию: строка либо продолжает стоять
+            # тенью (тёзку унесли из профиля — прежний отказ про запись основного
+            # конфига), либо исчезла вовсе, и прежний единственный текст слал
+            # «удалите в секции «Модели»» человека, который в ней и стоит.
+            self._reload()
+            if self._shadowed and pending["alias"] in self._base_entries:
+                self._notice(_NOTICE_REMOVE_REFUSED_INHERITED.format(
+                    alias=pending["alias"]), ok=False)
+            else:
+                self._notice(_NOTICE_REMOVE_RACED.format(
+                    alias=pending["alias"], file=Path(self._target).name), ok=False)
             return
         self._changed()             # снимки экрана — до перечитки (см. `_write`)
         self._reload()
