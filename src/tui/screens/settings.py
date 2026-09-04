@@ -3654,12 +3654,62 @@ class SettingsScreen(Screen):
         знает и правило записи волны A (`_profile_activation_target`): указатель
         туда не пишет никто, а знание о слое, размазанное по двум правилам, хуже
         одного (пробел зафиксирован в отчёте)."""
+        from config_modules.env_interpolation import resolve_env_placeholders
+
+        def _named(doc: dict) -> bool:
+            # Значение интерполируется ПЕРЕД сравнением — зеркало ядра
+            # (`layers.resolve_profile_pointer`): загрузчик разворачивает
+            # `${ENV:…}` до чтения указателя, и сырое сравнение не опознавало
+            # слой-носитель при `profile: "${ENV:X}"` — переименование/удаление
+            # пропускали его, указатель оставался висеть на исчезнувшем имени.
+            return str(resolve_env_placeholders(doc.get("profile")) or "").strip() == name
+
         layers = []
-        if self._project_config_doc().get("profile") == name:
+        if _named(self._project_config_doc()):
             layers.append(self._project_config_candidate_path())
-        if self._base_config_doc().get("profile") == name:
+        if _named(self._base_config_doc()):
             layers.append(self._profiles_base_path())
         return layers
+
+    def _profile_pointer_pinned_elsewhere(self, name: str, layers: list):
+        """Файл-носитель указателя `profile: <name>`, который операция НЕ перепишет
+        (managed `config.local.yml` — слой, которого правило записи осознанно не
+        знает), либо None. Правило записи здесь НЕ расширяется: снять чужой
+        machine-managed указатель мы не вправе — но молчание оставляло бы после
+        удаления/переименования ссылку на исчезнувшее имя, и следующий старт не
+        собирался бы. Предупреждение — на входе, вместе с остальными следствиями.
+
+        Вопрос задаётся ПОДСТАНОВКОЙ — готовым приёмом лестницы починки
+        (`onboarding.load_config_for_repair`): в стек кандидатами кладутся
+        документы переписываемых слоёв со снятым указателем, и тот же резолв,
+        каким указатель читает следующий старт (`resolve_profile_pointer`),
+        отвечает, переживёт ли имя операцию; носителя называет та же витрина
+        происхождения (`origins`) по тому же стеку. Своя прикидка «а не лежит ли
+        он в managed» была бы четвёртой редакцией резолва указателя.
+
+        Документы слоёв — из кэша прохода (`_base_config_doc`/`_project_config_doc`),
+        не с диска: `layers` — ровно те пути, что вернул `_profile_pointer_layers`
+        секундой раньше, спросив те же самые файлы (находка ревью #11). Баннер
+        удаления/переименования зовёт обе функции подряд на каждой отрисовке —
+        свежее чтение здесь поверх уже тёплого кэша удваивало read+parse YAML на
+        UI-потоке без всякой причины (кэш и так живёт один проход)."""
+        import config_raw
+        from config_modules.layers import resolve_profile_pointer
+        from config_origin import origins
+        base = self._profiles_base_path()
+        cached = {self._project_config_candidate_path(): self._project_config_doc(),
+                  base: self._base_config_doc()}
+        candidates = {}
+        for target in layers:
+            source = cached.get(target)
+            doc = dict(source) if source is not None else dict(config_raw.read_document(target))
+            doc["profile"] = ""
+            candidates[target] = doc
+        if resolve_profile_pointer(base, candidates=candidates) != name:
+            return None
+        survivor = origins(str(base), ["profile"], candidates=candidates,
+                           profile_override="")["profile"]
+        return survivor.overlay_path or str(base)
 
     def _repoint_profile_layers(self, layers: list, value: str, *,
                                 extra_candidates=None) -> tuple[list, Exception | None]:
@@ -3868,12 +3918,25 @@ class SettingsScreen(Screen):
         `--profile` (`TuiApp._profile_override`, `""` — «без профиля»): флаг переживает
         перечитывание, и записанное применится лишь со следующего запуска без
         него. «Применится со следующего хода агента» здесь — та же ложь, что и под
-        сессионным выбором. None — флага нет либо он называет то же имя."""
+        сессионным выбором. None — флага нет либо он называет то же имя.
+
+        `_profile_override_cleared_name` (ревью #10): удаление профиля флага пишет
+        `""` не потому, что человек запускался с `--profile ""`, а потому, что
+        перечитка (`_load_base_config`) обязана видеть именно эту раскладку —
+        `None` она бы приняла за «флага нет вовсе» и вернулась бы к указателю из
+        файла. Текст об этом не знал ничего, кроме итогового `""`, и после
+        удаления «work» с живым тёзкой в другом корне (флеш зовёт «включить —
+        Space») называл флаг пустым, хотя он называл «work» — тот же класс лжи,
+        которого текст обязан избегать."""
         launch = getattr(self.app, "_profile_override", None)
         if launch is None or launch == pointer:
             return None
         if launch:
             return f"текущий запуск остаётся на «{launch}» (флаг --profile)"
+        cleared = getattr(self.app, "_profile_override_cleared_name", None)
+        if cleared:
+            return (f'текущий запуск остаётся без профиля — профиль «{cleared}» '
+                     "из флага --profile удалён в этом сеансе")
         return 'текущий запуск остаётся без профиля (флаг --profile "")'
 
     def _profile_session_effect(self, before: str | None, *, pointer_changed: bool,
@@ -3899,7 +3962,15 @@ class SettingsScreen(Screen):
             return f'сессионный выбор «{before}» снят — действует «{acting}»'
         if not pointer_changed:
             return ""
-        return self._launch_profile_effect(pointer) or "применится со следующего хода агента"
+        launch = self._launch_profile_effect(pointer)
+        if launch:
+            return launch
+        if not pointer:
+            # Указатель снят В ПУСТО (удаление): «применится …» без предмета в
+            # плашке рядом со строкой о тёзке читалось как «применится тень» —
+            # снятие называется снятием, обещание про следующий ход остаётся.
+            return "Выбор снят: со следующего хода агента — без профиля."
+        return "применится со следующего хода агента"
 
     def _rename_profile(self, original: str, new_name: str) -> None:
         """`r` → новое имя: переименовываются файл И указатель в КАЖДОМ файловом
@@ -4003,6 +4074,14 @@ class SettingsScreen(Screen):
             self.app._profile_override = new_name
         if not self._reload_after_profile_file_change("переименовано"):
             return
+        # Курсор — на переименованную строку (приём создания): список сортирован,
+        # новое имя встаёт в другую позицию, и прежний индекс указывал бы на
+        # СОСЕДНИЙ профиль — следующий Space активировал бы его без подтверждения.
+        rows = self._profiles_rows()
+        row = next((r for r in rows
+                    if r["kind"] == "profile" and r["name"] == new_name), None)
+        if row is not None:
+            self._profiles_idx = rows.index(row)
         self._render_view()
         self._flash(" ".join(filter(None, [
             f"Профиль «{original}» переименован в «{new_name}».",
@@ -4037,8 +4116,20 @@ class SettingsScreen(Screen):
             active = " (сейчас активен)" if (self._config.get("profile") or None) == name else ""
             parts.append(f"Указатель на него{active} снимется в: "
                          + ", ".join(str(t) for t in layers) + ".")
+        pinned = self._profile_pointer_pinned_elsewhere(name, layers)
+        if pinned:
+            # Слой, который правило записи не переписывает (managed), продолжит
+            # называть исчезнувший файл — предупредить обязаны ДО Enter.
+            parts.append(f"Указатель на профиль лежит в {pinned} — снимите его "
+                         "там, иначе следующий запуск не соберётся.")
         if self._session_profile_name() == name:
             parts.append("Сессионный выбор /profiles тоже снимется.")
+        if getattr(self.app, "_profile_override", None) == name:
+            # Флаг --profile называет удаляемый профиль — удаление его снимет
+            # (см. `_delete_profile`), и запуск переедет: следствие необратимое,
+            # значит место ему здесь, до Enter.
+            parts.append("Профиль выбран флагом --profile — "
+                         "запуск перейдёт на «без профиля».")
         parts.append("Enter — удалить · Esc — отмена")
         return " ".join(parts)
 
@@ -4093,17 +4184,37 @@ class SettingsScreen(Screen):
         # обещанием readme на первой же правке одной из сторон.
         from config_sync import prune_backups
         prune_backups(backup.parent, path.name)
+        if getattr(self.app, "_profile_override", None) == name:
+            # Флаг запуска называет только что удалённый профиль: оставленный, он
+            # ронял бы КАЖДУЮ перечитку до конца сессии («профиль не найден») —
+            # начиная с той, что строкой ниже. Пустая строка — «этот запуск без
+            # профиля», раскладку уже понимает `_load_base_config`; переименование
+            # рядом везёт флаг за именем по той же причине.
+            #
+            # `_profile_override_cleared_name` — ЧТО флаг называл до этой строки:
+            # без него `_launch_profile_effect` не отличал бы «`""` — это удаление
+            # сняло флаг с исчезнувшего профиля» от «человек и правда запустился
+            # `--profile ""»`, и текст приписывал бы пустой флаг, которого не было
+            # (ревью #10) — особенно заметно, когда тёзка того же имени жив в
+            # другом корне и «включить — Space» тут же зовёт этот текст снова.
+            self.app._profile_override_cleared_name = name
+            self.app._profile_override = ""
         if not self._reload_after_profile_file_change("удалено"):
             return
         self._profiles_idx = 0
         self._render_view()
         parts = [f"Профиль «{name}» удалён — бэкап: {backup}."]
+        # Эффект для сессии — ПЕРЕД строкой о тёзке: хвост «со следующего хода…»
+        # после неё прирастал к тени и читался как «применится тень» (L24).
+        parts.append(self._profile_session_effect(session_before,
+                                                  pointer_changed=bool(layers)))
         if shadow is not None:
             # Удалён победивший тёзка: строка с тем же именем остаётся в списке
             # (из второго корня) — молчание читалось бы как «удаление не сработало».
-            parts.append(f"Имя «{name}» теперь резолвится в {shadow.path}.")
-        parts.append(self._profile_session_effect(session_before,
-                                                  pointer_changed=bool(layers)))
+            # «Включить — Space» отделяет резолвинг имени от действующего выбора:
+            # тень НЕ применяется сама, её ещё надо включить.
+            parts.append(f"Имя «{name}» теперь резолвится в {shadow.path}, "
+                         "включить — Space.")
         self._flash(" ".join(filter(None, parts)))
 
     @staticmethod
@@ -4148,7 +4259,11 @@ class SettingsScreen(Screen):
             self._notice(
                 f"✗ {action} не удалось, а автоматический откат указателя тоже "
                 "не удался — конфиг может ссылаться на несуществующий профиль, "
-                "поправьте вручную в разделе «Модели»: " + "; ".join(stuck))
+                # Указатель `profile:` пишет секция «Профили», не «Модели»: слать
+                # чинить в раздел, который этот ключ не правит, — послать не по
+                # адресу. Файлы перечислены следом — «прямо в файле» вторая дверь.
+                "поправьте вручную в разделе «Профили» или прямо в файле: "
+                + "; ".join(stuck))
             return
         self._notice(f"✗ {file_exc}")
 
@@ -4348,6 +4463,18 @@ class SettingsScreen(Screen):
                          id="set-profile-name",
                          classes=f"set-dyn set-spaced set-framed {KEEP_IN_VIEW}")
         frame.mount(inp)
+        if prompt["mode"] == "rename":
+            # Симметрия с баннером удаления (L23): указатель в слое, которого
+            # правило записи не знает (managed), останется на СТАРОМ имени —
+            # предупреждение стоит у поля, до Enter.
+            name = prompt["original"]
+            pinned = self._profile_pointer_pinned_elsewhere(
+                name, self._profile_pointer_layers(name))
+            if pinned:
+                frame.mount(Static(
+                    Text(f"указатель на профиль лежит в {pinned} — поправьте его "
+                         "там, иначе следующий запуск не соберётся", style=WARN),
+                    classes="set-hint set-dyn", markup=False))
         inp.focus()
 
     def _refresh_profiles_rows(self) -> None:
