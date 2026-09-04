@@ -575,11 +575,17 @@ def entry_uses_yaml_anchors(text: str, parent_dotted: str, key: str) -> bool:
 
 
 def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) -> None:
-    """Запись `profile: "<name>"` (пустое имя — деактивация): якорь гарантируется
-    `ensure_pointer_anchor` (топ-уровневый `profile:` из пакетного шаблона,
-    идемпотентно), значение — существующим `write_values`. Файл, которого ещё нет
-    (проектный `.gc/config.yml`), создаёт отдельная простая функция —
-    `write_values` по контракту требует существующего файла.
+    """Запись `profile: "<name>"` (пустое имя — деактивация): якорь (топ-уровневый
+    `profile:` из пакетного шаблона) и значение собираются В ПАМЯТИ и уходят ОДНОЙ
+    валидируемой записью (`write_text`) — тот же принцип, что у записи реестра
+    (`config_modules/registry_write.py::_commit`): дописывание якоря — часть той же
+    несостоявшейся записи, а не отдельный побочный эффект. Якорь, записанный
+    отдельным заходом (`ensure_pointer_anchor`), переживал отказ валидации ниже —
+    в файле без ключа `profile` оставался `profile: ""`, а пустой указатель в
+    проектном слое побеждает merge по ФАКТУ наличия ключа: действующий профиль
+    человека молча гас. Файл, которого ещё нет (проектный `.gc/config.yml`),
+    создаёт отдельная простая функция — текстовые примитивы требуют существующего
+    файла.
 
     Дом — здесь, у примитивов указателя, которые она и склеивает: потребителей
     двое (секция «Профили» `/settings` и финал мастера, снимающий указатель на
@@ -628,7 +634,15 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
                 extra_candidates=extra_candidates)
         create_pointer_file(path, name)
         return
-    ensure_pointer_anchor(path, template_path=_default_config_path())
+    text = read_user_text(path)
+    try:
+        find_anchor(text, "profile")
+    except KeyError:
+        text = insert_missing(text, "profile", read_user_text(_default_config_path()))
+    try:
+        text = set_scalar(text, "profile", name)
+    except KeyError:
+        raise ValueError("не удалось записать: profile")
     if is_base:
 
         def validate(candidate: str) -> None:
@@ -640,9 +654,7 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
             validate_config_text_with_sections(
                 candidate, base_path=base_path, target=path,
                 extra_candidates=extra_candidates)
-    missing = write_values(path, {"profile": name}, validate=validate)
-    if missing:
-        raise ValueError(f"не удалось записать: {', '.join(missing)}")
+    write_text(path, text, validate=validate)
 
 
 def create_pointer_file(path, name: str) -> None:

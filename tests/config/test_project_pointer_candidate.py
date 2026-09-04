@@ -305,3 +305,60 @@ def test_pointer_write_target_trusts_the_document_it_was_given(stack):
     project_config.write_text('profile: "work"\n', encoding="utf-8")
 
     assert profile_pointer_write_target(base, project_doc={}) == Path(base)
+
+
+# --- write_profile_pointer: якорь — часть той же валидируемой записи -------------
+
+
+def _pointerless_project_stand(stack):
+    """База с активным `work` (2 модели, слот — в профиле), сломанный `ghost`
+    и СУЩЕСТВУЮЩИЙ проектный `.gc/config.yml` БЕЗ ключа `profile` — ровно цель,
+    которую отдаёт `_profile_activation_target` для профиля из проектного корня."""
+    base, profiles, project_config = stack
+    base.write_text(
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
+        encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
+    (profiles / "job.yml").write_text('slots:\n  default: "b"\n', encoding="utf-8")
+    (profiles / "ghost.yml").write_text('slots:\n  default: "призрак"\n', encoding="utf-8")
+    project_config.parent.mkdir(parents=True, exist_ok=True)
+    project_config.write_text("level: default\n", encoding="utf-8")
+    return base, profiles, project_config
+
+
+def test_a_refused_activation_leaves_the_pointerless_project_file_byte_identical(stack):
+    """Ревью MR #80 (H2): якорь `profile: ""` дописывался ОТДЕЛЬНОЙ записью до
+    валидируемой — отклонённая активация оставляла его в файле, а пустой указатель
+    в проектном слое побеждает merge по ФАКТУ наличия ключа: действующий профиль
+    человека молча гас (и стек «модели в базе, слот в профиле» переставал
+    собираться вовсе). Отказ обязан оставить файл байт-в-байт прежним, а
+    активный профиль — прежним."""
+    import onboarding_config_writer as ocw
+    from config import load_config_ex
+    base, _profiles, project_config = _pointerless_project_stand(stack)
+    before = project_config.read_bytes()
+
+    with pytest.raises(ValueError, match="призрак"):
+        ocw.write_profile_pointer(project_config, "ghost", base_path=base)
+
+    assert project_config.read_bytes() == before
+    _cfg, meta = load_config_ex(str(base))
+    assert meta.active_name == "work"
+
+
+def test_a_successful_activation_still_appends_the_anchor_and_the_value(stack):
+    """Сторож от перегиба: у файла без ключа `profile` УСПЕШНАЯ активация
+    по-прежнему дописывает якорь и значение (одной записью), не теряя остального
+    содержимого файла. Профиль — ДРУГОЙ, чем в базе: победа проектного слоя и
+    доказывает, что запись состоялась, а не совпала с прежним ответом базы."""
+    import onboarding_config_writer as ocw
+    from config import load_config_ex
+    base, _profiles, project_config = _pointerless_project_stand(stack)
+
+    ocw.write_profile_pointer(project_config, "job", base_path=base)
+
+    text = project_config.read_text(encoding="utf-8")
+    assert 'profile: "job"' in text
+    assert "level: default" in text
+    _cfg, meta = load_config_ex(str(base))
+    assert meta.active_name == "job"

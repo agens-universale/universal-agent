@@ -1648,6 +1648,93 @@ async def test_renaming_a_profile_to_its_own_name_in_another_case_still_works(
         assert (tmp_path / "base" / "profiles" / "TestProf1.yml").is_file()
 
 
+def _spy_repoint(monkeypatch) -> list:
+    """Записать вызовы `_repoint_profile_layers`, НЕ подменяя поведение: гейт
+    занятой цели обязан стоять ДО первой записи указателей — по конечному
+    состоянию файлов этого не видно (откат возвращает те же байты)."""
+    calls = []
+    real = s.SettingsScreen._repoint_profile_layers
+
+    def _recording(self, layers, value, **kwargs):
+        calls.append(value)
+        return real(self, layers, value, **kwargs)
+
+    monkeypatch.setattr(s.SettingsScreen, "_repoint_profile_layers", _recording)
+    return calls
+
+
+async def test_renaming_onto_a_file_discovery_does_not_see_is_refused_before_pointers(
+        tmp_path, monkeypatch):
+    """Ревью MR #80 (H1): гейт тёзки судил по именам ДИСКАВЕРИ, а `rename()`
+    работает с ПУТЯМИ. `default.yml` — резервное имя, дискавери его пропускает,
+    casefold-гейт молчит — и на регистронечувствительной ФС цель «Default.yml»
+    попадает в чужой `default.yml`: POSIX-rename перезаписал бы его молча и без
+    бэкапа, а указатели `profile:` успевали переписаться до отказа ФС даже там,
+    где она отказывает сама (Windows). Судим файловую систему, ДО любых записей."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    root = tmp_path / "base" / "profiles"
+    _write(root / "work.yml", _PROFILE_BODY)
+    foreign = _write(root / "default.yml", "# ФАЙЛ ПОЛЬЗОВАТЕЛЯ — дискавери его не видит\n")
+    if not (root / "DEFAULT.YML").exists():
+        pytest.skip("регистрочувствительная ФС: «Default.yml» в default.yml тут не попадает")
+    base_before = base_cfg.read_bytes()
+    foreign_before = foreign.read_bytes()
+    calls = _spy_repoint(monkeypatch)
+
+    cfg = dict(_base_dict(), profile="work")
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "Default")
+        notice = _notice(scr)
+
+    assert "не переименовано" in notice and "уже занят" in notice, notice
+    assert calls == [], calls                       # указатели не тронуты ВОВСЕ
+    assert base_cfg.read_bytes() == base_before
+    assert foreign.read_bytes() == foreign_before   # чужой файл цел байт-в-байт
+    assert (root / "work.yml").is_file()
+
+
+async def test_renaming_onto_a_directory_namesake_is_refused_before_pointers(
+        tmp_path, monkeypatch):
+    """Тот же гейт на регистрочувствительной ФС: каталог-тёзка `<имя>.yml` для
+    дискавери невидим (`is_file()`), casefold-гейт молчит — а без гейта указатели
+    переписывались бы и откатывались, отказ приходил бы от ФС уже ПОСЛЕ них."""
+    import tui.app as app_mod
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    root = tmp_path / "base" / "profiles"
+    _write(root / "work.yml", _PROFILE_BODY)
+    occupant = _write(root / "job.yml" / "данные.txt", "не профиль\n")
+    base_before = base_cfg.read_bytes()
+    calls = _spy_repoint(monkeypatch)
+
+    cfg = dict(_base_dict(), profile="work")
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "profile", "work")
+        await pilot.press("r")
+        await pilot.pause()
+        await _type_name(pilot, scr, "job")
+        notice = _notice(scr)
+
+    assert "не переименовано" in notice and "уже занят" in notice, notice
+    assert calls == [], calls                       # гейт стоит ДО _repoint_profile_layers
+    assert base_cfg.read_bytes() == base_before
+    assert occupant.read_text(encoding="utf-8") == "не профиль\n"
+    assert (root / "work.yml").is_file()
+
+
 async def test_name_prompt_hides_the_hint_about_the_row_under_cursor(tmp_path, monkeypatch):
     """Пока идёт ввод имени, подсказка под списком молчит.
 

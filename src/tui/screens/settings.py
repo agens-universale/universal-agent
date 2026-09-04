@@ -3958,6 +3958,18 @@ class SettingsScreen(Screen):
         except ValueError as exc:
             self._notice(f"✗ не переименовано: {ref.path}: {exc}")
             return
+        # Занятость цели судит ФАЙЛОВАЯ СИСТЕМА, не дискавери: гейт тёзок выше
+        # сравнивает ИМЕНА из дискавери, а `rename()` работает с ПУТЯМИ, и цель,
+        # которой в дискавери нет (резервное имя вроде `default.yml`, тёзка по
+        # регистру на регистрочувствительной ФС), POSIX-rename перезаписал бы
+        # МОЛЧА и без бэкапа. `samefile` оставляет законной смену регистра
+        # СОБСТВЕННОГО имени: на регистронечувствительной ФС `exists()` находит
+        # сам переименовываемый файл. Гейт стоит ДО `_repoint_profile_layers` —
+        # иначе там, где ФС откажет сама (Windows), указатели `profile:` успевали
+        # бы переписаться и откатиться впустую.
+        if new_profile_path.exists() and not new_profile_path.samefile(ref.path):
+            self._notice(f"✗ не переименовано: файл {new_profile_path} уже занят")
+            return
         written, error = self._repoint_profile_layers(
             layers, new_name, extra_candidates=profile_candidate)
         if error is not None:
