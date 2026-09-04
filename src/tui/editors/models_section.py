@@ -1823,6 +1823,8 @@ class ModelsSectionEditor(Vertical):
             # сохранить её без единой правки. Правит форма по-прежнему только свои поля.
             initial = {"alias": alias, **self._own_entry(alias)}
         self._form = ModelEntryForm(
+            interaction_gate=lambda: (self._picker is not None
+                                      or self._env_pending is not None),
             initial=initial, existing_aliases=self._own_aliases, presets=self._presets,
             effective_url=self._effective_url, effective_auth=self._effective_auth,
             verify=self._verify, config_proxy=self._config_proxy,

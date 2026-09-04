@@ -2409,3 +2409,41 @@ async def test_registry_origin_cache_does_not_survive_the_sections_own_write(
         assert not ed.legacy_open, "легаси-редактор поднялся под живым реестром слоя выше"
         assert not scr.query(ModelEditor), "правка `agent.model`, которая не действует"
         assert ".gc/config.yml в проекте" in _texts(scr), _texts(scr)
+
+async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
+    """[ревью №7, находка 1] Пока висит вопрос секции (пикер default-слота или
+    баннер ${ENV:…}), клик мышью в поля формы обязан молчать, как молчат
+    клавиши (_route_registry_editor): иначе клик переезжал курсором, возвращал
+    фокус в поле и на id ещё и раскрывал список поверх живого пикера — то же
+    двоевластие, что чинил фикс отказа записи, только мышью."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        await pilot.press("n")
+        await pilot.pause()
+        from tui.editors.model_entry_form import ModelEntryForm
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "opus"
+        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                 # submit → пикер default
+        await pilot.pause()
+        ed = _editor(scr)
+        assert ed.picker_open
+        idx_before = form._idx
+        await pilot.click("#mef-model")
+        await pilot.pause()
+        assert ed.picker_open, "клик убил пикер вопроса"
+        assert form._idx == idx_before, "клик переехал курсором под вопросом"
+        assert not form._list.is_open, "список моделей раскрылся поверх пикера"
+        # MouseDown фокусирует Input сам — гейт обязан снять фокус обратно:
+        # иначе печать меняла поля при замороженном составе транзакции.
+        assert scr.app.focused is None, "фокус остался в поле под вопросом"
+        model_before = form.query_one("#mef-model", Input).value
+        await pilot.press("d")
+        await pilot.pause()
+        assert form.query_one("#mef-model", Input).value == model_before, (
+            "печать после клика изменила поле под вопросом")
+

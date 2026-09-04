@@ -274,6 +274,34 @@ class ConnectionEditor(Vertical):
             # Замороженное поле токена (● без авторизации) курсор пропускает —
             # фокусировать disabled-Input нельзя, делать там нечего.
             self._idx = (self._idx + delta) % len(self._positions)
+        self._land()
+
+    def on_click(self, event) -> None:
+        """Клик мышью по полю — тоже перемещение курсора (спека §4.3, тот же
+        приём, что `ModelEntryForm.on_click`): без приземления Space на галке и
+        футер судили по «прошлому» месту курсора, а список над пустым адресом не
+        раскрывался. Клик по текущему полю — no-op (раскрытый список не
+        пересобирается); замороженный токен (`● без авторизации`) мышь не
+        оживляет. Событие не глушится — выделение текста живёт как жило."""
+        wid = getattr(getattr(event, "control", None), "id", None)
+        if wid == "conn-noauth":
+            wid = None          # позиция галки в _positions — None (ревью N7, н.3)
+        elif wid is None or wid not in self._positions:
+            return
+        pos = self._positions.index(wid)
+        if pos == self._idx or (self._no_auth and wid == "conn-token"):
+            return
+        if self._presets_ctrl.is_open:
+            self._presets_ctrl.close()
+        self._idx = pos
+        self._land()
+        # Мышь обязана обновить футер экрана, как клавиатурные маршруты
+        # (ревью N7, находка 2).
+        getattr(self.screen, "_refresh_footer", lambda: None)()
+
+    def _land(self) -> None:
+        """Приземление курсора на текущую позицию: раскрытие пресет-листа над
+        пустым адресом, подсветка галки, фокус — один хвост на стрелки и мышь."""
         target = self._positions[self._idx]
         if target == "conn-url":
             # Канон 2026-08-17: раскрываем, только если поле пусто (решает `can_open`).

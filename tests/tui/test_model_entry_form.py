@@ -2047,6 +2047,31 @@ async def test_empty_server_answer_is_not_reported_as_a_failure():
         assert str(form.query_one("#mef-model-status", Static).render()) == LIST_EMPTY
 
 @pytest.mark.asyncio
+async def test_a_mouse_click_lands_the_cursor_like_the_arrows_do():
+    """Клик мышью по полю — тоже перемещение курсора (спека §4.3, канон
+    voice-редакторов): без приземления клик в поле id не запускал автоподгрузку
+    списка, статуса не было, а Alt+↓ молчал — его гейт смотрит на позицию
+    курсора, которую двигали только стрелки (живой смок 2026-09-04)."""
+    calls = []
+
+    def fetch(url, auth, **kw):
+        calls.append(url)
+        return _models()
+
+    form = _form(initial={"alias": "op", "model": "",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
+                          "token": "sk-x"},
+                 existing_aliases=set(), fetch=fetch)
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form._positions[form._idx] == "mef-url"    # предусловие: курсор на адресе
+        await pilot.click("#mef-model")
+        await pilot.pause()
+        assert form._positions[form._idx] == "mef-model", "клик не приземлил курсор"
+        assert calls, "автоподгрузка не стартовала по клику"
+        assert form.reload_models() is True               # Alt+↓ ожил
+
+@pytest.mark.asyncio
 async def test_the_id_field_promises_alt_down_before_the_first_load():
     """«Alt+↓ — перечитать список» обязана стоять под полем id с ПЕРВОГО кадра:
     список СЕТЕВОЙ — клавиша идёт на сервер, и обещание осмысленно даже без
@@ -2062,6 +2087,43 @@ async def test_the_id_field_promises_alt_down_before_the_first_load():
         await pilot.pause()
         hints = [str(w.render()) for w in form.query(".mef-model-hint")]
         assert any(MODEL_RELOAD_HINT in h for h in hints), hints
+
+@pytest.mark.asyncio
+async def test_a_click_on_the_noauth_row_lands_the_cursor_too():
+    """[ревью №7, находка 3] Галка «без авторизации» — единственная позиция, на
+    которую мышь не приземлялась (её позиция в _positions — None, а id виджета в
+    кортеже нет): после клика Space печатал пробел в прежнее поле вместо
+    переключения."""
+    form = _form(initial={"alias": "op", "model": "m",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
+                          "token": "sk-x"},
+                 existing_aliases=set())
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        await pilot.click("#mef-noauth")
+        await pilot.pause()
+        assert form._positions[form._idx] is None, "клик по галке не приземлил курсор"
+        assert form.toggle_no_auth() is True
+
+
+@pytest.mark.asyncio
+async def test_a_mouse_landing_refreshes_the_screen_footer():
+    """[ревью №7, находка 2] Приземление мышью обязано обновить футер экрана —
+    как канон voice (settings.on_descendant_focus): иначе до следующей клавиши
+    футер обещает клавиши прошлой позиции."""
+    calls = []
+    form = _form(initial={"alias": "op", "model": "m",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
+                          "token": "sk-x"},
+                 existing_aliases=set())
+    app = _harness(form)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pilot.app.screen._refresh_footer = lambda: calls.append(1)
+        await pilot.click("#mef-token")
+        await pilot.pause()
+        assert form._positions[form._idx] == "mef-token"
+        assert calls, "футер не обновлён после мышиного приземления"
 
 @pytest.mark.asyncio
 async def test_typing_in_the_id_field_reopens_the_fetched_list_with_a_filter():

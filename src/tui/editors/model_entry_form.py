@@ -241,8 +241,15 @@ class ModelEntryForm(Vertical):
                  fetch=None, probe=None, presets: list | None = None,
                  effective_url: str = "", effective_auth: str | None = None,
                  verify: bool = True, config_proxy: str | None = None,
-                 base_aliases=frozenset(), base_entry: dict | None = None) -> None:
+                 base_aliases=frozenset(), base_entry: dict | None = None,
+                 interaction_gate=None) -> None:
         super().__init__(classes="onb-dyn")
+        # interaction_gate() -> bool — «хозяин забрал клавиатуру» (пикер
+        # default-слота, баннер перезаписи ссылки): клавиши секция гейтит сама
+        # (_route_registry_editor), а клик доходит до формы напрямую — без
+        # этого он переезжал курсором и раскрывал список поверх живого
+        # вопроса (ревью N7, находка 1).
+        self._interaction_gate = interaction_gate
         initial = initial or {}
         # Эффективные адрес/Authorization основного конфига — то, что реально
         # унаследует запись с пустыми полями (решение 7 «наследование явно»):
@@ -353,6 +360,7 @@ class ModelEntryForm(Vertical):
         self._list = FieldListController(
             self, input_id="mef-model", row_class="mef-model-row",
             scroll_class="mef-model-scroll", hint_class="mef-model-hint",
+            promise_empty=True,
             rows_source=lambda: list(self._models), render_row=self._model_row_text,
             matches=lambda m, q: q in m.id.lower(),
             value_of=lambda m: m.id, on_pick=self._apply_model,
@@ -761,6 +769,11 @@ class ModelEntryForm(Vertical):
         write_field(self._url_input, self._url0)
         self._sync_pair_state()
         self._focus_position()
+        # Строка «Alt+↓ — перечитать список» — с ПЕРВОГО кадра (канон
+        # `sync_hint`, смок 2026-08-20): список сетевой (`promise_empty`), и до
+        # этого вызова способ позвать его не был назван нигде, пока курсор не
+        # заходил на поле id (живой смок 2026-09-04).
+        self._list.sync_hint()
 
     # --- навигация ---
     def _sync_pair_state(self) -> None:
@@ -819,6 +832,45 @@ class ModelEntryForm(Vertical):
         if not self.own_connection():
             return position == "mef-token" or position is None
         return position == "mef-token" and self._no_auth
+
+    def on_click(self, event) -> None:
+        """Клик мышью по полю — тоже перемещение курсора (спека §4.3, канон
+        voice-редакторов): без приземления клик в поле id не запускал
+        автоподгрузку списка, статуса не было, а `Alt+↓` молчал — его гейт
+        смотрит на позицию курсора, которую двигали только стрелки (живой смок
+        2026-09-04). Именно КЛИК, не DescendantFocus: события фокуса
+        доставляются отложенно, и событие от поля, которое `move` уже покинул,
+        перетаскивало курсор назад. Клик по текущему полю — no-op (гейт
+        `pos == _idx`: раскрытый список не пересобирается); замороженные
+        позиции (`_skip_position`) мышь не оживляет — там и клавиатура не
+        стоит. Событие не глушится — выделение текста живёт как жило."""
+        if self._interaction_gate is not None and self._interaction_gate():
+            # Висит вопрос секции: мышь молчит, как клавиши, — но Textual уже
+            # сфокусировал Input на MouseDown, и печать уезжала бы в поле при
+            # ЗАМОРОЖЕННОМ составе транзакции («правки под баннером снимку
+            # разъехаться не дают» — канон секции; живой смок 2026-09-04).
+            # Снимаем фокус обратно: под вопросом клавиатура принадлежит
+            # вопросу целиком.
+            self.screen.set_focus(None)
+            return
+        wid = getattr(getattr(event, "control", None), "id", None)
+        if wid == "mef-noauth":
+            wid = None          # позиция галки в _positions — None (ревью N7, н.3)
+        elif wid is None or wid not in self._positions:
+            return
+        pos = self._positions.index(wid)
+        if pos == self._idx or self._skip_position(wid):
+            return
+        # Тот же хвост, что у move(): чужие списки закрываются перед переездом.
+        if self._list.is_open:
+            self._list.close()
+        if self._presets_ctrl.is_open:
+            self._presets_ctrl.close()
+        self._idx = pos
+        self._focus_position()
+        # Футер экрана судит по позиции курсора — мышь обязана обновить его,
+        # как канон voice (settings.on_descendant_focus; ревью N7, находка 2).
+        getattr(self.screen, "_refresh_footer", lambda: None)()
 
     def move(self, delta: int) -> None:
         if self._list.move(delta) or self._presets_ctrl.move(delta):
