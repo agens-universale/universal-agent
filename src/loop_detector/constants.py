@@ -21,3 +21,11 @@ def loop_warn_on_repeat(*, consecutive: int, in_window: int) -> Callable[[_T], _
         return cls
 
     return deco
+
+
+def copy_loop_warn(cls: object) -> dict[str, int] | None:
+    """Пороги с класса в запись tools_data (ключ LOOP_WARN_KEY)."""
+    raw = getattr(cls, LOOP_WARN_ATTR, None)
+    if not isinstance(raw, dict):
+        return None
+    return dict(raw)

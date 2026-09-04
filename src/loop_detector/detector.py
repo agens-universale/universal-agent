@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from loop_detector.constants import LOOP_WARN_ATTR, LOOP_WARN_KEY, WINDOW_SIZE
+from loop_detector.constants import LOOP_WARN_KEY, WINDOW_SIZE
 
 _BRIEF_VALUE_LIMIT = 100
 # Слот в окне, если args разобрать нельзя: consecutive соседних маркированных
@@ -60,9 +60,6 @@ def resolve_thresholds(
 ) -> tuple[int, int] | None:
     entry = (tools_data or {}).get(tool_name) or {}
     raw = entry.get(LOOP_WARN_KEY)
-    if raw is None:
-        fabric = entry.get("tool_fabric")
-        raw = getattr(fabric, LOOP_WARN_ATTR, None)
     if not isinstance(raw, dict):
         return None
     try:

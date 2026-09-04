@@ -13,7 +13,7 @@ import sys
 from typing import Any, Dict, Optional
 
 from config_modules.agent import exec_timeout_from_config_dict
-from loop_detector.constants import LOOP_WARN_ATTR, READ_PROFILE, loop_warn_on_repeat
+from loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE, copy_loop_warn, loop_warn_on_repeat
 from tools.schema_optional import coalesce_optional_string
 from tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from utils.arg_decorators import parse_json_object_argument
@@ -342,10 +342,13 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
         def fabric(**kwargs: Any):
             return tool_cls(skills_registry, **kwargs)
 
-        warn = getattr(tool_cls, LOOP_WARN_ATTR, None)
-        if warn is not None:
-            setattr(fabric, LOOP_WARN_ATTR, warn)
         return fabric
+
+    def _with_loop_warn(entry: Dict[str, Any], tool_cls: type) -> Dict[str, Any]:
+        warn = copy_loop_warn(tool_cls)
+        if warn is not None:
+            entry[LOOP_WARN_KEY] = warn
+        return entry
 
     tools: Dict[str, Dict[str, Any]] = {
         "skills_list": {
@@ -596,6 +599,15 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             ),
         },
     }
+
+    for name, tool_cls in (
+        ("skills_list", SkillsListTool),
+        ("skills_load", LoadSkillTool),
+        ("skills_run_script", RunSkillScriptTool),
+        ("skills_read_reference", LoadReferenceTool),
+        ("skills_read_asset", LoadAssetTool),
+    ):
+        _with_loop_warn(tools[name], tool_cls)
 
     return tools
 

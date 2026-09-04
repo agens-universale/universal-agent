@@ -5,18 +5,20 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from loop_detector import (
+from loop_detector.constants import (
     GENERIC_PROFILE,
     LOOP_WARN_ATTR,
     LOOP_WARN_KEY,
     READ_PROFILE,
     WINDOW_SIZE,
+    loop_warn_on_repeat,
+)
+from loop_detector.detector import (
     brief_args,
     clear,
     fingerprint,
     flush,
     is_enabled,
-    loop_warn_on_repeat,
     observe,
     resolve_thresholds,
 )
@@ -37,6 +39,7 @@ def _entry(consecutive: int, in_window: int, *, injected=("reason",)):
 
     return {
         "tool_fabric": Tool,
+        LOOP_WARN_KEY: {"consecutive": consecutive, "in_window": in_window},
         "injected_fields": list(injected),
         "spec": {},
     }
@@ -397,11 +400,53 @@ def test_window_is_a_ring_of_ten():
 
 
 def test_decorator_puts_thresholds_on_class_not_instance_state():
+    from loop_detector.constants import copy_loop_warn
+
     @loop_warn_on_repeat(**READ_PROFILE)
     class Sample:
         pass
 
     assert getattr(Sample, LOOP_WARN_ATTR) == READ_PROFILE
+    assert copy_loop_warn(Sample) == READ_PROFILE
+    assert copy_loop_warn(object()) is None
+
+
+def test_resolve_thresholds_reads_only_tools_data_key():
+    @loop_warn_on_repeat(**READ_PROFILE)
+    class Tool:
+        pass
+
+    tools_data = {"fs_read_file": {"tool_fabric": Tool}}
+    assert resolve_thresholds(tools_data, "fs_read_file") is None
+
+    tools_data["fs_read_file"][LOOP_WARN_KEY] = dict(GENERIC_PROFILE)
+    assert resolve_thresholds(tools_data, "fs_read_file") == (3, 4)
+
+
+def test_builtin_registry_copies_loop_warn_key():
+    from tools.registry import get_builtin_tools_data
+
+    tools = get_builtin_tools_data({})
+    assert tools["fs_read_file"][LOOP_WARN_KEY] == READ_PROFILE
+    assert tools["session_think"][LOOP_WARN_KEY] == GENERIC_PROFILE
+    assert LOOP_WARN_KEY not in tools["fs_write_file"]
+    assert LOOP_WARN_KEY not in tools["exec_command"]
+    assert LOOP_WARN_KEY not in tools["turn_finish"]
+
+
+def test_skills_tools_data_copies_loop_warn_key():
+    from tools.skills.skills_tools import get_skills_tools_data
+
+    tools = get_skills_tools_data(None)
+    for name in (
+        "skills_list",
+        "skills_load",
+        "skills_read_reference",
+        "skills_read_asset",
+    ):
+        assert tools[name][LOOP_WARN_KEY] == READ_PROFILE
+        assert not hasattr(tools[name]["tool_fabric"], LOOP_WARN_ATTR)
+    assert LOOP_WARN_KEY not in tools["skills_run_script"]
 
 
 def _ptc_state(**extra):
@@ -476,6 +521,68 @@ def test_process_tool_calls_second_read_executes_and_emits_technical(monkeypatch
     assert len(tech) == 1
     assert "Loop detector:" in tech[0]["content"]
     assert "fs_read_file" in tech[0]["content"]
+
+
+def test_process_tool_calls_user_stop_clears_window(monkeypatch):
+    import processing_responses as pr
+
+    state = _ptc_state()
+
+    def fake_apply(**_kw):
+        state.stop_requested = True
+        return json.dumps({"ok": True, "path": "a.py"})
+
+    monkeypatch.setattr(pr, "apply_tool", fake_apply)
+    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
+    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
+
+    tools_data = {"fs_read_file": _entry(**READ_PROFILE)}
+    args = json.dumps({"path": "a.py"})
+    outs = pr.process_tool_calls(
+        messages=[_fc("fs_read_file", "c1", args), _fc("fs_read_file", "c2", args)],
+        state=state,
+        ctx=_ptc_ctx(tools_data),
+        run_agent_func=None,
+    )
+    assert state.loop_detector_window == []
+    assert state.loop_detector_pending == []
+    assert not any("Loop detector:" in str(o.get("content", "")) for o in outs)
+
+
+def test_run_agent_check_stop_clears_window():
+    from processing_responses import run_agent
+    from states import State
+
+    state = State(
+        verbose=False,
+        model="CodeChat",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=5,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
+    state.loop_detector_window = ["fp"]
+    state.loop_detector_pending = [{"tool": "fs_read_file", "args": {}}]
+    result = run_agent(
+        [{"role": "user", "content": "hi"}],
+        state,
+        SimpleNamespace(
+            config_dict={
+                "backend_api_mode": "chat_completions",
+                "console_trace": False,
+                "no_tool_call_max_count": 50,
+            },
+            logger=None,
+            auth_connector=None,
+        ),
+        check_stop=lambda: True,
+    )
+    assert result is None
+    assert state.loop_detector_window == []
+    assert state.loop_detector_pending == []
 
 
 def test_process_tool_calls_disabled_has_no_notice(monkeypatch):

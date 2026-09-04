@@ -953,6 +953,9 @@ def process_tool_calls(
         # run_agent после stop часто выходит на check_stop до обычного persist —
         # закрывающие A/B пишем сразу (исключение discard_writes).
         _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
+        # Прогон остановлен: notice агенту не нужен, окно прошлого батча
+        # не должно всплыть при продолжении сессии.
+        clear_loop_detector(state)
 
     # Если внутри batch сработал session_compact — вместо сырых output'ов
     # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
@@ -1070,6 +1073,7 @@ def run_agent(
     state.last_batch_invalid_arguments_count = 0
     while True:
         if check_stop is not None and check_stop():
+            clear_loop_detector(state)
             return None
         if get_pending_messages is not None:
             pending = get_pending_messages()
