@@ -106,7 +106,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 | `--read-guard-mode` | Режим `read_guard`: `allow` — без проверок, `ask` — подтверждение для подозрительного, `deny` — блокировка. |
 | `--command-moderation` | Режим для `execute_command` / `run_python_code`: `allow` — без judge, `ask` — подтверждение опасного, `deny` — блокировка опасного. |
 | `--agentsmd-override` | Только TUI: оставить лишь корневой `AGENTS.md` (L3), отбросив shipped, глобальный `~/.gc/AGENTS.md` и `.gc/AGENTS.md`. Вне TUI слои не грузятся вовсе — агент говорит об этом на старте. |
-| `--profile` | Активировать профиль `<имя>` поверх указателя `profile:` из `config.yml` (`~/.gc/profiles/` или `<проект>/.gc/profiles/`). |
+| `--profile` | Активировать профиль `<имя>` поверх указателя `profile:` из `config.yml` (`<проект>/.gc/profiles/` или `profiles/` рядом с базовым `config.yml` — Windows `~/.gc/profiles/`, Linux/macOS `~/.config/gc/profiles/`; при `--config` — каталог указанного файла). |
 | `--level` | Активный уровень модели на этот запуск: `light` / `default` / `max` (перекрывает `config.yml` и профиль). |
 | `-a`, `--auto-mcp` | Поднять HTTP/SSE MCP-демоны из `recommended_mcp/` перед запуском (если каталог есть в cwd); по завершении гасятся только процессы этого вызова. |
 | `--reset-config` | Сбросить `config.yml` к пакетному умолчанию (подтверждение `y/N`, старый файл — в бэкап; профили и сессионные оверрайды не трогает) и выйти. |
