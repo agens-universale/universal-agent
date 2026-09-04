@@ -402,12 +402,14 @@ def test_window_is_a_ring_of_ten():
 def test_decorator_puts_thresholds_on_class_not_instance_state():
     from loop_detector.constants import copy_loop_warn
 
-    @loop_warn_on_repeat(**READ_PROFILE)
+    thresholds = {"consecutive": 9, "in_window": 7}
+
+    @loop_warn_on_repeat(**thresholds)
     class Sample:
         pass
 
-    assert getattr(Sample, LOOP_WARN_ATTR) == READ_PROFILE
-    assert copy_loop_warn(Sample) == READ_PROFILE
+    assert getattr(Sample, LOOP_WARN_ATTR) == thresholds
+    assert copy_loop_warn(Sample) == thresholds
     assert copy_loop_warn(object()) is None
 
 
