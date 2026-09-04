@@ -130,6 +130,10 @@ class State:
         self.last_internal_error_tool_name: Optional[str] = None
         self.internal_error_repeat_count: int = 0
         self.last_batch_invalid_arguments_count: int = 0
+        # Loop detector: per-run in-memory ring of all tool-call fingerprints.
+        # Not persisted (StateSerializer pops it); not thread meta.
+        self.loop_detector_window: list[str] = []
+        self.loop_detector_pending: list[dict] = []
         self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
         # Шаги без вызова session_todo (todo_reminder); переживает ход через meta.

@@ -9,6 +9,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from constants.tool_names import SESSION_TODO_TOOL_NAME
+from loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 
 
@@ -32,6 +33,7 @@ def _counts(items: List[Dict[str, str]]) -> Dict[str, int]:
     }
 
 
+@loop_warn_on_repeat(**GENERIC_PROFILE)
 class SessionTodo(AbstractSimpleTool):
     tool_name = SESSION_TODO_TOOL_NAME
 

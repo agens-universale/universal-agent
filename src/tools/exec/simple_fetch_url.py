@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 
 import requests
 
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 from security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
 
@@ -19,6 +20,7 @@ class _RedirectBlocked(Exception):
         super().__init__(decision.reason or "redirect blocked")
         self.decision = decision
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class SimpleFetchUrl(AbstractSimpleTool):
     timeout_seconds = 20
     max_content_chars = 20_000

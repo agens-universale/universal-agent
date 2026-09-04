@@ -1,3 +1,4 @@
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 from typing import Any, Dict, Optional
 import json
@@ -13,6 +14,7 @@ from utils.fs_size_limits import (
 )
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class ReadFile(AbstractSimpleTool):
     def _result(
         self,

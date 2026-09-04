@@ -252,6 +252,8 @@ agent:
   # session_token_limit: 200000   # бюджет input+output токенов на один ран
   # max_tool_calls: 100           # макс. вызовов инструментов на один ран
   no_tool_call_max_count: 3
+  loop_detector:
+    enabled: true
   strict_turn_finish_validation: true
   # Finish gate (quality gate): макс. reject turn_finish за user turn / subagent run
   finish_gate_max_iterations: 10
@@ -635,6 +637,10 @@ mcp:
       # whitelist:
       #   enabled: true
       #   tools: [read_document, list_sheets]   # базовые имена из tools/list; [] = ноль тулов
+      # Loop detector для MCP выключен по умолчанию. Включить generic-профиль
+      # точечно (базовые имена) или на все тулы сервера:
+      # loop_control_tools: [read_document]
+      # loop_control_tools: all
     science:
       transport: stream_http
       url: http://127.0.0.1:8765/mcp

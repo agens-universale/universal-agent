@@ -11,12 +11,14 @@ from utils.file_text import (
     guess_encoding,
 )
 from security.read_guard import enforce_read_guard
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 
 DEFAULT_MAX_HASH_BYTES = 100 * 1024 * 1024
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class FileInfo(AbstractSimpleTool):
     max_hash_bytes = DEFAULT_MAX_HASH_BYTES
 

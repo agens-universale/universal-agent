@@ -57,6 +57,12 @@ class McpServerConfig(BaseModel):
     # enabled=True → строго tools (пустой список = ноль тулов). Имена базовые,
     # как в tools/list, без префикса mcp_<server>_.
     whitelist: McpToolsWhitelistConfig | None = None
+    # Opt-in loop detector для тулов этого сервера. По умолчанию выключен:
+    # MCP может публиковать mutating/polling операции, где повтор с теми же
+    # аргументами намеренно даёт новый результат. ``"all"`` — generic-профиль
+    # на каждый тул сервера; список — базовые имена из tools/list (без
+    # префикса mcp_<server>_), как у whitelist.tools.
+    loop_control_tools: Literal["all"] | list[str] = Field(default_factory=list)
     # Отправлять ли внешний trace_id этому серверу. False (дефолт) — не
     # отправлять ничего: внутренний корреляционный id не уходит наружу, пока
     # его не разрешили явно (в mcp-servers могут быть сторонние эндпойнты).
@@ -112,6 +118,35 @@ class McpServerConfig(BaseModel):
         if not isinstance(value, dict):
             raise ValueError("mcp.servers.<name>.headers должен быть объектом key/value")
         return {str(k): str(v) for k, v in value.items()}
+
+    @field_validator("loop_control_tools", mode="before")
+    @classmethod
+    def normalize_loop_control_tools(
+        cls, value: object
+    ) -> Literal["all"] | list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if text == "all":
+                return "all"
+            raise ValueError(
+                'mcp.servers.<name>.loop_control_tools должен быть "all" '
+                "или списком имён тулов"
+            )
+        if not isinstance(value, list):
+            raise ValueError(
+                'mcp.servers.<name>.loop_control_tools должен быть "all" '
+                "или списком имён тулов"
+            )
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if text and text not in seen:
+                seen.add(text)
+                out.append(text)
+        return out
 
 
 class McpMetaConfig(BaseModel):

@@ -6,6 +6,7 @@ import copy
 import logging
 from typing import Any, Dict
 
+from loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
 from tools.connect_mcp.api import call_mcp_tool
 from tools.connect_mcp.registry import ToolsCache
 from tools.schema_optional import apply_openai_strict_object
@@ -354,6 +355,39 @@ def normalize_tool_spec_for_agent(
     return spec
 
 
+def _mcp_base_tool_name(full_name: str, entry: Dict[str, Any]) -> str:
+    """Базовое имя тула как в tools/list, без префикса mcp_<server>_."""
+    metadata = entry.get("metadata") if isinstance(entry, dict) else None
+    if isinstance(metadata, dict):
+        raw = metadata.get("mcp_tool_name")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    prefix = "mcp_"
+    if full_name.startswith(prefix):
+        rest = full_name[len(prefix):]
+        _, sep, tool = rest.partition("_")
+        if sep and tool:
+            return tool
+    return full_name
+
+
+def _loop_warn_for_mcp_tool(
+    server_cfg: Dict[str, Any] | None,
+    base_tool_name: str,
+) -> Dict[str, int] | None:
+    """Opt-in: generic-профиль только для явно указанных тулов сервера."""
+    if not isinstance(server_cfg, dict):
+        return None
+    raw = server_cfg.get("loop_control_tools")
+    if raw == "all":
+        return dict(GENERIC_PROFILE)
+    if not isinstance(raw, list):
+        return None
+    allowed = {str(name).strip() for name in raw if str(name).strip()}
+    if base_tool_name in allowed:
+        return dict(GENERIC_PROFILE)
+    return None
+
 
 # Транспорты, у которых есть канал HTTP-заголовков.
 _TRACE_HEADER_TRANSPORTS = {"http", "sse", "stream_http", "stream_sse"}
@@ -479,11 +513,24 @@ def get_mcp_tools_data_for_config(
             tool_entry, openai_strict=openai_strict
         )
 
-        result[full_name] = {
+        metadata = entry.get("metadata") if isinstance(entry, dict) else None
+        server_key = None
+        if isinstance(metadata, dict):
+            server_key = metadata.get("mcp_server_key")
+        server_cfg = servers_cfg.get(server_key) if server_key else None
+        loop_warn = _loop_warn_for_mcp_tool(
+            server_cfg if isinstance(server_cfg, dict) else None,
+            _mcp_base_tool_name(full_name, entry if isinstance(entry, dict) else {}),
+        )
+
+        tool_data: Dict[str, Any] = {
             "tool_fabric": make_fabric(full_name),
             "spec": normalized_spec,
             "description": normalized_spec.get("description", ""),
         }
+        if loop_warn is not None:
+            tool_data[LOOP_WARN_KEY] = loop_warn
+        result[full_name] = tool_data
     return result, status_map
 
 

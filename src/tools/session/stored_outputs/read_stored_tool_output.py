@@ -7,6 +7,7 @@ from tools.session.stored_outputs.envelope import (
     dumps_stored_tool_output_payload,
     utf8_byte_length,
 )
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 
 _TOOL_NAME = "session_read_stored_tool_output"
@@ -18,6 +19,7 @@ _NOT_FOUND_MESSAGE = (
 )
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class ReadStoredToolOutput(AbstractSimpleTool):
     def _logger(self) -> logging.Logger:
         logger = getattr(self._ctx, "logger", None)

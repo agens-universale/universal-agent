@@ -6,11 +6,13 @@ from config_modules.intent_scope import (
     intent_scope_from_config_dict,
 )
 from intent_log import deserialize_list, read_info, read_page
+from loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from tools.simple_tool_base import AbstractSimpleTool
 
 _TOOL_NAME = "session_read_user_intent_log"
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class ReadUserIntentLog(AbstractSimpleTool):
     tool_name = _TOOL_NAME
 
