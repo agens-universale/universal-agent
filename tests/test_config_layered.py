@@ -306,6 +306,11 @@ def test_invalid_schema_in_project_loud_error(global_config_file, isolated_cwd):
     (Полагаться на отказ coerce'ить scalar в int нельзя: Pydantic v2 по умолчанию
     coerce'ит "123" → 123 без ошибки, и тест становится хрупким. Extra-forbid —
     чёткий тест.)
+
+    Ревизия (MR #80, класс L28): отказ схемы приходит завёрнутым — ValueError с
+    текстом из координат и причин, БЕЗ pydantic-дампа (`input_value` нёс токен из
+    файла в хинт пикера); сырой `ValidationError` — в `__cause__`, по нему
+    `explain_broken_config` берёт точные координаты.
     """
     from config import load_config
 
@@ -313,8 +318,10 @@ def test_invalid_schema_in_project_loud_error(global_config_file, isolated_cwd):
         isolated_cwd,
         "this_top_level_field_does_not_exist_in_appconfig_schema: 123\n",
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError, match="не проходит схему") as excinfo:
         load_config(str(global_config_file))
+    assert isinstance(excinfo.value.__cause__, ValidationError)
+    assert "input_value" not in str(excinfo.value)
 
 
 def test_invalid_yaml_in_base_loud_error(tmp_path):

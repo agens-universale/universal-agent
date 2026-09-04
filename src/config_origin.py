@@ -20,6 +20,7 @@ from typing import Any, Dict, Iterable, Optional
 
 import config_raw
 from config_modules.merge import deep_merge
+from config_modules.root import PROFILE_SCHEMA_ERROR_PREFIX, SCHEMA_ERROR_PREFIX
 
 # Подписи слоёв для UI (значение — то, что видит пользователь). Профильные подписи —
 # шаблоны с `{name}` (имя профиля = стем пути файла, см. overlay_label ниже): одно
@@ -170,7 +171,17 @@ _POINTER_NOT_FOUND = ('профиль "', '" не найден')
 
 def error_keys(error_text: str) -> list:
     """Координаты ключей, названные текстом ошибки, — в порядке `ERROR_SUSPECT_KEYS`,
-    внутри одного подозреваемого — в порядке текста. Ошибка не про ключи — пусто."""
+    внутри одного подозреваемого — в порядке текста. Ошибка не про ключи — пусто.
+
+    Вводная схемы снимается до разбора — ОБЕ редакции, у конфига и у профиля
+    (`SCHEMA_ERROR_PREFIX`/`PROFILE_SCHEMA_ERROR_PREFIX`): первый сегмент склейки
+    `конфиг не проходит схему: slots.default: …` (или её профильный близнец
+    `профиль не проходит схему: …`) иначе прятал бы свой ключ за вводной — и
+    виновник первой (нередко единственной) ошибки терялся (ревью MR #80, #3:
+    снималась только конфиговая вводная, профильная — нет). `removeprefix` двух
+    подряд безопасен: текст начинается максимум с одной из них."""
+    error_text = error_text.removeprefix(SCHEMA_ERROR_PREFIX).removeprefix(
+        PROFILE_SCHEMA_ERROR_PREFIX)
     heads = [segment.split(": ", 1)[0] for segment in error_text.split("; ")]
     heads = ["profile" if head.startswith(_POINTER_NOT_FOUND[0])
              and head.endswith(_POINTER_NOT_FOUND[1]) else head for head in heads]

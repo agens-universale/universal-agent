@@ -610,6 +610,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     from pydantic import ValidationError as _ValidationError
 
     from config_modules.layers import resolve_profile_pointer
+    from config_modules.root import SCHEMA_ERROR_PREFIX, schema_error_details
     from config_origin import _overlay_paths, error_keys, key_origins
 
     def _display_path(path) -> str:
@@ -638,9 +639,18 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     # Координаты названных ошибкой ключей — ОДИН разбор на всё объяснение: их
     # спрашивают и виновники, и совет про профиль из флага. Второе чтение той же
     # строки — второе прочтение одного правила, и разъезжаются они молча.
-    if isinstance(exc, _ValidationError):
-        error_text = f"конфиг не проходит схему: {exc}"
-        keys = _schema_error_keys(exc)
+    # Загрузка (`config.load_config_ex`) отдаёт отказ схемы уже завёрнутым —
+    # ValueError с текстом без pydantic-дампа (`input_value=<repr записи>` нёс
+    # токен из файла; MR #80, класс L28), а сам `ValidationError` едет в
+    # `__cause__`: его `loc` точнее текста (заходит в списки и не ограничен
+    # закрытым списком подозреваемых `error_keys`), и виновники ищутся по нему.
+    # Сырой `ValidationError` первым аргументом — страховка на прямых вызовах.
+    schema_exc = exc if isinstance(exc, _ValidationError) else (
+        exc.__cause__ if isinstance(exc.__cause__, _ValidationError) else None)
+    if schema_exc is not None:
+        error_text = (str(exc) if schema_exc is not exc
+                      else f"{SCHEMA_ERROR_PREFIX}{schema_error_details(schema_exc)}")
+        keys = _schema_error_keys(schema_exc)
     else:
         error_text = str(exc)
         keys = error_keys(error_text)

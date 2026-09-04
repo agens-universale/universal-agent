@@ -7,13 +7,16 @@ from typing import Any, Dict, Optional
 import urllib3
 
 from config_modules.auth import build_auth_connector
+from pydantic import ValidationError as _PydanticValidationError
+
 from config_modules.env_vars import project_gc_dir
 from config_modules.backend import parse_chat_completions_max_tokens  # noqa: F401  # re-export: processing_responses импортирует из config
 from config_modules.common import (
     apply_swarm_env_overrides,
 )
 from config_modules.env_interpolation import resolve_env_placeholders
-from config_modules.root import AppConfig, resolve_paths
+from config_modules.root import (AppConfig, SCHEMA_ERROR_PREFIX, resolve_paths,
+                                 schema_error_details)
 from config_modules.security import (
     apply_cli_command_moderation_overrides,
 )
@@ -543,7 +546,14 @@ def load_config_ex(
     # остальные (единый вызов после всех merge-слоёв, включая профиль).
     _compat_notices = apply_compat(raw_config)
 
-    app_cfg = AppConfig.model_validate(raw_config)
+    # Отказ схемы — из `exc.errors()`, не `str(exc)`: pydantic-дамп несёт
+    # `input_value=<repr записи>` — токен из файла уезжал в хинт пикера профилей
+    # и в статус «не применится» дословным текстом ошибки (MR #80, класс L28).
+    try:
+        app_cfg = AppConfig.model_validate(raw_config)
+    except _PydanticValidationError as exc:
+        raise ValueError(
+            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
     _model_section_notices = validate_model_sections(app_cfg)
     resolve_paths(app_cfg, config_dir)
     # Bootstrap for_model strip tags after validate/normalize (no hot-path yaml reads).

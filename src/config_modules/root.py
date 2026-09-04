@@ -250,3 +250,39 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     write_guard.extra_paths = [
         to_abs(path) or path for path in write_guard.extra_paths
     ]
+
+
+# Вводная текста ошибки схемы — ОДНА строка на всех пишущих и на разбор
+# (`config_origin.error_keys` снимает её перед поиском координат: иначе первый
+# сегмент склейки прятал бы свой ключ за вводной, и виновник терялся).
+SCHEMA_ERROR_PREFIX = "конфиг не проходит схему: "
+
+# Та же роль у отказа схемы ФАЙЛА ПРОФИЛЯ (`config_modules.profiles.
+# _validate_profile_document`) — своя вводная, не `SCHEMA_ERROR_PREFIX`: профиль
+# не конфиг целиком. `error_keys` обязана снимать ОБЕ (ревью MR #80, #3) — снимая
+# только первую, она прятала первый ключ профильной ошибки за этой вводной.
+PROFILE_SCHEMA_ERROR_PREFIX = "профиль не проходит схему: "
+
+
+def schema_error_details(exc) -> str:
+    """Текст ошибки схемы из `exc.errors()`: координата `loc` + причина `msg`,
+    БЕЗ pydantic-дампа. `str(ValidationError)` несёт `input_value=<repr записи>`
+    — на правилах `ModelEntry` это набранный или лежащий в файле токен (ревью
+    MR #80, L28). Одна редакция на всех показывающих: `layers._app_config_from_
+    raw`, `profiles._validate_profile_document`, `onboarding.explain_broken_
+    config` — написанная трижды, склейка разъезжалась бы молча."""
+    # `removeprefix("Value error, ")`: правила-валидаторы бросают ValueError с
+    # ПОЛНЫМ русским текстом, а pydantic кладёт его в msg, приписав спереди тип
+    # по-английски — служебный огрызок посреди русской фразы человеку не нужен.
+    # У ошибок полей ("Input should be …") префикса нет, они не меняются.
+    #
+    # `removeprefix("models.<alias>: ")` следом: правила `ModelEntry` несут ЭТУ
+    # координату в СВОЁМ тексте буквально («models.<alias>» — placeholder, не
+    # подставленный алиас, «одна редакция на всех» правило владельца), а pydantic
+    # приписывает свою из `loc` («models.opus41: …») — без снятия склейка называла
+    # координату дважды (ревью MR #80, #4). Тексты правил не меняем — они матчатся
+    # тестами; снимается только этот повтор, здесь же.
+    return "; ".join(
+        f"{'.'.join(map(str, err['loc']))}: "
+        f"{err['msg'].removeprefix('Value error, ').removeprefix('models.<alias>: ')}"
+        for err in exc.errors())

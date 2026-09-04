@@ -188,11 +188,11 @@ def test_broken_voice_section_fails_validation_not_arithmetic(tmp_path):
     «dictionary update sequence element #0 has length 1» — про собственный конфиг он
     из такого сообщения не узнавал ничего."""
     import config as config_mod
-    from pydantic import ValidationError
 
     base = tmp_path / "config.yml"
     base.write_text("voice: broken\n", encoding="utf-8")
 
-    with pytest.raises(ValidationError) as exc:
+    # отказ схемы приходит завёрнутым (MR #80, L28) — ключ назван, дампа нет
+    with pytest.raises(ValueError, match="не проходит схему") as exc:
         config_mod.load_config(str(base))
     assert "voice" in str(exc.value)

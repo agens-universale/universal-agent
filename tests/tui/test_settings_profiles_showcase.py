@@ -320,8 +320,11 @@ async def test_activate_base_profile_redirects_to_project_when_project_sets_poin
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    # профиль ВАЛИДЕН (полная пара не нужна — модель без своего подключения):
+    # активация судится стеком строго, и стенд с половиной пары (url без token)
+    # проверял бы отказ гейта, а не место записи указателя
     _write(tmp_path / "base" / "profiles" / "home.yml",
-          "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+          "models:\n  glm:\n    model: zhipu/glm\nslots:\n  default: glm\n")
     project_config = _write(project_dir / ".gc" / "config.yml", 'profile: "other"\n')
 
     app = app_mod.TuiApp(config=_base_dict())

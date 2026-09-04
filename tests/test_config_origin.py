@@ -307,6 +307,20 @@ def test_error_origins_takes_assign_keys_by_their_full_coordinate(tmp_path, monk
     ]
 
 
+def test_error_keys_strips_the_profile_schema_prefix_too():
+    """[ревью #3] `_validate_profile_document` бросает `ValueError("профиль не
+    проходит схему: …")` — своей вводной, отличной от `SCHEMA_ERROR_PREFIX`
+    («конфиг не проходит схему: »). `error_keys` снимала только последний, и
+    первый сегмент профильной склейки прятал свой ключ за вводной целиком:
+    голова segments была «профиль не проходит схему», а не «models.x», и
+    подозреваемый терялся."""
+    from config_origin import error_keys
+
+    assert error_keys(
+        'профиль не проходит схему: models.x: беда; slots.default: беда'
+    ) == ["slots.default", "models.x"]
+
+
 def test_error_origins_names_the_file_that_holds_a_dangling_pointer(tmp_path, monkeypatch):
     """Ревью (H2б): указатель на удалённый профиль — ошибка по-русски, ключ
     `profile` в ней не назван, и виновником выходила база. Файл, где лежит

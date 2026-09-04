@@ -363,15 +363,17 @@ async def test_level_inside_a_profile_shows_in_the_preview_but_not_in_the_list_r
 
 
 async def test_a_validator_error_with_brackets_reaches_the_screen(tmp_path, monkeypatch):
-    """Отказ валидатора — ЧУЖОЙ текст (сообщение pydantic несёт `[type=…,
-    input_value=[], …]`), и уходит он в тот же `_singleton`, что и все notice'ы.
-    Разметка Rich в нём — не разметка, а данные: разбирать её значит ронять
-    приложение на первом же устаревшем ключе в открытом профиле."""
+    """Отказ валидатора — ЧУЖОЙ текст (координата ключа может нести `[скобки]` —
+    ключ в кавычках в YAML законен), и уходит он в тот же `_singleton`, что и
+    все notice'ы. Разметка Rich в нём — не разметка, а данные: разбирать её
+    значит ронять приложение на первом же устаревшем ключе в открытом профиле.
+    (Раньше скобки поставлял pydantic-дамп `[type=…, input_value=[], …]` — после
+    чистки дампа, MR #80 L28, их источник — сами данные человека.)"""
     import tui.app as app_mod
     _project(tmp_path, monkeypatch)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     profile = _write(tmp_path / "base" / "profiles" / "work.yml",
-                     "bogus: []\n" + _PROFILE_BODY)
+                     '"[bogus]": []\n' + _PROFILE_BODY)
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -383,7 +385,7 @@ async def test_a_validator_error_with_brackets_reaches_the_screen(tmp_path, monk
         await _fill_entry(pilot, scr, "flash", "google/gemini-2.5-flash")
         notice = _notice(scr)
         assert "не сохранено" in notice
-        assert "input_value=[]" in notice           # текст доехал целиком, как есть
+        assert "[bogus]" in notice                  # скобки доехали как данные
         assert scr._profiles_open == "work"        # экран жив, под-вид на месте
     assert profile.read_bytes() == before
 

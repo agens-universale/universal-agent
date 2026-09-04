@@ -14,11 +14,13 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import yaml
+from pydantic import ValidationError
 
 from config_modules.compat import apply_compat
 from config_modules.env_interpolation import resolve_env_placeholders
 from config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
-from config_modules.root import AppConfig
+from config_modules.root import (AppConfig, PROFILE_SCHEMA_ERROR_PREFIX,
+                                 schema_error_details)
 from utils.user_text import unreadable_reason
 
 
@@ -199,9 +201,17 @@ def _validate_profile_document(raw: dict, *, source: Optional[str] = None) -> No
     (документ уже прочитан с диска, `source` — путь файла для сообщения) и
     `validate_profile_text` (документ ещё не записан на диск, `source` не задан —
     сообщение без привязки к пути, как `config.validate_config_text`)."""
-    AppConfig.model_validate(raw)
+    prefix = f"{source}: " if source else ""
+    try:
+        AppConfig.model_validate(raw)
+    except ValidationError as exc:
+        # Не сырой `str(exc)`: pydantic-дамп несёт `input_value=<repr записи>` —
+        # токен НЕАКТИВНОГО профиля уезжал в нотис секции «Модели» этим, вторым
+        # путём (первый — `layers._app_config_from_raw`; ревью MR #80, L28).
+        raise ValueError(
+            f"{prefix}{PROFILE_SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
+        ) from exc
     if "profile" in raw:
-        prefix = f"{source}: " if source else ""
         raise ValueError(
             f'{prefix}ключ "profile" внутри профиля запрещён — цепочки профилей запрещены'
         )

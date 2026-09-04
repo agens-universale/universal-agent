@@ -2,7 +2,6 @@ import os
 import tempfile
 import unittest
 
-from pydantic import ValidationError
 
 from config import load_config  # noqa: E402
 
@@ -235,7 +234,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                     "summary:\n"
                     "  original_user_messages_max_chars: 12000\n"
                 )
-            with self.assertRaises(ValidationError):
+            # отказ схемы приходит завёрнутым (без pydantic-дампа), ключ назван
+            with self.assertRaisesRegex(ValueError, "summary"):
                 load_config(cfg_path)
 
     def test_summary_llm_in_yaml_is_rejected(self):
@@ -248,7 +248,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                     "  llm:\n"
                     "    max_tokens: 4096\n"
                 )
-            with self.assertRaises(ValidationError):
+            # отказ схемы приходит завёрнутым (без pydantic-дампа), ключ назван
+            with self.assertRaisesRegex(ValueError, "summary"):
                 load_config(cfg_path)
 
     def test_chat_completion_kwargs_and_flags_loaded_from_backend_section(self):

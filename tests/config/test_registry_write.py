@@ -315,6 +315,63 @@ def test_upsert_model_invalid_result_leaves_file_untouched(tmp_path, template):
     assert path.read_text(encoding="utf-8") == before
 
 
+def test_upsert_model_schema_conflict_does_not_leak_the_token(tmp_path, template):
+    """Ревью MR #80 (L28): запись токена поверх записи, у которой уже задан
+    `backend.chat_completion_headers.Authorization`, валится правилом пары
+    `ModelEntry` — а pydantic-дамп `ValidationError` несёт `input_value=<repr
+    записи>`, то есть только что набранный токен целиком. Отказ обязан назвать
+    координату (`models.<alias>`) и причину, но не сам секрет."""
+    body = (
+        'profile: ""\n'
+        "level: default\n"
+        "models:\n"
+        "  flash:\n"
+        '    model: "google/gemini-2.5-flash"\n'
+        "    backend:\n"
+        "      chat_completion_headers:\n"
+        '        Authorization: "Bearer OLD-VALUE"\n'
+        "slots:\n"
+        '  default: "flash"\n'
+    )
+    path = _cfg(tmp_path, body)
+
+    with pytest.raises(RegistryWriteError) as excinfo:
+        upsert_model(path, "flash", {"token": "sk-MY-OWN-SECRET"}, template)
+
+    message = str(excinfo.value)
+    assert "sk-MY-OWN-SECRET" not in message
+    assert "input_value" not in message
+    assert "Value error" not in message   # служебная обёртка pydantic — не причина
+    assert "models.flash" in message
+    assert "token и backend.chat_completion_headers.Authorization заданы одновременно" in message
+
+
+def test_profile_upsert_schema_conflict_does_not_leak_the_token(tmp_path):
+    """Близнец теста выше для ФАЙЛА ПРОФИЛЯ: неактивный профиль судится фазой 1
+    (`profiles._validate_profile_document`), и там `AppConfig.model_validate`
+    бросал СЫРОЙ pydantic-`ValidationError` — тот же `input_value` с только что
+    набранным токеном уезжал в нотис секции «Модели» этим, вторым путём. Класс
+    один: любой `str(ValidationError)`, доходящий до человека."""
+    path = tmp_path / "work.yml"
+    path.write_text(
+        "models:\n"
+        "  flash:\n"
+        '    model: "google/gemini-2.5-flash"\n'
+        "    backend:\n"
+        "      chat_completion_headers:\n"
+        '        Authorization: "Bearer OLD-VALUE"\n',
+        encoding="utf-8")
+
+    with pytest.raises(RegistryWriteError) as excinfo:
+        upsert_model(path, "flash", {"token": "sk-MY-OWN-SECRET"}, "",
+                     is_profile=True)
+
+    message = str(excinfo.value)
+    assert "sk-MY-OWN-SECRET" not in message
+    assert "input_value" not in message
+    assert "models.flash" in message
+
+
 def test_upsert_model_into_file_without_trailing_newline(tmp_path):
     """Файл после ручной правки часто остаётся без завершающего перевода строки, а
     реестр — последней секцией: вторая запись не должна упираться в этот шов."""

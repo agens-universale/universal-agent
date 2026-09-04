@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
 import yaml
+from pydantic import ValidationError
 
 from config_modules.compat import apply_compat
 from config_modules.env_interpolation import resolve_env_placeholders
@@ -29,7 +30,8 @@ from config_modules.profiles import (
     resolve_profile,
     validate_profile_text,
 )
-from config_modules.root import AppConfig
+from config_modules.root import (AppConfig, SCHEMA_ERROR_PREFIX,
+                                 schema_error_details)
 from mcp_runtime import paths as mcp_paths
 from utils.user_text import read_user_text_or_none, unreadable_reason
 
@@ -294,12 +296,22 @@ def _raw_from_text(text: str, subject: str = "config.yml") -> Dict[str, Any]:
 
 
 def _app_config_from_raw(raw: Dict[str, Any]) -> AppConfig:
-    """compat → схема над уже прочитанным документом."""
+    """compat → схема над уже прочитанным документом.
+
+    Отказ `ValidationError` собирается из `exc.errors()` (координата `loc` + причина
+    `msg`, `root.schema_error_details`), а не из `str(exc)`: pydantic-дамп несёт
+    `input_value=<repr записи>`, и на правилах `ModelEntry` (`token`+`Authorization`
+    заданы одновременно и т.п.) — это только что набранный в форме токен, целиком или
+    хвостом (ревью MR #80, L28). Координата и причина у этих правил самодостаточны —
+    `input_value`/`input_type`/ссылка на errors.pydantic.dev человеку не нужны."""
     apply_compat(raw)
     try:
         return AppConfig.model_validate(raw)
+    except ValidationError as exc:
+        raise ValueError(
+            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
     except Exception as exc:
-        raise ValueError(f"конфиг не проходит схему: {exc}") from exc
+        raise ValueError(f"{SCHEMA_ERROR_PREFIX}{exc}") from exc
 
 
 def _app_config_from_text(text: str) -> AppConfig:

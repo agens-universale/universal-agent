@@ -204,6 +204,41 @@ def test_schema_error_on_the_pointer_is_not_a_missing_profile(isolated_cwd, tmp_
     assert f"{profile}   (активен: --profile)" in text
 
 
+def test_schema_error_explanation_does_not_leak_the_token(isolated_cwd, tmp_path):
+    """Ревью MR #80 (L28, класс): объяснение сломанного конфига строило текст из
+    `str(ValidationError)` — pydantic-дамп несёт `input_value=<repr записи>`, то
+    есть токен из лежащего на диске конфига. Координата и причина обязаны
+    остаться (по ним же ищутся виновники), сам секрет — нет."""
+    from config import load_config_ex
+    from onboarding import explain_broken_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(
+        _BACKEND
+        + "models:\n"
+        "  flash:\n"
+        '    model: "google/gemini-2.5-flash"\n'
+        '    url: "http://own/v1/chat/completions"\n'
+        '    token: "sk-MY-OWN-SECRET"\n'
+        "    backend:\n"
+        "      chat_completion_headers:\n"
+        '        Authorization: "Bearer ANOTHER"\n'
+        "slots:\n"
+        '  default: "flash"\n',
+        encoding="utf-8")
+
+    try:
+        load_config_ex(str(base))
+    except ValueError as exc:
+        text = explain_broken_config(str(base), exc, program="gc-ua")
+    else:
+        pytest.fail("ожидался ValueError от load_config_ex")
+
+    assert "sk-MY-OWN-SECRET" not in text
+    assert "input_value" not in text
+    assert "models.flash" in text
+
+
 def test_empty_profile_override_means_no_profile_at_all(isolated_cwd, tmp_path):
     """`--profile ""` — профильный слой снят: указатель в файле инертен, и совет
     «запустить без профиля» бессмыслен (человек уже так запустил); карта без
@@ -362,7 +397,10 @@ def test_schema_error_in_project_overlay_names_the_overlay(isolated_cwd, tmp_pat
     project.write_text("agent:\n  max_steps: many\n", encoding="utf-8")
 
     exc = _load_and_catch(str(base))
-    assert isinstance(exc, ValidationError)
+    # контракт загрузки: отказ схемы завёрнут (дамп с input_value не летает),
+    # сырой ValidationError — в __cause__, по нему explain берёт координаты
+    assert not isinstance(exc, ValidationError)
+    assert isinstance(exc.__cause__, ValidationError)
     text = explain_broken_config(str(base), exc, program="gc-ua")
 
     assert "конфиг не проходит схему:" in text
@@ -390,7 +428,10 @@ def test_schema_error_inside_a_list_in_the_overlay_names_the_overlay(isolated_cw
     project.write_text("endpoint_presets:\n  - name: 1\n    url: u\n", encoding="utf-8")
 
     exc = _load_and_catch(str(base))
-    assert isinstance(exc, ValidationError)
+    # контракт загрузки: отказ схемы завёрнут (дамп с input_value не летает),
+    # сырой ValidationError — в __cause__, по нему explain берёт координаты
+    assert not isinstance(exc, ValidationError)
+    assert isinstance(exc.__cause__, ValidationError)
     text = explain_broken_config(str(base), exc, program="gc-ua")
 
     assert f"поправить endpoint_presets в:  {project}" in text
@@ -576,8 +617,10 @@ def test_pydantic_validation_error_gets_readable_prefix(tmp_path):
     )
 
     exc = _load_and_catch(str(base))
-    assert isinstance(exc, ValidationError)
+    assert not isinstance(exc, ValidationError)
+    assert isinstance(exc.__cause__, ValidationError)
     text = explain_broken_config(str(base), exc)
 
     assert "конфиг не проходит схему:" in text
-    assert "validation error for AppConfig" in text
+    assert "validation error for AppConfig" not in text   # дампа больше нет
+    assert "input_value" not in text

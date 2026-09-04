@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from config_modules.model_registry import ModelEntry, AssignConfig
 from config_modules.model_sections_validation import validate_model_sections
-from config_modules.root import AppConfig
+from config_modules.root import AppConfig, schema_error_details
 
 
 def test_models_slots_assign_parse_minimal():
@@ -145,3 +145,22 @@ def test_token_bearer_normalization():
     assert ModelEntry.model_validate(
         {"url": url, "token": "Bearer sk-1"}).authorization_header == "Bearer sk-1"
     assert ModelEntry.model_validate({"url": url, "token": ""}).authorization_header == ""
+
+
+def test_schema_error_details_does_not_double_the_coordinate():
+    """[ревью #4] `ModelEntry._validate_no_duplicate_settings` несёт координату
+    в СВОЁМ тексте («models.<alias>: token и …» — «одна редакция на всех»,
+    правило владельца), а pydantic ДОБАВЛЯЕТ свою через `loc` («models.opus41:
+    …»). Склейка `schema_error_details` их не различала: результат называл
+    координату дважды — «models.opus41: models.<alias>: token и …»."""
+    try:
+        AppConfig.model_validate({"models": {"opus41": {
+            "token": "sk-secret",
+            "backend": {"chat_completion_headers": {"Authorization": "Bearer y"}},
+        }}})
+    except ValidationError as exc:
+        details = schema_error_details(exc)
+    assert details == (
+        "models.opus41: token и backend.chat_completion_headers.Authorization "
+        "заданы одновременно — оставьте что-то одно"
+    )
