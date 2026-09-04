@@ -12,6 +12,9 @@ from typing import Any
 from loop_detector.constants import LOOP_WARN_ATTR, LOOP_WARN_KEY, WINDOW_SIZE
 
 _BRIEF_VALUE_LIMIT = 100
+# Слот в окне, если args разобрать нельзя: consecutive соседних маркированных
+# всё равно рвётся, notice по этому вызову не строится.
+_UNPARSED_ARGS = {"_unparsed": True}
 
 
 def is_enabled(config_dict: dict[str, Any] | None) -> bool:
@@ -86,10 +89,39 @@ def clear(state: Any) -> None:
     state.loop_detector_pending = []
 
 
+def _injected_field_names(
+    tools_data: dict[str, Any] | None,
+    config_dict: dict[str, Any] | None,
+) -> list[str]:
+    """Имена полей, которые навешивает inject_tool_fields (reason и любые другие)."""
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def _add(field: object) -> None:
+        if not isinstance(field, str):
+            return
+        text = field.strip()
+        if text and text not in seen:
+            seen.add(text)
+            names.append(text)
+
+    raw = (config_dict or {}).get("inject_tool_fields")
+    if isinstance(raw, dict):
+        for key in raw:
+            _add(key)
+    for entry in (tools_data or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        for field in entry.get("injected_fields") or []:
+            _add(field)
+    return names
+
+
 def _parse_stripped_args(
     tool_name: str,
     raw_arguments: str | dict[str, Any],
     tools_data: dict[str, Any] | None,
+    config_dict: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     entry = (tools_data or {}).get(tool_name) or {}
     if isinstance(raw_arguments, dict):
@@ -107,7 +139,7 @@ def _parse_stripped_args(
         parsed = prepare(parsed)
         if not isinstance(parsed, dict):
             return None
-    injected = entry.get("injected_fields") or []
+    injected = _injected_field_names(tools_data, config_dict)
     if not injected:
         return parsed
     stripped = dict(parsed)
@@ -144,18 +176,17 @@ def observe(
     if not is_enabled(config_dict):
         return
     tools_data = getattr(ctx, "tools_data", None)
-    thresholds = resolve_thresholds(tools_data, tool_name)
-    if thresholds is None:
-        return
-    args = _parse_stripped_args(tool_name, raw_arguments, tools_data)
-    if args is None:
-        return
-    consecutive_limit, in_window_limit = thresholds
-    fp = fingerprint(tool_name, args)
+    args = _parse_stripped_args(tool_name, raw_arguments, tools_data, config_dict)
+    fp = fingerprint(tool_name, args if args is not None else _UNPARSED_ARGS)
     _ensure_lists(state)
     state.loop_detector_window.append(fp)
     if len(state.loop_detector_window) > WINDOW_SIZE:
         state.loop_detector_window = state.loop_detector_window[-WINDOW_SIZE:]
+    # Кольцо — все вызовы; пороги и notice — только маркированные с разобранными args.
+    thresholds = resolve_thresholds(tools_data, tool_name)
+    if thresholds is None or args is None:
+        return
+    consecutive_limit, in_window_limit = thresholds
     count_consecutive = _count_consecutive(state.loop_detector_window, fp)
     count_in_window = state.loop_detector_window.count(fp)
     if count_consecutive >= consecutive_limit or count_in_window >= in_window_limit:

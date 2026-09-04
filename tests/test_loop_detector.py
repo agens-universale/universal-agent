@@ -42,9 +42,12 @@ def _entry(consecutive: int, in_window: int, *, injected=("reason",)):
     }
 
 
-def _ctx(tools_data, *, enabled=True):
+def _ctx(tools_data, *, enabled=True, inject_tool_fields=None):
+    config_dict = {"loop_detector": {"enabled": enabled}}
+    if inject_tool_fields is not None:
+        config_dict["inject_tool_fields"] = inject_tool_fields
     return SimpleNamespace(
-        config_dict={"loop_detector": {"enabled": enabled}},
+        config_dict=config_dict,
         tools_data=tools_data,
         logger=None,
     )
@@ -80,6 +83,38 @@ def test_fingerprint_strips_reason_and_keeps_paging_and_path_literal():
     assert fingerprint("fs_read_file", {"path": "a.py", "offset": None}) != fingerprint(
         "fs_read_file", {"path": "a.py"}
     )
+
+
+def test_fingerprint_strips_all_injected_fields_even_for_unknown_tools():
+    tools_data = {"fs_read_file": _entry(**READ_PROFILE)}
+    ctx = _ctx(
+        tools_data,
+        inject_tool_fields={"reason": "why this call", "why": "extra injected"},
+    )
+    state = _state()
+    observe(
+        state,
+        ctx,
+        "fs_read_file",
+        json.dumps({"path": "a.py", "reason": "first", "why": "also first"}),
+    )
+    observe(
+        state,
+        ctx,
+        "unknown_tool",
+        json.dumps({"q": 1, "reason": "mask", "why": "mask2"}),
+    )
+    observe(
+        state,
+        ctx,
+        "fs_read_file",
+        json.dumps({"path": "a.py", "reason": "second", "why": "also second"}),
+    )
+    assert state.loop_detector_window == [
+        fingerprint("fs_read_file", {"path": "a.py"}),
+        fingerprint("unknown_tool", {"q": 1}),
+        fingerprint("fs_read_file", {"path": "a.py"}),
+    ]
 
 
 def test_brief_args_truncates_each_value_to_100():
@@ -123,7 +158,7 @@ def test_read_a_other_read_a_silent_third_a_hits_in_window():
     assert "fs_read_file" in notice
 
 
-def test_write_is_not_in_window_so_same_read_still_hits():
+def test_unmarked_between_reads_breaks_consecutive():
     tools_data = {
         "fs_read_file": _entry(**READ_PROFILE),
         "fs_write_file": {"tool_fabric": type("W", (), {}), "injected_fields": ["reason"]},
@@ -134,8 +169,28 @@ def test_write_is_not_in_window_so_same_read_still_hits():
     observe(state, ctx, "fs_read_file", args)
     observe(state, ctx, "fs_write_file", json.dumps({"path": "a.py", "content": "x"}))
     observe(state, ctx, "fs_read_file", args)
+    assert flush(state) is None
+    assert state.loop_detector_window == [
+        fingerprint("fs_read_file", {"path": "a.py"}),
+        fingerprint("fs_write_file", {"path": "a.py", "content": "x"}),
+        fingerprint("fs_read_file", {"path": "a.py"}),
+    ]
+
+
+def test_unmarked_does_not_clear_in_window_count():
+    tools_data = {
+        "fs_read_file": _entry(**READ_PROFILE),
+        "fs_write_file": {"tool_fabric": type("W", (), {}), "injected_fields": []},
+    }
+    ctx = _ctx(tools_data)
+    state = _state()
+    args = json.dumps({"path": "a.py"})
+    for _ in range(READ_PROFILE["in_window"] - 1):
+        observe(state, ctx, "fs_read_file", args)
+        observe(state, ctx, "fs_write_file", json.dumps({"path": "a.py"}))
+        assert flush(state) is None
+    observe(state, ctx, "fs_read_file", args)
     assert flush(state) is not None
-    assert len(state.loop_detector_window) == 2
 
 
 def test_clear_then_same_read_is_silent():
@@ -190,7 +245,7 @@ def test_unmarked_tool_never_notices():
         for _ in range(5):
             observe(state, ctx, name, "{}")
     assert flush(state) is None
-    assert state.loop_detector_window == []
+    assert len(state.loop_detector_window) == WINDOW_SIZE
 
 
 def test_disabled_config_does_not_record_or_notice():
