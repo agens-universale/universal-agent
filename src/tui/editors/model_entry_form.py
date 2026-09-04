@@ -356,6 +356,13 @@ class ModelEntryForm(Vertical):
             rows_source=lambda: list(self._models), render_row=self._model_row_text,
             matches=lambda m, q: q in m.id.lower(),
             value_of=lambda m: m.id, on_pick=self._apply_model,
+            # Подсветка на раскрытии — строка, РАВНАЯ значению поля (канон
+            # `voice_endpoint._model_initial_index`), и она же держится при фильтре:
+            # раскрытие поверх набранного id фильтруется этим же id (`_on_models`),
+            # и «первая уцелевшая» подсовывала под Enter соседа `…-turbo` вместо
+            # своего (находка M6 ревью MR #80).
+            initial_index=self._model_initial_index,
+            refilter_index=self._model_refilter_index,
             hint=lambda ok: MODEL_LIST_HINT if ok else MODEL_LIST_HINT_NO_MATCH,
             closed_hint=MODEL_RELOAD_HINT,
             # Канон 2026-08-17: САМ список раскрывается только над пустым полем —
@@ -486,10 +493,17 @@ class ModelEntryForm(Vertical):
         адресом и требовала токен, а писатель видел пустую строку и требовал токен
         УБРАТЬ — собрать такую запись было нельзя ни одним набором полей.
 
+        ТОЛЬКО `${ENV:…}` — зовётся из `on_input_changed` на КАЖДОЕ нажатие клавиши в
+        полях адреса/токена, то есть на UI-потоке; `resolve_env_placeholders` разворачивает
+        ещё и `${FILE:...}` синхронным чтением файла с диска — там, где `_resolved_for_request`
+        (соседняя форма того же смысла) запрещает это себе прямым текстом. `${FILE:...}`
+        остаётся воркерам: правило пары просто видит ссылку как непустую строку — то же
+        поведение, какое видело бы поле без единой подстановки вовсе.
+
         `None` (ключа нет) подстановка не трогает — «токена нет» и «токен пустой» этим
         не путаются."""
-        from config_modules.env_interpolation import resolve_env_placeholders
-        return resolve_env_placeholders(value)
+        from config_modules.env_interpolation import resolve_env_only
+        return resolve_env_only(value)
 
     def _pair_parts(self) -> tuple[bool, bool]:
         """Что запись задаёт СВОЕГО — (адрес, токен) — ядровым определением §2
@@ -642,6 +656,41 @@ class ModelEntryForm(Vertical):
             hint = _TOKEN_BASE_HINT if self._inherits_from_base() else _TOKEN_SHARED_HINT
         t.append("   " + hint, style=DEEP_DIM)
         return t
+
+    @staticmethod
+    def _model_initial_index(items, value: str) -> int | None:
+        """Что подсвечено на раскрытии: строка ДЕЙСТВУЮЩЕГО id (эталоны —
+        `preset_list._initial_index`, `voice_endpoint._model_initial_index`).
+        Enter сразу после раскрытия не имеет права подменить набранный id первой
+        строкой сервера. Своего id в списке нет — подсвеченной строки нет вовсе, и
+        Enter оставляет введённое; поле пустое — защищать нечего, первая строка."""
+        if not value:
+            return 0 if items else None
+        value = value.lower()
+        return next((i for i, m in enumerate(items) if m.id.lower() == value), None)
+
+    @staticmethod
+    def _model_refilter_index(items, visible, prev) -> int | None:
+        """Куда встаёт ▸ после сужения: та же строка, пока она видна (по identity,
+        канон `model._list_refilter_index`). Нужен подсветке значения: раскрытие
+        поверх набранного id тут же фильтруется этим id, и умолчание «первая
+        уцелевшая» затирало бы выбор `_model_initial_index` соседом по фильтру.
+
+        `prev is None` — ДО этого сужения не было подсвечено ничего ОСОЗНАННО:
+        `_model_initial_index` не нашёл строку, РАВНУЮ значению поля (набранного
+        id на сервере нет). Фолбэк на первую уцелевшую здесь откатывал бы ровно
+        это решение — подсвечивал соседа по фильтру, которого поле не называет
+        (M6, находка #13 ревью MR #80: один Enter молча подставлял его). `None`
+        держит «ничего не подсвечено» СКВОЗЬ рефильтр, а не только на раскрытии.
+
+        Строка БЫЛА подсвечена (`prev` — не `None`) и ушла из-под фильтра —
+        другое дело: первая уцелевшая, как у соседних списков."""
+        if prev is None:
+            return None
+        for pos, i in enumerate(visible):
+            if items[i] is prev:
+                return pos
+        return 0
 
     def _model_row_text(self, model, *, selected: bool) -> Text:
         t = Text()
@@ -796,29 +845,35 @@ class ModelEntryForm(Vertical):
             # его вызвать назван постоянной строкой под полем (Alt+↓).
             self._presets_ctrl.open()
         if target == "mef-model":
-            if self._models:
-                # Список уже подгружен — показать варианты сразу, но по тому же
-                # правилу (`can_open`): над пустым полем сам, над набранным id —
-                # только по явному Alt+↓.
+            # Ключ (адрес, авторизация) сверяется ДО развилки «показать добытое /
+            # сходить заново» (находка M7 ревью MR #80): список принадлежит СВЯЗИ,
+            # а не полю, и после смены адреса или токена добытое у прежнего
+            # эндпоинта показывать нельзя — Enter вписал бы id, которого на новом
+            # хосте нет. Сверка в одной точке потребления ловит все пути правки
+            # разом — печать, пресет, Ctrl+U, галку: ключ выводится из текущего
+            # состояния, а не из событий (write_field события не постит).
+            key = (self._current_url(), self._current_auth_header())
+            if key != self._autoload_key:
+                # Автоподгрузка при входе: к этому полю курсор приходит после
+                # адреса и токена, идти есть по чему. Те же параметры второй раз
+                # не перечитываем (дребезг), ИЗМЕНЁННЫЕ — обязаны: сбой без токена
+                # и повтор с введённым токеном это один сценарий, а не два. Сбой
+                # не блокирует ручной ввод, Alt+↓ остаётся принудительным
+                # перечитыванием.
+                self._autoload_key = key
+                self._start_models_fetch(refresh=False)
+            elif self._models:
+                # Список уже подгружен ЭТОЙ связью — показать варианты сразу, но
+                # по тому же правилу (`can_open`): над пустым полем сам, над
+                # набранным id — только по явному Alt+↓.
                 if not self._list.is_open:
                     self._list.open(filter_text=self._model_value())
-            else:
-                # Автоподгрузка при входе — по ключу (адрес, авторизация): к этому
-                # полю курсор приходит после них, идти есть по чему. Те же
-                # параметры второй раз не перечитываем (дребезг), ИЗМЕНЁННЫЕ —
-                # обязаны: сбой без токена и повтор с введённым токеном это один
-                # сценарий, а не два. Сбой не блокирует ручной ввод, Alt+↓
-                # остаётся принудительным перечитыванием.
-                key = (self._current_url(), self._current_auth_header())
-                if key != self._autoload_key:
-                    self._autoload_key = key
-                    self._start_models_fetch(refresh=False)
-                elif self._list_status:
-                    # Этими же параметрами уже сходили — пока курсор был на другом
-                    # поле, сказать об исходе было негде. Дребезг загрузку не
-                    # повторит, и молчание читалось бы как «список ещё летит»:
-                    # говорим то же, что сказали бы, останься курсор здесь.
-                    self._set_status(self._list_status)
+            elif self._list_status:
+                # Этими же параметрами уже сходили — пока курсор был на другом
+                # поле, сказать об исходе было негде. Дребезг загрузку не
+                # повторит, и молчание читалось бы как «список ещё летит»:
+                # говорим то же, что сказали бы, останься курсор здесь.
+                self._set_status(self._list_status)
         else:
             # Счётчик/ошибка списка — про поле, с которого курсор ушёл: «2 модели»
             # под чужим полем не про что.
@@ -1025,9 +1080,9 @@ class ModelEntryForm(Vertical):
                                  config_proxy=self._config_proxy, refresh=refresh)
         except Exception:
             models = None
-        self.app.call_from_thread(self._on_models, models, gen)
+        self.app.call_from_thread(self._on_models, models, gen, refresh)
 
-    def _on_models(self, models, gen: int) -> None:
+    def _on_models(self, models, gen: int, refresh: bool) -> None:
         # Поколение протухло — ответ не про эту загрузку: не трогаем ни состояние,
         # ни DOM.
         if gen != self._list_gen or not self.is_mounted:
@@ -1052,7 +1107,11 @@ class ModelEntryForm(Vertical):
         self._models = list(models)
         self._list_status = None
         self._list.close()                   # прошлое раскрытие больше не наше
-        self._list.open(forced=True, filter_text=self._model_value())
+        # `forced` — только у явной клавиши (`Alt+↓` → `refresh=True`): автоподгрузка
+        # обязана спрашивать СОБСТВЕННЫЙ гейт формы (`can_open`) — форсированный
+        # ответ раскрывался поверх набранного id, забирал ↑/↓ списку, и один Enter
+        # молча подменял `gpt-4` на `gpt-4-turbo` (находка M6 ревью MR #80).
+        self._list.open(forced=refresh, filter_text=self._model_value())
         n = len(self._models)
         self._set_status(f"{n} {plural_models(n)}")
 
@@ -1089,7 +1148,16 @@ class ModelEntryForm(Vertical):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "mef-model":
-            self._list.apply_filter(event.input.value)   # no-op, если список свёрнут
+            value = event.input.value
+            if self._list.is_open:
+                self._list.apply_filter(value)
+            elif self._models:
+                # Печать возвращает свёрнутый список с фильтром — как у адреса
+                # и голосового endpoint'а (`reopen_for_typing`: Esc вернёт
+                # исходный id, не набранное). Поле id было единственным соседом
+                # без живого фильтра (живой смок 2026-09-04). Без добытых
+                # моделей раскрывать нечего — Alt+вниз остаётся походом в сеть.
+                self._list.reopen_for_typing(value)
             self._refresh_alias_placeholder()
         elif event.input.id == "mef-url":
             # Канон 2026-08-17 в редакции 2026-08-18 (эталон — `ConnectionEditor`):

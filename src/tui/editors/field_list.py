@@ -93,7 +93,8 @@ class FieldListController:
                  render_row, hint=None, hint_class: str = "", row_classes: str = "",
                  rows_source=(), matches=None, value_of=None, initial_index=None,
                  refilter_index=None, can_open=None, on_pick=None,
-                 restore_on_close: bool = True, closed_hint: str = LIST_CLOSED_HINT) -> None:
+                 restore_on_close: bool = True, closed_hint: str = LIST_CLOSED_HINT,
+                 promise_empty: bool = False) -> None:
         # rows_source — последовательность либо функция без аргументов: её перечитывают
         # на каждом раскрытии (статический список от этого не меняется, живой — меняется).
         # render_row(item, *, selected) -> Text — колонки и метки строки.
@@ -141,6 +142,10 @@ class FieldListController:
         self._on_pick = on_pick
         self._restore_on_close = restore_on_close
         self._closed_hint = closed_hint
+        # promise_empty — сетевой источник: Alt+↓ идёт за строками на сервер, и
+        # обещание под свёрнутым списком осмысленно даже без единой добытой
+        # строки (см. _can_promise; канон voice_endpoint.ModelListController).
+        self._promise_empty = promise_empty
         self._items: tuple = ()
         self.is_open = False
         self._visible: list[int] = []      # индексы _items, прошедшие фильтр
@@ -417,8 +422,9 @@ class FieldListController:
         У статического источника это просто «есть ли строки»: звать раскрыть список,
         которого не существует, нельзя. Сетевой список правило переопределяет — его
         `Alt+↓` не показывает уже добытое, а идёт за строками на сервер, и обещание
-        осмысленно даже с пустым списком (`voice_endpoint.ModelListController`)."""
-        return bool(self._read_items())
+        осмысленно даже с пустым списком (`voice_endpoint.ModelListController`,
+        параметр `promise_empty` — то же исключение для контроллера формы)."""
+        return self._promise_empty or bool(self._read_items())
 
     def sync_hint(self) -> None:
         """Привести строку под полем в согласие с состоянием списка — снаружи.

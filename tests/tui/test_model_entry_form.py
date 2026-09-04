@@ -1487,6 +1487,122 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
         assert [str(w.render()) for w in _rows(form)], "список не раскрылся"
 
 
+async def test_the_autoload_answer_respects_can_open_over_a_typed_id():
+    """Автоподгрузка подчиняется СОБСТВЕННОМУ правилу формы (`can_open`): её ответ
+    над заполненным полем id не раскрывается — форсированное раскрытие поверх
+    набранного забирало ↑/↓ списку, а один Enter молча подменял `gpt-4` на
+    `gpt-4-turbo` (M6 ревью MR #80). Список даёт о себе знать счётчиком, путь к
+    нему — явный Alt+↓."""
+    from textual.widgets import Static
+    fetch = lambda *a, **k: [ModelInfo(id="gpt-4-turbo", tool_capable=True),
+                             ModelInfo(id="gpt-4", tool_capable=True)]
+    form = _form(initial={"alias": "g", "model": "gpt-4"}, existing_aliases={"g"},
+                 fetch=fetch, effective_url="http://hub/v1/chat/completions")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()                        # ответ автоподгрузки приехал
+        assert form.list_open is False, "ответ раскрылся поверх набранного id"
+        assert not _rows(form)
+        # Загрузка состоялась и о ней сказано — счётчиком, а не раскрытием.
+        assert "2" in str(form.query_one("#mef-model-status", Static).render())
+        # Enter — хозяину (сохранить), а не подстановка чужой строки.
+        assert form.enter() is False
+        assert form.query_one("#mef-model", Input).value == "gpt-4"
+
+
+async def test_the_forced_list_highlights_the_row_equal_to_the_field():
+    """`Alt+↓` поверх набранного id: подсвечена строка, РАВНАЯ значению поля
+    (эталоны `preset_list._initial_index` / `voice_endpoint._model_initial_index`),
+    а не первая уцелевшая под фильтром — там стоял сосед `gpt-4-turbo`, и Enter
+    вписывал его вместо своего (второй дефект M6)."""
+    fetch = lambda *a, **k: [ModelInfo(id="gpt-4-turbo", tool_capable=True),
+                             ModelInfo(id="gpt-4", tool_capable=True)]
+    form = _form(initial={"alias": "g", "model": "gpt-4"}, existing_aliases={"g"},
+                 fetch=fetch, effective_url="http://hub/v1/chat/completions")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()                        # автоподгрузка (список свёрнут)
+        assert form.reload_models() is True            # явная просьба показать
+        for _ in range(3):
+            await pilot.pause()
+        assert form.list_open is True
+        assert form.list_has_selection is True
+        selected = [r for r in (str(w.render()) for w in _rows(form)) if "▸" in r]
+        assert selected and "gpt-4-turbo" not in selected[0], selected
+        assert "gpt-4" in selected[0]
+        assert form.enter() is True                    # подставить подсвеченную
+        await pilot.pause()
+        assert form.query_one("#mef-model", Input).value == "gpt-4"
+
+
+async def test_the_forced_list_highlights_nothing_when_the_typed_id_has_no_exact_match():
+    """`Alt+↓` поверх набранного id, которого на сервере нет ВООБЩЕ (только соседи
+    по префиксу, `gpt-4-turbo`/`gpt-4o` — точного `gpt-4` нет): `_begin_open`
+    ставит `_idx = None` верно (`_model_initial_index` не нашёл строку, равную
+    полю), но тут же `apply_filter` тем же значением сужает список, и
+    `_model_refilter_index` откатывал это решение фолбэком на первую уцелевшую
+    строку — подсвечивала соседа, которого поле не называет. Один Enter тогда
+    молча подставлял его вместо набранного (M6, находка #13, ревью MR #80)."""
+    fetch = lambda *a, **k: [ModelInfo(id="gpt-4-turbo", tool_capable=True),
+                             ModelInfo(id="gpt-4o", tool_capable=True)]
+    form = _form(initial={"alias": "g", "model": "gpt-4"}, existing_aliases={"g"},
+                 fetch=fetch, effective_url="http://hub/v1/chat/completions")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()                        # автоподгрузка (список свёрнут)
+        assert form.reload_models() is True            # явная просьба показать
+        for _ in range(3):
+            await pilot.pause()
+        assert form.list_open is True
+        assert form.list_has_selection is False, "точного совпадения нет — подсвечивать нечего"
+        assert not [r for r in (str(w.render()) for w in _rows(form)) if "▸" in r]
+        assert form.enter() is True                    # список раскрыт, клавиша его
+        await pilot.pause()
+        assert form.query_one("#mef-model", Input).value == "gpt-4", \
+            "Enter подставил соседа вместо набранного id"
+
+
+async def test_a_changed_address_invalidates_the_fetched_model_list():
+    """Успешная загрузка с host-A → смена адреса на host-B → возврат на поле id:
+    ОБЯЗАН пойти второй fetch с B (M7 ревью MR #80). Список принадлежит связи
+    (адрес, авторизация), и показанный без сверки ключа список host-A подставлял
+    Enter'ом id, которого на B нет; второго похода не было вовсе."""
+    calls = []
+
+    def fetch(url, auth, **kwargs):
+        calls.append((url, auth))
+        return _models()
+
+    form = _form(initial=None, existing_aliases=set(), fetch=fetch,
+                 effective_url="http://host-a/v1/chat/completions")
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()                                  # свернуть пресеты входа
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        assert calls == [("http://host-a/v1/chat/completions", None)]
+        form.escape()                                  # свернуть раскрытый список
+        form.move(1); form.move(1)                     # id → алиас → адрес
+        await pilot.pause()
+        form.query_one("#mef-url", Input).value = "http://host-b/v1/chat/completions"
+        await pilot.pause()                            # пресеты закрылись сами (нет совпадений)
+        form.move(-1); form.move(-1)                   # адрес → алиас → id модели
+        for _ in range(3):
+            await pilot.pause()
+        assert len(calls) == 2, "смена адреса не перечитала список"
+        assert calls[1] == ("http://host-b/v1/chat/completions", None)
+
+
 async def test_alt_down_reports_a_dead_endpoint_instead_of_staying_silent():
     form = _form(initial=None, existing_aliases=set(), fetch=lambda *a, **k: None,
                  effective_url="http://hub/v1/chat/completions")
@@ -1581,6 +1697,37 @@ async def test_the_probe_resolves_env_references_before_the_request(monkeypatch)
         assert "Bearer sk-REAL" in [auth for _, auth in seen], seen
         # Поле остаётся сырым: раскрытое значение — только для запроса.
         assert form.query_one("#mef-url", Input).value == "${ENV:MEF_HUB}"
+
+
+async def test_typing_in_the_form_does_not_read_a_file_backed_token(monkeypatch, tmp_path):
+    """`_as_validator_sees` (правило пары, `_pair_parts`) резолвит поля СИНХРОННО на
+    каждое нажатие клавиши в mef-url/mef-token (`on_input_changed` → `_sync_pair_state`
+    → `own_connection` → `_pair_parts`) — и до фикса разворачивал вместе с `${ENV:…}`
+    ещё и `${FILE:...}`, то есть читал файл-кред с диска на UI-потоке на каждый
+    набранный символ, вопреки правилу соседней `_resolved_for_request` («Зовётся
+    ТОЛЬКО из воркеров… в UI-потоке оно подвесило бы интерфейс»)."""
+    import config_modules.env_interpolation as env_interp
+
+    reads: list = []
+    real_read = env_interp._read_secret_file
+
+    def counted(path_raw, cache):
+        reads.append(path_raw)
+        return real_read(path_raw, cache)
+
+    monkeypatch.setattr(env_interp, "_read_secret_file", counted)
+
+    cred = tmp_path / "cred.txt"
+    cred.write_text("sk-FROM-FILE")
+    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash",
+                          "token": f"${{FILE:{cred}}}"},
+                 existing_aliases={"flash"})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        url_input = form.query_one("#mef-url", Input)
+        url_input.value = "http://own/v1/chat/completions"     # печать одного символа
+        await pilot.pause()
+        assert reads == [], f"печать в #mef-url прочитала файл-кред с диска: {reads}"
 
 
 async def test_the_model_list_resolves_env_references_before_the_request(monkeypatch):
@@ -1898,3 +2045,48 @@ async def test_empty_server_answer_is_not_reported_as_a_failure():
         for _ in range(4):
             await pilot.pause()
         assert str(form.query_one("#mef-model-status", Static).render()) == LIST_EMPTY
+
+@pytest.mark.asyncio
+async def test_the_id_field_promises_alt_down_before_the_first_load():
+    """«Alt+↓ — перечитать список» обязана стоять под полем id с ПЕРВОГО кадра:
+    список СЕТЕВОЙ — клавиша идёт на сервер, и обещание осмысленно даже без
+    единой добытой строки (канон _can_promise, воплощённый у voice). До фикса
+    строка появлялась только после первой загрузки — способ позвать список не
+    был назван нигде (живой смок 2026-09-04)."""
+    from tui.editors.field_list import MODEL_RELOAD_HINT
+    form = _form(initial={"alias": "op", "model": "",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
+                          "token": "sk-x"},
+                 existing_aliases=set(), fetch=lambda *a, **k: None)
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        hints = [str(w.render()) for w in form.query(".mef-model-hint")]
+        assert any(MODEL_RELOAD_HINT in h for h in hints), hints
+
+@pytest.mark.asyncio
+async def test_typing_in_the_id_field_reopens_the_fetched_list_with_a_filter():
+    """Печать в поле id при свёрнутом списке возвращает его с фильтром по
+    набранному — как у адреса и голосового endpoint'а (reopen_for_typing,
+    канон 2026-08-18). Поле id было единственным соседом без живого фильтра:
+    человек стирал хвост id и ждал варианты, а список молчал до Alt+вниз
+    (живой смок 2026-09-04). Без добытых моделей раскрывать нечего —
+    поведение прежнее."""
+    form = _form(initial={"alias": "op", "model": "",
+                          "url": "https://openrouter.ai/api/v1/chat/completions",
+                          "token": "sk-x"},
+                 existing_aliases=set(), fetch=lambda *a, **k: _models())
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.move(1); form.move(1); form.move(1)      # адрес -> токен -> галка -> id
+        await pilot.pause()
+        assert form._positions[form._idx] == "mef-model"
+        assert form._list.is_open                      # автоподгрузка раскрыла
+        form.escape()                                  # свернуть, курсор в поле
+        await pilot.pause()
+        assert not form._list.is_open
+        await pilot.press("z", "h")                    # печать возвращает список
+        await pilot.pause()
+        assert form._list.is_open, "печать не вернула свёрнутый список"
+        shown = " ".join(str(w.render()) for w in _rows(form))
+        assert "glm" in shown and "gemini" not in shown   # фильтр по набранному
+
