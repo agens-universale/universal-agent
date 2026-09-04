@@ -190,12 +190,17 @@ def _commit(target, text: str, is_profile: bool, stack_base=None) -> None:
     elif is_profile:
 
         def validate(candidate: str) -> None:
+            # `lenient_prebroken` — только здесь: реестр правит содержимое УЖЕ
+            # стоящего слоя, и чужая поломка стека не должна запирать именно ту
+            # секцию, в которой её чинят (layers, развилка «сломан и без нас»).
             validate_profile_text_with_sections(
-                candidate, target=target, base_path=stack_base)
+                candidate, target=target, base_path=stack_base,
+                lenient_prebroken=True)
     else:
 
         def validate(candidate: str) -> None:
-            validate_config_text_with_sections(candidate, base_path=target)
+            validate_config_text_with_sections(candidate, base_path=target,
+                                               lenient_prebroken=True)
     try:
         ocw.write_text(target, text, validate=validate)
     except RegistryWriteError:

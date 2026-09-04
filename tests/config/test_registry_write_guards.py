@@ -587,65 +587,76 @@ def test_needs_default_slot_for_an_inactive_profile_counts_its_own_cascade(stack
 def test_a_refusal_caused_by_the_profile_names_the_profile_and_its_file(stack):
     """Текст валидатора остаётся дословно; за ним — слой словами («в профиле
     "work"») и ПОЛНЫЙ путь его файла: файлов в стеке несколько, и «в файле выше»
-    не называет ни одного."""
+    не называет ни одного.
+
+    Стенд — запись, ломающая ЗДОРОВЫЙ стек сама (снятие записи базы, на которую
+    смотрит слот активного профиля): с починки L19 стек, не проходивший вопрос
+    гейта и ДО записи, правку своего файла больше не запирает — прежний стенд с
+    уже висячей ссылкой профиля до отказа теперь не доходит."""
     base, profiles = stack
-    text = 'profile: "work"\nmodels:\n  fast:\n    model: "qwen/qwen3-8b"\n'
+    text = ('profile: "work"\n'
+            'models:\n  fast:\n    model: "qwen/qwen3-8b"\n'
+            '  strong:\n    model: "m-strong"\n'
+            'slots:\n  default: "fast"\n')
     base.write_text(text, encoding="utf-8")
     profile = profiles / "work.yml"
-    profile.write_text('slots:\n  default: "strong"\n', encoding="utf-8")
+    profile.write_text('slots:\n  max: "strong"\n', encoding="utf-8")
 
     with pytest.raises(RegistryWriteError) as exc:
-        rw.apply_registry_ops(base, [
-            ("write_slot", "default", "fast"),
-            ("upsert_model", "claude", {"model": "anthropic/claude"}),
-            ("write_slot", "max", "claude"),
-        ], "")
+        rw.apply_registry_ops(base, [("remove_model", "strong", True)], "")
 
     message = str(exc.value)
     assert message.startswith(
-        'slots.default: алиас "strong" не найден в merged-реестре models')
-    assert f'поправьте slots.default в профиле "work": {profile}' in message
+        'slots.max: алиас "strong" не найден в merged-реестре models')
+    assert f'поправьте slots.max в профиле "work": {profile}' in message
     assert base.read_text(encoding="utf-8") == text
 
 
 def test_a_refusal_caused_by_the_base_names_the_base_file(stack):
-    """Обратная раскладка: правится АКТИВНЫЙ профиль, а стек ломает слот основного
-    конфига. Назван основной конфиг, а не файл, который человек правит."""
+    """Обратная раскладка: правится АКТИВНЫЙ профиль, запись рвёт ссылку, а
+    названный вердиктом ключ лежит в основном конфиге — назван он, а не файл,
+    который человек правит. Стенд — запись сама ломает здоровый стек: снимается
+    профильная модель, которую резолвит только слот базы (прежний стенд с уже
+    висячим слотом базы с починки L19 до отказа не доходит)."""
     base, profiles = stack
     base.write_text(
-        'profile: "work"\nmodels:\n  fast:\n    model: "x"\nslots:\n  default: "ghost"\n',
-        encoding="utf-8")
+        'profile: "work"\nslots:\n  default: "p1"\n', encoding="utf-8")
     profile = profiles / "work.yml"
-    text = 'slots:\n  max: "fast"\n'
+    text = 'models:\n  p1:\n    model: "x"\n'
     profile.write_text(text, encoding="utf-8")
 
     with pytest.raises(RegistryWriteError) as exc:
-        rw.write_slot(profile, "light", "fast", "", is_profile=True, stack_base=base)
+        rw.remove_model(profile, "p1", force=True, is_profile=True, stack_base=base)
 
     message = str(exc.value)
-    assert message.startswith('slots.default: алиас "ghost" не найден')
+    assert message.startswith('slots.default: алиас "p1" не найден')
     assert f"поправьте slots.default в основном конфиге: {base}" in message
     assert str(profile) not in message
     assert profile.read_text(encoding="utf-8") == text
 
 
 def test_a_validation_refusal_carries_no_operation_names(stack):
-    """Секция «Модели» на том же стенде показывала «upsert_model fast:
-    slots.default: …». Отказ валидации написан для человека — как и осознанный
+    """Секция «Модели» на этом классе стендов показывала «remove_model strong:
+    slots.max: …». Отказ валидации написан для человека — как и осознанный
     отказ операции, он начинается с собственного текста, а не со служебного
     имени; подпись операцией остаётся у МЕХАНИЧЕСКОГО сбоя (см.
     test_registry_write.py::test_a_deliberate_refusal_reaches_the_user_without_
-    the_operation_name — сторож на ту ветку)."""
+    the_operation_name — сторож на ту ветку). Стенд — запись сама ломает
+    здоровый стек, как и у соседей выше."""
     base, profiles = stack
     base.write_text(
-        'profile: "work"\nmodels:\n  fast:\n    model: "qwen/qwen3-8b"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('slots:\n  default: "strong"\n', encoding="utf-8")
+        'profile: "work"\n'
+        'models:\n  fast:\n    model: "qwen/qwen3-8b"\n'
+        '  strong:\n    model: "m-strong"\n'
+        'slots:\n  default: "fast"\n',
+        encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  max: "strong"\n', encoding="utf-8")
 
     with pytest.raises(RegistryWriteError) as exc:
-        rw.upsert_model(base, "fast", {"model": "qwen/qwen3-14b"}, "")
+        rw.apply_registry_ops(base, [("remove_model", "strong", True)], "")
 
     message = str(exc.value)
-    assert message.startswith("slots.default:")
+    assert message.startswith("slots.max:")
     for op_name in rw._OPERATIONS:
         assert op_name not in message
 

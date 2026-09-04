@@ -70,7 +70,8 @@ def test_unresolvable_pointer_falls_back_to_the_single_file(stack):
     text = 'profile: "нет-такого"\nmodels:\n  a:\n    model: "x"\n'
     base.write_text(text, encoding="utf-8")
 
-    validate_config_text_with_sections(text, base_path=base)
+    validate_config_text_with_sections(text, base_path=base,
+        lenient_prebroken=True)
 
 
 def _write_utf16(path: Path, text: str) -> Path:
@@ -106,7 +107,82 @@ def test_editing_the_base_under_an_already_unreadable_profile_is_allowed(stack):
     _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
 
     validate_config_text_with_sections(
-        'profile: "broken-enc"\nmodels:\n  a:\n    model: "y"\n', base_path=base)
+        'profile: "broken-enc"\nmodels:\n  a:\n    model: "y"\n', base_path=base,
+        lenient_prebroken=True)
+
+
+def test_editing_the_base_under_a_foreign_dangling_reference_is_allowed(stack):
+    """Зеркало теста выше для ССЫЛОЧНОЙ поломки чужого слоя (ревью MR #80, L19):
+    проектный `.gc/config.yml` держит `assign.finish_gate: "ghost"` — стек не
+    проходит вопрос гейта и БЕЗ этой записи, но СОБИРАЕТСЯ (merge+схема чисты),
+    и поблажка «сломан и без нас» не срабатывала: `_stack_assembles` не задавала
+    вопрос ссылочной целостности, который задаёт гейт. Итог — человек заперт:
+    ЛЮБАЯ запись в свой файл, не чинящая чужую ссылку, отклонялась."""
+    base, _profiles = stack
+    base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
+    gc_dir = Path.cwd() / ".gc"
+    gc_dir.mkdir()
+    (gc_dir / "config.yml").write_text(
+        'assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
+
+    validate_config_text_with_sections(
+        'models:\n  a:\n    model: "y"\n', base_path=base,
+        lenient_prebroken=True)
+
+
+def test_editing_the_active_profile_under_a_foreign_dangling_reference_is_allowed(stack):
+    """Тот же откат у второго входа гейта: правится активный профиль, а вопрос
+    гейта заваливает висячая ссылка проектного слоя — профиль остаётся на фазе 1."""
+    base, profiles = stack
+    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n',
+                    encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
+    gc_dir = Path.cwd() / ".gc"
+    gc_dir.mkdir()
+    (gc_dir / "config.yml").write_text(
+        'assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
+
+    validate_profile_text_with_sections(
+        'slots:\n  default: "a"\n', target=profiles / "work.yml", base_path=base,
+        lenient_prebroken=True)
+
+
+def test_a_pointer_write_is_judged_strictly_even_on_a_prebroken_stack(stack):
+    """Граница поблажки: её просит ЗАПИСЬ содержимого стоящего слоя
+    (`registry_write._commit`), а не вход валидации. Запись УКАЗАТЕЛЯ меняет сам
+    СОСТАВ стека — активирует, создаёт или переносит поломку, — и поблажка
+    подменяла причину отказа чужой: аварийный откат на несуществующий профиль
+    отклонялся текстом «моделей ≥2» вместо «профиль не найден», активация
+    профиля со слотом-призраком создавала указатель МОЛЧА, а витрина хаба
+    рисовала ✓ на стеке, сломанном профилем (регресс волны фиксов MR #80)."""
+    base, _profiles = stack
+    # сломан и без записи: 2 модели, ни одного слота
+    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
+                    encoding="utf-8")
+
+    with pytest.raises(ValueError, match="нет-такого"):
+        validate_config_text_with_sections(
+            'profile: "нет-такого"\nmodels:\n  a:\n    model: "x"\n'
+            '  b:\n    model: "y"\n',
+            base_path=base)
+
+
+def test_the_fallback_under_a_foreign_break_still_judges_the_file_itself(stack):
+    """Откат — не амнистия (тот же принцип, что и у
+    test_a_broken_layer_does_not_disable_phase_one): при чужой висячей ссылке
+    свой файл судится ОДНОФАЙЛОВОЙ фазой 2, и его собственная нерезолвимость
+    (2 модели без единого слота) — по-прежнему отказ."""
+    base, _profiles = stack
+    base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
+    gc_dir = Path.cwd() / ".gc"
+    gc_dir.mkdir()
+    (gc_dir / "config.yml").write_text(
+        'assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"slots\.default"):
+        validate_config_text_with_sections(
+            'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', base_path=base,
+        lenient_prebroken=True)
 
 
 def test_dropping_the_pointer_to_an_unreadable_profile_is_allowed(stack):
@@ -326,7 +402,21 @@ def test_a_broken_layer_leaves_the_gate_on_the_file_itself(stack, layer, content
     text = _stack_with_profile(base, profiles)
     _break_layer(layer, profiles, content)
 
-    validate_config_text_with_sections(text, base_path=base)
+    validate_config_text_with_sections(text, base_path=base,
+        lenient_prebroken=True)
+
+
+@pytest.mark.parametrize("content", BROKEN)
+def test_the_strict_verdict_on_a_broken_foreign_layer_stays_a_value_error(stack, content):
+    """Строгий режим не воскрешает старый крэш: негодный чужой файл стека — отказ
+    КЛАССОМ ValueError (`StackAssemblyError`), который витрина и точки записи уже
+    ловят, а не YAMLError/AttributeError мимо перехватов."""
+    base, profiles = stack
+    text = _stack_with_profile(base, profiles)
+    _break_layer("project", profiles, content)
+
+    with pytest.raises(ValueError):
+        validate_config_text_with_sections(text, base_path=base)
 
 
 @pytest.mark.parametrize("content", BROKEN)
@@ -339,7 +429,8 @@ def test_a_broken_layer_does_not_disable_phase_one(stack, content):
 
     with pytest.raises(ValueError, match="схему"):
         validate_config_text_with_sections('models:\n  a:\n    model: 5\n',
-                                           base_path=base)
+                                           base_path=base,
+        lenient_prebroken=True)
 
 
 @pytest.mark.parametrize("layer", ["managed", "project"])
@@ -351,7 +442,8 @@ def test_a_broken_layer_leaves_the_profile_gate_on_the_file_itself(stack, layer,
     _break_layer(layer, profiles, content)
 
     validate_profile_text_with_sections(
-        'slots:\n  default: "a"\n', target=profiles / "work.yml", base_path=base)
+        'slots:\n  default: "a"\n', target=profiles / "work.yml", base_path=base,
+        lenient_prebroken=True)
 
 
 @pytest.mark.parametrize("layer", ["managed", "project", "profile"])

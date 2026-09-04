@@ -196,6 +196,23 @@ def test_the_project_candidate_is_visible_through_validate_config_text_with_sect
         'profile: "work"\n', base_path=base, target=project_config)
 
 
+def test_a_candidate_outside_the_profile_roots_is_not_mistaken_for_a_profile(stack):
+    """Кандидат на месте проектного слоя может носить то же имя (`stem`), что и
+    указатель, который он же и задаёт (`.gc/config.yml` → stem `config`), — но
+    его каталог (`.gc/`) не входит ни в один из корней профилей
+    (`.gc/profiles/`, `<base>/profiles/`). Совпадение имени файла само по себе
+    не делает кандидата профилем: `_candidate_profile_ref` обязан отвергнуть
+    его так же, как отверг бы диск, — иначе редактируемый файл объявил бы себя
+    же своим собственным профилем, и следующий старт не поднялся бы."""
+    base, _profiles, project_config = stack
+    base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
+    assert project_config.name == "config.yml"   # stem "config" совпадёт с указателем
+
+    with pytest.raises(ValueError, match='"config" не найден'):
+        validate_config_text_with_sections(
+            'profile: "config"\n', base_path=base, target=project_config)
+
+
 def test_clearing_the_project_pointer_is_refused_when_it_breaks_the_stack(stack):
     """Ревью: указатель — в проектном слое, слот — в профиле (легальная
     раскладка). Снятие указателя рвёт единственный слот (моделей ≥2 в базе) —
@@ -230,8 +247,10 @@ def test_an_unresolvable_pointer_written_into_the_project_layer_is_refused(stack
 
 def test_an_already_dangling_pointer_still_falls_back_to_the_single_file(stack):
     """Обратная сторона той же развилки: указатель уже висит на несуществующем
-    профиле (стек сломан и БЕЗ этой записи) — правку проектного слоя не
-    запрещаем, иначе чинить его из /settings стало бы нечем."""
+    профиле (стек сломан и БЕЗ этой записи) — правку СОДЕРЖИМОГО проектного
+    слоя (указатель остаётся тем же) не запрещаем, иначе чинить его из
+    /settings стало бы нечем. Поблажку просит сама запись
+    (`lenient_prebroken`) — вход валидации по умолчанию строг."""
     base, _profiles, project_config = stack
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
     project_config.parent.mkdir(parents=True, exist_ok=True)
@@ -239,7 +258,7 @@ def test_an_already_dangling_pointer_still_falls_back_to_the_single_file(stack):
 
     validate_config_text_with_sections(
         'profile: "нет-такого"\nlevel: default\n',
-        base_path=base, target=project_config)
+        base_path=base, target=project_config, lenient_prebroken=True)
 
 
 # --- куда ложится сам указатель: `profile_pointer_write_target` -----------------
@@ -362,3 +381,20 @@ def test_a_successful_activation_still_appends_the_anchor_and_the_value(stack):
     assert "level: default" in text
     _cfg, meta = load_config_ex(str(base))
     assert meta.active_name == "job"
+
+
+def test_dropping_the_pointer_is_lenient_to_a_stack_broken_by_a_foreign_layer(stack):
+    """[ревью #2] `lenient_prebroken` запирала юзера ВНУТРИ, если стек сломан
+    ЧУЖИМ слоем: висячий `assign.finish_gate` в проектном файле (никак не
+    связанный с указателем) отказывал СНЯТИЮ профиля той же строгой валидацией,
+    что и активации, — хотя снятие указателя хуже не делает никогда, это дверь
+    наружу. Поблажка теперь достаётся именно снятию (`name == ""`)."""
+    import onboarding_config_writer as ocw
+    base, _profiles, project_config = stack
+    base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
+    project_config.parent.mkdir(parents=True, exist_ok=True)
+    project_config.write_text('assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
+
+    ocw.write_profile_pointer(base, "", base_path=base)
+
+    assert 'profile: ""' in base.read_text(encoding="utf-8")

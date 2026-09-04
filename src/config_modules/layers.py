@@ -343,29 +343,51 @@ class StackAssemblyError(ValueError):
 
 
 def _stack_assembles(base_path) -> bool:
-    """Собирается ли стек следующего старта ПО ДИСКУ — без правимого текста и без
-    единого кандидата.
+    """Проходит ли стек следующего старта ПО ДИСКУ тот же вопрос, что задаёт
+    гейт (сборка + схема + ссылочная целостность секций), — без правимого текста
+    и без единого кандидата.
 
-    Счётчик «кто сломал»: стек не собрался и БЕЗ этой записи — запрещать её
-    нельзя. Цена ошибки в обе стороны, и обе — ловушка: разрешить запись,
+    Счётчик «кто сломал»: стек не проходил вопрос и БЕЗ этой записи — запрещать
+    её нельзя. Цена ошибки в обе стороны, и обе — ловушка: разрешить запись,
     ломающую старт, значит запереть человека СНАРУЖИ приложения; запретить правку
     при уже сломанном стеке — запереть ВНУТРИ, потому что чинить сломанный
     соседний слой из /settings станет нечем (не-модельные секции правятся руками,
-    так что негодный слой — рабочий сценарий, а не экзотика)."""
+    так что негодный слой — рабочий сценарий, а не экзотика).
+
+    `validate_model_sections` — в том же try НАМЕРЕННО: гейт спрашивает не
+    только «собирается ли», но и ссылочную целостность (:668/:689), и счётчик
+    без неё врал в запирающую сторону — висячая ссылка ЧУЖОГО слоя (проектный
+    `assign.finish_gate: "ghost"`) сборку проходит, счётчик отвечал «жив», и
+    любая запись в свой файл, не чинящая чужую ссылку, отклонялась (ревью
+    MR #80, L19). Вопрос обязан быть ТЕМ ЖЕ, каким судят запись, — иначе это
+    вторая редакция правила, и она уже разъехалась."""
     try:
-        _app_config_from_raw(_merge_layers(
+        validate_model_sections(_app_config_from_raw(_merge_layers(
             _raw_from_text(Path(base_path).read_text(encoding="utf-8"), "config.yml"),
-            str(base_path)).config)
+            str(base_path)).config))
     except (OSError, ValueError):
         return False
     return True
 
 
 def _stacked_app_config(text: str, *, target=None, base_path, is_profile: bool = False,
-                        extra_candidates=None):
+                        extra_candidates=None, lenient_prebroken: bool = False):
     """Merged AppConfig стека, который соберёт СЛЕДУЮЩИЙ СТАРТ; None — фаза 2
-    неприменима (цель в этот стек не входит либо он не собирался и без этой
-    записи); `StackAssemblyError` — стек ломает сама эта запись.
+    неприменима (цель в этот стек не входит либо — только при
+    `lenient_prebroken` — он не собирался и без этой записи);
+    `StackAssemblyError` — стек не собирается с этой записью.
+
+    `lenient_prebroken` включает поблажку «сломан и без нас» (см. развилку в
+    `validate_config_text_with_sections`) и передаётся точками, чья запись НЕ
+    ухудшает состав стека: правка содержимого УЖЕ СТОЯЩЕГО слоя
+    (`registry_write._commit`) и снятие указателя, `name == ""`
+    (`onboarding_config_writer.write_profile_pointer` — дверь НАРУЖУ, хуже не
+    делает никогда, ревью MR #80, #2). Умолчание строгое: запись, которая
+    АКТИВИРУЕТ или переносит указатель, меняет сам СОСТАВ стека — активирует
+    или переносит поломку, — и глушить её вердикт «диск и так сломан» значит
+    подменять причину отказа чужой (ревью MR #80, регресс волны фиксов: отказ
+    активации профиля со слотом-призраком показывал «моделей ≥2» вместо
+    призрака, а создание нового указателя проходило вовсе).
 
     Один путь сборки на обе pre-write валидации: второй раз выписанный мерж
     разъехался бы с первым на первой же правке загрузчика.
@@ -412,8 +434,8 @@ def _stacked_app_config(text: str, *, target=None, base_path, is_profile: bool =
             return None
         return _app_config_from_raw(layers.config)
     except (OSError, ValueError) as exc:
-        if not _stack_assembles(base_path):
-            return None         # сломан и без нас — правку своего файла не запрещаем
+        if lenient_prebroken and not _stack_assembles(base_path):
+            return None         # сломан и без нас — правку стоящего слоя не запрещаем
         raise StackAssemblyError(str(exc)) from exc
 
 
@@ -622,7 +644,8 @@ def stack_documents(base_path, *, profile_override=None) -> list:
 
 
 def validate_config_text_with_sections(text: str, *, base_path=None, target=None,
-                                       extra_candidates=None) -> None:
+                                       extra_candidates=None,
+                                       lenient_prebroken: bool = False) -> None:
     """Как validate_config_text (фаза 1), плюс фаза 2 — ссылочная целостность и
     правило резолвимости секций models/slots/assign (config_modules.
     model_sections_validation.validate_model_sections).
@@ -643,11 +666,26 @@ def validate_config_text_with_sections(text: str, *, base_path=None, target=None
     зелёным «✓», а следующий старт падает), и отвергает рабочую раскладку
     «модели в базе, уровни в профиле». ФАЗА 1 остаётся на самом файле: сломанный
     соседний слой — не повод запрещать правку этого, а сообщение о чужом файле
-    человеку в форме бесполезно. Стек не собрался — ответ зависит от того, КТО
-    его сломал (`_stacked_app_config`): не собирался и без этой записи — фаза 2
-    откатывается к однофайловой (хуже, чем было, не станет); ломает его сама
-    запись — `StackAssemblyError`, потому что «хуже, чем было» тут как раз и
-    становится: следующий старт не поднимется.
+    человеку в форме бесполезно. Стек не собрался или завалил вопрос секций —
+    отказ ДОСЛОВНО (`StackAssemblyError` либо текст валидатора): следующий
+    старт не поднимется, и молчать об этом нельзя.
+
+    `lenient_prebroken=True` — поблажка «сломан и без нас»: стек не проходил
+    вопрос и БЕЗ этой записи (счётчик `_stack_assembles`, задающий тот же
+    вопрос по диску) — фаза 2 откатывается к однофайловой (хуже, чем было, не
+    станет). Флаг передают две записи: содержимое уже стоящего слоя
+    (`registry_write._commit`) и снятие указателя (`onboarding_config_writer.
+    write_profile_pointer`, `name == ""`) — дверь НАРУЖУ, ей хуже не станет
+    никогда, а строгий вход запирал юзера ВНУТРИ, если стек сломан ЧУЖИМ слоем
+    (ревью MR #80, #2): любая правка своего файла, не чинящая чужую ссылку,
+    отклонялась вердиктом о чужом, а чинят модельные секции как раз здесь.
+    Умолчание — строгое, и это свойство ЗАПИСИ, не валидации: запись, которая
+    АКТИВИРУЕТ указатель или переносит его (переименование), меняет сам СОСТАВ
+    стека — активирует, создаёт или переносит поломку, — и поблажка подменяла
+    бы её причину чужой (ревью MR #80, L19: отказ активации профиля со
+    слотом-призраком показывал «моделей ≥2» вместо призрака); витринный
+    вердикт (`settings._models_verdict`) не пишет вовсе, и откат заставлял его
+    молчать про сломанный профилем стек.
 
     `target` — путь проектного `.gc/config.yml`, если `text` — это ОН, а не база
     (`_write_profile_pointer` пишет указатель `profile:` в оба файла, и вопрос
@@ -666,13 +704,21 @@ def validate_config_text_with_sections(text: str, *, base_path=None, target=None
     app_cfg = _app_config_from_text(text)
     if base_path is not None:
         stacked = _stacked_app_config(text, base_path=base_path, target=target,
-                                      extra_candidates=extra_candidates)
+                                      extra_candidates=extra_candidates,
+                                      lenient_prebroken=lenient_prebroken)
         if stacked is not None:
-            app_cfg = stacked
+            try:
+                validate_model_sections(stacked)
+                return
+            except ValueError:
+                if not lenient_prebroken or _stack_assembles(base_path):
+                    raise       # отказ дословно — поблажки нет или запись и завалила
+                # не проходил и без неё — откат к однофайловой фазе 2 ниже
     validate_model_sections(app_cfg)
 
 
-def validate_profile_text_with_sections(text: str, *, target, base_path) -> None:
+def validate_profile_text_with_sections(text: str, *, target, base_path,
+                                        lenient_prebroken: bool = False) -> None:
     """Фаза 1 профиля (`profiles.validate_profile_text`) плюс фаза 2 на стеке, где
     ЭТОТ текст стоит слоем профиля.
 
@@ -681,13 +727,22 @@ def validate_profile_text_with_sections(text: str, *, target, base_path) -> None
     часть того самого стека, который соберёт следующий старт: снятое в нём
     значение способно оставить merged нерезолвимым ровно так же, как правка базы.
     Поэтому фаза 2 включается только когда указатель базы приводит в `target`;
-    неактивный профиль (и стек, не собиравшийся и без этой записи) остаётся на
-    фазе 1 — блокировать правку файла, которого никто не грузит, вреднее, чем
-    предупредить при активации. Запись, которая ломает стек САМА, сюда не
-    доходит вовсе: `_stacked_app_config` отвечает на неё
-    `StackAssemblyError`."""
+    неактивный профиль остаётся на фазе 1 — блокировать правку файла, которого
+    никто не грузит, вреднее, чем предупредить при активации. Запись, которая
+    ломает стек САМА, сюда не доходит вовсе: `_stacked_app_config` отвечает на
+    неё `StackAssemblyError`. `lenient_prebroken` — та же развилка «сломан и
+    без нас», что у `validate_config_text_with_sections` (и с теми же
+    полномочиями: только запись содержимого стоящего слоя), только однофайловой
+    фазы 2 у профиля нет — поблажка оставляет его на фазе 1: файл частичен по
+    устройству."""
     validate_profile_text(text)
     app_cfg = _stacked_app_config(text, target=target, base_path=base_path,
-                                  is_profile=True)
-    if app_cfg is not None:
+                                  is_profile=True,
+                                  lenient_prebroken=lenient_prebroken)
+    if app_cfg is None:
+        return
+    try:
         validate_model_sections(app_cfg)
+    except ValueError:
+        if not lenient_prebroken or _stack_assembles(base_path):
+            raise               # отказ дословно — поблажки нет или запись и завалила

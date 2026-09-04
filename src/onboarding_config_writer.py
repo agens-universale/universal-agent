@@ -619,19 +619,30 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
     пишется на НОВОЕ имя ДО физического `rename()` файла профиля, и без будущего
     документа профиля НА ЕГО будущем пути указатель не резолвится вовсе —
     валидация судила бы стек БЕЗ профиля, которого просто ещё нет под этим
-    именем."""
+    именем.
+
+    Снятие указателя (`name == ""`) идёт с `lenient_prebroken=True`: это дверь
+    НАРУЖУ — она хуже не делает никогда, а строгий вход запирал юзера ВНУТРИ,
+    если стек сломан ЧУЖИМ слоем (битый managed, висячая ссылка соседнего
+    оверлея) — снять свой же указатель, ничего не чинящий в чужой поломке, было
+    нечем (ревью MR #80, #2). Активация и переименование остаются строгими:
+    их запись меняет САМ СОСТАВ стека — активирует или переносит поломку — и
+    поблажка здесь подменяла бы отказ чужой причиной (регресс L19)."""
     from config import _default_config_path, validate_config_text_with_sections
     path = Path(path)
     is_base = path.resolve() == Path(base_path).resolve()
+    lenient_prebroken = name == ""
     if not path.is_file():
         candidate = f"profile: {quote_scalar(name)}\n"
         if is_base:
             validate_config_text_with_sections(
-                candidate, base_path=path, extra_candidates=extra_candidates)
+                candidate, base_path=path, extra_candidates=extra_candidates,
+                lenient_prebroken=lenient_prebroken)
         else:
             validate_config_text_with_sections(
                 candidate, base_path=base_path, target=path,
-                extra_candidates=extra_candidates)
+                extra_candidates=extra_candidates,
+                lenient_prebroken=lenient_prebroken)
         create_pointer_file(path, name)
         return
     text = read_user_text(path)
@@ -647,13 +658,15 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
 
         def validate(candidate: str) -> None:
             validate_config_text_with_sections(
-                candidate, base_path=path, extra_candidates=extra_candidates)
+                candidate, base_path=path, extra_candidates=extra_candidates,
+                lenient_prebroken=lenient_prebroken)
     else:
 
         def validate(candidate: str) -> None:
             validate_config_text_with_sections(
                 candidate, base_path=base_path, target=path,
-                extra_candidates=extra_candidates)
+                extra_candidates=extra_candidates,
+                lenient_prebroken=lenient_prebroken)
     write_text(path, text, validate=validate)
 
 
