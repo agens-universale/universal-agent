@@ -357,7 +357,13 @@ def upsert_mapping_entry(
     ВСТАВКЕ новой записи в непустого родителя — `_exclude_next_attached_comment`,
     иначе комментарий соседней топ-уровневой секции переехал бы ПЕРЕД новую
     запись при добавлении второй+ записи подряд, напр. models.light вслед за
-    models.default)."""
+    models.default). Хвостовой «шум» за последней содержательной строкой записи
+    (пустые строки, висячий комментарий, отделённый пустой строкой) записи НЕ
+    принадлежит — граница замены и точка вставки откатываются `_trim_trailing_
+    noise`, тем же правилом, каким давно живёт `remove_mapping_entry`: без него
+    замена уносила висячий комментарий секции вместе с пустой строкой-
+    разделителем, а вставка вставала ПОСЛЕ чужого комментария, делая его своей
+    шапкой (ревью MR #80, M11)."""
     p_start, p_end, p_indent, p_rest = find_anchor(text, parent_dotted)
     parent_key = parent_dotted.rsplit(".", 1)[-1]
     span_end = section_end(text, p_end, p_indent)
@@ -372,13 +378,16 @@ def upsert_mapping_entry(
             # Родитель без единой записи-строки ("parent:" ИЛИ "parent: {}", в т.ч.
             # с висячими комментами под ним) — нормализуем инлайновую форму в
             # блочную и вставляем первую запись. Непустой инлайновый мэппинг сюда
-            # не доедет: `_empty_parent_tail` отказывает.
+            # не доедет: `_empty_parent_tail` отказывает. `block_end` здесь и
+            # граница, и точка вставки — откатывать его нечем и незачем.
             tail = _empty_parent_tail(p_rest, parent_dotted)
             return (text[:p_start] + f"{p_indent}{parent_key}:{tail}\n"
                     + text[p_end:block_end] + new_block + text[block_end:])
-        return _splice(text, block_end, new_block)
+        return _splice(text, _trim_trailing_noise(text, p_end, block_end), new_block)
     entry_start = _attached_comment_start(text, k_start, k_indent)
-    entry_end = _exclude_next_attached_comment(text, section_end(text, k_end, k_indent))
+    entry_end = _trim_trailing_noise(
+        text, k_start,
+        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
     return text[:entry_start] + new_block + text[entry_end:]
 
 
@@ -448,6 +457,121 @@ def remove_mapping_entry(text: str, parent_dotted: str, key: str) -> str:
         return (text[:p_start] + f"{p_indent}{parent_key}: {{}}{tail}\n"
                 + remaining + text[block_end:])
     return text[:entry_start] + text[entry_end:]
+
+
+def _split_trailing_comment(rest: str) -> tuple[str, str]:
+    """Хвост строки ключа → (значение, трейлинг-комментарий с ведущими пробелами
+    либо ''). Решётка внутри кавычек — часть значения, а не комментарий; внутри
+    двойных кавычек уважается escape `\\`, внутри одинарных — удвоение `''`."""
+    quote = None
+    i = 0
+    while i < len(rest):
+        ch = rest[i]
+        if quote == '"' and ch == "\\":
+            i += 2
+            continue
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or rest[i - 1] in " \t"):
+            j = i
+            while j > 0 and rest[j - 1] in " \t":
+                j -= 1
+            return rest[:j], rest[j:]
+        i += 1
+    return rest, ""
+
+
+def _value_scalar(value_text: str):
+    """Значение строки как YAML-скаляр — тем же правилом, каким `_key_scalar`
+    сравнивает ключи: «то же значение» обязано сходиться поверх начертаний
+    (старая строка написана рукой в одинарных кавычках, новую выдал `safe_dump`
+    без кавычек вовсе). Не разобралось — сравниваем литералом."""
+    try:
+        return yaml.safe_load(value_text)
+    except yaml.YAMLError:
+        return value_text.strip()
+
+
+def carry_entry_comments(text: str, parent_dotted: str, key: str,
+                         block_lines: list[str]) -> list[str]:
+    """`block_lines` с комментариями СТАРОЙ записи `key` из `text`: прикреплённый
+    комментарий записи — первыми строками (ровно тем каналом, который контракт
+    `upsert_mapping_entry` и предлагает вызывающему), трейлинг-комментарии —
+    обратно на строки, оставшиеся с ТЕМ ЖЕ ключом и ТЕМ ЖЕ значением.
+
+    Нужна вызывающим, которые пересобирают блок записи из разобранного словаря
+    (слой записи реестра): reparse+reserialize честно переносит данные, но не
+    комментарии — правка одного поля молча уносила и комментарий-шапку записи
+    («прод-эндпоинт, не трогать…»), и инлайновые на соседних НЕТРОНУТЫХ строках.
+    Валидация потерю не ловит (результат схемно валиден), бэкапа у записи нет.
+
+    Трейлинг ПРАВИМОЙ строки (значение изменилось) намеренно не переносится: он
+    описывал старое значение, приписать его новому — соврать; так вела себя и
+    построчная правка до пересборки. Ключ и значение сверяются как YAML-скаляры,
+    а не побайтово. Записи нет в `text` — block_lines отдаются как есть."""
+    try:
+        k_start, k_end, k_indent, _rest = _find_child_anchor(text, parent_dotted, key)
+    except KeyError:
+        return list(block_lines)
+    entry_start = _attached_comment_start(text, k_start, k_indent)
+    attached = [line[len(k_indent):].rstrip("\r\n")
+                for _s, _e, line in _lines_with_offsets(text[entry_start:k_start])]
+    entry_end = _trim_trailing_noise(
+        text, k_start,
+        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
+    old_comments: list[tuple] = []
+    for _s, _e, line in _lines_with_offsets(text[k_start:entry_end]):
+        match = _KEY_LINE_RE.match(line)
+        if match is None:
+            continue
+        value, comment = _split_trailing_comment(match.group("rest"))
+        if comment.strip():
+            old_comments.append((_key_scalar(match.group("key").strip()),
+                                 _value_scalar(value), comment.rstrip("\r\n")))
+    out: list[str] = []
+    for line in block_lines:
+        match = _KEY_LINE_RE.match(line)
+        if match is not None:
+            value, own = _split_trailing_comment(match.group("rest"))
+            if not own:
+                wanted = (_key_scalar(match.group("key").strip()), _value_scalar(value))
+                for idx, (old_key, old_value, comment) in enumerate(old_comments):
+                    if (old_key, old_value) == wanted:
+                        line += comment
+                        del old_comments[idx]
+                        break
+        out.append(line)
+    return attached + out
+
+
+def entry_uses_yaml_anchors(text: str, parent_dotted: str, key: str) -> bool:
+    """Использует ли СУЩЕСТВУЮЩАЯ запись `key` YAML-якоря/alias/merge (`&a`, `*a`,
+    `<<: *a`). Вызывающему, который пересобирает блок через reparse+reserialize,
+    это вопрос «можно ли вообще»: `safe_load` разворачивает alias и merge в
+    обычные ключи, и пересборка молча инлайнит ссылку (или роняет объявление
+    якоря) — текст остаётся валидным, потерю не ловит никто.
+
+    Спрашивается ПАРСЕР (поток событий с позициями), а не байты строк: `"*wild"`
+    в кавычках — строка, и текстовый детект отбивал бы легальные записи. Ответ —
+    по позиции: событие с якорем внутри диапазона записи. Записи нет или текст
+    не разбирается — False: негодный YAML отбивает своя проверка вызывающего."""
+    try:
+        k_start, k_end, k_indent, _rest = _find_child_anchor(text, parent_dotted, key)
+    except KeyError:
+        return False
+    entry_end = section_end(text, k_end, k_indent)
+    try:
+        for event in yaml.parse(text):
+            if getattr(event, "anchor", None) is None:
+                continue
+            if k_start <= event.start_mark.index < entry_end:
+                return True
+    except yaml.YAMLError:
+        return False
+    return False
 
 
 def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) -> None:

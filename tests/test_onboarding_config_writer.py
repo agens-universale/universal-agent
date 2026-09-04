@@ -776,3 +776,42 @@ def test_remove_mapping_entry_still_drops_the_entrys_own_attached_comment():
 
     assert "# про a" not in out          # свой комментарий ушёл с записью
     assert "# про b" in out              # чужой остался при своей записи
+
+
+def test_upsert_mapping_entry_replace_keeps_a_dangling_comment_after_the_last_entry():
+    """Зеркало remove-теста выше для ветки ЗАМЕНЫ (ревью MR #80, M11): комментарий,
+    отделённый от записи пустой строкой, ей не принадлежит — замена записи его не
+    уносит. Конец диапазона считался голым `_exclude_next_attached_comment(
+    section_end(...))` — без `_trim_trailing_noise`, которым тот же расчёт давно
+    обёрнут у `remove_mapping_entry`: висячий комментарий хвоста секции уезжал в
+    заменяемый диапазон, а с ним и пустая строка-разделитель (повторные прогоны
+    слипали файл). Валидация потерю не ловит — результат схемно валиден, — а
+    бэкапа у записи реестра нет."""
+    text = ("slots:\n"
+            '  default: "a"\n'
+            "\n"
+            "  # light намеренно не задан: см. регламент\n"
+            'level: "default"\n')
+
+    out = w.upsert_mapping_entry(text, "slots", "default", ['default: "b"'])
+
+    assert "# light намеренно не задан" in out
+    assert '  default: "b"\n\n' in out    # пустая строка-разделитель цела
+    assert 'level: "default"' in out
+
+
+def test_upsert_mapping_entry_insert_goes_before_a_dangling_comment_not_after():
+    """Та же дыра у ветки ВСТАВКИ в непустого родителя: новая запись вставала
+    ПОСЛЕ висячего комментария — чужой комментарий становился её шапкой и
+    искажал смысл."""
+    text = ("models:\n"
+            '  a:\n    model: "m-a"\n'
+            "\n"
+            "  # хвостовой комментарий секции\n"
+            'level: "default"\n')
+
+    out = w.upsert_mapping_entry(text, "models", "b", ["b:", '  model: "m-b"'])
+
+    assert out.index("  b:") < out.index("# хвостовой комментарий секции")
+    assert yaml.safe_load(out)["models"] == {
+        "a": {"model": "m-a"}, "b": {"model": "m-b"}}

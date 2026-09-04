@@ -708,3 +708,36 @@ def test_a_readable_target_still_writes(tmp_path):
 
     rw.upsert_model(target, "b", {"model": "y"}, "", is_profile=True)
     assert "b:" in target.read_text(encoding="utf-8")
+
+
+# --- Нестроковый алиас: отказ с подписью операции, а не трейсбек (L17) ---
+#
+# Достижимо мастером: YAML-ключ `4.1:` без кавычек парсится float'ом, повторный
+# прогон мастера собирает `('write_slot', 'default', 4.1)`. L17 ловил СЛЕДСТВИЕ —
+# `quote_scalar` падал `AttributeError` ('float' object has no attribute
+# 'replace') МИМО кортежа механических сбоев `_apply_ops_to_text`, — но не саму
+# ПРИЧИНУ: нестроковый алиас так и оставался нестроковым. Ревью MR #80 (#4):
+# граница нормализации типа (`str(alias)`/`str(value)` в `_write_slot_text`/
+# `_write_assign_text`/`_yaml_key`) убирает сам триггер — дальше это ОБЫЧНЫЙ
+# домен-отказ «такого алиаса нет в реестре» (модель `gc`, не «4.1»/«True»), а
+# не механический сбой с именем операции вместо причины.
+
+
+@pytest.mark.parametrize("alias", [4.1, True], ids=["float", "bool"])
+def test_a_non_string_slot_alias_is_a_write_error_not_a_traceback(tmp_path, alias):
+    text = 'models:\n  gc:\n    model: "x"\nslots:\n  default: "gc"\n'
+    target = _target(tmp_path, text)
+
+    with pytest.raises(RegistryWriteError, match=f'slots\\.default: алиас "{alias}" не найден'):
+        rw.write_slot(target, "default", alias, "")
+    assert target.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("value", [4.1, True], ids=["float", "bool"])
+def test_a_non_string_assign_value_is_a_write_error_not_a_traceback(tmp_path, value):
+    text = 'models:\n  gc:\n    model: "x"\nassign:\n  finish_gate: "gc"\n'
+    target = _target(tmp_path, text)
+
+    with pytest.raises(RegistryWriteError, match=f'assign\\.finish_gate: значение "{value}"'):
+        rw.write_assign(target, "finish_gate", value, "")
+    assert target.read_text(encoding="utf-8") == text

@@ -82,7 +82,15 @@ def _yaml_key(key: str) -> str:
     (`123`, `true`, `null`, `0755` — локальные раздачи такие id дают), обязан
     уехать в кавычках, иначе запись валится схемой («models.123.[key]: input
     should be a valid string») в момент, когда соседние ключи уже записаны.
-    Одна функция и на запись, и на поиск — обе стороны видят один вид."""
+    Одна функция и на запись, и на поиск — обе стороны видят один вид.
+
+    `str(key)` первой строкой — граница нормализации типа (ревью MR #80, #4):
+    алиас `4.1` без кавычек в YAML разбирается `yaml.safe_load` ФЛОУТОМ, и тем
+    же флоутом приходит сюда любой код, читающий его из документа (пикер
+    значений слота). Без приведения `_PLAIN_KEY_RE.match` падал `TypeError`
+    («expected string or bytes-like object»), а не сообщением про алиас —
+    механический сбой вместо честной записи "4.1"."""
+    key = str(key)
     if not _PLAIN_KEY_RE.match(key):
         return ocw.quote_scalar(key)
     try:
@@ -279,7 +287,15 @@ def _upsert_model_text(text: str, template: str, alias: str, fields: dict) -> st
     раз (`token`), молча терялись бы. Правило: ключ со значением — установить,
     ключ со значением `None` — удалить из записи, отсутствующий ключ — сохранить
     как был. Старая запись читается из ТЕКУЩЕГО текста — в транзакции это уже
-    результат предыдущих операций, а не состояние диска."""
+    результат предыдущих операций, а не состояние диска.
+
+    Пересборка блока (reparse+reserialize) несёт две оговорки. Комментарии старой
+    записи переносятся `ocw.carry_entry_comments` — шапка записи и трейлинг строк,
+    оставшихся с тем же ключом и значением: данные пересборка переживают, а
+    комментарии без переноса молча пропадали. Запись с YAML-якорями/merge не
+    пересобирается ВООБЩЕ — отказ: `safe_dump` молча инлайнит `<<: *common` и
+    роняет объявления якорей, текст остаётся валидным, а запись немедленная и
+    отмены нет — предупреждать постфактум поздно."""
     old_entry = (_document(text).get("models") or {}).get(alias)
     entry = dict(old_entry) if isinstance(old_entry, dict) else {}
     for key, value in fields.items():
@@ -289,7 +305,12 @@ def _upsert_model_text(text: str, template: str, alias: str, fields: dict) -> st
             entry[key] = value
     key = _yaml_key(alias)
     text = ocw.ensure_section_anchor_text(text, "models", template)
-    return ocw.upsert_mapping_entry(text, "models", key, _entry_block_lines(key, entry))
+    if ocw.entry_uses_yaml_anchors(text, "models", key):
+        raise RegistryWriteError(
+            f"запись «{alias}» использует YAML-якоря/merge — правьте файл руками"
+        )
+    block = ocw.carry_entry_comments(text, "models", key, _entry_block_lines(key, entry))
+    return ocw.upsert_mapping_entry(text, "models", key, block)
 
 
 def _drop_mapping_entry(text: str, parent: str, key: str, subject: str) -> str:
@@ -372,25 +393,38 @@ def _write_slot_text(text: str, template: str, level: str, alias) -> str:
     отдельной строки нет, сырое `remove_mapping_entry` вернуло бы исходный текст,
     а секция отрапортовала бы «✓ Слот «default» снят» о неслучившемся. Слота нет
     вовсе — идемпотентный no-op: пикер открывается на «не задан», и Enter без
-    движения курсора штатно шлёт `None`."""
+    движения курсора штатно шлёт `None`. Прикреплённый комментарий строки слота
+    переносится (`carry_entry_comments`) — тот же класс потери, что у записи
+    реестра, только запись однострочная.
+
+    `str(alias)` (не-`None` ветка) — та же граница нормализации типа, что у
+    `_yaml_key` (ревью MR #80, #4): алиас `4.1` без кавычек в YAML разбирается
+    ФЛОУТОМ, тем же флоутом сюда приходит выбор пикера значений слота."""
     if alias is None:
         if level not in (_document(text).get("slots") or {}):
             return text
         return _drop_mapping_entry(text, "slots", level, f"слота slots.{level}")
+    alias = str(alias)
     text = ocw.ensure_section_anchor_text(text, "slots", template)
-    return ocw.upsert_mapping_entry(
+    block = ocw.carry_entry_comments(
         text, "slots", level, [f"{level}: {ocw.quote_scalar(alias)}"])
+    return ocw.upsert_mapping_entry(text, "slots", level, block)
 
 
 def _write_assign_text(text: str, template: str, consumer: str, value) -> str:
     """Задать/снять привязку потребителя. Снятие — под тем же стражем, что и слот
     (`_write_slot_text`): формы без отдельной строки бывают не только инлайновые,
-    но и «ключ записан другими кавычками» (`'*'` против `"*"` писателя)."""
+    но и «ключ записан другими кавычками» (`'*'` против `"*"` писателя).
+
+    `str(value)` (не-`None` ветка) — та же граница нормализации типа, что у
+    `_write_slot_text`/`_yaml_key` (ревью MR #80, #4): привязка на алиас
+    `4.1` приходит тем же нестроковым флоутом, каким его разобрал YAML."""
     parent, key = _assign_coordinate(consumer)
     if value is None:
         if not _assign_present(_document(text), consumer):
             return text
         return _drop_mapping_entry(text, parent, key, f"привязки assign.{consumer}")
+    value = str(value)
     text = ocw.ensure_section_anchor_text(text, "assign", template)
     if parent != "assign":
         # Вложенный якорь (`assign.subagents`) — не топ-уровневый, его
@@ -401,8 +435,9 @@ def _write_assign_text(text: str, template: str, consumer: str, value) -> str:
         except KeyError:
             text = ocw.upsert_mapping_entry(text, "assign", nested, [f"{nested}: {{}}"])
     key_yaml = _yaml_key(key)
-    return ocw.upsert_mapping_entry(
+    block = ocw.carry_entry_comments(
         text, parent, key_yaml, [f"{key_yaml}: {ocw.quote_scalar(value)}"])
+    return ocw.upsert_mapping_entry(text, parent, key_yaml, block)
 
 
 _OPERATIONS = {
@@ -450,9 +485,16 @@ def _apply_ops_to_text(text: str, ops, template: str, survivors=frozenset()) -> 
             # своё внутреннее имя значит вести служебный лог в пользовательском
             # тексте: отказ доезжает до notice секции дословно.
             raise
-        except (KeyError, TypeError, ValueError) as exc:
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
             # Механический сбой (сломанный аргумент, отсутствующий якорь) фразы для
-            # человека не несёт — вот его и подписываем операцией.
+            # человека не несёт — вот его и подписываем операцией. Нестроковый алиас
+            # (YAML-ключ `4.1:` без кавычек парсится float'ом) сюда больше не
+            # доезжает — граница нормализации типа (`str(...)` в `_yaml_key`/
+            # `_write_slot_text`/`_write_assign_text`, ревью MR #80, #4) чинит
+            # ПРИЧИНУ, а не только глушит `AttributeError` из `quote_scalar` на
+            # `.replace`. Класс не сужаем: `AttributeError` остаётся живым по
+            # другому пути (например, `fields` не словарь у `upsert_model` —
+            # `fields.items()` падает тем же классом).
             raise RegistryWriteError(f"{_op_label(op)}: {exc}") from exc
     return text
 

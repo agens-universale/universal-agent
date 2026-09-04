@@ -112,6 +112,165 @@ def test_upsert_model_merge_removes_key_passed_as_none(tmp_path, template):
     assert entry["url"] == "https://openrouter.ai/api/v1/chat/completions"   # сосед как был
 
 
+# --- M3 (ревью MR #80): пересборка блока не теряет комментарии и не рвёт якоря --
+
+
+_COMMENTED_REGISTRY = (
+    'profile: ""\n'
+    "level: default\n"
+    "models:\n"
+    "  # прод-эндпоинт, не трогать без согласования\n"
+    "  flash:\n"
+    '    model: "old-model"  # выбран на бенче, спорно\n'
+    '    url: "https://prod/v1"  # инлайновый на url\n'
+    '    token: "sk-secret"\n'
+    "slots:\n"
+    '  default: "flash"\n'
+    "backend:\n"
+    '  completions_url: "http://real/v1/chat/completions"\n'
+)
+
+
+def test_upsert_model_carries_comments_of_untouched_lines(tmp_path, template):
+    """Правка ОДНОГО поля пересобирает блок записи через reparse+reserialize —
+    прикреплённый комментарий записи и трейлинг-комментарии НЕТРОНУТЫХ соседних
+    строк молча терялись: результат схемно валиден, валидация потерю не ловит,
+    бэкапа нет. Трейлинг самой ПРАВИМОЙ строки не переносится намеренно: он
+    описывал старое значение, приписать его новому — соврать (терялся и в BASE)."""
+    path = _cfg(tmp_path, _COMMENTED_REGISTRY)
+
+    upsert_model(path, "flash", {"model": "new-model"}, template)
+
+    text = path.read_text(encoding="utf-8")
+    assert "# прод-эндпоинт, не трогать без согласования" in text
+    assert "# инлайновый на url" in text            # сосед не тронут — комментарий цел
+    assert "# выбран на бенче" not in text          # правимая строка — комментарий ушёл
+    assert _models(path)["flash"] == {
+        "model": "new-model", "url": "https://prod/v1", "token": "sk-secret"}
+
+
+_ANCHORED_REGISTRY = (
+    'profile: ""\n'
+    "level: default\n"
+    "models:\n"
+    "  proto: &proto\n"
+    '    model: "base-model"\n'
+    "  flash:\n"
+    "    <<: *proto\n"
+    '    url: "https://prod/v1"\n'
+    '    token: "sk-x"\n'
+    "slots:\n"
+    '  default: "flash"\n'
+    "backend:\n"
+    '  completions_url: "http://real/v1/chat/completions"\n'
+)
+
+
+def test_upsert_model_refuses_an_entry_that_uses_yaml_anchors(tmp_path, template):
+    """reparse+reserialize разворачивает `<<: *proto` в обычные ключи — связь с
+    якорем рвётся МОЛЧА: текст валиден, запись немедленная, отмены нет. Молча
+    инлайнить — порча, предупреждать постфактум — поздно; единственный честный
+    исход — отказ ДО записи, файл байт-в-байт цел."""
+    path = _cfg(tmp_path, _ANCHORED_REGISTRY)
+    before = path.read_bytes()
+
+    with pytest.raises(RegistryWriteError, match="якор"):
+        upsert_model(path, "flash", {"model": "new"}, template)
+
+    assert path.read_bytes() == before
+
+
+def test_upsert_model_refuses_to_silently_drop_an_anchor_declaration(tmp_path, template):
+    """Якорь без единой ссылки НА СЕГОДНЯ: пересборка молча роняла `&addr` —
+    результат валиден, потерю не ловил никто. Тот же отказ, что и у alias/merge."""
+    body = (
+        'profile: ""\n'
+        "level: default\n"
+        "models:\n"
+        "  flash:\n"
+        '    url: &addr "https://prod/v1"\n'
+        '    token: "sk-x"\n'
+        '    model: "old"\n'
+        "slots:\n"
+        '  default: "flash"\n'
+    )
+    path = _cfg(tmp_path, body)
+    before = path.read_bytes()
+
+    with pytest.raises(RegistryWriteError, match="якор"):
+        upsert_model(path, "flash", {"model": "new"}, template)
+
+    assert path.read_bytes() == before
+
+
+def test_editing_the_anchor_owner_is_still_refused(tmp_path, template):
+    """Сторож: правка записи-ВЛАДЕЛЬЦА якоря отбивалась и раньше (пересборка
+    роняет `&proto`, и `*proto` соседа перестаёт разбираться — отказ валидации);
+    отказ обязан остаться отказом, а файл — целым."""
+    path = _cfg(tmp_path, _ANCHORED_REGISTRY)
+    before = path.read_bytes()
+
+    with pytest.raises(RegistryWriteError):
+        upsert_model(path, "proto", {"model": "new"}, template)
+
+    assert path.read_bytes() == before
+
+
+def test_a_quoted_star_value_is_not_mistaken_for_an_alias(tmp_path, template):
+    """Сторож от текстового пере-детекта: `"*wild*"` в кавычках — строка, не
+    alias. Вопрос «запись использует якоря?» задаётся парсеру (потоку событий),
+    а не байтам строки — легальная запись правится свободно."""
+    body = (
+        "models:\n"
+        "  flash:\n"
+        '    model: "*wild*"\n'
+        '    url: "https://x/v1"\n'
+        '    token: "sk-x"\n'
+        "slots:\n"
+        '  default: "flash"\n'
+    )
+    path = _cfg(tmp_path, body)
+
+    upsert_model(path, "flash", {"model": "new"}, template)
+
+    assert _models(path)["flash"]["model"] == "new"
+
+
+def test_write_slot_keeps_the_attached_comment_of_the_slot_line(tmp_path, template):
+    """Тот же класс у однострочных записей: прикреплённый комментарий слота
+    переживает смену значения (трейлинг правимой строки — нет, как и у записи
+    реестра)."""
+    body = (
+        'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n'
+        "slots:\n"
+        "  # осознанный выбор: см. решение от 2026-08\n"
+        '  default: "a"\n'
+    )
+    path = _cfg(tmp_path, body)
+
+    write_slot(path, "default", "b", template)
+
+    text = path.read_text(encoding="utf-8")
+    assert "# осознанный выбор: см. решение от 2026-08" in text
+    assert yaml.safe_load(text)["slots"] == {"default": "b"}
+
+
+def test_write_assign_keeps_the_attached_comment_of_the_binding(tmp_path, template):
+    body = (
+        'models:\n  a:\n    model: "x"\n'
+        "assign:\n"
+        "  # гейт слабой моделью не судим\n"
+        '  finish_gate: "a"\n'
+    )
+    path = _cfg(tmp_path, body)
+
+    write_assign(path, "finish_gate", "light", template)
+
+    text = path.read_text(encoding="utf-8")
+    assert "# гейт слабой моделью не судим" in text
+    assert yaml.safe_load(text)["assign"] == {"finish_gate": "light"}
+
+
 def test_upsert_model_leaving_half_a_pair_is_rejected(tmp_path, template):
     """Слой записи валидирует РЕЗУЛЬТАТ, значит правило пары (§2) действует и на нём:
     снять `token` у записи, которая держит свой адрес, — это оставить половину, после
@@ -286,6 +445,23 @@ def test_write_slot_dangling_alias_leaves_file_untouched(tmp_path, template):
         write_slot(path, "light", "нет-такого", template)
 
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_write_slot_normalizes_a_non_string_alias_from_a_bare_numeric_yaml_key(
+        tmp_path, template):
+    """[ревью #4] Алиас `4.1` в YAML (без кавычек) разбирается `yaml.safe_load`
+    ФЛОУТОМ, не строкой — картина, с которой видит его любой код, читающий
+    реестр из документа (пикер значений слота, например). Аргумент `alias`
+    сюда доезжает тем же флоутом — баг нормализации типа, а не механический
+    сбой: `write_slot` обязан привести его к строке на границе, а не падать
+    `AttributeError` внутри `quote_scalar` (`'float' object has no attribute
+    'replace'`), проглоченным общим перехватом `_apply_ops_to_text`."""
+    path = _cfg(tmp_path, _BASE.replace(
+        'level: default\n', 'level: default\nmodels:\n  "4.1":\n    model: "x"\n'))
+
+    write_slot(path, "default", 4.1, template)
+
+    assert yaml.safe_load(path.read_text(encoding="utf-8"))["slots"]["default"] == "4.1"
 
 
 def test_write_slot_clearing_last_slot_of_multi_model_registry_is_rejected(tmp_path, template):
