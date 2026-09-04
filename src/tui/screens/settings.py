@@ -3654,15 +3654,17 @@ class SettingsScreen(Screen):
         знает и правило записи волны A (`_profile_activation_target`): указатель
         туда не пишет никто, а знание о слое, размазанное по двум правилам, хуже
         одного (пробел зафиксирован в отчёте)."""
-        from config_modules.env_interpolation import resolve_env_placeholders
+        from config_modules.layers import resolve_pointer_value
 
         def _named(doc: dict) -> bool:
-            # Значение интерполируется ПЕРЕД сравнением — зеркало ядра
-            # (`layers.resolve_profile_pointer`): загрузчик разворачивает
+            # Значение интерполируется ПЕРЕД сравнением ТЕМ ЖЕ домом, что ядро
+            # (`layers.resolve_pointer_value`): загрузчик разворачивает
             # `${ENV:…}` до чтения указателя, и сырое сравнение не опознавало
-            # слой-носитель при `profile: "${ENV:X}"` — переименование/удаление
-            # пропускали его, указатель оставался висеть на исчезнувшем имени.
-            return str(resolve_env_placeholders(doc.get("profile")) or "").strip() == name
+            # слой-носитель при `profile: "${ENV:X}"`. Своя редакция на полном
+            # резолвере шумела warning'ом и лезла на диск на каждый кадр баннера
+            # и расходилась с ядерным читателем в том же кадре (ревью волны F,
+            # находки 2–3).
+            return resolve_pointer_value(doc.get("profile")) == name
 
         layers = []
         if _named(self._project_config_doc()):

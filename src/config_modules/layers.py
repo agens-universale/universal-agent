@@ -11,6 +11,7 @@
 импортах внутри функций, то есть до первой естественной правки.
 """
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
@@ -18,7 +19,7 @@ import yaml
 from pydantic import ValidationError
 
 from config_modules.compat import apply_compat
-from config_modules.env_interpolation import resolve_env_placeholders
+from config_modules.env_interpolation import resolve_env_only, resolve_env_placeholders
 from config_modules import env_vars
 from config_modules.merge import deep_merge
 from config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
@@ -518,6 +519,49 @@ def _safe_yaml_dict(path) -> Optional[Dict[str, Any]]:
     return raw if isinstance(raw, dict) else None
 
 
+def resolve_pointer_value(value) -> str:
+    """Значение указателя `profile:` глазами загрузчика, без побочек витринной
+    частоты: `${ENV:…}` разворачивается всегда (`resolve_env_only` — без
+    warning на незаданную переменную и без файлового резолвера), а полный
+    резолв с чтением диска включается ТОЛЬКО когда в значении остался
+    `${FILE:` — редчайший указатель-из-файла платит за себя сам, ровно как у
+    загрузчика (тот полным резолвером разворачивает весь документ). Одна
+    редакция на ядро (`resolve_profile_pointer`) и витрину
+    (`settings._profile_pointer_layers`): написанные порознь, читатели
+    указателя расходились и с загрузчиком (`${FILE:…}` возвращался
+    литералом — удаление/переименование оставляло указатель висячим), и
+    между собой в одном кадре (ревью волны F, находки 2–3)."""
+    resolved = resolve_env_only(value)
+    if isinstance(resolved, str) and "${FILE:" in resolved:
+        resolved = _pointer_file_resolved(resolved)
+    return str(resolved or "").strip()
+
+
+# Кэш размера 1 для ${FILE:}-указателя: (значение, mtime_ns | None) -> итог.
+# Размер 1 достаточен — указатель у стека один; ключ по mtime, а не по TTL:
+# появившийся или переписанный файл пересчитывается сразу, неизменный (и
+# отсутствующий) не зовёт полный резолвер вовсе (ревью N7, находка 4: без
+# кэша битый путь писал «credential file not readable» на каждый кадр).
+_POINTER_FILE_CACHE: list = [None]
+_POINTER_FILE_RE = re.compile(r"\$\{FILE:([^}]*)\}")
+
+
+def _pointer_file_resolved(value: str) -> str:
+    m = _POINTER_FILE_RE.search(value)
+    mtime = None
+    if m:
+        try:
+            mtime = os.stat(os.path.expanduser(m.group(1).strip())).st_mtime_ns
+        except OSError:
+            mtime = None
+    cached = _POINTER_FILE_CACHE[0]
+    if cached is not None and cached[0] == value and cached[1] == mtime:
+        return cached[2]
+    resolved = str(resolve_env_placeholders(value) or "")
+    _POINTER_FILE_CACHE[0] = (value, mtime, resolved)
+    return resolved
+
+
 def resolve_profile_pointer(base_path, *, candidates=None) -> str:
     """Указатель `profile:` — какое имя назовут слои база → managed → project
     (порядок `_merge_layers`), ЕСЛИ их удастся прочитать, БЕЗ резолва самого
@@ -556,7 +600,25 @@ def resolve_profile_pointer(base_path, *, candidates=None) -> str:
     ли указатель запись вот в этот файл» (`onboarding.load_config_for_repair`):
     ответ по диску говорит о том, что лежит СЕЙЧАС, а спрашивают о том, что
     прочтёт следующий старт ПОСЛЕ записи. Считать это отдельной прикидкой нельзя
-    — она и есть четвёртая редакция резолва указателя."""
+    — она и есть четвёртая редакция резолва указателя.
+
+    Итог интерполируется, но ТОЛЬКО `${ENV:…}` (`resolve_env_only`, без файлового
+    резолвера и без логов) — не полным `resolve_env_placeholders`, каким
+    загрузчик разворачивает слои: сырая строка отсюда разъезжалась бы с ним — при
+    `profile: "${ENV:GC_PROFILE}"` слой профиля пропадал у всех потребителей
+    резолва разом (`stack_documents` → справки удаления, витрина происхождения,
+    ключ кэша вердикта), хотя гейт записи отвечал верно. Интерполируется только
+    ИТОГ мержа, не документы целиком: этой функции от них нужно одно имя, а
+    отсутствующая переменная у best-effort резолва — штатное «пусто», не отказ.
+
+    Не полный резолвер — потому что эта функция зовётся на КАЖДОЕ разрешение
+    указателя (витрина происхождения, ключ кэша вердикта, guard ссылок — с
+    UI-потока, за кадр): незаданная переменная у полного резолвера пишет
+    `warning` на КАЖДЫЙ такой вызов — то есть шумела бы на каждый кадр вместо
+    одного осмысленного предупреждения (ревью MR #80, #12). Само значение
+    разворачивает `resolve_pointer_value` — общий дом с витринным читателем
+    (`settings._profile_pointer_layers`): два читателя указателя в одном кадре
+    расходились и с загрузчиком, и между собой (ревью волны F, находки 2–3)."""
     _candidates = {Path(p).resolve(): doc for p, doc in (candidates or {}).items()}
 
     def _document(path):
@@ -572,7 +634,7 @@ def resolve_profile_pointer(base_path, *, candidates=None) -> str:
         raw = _document(path)
         if raw is not None:
             merged = deep_merge(merged, raw)
-    return str(merged.get("profile") or "").strip()
+    return resolve_pointer_value(merged.get("profile"))
 
 
 def profile_pointer_write_target(base_path, *, project_doc=None) -> Path:

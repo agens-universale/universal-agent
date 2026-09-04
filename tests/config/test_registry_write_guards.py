@@ -392,6 +392,97 @@ def test_a_pointer_conflict_between_base_and_project_is_resolved_like_the_loader
     assert rw.references_broken_by_removal(base, "gc") == []
 
 
+def test_resolve_profile_pointer_interpolates_env_placeholders(stack, monkeypatch):
+    """Указатель `profile: "${ENV:…}"` (ревью MR #80, M4): загрузчик интерполирует
+    ДО чтения указателя, а общий резолв отдавал сырую строку — слой профиля
+    пропадал у ВСЕХ потребителей резолва разом (stack_documents → справки
+    удаления, витрина происхождения, ключ кэша вердикта), при том что гейт
+    записи отвечал верно: две редакции резолва разъехались. Интерполируется
+    ИТОГ мержа — ${ENV:…}-only резолвером (`resolve_env_only`), не тем же
+    `resolve_env_placeholders`, что у загрузчика: указатель зовётся на каждый
+    кадр UI, и файловый резолв/warning там неуместны (ревью MR #80, #12)."""
+    from config_modules.layers import resolve_profile_pointer, stack_documents
+
+    base, profiles = stack
+    monkeypatch.setenv("GC_TEST_PROFILE_PTR", "work")
+    base.write_text(
+        'profile: "${ENV:GC_TEST_PROFILE_PTR}"\nmodels:\n  gc:\n    model: "x"\n',
+        encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+
+    assert resolve_profile_pointer(base) == "work"
+    assert any(Path(p).resolve() == (profiles / "work.yml").resolve()
+               for p, _doc in stack_documents(base))
+
+
+def test_a_broken_file_marker_logs_once_not_every_frame(stack, tmp_path, caplog):
+    """[ревью N7, находка 4] Указатель ${FILE:битый-путь}: полный резолвер зовётся
+    на КАЖДОЕ разрешение указателя (за кадр, с UI-потока) — без кэша нечитаемый
+    файл заливал лог предупреждением на каждый вызов. Кэш по (значение, mtime):
+    повторный вызов при неизменном файле не ходит в полный резолвер вовсе;
+    появившийся файл (mtime сменился) честно пересчитывается."""
+    from config_modules.layers import resolve_profile_pointer
+
+    base, _profiles = stack
+    marker = tmp_path / "no-such-pointer.txt"          # файла нет
+    base.write_text(
+        'profile: "${FILE:%s}"\n' % str(marker).replace("\\", "/"),
+        encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        resolve_profile_pointer(base)
+        first = len(caplog.records)
+        resolve_profile_pointer(base)
+        resolve_profile_pointer(base)
+
+    assert len(caplog.records) == first, "повторные вызовы шумят в лог"
+
+    marker.write_text("work", encoding="utf-8")        # файл появился
+    (_profiles / "work.yml").write_text('slots: {}\n', encoding="utf-8")
+    assert resolve_profile_pointer(base) == "work"     # кэш не залип на пустоте
+
+
+def test_resolve_profile_pointer_follows_a_file_marker_like_the_loader(stack, tmp_path):
+    """[ревью волны F, находки 2-3] Указатель `profile: "${FILE:…}"`: загрузчик
+    разворачивает весь документ полным резолвером и активирует названный
+    профиль, а env-only резолв возвращал ЛИТЕРАЛ — все потребители резолва
+    расходились с работающим стеком, удаление/переименование оставляло
+    указатель висячим. `resolve_pointer_value` дорезолвит `${FILE:…}` полным
+    резолвером — редчайший указатель-из-файла платит за себя сам."""
+    from config_modules.layers import resolve_profile_pointer
+
+    base, profiles = stack
+    marker = tmp_path / "pointer.txt"
+    marker.write_text("work", encoding="utf-8")
+    base.write_text(
+        'profile: "${FILE:%s}"\nmodels:\n  gc:\n    model: "x"\n'
+        % str(marker).replace("\\", "/"),
+        encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+
+    assert resolve_profile_pointer(base) == "work"
+
+
+def test_resolve_profile_pointer_does_not_warn_on_an_unset_env_var(stack, caplog, monkeypatch):
+    """[ревью #12] `resolve_profile_pointer` — best-effort и зовётся на КАЖДОЕ
+    разрешение указателя (витрина происхождения, ключ кэша вердикта, guard
+    ссылок — с UI-потока, за кадр). Полный `resolve_env_placeholders` пишет
+    `warning` на каждую незаданную `${ENV:…}` — с указателем это шумело бы на
+    каждый кадр, хотя незаданная переменная в ИМЕНИ профиля — штатное
+    best-effort «пусто», не повод жаловаться (файловый секрет в имени профиля
+    — небыль, ей и подавно предупреждать не о чем)."""
+    from config_modules.layers import resolve_profile_pointer
+
+    monkeypatch.delenv("GC_TEST_PROFILE_PTR_UNSET", raising=False)
+    base, _profiles = stack
+    base.write_text('profile: "${ENV:GC_TEST_PROFILE_PTR_UNSET}"\n', encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        assert resolve_profile_pointer(base) == ""
+
+    assert caplog.records == []
+
+
 def test_resolve_profile_pointer_is_lenient_to_a_broken_base(stack):
     """База невалидна (внешняя порча, недописанный YAML) — указатель всё равно
     ищется в managed/project, тем же правилом, каким `config_raw.read_document`
