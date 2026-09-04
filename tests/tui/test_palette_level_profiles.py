@@ -643,7 +643,7 @@ def test_cmd_profiles_unknown_name_honest_refusal(tmp_path, monkeypatch):
     calls, hints = [], []
     app.switch_session_profile = lambda name: calls.append(name)
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
     scr._cmd_profiles("wrok")
     assert calls == []
     assert hints and "wrok" in hints[0] and "smoke" in hints[0]
@@ -663,9 +663,24 @@ def test_cmd_profiles_write_failure_shows_hint_not_crash(tmp_path, monkeypatch):
     hints = []
     app.switch_session_profile = _raiser(OSError("read-only"))
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
     scr._cmd_profiles("smoke")
     assert hints and "не сохранено" in hints[0] and "read-only" in hints[0]
+
+
+def test_refusal_hint_outlives_the_ephemeral_default(tmp_path, monkeypatch):
+    """Отказ с причиной держится 5с (`_show_footer_refusal`): 2-секундного
+    дефолта эфемерных подсказок не хватает прочитать координату и причину
+    («slots.default: алиас "ghost" не найден…») — живой смок владельца
+    2026-09-04."""
+    app = _picker_app(tmp_path, monkeypatch)
+    seen = []
+    app.switch_session_profile = _raiser(ValueError("slots.default: алиас"))
+    scr = _bare_trace_screen(monkeypatch, app)
+    scr._show_footer_hint = lambda text, **kw: seen.append((text, kw.get("seconds")))
+    scr._cmd_profiles("smoke")
+    assert seen and "не сохранено" in seen[0][0]
+    assert seen[0][1] == 5.0
 
 
 def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(tmp_path, monkeypatch):
@@ -673,7 +688,7 @@ def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(tmp_path, monkeypa
     hints = []
     app.switch_session_profile = _raiser(OSError("disk full"))
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
     scr._cmd_profiles("без профиля")
     assert hints and "не сохранено" in hints[0]
 
@@ -685,7 +700,7 @@ def test_cmd_profiles_vanished_profile_shows_hint_not_crash(tmp_path, monkeypatc
     hints = []
     app.switch_session_profile = _raiser(ValueError("профиль не найден"))
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
     scr._cmd_profiles("smoke")
     assert hints and "не сохранено" in hints[0]
 
@@ -717,7 +732,7 @@ def test_cmd_profiles_refuses_a_profile_that_does_not_assemble(tmp_path, monkeyp
     _add_unassemblable_profile(tmp_path)
     hints = []
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
 
     scr._cmd_profiles("broken-enc")
 
