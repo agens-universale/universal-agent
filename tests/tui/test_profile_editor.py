@@ -240,6 +240,49 @@ async def test_the_profile_key_cannot_be_written_into_a_profile(tmp_path, monkey
     validate_config_text_with_sections(profile.read_text(encoding="utf-8"))
 
 
+async def test_focus_returns_to_the_form_after_a_write_fails_past_the_env_confirm(
+        tmp_path, monkeypatch):
+    """Confirm ${ENV:...} снимает фокус ради баннера (`_submit_form`); второй Enter
+    подтверждает и уходит в `_finish_submit` → `_write`. Если запись всё же не
+    прошла (здесь — запрещённый `profile:` внутри профиля), форма остаётся
+    смонтированной, а фокус — снятым: клавиатура мертва, черновик виден, но
+    неправим иначе как через Esc (L21 ревью MR #80, находка #8)."""
+    import tui.app as app_mod
+    from tui.editors.model_entry_form import ModelEntryForm
+    _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(tmp_path / "base" / "profiles" / "work.yml",
+                     'profile: "other"\n'
+                     'models:\n'
+                     '  glm:\n'
+                     '    model: "z-ai/glm-5.3"\n'
+                     '    url: "http://glm-host/v1/chat/completions"\n'
+                     '    token: "${ENV:GLM_TOKEN}"\n')
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        before = profile.read_bytes()
+        ed = await _open_profile(pilot, scr, "work")
+        _cursor_to(ed, "entry", alias="glm")
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-token", Input).value = "literal-secret"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                   # submit → баннер перезаписи ссылки
+        await pilot.pause()
+        assert ed._env_pending is not None, "баннер подтверждения не поднялся"
+        await pilot.press("enter")                   # подтвердить — запись должна упасть
+        await pilot.pause()
+
+        assert "не сохранено" in _notice(scr), _notice(scr)
+        assert profile.read_bytes() == before         # запрещённый ключ отверг запись целиком
+        assert scr.query(ModelEntryForm), "форма ушла, хотя запись не прошла"
+        assert isinstance(scr.focused, Input), "фокус не вернулся в форму после отказа"
+
+
 async def test_the_address_warning_and_the_literal_token_warning_share_one_notice(
         tmp_path, monkeypatch):
     """`_write` шлёт предупреждение об адресе (ok=None), а следом

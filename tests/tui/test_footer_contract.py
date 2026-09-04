@@ -160,6 +160,49 @@ def test_the_file_viewer_key_is_promised_only_in_the_profile_sub_view():
         assert viewed.endswith(m._EXIT_TO_LIST), viewed   # выход остаётся последним
 
 
+@pytest.mark.asyncio
+async def test_main_section_empty_body_keeps_the_menu_exit_under_an_overlay(
+        tmp_path, monkeypatch):
+    """Страж над СОСТОЯНИЕМ (а): основная секция, реестр цели пуст и перекрыт слоем
+    выше — строк нет, Esc уводит в МЕНЮ хаба. Прежний футер безусловно отдавал
+    профильное «Esc — к списку»: списка профилей на этом экране нет, обещание вело
+    в никуда (M5 ревью MR #80). `is_profile=False` не имеет права выдавать футер с
+    хвостом `_EXIT_TO_LIST` ни в одном состоянии."""
+    from tests.tui.test_settings_models_section import (_PROJECT_REGISTRY, _editor,
+                                                        _section_over_layers)
+    from tui.editors import models_section as m
+    async with _section_over_layers(tmp_path, monkeypatch, project=_PROJECT_REGISTRY) \
+            as (_pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        assert ed._is_profile is False and ed._row_at_cursor() is None, \
+            "предпосылка: основная секция без единой строки"
+        footer = ed.footer_text()
+        assert m._EXIT_TO_LIST not in footer, footer
+        assert "n — добавить запись" in footer
+        assert m._EXIT_TO_LIST not in _set_footer_widget(scr)
+
+
+@pytest.mark.asyncio
+async def test_main_section_empty_body_keeps_the_menu_exit_with_collapsed_blocks(
+        tmp_path):
+    """Страж над СОСТОЯНИЕМ (б): основная секция, все три блока свёрнуты, резервной
+    строки нет (`agent.model` пуст) — `_rows()` пуст и здесь, вопреки снятому
+    комментарию «строк нет только у профиля». Хвост выхода обязан остаться «Esc»
+    в меню, а не профильным «Esc — к списку» (M5 ревью MR #80)."""
+    from tests.tui.test_settings_models_section import _REGISTRY, _editor, _section
+    from tui.editors import models_section as m
+    async with _section(tmp_path, _REGISTRY, model='""') as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        for kind in ("entry", "slot", "assign"):
+            ed._toggle_block(kind)
+        await pilot.pause()
+        assert ed._is_profile is False and ed._row_at_cursor() is None, \
+            "предпосылка: все блоки свёрнуты, строк нет"
+        footer = ed.footer_text()
+        assert m._EXIT_TO_LIST not in footer, footer
+        assert "n — добавить запись" in footer
+
+
 def test_no_footer_promises_tab_as_probe():
     """Tab больше не проверяет связь — ни один футер не смеет это обещать."""
     for name, value in _all_footer_strings().items():

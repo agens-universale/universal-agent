@@ -292,6 +292,45 @@ async def test_second_entry_is_written_together_with_the_default_slot(tmp_path):
         assert doc["slots"]["default"] in ("flash", "opus")
 
 
+async def test_a_write_failure_past_the_slot_picker_closes_it_and_refocuses(
+        tmp_path, monkeypatch):
+    """Провал записи ПОСЛЕ вопроса «какая модель по умолчанию»: пикер обязан
+    закрыться, а фокус — вернуться в форму. Возврат фокуса без закрытия пикера
+    давал двоевластие: каретка в Input, но ↑/↓/Enter уходят пикеру, а состав
+    транзакции уже заморожен — правки полей молча теряются (ревью волны F,
+    находка 1; канон закрытия — `escape()`). Причина отказа тут не важна —
+    стенд про состояние UI, отказ подменён."""
+    body = ("models:\n"
+            "  flash:\n"
+            '    model: "google/gemini-2.5-flash"\n')
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        await pilot.press("n")
+        await pilot.pause()
+        from config_modules.registry_write import RegistryWriteError
+        from tui.editors.model_entry_form import ModelEntryForm
+        monkeypatch.setattr(
+            "config_modules.registry_write.apply_registry_ops",
+            lambda *a, **kw: (_ for _ in ()).throw(RegistryWriteError("стендовый отказ")))
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-alias", Input).value = "opus"
+        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                # submit → пикер default
+        await pilot.pause()
+        assert _editor(scr).picker_open
+        await pilot.press("enter")                # выбор → запись падает
+        await pilot.pause()
+        ed = _editor(scr)
+        assert not ed.picker_open, "пикер остался над формой после отказа"
+        assert "не сохранено" in _notice(scr)
+        focused = scr.app.focused
+        assert focused is not None and focused.id and focused.id.startswith("mef-"), (
+            "фокус не вернулся в форму: %r" % focused)
+        assert cfg_file.read_bytes() == before
+
+
 async def test_the_default_slot_picker_describes_the_entry_being_written(tmp_path):
     """Позиция ещё НЕ ЗАПИСАННОЙ записи описывается тем, что уедет в неё этой же
     транзакцией, а не выдумывается: в файле записи нет, и витринные `_entry_model`/
@@ -897,6 +936,64 @@ async def test_entry_form_untouched_ref_fields_raise_no_banner(tmp_path, monkeyp
         assert _doc(cfg_file)["models"]["gc"]["model"] == "giga/model-2"
         assert "${ENV:GC_TEST_URL_REF}" in content
         assert "${ENV:GC_TEST_TOKEN_REF}" in content
+
+
+async def test_ctrl_u_is_swallowed_while_the_env_confirm_banner_is_up(
+        tmp_path, monkeypatch):
+    """`Ctrl+U` есть только у поля пары формы; висящий баннер перезаписи
+    `${ENV:…}` снимает у формы фокус (`_submit_form`), но форма ОСТАЁТСЯ —
+    `clear_token` отвечал тем же «не наш случай — False», что у `probe`/`space`,
+    а те клавиши экран съедает БЕЗУСЛОВНО (up/down, alt+down, ctrl+space,
+    delete, space, n, enter); только ответ `clear_token` РЕШАЕТ для
+    `SettingsScreen.on_key`, съесть ли `Ctrl+U` (settings.py:1700) — «не наш
+    случай» обязан значить «формы нет вовсе», а не «форма есть, но без фокуса»
+    (L21 ревью MR #80, находка #9)."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    _env_pair(monkeypatch)
+    async with _section(tmp_path, _ENV_ENTRY) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "entry", alias="gc")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-token", Input).value = "sk-PLAIN"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                  # submit → баннер перезаписи
+        await pilot.pause()
+        assert ed._env_pending is not None
+        before = cfg_file.read_bytes()
+
+        assert ed.clear_token() is True, "Ctrl+U обязан съедаться, пока висит баннер"
+
+        assert ed._env_pending is not None, "клавиша не должна была снять баннер"
+        assert cfg_file.read_bytes() == before
+        assert form.query_one("#mef-token", Input).value == "sk-PLAIN", \
+            "клавиша не должна была тронуть поле формы"
+
+        # То же — целиком через реальную клавишу с экраном (settings.py:1700
+        # решает по ЭТОМУ ответу, стопить ли событие).
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert ed._env_pending is not None, "баннер снят настоящей клавишей"
+        assert cfg_file.read_bytes() == before
+
+
+async def test_ctrl_u_still_falls_through_with_no_form(tmp_path):
+    """Симметрия: список слотов/привязок раскрывает пикер значения БЕЗ формы
+    (`self._form is None`) — тут `Ctrl+U` действительно «не наш случай», и
+    клавиша обязана уйти легаси-обработке как раньше (докстрока `clear_token`:
+    «состояние не наше»), не только когда форма жива, но без фокуса."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")                  # раскрыть пикер слота — формы нет
+        await pilot.pause()
+        assert ed.picker_open
+        assert ed._form is None
+        assert ed.clear_token() is False, "без формы Ctrl+U по-прежнему не наш случай"
 
 
 async def test_reserve_row_edits_agent_model_through_its_own_subform(tmp_path):
@@ -2279,10 +2376,17 @@ async def test_form_keys_are_dead_while_the_default_slot_picker_is_open(tmp_path
     """Пока висит вопрос «какая модель по умолчанию», клавиши формы молчат.
 
     `move`, `enter`, `escape` и `alt_down` гейт пикера имеют, а `probe`, `space` и
-    `clear_token` — нет; форму же `_submit_form` до открытия пикера не снимает.
-    Итог: Ctrl+U отвечал «наследование возвращено» и чистил поле адреса, хотя
-    состав записи для транзакции уже зафиксирован — в файл уезжал прежний токен.
-    Человек видел подтверждение снятия того, что не снялось."""
+    `clear_token` — гейт свой, но с разным ИТОГОМ для формы: ни один не зовёт
+    `self._form.*` (иначе Ctrl+U отвечал «наследование возвращено» и чистил поле
+    адреса, хотя состав записи для транзакции уже зафиксирован — в файл уезжал
+    прежний токен, человек видел подтверждение снятия того, что не снялось).
+    `probe`/`space` при этом честно отвечают False — их клавиши (`ctrl+space`,
+    `space`) экран съедает БЕЗУСЛОВНО, ответ ни на что не влияет. `clear_token`
+    — иначе: `SettingsScreen.on_key` решает по ЕГО ответу, стопить ли `Ctrl+U`
+    (settings.py:1700), и False здесь означало бы «пусть уходит легаси-
+    `delete_left_all`», хотя форма жива — просто без фокуса ради вопроса. Раз
+    форма есть, клавиша обязана быть съедена (True), не делая ничего
+    (L21 ревью MR #80, находка #9)."""
     body = ("models:\n"
             '  a:\n    model: "m-a"\n')
     async with _section(tmp_path, body) as (pilot, scr, cfg_file):
@@ -2302,9 +2406,11 @@ async def test_form_keys_are_dead_while_the_default_slot_picker_is_open(tmp_path
         await pilot.pause()
         assert editor._picker is not None, "пикер default-слота обязан быть открыт"
 
-        assert editor.clear_token() is False
+        assert editor.clear_token() is True, "форма жива — Ctrl+U обязан быть съеден"
         assert editor.probe() is False
         assert editor.space() is False
+        assert form.query_one("#mef-token", Input).value == "sk-OWN", \
+            "клавиша не должна была тронуть поле формы"
 
 
 async def test_empty_state_does_not_claim_levels_are_off_under_a_profile_registry(
