@@ -68,11 +68,14 @@ def test_project_memory_project_future():
     assert "thread" in desc
 
 
-def test_read_file_pagination_lines_and_chars():
-    flat = " ".join(ReadFile.tool_description()["description"].lower().split())
+def test_read_file_pagination_lines_only():
+    spec = ReadFile.tool_description()
+    flat = " ".join(spec["description"].lower().split())
     assert "line" in flat
-    assert "char_offset" in flat
-    assert "char_limit" in flat
+    props = spec["parameters"]["properties"]
+    assert "offset" in props and "limit" in props
+    assert "char_offset" not in props
+    assert "char_limit" not in props
 
 
 def test_read_stored_tool_output_pagination_chars():
