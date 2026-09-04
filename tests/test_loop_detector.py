@@ -277,7 +277,24 @@ def test_flush_one_notice_for_several_hits():
     assert notice.count("Loop detector:") == 1
     assert "fs_read_file" in notice
     assert "fs_list_files" in notice
+    assert notice.count("- fs_read_file") == 1
+    assert notice.count("- fs_list_files") == 1
     assert flush(state) is None
+
+
+def test_flush_dedups_identical_hits_in_one_notice():
+    tools_data = {"fs_read_file": _entry(**READ_PROFILE)}
+    ctx = _ctx(tools_data)
+    state = _state()
+    args = json.dumps({"path": "a.py"})
+    observe(state, ctx, "fs_read_file", args)
+    observe(state, ctx, "fs_read_file", args)
+    observe(state, ctx, "fs_read_file", args)
+    notice = flush(state)
+    assert notice is not None
+    assert notice.count("Loop detector:") == 1
+    assert notice.count("fs_read_file") == 1
+    assert "- fs_read_file" not in notice
 
 
 def test_mcp_flag_on_tools_data_without_decorator():
