@@ -643,7 +643,6 @@ def needs_default_slot(target, ops, template: str, *, is_profile: bool = False,
         return False
     view = prospective_registry(
         text,
-        target=target,
         base_path=stack_base if is_profile else target,
         is_profile=is_profile,
     )

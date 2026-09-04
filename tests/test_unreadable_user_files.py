@@ -63,6 +63,10 @@ def _cases() -> list[_Case]:
     cases: list[_Case] = []
 
     # --- слои конфига (дома правила, закрытые прежними коммитами) ---
+    def _load_config_ex(path, **_):
+        import config as config_mod
+        return config_mod.load_config_ex(str(path), apply_to_process=False)
+
     def _read_document(path, **_):
         import config_raw
         return config_raw.read_document(path)
@@ -88,6 +92,7 @@ def _cases() -> list[_Case]:
         return loader._read(Path(path))
 
     cases += [
+        _Case("config.load_config_ex", "config.yml", _BODY_YAML, _load_config_ex),
         _Case("config_raw.read_document", "config.yml", _BODY_YAML, _read_document),
         _Case("layers._safe_yaml_dict", "config.yml", _BODY_YAML, _safe_yaml_dict),
         _Case("layers._readable_layer_document", "config.yml", _BODY_YAML,

@@ -236,11 +236,9 @@ def test_prospective_registry_counts_the_profile_even_when_it_is_not_active(stac
     base, profiles = stack
     base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
     (profiles / "work.yml").write_text("slots: {}\n", encoding="utf-8")
-    other = profiles / "other.yml"
-    other.write_text("slots: {}\n", encoding="utf-8")
 
     models, slots = prospective_registry(
-        'models:\n  b:\n    model: "y"\n', target=other, base_path=base, is_profile=True)
+        'models:\n  b:\n    model: "y"\n', base_path=base, is_profile=True)
     assert sorted(models) == ["a", "b"]
     assert slots.default is None
 

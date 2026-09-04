@@ -51,6 +51,7 @@ from config_modules.layers import (  # noqa: F401
 
 from message_projection import configure_for_model_tags
 from trace_id import normalize_trace_id
+from utils.user_text import unreadable_reason
 
 # Backward compatibility for existing imports.
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
@@ -487,13 +488,16 @@ def load_config_ex(
     # Чтение базы — тем же приёмом, что и слои (`_layer_document`): невалидный YAML и
     # не-словарь на верхнем уровне дают ValueError с именем файла и причиной, а не
     # сырые yaml.YAMLError/AttributeError из глубины мержа. Голый open() снаружи
-    # `_layer_document` — сам он не оборачивает OSError (см. его докстринг), это
-    # остаётся на вызывающем; здесь единственный вызывающий, которому нужен
-    # непрочитанный файл тем же ValueError, что и остальные исходы базы.
+    # `_layer_document` — сам он не оборачивает OSError/UnicodeDecodeError (см. его
+    # докстринг), это остаётся на вызывающем; здесь единственный вызывающий, которому
+    # нужен непрочитанный файл тем же ValueError, что и остальные исходы базы.
+    # `UnicodeDecodeError` — подкласс `ValueError`, а не `OSError` (файл, сохранённый
+    # «блокнотом» в UTF-16), и без отдельного перехвата уходил голой жалобой кодека
+    # мимо этой обёртки и мимо классового сторожа (ревью MR #80, L40).
     try:
         raw_config = _layer_document(base_path, "config.yml")
-    except OSError as exc:
-        raise ValueError(f"{base_path}: не удалось прочитать: {exc}") from exc
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(unreadable_reason(base_path, exc)) from exc
     # Дорезолвный вид держим для отказа правила пары: после подстановки от `${ENV:X}`
     # остаётся пустая строка, и назвать незаданную переменную уже нечем.
     base_before_env = raw_config

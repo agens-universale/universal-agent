@@ -417,10 +417,14 @@ def _stacked_app_config(text: str, *, target=None, base_path, is_profile: bool =
         raise StackAssemblyError(str(exc)) from exc
 
 
-def prospective_registry(text: str, *, target=None, base_path=None,
-                         is_profile: bool = False):
+def prospective_registry(text: str, *, base_path=None, is_profile: bool = False):
     """`(models, slots)` реестра, каким он СТАНЕТ, если этот файл пойдёт в дело;
     None — сам текст не разбирается.
+
+    Указатель профиля вопроса не касается: результат считается по стеку «нижние
+    слои + этот текст» ВСЕГДА, независимо от того, какой файл станет целью записи
+    (ревью MR #80, L18 — прежний параметр `target` в теле не использовался ни в
+    одной ветке и был мёртв).
 
     Намеренно НЕ то же, что `_stacked_app_config`: для файла профиля считает
     «база + ЭТОТ файл» независимо от указателя. Гейт по неактивному профилю бить не
