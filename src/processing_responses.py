@@ -1020,6 +1020,9 @@ def _pickup_pending_as_new_turn(
     pending = get_pending_messages()
     if not pending:
         return None
+    # Новый пользовательский ход: окно прошлого хода не должно давать
+    # ложный повтор на первом же чтении с теми же аргументами.
+    clear_loop_detector(state)
     try:
         begin_turn_main_trace(state, ctx)
     except Exception as exc:
@@ -1431,6 +1434,7 @@ def run_agent(
                                 assistant_text=assistant_text, state=state, ctx=ctx
                             )
                             state.flush_current_user_intent()
+                            clear_loop_detector(state)
                         finally:
                             if mark_finalizing is not None:
                                 mark_finalizing(False)

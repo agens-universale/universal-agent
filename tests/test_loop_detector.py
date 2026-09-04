@@ -244,6 +244,77 @@ def test_mcp_flag_on_tools_data_without_decorator():
     assert flush(state) is not None
 
 
+def _mcp_registry_entry(server: str, tool: str):
+    return {
+        "tool": {
+            "type": "function",
+            "name": f"mcp_{server}_{tool}",
+            "description": "x",
+            "parameters": {"type": "object", "properties": {}},
+        },
+        "metadata": {"mcp_server_key": server, "mcp_tool_name": tool},
+    }
+
+
+def test_mcp_tools_data_has_no_loop_warn_by_default(monkeypatch):
+    import tools.connect_mcp.registry as reg
+    from tools.connect_mcp.agent_tools import get_mcp_tools_data_for_config
+
+    monkeypatch.setattr(
+        reg,
+        "_build_tools_registry",
+        lambda *_a, **_k: (
+            {"mcp_srv_search": _mcp_registry_entry("srv", "search")},
+            {"srv": {"status": "connected"}},
+        ),
+    )
+    tools_data, _status = get_mcp_tools_data_for_config(
+        {"mcp-servers": {"srv": {"transport": "stdio", "command": "x"}}}
+    )
+    assert LOOP_WARN_KEY not in tools_data["mcp_srv_search"]
+    assert resolve_thresholds(tools_data, "mcp_srv_search") is None
+
+
+def test_mcp_loop_control_tools_all_and_list(monkeypatch):
+    import tools.connect_mcp.registry as reg
+    from tools.connect_mcp.agent_tools import get_mcp_tools_data_for_config
+
+    registry = {
+        "mcp_srv_search": _mcp_registry_entry("srv", "search"),
+        "mcp_srv_poll": _mcp_registry_entry("srv", "poll"),
+    }
+    monkeypatch.setattr(
+        reg, "_build_tools_registry", lambda *_a, **_k: (registry, {"srv": {}})
+    )
+    listed, _ = get_mcp_tools_data_for_config(
+        {
+            "mcp-servers": {
+                "srv": {
+                    "transport": "stdio",
+                    "command": "x",
+                    "loop_control_tools": ["search"],
+                }
+            }
+        }
+    )
+    assert listed["mcp_srv_search"][LOOP_WARN_KEY] == GENERIC_PROFILE
+    assert LOOP_WARN_KEY not in listed["mcp_srv_poll"]
+
+    all_tools, _ = get_mcp_tools_data_for_config(
+        {
+            "mcp-servers": {
+                "srv": {
+                    "transport": "stdio",
+                    "command": "x",
+                    "loop_control_tools": "all",
+                }
+            }
+        }
+    )
+    assert all_tools["mcp_srv_search"][LOOP_WARN_KEY] == GENERIC_PROFILE
+    assert all_tools["mcp_srv_poll"][LOOP_WARN_KEY] == GENERIC_PROFILE
+
+
 def test_window_is_a_ring_of_ten():
     tools_data = {"fs_read_file": _entry(**READ_PROFILE)}
     ctx = _ctx(tools_data)
@@ -254,7 +325,7 @@ def test_window_is_a_ring_of_ten():
 
 
 def test_decorator_puts_thresholds_on_class_not_instance_state():
-    @loop_warn_on_repeat(consecutive=2, in_window=3)
+    @loop_warn_on_repeat(**READ_PROFILE)
     class Sample:
         pass
 
@@ -509,6 +580,73 @@ def test_accepted_turn_finish_clears_window(monkeypatch):
     assert result is not None
     assert state.loop_detector_window == []
     assert state.loop_detector_pending == []
+
+
+def test_accepted_text_response_clears_window():
+    from processing_responses import run_agent
+    from states import State
+
+    state = State(
+        verbose=False,
+        model="CodeChat",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=5,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
+    state.backend_api_mode = "chat_completions"
+    state.loop_detector_window = ["fp"]
+    state.loop_detector_pending = [{"tool": "fs_read_file", "args": {}}]
+    result = run_agent(
+        [{"role": "assistant", "type": "message", "content": "готово"}],
+        state,
+        SimpleNamespace(
+            config_dict={
+                "backend_api_mode": "chat_completions",
+                "text_answer_mode": "allow",
+                "console_trace": False,
+                "no_tool_call_max_count": 50,
+            },
+            logger=None,
+            auth_connector=None,
+        ),
+    )
+    assert result == "готово"
+    assert state.loop_detector_window == []
+    assert state.loop_detector_pending == []
+
+
+def test_pickup_pending_as_new_turn_clears_window(monkeypatch):
+    import processing_responses as pr
+
+    monkeypatch.setattr(pr, "begin_turn_main_trace", lambda *_a, **_k: None)
+    state = SimpleNamespace(
+        loop_detector_window=["fp"],
+        loop_detector_pending=[{"tool": "fs_read_file", "args": {}}],
+    )
+    picked = pr._pickup_pending_as_new_turn(
+        lambda: [{"role": "user", "content": "следующий ход"}],
+        state,
+        SimpleNamespace(logger=None),
+    )
+    assert picked == [{"role": "user", "content": "следующий ход"}]
+    assert state.loop_detector_window == []
+    assert state.loop_detector_pending == []
+
+
+def test_empty_pickup_does_not_clear_window(monkeypatch):
+    import processing_responses as pr
+
+    monkeypatch.setattr(pr, "begin_turn_main_trace", lambda *_a, **_k: None)
+    state = SimpleNamespace(
+        loop_detector_window=["fp"],
+        loop_detector_pending=[{"tool": "fs_read_file", "args": {}}],
+    )
+    assert pr._pickup_pending_as_new_turn(lambda: [], state, SimpleNamespace(logger=None)) is None
+    assert state.loop_detector_window == ["fp"]
+    assert state.loop_detector_pending == [{"tool": "fs_read_file", "args": {}}]
 
 
 def test_finish_gate_reject_keeps_window(monkeypatch):
