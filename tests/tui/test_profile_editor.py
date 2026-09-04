@@ -240,6 +240,46 @@ async def test_the_profile_key_cannot_be_written_into_a_profile(tmp_path, monkey
     validate_config_text_with_sections(profile.read_text(encoding="utf-8"))
 
 
+async def test_the_address_warning_and_the_literal_token_warning_share_one_notice(
+        tmp_path, monkeypatch):
+    """`_write` шлёт предупреждение об адресе (ok=None), а следом
+    `_warn_literal_tokens` шлёт СВОЁ (тоже ok=None) — оба на один канал
+    `_notice`/`#set-notice`. Оба вызова синхронны, без паузы между ними —
+    второй не находит виджет первого (`Widget.mount` регистрирует его для
+    `query()` не раньше следующего такта Textual) и монтирует РЯДОМ ВТОРОЙ
+    `#set-notice` с тем же id: два виджета вместо одной подмены — докстрока
+    `_warn_literal_tokens` обещала «обе строки видны разом» ОДНИМ сообщением
+    (L21 ревью MR #80, находка #7). Профиль — ПРОЕКТНОГО корня (секрет-политика
+    литеральных токенов включена), базовый конфиг — без `backend` вовсе (адреса
+    нет НИГДЕ, наследовать нечего)."""
+    import tui.app as app_mod
+    project_dir = _project(tmp_path, monkeypatch)
+    base_cfg = _write(tmp_path / "base" / "config.yml", 'agent:\n  model: "test-model"\n')
+    _write(project_dir / ".gc" / "profiles" / "work.yml",
+          'models:\n'
+          '  secret:\n'
+          '    model: "secret-model"\n'
+          '    url: "http://secret-host/v1/chat/completions"\n'
+          '    token: "sk-literal"\n'
+          'slots:\n'
+          '  default: "secret"\n')            # default уже резолвится — без вопроса о слоте
+
+    app = app_mod.TuiApp(config=_base_dict())
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        ed = await _open_profile(pilot, scr, "work")
+        assert ed._project_profile, "предпосылка: секрет-политика профиля включена"
+        await pilot.press("n")
+        await pilot.pause()
+        await _fill_entry(pilot, scr, "noaddr", "noaddr-model")
+        notice = _notice(scr)
+        widgets = list(scr.query("#set-notice"))
+
+    assert len(widgets) == 1, "предупреждения разъехались по разным виджетам"
+    assert "адрес не задан" in notice, notice          # первое предупреждение не стёрто
+    assert "литеральный токен" in notice, notice        # вторым не заменено, а дополнено
+
+
 async def test_a_removed_legacy_key_in_the_profile_does_not_break_the_write(
         tmp_path, monkeypatch):
     """Устаревший ключ (`compat.REMOVED`) попадает в профиль копипастой секции из

@@ -94,6 +94,9 @@ _FOOTER_FORM_LIST_PAIR = f"{_FOOTER_FORM_LIST} · {CTRL_U_PAIR}"
 _FOOTER_FORM_LIST_NO_MATCH_PAIR = f"{_FOOTER_FORM_LIST_NO_MATCH} · {CTRL_U_PAIR}"
 _FOOTER_PICKER = "↑/↓ — выбор · Enter — выбрать · Esc — отмена"
 _FOOTER_CONFIRM = "Enter — удалить · Esc — отмена"
+# Подтверждение перезаписи ${ENV:…} литералом (L22) — свои клавиши, свой глагол:
+# здесь Enter не удаляет, а сохраняет.
+_FOOTER_ENV_CONFIRM = "Enter — сохранить · Esc — отмена"
 # Нижняя половина секции: на строке слота значение — только алиас реестра, на
 # строке привязки — ещё и уровень (индирекция через слоты). Удаления на обеих нет:
 # снятие значения — первая позиция списка, а не Del (Global Constraints).
@@ -272,6 +275,17 @@ _NOTICE_REMOVE_RACED = (
 # честного no-op секции (`settings._save_legacy_model`, Enter без правок).
 _NOTICE_NO_CHANGE = "ничего не изменено"
 _NOTICE_ENTRY_SAVED = "Запись «{alias}» сохранена — {file}"
+# Секрет-политика проектных профилей (docs/configuration.md, спека §3.5): файл
+# лежит в РЕПОЗИТОРИИ, и литеральный токен в нём — секрет, уезжающий в git.
+# Текст — ДОСЛОВНО тот, что печатает загрузчик (`profiles.load_profile_document`,
+# warn_literal_tokens): одно состояние — одни слова; сторож тождества сверяет
+# строку с самим загрузчиком (test_profile_effective_view). Своя строка здесь
+# вынуждена: до неактивного профиля загрузчик не доходит никогда, и запись из
+# формы — единственный момент сказать. Путь — ПОЛНЫЙ (как у загрузчика): одного
+# basename рядом с «✓ сохранено» мало, чтобы найти файл.
+_NOTICE_LITERAL_TOKEN = ("⚠ {path}: models.{alias}.token — литеральный токен в "
+                         "проектном профиле; используйте ${{ENV:VAR}} или "
+                         "наследование из базового конфига")
 # Ячейка адреса мёртвой записи: причина «мёртвости» видна в самой строке, длинное
 # объяснение (`_NO_ADDRESS_HINT`) остаётся в notice сохранения.
 _DEAD_ADDRESS_CELL = "без адреса"
@@ -616,6 +630,7 @@ class ModelsSectionEditor(Vertical):
     """
 
     def __init__(self, *, target, template: str, is_profile: bool = False,
+                 project_profile: bool = False,
                  base_registry=None, overlay_origin=None, stack_base=None,
                  effective_url: str = "",
                  effective_auth: str | None = None, verify: bool = True,
@@ -629,6 +644,11 @@ class ModelsSectionEditor(Vertical):
         # Что за файл перед нами — единственное, чем режимы отличаются: валидатор
         # записи, отсутствие `agent.model` и хвост футера следуют отсюда.
         self._is_profile = is_profile
+        # Цель — профиль ПРОЕКТНОГО корня (`.gc/profiles` репозитория): признак
+        # приезжает честно от дискавери (`ProfileRef.root_kind`, экран его знает),
+        # а не угадывается по пути. Включает предупреждение секрет-политики при
+        # записи литерального токена (`_warn_literal_tokens`).
+        self._project_profile = bool(project_profile)
         # Путь основного конфига — под-виду профиля: пока профиль АКТИВЕН, его файл
         # часть того стека, который соберёт следующий старт, и гейт записи обязан
         # судить merged (§12 спеки). Активен ли он — решает не экран, а валидатор:
@@ -679,6 +699,9 @@ class ModelsSectionEditor(Vertical):
         self._measured_width = None       # ширина рамки, под которую посчитаны колонки
         self._picker = None               # {"items", "idx", "on_pick"}
         self._pending = None              # {"alias", "references", "last"} — confirm удаления
+        # (алиас, поля) записи, ждущей ответа на «затереть ссылку ${ENV:…}
+        # литералом?» (L22): форма при этом жива, отмена возвращает в неё.
+        self._env_pending = None
         self._writing_entry = None        # (алиас, запись) транзакции в полёте, см. `_own_entry`
 
     # --- файловое состояние цели ---------------------------------------------
@@ -1626,6 +1649,8 @@ class ModelsSectionEditor(Vertical):
                 and self._pending is None and not self._legacy_open)
 
     def footer_text(self) -> str:
+        if self._env_pending is not None:
+            return _FOOTER_ENV_CONFIRM
         if self._pending is not None:
             return _FOOTER_CONFIRM
         if self._picker is not None:
@@ -1681,7 +1706,7 @@ class ModelsSectionEditor(Vertical):
 
     # --- клавиши --------------------------------------------------------------
     def move(self, delta: int) -> None:
-        if self._pending is not None:
+        if self._pending is not None or self._env_pending is not None:
             return
         if self._picker is not None:
             rows = self._picker["rows"]
@@ -1701,6 +1726,14 @@ class ModelsSectionEditor(Vertical):
         self._refresh_rows()
 
     def enter(self) -> None:
+        if self._env_pending is not None:
+            # Подтверждение перезаписи ссылки: снимок (алиас, поля) зафиксирован
+            # на момент submit, фокус на время вопроса снят — правки под баннером
+            # снимку разъехаться не дают.
+            alias, fields = self._env_pending
+            self._clear_env_confirm()
+            self._finish_submit(alias, fields)
+            return
         if self._pending is not None:
             self.confirm_pending()
             return
@@ -1738,6 +1771,13 @@ class ModelsSectionEditor(Vertical):
     def escape(self) -> bool:
         """Свернуть СВОЁ под-состояние и съесть клавишу; сворачивать нечего — False,
         и Esc достаётся экрану (тот уводит в меню). Вложенность из Global Constraints."""
+        if self._env_pending is not None:
+            # Отмена — назад В ФОРМУ, не теряя набранного: ссылка остаётся в
+            # файле, черновик — в полях; ввод возвращается форме (приём пикера).
+            self._clear_env_confirm()
+            if self._form is not None:
+                self._form.refocus()
+            return True
         if self._pending is not None:
             self.cancel_pending()
             return True
@@ -1781,7 +1821,8 @@ class ModelsSectionEditor(Vertical):
         # Гейт пикера — первым, как у `move`/`enter`/`escape`/`clear_token`: вопрос
         # о слоте висит НАД живой формой, и спрошенная раньше него форма раскрывала
         # под ним второй список (пресетов адреса) — две ленты на один Enter.
-        if self._picker is not None:
+        # Вопрос о перезаписи ссылки (L22) висит там же — гейт тот же.
+        if self._picker is not None or self._env_pending is not None:
             return False        # список уже раскрыт, а перечитывать в нём нечего
         if self._form is not None:
             return self._form.reload_models() or self._form.reload_presets()
@@ -1798,15 +1839,15 @@ class ModelsSectionEditor(Vertical):
     def probe(self) -> bool:
         """`Ctrl+Space` — проба соединения; она есть только у формы записи (у списка
         и у легаси-редактора пробы нет, §5.2 спеки клавиш)."""
-        if self._picker is not None:
-            return False        # вопрос о слоте висит — клавиши формы не её
+        if self._picker is not None or self._env_pending is not None:
+            return False        # висит вопрос (слот / перезапись ссылки) — клавиши не формы
         if self._form is not None:
             return self._form.probe_connection()
         return False
 
     def space(self) -> bool:
-        if self._picker is not None:
-            return False        # вопрос о слоте висит — клавиши формы не её
+        if self._picker is not None or self._env_pending is not None:
+            return False        # висит вопрос (слот / перезапись ссылки) — клавиши не формы
         if self._form is not None:
             return self._form.toggle_no_auth()
         return False
@@ -1821,8 +1862,8 @@ class ModelsSectionEditor(Vertical):
         `_submit_form` до вопроса о слоте не снимает, а состав записи для
         транзакции уже зафиксирован. Без гейта Ctrl+U отвечал «наследование
         возвращено» и чистил поле, пока в файл уезжал прежний токен."""
-        if self._picker is not None:
-            return False        # вопрос о слоте висит — клавиши формы не её
+        if self._picker is not None or self._env_pending is not None:
+            return False        # висит вопрос (слот / перезапись ссылки) — клавиши не формы
         if self._form is not None:
             return self._form.clear_token()
         return False
@@ -1869,6 +1910,35 @@ class ModelsSectionEditor(Vertical):
         ok, alias, fields = self._form.submit()
         if not ok:
             return                          # ошибка осталась В форме, писать нечего
+        # Гейт «ссылка не может стать литералом молча» (L22) — ДО транзакции и до
+        # вопроса о слоте: та же дверь, что у плоского `_do_save` экрана, тем же
+        # предикатом (`config_raw.env_refs_overwritten`). Судятся token и url —
+        # ключи записи, где живут секрет и адрес, — по СЫРОЙ записи файла цели:
+        # один Enter поверх `${ENV:…}` иначе клал секрет открытым текстом в файл,
+        # который может лежать в репозитории. Затирание ссылки ПУСТЫМ значением
+        # (Ctrl+U, галка ●) вопрос не поднимает: это явные действия формы со
+        # своими подписями, а не молчаливая подмена.
+        import config_raw
+        prev = self._form.original_alias
+        pair = {k: v for k, v in fields.items() if k in ("token", "url")}
+        old = self._own_entry(prev) if prev is not None else {}
+        written, _erased = config_raw.env_refs_overwritten(pair, old)
+        if written:
+            self._env_pending = (alias, fields)
+            self._ask("В файле — ссылка на переменную окружения: "
+                      + ", ".join(written)
+                      + " — сохранение запишет введённое значение в файл "
+                        "открытым текстом.", _FOOTER_ENV_CONFIRM)
+            # Вопрос висит над живой формой — клавиатура его, иначе печать под
+            # баннером разводила бы снимок с показанным (приём пикера слота).
+            self.screen.set_focus(None)
+            return
+        self._finish_submit(alias, fields)
+
+    def _finish_submit(self, alias: str, fields: dict) -> None:
+        """Хвост submit'а ПОСЛЕ гейта перезаписи ссылки: вопрос о слоте и запись.
+        Отдельным шагом, потому что подтверждение (L22) возвращается сюда с тем же
+        снимком (алиас, поля) — форма всё это время жива."""
         prev = self._form.original_alias
         renaming = prev is not None and alias != prev
         # Гейт спрашивается и у переименования: у неактивного профиля фаза 2 записи
@@ -1979,11 +2049,40 @@ class ModelsSectionEditor(Vertical):
         self._cursor_to(alias)
         self._refresh_rows()
         if not self._entry_address(alias):
-            self._notice(f"⚠ запись «{alias}» сохранена в {Path(self._target).name}, "
-                         f"но {_NO_ADDRESS_HINT}", ok=None)
-            return
-        self._notice(_NOTICE_ENTRY_SAVED.format(alias=alias,
-                                                file=Path(self._target).name), ok=True)
+            # Оба предупреждения (адрес и литеральный токен) едут каналом `ok=None`
+            # — ОДНИМ виджетом (`_singleton`), и второй вызов подряд его не
+            # дополняет, а замещает. Склеены здесь, а не по два отдельных вызова
+            # (L21 ревью MR #80, находка #7).
+            self._warn_literal_tokens(f"⚠ запись «{alias}» сохранена в "
+                                      f"{Path(self._target).name}, но {_NO_ADDRESS_HINT}")
+        else:
+            self._notice(_NOTICE_ENTRY_SAVED.format(alias=alias,
+                                                    file=Path(self._target).name), ok=True)
+            self._warn_literal_tokens()
+
+    def _warn_literal_tokens(self, pending: str | None = None) -> None:
+        """Предупреждение секрет-политики — рядом с итогом записи и по ИТОГОВОМУ
+        документу цели (перечитан `_reload` строкой выше): судится то, что реально
+        легло в файл, тем же `find_literal_tokens`, каким судит загрузчик.
+        Реализация загрузчика (`load_profile_document(warn_literal_tokens=…)`)
+        срабатывает только при сборке стека и только для АКТИВНОГО профиля — токен
+        в неактивном проектном профиле лежал в git без единого слова, и узнавали
+        об этом после push.
+
+        `pending` — уже готовый текст, которому идти тем же каналом (`ok=None`):
+        предупреждение об отсутствующем адресе. Канал общий с плашкой успеха
+        (`ok=True`) не заменяет — они в разных виджетах; а вот с ЭТИМ
+        предупреждением он ОДИН И ТОТ ЖЕ виджет (`#set-notice`), и второй вызов
+        подряд заместил бы первый целиком. `pending` печатается ПЕРВОЙ строкой
+        одним вызовом с находками `find_literal_tokens`, если они есть, — обе
+        строки видны разом взаправду, а не только когда докстрока обещала."""
+        lines = [pending] if pending else []
+        if self._project_profile:
+            from config_modules.profiles import find_literal_tokens
+            lines.extend(_NOTICE_LITERAL_TOKEN.format(path=self._target, alias=alias)
+                        for alias in find_literal_tokens(self._document))
+        if lines:
+            self._notice("\n".join(lines), ok=None)
 
     def _cursor_to(self, alias: str) -> None:
         """Курсор на строку записи — поиском ПО СТРОКАМ: индекс алиаса в реестре и
@@ -2175,6 +2274,14 @@ class ModelsSectionEditor(Vertical):
 
     def _clear_confirm(self) -> None:
         self._pending = None
+        for widget in self.query(".models-confirm"):
+            widget.remove()
+
+    def _clear_env_confirm(self) -> None:
+        """Снять вопрос о перезаписи ссылки (L22). Класс баннера тот же, что у
+        confirm удаления (`_ask` один на оба), а состояния взаимоисключающие —
+        снос по классу чужого не заденет."""
+        self._env_pending = None
         for widget in self.query(".models-confirm"):
             widget.remove()
 

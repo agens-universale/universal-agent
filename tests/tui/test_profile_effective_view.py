@@ -145,12 +145,14 @@ def _cursor_to(ed, kind: str, **match) -> None:
 async def _profile_view(tmp_path, monkeypatch, *, profile: str | None = None,
                         registry: bool = True, assign: bool = False,
                         base: str | None = None, size=None,
-                        file_view: bool = True):
+                        file_view: bool = True, root: str = "base"):
     """Открытый профиль «work» над базовым конфигом. Отдаёт `(pilot, scr, ed)`.
 
     `profile=None` — бланк создания (`PROFILE_SKELETON`, один комментарий-шапка).
     `base` — базовый файл целиком, когда его форма и есть предмет стража
     (`_BASE_ONE_MODEL`); иначе собирается `_base_config_text`.
+    `root="project"` — профиль лежит в ПРОЕКТНОМ корне (`<cwd>/.gc/profiles`),
+    как его находит дискавери: предмет стражей секрет-политики (M14).
 
     Работа из временного проектного каталога: дискавери профилей смотрит и в
     `<cwd>/.gc/profiles`, и каталог репозитория сдвинул бы состав строк.
@@ -165,8 +167,9 @@ async def _profile_view(tmp_path, monkeypatch, *, profile: str | None = None,
     base_cfg = _write(tmp_path / "base" / "config.yml",
                       base if base is not None
                       else _base_config_text(registry=registry, assign=assign))
-    _write(tmp_path / "base" / "profiles" / "work.yml",
-           PROFILE_SKELETON if profile is None else profile)
+    profile_file = (project / ".gc" / "profiles" / "work.yml" if root == "project"
+                    else tmp_path / "base" / "profiles" / "work.yml")
+    _write(profile_file, PROFILE_SKELETON if profile is None else profile)
 
     config = _screen_config(file_view=file_view)
     app = app_mod.TuiApp(config=config)

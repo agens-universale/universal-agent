@@ -790,6 +790,115 @@ async def test_list_reload_after_env_confirm_cancels_it(tmp_path):
         os.environ.pop("GC_TEST_MODEL_REF", None)
 
 
+# --- ревью MR #80 (L22): форма записи реестра не пишет секрет поверх ${ENV:…} молча
+
+_ENV_ENTRY = (
+    "models:\n"
+    "  gc:\n"
+    '    model: "giga/model"\n'
+    '    url: "${ENV:GC_TEST_URL_REF}"\n'
+    '    token: "${ENV:GC_TEST_TOKEN_REF}"\n'
+    "slots:\n"
+    '  default: "gc"\n'
+)
+
+
+def _env_pair(monkeypatch):
+    """Ссылки записи резолвятся: судья пары формы смотрит на резолв, и без
+    переменных отказ «переменной нет» пришёл бы раньше предмета теста."""
+    monkeypatch.setenv("GC_TEST_URL_REF", "https://ref-host/v1/chat/completions")
+    monkeypatch.setenv("GC_TEST_TOKEN_REF", "sk-REF")
+
+
+async def test_entry_form_asks_before_writing_a_literal_over_an_env_ref(
+        tmp_path, monkeypatch):
+    """Гейт «ссылка не может стать литералом молча» стоял только на плоском
+    `_do_save` — путь `models_section._submit_form → _write` его не спрашивал:
+    один Enter, и `${ENV:…}` исчезал навсегда, секрет открытым текстом (профиль
+    может быть в репозитории). Легаси-`agent.model` в ЭТОЙ ЖЕ секции защищён
+    баннером — настоящий секрет обязан быть защищён не хуже. Первый Enter —
+    баннер, в файле ПО-ПРЕЖНЕМУ ссылка; второй Enter — литерал."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    _env_pair(monkeypatch)
+    async with _section(tmp_path, _ENV_ENTRY) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "entry", alias="gc")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-token", Input).value = "sk-PLAIN"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                  # submit → подтверждение
+        await pilot.pause()
+        assert "открытым текстом" in _texts(scr)
+        assert "GC_TEST_TOKEN_REF" in _texts(scr)   # баннер называет переменную
+        content = cfg_file.read_text(encoding="utf-8")
+        assert "${ENV:GC_TEST_TOKEN_REF}" in content, "ссылка затёрта без ответа"
+        await pilot.press("enter")                  # подтвердить
+        await pilot.pause()
+        content = cfg_file.read_text(encoding="utf-8")
+        assert _doc(cfg_file)["models"]["gc"]["token"] == "sk-PLAIN"
+        assert "${ENV:GC_TEST_TOKEN_REF}" not in content
+        assert "${ENV:GC_TEST_URL_REF}" in content  # нетронутый адрес остался ссылкой
+
+
+async def test_entry_form_env_confirm_escape_returns_to_the_form_with_the_draft(
+        tmp_path, monkeypatch):
+    """Esc в подтверждении — назад В ФОРМУ, не теряя набранного: файл байт-в-байт,
+    черновик жив, следующий Enter поднимает вопрос заново."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    _env_pair(monkeypatch)
+    async with _section(tmp_path, _ENV_ENTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        ed = _editor(scr)
+        _goto(ed, "entry", alias="gc")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-token", Input).value = "sk-PLAIN"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")                  # submit → подтверждение
+        await pilot.pause()
+        assert "открытым текстом" in _texts(scr)
+        await pilot.press("escape")                 # отмена — назад в форму
+        await pilot.pause()
+        assert "открытым текстом" not in _texts(scr), "баннер остался висеть"
+        assert scr.query(ModelEntryForm), "форма закрылась — черновик потерян"
+        assert form.query_one("#mef-token", Input).value == "sk-PLAIN"
+        assert cfg_file.read_bytes() == before
+        await pilot.press("enter")                  # вопрос поднимается заново
+        await pilot.pause()
+        assert "открытым текстом" in _texts(scr)
+
+
+async def test_entry_form_untouched_ref_fields_raise_no_banner(tmp_path, monkeypatch):
+    """Сторож от пере-срабатывания: правится только id модели — нетронутые
+    ссылки url/token баннер не поднимают, запись уходит первым Enter."""
+    from tui.editors.model_entry_form import ModelEntryForm
+    _env_pair(monkeypatch)
+    async with _section(tmp_path, _ENV_ENTRY) as (pilot, scr, cfg_file):
+        ed = _editor(scr)
+        _goto(ed, "entry", alias="gc")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form.query_one("#mef-model", Input).value = "giga/model-2"
+        form._presets_ctrl.close()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "открытым текстом" not in _texts(scr)
+        content = cfg_file.read_text(encoding="utf-8")
+        assert _doc(cfg_file)["models"]["gc"]["model"] == "giga/model-2"
+        assert "${ENV:GC_TEST_URL_REF}" in content
+        assert "${ENV:GC_TEST_TOKEN_REF}" in content
+
+
 async def test_reserve_row_edits_agent_model_through_its_own_subform(tmp_path):
     """Строка «резервная модель» открывает под-форму `ModelEditor` и правит
     `agent.model`; хинт говорит ВЕРДИКТ («не работает»), а не «база наследования»."""

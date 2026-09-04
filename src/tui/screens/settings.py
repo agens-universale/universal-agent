@@ -4436,6 +4436,10 @@ class SettingsScreen(Screen):
         from config_modules.endpoint_presets import endpoint_presets_from_config
         frame.mount(ModelsSectionEditor(
             target=row["ref"].path, template="", is_profile=True,
+            # Секрет-политика литеральных токенов действует для профиля ПРОЕКТНОГО
+            # корня — признак от дискавери (`root_kind`), тем же условием, каким
+            # загрузчик включает warn_literal_tokens (`layers.py`).
+            project_profile=row["ref"].root_kind == "project",
             base_registry=self._base_registry_snapshot,
             # Пока профиль активен, его файл — часть стека следующего старта, и гейт
             # записи обязан судить merged; для неактивного валидатор сам остаётся на
@@ -5148,16 +5152,13 @@ class SettingsScreen(Screen):
         значением). Оба списка пусты — затирать нечего либо новое значение само ссылка.
 
         Раскладка нужна предупреждению: у литерала последствие — утечка секрета в
-        файл, у пустого поля — исчезновение ссылки. Одним словом их не назвать."""
+        файл, у пустого поля — исчезновение ссылки. Одним словом их не назвать.
+
+        Правило — общее (`config_raw.env_refs_overwritten`): тем же предикатом
+        судит себя форма записи реестра (`models_section._submit_form`), и вторая
+        редакция здесь снова разъехалась бы с ней (L22)."""
         import config_raw
-        written: list[str] = []
-        erased: list[str] = []
-        for key, value in values.items():
-            if config_raw.env_refs(value):
-                continue
-            refs = config_raw.env_refs(self._raw.get(key))
-            (written if str(value or "").strip() else erased).extend(refs)
-        return written, erased
+        return config_raw.env_refs_overwritten(values, self._raw)
 
     def _env_confirm_text(self, written: list[str], erased: list[str]) -> str:
         """Предупреждение называет ПОСЛЕДСТВИЕ, а не сам факт затирания.
