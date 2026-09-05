@@ -1,7 +1,7 @@
-"""tui/services/session_title: чистые функции имени сессии (title/last_actual).
+"""tui/services/session_title: чистые функции имени сессии (title/task/last_actual).
 
 display_name — единый источник имени для пикера и OSC:
-  title (ручной) > last_actual (авто из промпта) > «Без названия».
+  title (ручной) > task (из turn_finish) > last_actual (авто из промпта) > «Без названия».
 normalize_prompt_title — collapse whitespace + truncate до LAST_ACTUAL_MAX,
 порог обновления last_actual — LAST_ACTUAL_MIN по уже нормализованной строке.
 """
@@ -10,6 +10,8 @@ from tui.services.session_title import (
     LAST_ACTUAL_MIN,
     display_name,
     normalize_prompt_title,
+    task_subtitle,
+    task_title,
 )
 
 
@@ -52,6 +54,45 @@ def test_display_last_actual_whitespace_only_falls_back_to_unnamed():
 
 def test_display_non_string_fields_ignored():
     assert display_name({"title": 0, "last_actual": None}) == "Без названия"
+
+
+def test_display_task_wins_over_last_actual():
+    meta = {"task": "Добавить поле task в turn_finish", "last_actual": "реализуй спеку"}
+    assert display_name(meta) == "Добавить поле task в turn_finish"
+
+
+def test_display_title_wins_over_task():
+    meta = {
+        "title": "parser bugfix",
+        "task": "Добавить поле task",
+        "last_actual": "реализуй спеку",
+    }
+    assert display_name(meta) == "parser bugfix"
+
+
+def test_task_title_strips_and_truncates():
+    assert task_title({"task": "  hello  "}) == "hello"
+    assert task_title({"task": "   "}) == ""
+    assert len(task_title({"task": "a" * (LAST_ACTUAL_MAX + 10)})) == LAST_ACTUAL_MAX
+
+
+def test_task_subtitle_when_title_is_task():
+    meta = {"task": "Закрыть баг", "last_actual": "посмотри логи"}
+    assert task_subtitle(meta) == "посмотри логи"
+
+
+def test_task_subtitle_empty_when_same_as_title():
+    meta = {"task": "Закрыть баг", "last_actual": "Закрыть баг"}
+    assert task_subtitle(meta) == ""
+
+
+def test_task_subtitle_when_manual_title():
+    meta = {"title": "parser", "task": "Закрыть баг", "last_actual": "посмотри логи"}
+    assert task_subtitle(meta) == "Закрыть баг"
+
+
+def test_task_subtitle_empty_without_task():
+    assert task_subtitle({"last_actual": "привет"}) == ""
 
 
 # ---- normalize_prompt_title --------------------------------------------

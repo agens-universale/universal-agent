@@ -20,7 +20,7 @@ from tui.services.git_info import current_branch
 from tui.services.notices_ui import format_notices_badge
 from tui.services.relative_time import format_relative_local
 from tui.services.session_lock import BUSY_MESSAGE, is_held_by_other
-from tui.services.session_title import display_name
+from tui.services.session_title import display_name, task_subtitle
 from tui.services.skill_view import truncate_path_left
 from tui.services.stores.file_store import FileTaskStore
 from tui.services.usage_meter import format_nonzero_cost
@@ -128,9 +128,8 @@ class SessionsScreen(Screen):
         return out
 
     def _title_of(self, task) -> str:
-        # R7: единый источник имён — display_name(meta.tui): title > last_actual
-        # > «Без названия». Сканирование логов архивов/live удалено (бэкфил
-        # last_actual вне scope спеки §4).
+        # R7: единый источник имён — display_name(meta.tui): title > task >
+        # last_actual > «Без названия». Сканирование логов архивов/live удалено.
         return display_name(task.tui_meta or {})
 
     def _page_items(self) -> list:
@@ -233,9 +232,13 @@ class SessionsScreen(Screen):
         return t
 
     def _card_text(self, task, *, selected: bool) -> Text:
-        """Карточка сессии одним 2-строчным виджетом: заголовок + мета."""
+        """Карточка сессии: заголовок + опциональный подзаголовок + мета."""
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append_text(self._title_line(task, selected=selected))
+        subtitle = task_subtitle(task.tui_meta or {})
+        if subtitle:
+            t.append("\n")
+            t.append(subtitle, style=DIM)
         t.append("\n")
         t.append_text(self._meta_line(task))
         return t
@@ -256,7 +259,7 @@ class SessionsScreen(Screen):
                 selected_card = card
             listview.mount(card)
         if selected_card is not None:
-            # Элемент — ОДИН виджет (2 строки): scroll_visible тащит его целиком в
+            # Элемент — ОДИН виджет (2–3 строки): scroll_visible тащит его целиком в
             # обе стороны кругового перехода (как карточка MCP).
             self.call_after_refresh(selected_card.scroll_visible, animate=False)
 

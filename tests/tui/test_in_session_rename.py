@@ -5,6 +5,8 @@ _on_user_text_submitted) + Шаг 3 (R5 — OSC = display_name(meta.tui)).
 порядок записи meta ДО обновления OSC, и что OSC читает display_name, а не
 _resumed_prompt. Чистая логика display_name/normalize — в test_session_title.py.
 """
+import json
+
 import pytest
 
 
@@ -585,3 +587,79 @@ async def test_r1_ctrl_r_no_store_noop(tmp_path, monkeypatch):
         scr.on_key(ev)
         assert called == [], called
         assert ev.stopped is False
+
+
+@pytest.mark.asyncio
+async def test_seed_task_from_submit_writes_tui_meta_and_osc(tmp_path, monkeypatch):
+    """turn_finish.task → meta.tui.task + OSC обновлён."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.models import TraceEvent
+    import tui.screens.main as main_mod
+
+    titles = []
+    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: titles.append(text), raising=False)
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "t1"
+        store = _FakeStore({"tui": {"last_actual": "реализуй спеку"}})
+        monkeypatch.setattr(scr, "_store", store)
+        monkeypatch.setattr(scr, "_session_status_word", lambda: "running")
+
+        ev = TraceEvent(
+            no=1,
+            event_ts_utc_iso="t",
+            kind="agent",
+            title="",
+            summary="done",
+            full_payload={
+                "arguments": json.dumps(
+                    {"task": "Добавить поле task", "task_report": "done"},
+                    ensure_ascii=False,
+                )
+            },
+            call_id="c1",
+            tool_name="submit_solution",
+        )
+        scr._seed_or_update_task_from_submit(ev)
+
+        assert store.patches == [{"task": "Добавить поле task"}], store.patches
+        assert store.base["tui"]["task"] == "Добавить поле task"
+        assert titles, titles
+        assert "Добавить поле task" in titles[-1]
+
+
+@pytest.mark.asyncio
+async def test_submit_task_is_saved_when_report_is_visual_duplicate(tmp_path, monkeypatch):
+    """Метаданные turn_finish не теряются при дедупе одинакового task_report."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.models import TraceEvent
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "t1"
+        store = _FakeStore({"tui": {"last_actual": "реализуй спеку"}})
+        monkeypatch.setattr(scr, "_store", store)
+        monkeypatch.setattr(scr, "_update_terminal_title", lambda: None)
+        scr._last_agent_summary = "одинаковый отчёт"
+
+        ev = TraceEvent(
+            no=2,
+            event_ts_utc_iso="t",
+            kind="agent",
+            title="",
+            summary="одинаковый отчёт",
+            full_payload={
+                "arguments": {
+                    "task": "Сохранить task при дедупе",
+                    "task_report": "одинаковый отчёт",
+                }
+            },
+            call_id="c2",
+            tool_name="submit_solution",
+        )
+        scr._render_event(ev, live=True)
+
+        assert store.patches == [{"task": "Сохранить task при дедупе"}]
