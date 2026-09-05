@@ -289,6 +289,29 @@ class _LineReader:
         except queue.Empty:
             return None
 
+    async def areadline(self, timeout: float) -> "str | None":
+        """То же, но ожиданием очереди не занимает ни поток, ни loop.
+
+        ``queue.get(timeout=…)`` блокирует вызывающего, поэтому синхронный
+        двойник годится только в потоке. Здесь — ``get_nowait`` плюс пауза,
+        отдающая управление циклу: поток-качальщик (``_pump``) остаётся, он
+        один на процесс и структурно необходим, а вот держать РЯДОМ ещё один
+        поток только ради ожидания незачем.
+        """
+        import asyncio
+        import time as _time
+
+        deadline = _time.monotonic() + timeout
+        while True:
+            try:
+                return self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                return None
+            await asyncio.sleep(min(0.02, remaining))
+
 
 #: Читатели по объекту потока: у одного процесса один читатель, сколько бы раз
 #: его ни просили прочитать строку. WeakKeyDictionary нельзя (файловые объекты
@@ -296,8 +319,8 @@ class _LineReader:
 _READERS: "dict[int, _LineReader]" = {}
 
 
-def _readline_with_timeout(stream: "Any", timeout: float) -> "str | None":
-    """Прочитать одну строку из stream с таймаутом (кроссплатформенно)."""
+def _reader_for(stream: "Any") -> "_LineReader | None":
+    """Читатель этого потока; заводится при первом обращении."""
     if stream is None:
         return None
     key = id(stream)
@@ -305,7 +328,19 @@ def _readline_with_timeout(stream: "Any", timeout: float) -> "str | None":
     if reader is None:
         reader = _LineReader(stream)
         _READERS[key] = reader
-    return reader.readline(timeout)
+    return reader
+
+
+def _readline_with_timeout(stream: "Any", timeout: float) -> "str | None":
+    """Прочитать одну строку из stream с таймаутом (кроссплатформенно)."""
+    reader = _reader_for(stream)
+    return None if reader is None else reader.readline(timeout)
+
+
+async def _areadline_with_timeout(stream: "Any", timeout: float) -> "str | None":
+    """То же, не занимая поток на ожидании."""
+    reader = _reader_for(stream)
+    return None if reader is None else await reader.areadline(timeout)
 
 
 def forget_stdio_reader(stream: "Any") -> None:

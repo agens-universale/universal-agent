@@ -49,6 +49,21 @@ def _start(flow: Generator) -> tuple[bool, Any]:
     return True, None
 
 
+async def _off_loop(fn: Callable[..., Any], *args: Any) -> Any:
+    """Исполнить блокирующую часть гварда вне loop — на своём потоке.
+
+    Не ``asyncio.to_thread``: его пул общий и небольшой, и тело гварда встало
+    бы в очередь за чужой работой. Замерено на забитом пуле — команда, которая
+    сама идёт секунду, занимала 2.25 с, потому что сперва ждала слот.
+
+    ``run_abandonable`` даёт поток-демон на вызов; ровно для этого он и
+    написан, см. его докстроку.
+    """
+    from gc_core.tools.connect_mcp.abandonable import run_abandonable
+
+    return await run_abandonable(fn, *args)
+
+
 def _finish(flow: Generator, result: Any) -> Any:
     """Вернуть телу результат тула и забрать финальный ответ."""
     try:
@@ -64,6 +79,8 @@ def _finish(flow: Generator, result: Any) -> Any:
 def dual_wrap(
     func: Callable[..., Any],
     flow: Callable[..., Generator],
+    *,
+    body_may_block: bool = False,
 ) -> Callable[..., Any]:
     """Обернуть ``func`` телом-генератором ``flow``.
 
@@ -71,17 +88,47 @@ def dual_wrap(
     ``functools.wraps`` обязателен: гварды достают имена аргументов из
     сигнатуры обёрнутой функции (``_extract_named_value``), и без переноса
     метаданных они извлекали бы не тот аргумент.
+
+    ``body_may_block`` — про ТЕЛО гварда, не про тул. По умолчанию тело идёт
+    инлайн: у четырёх гвардов из пяти это десятки микросекунд чистого CPU, и
+    поход в пул стоит дороже самой работы.
+
+    Исключение одно — ``moderate_command_execution``: его тело зовёт LLM-судью
+    через ``request_auxiliary_completion_text``, а тот идёт ЧЕРЕЗ ПОРТАЛ
+    (``summarize/llm``). Портал из-под живого event loop поднимает
+    ``SyncApiInsideEventLoopError``, поэтому такому телу нужен поток — там
+    живого loop нет. Флаг ставится в самом гварде: только он знает, что у него
+    внутри.
+
+    На нативность самого тула это не влияет: ``func`` в обеих ветках ждётся
+    через ``await``, и запуск процесса остаётся асинхронным.
     """
     if inspect.iscoroutinefunction(func):
         @functools.wraps(func)
         async def awrapper(*args: Any, **kwargs: Any) -> Any:
             gen = flow(*args, **kwargs)
-            # Тело гварда синхронное, и в режиме `ask` внутри него живёт
-            # ожидание человека (request_confirm → input()). Прямой прогон
-            # заморозил бы event loop вызывающего до ответа — то есть,
-            # возможно, навсегда. В поток: политика над строками — чистый CPU,
-            # ждать человека там безопасно.
-            needs_call, early = await asyncio.to_thread(_start, gen)
+            # Тело гварда идёт ИНЛАЙН — от синхронной ветки ниже эта
+            # отличается ровно словом `await` перед вызовом тула.
+            #
+            # Раньше здесь стоял `asyncio.to_thread`, чтобы не морозить loop на
+            # время раздумий человека в режиме `ask`. Замеры показали, что
+            # платим мы за это всегда, а получаем почти никогда:
+            #   * тело — 15-25 мкс чистого CPU (signature, urlsplit, fnmatch,
+            #     json.dumps), нативной асинхронной формы у него нет;
+            #   * два похода в пул стоят 88 мкс — дороже переносимой работы;
+            #   * пул ОБЩИЙ, и те же тулы уводят туда разбор HTML
+            #     (fetch_url): на параллельных фетчах гвард вставал в очередь
+            #     за собственным тулом — 383 мс ожидания на 15 мкс работы;
+            #   * ожидание человека на дефолтном конфиге недостижимо (пустой
+            #     url_blacklist → любой http/https разрешён), а на сервере
+            #     отсекается в confirm_port.confirm_available.
+            # Там, где оно достижимо, инлайн даёт ту же заморозку, что уже
+            # принята для файловых тулов: их `acall` зовёт синхронную ветку
+            # прямо на loop.
+            if body_may_block:
+                needs_call, early = await _off_loop(_start, gen)
+            else:
+                needs_call, early = _start(gen)
             if not needs_call:
                 return early
             try:
@@ -92,8 +139,11 @@ def dual_wrap(
                 # интерпретатора уже в чужом месте.
                 gen.close()
                 raise
-            # _finish тоже может ждать человека (постобработка в режиме ask).
-            return await asyncio.to_thread(_finish, gen, result)
+            # Постобработки нет ни у одного гварда в ядре: все `yield` — это
+            # `return (yield)`. Поход в пул стоил бы здесь 0.3 мкс работы.
+            if body_may_block:
+                return await _off_loop(_finish, gen, result)
+            return _finish(gen, result)
 
         return awrapper
 

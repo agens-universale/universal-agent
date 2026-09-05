@@ -59,6 +59,18 @@ async def test_facade_does_not_block_the_loop(tmp_path, monkeypatch):
             prev = now
 
     beat = asyncio.create_task(_heartbeat())
+    # Даём пульсу завестись ДО прогона. Иначе первый assert проверяет не
+    # свободу loop, а длительность прогона: на скриптованном бэкенде хода
+    # хватает на 20-30 мс, и при шаге пульса 10 мс единственный тик мог
+    # прийтись на любую паузу внутри — например на то самое `to_thread`,
+    # которым раньше закрывались stdio-сессии. Убрали поток — тиков не стало,
+    # хотя loop стал свободнее, а не занятее.
+    #
+    # С прогревом инструмент строже: тики есть гарантированно, а весь ход
+    # ложится в ОДИН разрыв между ними — его и судит порог ниже.
+    while not gaps:
+        await asyncio.sleep(0.005)
+
     async with await AsyncAgent.create(cfg) as agent:
         await agent.run("привет", thread_id="t1")
     stop.set()

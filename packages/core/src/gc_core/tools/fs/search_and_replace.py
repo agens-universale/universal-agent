@@ -270,6 +270,10 @@ Update version string:
             error=error,
         )
 
+    async def acall(self, *args, **kwargs) -> str:
+        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
+        return self(*args, **kwargs)
+
     @enforce_write_guard(path_arg="path", operation="search_and_replace")
     def __call__(
         self,

@@ -15,7 +15,7 @@ from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, get_function_call_output_text
 from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
-from gc_core.intent_scope.final_answer import maybe_record_final_answer_intent
+from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
 from gc_core.message_policy.cycle_stop import aappend_cycle_stop_tool_outputs_for_batch
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
@@ -1176,12 +1176,13 @@ async def arun_agent(
                         if mark_finalizing is not None:
                             await await_callback(mark_finalizing(True))
                         try:
-                            # В поток, как соседние intent-scope хуки: внутри
-                            # синхронный aux-LLM, и прямой вызов из корутины
-                            # упирается в портал, а fail-open это глотает —
-                            # сводка молча подменялась сырым текстом.
+                            # Корутинным именем, как соседние intent-scope хуки.
+                            # Синхронное вело в портал, а fail-open внутри это
+                            # глотал — сводка молча подменялась сырым текстом.
+                            # Обходной путь был через поток; с готовым
+                            # двойником портала на пути нет вовсе.
                             await _acall_blocking_hook(
-                                maybe_record_final_answer_intent,
+                                amaybe_record_final_answer_intent,
                                 assistant_text=assistant_text, state=state, ctx=ctx
                             )
                             state.flush_current_user_intent()

@@ -173,6 +173,10 @@ Return format (JSON string):
 '''
         return description
 
+    async def acall(self, *args: Any, **kwargs: Any) -> str:
+        """Инлайн на loop: работы микросекунды, поток дороже (docs/async.md)."""
+        return self(*args, **kwargs)
+
     def __call__(self, expression: str, **kwargs) -> str:
         if not isinstance(expression, str):
             return self._result(

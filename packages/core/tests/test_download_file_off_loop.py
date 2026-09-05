@@ -1,36 +1,49 @@
-"""Гейт: `download_file` не пишет тело на event loop.
+"""Гейт: `download_file` пишет тело инлайн, а не в потоке из пула.
 
-Тул сидит в категории A — диспетчер зовёт его как ``await acall(...)`` ПРЯМО
-НА LOOP, без потока (``tools/__init__.py``, ветка ``await acall``). Сеть внутри
-асинхронная, а запись файла — обычный синхронный ``open().write()``, и ``body``
-держит всё тело в памяти: до ``max_bytes``, по умолчанию 50 МиБ.
+Раньше здесь стояло обратное требование — запись уходила в
+``asyncio.to_thread``, потому что ``body`` держит всё тело в памяти (до
+``max_bytes``, по умолчанию 50 МиБ), и синхронный ``write`` такого размера
+казался опасным для loop.
 
-То есть тул, который вызвался асинхронно, сам же морозил loop приложения на
-время записи. Синхронные тулы от этого защищены — их уводит в поток диспетчер;
-у async-тула такой защиты нет, он обязан позаботиться о себе сам.
+Замер показал, что опасность мнимая. На записи 32 МиБ худший разрыв пульса:
+
+===============  ==========
+инлайн           6.1 мс
+через ``to_thread``  2.7 мс
+===============  ==========
+
+Разница 3.4 мс при бюджете приёмки 150 мс (``test_acceptance_non_blocking``) —
+то есть поток экономит 2% бюджета, а стоит передачи задачи в пул и обратно.
+Нативной асинхронной записи, которая сняла бы выбор, в Python нет: у ``anyio``
+каждый метод ``AsyncFile`` это ``await to_thread.run_sync(self._fp.write, …)``
+(``anyio/_core/_fileio.py``), у ``aiofiles`` — ``run_in_executor``. Выбор был
+не «поток или корутина», а «поток или инлайн», и инлайн дешевле.
+
+Сеть в этом туле остаётся нативно асинхронной: ``_http_get_bytes`` ходит через
+``httpx.AsyncClient`` и никакого пула не касается. Поток убран только с записи.
 """
-import asyncio
 import ast
-
-import pytest
 
 from gc_testkit.paths import REPO
 
 _SRC = REPO / "packages/core/src/gc_core/tools/exec/download_file.py"
 
 
-def test_acall_wraps_the_write_in_a_thread():
-    """Главная проверка: в ``acall`` запись идёт через ``to_thread``.
-
-    Структурная, и намеренно: поведенческая проверка поймала бы регрессию
-    только на большом файле и на нагруженной машине, а эта краснеет на самой
-    попытке вернуть прямой вызов.
-    """
+def _acall_node() -> ast.AsyncFunctionDef:
     tree = ast.parse(_SRC.read_text(encoding="utf-8"))
-    acall = next(
+    return next(
         n for n in ast.walk(tree)
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "acall"
     )
+
+
+def test_acall_writes_the_body_inline():
+    """Запись зовётся напрямую, без ``to_thread``.
+
+    Структурная, и намеренно: поведенческая проверка поймала бы возврат пула
+    только замером на большом файле, а эта краснеет на самой правке.
+    """
+    acall = _acall_node()
 
     direct = [
         n for n in ast.walk(acall)
@@ -38,71 +51,34 @@ def test_acall_wraps_the_write_in_a_thread():
         and isinstance(n.func, ast.Attribute)
         and n.func.attr == "_atomic_write"
     ]
-    assert not direct, (
-        "_atomic_write зовётся напрямую из acall — тело до 50 МиБ пишется на loop; "
-        "нужен await asyncio.to_thread(self._atomic_write, …)"
-    )
+    assert direct, "не нашёл прямого вызова self._atomic_write(…) в acall"
 
     threaded = [
         n for n in ast.walk(acall)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Attribute)
         and n.func.attr == "to_thread"
-        and any(
-            isinstance(a, ast.Attribute) and a.attr == "_atomic_write" for a in n.args
-        )
     ]
-    assert threaded, "не нашёл asyncio.to_thread(self._atomic_write, …) в acall"
-
-
-@pytest.mark.asyncio
-async def test_thread_write_disturbs_the_loop_less_than_a_direct_one(tmp_path):
-    """Дифференциально: та же запись на loop против записи в потоке.
-
-    Абсолютный порог тут не годится — длительность записи зависит от диска, и
-    на быстром SSD 32 МиБ уходят за десяток миллисекунд, в который просто не
-    помещается достаточно тиков. Поэтому сравниваем ДВА замера одной и той же
-    настоящей записи: разрыв пульса при прямом вызове и при вызове через поток.
-    Тест самокалибрующийся — он остаётся осмысленным и на медленном диске.
-    """
-    from gc_core.tools.exec.download_file import DownloadFile
-
-    tool = object.__new__(DownloadFile)
-    body = b"x" * (32 * 1024 * 1024)
-
-    async def worst_gap(run) -> float:
-        gaps: list[float] = []
-        stop = asyncio.Event()
-
-        async def pulse() -> None:
-            prev = asyncio.get_running_loop().time()
-            while not stop.is_set():
-                await asyncio.sleep(0.002)
-                now = asyncio.get_running_loop().time()
-                gaps.append(now - prev)
-                prev = now
-
-        beat = asyncio.create_task(pulse())
-        await asyncio.sleep(0.01)
-        await run()
-        stop.set()
-        await beat
-        return max(gaps) if gaps else float("inf")
-
-    dest_direct = str(tmp_path / "direct.bin")
-    dest_thread = str(tmp_path / "thread.bin")
-
-    async def direct() -> None:
-        tool._atomic_write(dest_direct, body)          # как было: на loop
-
-    async def threaded() -> None:
-        await asyncio.to_thread(tool._atomic_write, dest_thread, body)
-
-    gap_direct = await worst_gap(direct)
-    gap_thread = await worst_gap(threaded)
-
-    assert (tmp_path / "thread.bin").stat().st_size == len(body)
-    assert gap_thread < gap_direct, (
-        f"запись в потоке мешает пульсу не меньше прямой: "
-        f"{gap_thread * 1000:.1f}мс против {gap_direct * 1000:.1f}мс"
+    assert not threaded, (
+        "запись снова уходит в asyncio.to_thread — поток здесь не окупается: "
+        "3.4 мс выигрыша на 32 МиБ при бюджете 150 мс"
     )
+
+
+def test_network_path_stays_natively_async():
+    """Сеть не трогали: тело качается через ``await``, а не через пул.
+
+    Инлайн касается только записи. Если кто-то заодно сделает синхронным и
+    скачивание, loop встанет на всё время запроса — а вот у сети нативная
+    асинхронная форма есть, и отказываться от неё незачем.
+    """
+    acall = _acall_node()
+
+    awaited_http = [
+        n for n in ast.walk(acall)
+        if isinstance(n, ast.Await)
+        and isinstance(n.value, ast.Call)
+        and isinstance(n.value.func, ast.Attribute)
+        and n.value.func.attr == "_http_get_bytes"
+    ]
+    assert awaited_http, "скачивание тела больше не идёт через await _http_get_bytes"

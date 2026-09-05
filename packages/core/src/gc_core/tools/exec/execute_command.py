@@ -1,6 +1,9 @@
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 import json
 
+from typing import Any
+
+from gc_core.backends.async_protocol import aexec_port
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from gc_core.security.command_guard import enforce_command_guard
@@ -207,6 +210,90 @@ Important Usage Rules:
         env_vars: list[dict] | None = None,
         **kwargs,
     ) -> str:
+        """Синхронный вход: процесс запускается блокирующим ``exec``."""
+        early, plan = self._plan(
+            command, timeout_seconds, max_output_chars, cwd, env_vars
+        )
+        if early is not None:
+            return early
+        try:
+            res = self._backend.exec(
+                plan["command"], cwd=plan["cwd"], timeout=plan["timeout"],
+                env=plan["env"],
+            )
+        except Exception as e:
+            return self._exec_failed(plan, e)
+        return self._finish(res, plan)
+
+    @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
+    @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
+    async def acall(
+        self,
+        command: str,
+        timeout_seconds: int | None = None,
+        max_output_chars: int | None = None,
+        cwd: str | None = None,
+        env_vars: list[dict] | None = None,
+        **kwargs,
+    ) -> str:
+        """Нативный вход: процесс через ``asyncio.create_subprocess_shell``.
+
+        Прежде тул целиком уезжал в ``asyncio.to_thread``, и слот общего пула
+        держался ВЕСЬ таймаут — по умолчанию 120 с. На одиночном вызове это
+        почти незаметно, на параллельных — нет: 20 команд шли 4.09 с через пул
+        против 2.10 с нативно.
+
+        Гварды навешены и здесь — иначе асинхронный путь обошёл бы политику
+        безопасности. Тело модерации при этом остаётся в потоке (внутри
+        портальный LLM-судья), а сам запуск ждётся через ``await``.
+
+        ``aexec_port`` вместо прямого ``backend.aexec``: у ``HarborBackend`` и
+        ``TrackingFsBackend`` нативного ``aexec`` нет, и адаптер завернёт их
+        по-старому — совместимость цела.
+        """
+        early, plan = self._plan(
+            command, timeout_seconds, max_output_chars, cwd, env_vars
+        )
+        if early is not None:
+            return early
+        try:
+            res = await aexec_port(self._backend).aexec(
+                plan["command"], cwd=plan["cwd"], timeout=plan["timeout"],
+                env=plan["env"],
+            )
+        except Exception as e:
+            return self._exec_failed(plan, e)
+        return self._finish(res, plan)
+
+    def _exec_failed(self, plan: dict, exc: Exception) -> str:
+        """Отказ запуска — общий для обоих входов."""
+        err = str(exc).replace("\n", " ").strip()
+        return self._result(
+            ok=False,
+            command=plan["command"],
+            cwd=plan["cwd"] or "",
+            exit_code=-1,
+            timed_out=False,
+            truncated=False,
+            stdout="",
+            stderr="",
+            error={"type": "execution_failed", "message": err},
+        )
+
+    def _plan(
+        self,
+        command: str,
+        timeout_seconds: int | None = None,
+        max_output_chars: int | None = None,
+        cwd: str | None = None,
+        env_vars: list[dict] | None = None,
+    ) -> "tuple[str | None, dict]":
+        """``(готовый отказ, план запуска)`` — значимо ровно одно из двух.
+
+        Всё, что не зависит от способа запуска: валидация, дефолты, проверка
+        cwd и разбор env. Вынесено, чтобы у двух входов не разошлись правила —
+        разойдясь, они дали бы одному и тому же туду два разных контракта.
+        """
         cwd_used = cwd if cwd is not None else self._backend.default_cwd()
 
         # Input validation
@@ -221,7 +308,7 @@ Important Usage Rules:
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "command"},
-            )
+            ), {}
 
         if not command.strip():
             return self._result(
@@ -234,7 +321,7 @@ Important Usage Rules:
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "command", "message": "Empty command"},
-            )
+            ), {}
 
         if timeout_seconds is None:
             timeout_seconds = exec_timeout_from_config_dict(self._config_dict)
@@ -249,7 +336,7 @@ Important Usage Rules:
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "timeout_seconds"},
-            )
+            ), {}
 
         if max_output_chars is None:
             max_output_chars = self.cut_n
@@ -264,7 +351,7 @@ Important Usage Rules:
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "max_output_chars"},
-            )
+            ), {}
         max_output_chars = clamp_max_output_chars(max_output_chars, self._config_dict)
 
         if cwd_used is not None:
@@ -279,7 +366,7 @@ Important Usage Rules:
                     stdout="",
                     stderr="",
                     error={"type": "invalid_argument", "field": "cwd"},
-                )
+                ), {}
             if not self._backend.is_dir(cwd_used):
                 return self._result(
                     ok=False,
@@ -291,7 +378,7 @@ Important Usage Rules:
                     stdout="",
                     stderr="",
                     error={"type": "invalid_argument", "field": "cwd", "message": "Not a directory"},
-                )
+                ), {}
 
         env_sanitized: dict[str, str] = {}
         if env_vars is not None:
@@ -310,7 +397,7 @@ Important Usage Rules:
                         "field": "env_vars",
                         "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
                     },
-                )
+                ), {}
             env_from_pairs: dict[str, str] = {}
             for idx, item in enumerate(env_vars):
                 if not isinstance(item, dict):
@@ -328,7 +415,7 @@ Important Usage Rules:
                             "field": f"env_vars[{idx}]",
                             "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
                         },
-                    )
+                    ), {}
                 name = item.get("name")
                 if not isinstance(name, str) or not name.strip():
                     return self._result(
@@ -341,7 +428,7 @@ Important Usage Rules:
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
-                    )
+                    ), {}
                 value = item.get("value")
                 if not isinstance(value, str):
                     return self._result(
@@ -358,27 +445,24 @@ Important Usage Rules:
                             "field": f"env_vars[{idx}].value",
                             "message": "env_vars value must be a string",
                         },
-                    )
+                    ), {}
                 env_from_pairs[name.strip()] = value
             env_sanitized = env_from_pairs
 
-        try:
-            res = self._backend.exec(
-                command, cwd=cwd_used, timeout=timeout_seconds, env=env_sanitized or None
-            )
-        except Exception as e:
-            err = str(e).replace("\n", " ").strip()
-            return self._result(
-                ok=False,
-                command=command,
-                cwd=cwd_used or "",
-                exit_code=-1,
-                timed_out=False,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={"type": "execution_failed", "message": err},
-            )
+        return None, {
+            "command": command,
+            "cwd": cwd_used,
+            "timeout": timeout_seconds,
+            "env": env_sanitized or None,
+            "max_output_chars": max_output_chars,
+        }
+
+    def _finish(self, res: "Any", plan: dict) -> str:
+        """Разобрать результат запуска. Общий для обоих входов."""
+        command = plan["command"]
+        cwd_used = plan["cwd"]
+        timeout_seconds = plan["timeout"]
+        max_output_chars = plan["max_output_chars"]
 
         stdout_meta = self._process_stream(
             res.stdout or "",

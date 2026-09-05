@@ -128,6 +128,10 @@ Behavior:
             read_via=cls.registered_tool_name(),
         )
 
+    async def acall(self, *args: Any, **kwargs: Any) -> str:
+        """Инлайн на loop: работы микросекунды, поток дороже (docs/async.md)."""
+        return self(*args, **kwargs)
+
     def __call__(
         self,
         output_ref: str,

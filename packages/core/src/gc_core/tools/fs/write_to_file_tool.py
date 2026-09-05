@@ -126,6 +126,10 @@ Usage:
     ) -> str:
         return self._result(ok=False, path=path, mode=mode, error=error)
 
+    async def acall(self, *args, **kwargs) -> str:
+        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
+        return self(*args, **kwargs)
+
     @enforce_write_guard(path_arg="path", operation="write")
     def __call__(
         self,

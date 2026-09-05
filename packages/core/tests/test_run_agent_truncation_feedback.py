@@ -60,7 +60,12 @@ def _run_with_finish_reason(monkeypatch, finish_reason):
     monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_process_tool_calls)
     monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
     # Избегаем дёрганья LLM-summarizer для intent-log при финальном ответе.
-    monkeypatch.setattr(pr, "maybe_record_final_answer_intent", lambda **_kw: None)
+    # Заглушка корутинная: цикл ждёт хук нативно, синхронное имя ушло вместе
+    # с лишним прыжком через поток и портал.
+    async def _no_final_answer_intent(**_kw):
+        return None
+
+    monkeypatch.setattr(pr, "amaybe_record_final_answer_intent", _no_final_answer_intent)
 
     state = _state()
     state.last_finish_reason = finish_reason

@@ -458,7 +458,12 @@ def moderate_command_execution(
                 ensure_ascii=False,
             )
 
-        return dual_wrap(func, _flow)
+        # Тело зовёт LLM-судью через ``request_auxiliary_completion_text``, а
+        # тот идёт через портал — на живом loop он поднял бы
+        # SyncApiInsideEventLoopError. Единственный такой гвард в ядре, у
+        # остальных тело чистый CPU и идёт инлайн. Сам тул это не замедляет:
+        # ``dual_wrap`` ждёт его через ``await`` в обеих ветках.
+        return dual_wrap(func, _flow, body_may_block=True)
 
     return decorator
 

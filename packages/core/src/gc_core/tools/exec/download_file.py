@@ -427,13 +427,11 @@ class DownloadFile(AbstractSimpleTool):
                 error={"type": "write_failed", "message": str(exc)},
             )
 
-        # В поток: тул в категории A, диспетчер зовёт acall ПРЯМО НА LOOP
-        # (tools/__init__.py, ветка `await acall`). Сеть здесь асинхронная, а
-        # запись — нет: `body` держит всё тело в памяти, до max_bytes (50 МиБ),
-        # и синхронный write такого размера морозит loop приложения целиком.
-        # Синхронные тулы от этого защищены — их уводит в поток сам диспетчер;
-        # этот вызвался async и обязан позаботиться о себе сам.
-        write_error = await asyncio.to_thread(self._atomic_write, dest, body)
+        # Инлайн: нативной асинхронной записи в Python нет (все «async file»
+        # обёрнуты вокруг того же пула), а поток здесь не окупается — замерено
+        # 6.1 мс лага loop против 2.7 мс на записи 32 МиБ при бюджете приёмки
+        # 150 мс. Сеть выше остаётся асинхронной, поток убран только с записи.
+        write_error = self._atomic_write(dest, body)
         if write_error is not None:
             return self._result(path=dest, filename=validated_filename, error=write_error)
 

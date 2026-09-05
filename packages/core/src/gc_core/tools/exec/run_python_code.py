@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from gc_core.backends.async_protocol import aexec_port
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from gc_core.security.command_guard import enforce_command_guard
@@ -200,6 +201,77 @@ Return format (JSON string):
         env_vars: Optional[list[dict]] = None,
         **kwargs,
     ) -> str:
+        """Синхронный вход: процесс запускается блокирующим ``run_python``."""
+        early, plan = self._plan(
+            code, timeout_seconds, max_output_chars, cwd, env_vars, **kwargs
+        )
+        if early is not None:
+            return early
+        try:
+            res = self._backend.run_python(
+                plan["code"], cwd=plan["cwd"], timeout=plan["timeout"], env=plan["env"]
+            )
+        except Exception as e:
+            return self._exec_failed(e)
+        return self._finish(res, plan)
+
+    @enforce_command_guard(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
+    @moderate_command_execution(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
+    async def acall(
+        self,
+        code: str,
+        timeout_seconds: Optional[int] = None,
+        max_output_chars: int = 4000,
+        cwd: Optional[str] = None,
+        env_vars: Optional[list[dict]] = None,
+        **kwargs,
+    ) -> str:
+        """Нативный вход: процесс через ``asyncio.create_subprocess_exec``.
+
+        Ровно та же причина, что у ``exec_command``: слот общего пула держался
+        весь таймаут запуска. Гварды навешены и здесь — иначе асинхронный путь
+        обошёл бы политику. ``aexec_port`` вместо прямого ``backend.arun_python``
+        оставляет рабочими бэкенды без нативного запуска (harbor, TUI).
+        """
+        early, plan = self._plan(
+            code, timeout_seconds, max_output_chars, cwd, env_vars, **kwargs
+        )
+        if early is not None:
+            return early
+        try:
+            res = await aexec_port(self._backend).arun_python(
+                plan["code"], cwd=plan["cwd"], timeout=plan["timeout"], env=plan["env"]
+            )
+        except Exception as e:
+            return self._exec_failed(e)
+        return self._finish(res, plan)
+
+    def _exec_failed(self, exc: Exception) -> str:
+        """Отказ запуска — общий для обоих входов."""
+        return self._result(
+            ok=False,
+            return_code=None,
+            timed_out=False,
+            truncated=False,
+            stdout="",
+            stderr="",
+            error={"type": "execution_failed", "message": str(exc)},
+        )
+
+    def _plan(
+        self,
+        code: str,
+        timeout_seconds: Optional[int] = None,
+        max_output_chars: int = 4000,
+        cwd: Optional[str] = None,
+        env_vars: Optional[list[dict]] = None,
+        **kwargs,
+    ) -> "tuple[str | None, dict]":
+        """``(готовый отказ, план запуска)`` — значимо ровно одно из двух.
+
+        Всё, что не зависит от способа запуска. Вынесено, чтобы у двух входов
+        не разошлись правила проверки аргументов.
+        """
         if not isinstance(code, str):
             return self._result(
                 ok=False,
@@ -209,7 +281,7 @@ Return format (JSON string):
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "code"},
-            )
+            ), {}
 
         if not code.strip():
             return self._result(
@@ -220,7 +292,7 @@ Return format (JSON string):
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "code", "message": "Code is empty"},
-            )
+            ), {}
 
         effective_timeout = (
             timeout_seconds
@@ -236,7 +308,7 @@ Return format (JSON string):
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "timeout_seconds"},
-            )
+            ), {}
 
         if not isinstance(max_output_chars, int) or max_output_chars <= 0:
             return self._result(
@@ -247,7 +319,7 @@ Return format (JSON string):
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "max_output_chars"},
-            )
+            ), {}
         max_output_chars = clamp_max_output_chars(max_output_chars, self._config_dict)
 
         if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
@@ -259,7 +331,7 @@ Return format (JSON string):
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "cwd"},
-            )
+            ), {}
 
         if self._backend.is_sandbox:
             cwd_used = cwd  # None → container default workdir
@@ -281,7 +353,7 @@ Return format (JSON string):
                             "use one of those paths — they are the writable locations allowed for this agent run."
                         ),
                     },
-                )
+                ), {}
         else:
             security_context = resolve_tool_context(self, **kwargs)
             cwd_used = effective_command_cwd(EXEC_PYTHON_NAME, {"cwd": cwd}, security_context)
@@ -317,7 +389,7 @@ Return format (JSON string):
                             "use one of those paths — they are the writable locations allowed for this agent run."
                         ),
                     },
-                )
+                ), {}
 
         env_map: Optional[Dict[str, str]] = None
         if env_vars is not None:
@@ -334,7 +406,7 @@ Return format (JSON string):
                         "field": "env_vars",
                         "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
                     },
-                )
+                ), {}
             parsed: Dict[str, str] = {}
             for idx, item in enumerate(env_vars):
                 if not isinstance(item, dict):
@@ -350,7 +422,7 @@ Return format (JSON string):
                             "field": f"env_vars[{idx}]",
                             "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
                         },
-                    )
+                    ), {}
                 name = item.get("name")
                 if not isinstance(name, str) or not name.strip():
                     return self._result(
@@ -361,7 +433,7 @@ Return format (JSON string):
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
-                    )
+                    ), {}
                 value = item.get("value")
                 if not isinstance(value, str):
                     return self._result(
@@ -372,24 +444,24 @@ Return format (JSON string):
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].value"},
-                    )
+                    ), {}
                 parsed[name.strip()] = value
             env_map = parsed
 
-        try:
-            res = self._backend.run_python(
-                code, cwd=cwd_used, timeout=effective_timeout, env=env_map
-            )
-        except Exception as e:
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=False,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={"type": "execution_failed", "message": str(e)},
-            )
+        return None, {
+            "code": code,
+            "cwd": cwd_used,
+            "timeout": effective_timeout,
+            "env": env_map,
+            "max_output_chars": max_output_chars,
+        }
+
+    def _finish(self, res: "Any", plan: dict) -> str:
+        """Разобрать результат запуска. Общий для обоих входов."""
+        cwd_used = plan["cwd"]
+        effective_timeout = plan["timeout"]
+        max_output_chars = plan["max_output_chars"]
+
         stdout_meta = self._process_stream(
             res.stdout or "",
             max_output_chars,

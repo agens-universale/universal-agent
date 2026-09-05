@@ -48,14 +48,23 @@ asyncio уместен и применён (``transport._astdio_exchange``), ч�
 
 from typing import Any, Dict, Optional
 
+import asyncio
 import json
 import os
 import signal
 import subprocess
 import threading
+import time
 
 from gc_core.mcp_session_owner import current_owner
-from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, _INITIALIZED_PAYLOAD, _readline_with_timeout, _resolve_command, forget_stdio_reader
+from gc_core.tools.connect_mcp.transport import (
+    _INIT_PAYLOAD,
+    _INITIALIZED_PAYLOAD,
+    _areadline_with_timeout,
+    _readline_with_timeout,
+    _resolve_command,
+    forget_stdio_reader,
+)
 
 
 def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
@@ -145,6 +154,75 @@ def _terminate_process_tree(proc: subprocess.Popen, graceful_timeout: float = 5.
         pass
 
 
+#: Шаг опроса при асинхронном ожидании смерти процесса. Компромисс: реже —
+#: закрытие тянется дольше нужного, чаще — лишние пробуждения loop на пустом
+#: месте. При graceful-таймауте 5 с это до сотни проверок, каждая — один
+#: ``waitpid(WNOHANG)``.
+_POLL_STEP_SEC = 0.05
+
+
+async def _await_exit(proc: subprocess.Popen, timeout: float) -> bool:
+    """Дождаться смерти процесса опросом. ``True`` — успел, ``False`` — таймаут.
+
+    Замена ``proc.wait(timeout)``, которая не занимает ни поток, ни loop:
+    ``poll()`` — неблокирующий ``waitpid(WNOHANG)``, а пауза между проверками
+    отдаёт управление циклу.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if proc.poll() is not None:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(min(_POLL_STEP_SEC, max(0.0, deadline - time.monotonic())))
+
+
+async def _aterminate_process_tree(
+    proc: subprocess.Popen, graceful_timeout: float = 5.0
+) -> None:
+    """Асинхронный двойник :func:`_terminate_process_tree`.
+
+    Отличается ровно способом ждать: сигналы (``killpg``, ``terminate``) —
+    мгновенные системные вызовы и в потоке не нуждались никогда; блокировало
+    только ``proc.wait(timeout)``, и вместо него здесь опрос.
+
+    Эскалация сохранена дословно: SIGTERM по группе → graceful-таймаут →
+    SIGKILL по группе. Терять её нельзя — сервер, игнорирующий SIGTERM
+    (Chromium под @playwright/mcp), иначе переживёт агента.
+    """
+    if proc.poll() is not None:
+        return
+    pid = proc.pid
+    try:
+        if os.name == "posix":
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        else:
+            proc.terminate()
+    except ProcessLookupError:
+        return
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    try:
+        if await _await_exit(proc, graceful_timeout):
+            return
+    except Exception:
+        return
+    try:
+        if os.name == "posix":
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        else:
+            proc.kill()
+    except Exception:
+        pass
+    try:
+        await _await_exit(proc, 2.0)
+    except Exception:
+        pass
+
+
 class PersistentStdioSession:
     """
     Одна долгоживущая stdio-сессия с MCP-сервером.
@@ -201,55 +279,175 @@ class PersistentStdioSession:
             self._write_line(payload)
             return self._read_matching(req_id, timeout)
 
-    def close(self) -> None:
+    def _detach(self) -> "Optional[subprocess.Popen]":
+        """Снять процесс с сессии под локом. Дальше он уже ничей — ждать его
+        можно сколько угодно, никого не блокируя.
+
+        Лок держится ТОЛЬКО здесь. Раньше он удерживался на всё закрытие,
+        включая ожидание close-тула (до 10 с) и смерти процесса (до 7 с); для
+        асинхронного пути это недопустимо — ``threading.Lock``, удержанный
+        через ``await``, застопорил бы весь loop, если бы за ним пришла
+        корутина.
+        """
         with self._lock:
             proc = self._proc
             self._proc = None
-            if proc is None:
-                return
-            # Забыть читателя stdout: он живёт столько же, сколько процесс, и
-            # без этого его запись осталась бы в реестре навсегда.
-            forget_stdio_reader(getattr(proc, "stdout", None))
-            # Некоторые MCP-серверы поднимают внешних, detached-потомков:
-            # например @playwright/mcp на macOS может запустить системный Google Chrome
-            # (ppid=1, не в нашей process group), поэтому killpg до него не
-            # дотянется. Сначала даём серверу шанс погасить их штатно через
-            # собственный MCP-тул (например browser_close_all) — CDP-коннект
-            # закроется корректно, Chrome завершится сам.
-            close_tool = self._server_cfg.get("persistent_session_close_tool")
-            if isinstance(close_tool, str) and close_tool.strip():
-                try:
-                    req_id = self._next_id
-                    self._next_id += 1
-                    self._write_line(
-                        {
-                            "jsonrpc": "2.0",
-                            "id": req_id,
-                            "method": "tools/call",
-                            "params": {"name": close_tool.strip(), "arguments": {}},
-                        }
-                    )
-                    # Короткий таймаут: если сервер не ответил — всё равно
-                    # идём дальше и дожимаем SIGTERM/SIGKILL.
-                    self._read_matching(req_id, 10.0)
-                except Exception:
-                    pass
-            # Закрываем stdin: некоторые MCP-серверы по EOF корректно
-            # завершают свой event loop.
-            if proc.stdin is not None:
-                try:
-                    proc.stdin.close()
-                except Exception:
-                    pass
+        return proc
+
+    def close(self) -> None:
+        proc = self._detach()
+        if proc is not None:
+            self._close_prologue(proc)
             _terminate_process_tree(proc, graceful_timeout=5.0)
+
+    async def aclose(self) -> None:
+        """То же закрытие, но ожидание не занимает поток.
+
+        Пролог (ответ close-тула) и терминация — единственное, что здесь
+        долгое, и оба переведены на опрос.
+        """
+        proc = self._detach()
+        if proc is not None:
+            await self._aclose_prologue(proc)
+            await _aterminate_process_tree(proc, graceful_timeout=5.0)
+
+    def _close_prologue(self, proc: "subprocess.Popen") -> None:
+        self._close_prologue_head(proc)
+        close_tool = self._close_tool_name()
+        if close_tool is not None:
+            try:
+                req_id = self._write_close_tool(proc, close_tool)
+                self._read_matching_on(proc, req_id, 10.0)
+            except Exception:
+                pass
+        self._close_stdin(proc)
+
+    async def _aclose_prologue(self, proc: "subprocess.Popen") -> None:
+        self._close_prologue_head(proc)
+        close_tool = self._close_tool_name()
+        if close_tool is not None:
+            try:
+                req_id = self._write_close_tool(proc, close_tool)
+                await self._aread_matching_on(proc, req_id, 10.0)
+            except Exception:
+                pass
+        self._close_stdin(proc)
+
+    def _close_tool_name(self) -> "Optional[str]":
+        """Имя тула, которым сервер гасит своих внешних детей, если он есть.
+
+        Некоторые MCP-серверы поднимают detached-потомков: @playwright/mcp на
+        macOS может запустить системный Google Chrome (ppid=1, вне нашей
+        process group), и killpg до него не дотянется. Сначала даём серверу
+        шанс погасить их штатно (например ``browser_close_all``) — CDP-коннект
+        закроется корректно, Chrome завершится сам. Не ответил за таймаут —
+        идём дальше и дожимаем SIGTERM/SIGKILL.
+        """
+        close_tool = self._server_cfg.get("persistent_session_close_tool")
+        if isinstance(close_tool, str) and close_tool.strip():
+            return close_tool.strip()
+        return None
+
+    def _write_close_tool(self, proc: "subprocess.Popen", close_tool: str) -> int:
+        req_id = self._next_id
+        self._next_id += 1
+        self._write_line_on(
+            proc,
+            {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "method": "tools/call",
+                "params": {"name": close_tool, "arguments": {}},
+            },
+        )
+        return req_id
+
+    @staticmethod
+    def _close_stdin(proc: "subprocess.Popen") -> None:
+        # Некоторые MCP-серверы по EOF корректно завершают свой event loop.
+        if proc.stdin is not None:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+
+    def _close_prologue_head(self, proc: "subprocess.Popen") -> None:
+        """Отцепить читателя. Общее начало обоих закрытий, ничего не ждёт."""
+        # Читатель stdout живёт столько же, сколько процесс: без этого его
+        # запись осталась бы в реестре навсегда.
+        forget_stdio_reader(getattr(proc, "stdout", None))
 
     def _write_line(self, payload: Dict[str, Any]) -> None:
         proc = self._proc
-        if proc is None or proc.stdin is None:
+        if proc is None:
+            raise RuntimeError("persistent stdio MCP process is not running")
+        self._write_line_on(proc, payload)
+
+    @staticmethod
+    def _write_line_on(proc: "subprocess.Popen", payload: Dict[str, Any]) -> None:
+        """Написать в УЖЕ ИЗВЕСТНЫЙ процесс.
+
+        Закрытие снимает процесс с сессии первым делом (``_detach``), поэтому
+        обращаться к ``self._proc`` дальше нельзя — там уже ``None``.
+        """
+        if proc.stdin is None:
             raise RuntimeError("persistent stdio MCP process is not running")
         line = json.dumps(payload) + "\n"
         proc.stdin.write(line)
         proc.stdin.flush()
+
+    @staticmethod
+    def _match_line(line: "str | None", req_id: Any) -> "tuple[bool, Dict[str, Any]]":
+        """``(готово, ответ)`` для одной прочитанной строки.
+
+        Общий разбор для синхронного и асинхронного чтения: две копии этого
+        цикла разъехались бы на первом же изменении формата.
+        """
+        if line is None:
+            return True, {}
+        stripped = line.strip()
+        if not stripped:
+            return False, {}
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            return False, {}
+        if not isinstance(obj, dict):
+            return False, {}
+        # notifications не имеют id — просто пропускаем.
+        if "id" not in obj:
+            return False, {}
+        if obj.get("id") == req_id:
+            return True, obj
+        return False, {}
+
+    async def _aread_matching_on(
+        self, proc: "subprocess.Popen", req_id: Any, timeout: float
+    ) -> Dict[str, Any]:
+        """Асинхронный двойник чтения ответа — ожидание очереди без потока."""
+        if proc.stdout is None:
+            raise RuntimeError("persistent stdio MCP process is not running")
+        for _ in range(32):
+            done, obj = self._match_line(
+                await _areadline_with_timeout(proc.stdout, timeout), req_id
+            )
+            if done:
+                return obj
+        return {}
+
+    def _read_matching_on(
+        self, proc: "subprocess.Popen", req_id: Any, timeout: float
+    ) -> Dict[str, Any]:
+        """Чтение ответа из УЖЕ ИЗВЕСТНОГО процесса (после ``_detach``)."""
+        if proc.stdout is None:
+            raise RuntimeError("persistent stdio MCP process is not running")
+        for _ in range(32):
+            done, obj = self._match_line(
+                _readline_with_timeout(proc.stdout, timeout), req_id
+            )
+            if done:
+                return obj
+        return {}
 
     def _read_matching(self, req_id: Any, timeout: float) -> Dict[str, Any]:
         """
@@ -320,15 +518,33 @@ class PersistentStdioRegistry:
                 self._sessions[key] = session
             return session
 
-    def close_all(self) -> None:
-        """Закрыть сессии ТЕКУЩЕГО владельца. Чужие работают — их не трогаем."""
+    def _take_own(self) -> list:
+        """Снять с реестра сессии ТЕКУЩЕГО владельца. Чужие не трогаем."""
         owner = current_owner()
         with self._lock:
             keys = [k for k in self._sessions if k[0] == owner]
-            sessions = [self._sessions.pop(k) for k in keys]
-        for session in sessions:
+            return [self._sessions.pop(k) for k in keys]
+
+    def close_all(self) -> None:
+        """Закрыть сессии текущего владельца. Синхронный вход."""
+        for session in self._take_own():
             try:
                 session.close()
+            except Exception:
+                pass
+
+    async def aclose_all(self) -> None:
+        """То же, не занимая поток из пула.
+
+        Цикл агента гасит сессии в своём ``finally``, и это до 7 с на сессию
+        (SIGTERM → таймаут → SIGKILL) плюс до 10 с на ответ close-тула. Раньше
+        всё это уезжало в ``asyncio.to_thread``; теперь ожидание — опрос, и
+        поток не нужен. Форма та же, что у ``stream_client``: синхронный
+        ``close_all`` рядом с ``aclose_all``.
+        """
+        for session in self._take_own():
+            try:
+                await session.aclose()
             except Exception:
                 pass
 

@@ -1,0 +1,178 @@
+"""Тулы, у которых ЕСТЬ нативная асинхронная форма, идут через неё.
+
+Диспетчер уводит синхронный тул в ``asyncio.to_thread``. Для короткой работы
+это просто дороже самой работы, и такие тулы переведены на инлайн
+(``test_file_tools_run_inline.py``). Но четыре тула держат слот пула ДОЛГО, и
+у каждого из них асинхронная форма существует:
+
+===================  ==========================  ==================
+тул                  чем занят                   нативная форма
+===================  ==========================  ==================
+``exec_sleep``       до 180 с ожидания           ``asyncio.sleep``
+``exec_command``     до 120 с subprocess         ``backend.aexec``
+``exec_python``      до 120 с subprocess         ``backend.arun_python``
+``turn_ask_human``   ждёт человека без предела   ``await ctx.ask_human``
+===================  ==========================  ==================
+
+Пул ``to_thread`` — общий и небольшой (``min(32, cpu+4)``, на этой машине 14).
+Тул, занявший слот на две минуты, отнимает его у всех остальных: замерено
+20 параллельных ``exec_command`` — 4.09 с через пул против 2.10 с нативно.
+Хуже того, отменённый ход слот не освобождает: ``asyncio.run`` на выходе
+ждёт ``shutdown_default_executor()``, и прогон висел лишние 2.8 с.
+
+Тот же приём уже применён к ``skills_run_script``
+(``test_skills_run_script_native.py``).
+"""
+import asyncio
+import json
+import threading
+import time
+
+import pytest
+
+from gc_core.tools.exec.sleep_tool import Sleep
+from gc_core.tools.turn.ask_human import AskHuman
+from gc_testkit.helpers.tool_ctx import local_ctx
+
+#: Заметно больше шага пульса, чтобы заморозка не спряталась между тиками.
+NAP = 0.4
+TICK = 0.02
+
+
+async def _worst_gap(coro_factory):
+    """``(результат, худший разрыв пульса)`` за время работы корутины."""
+    gaps: list = []
+    stop = asyncio.Event()
+
+    async def pulse() -> None:
+        prev = time.perf_counter()
+        while not stop.is_set():
+            await asyncio.sleep(TICK)
+            now = time.perf_counter()
+            gaps.append(now - prev)
+            prev = now
+
+    beat = asyncio.create_task(pulse())
+    await asyncio.sleep(0.05)
+    result = await coro_factory()
+    stop.set()
+    await beat
+    return result, (max(gaps) if gaps else float("inf"))
+
+
+# --- exec_sleep ------------------------------------------------------------
+
+
+async def test_sleep_does_not_hold_the_loop():
+    """``exec_sleep`` спит корутиной, не занимая loop."""
+    tool = Sleep(ctx=None)
+
+    out, gap = await _worst_gap(lambda: tool.acall(seconds=NAP))
+
+    parsed = json.loads(out)
+    assert parsed["ok"] is True, parsed
+    assert parsed["slept_seconds"] == NAP
+    assert gap < NAP / 2, f"loop залипал на {gap:.3f}с — сон не асинхронный"
+
+
+async def test_sleep_does_not_occupy_a_pool_thread():
+    """И не занимает слот общего пула — иначе 180 с потолка съедали бы его.
+
+    Считать ``threading.active_count()`` здесь нельзя: под полным набором
+    соседние тесты поднимают и гасят свои потоки, и счётчик шумит. Меряем то,
+    ради чего слот и важен: пул забит, а сон всё равно начинается сразу.
+    """
+    tool = Sleep(ctx=None)
+
+    hogs = [asyncio.create_task(asyncio.to_thread(time.sleep, 1.0)) for _ in range(24)]
+    await asyncio.sleep(0.05)  # даём им занять все места
+
+    started = time.perf_counter()
+    out = json.loads(await tool.acall(seconds=0.05))
+    spent = time.perf_counter() - started
+
+    for h in hogs:
+        h.cancel()
+    await asyncio.gather(*hogs, return_exceptions=True)
+
+    assert out["ok"] is True, out
+    assert spent < 0.5, (
+        f"сон ждал освобождения пула {spent:.2f}с — он всё ещё ходит в поток"
+    )
+
+
+async def test_sleep_actually_waits():
+    """Асинхронность не должна превратить сон в мгновенный возврат."""
+    tool = Sleep(ctx=None)
+
+    started = time.perf_counter()
+    await tool.acall(seconds=NAP)
+
+    assert time.perf_counter() - started >= NAP * 0.9
+
+
+@pytest.mark.parametrize(
+    "seconds,field",
+    [(None, "seconds"), ("нет", "seconds"), (-1, None), (10_000, None)],
+)
+async def test_sleep_validation_matches_the_sync_path(seconds, field):
+    """Проверки аргументов не разъехались между двумя входами."""
+    tool = Sleep(ctx=None)
+
+    via_async = json.loads(await tool.acall(seconds=seconds))
+    via_sync = json.loads(tool(seconds=seconds))
+
+    assert via_async == via_sync
+    assert via_async["ok"] is False
+
+
+def test_sleep_sync_entry_still_blocks():
+    """Синхронный вход остаётся блокирующим — его зовут apply_tool и тесты."""
+    tool = Sleep(ctx=None)
+
+    started = time.perf_counter()
+    out = json.loads(tool(seconds=0.05))
+
+    assert out["ok"] is True
+    assert time.perf_counter() - started >= 0.04
+
+
+# --- turn_ask_human --------------------------------------------------------
+
+
+async def test_ask_human_awaits_an_async_port_on_the_calling_loop():
+    """Корутинный порт встраивающего ждётся ЗДЕСЬ, а не на чужом loop.
+
+    Синхронный путь гонит его через ``run_coro_blocking``, а тот при живом
+    loop поднимает одноразовый поток с одноразовым event loop
+    (``utils/aio_compat.py``). Порт встраивающего исполнялся на loop, которого
+    приложение не создавало и не контролирует: всё, что порт держит привязанным
+    к своему loop (очередь, соединение), там не работает.
+    """
+    seen = {}
+
+    async def _port(question: str) -> str:
+        seen["loop"] = asyncio.get_running_loop()
+        return "ответ человека"
+
+    ctx = local_ctx()
+    ctx.ask_human = _port
+    tool = AskHuman(ctx=ctx)
+
+    out = await tool.acall(question="как дела?")
+
+    assert seen["loop"] is asyncio.get_running_loop(), (
+        "порт встраивающего исполнился на чужом loop"
+    )
+    assert "ответ человека" in str(out)
+
+
+async def test_ask_human_still_accepts_a_sync_port():
+    """Обычная функция как порт тоже принимается — контракт не сузился."""
+    ctx = local_ctx()
+    ctx.ask_human = lambda question: "синхронный ответ"
+    tool = AskHuman(ctx=ctx)
+
+    out = await tool.acall(question="как дела?")
+
+    assert "синхронный ответ" in str(out)

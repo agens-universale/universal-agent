@@ -161,6 +161,14 @@ async def test_loop_stays_responsive_during_compaction(tmp_path, monkeypatch):
             prev = now
 
     beat = asyncio.create_task(heartbeat())
+    # Ждём первый тик ДО прогона. Иначе тест проверяет не свободу цикла, а
+    # наличие в нём хоть одной точки приостановки: на скриптованном бэкенде
+    # сети нет вовсе, и пока тулы уходили в поток, тики давал сам поток. Без
+    # прогрева пульс не успевал стартовать, и `gaps` оставался пустым — при
+    # том, что цикл стал свободнее, а не занятее.
+    while not gaps:
+        await asyncio.sleep(0.005)
+
     async with await AsyncAgent.create(cfg) as agent:
         await agent.run("сделай что-нибудь", thread_id="t-s2")
     stop.set()

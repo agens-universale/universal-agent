@@ -54,11 +54,52 @@ def _read_human_response(ctx: "Any", question: str) -> str:
     if callable(port):
         result = port(question)
         if inspect.isawaitable(result):
-            # Порт вызывающего асинхронный, а тул синхронный: ждём через общий
-            # хелпер — он умеет и «нет loop», и «loop уже крутится».
+            # Порт вызывающего асинхронный, а этот вход синхронный: ждём через
+            # общий хелпер — он умеет и «нет loop», и «loop уже крутится».
+            # Асинхронный вход сюда не заходит, см. _aread_human_response.
             result = run_coro_blocking(result)
         return (str(result) if result is not None else "").strip()
 
+    lines: list[str] = []
+    while True:
+        try:
+            line = input()
+            if line == "":
+                break
+            lines.append(line)
+        except EOFError:
+            break
+    return "\n".join(lines).strip()
+
+
+async def _aread_human_response(ctx: "Any", question: str) -> str:
+    """То же, но корутинный порт ждётся НА LOOP ВЫЗЫВАЮЩЕГО.
+
+    Синхронный двойник гонит его через ``run_coro_blocking``, а тот при живом
+    loop заводит одноразовый поток с одноразовым event loop
+    (``utils/aio_compat``). Порт встраивающего исполнялся на loop, которого
+    приложение не создавало: всё, что порт держит привязанным к своему loop —
+    очередь, соединение, сессия — там просто не работает.
+
+    Ожидание человека при этом ничем не ограничено, и синхронный путь держал
+    на нём слот общего пула ``to_thread``. Здесь не занят ни поток, ни loop.
+    """
+    port = getattr(ctx, "ask_human", None)
+    if callable(port):
+        result = port(question)
+        if inspect.isawaitable(result):
+            result = await result
+        return (str(result) if result is not None else "").strip()
+    # Порта нет — читаем stdin, как CLI. Это блокирующий ввод, и нативной
+    # асинхронной формы у него нет; уводим в поток, чтобы не морозить loop
+    # приложения на всё время, пока человек печатает.
+    import asyncio
+
+    return await asyncio.to_thread(_read_stdin_lines)
+
+
+def _read_stdin_lines() -> str:
+    """Построчное чтение stdin до пустой строки или EOF."""
     lines: list[str] = []
     while True:
         try:
@@ -206,6 +247,29 @@ Do not implement until they confirm.
         return description
 
     def __call__(self, question: str, **kwargs) -> str:
+        """Синхронный вход: читает ответ здесь же, блокируя вызывающего."""
+        return self._ask_with(
+            question, lambda: _read_human_response(self._ctx, question)
+        )
+
+    async def acall(self, question: str, **kwargs) -> str:
+        """Асинхронный вход: ожидание человека не занимает поток из пула.
+
+        Ждать человека можно сколько угодно, и синхронный путь держал на этом
+        слот общего пула ``to_thread`` (14 воркеров на всех) без всякого
+        предела. Здесь ответ читается ДО тела, а тело получает его готовым:
+        так у двух входов остаётся ровно одна разница — способ чтения, — и
+        печать, логи и обработка ошибок не раздваиваются.
+        """
+        answer = await _aread_human_response(self._ctx, question)
+        return self._ask_with(question, lambda: answer)
+
+    def _ask_with(self, question: str, read_response: "Any") -> str:
+        """Общее тело: проверки, печать, логи, прогресс и разбор ответа.
+
+        ``read_response`` — нульарный колбэк, отдающий ответ человека. Он и
+        есть единственное, чем отличаются синхронный и асинхронный входы.
+        """
         # Input validation
         if not isinstance(question, str):
             return self._result(
@@ -268,7 +332,7 @@ Do not implement until they confirm.
                 extra={"event": "ask_human_question", "question": question},
             )
 
-            response = _read_human_response(self._ctx, question)
+            response = read_response()
 
             if response == "":
                 response = "(empty response)"
