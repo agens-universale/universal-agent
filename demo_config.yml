@@ -646,6 +646,7 @@ mcp:
       url: http://127.0.0.1:8765/mcp
       server-name: science
       description: Unified scientific literature search across 10 public APIs
+      loop_control_tools: all
       # Где исполняется протокол этого сервера. Ось независима от transport.
       #   agent      — в процессе агента (дефолт, нынешнее поведение);
       #   os_backend — в окружении, где работают тулы (контейнер задачи), через
@@ -680,6 +681,7 @@ mcp:
       command: ddgs-mcp
       server-name: duckduckgo
       description: Web and news search via DuckDuckGo (DDGS)
+      loop_control_tools: all
     # browser_playwright (опционально):
     #   transport: stream_stdio
     #   command: <путь npx из install.py>

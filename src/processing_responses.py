@@ -480,6 +480,7 @@ def _request_backend_canonical_once(
             sanitized_messages,
             chat_state,
             max_tokens=max_tokens,
+            config_dict=cfg,
             resolved=resolved,
         )
 
