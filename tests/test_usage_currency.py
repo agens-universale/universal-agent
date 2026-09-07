@@ -1,6 +1,6 @@
 """Валюта фактической цены выводится из адреса эндпоинта: `.ru` → рубли."""
 
-from usage.currency import provider_currency_for_url
+from gc_core.usage.currency import provider_currency_for_url
 
 RUB = "₽"
 USD = "$"

@@ -6,19 +6,22 @@
 
 ## Установка
 
-TUI (`textual`, `rich`) входит в зависимости по умолчанию — ставится вместе с `gc-cli`:
+TUI-стек (`textual`, `rich`, `pygments`) и сам пакет `gc_tui` (вместе с подпакетом `diff_tui`) едет
+дистрибутивом `gc-tui`. В профиле `gc-cli` их на диске нет вовсе:
 
 ```bash
-uv tool install -e .
-# или
-pip install -e .
+uv tool install -e packages/tui
+# без клонирования репозитория:
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
 ```
 
-Минимальная headless-установка только `gc-cli` (без TUI) — см.
-[Установка и запуск](usage.md#минимальная-установка-gc-cli-без-tui).
+`pip install -e packages/tui` не сработает: манифест пинит `gc-core==0.3.0`,
+который резолвится только через uv-workspace — pip пойдёт за ним на PyPI.
 
-Если `textual` отсутствует (например, после cli-only install), `gc-ua` печатает в stderr
-короткую подсказку переустановить пакет и завершается с кодом 1 — без трейсбэка.
+Полная таблица профилей — [Установка и запуск](usage.md#профили-установки), устройство — [упаковка](packaging.md).
+
+Если TUI не установлен (профиль `gc-cli`), `gc-ua` печатает в stderr
+однострочную подсказку с готовой командой и завершается с кодом 1 — без трейсбэка.
 
 ## Запуск
 

@@ -8,7 +8,7 @@
 - **Где ищется базовый `config.yml`** (первый найденный источник побеждает):
   1. путь из `--config` (если задан);
   2. иначе `config.yml` в каталоге «Config» из таблицы [«Где gc-cli хранит runtime-данные»](#где-gc-cli-хранит-runtime-данные) — `~/.config/gc/config.yml` на Linux/macOS, `%USERPROFILE%\.gc\config.yml` на Windows (учитывает `GC_CONFIG_DIR` / `XDG_CONFIG_HOME` / `GC_HOME`). Это **полная база** (кладите полный конфиг — частичный файл здесь потеряет пакетные дефолты);
-  3. иначе `config.yml` рядом с установленным пакетом (каталог, откуда был выполнен `pip install -e .`, подкаталог `src`).
+  3. иначе `config.default.yml` из ассетов дистрибутива `gc-core` (в рабочей копии — `packages/core/assets/`, в установленном колесе — `gc_core/assets/`).
 
   Поверх выбранной базы дополнительно deep-merge'ится project-local `<cwd>/.gc/config.yml` (см. [«Project local config (опционально)»](#project-local-config-опционально)). Чтобы указать свой путь явно:
   ```commandline
@@ -780,49 +780,64 @@ agent:
 
 Полные примеры для http, sse, stdio и комментарии по stream_http/stream_sse/stream_stdio — в `demo_config.yml`. Скопируйте нужный блок, подставьте свои `url` или `command`/`args`.
 
-### Встроенные интеграции — `recommended_mcp/`
+### Встроенные интеграции — дистрибутив `gc-mcp`
 
-В корне репозитория есть каталог `recommended_mcp/` с готовыми рецептами
-подключения нескольких MCP.
+Курируемые рецепты подключения MCP едут отдельным дистрибутивом `gc-mcp`
+(пакет `recommended_mcp`, исходники — `packages/mcp/src/recommended_mcp/`).
+Его тянут все профили, ставить отдельно не нужно. В корне репозитория каталога
+`recommended_mcp/` больше нет — он переехал 18.08.2026 вместе с выделением
+дистрибутива.
 
-**Основной способ — `gc-mcp install`** (автоматически ставит пакет и прописывает в `~/.gc/config.local.yml`):
+**Основной способ — `gc-mcp install`** (ставит пакет в отдельный venv агента и
+сам прописывает сервер в `~/.gc/config.local.yml`):
 
 ```bash
 gc-mcp install computer   # пример: установить computer MCP
-gc-mcp list               # список установленных
-gc-mcp remove computer    # удалить
+gc-mcp install            # весь рекомендованный набор (кроме optional-рецептов)
+gc-mcp list               # доступные / установленные / подключённые
+gc-mcp remove computer    # отключить и удалить
 ```
 
-**Фолбэк — ручная установка** (если `gc-mcp` недоступен):
+**Фолбэк — `gc-mcp-install`**: та же установка отдельной точкой входа
+(back-compat алиас `gc-mcp install`). Из рабочей копии репозитория работает и
+запуск модулем:
 
 ```bash
-python recommended_mcp/install.py
+uv run python -m recommended_mcp.install
 ```
 
-После ручной установки нужно скопировать сниппеты из
-`recommended_mcp/<name>/agent_config.snippet.yml` в секцию `mcp-servers:`
-своего `config.yml`. На момент написания доступны:
+`install.py` только ставит пакеты, в конфиг он ничего не пишет — этим и
+отличается от `gc-mcp install`. После него сниппеты переносятся руками:
+скопировать `packages/mcp/src/recommended_mcp/<name>/agent_config.snippet.yml`
+в секцию `mcp-servers:` своего `config.yml`. Доступны:
 
 - **`computer`** — управление Windows GUI через UI Automation (запуск
-  приложений, клики, ввод, чтение состояния окон). Только Windows.
-  Исходники: `external/computer-mcp/`.
+  приложений, клики, ввод, чтение состояния окон). Только Windows
+  (`platforms: [win32]`). Исходники: `packages/mcp/external/vendor/computer-mcp/`.
 - **`office`** — чтение офисных документов (pdf, docx, xls, xlsx, pptx,
   csv, html, msg) → markdown. Кросс-платформенно. Исходники:
-  `external/office-mcp/`.
+  `packages/mcp/external/vendor/office-mcp/`.
+- **`science`** — научные данные и вычисления, поднимается HTTP-daemon'ом.
+  Исходники: `packages/mcp/external/vendor/science-mcp/`.
+- **`duckduckgo_search`** — веб-поиск. Исходники: `packages/mcp/external/vendor/ddgs-mcp/`.
+- **`browser_playwright`** — автоматизация браузера через `@playwright/mcp`
+  (npx или Docker). Помечен `optional: true`: при установке без имени
+  пропускается, ставится только явным `gc-mcp install browser_playwright`.
 
-Подробности про каждую интеграцию — в её `recommended_mcp/<name>/README.md`.
-Общая документация по `install.py` / `run.py` / структуре каталога —
-в `recommended_mcp/README.md`.
+Подробности про каждую интеграцию — в её
+`packages/mcp/src/recommended_mcp/<name>/README.md`. Общая документация по
+`install.py` / `run.py` / структуре каталога —
+в `packages/mcp/src/recommended_mcp/README.md`.
 
-Для итеративной разработки наших MCP в `external/`:
+Для итеративной разработки наших MCP в `packages/mcp/external/vendor/`:
 
 ```bash
-python recommended_mcp/install.py --editable
+gc-mcp install --editable
 ```
 
-### Ручная установка (для MCP не из `recommended_mcp/`)
+### Ручная установка (для MCP не из курируемого набора)
 
-Если нужный MCP не входит в `recommended_mcp/` — ставь как обычный пакет
+Если нужный MCP не входит в набор `gc-mcp` — ставь как обычный пакет
 и подключай через `mcp-servers:`. Пример с DDGS-поиском:
 
 ```bash

@@ -64,31 +64,31 @@ def _cases() -> list[_Case]:
 
     # --- слои конфига (дома правила, закрытые прежними коммитами) ---
     def _load_config_ex(path, **_):
-        import config as config_mod
+        from gc_core import config as config_mod
         return config_mod.load_config_ex(str(path), apply_to_process=False)
 
     def _read_document(path, **_):
-        import config_raw
+        from gc_core import config_raw
         return config_raw.read_document(path)
 
     def _safe_yaml_dict(path, **_):
-        from config_modules import layers
+        from gc_core.config_modules import layers
         return layers._safe_yaml_dict(path)
 
     def _readable_layer_document(path, **_):
-        from config_modules import layers
+        from gc_core.config_modules import layers
         return layers._readable_layer_document(path, "config.yml")
 
     def _load_profile_document(path, **_):
-        from config_modules.profiles import load_profile_document
+        from gc_core.config_modules.profiles import load_profile_document
         return load_profile_document(path)
 
     def _registry_read(path, **_):
-        from config_modules import registry_write
+        from gc_core.config_modules import registry_write
         return registry_write._read(path)
 
     def _instructions_read(path, **_):
-        from instructions import loader
+        from gc_core.instructions import loader
         return loader._read(Path(path))
 
     cases += [
@@ -105,11 +105,11 @@ def _cases() -> list[_Case]:
 
     # --- синхронизация конфига по пакетному шаблону ---
     def _sync_config(path, **_):
-        import config_sync
+        from gc_core import config_sync
         return config_sync.sync_config(path)
 
     def _reset_config_template(path, *, target, **_):
-        import config_sync
+        from gc_core import config_sync
         return config_sync.reset_config(target, template_path=path)
 
     def _reset_setup(tmp: Path) -> dict:
@@ -125,15 +125,15 @@ def _cases() -> list[_Case]:
 
     # --- писатель конфига (отказ обязан назвать файл) ---
     def _write_values(path, **_):
-        import onboarding_config_writer as ocw
+        from gc_core import onboarding_config_writer as ocw
         return ocw.write_values(path, {"model": "m"})
 
     def _ensure_pointer_anchor(path, *, template, **_):
-        import onboarding_config_writer as ocw
+        from gc_core import onboarding_config_writer as ocw
         return ocw.ensure_pointer_anchor(path, template, key="profile")
 
     def _ensure_section_anchor(path, **_):
-        import onboarding_config_writer as ocw
+        from gc_core import onboarding_config_writer as ocw
         return ocw.ensure_section_anchor(path, "models", "models: {}\n")
 
     def _template_setup(tmp: Path) -> dict:
@@ -151,15 +151,15 @@ def _cases() -> list[_Case]:
 
     # --- память проекта: эти файлы человек правит руками чаще прочих ---
     def _memory_read(path, **_):
-        from project_memory import storage
+        from gc_core.project_memory import storage
         return storage.read(Path(path))
 
     def _memory_stat(path, **_):
-        from project_memory import storage
+        from gc_core.project_memory import storage
         return storage.stat(Path(path))
 
     def _memory_append(path, **_):
-        from project_memory import storage
+        from gc_core.project_memory import storage
         return storage.append(Path(path), "новая заметка")
 
     cases += [
@@ -170,7 +170,7 @@ def _cases() -> list[_Case]:
 
     # --- история ввода TUI ---
     def _input_history_load(path, **_):
-        from tui.services.input_history import InputHistory
+        from gc_tui.services.input_history import InputHistory
         history = InputHistory(Path(path).parent)
         history.load()
         return history.size
@@ -181,7 +181,7 @@ def _cases() -> list[_Case]:
 
     # --- экраны TUI: чтение идёт на КАЖДОМ проходе отрисовки меню ---
     def _target_snapshot(path, **_):
-        from tui.screens.settings import SettingsScreen
+        from gc_tui.screens.settings import SettingsScreen
         screen = SettingsScreen.__new__(SettingsScreen)
         screen._config_path = str(path)
         screen._menu_pass_snapshot = None
@@ -189,25 +189,25 @@ def _cases() -> list[_Case]:
         return screen._target_snapshot()
 
     def _file_snapshot(path, **_):
-        from tui.screens.settings import SettingsScreen
+        from gc_tui.screens.settings import SettingsScreen
         screen = SettingsScreen.__new__(SettingsScreen)
         return screen._file_snapshot(path)
 
     def _restore_snapshot(path, **_):
-        from tui.screens.settings import SettingsScreen
+        from gc_tui.screens.settings import SettingsScreen
         screen = SettingsScreen.__new__(SettingsScreen)
         return screen._restore_snapshot(path, "model: m\n")
 
     def _post_update_needs_sync(path, **_):
-        import config_sync
-        from tui.screens.post_update import PostUpdateScreen
+        from gc_core import config_sync
+        from gc_tui.screens.post_update import PostUpdateScreen
         screen = PostUpdateScreen.__new__(PostUpdateScreen)
         screen._config_path = str(path)
         screen._config_sync = config_sync
         return screen._compute_needs_sync()
 
     def _read_lock(path, **_):
-        from tui.services import session_lock
+        from gc_tui.services import session_lock
         return session_lock.read_lock(str(path))
 
     cases += [
@@ -224,26 +224,31 @@ def _cases() -> list[_Case]:
 
     # --- конфиги вне основного стека ---
     def _server_config(path, *, monkeypatch, **_):
-        from config_modules import env_vars
-        from config_modules.env_vars import EnvVars
-        import rest_api.server_config as server_config
+        from gc_core.config_modules import env_vars
+        from gc_core.config_modules.env_vars import EnvVars
+        from gc_server.rest_api import server_config as server_config
         monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=Path(path)))
         return server_config.load_server_config()
 
     def _voice_base_config(path, *, monkeypatch, **_):
-        import config as config_mod
-        from voice_runtime import wire
+        from gc_core import config as config_mod
+        from gc_tui.voice_runtime import wire
         monkeypatch.setattr(config_mod, "resolve_config_path", lambda _p: str(path))
         return wire.base_config_raw()
 
+    # Проводка рецептов живёт в СВОЁМ дистрибутиве: `recommended_mcp.runtime.wiring`,
+    # а не в `gc_core.mcp_runtime` — на develop это один плоский `mcp_runtime`.
+    # Владелец `managed_config_path` у нас тоже другой: `config_modules.env_vars`
+    # (путь принадлежит конфигу, см. её докстринг), и подменять надо там, иначе
+    # заглушка молча не сработает.
     def _load_managed(path, *, monkeypatch, **_):
-        from mcp_runtime import paths as mcp_paths
-        from mcp_runtime import wiring
-        monkeypatch.setattr(mcp_paths, "managed_config_path", lambda: Path(path))
+        from gc_core.config_modules import env_vars
+        from recommended_mcp.runtime import wiring
+        monkeypatch.setattr(env_vars, "managed_config_path", lambda: Path(path))
         return wiring.load_managed()
 
     def _read_snippet(path, **_):
-        from mcp_runtime import wiring
+        from recommended_mcp.runtime import wiring
         return wiring.read_snippet(Path(path).parent)
 
     cases += [
@@ -251,15 +256,15 @@ def _cases() -> list[_Case]:
               _server_config),
         _Case("voice_runtime.wire.base_config_raw", "config.yml", _BODY_YAML,
               _voice_base_config),
-        _Case("mcp_runtime.wiring.load_managed", "config.local.yml", _BODY_YAML,
+        _Case("recommended_mcp.runtime.wiring.load_managed", "config.local.yml", _BODY_YAML,
               _load_managed),
-        _Case("mcp_runtime.wiring.read_snippet", "agent_config.snippet.yml", _BODY_YAML,
+        _Case("recommended_mcp.runtime.wiring.read_snippet", "agent_config.snippet.yml", _BODY_YAML,
               _read_snippet),
     ]
 
     # --- определения кастомных сабагентов: файлы пишет человек ---
     def _discover_subagents(path, **_):
-        from tools.subagents.custom.file_definitions import discover_subagent_definitions
+        from gc_core.tools.subagents.custom.file_definitions import discover_subagent_definitions
         return discover_subagent_definitions(
             {"subagents_dir": str(Path(path).parent)}, builtin_names=())
 
@@ -269,19 +274,19 @@ def _cases() -> list[_Case]:
 
     # --- промпты по путям из конфига: человек вправе показать на свой файл ---
     def _summary_prompt(path, **_):
-        from summarize import prompt_loading
+        from gc_core.summarize import prompt_loading
         return prompt_loading.load_prompt_template(str(path))
 
     def _intent_scope_prompt(path, **_):
-        from intent_scope import summarizer
+        from gc_core.intent_scope import summarizer
         return summarizer._load_prompt_file(str(path))
 
     def _intent_guard_prompt(path, **_):
-        from intent_guard import final_report_consistency
+        from gc_core.intent_guard import final_report_consistency
         return final_report_consistency._load_guard_prompt(str(path))
 
     def _command_judge_prompt(path, **_):
-        from security import command_moderation
+        from gc_core.security import command_moderation
         return command_moderation._load_prompt_file(Path(path))
 
     cases += [

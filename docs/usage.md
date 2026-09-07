@@ -13,34 +13,88 @@
 В корне проекта выполните:
 
 ```bash
-uv sync                # зависимости (dev + test)
-uv tool install -e .   # gc-cli + gc-ua (TUI в зависимостях по умолчанию)
+uv sync                              # окружение разработки (dev + test)
+uv tool install -e packages/cli     # только ядро
+uv tool install -e .                 # полный агент
 ```
 
 > В корпоративной сети Сбера к командам `uv tool install` добавляйте `--system-certs` — иначе TLS-перехват ломает установку.
 
-### Минимальная установка gc-cli без TUI
+### Профили установки
 
-Для headless-серверов, где нужен только `gc-cli` (без `gc-ua` и `textual`/`rich`):
+Профиль — отдельный дистрибутив со своим пакетом (`packages/<профиль>/src/gc_*`). Код чужих
+профилей физически не попадает на диск.
+
+| Команда | Ядро | TUI | server |
+|---|---|---|---|
+| `gc-ua` | да | да | да |
+| `gc-cli` | да | — | — |
+| `gc-tui` | да | да | — |
+| `gc-server` | да | — | да |
 
 ```bash
-uv tool install -e . --excludes packaging/cli-only-excludes.txt
+uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" --with-executables-from gc-mcp
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui" --with-executables-from gc-mcp
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 ```
 
-`pip install -e .` всегда тянет TUI-зависимости; для минимального runtime используйте `uv tool` с `--excludes`, как выше.
+Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
+корневой `pyproject.toml`, а корень — это полный профиль. Устройство раскладки
+описано в [docs/packaging.md](packaging.md).
+
+Полный профиль и любой листовой дистрибутив рядом не ставятся: `gc-ua`
+объявляет объединение команд листьев, и `uv` отвечает `error: Executables already
+exist`. Мета уже содержит всё, что даёт лист, так что ставить оба обычно незачем.
+Если всё-таки нужно — `uv tool install --force`; после этого на `gc-mcp`
+претендуют два инструмента, и `uv tool uninstall gc-mcp` унесёт команду у полного
+профиля, а не только у отдельного менеджера.
+
+Смена профиля — переустановка, нужен `--force`. `gc-ua --update` сохраняет
+текущий профиль: агент определяет его по метаданным установки и переустанавливает
+тем же дистрибутивом.
+
+Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
+`gc-tui` → `gc-ua`, `gc-server` → `gc-serve`, полный `gc-ua` — все пять.
+Менеджер MCP — отдельный дистрибутив. `uv tool` не экспортирует команды
+зависимостей, поэтому у узкого профиля стоит штатный флаг:
+
+```bash
+uv tool install "gc-cli @ ...#subdirectory=packages/cli" --with-executables-from gc-mcp
+```
+
+Флаг резолвит `gc-mcp` из того же коммита (через `[tool.uv.sources]`), пишется в
+`uv-receipt.toml` и переживает `uv tool upgrade` — набирать его нужно один раз.
+
+Если профилей на машине несколько, флаг не годится: второй профиль столкнётся с
+первым на именах `gc-mcp*`. Тогда ставьте менеджер отдельным инструментом:
+
+```bash
+uv tool install "gc-mcp @ ...#subdirectory=packages/mcp"
+```
+
+Подробности в [упаковке](packaging.md#команды-каждый-дистрибутив-объявляет-только-свои).
 
 Проверка после установки: `uv sync` и `uv run pytest` — см. [Тесты](testing.md).
 
-### Классический путь через pip
+### Через pip — не работает
 
-```bash
-pip install -e .
+`pip install -e .` в чистом окружении падает:
+
+```
+ERROR: Could not find a version that satisfies the requirement gc-cli==0.3.0
 ```
 
-Для установки в конкретный интерпретатор Python (например 3.12):
+Причина не в опечатке и не чинится флагами. Корневой манифест — мета-пакет
+`gc-ua`, который точно пинит четыре листа (`gc-core==0.3.0` и остальные), а
+резолвятся они через `[tool.uv.sources] workspace = true`. Этой секции pip не
+понимает: он идёт искать листья на PyPI, где их нет и не будет — пакеты не
+публикуются, установка только из git.
+
+Ставьте через `uv` (см. выше). Для конкретного интерпретатора:
 
 ```bash
-python3.12 -m pip install -e .
+uv tool install --python 3.12 -e .
 ```
 
 Если при установке возникает ошибка, связанная с `distutils`, обновите pip:
@@ -65,7 +119,7 @@ gc-mcp remove duckduckgo_search    # удалить по имени
 gc-mcp remove --all                # снести все подключённые
 ```
 
-`gc-mcp remove` с флагом `--keep-package` только отключает сервер (un-wire), оставляя пакет в venv для быстрой повторной активации. В `gc-ua` HTTP/SSE MCP-daemon'ы для серверов из конфига поднимаются по умолчанию; в `gc-cli` — флаг `-a` / `--auto-mcp`. Отключить в TUI: `gc-ua --no-auto-mcp`. Подробнее — [`recommended_mcp/README.md`](../recommended_mcp/README.md).
+`gc-mcp remove` с флагом `--keep-package` только отключает сервер (un-wire), оставляя пакет в venv для быстрой повторной активации. В `gc-ua` HTTP/SSE MCP-daemon'ы для серверов из конфига поднимаются по умолчанию; в `gc-cli` — флаг `-a` / `--auto-mcp`. Отключить в TUI: `gc-ua --no-auto-mcp`. Подробнее — [`recommended_mcp/README.md`](../packages/mcp/src/recommended_mcp/README.md).
 
 ## Запуск
 
@@ -88,7 +142,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 
 ## Ключи запуска gc-cli
 
-**Ключи запуска gc-cli** (см. `src/arg_parser.py`):
+**Ключи запуска gc-cli** (см. `packages/cli/src/gc_cli/arg_parser.py`):
 
 | Ключ | Описание |
 |------|----------|

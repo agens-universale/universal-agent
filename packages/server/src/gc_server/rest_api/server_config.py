@@ -1,0 +1,236 @@
+import logging
+import os
+from typing import Any, Dict
+
+import yaml
+
+from gc_core.config import apply_cli_overrides, load_config, sync_logging_flat_and_params
+from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.bundled_assets import bundled_root, repo_root
+from gc_core.utils.user_text import read_user_text
+
+logger = logging.getLogger(__name__)
+
+
+# bundled_root() — единый резолвер АССЕТОВ (editable → packages/core/assets,
+# wheel → site-packages). Относительные пути вида "./prompts/server_agent.md"
+# резолвятся от него.
+PROJECT_ROOT = str(bundled_root())
+
+
+def _server_config_candidates() -> list[str]:
+    """Где ищем `config_server.yml`, в порядке приоритета.
+
+    Раньше был один кандидат — `bundled_root()/config_server.yml`, и до
+    разбиения на пакеты это работало: ассеты лежали в корне репозитория, туда же
+    дока велит класть файл. После переезда ассетов путь стал указывать в
+    `packages/core/assets/`, файл в корне перестал находиться, и сервер молча
+    поднимался на минимальном дефолте — **с `auth_token: None`, то есть без
+    авторизации**. Ни строки в лог.
+    """
+    candidates = [os.path.join(os.getcwd(), "config_server.yml")]
+    root = repo_root()
+    if root is not None:
+        candidates.append(str(root / "config_server.yml"))
+    # Исторический путь: рядом с ассетами. Оставлен, чтобы не сломать установки,
+    # где файл действительно положили туда.
+    candidates.append(os.path.join(PROJECT_ROOT, "config_server.yml"))
+    seen: set[str] = set()
+    return [c for c in candidates if not (c in seen or seen.add(c))]
+
+
+def load_server_config() -> Dict[str, Any]:
+    """
+    Загрузить конфиг REST-сервера из config_server.yml или SERVER_CONFIG_PATH.
+
+    Возвращает словарь с секциями:
+    - server
+    - defaults
+    - agent
+    - logging (опционально)
+    - agent_overrides (опционально)
+    - threads_cleanup (опционально)
+
+    Плюс служебный ключ `config_path` — путь файла, который реально прочитан
+    ("" если файла нет и вернулся минимальный дефолт). Секцией он не является;
+    он нужен потребителям, которые резолвят ОТНОСИТЕЛЬНЫЕ пути из этого же
+    файла: якорем обязан быть каталог самого config_server.yml, а другого
+    места, где этот путь известен, в коде нет (см.
+    `swarm.config._user_config_dir`).
+    """
+    from gc_core.config_modules import env_vars
+    if env_vars.env.server_config_path is not None:
+        cfg_path = str(env_vars.env.server_config_path)
+        searched = [cfg_path]
+    else:
+        searched = _server_config_candidates()
+        cfg_path = next((c for c in searched if os.path.exists(c)), searched[-1])
+    if not os.path.exists(cfg_path):
+        # Минимальный дефолт, чтобы сервер мог стартовать и без файла. Раньше
+        # эта ветка была молчаливой, и «конфиг не нашёлся» было не отличить от
+        # «так и задумано» — а вместе с конфигом терялся и auth_token.
+        # Тревога про отсутствие авторизации переехала в `serve()`: она про
+        # СОСТОЯНИЕ (auth_token пуст), а не про то, нашёлся ли файл. Здесь их
+        # склейка давала сразу две беды. Найденный конфиг с пустым auth_token
+        # молчал — а именно туда ведёт подхват постороннего файла. И наоборот,
+        # `python -m gc_server.cleanup_threads` в cron, который зовёт этот
+        # резолвер ради одного пути к тредам, каждую ночь кричал про
+        # незапущенный сервер, приучая оператора не читать предупреждения.
+        logger.info(
+            "config_server.yml не найден, беру минимальный дефолт. Просмотрены "
+            "пути: %s. Явный путь задаётся переменной окружения "
+            "SERVER_CONFIG_PATH.",
+            ", ".join(searched),
+        )
+        return {
+            "server": {
+                "host": "0.0.0.0",
+                "port": 8000,
+                "log_level": "info",
+                "auth_token": None,
+            },
+            "defaults": {"system": "generic"},
+            "agent": {"server_agentmd_path": "./prompts/server_agent.md"},
+            "agent_overrides": {},
+            "logging": {},
+            "config_path": "",
+        }
+
+    # Единственная строка, по которой вообще можно узнать, ЧЕЙ конфиг прочитан:
+    # список кандидатов начинается с CWD, а он у сервера, у cron и у systemd
+    # разный. Раньше в лог не попадало ничего, кроме случая «не нашёлся нигде», —
+    # и неудачный резолв однажды уже поднял сервер с auth_token: None молча.
+    logger.info("config_server.yml: читаю %s", cfg_path)
+
+    # config_server.yml человек правит руками так же, как config.yml, — значит и
+    # «файл на месте, но не читается» здесь такой же рабочий сценарий. Отказ должен
+    # назвать файл: без пути оператор сервера видит голую жалобу кодека.
+    raw = yaml.safe_load(read_user_text(cfg_path)) or {}
+
+    # ${ENV:VAR} / ${FILE:path} — как в основном config.yml, чтобы серверные
+    # секреты (server.auth_token и пр.) не приходилось держать в файле открытым
+    # текстом. Отсутствующий источник → пустая строка + warning, как везде.
+    raw = resolve_env_placeholders(raw)
+
+    # Гарантируем наличие ключевых секций.
+    server_cfg = raw.get("server") or {}
+    defaults_cfg = raw.get("defaults") or {}
+    agent_cfg = raw.get("agent") or {}
+    overrides_cfg = raw.get("agent_overrides") or {}
+
+    # Секция swarm — настройки сворм-режима (может отсутствовать в старых конфигах).
+    swarm_cfg = raw.get("swarm") or {}
+
+    threads_cleanup_cfg = raw.get("threads_cleanup") or {}
+
+    return {
+        "server": server_cfg,
+        "defaults": defaults_cfg,
+        "agent": agent_cfg,
+        "agent_overrides": overrides_cfg,
+        "logging": raw.get("logging") or {},
+        "swarm": swarm_cfg,
+        "threads_cleanup": threads_cleanup_cfg,
+        "config_path": cfg_path,
+    }
+
+
+def _resolve_server_agent_md(raw: str, server_cfg: Dict[str, Any]) -> str:
+    """Резолв `agent.server_agentmd_path` из пользовательского конфига.
+
+    Относительный путь ищется СНАЧАЛА рядом с самим `config_server.yml` — там,
+    где человек его и видит, — и только потом среди ассетов дистрибутива.
+
+    Раньше стоял безусловный `os.path.join(PROJECT_ROOT, …)`, и это было верно,
+    пока `bundled_root()` возвращал корень репозитория: конфиг лежал там же.
+    После переезда ассетов внутрь пакета тот же якорь стал вести в
+    `packages/core/assets` (в колесе — `site-packages/gc_core/assets`), и пример
+    из `docs/server.md` (`server_agentmd_path: "./server_agent.md"`) перестал
+    находиться. Для секции swarm эта же ветка завела `_resolve_user_path`, а про
+    `agent` забыли — чинили место, а не класс.
+
+    Цена промаха высокая и незаметная: `build_instructions` возвращает пустой
+    текст, предупреждение печатается только при verbose, и сервер обслуживает
+    запросы агентом БЕЗ системных инструкций, ничего об этом не сказав. Поэтому
+    ненайденный файл здесь кричит, а не молчит.
+    """
+    path = raw.strip()
+    if os.path.isabs(path):
+        return path
+
+    cfg_path = server_cfg.get("config_path")
+    base = (
+        os.path.dirname(os.path.abspath(cfg_path.strip()))
+        if isinstance(cfg_path, str) and cfg_path.strip()
+        else os.getcwd()
+    )
+    # normpath: "./server_agent.md" иначе доезжает до логов и до agent_md_path
+    # как "<каталог>/./server_agent.md" — работает, но читается как опечатка.
+    local = os.path.normpath(os.path.join(base, path))
+    if os.path.isfile(local):
+        return local
+
+    bundled = os.path.normpath(os.path.join(PROJECT_ROOT, path))
+    if os.path.isfile(bundled):
+        return bundled
+
+    logger.warning(
+        "agent.server_agentmd_path=%r не найден (искал %s и %s) — агент будет "
+        "работать БЕЗ системных инструкций",
+        raw, local, bundled,
+    )
+    return local
+
+
+def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Построить config_dict для агента при запуске через REST-сервер.
+
+    Логика:
+    - Берём базовый config.yml через load_config().
+    - Если в server_cfg задана секция logging — мержим её в cfg["logging_params"]
+      и синхронизируем плоские ключи (console_trace, save_logs, full_log_backend).
+    - Если в server_cfg.agent задан server_agentmd_path:
+        - резолвим путь относительно PROJECT_ROOT (если он относительный);
+        - перезаписываем cfg["agent_md_path"] значением server_agentmd_path.
+    - Применяем перекрытия из server_cfg.agent_overrides через apply_cli_overrides
+      (тот же путь, что CLI-аргументы) — так agent_overrides.model/completions_url
+      тоже попадают в cli_explicit_keys и детектируются cli_forces_legacy_model
+      (легаси-форс §2: перекрытие модели поверх непустого реестра моделей).
+    """
+    cfg = load_config()
+
+    log_block = server_cfg.get("logging")
+    if isinstance(log_block, dict) and log_block:
+        lp = dict(cfg.get("logging_params") or {})
+        lp.update(log_block)
+        cfg["logging_params"] = lp
+        for key in (
+            "full_log_backend",
+            "console_trace",
+            "save_logs",
+        ):
+            if key in log_block:
+                cfg[key] = log_block[key]
+
+    agent_cfg = server_cfg.get("agent") or {}
+    server_agent_path = agent_cfg.get("server_agentmd_path")
+    if isinstance(server_agent_path, str) and server_agent_path.strip():
+        server_agent_path = _resolve_server_agent_md(server_agent_path, server_cfg)
+        cfg["agent_md_path"] = server_agent_path
+
+    overrides = server_cfg.get("agent_overrides") or {}
+    if isinstance(overrides, dict) and overrides:
+        apply_cli_overrides(cfg, extra_overrides=overrides)
+
+    sync_logging_flat_and_params(cfg)
+
+    # В серверном режиме ограничиваем проектные метаданные,
+    # чтобы не передавать структуру файловой системы пользователя.
+    cfg.setdefault("limit_project_metadata", True)
+
+    return cfg
+
+
+__all__ = ["load_server_config", "build_agent_config_for_server", "PROJECT_ROOT"]
+

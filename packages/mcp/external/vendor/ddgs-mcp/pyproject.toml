@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ddgs-mcp"
+# 0.2.0+: отличается от upstream PyPI ddgs-mcp==0.1.0, иначе pip пропустит
+# установку source-обёртки у тех, у кого уже стоит PyPI-0.1.0 (несовместимый с 3.14).
+version = "0.2.0"
+description = "MCP server for web/news search via DuckDuckGo (DDGS)"
+requires-python = ">=3.10"
+dependencies = [
+    # Верхняя граница обязательна: в mcp 2.0 убран `mcp.server.fastmcp`, а сервер
+    # импортирует именно оттуда FastMCP. Без неё pip ставит двойку (она
+    # удовлетворяет `>=1.26.0`), и рецепт падает на импорте — «нет соединения»
+    # в списке MCP при бодром «подключён» у менеджера (найдено 27.08.2026).
+    "mcp>=1.26.0,<2",
+    "ddgs>=9.6.1",
+]
+
+[project.scripts]
+ddgs-mcp = "ddgs_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ddgs_mcp*"]
+
+# Секция пустая, но обязана быть: по ней pytest объявляет rootdir этим
+# каталогом. Без неё поиск поднимается до корневого pyproject.toml
+# монорепозитория, rootdir становится нашим корнем, и pytest11-плагин
+# gc_testkit считает прогон СВОИМ — кладёт на sys.path все packages/*/src и
+# подменяет trafilatura/readability заглушками, которые всегда отдают пустоту.
+# Набор при этом остаётся зелёным, потому что извлекать перестаёт что бы то ни
+# было. У трёх соседних вендоров такая секция есть, у этого не было.
+[tool.pytest.ini_options]

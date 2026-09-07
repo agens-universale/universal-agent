@@ -10,10 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from config import load_config
-from config_modules.backend import BackendConfig
-from tools import build_tools_data
-from utils.connect_backend import (
+from gc_core.config import load_config
+from gc_core.config_modules.backend import BackendConfig
+from gc_core.tools import build_tools_data
+from gc_core.utils.connect_backend import (
     create_call_data_responses,
     normalize_chat_completions_tools,
 )

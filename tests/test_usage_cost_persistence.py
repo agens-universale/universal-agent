@@ -2,10 +2,10 @@
 import threading
 import types
 
-import agent_executor as ae
-import manual_compaction as mc
-from thread_store import load_thread_meta
-from usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
+import gc_core.agent_executor as ae
+import gc_core.manual_compaction as mc
+from gc_core.thread_store import load_thread_meta
+from gc_core.usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
 
 
 def test_cost_survives_meta_write_and_read():

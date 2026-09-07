@@ -30,7 +30,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
 # Type checking
 .mypy_cache/
 .dmypy.json
@@ -61,7 +60,10 @@ ipython_config.py
 # =============================================================
 # Project-specific
 # =============================================================
-config.yml
+# ТОЛЬКО в корне: это личный конфиг разработчика. Без ведущего слэша
+# шаблон ловил config.yml на ЛЮБОЙ глубине — в том числе курируемый
+# манифест MCP, который приходилось добавлять в индекс принудительно.
+/config.yml
 plan.md
 docs/plans/
 .superpowers/
@@ -116,7 +118,7 @@ swarm_threads/
 .swarm_sandboxes/
 
 # auto-generated SVG copies of pytest-textual-snapshot .raw files (human viewing aid)
-tests/tui/__snapshots__/**/*.svg
+packages/tui/tests/__snapshots__/**/*.svg
 
 # superpowers-скиллы пишут сюда черновики спек/планов по дефолту — в git не попадают
 # (доки TUI живут в docs/tui/{specs,plans,visual})
@@ -133,3 +135,4 @@ docs/tui/
 docs/2026-06-23-corp-mirror-config-overlay.md
 docs/CHANGES-vs-master.md
 snapshot_report.html
+
