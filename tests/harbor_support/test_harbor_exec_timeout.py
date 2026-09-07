@@ -1,8 +1,9 @@
-"""HarborBackend maps Harbor exec timeouts to ExecResult(timed_out=True).
-
-See docs_md/improvments_gleb_090726/05-harbor-exec-timeout.md.
+"""HarborBackend maps Harbor exec timeouts to ExecResult(timed_out=True) and keeps
+the output streamed before the timeout (spec 2026-09-06 harbor-exec-timeout-partial-output).
 """
 import asyncio
+import contextlib
+import contextvars
 import json
 import threading
 
@@ -23,6 +24,52 @@ class RaisingEnv:
     async def exec(self, command, **kw):
         self.calls.append(command)
         raise self.exc
+
+
+class StreamingEnv(RaisingEnv):
+    """Fake Harbor env with ``scoped_output_callback``: streams ``chunks`` to the
+    scoped callback (like Docker ``_collect_streamed_output``), then raises ``exc``
+    or returns ``result``.
+
+    The callback lives in a ``ContextVar`` exactly like ``BaseEnvironment``: the
+    scope is entered in the caller's thread while ``exec`` runs as a task on the
+    adapter loop, so this fake fails if the context does not reach the coroutine.
+    """
+
+    def __init__(self, exc=None, chunks=(), result=None):
+        super().__init__(exc)
+        self.chunks = list(chunks)
+        self.result = result
+        self._callbacks = contextvars.ContextVar("callbacks", default=())
+
+    @property
+    def active_callbacks(self):
+        return list(self._callbacks.get())
+
+    @contextlib.contextmanager
+    def scoped_output_callback(self, callback):
+        token = self._callbacks.set((*self._callbacks.get(), callback))
+        try:
+            yield
+        finally:
+            self._callbacks.reset(token)
+
+    async def exec(self, command, **kw):
+        self.calls.append(command)
+        for text, stream in self.chunks:
+            for cb in self._callbacks.get():
+                await cb(text, stream)
+        if self.exc is not None:
+            raise self.exc
+        return self.result
+
+
+class _Res:
+    def __init__(self, stdout, stderr=None, return_code=0):
+        self.stdout, self.stderr, self.return_code = stdout, stderr, return_code
+
+
+TIMEOUT = RuntimeError("Command timed out after 10 seconds")
 
 
 @pytest.fixture
@@ -69,17 +116,108 @@ def test_harbor_backend_propagates_non_timeout_runtime_error(loop_in_thread):
         ).exec("true")
 
 
-def test_harbor_backend_keeps_partial_streams_from_exception(loop_in_thread):
-    """If the exception carries stdout/stderr attrs, preserve them."""
-    exc = RuntimeError("Command timed out after 10 seconds")
-    exc.stdout = "partial out"
-    exc.stderr = "partial err"
+def test_harbor_backend_timeout_keeps_streamed_chunks(loop_in_thread):
+    """Timeout = partial completion: chunks streamed before the timeout survive."""
+    env = StreamingEnv(TIMEOUT, chunks=[("line 1\n", "stdout"), ("line 2\n", "stdout"), ("warn\n", "stderr")])
 
-    result = _backend(exc, loop_in_thread).exec("make test", timeout=10)
+    result = HarborBackend(env, loop_in_thread).exec("make test", timeout=10)
 
     assert result.timed_out is True
-    assert result.stdout == "partial out"
-    assert result.stderr == "partial err"
+    assert result.return_code is None
+    assert result.stdout == "line 1\nline 2\n"
+    assert result.stderr == "warn\n"
+
+
+def test_harbor_backend_timeout_without_chunks_is_empty(loop_in_thread):
+    """No chunks before timeout → empty streams are legal (silent command)."""
+    result = HarborBackend(StreamingEnv(TIMEOUT), loop_in_thread).exec("sleep 99", timeout=10)
+
+    assert result.timed_out is True
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_harbor_backend_timeout_ignores_exception_attrs(loop_in_thread):
+    """Streamed chunks are the source of truth, not ``exc.stdout``."""
+    exc = RuntimeError("Command timed out after 10 seconds")
+    exc.stdout = "from exception"
+    env = StreamingEnv(exc, chunks=[("from stream\n", "stdout")])
+
+    result = HarborBackend(env, loop_in_thread).exec("make", timeout=10)
+
+    assert result.stdout == "from stream\n"
+
+
+def test_harbor_backend_timeout_partial_output_bounded_by_common_cap(loop_in_thread):
+    """Partial output is a prefix bounded by the same capture cap as a normal exec."""
+    env = StreamingEnv(TIMEOUT, chunks=[("x" * 50, "stdout"), ("y" * 50, "stdout")])
+
+    result = HarborBackend(env, loop_in_thread, exec_output_capture_max_chars=70).exec("cmd", timeout=10)
+
+    assert result.timed_out is True
+    assert result.stdout == "x" * 50 + "y" * 20
+    assert result.stdout_hit_capture_cap is True
+
+
+def test_harbor_backend_timeout_output_exactly_at_cap_then_more_sets_flag(loop_in_thread):
+    """Accumulated == cap and the command kept printing → hit flag, like local."""
+    env = StreamingEnv(TIMEOUT, chunks=[("x" * 70, "stdout"), ("y", "stdout")])
+
+    result = HarborBackend(env, loop_in_thread, exec_output_capture_max_chars=70).exec("cmd", timeout=10)
+
+    assert result.stdout == "x" * 70
+    assert result.stdout_hit_capture_cap is True
+
+
+def test_harbor_backend_timeout_output_exactly_at_cap_without_more_is_not_flagged(loop_in_thread):
+    env = StreamingEnv(TIMEOUT, chunks=[("x" * 70, "stdout")])
+
+    result = HarborBackend(env, loop_in_thread, exec_output_capture_max_chars=70).exec("cmd", timeout=10)
+
+    assert result.stdout == "x" * 70
+    assert result.stdout_hit_capture_cap is False
+
+
+def test_harbor_backend_timeout_respects_per_call_cap(loop_in_thread):
+    env = StreamingEnv(TIMEOUT, chunks=[("x" * 100, "stdout")])
+
+    result = HarborBackend(env, loop_in_thread)._exec("cmd", timeout=10, capture_max_chars=30)
+
+    assert result.stdout == "x" * 30
+    assert result.stdout_hit_capture_cap is True
+
+
+def test_harbor_backend_success_uses_result_and_releases_callback(loop_in_thread):
+    """Success path: ExecResult from ``res``; callback scope is left afterwards."""
+    env = StreamingEnv(chunks=[("streamed\n", "stdout")], result=_Res("final out", "final err", 3))
+
+    result = HarborBackend(env, loop_in_thread).exec("cmd", timeout=10)
+
+    assert (result.stdout, result.stderr, result.return_code, result.timed_out) == ("final out", "final err", 3, False)
+    assert env.active_callbacks == []
+
+
+def test_harbor_backend_timeout_releases_callback(loop_in_thread):
+    env = StreamingEnv(TIMEOUT, chunks=[("a\n", "stdout")])
+
+    HarborBackend(env, loop_in_thread).exec("cmd", timeout=10)
+
+    assert env.active_callbacks == []
+
+
+def test_execute_command_timeout_envelope_carries_partial_output(loop_in_thread):
+    """D3: the agent sees what the command printed before the timeout."""
+    env = StreamingEnv(TIMEOUT, chunks=[("Length: 162M\n", "stdout"), ("Saving to: cifar.tar.gz\n", "stdout")])
+    tool = ExecuteCommand.__new__(ExecuteCommand)
+    tool._config_dict = None
+    bind_os_backend(tool, HarborBackend(env, loop_in_thread), config_dict={})
+
+    envelope = json.loads(tool(command="wget …", timeout_seconds=10))
+
+    assert envelope["timed_out"] is True
+    assert envelope["error"]["type"] == "timeout"
+    assert "Length: 162M" in envelope["stdout"]
+    assert "Saving to: cifar.tar.gz" in envelope["stdout"]
 
 
 def test_execute_command_maps_harbor_timeout_envelope(loop_in_thread):
