@@ -82,11 +82,11 @@ uv tool install "gc-mcp @ ...#subdirectory=packages/mcp"
 `pip install -e .` в чистом окружении падает:
 
 ```
-ERROR: Could not find a version that satisfies the requirement gc-cli==0.5.0
+ERROR: Could not find a version that satisfies the requirement gc-cli==0.3.0
 ```
 
 Причина не в опечатке и не чинится флагами. Корневой манифест — мета-пакет
-`gc-ua`, который точно пинит четыре листа (`gc-core==0.5.0` и остальные), а
+`gc-ua`, который точно пинит четыре листа (`gc-core==0.3.0` и остальные), а
 резолвятся они через `[tool.uv.sources] workspace = true`. Этой секции pip не
 понимает: он идёт искать листья на PyPI, где их нет и не будет — пакеты не
 публикуются, установка только из git.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-testkit"
-version = "0.5.0"
+version = "0.3.0"
 description = "Общая тестовая инфраструктура пакетов gc-* (только для разработки)"
 requires-python = ">=3.10"
 dependencies = [

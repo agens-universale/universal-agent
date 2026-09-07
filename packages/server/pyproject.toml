@@ -4,21 +4,21 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-server"
-version = "0.5.0"
+version = "0.3.0"
 description = "GigaCode Universal Agent — FastAPI-режим и swarm (gc-serve)"
 requires-python = ">=3.11"
 dependencies = [
     # Точный пин: версии всех манифестов обязаны совпадать, иначе можно собрать
     # установку из разных коммитов.
-    "gc-core==0.5.0",
+    "gc-core==0.3.0",
     # Сворм запускает В ПЕСОЧНИЦЕ именно `gc-cli` (swarm/config.py::cli_command,
     # run-cli-in-sandbox.sh). Пока дистрибутив был один, он объявлял обе команды
     # сам, и предположение «gc-cli рядом» было верным; после разделения профилей
     # установка сервера перестала приносить CLI, и каждый sworm завершался
     # exit 127 с error_type=wrapper_setup_error. Зависимость стоит ноль по
     # дереву: gc_cli — тонкий фронтенд, а gc-core и gc-mcp у сервера уже есть.
-    "gc-cli==0.5.0",
-    "gc-mcp==0.5.0",
+    "gc-cli==0.3.0",
+    "gc-mcp==0.3.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.31.1",
     "psutil>=5.9,<7",

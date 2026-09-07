@@ -15,7 +15,7 @@ uv tool install -e packages/tui
 uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
 ```
 
-`pip install -e packages/tui` не сработает: манифест пинит `gc-core==0.5.0`,
+`pip install -e packages/tui` не сработает: манифест пинит `gc-core==0.3.0`,
 который резолвится только через uv-workspace — pip пойдёт за ним на PyPI.
 
 Полная таблица профилей — [Установка и запуск](usage.md#профили-установки), устройство — [упаковка](packaging.md).

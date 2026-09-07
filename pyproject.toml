@@ -5,17 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "gc-ua"
 # Версии ВСЕХ манифестов обязаны совпадать: профили пинят друг друга точно.
-# 0.5.0 — разбиение на настоящие пакеты gc_core / gc_cli / gc_tui / gc_server.
-version = "0.5.0"
+# 0.3.0 — разбиение на настоящие пакеты gc_core / gc_cli / gc_tui / gc_server.
+version = "0.3.0"
 description = "GigaCode Universal Agent — полный агент (ядро + CLI + TUI + server)"
 readme = "readme.md"
 requires-python = ">=3.11"
 dependencies = [
-    "gc-core==0.5.0",
-    "gc-cli==0.5.0",
-    "gc-tui==0.5.0",
-    "gc-server==0.5.0",
-    "gc-mcp==0.5.0",
+    "gc-core==0.3.0",
+    "gc-cli==0.3.0",
+    "gc-tui==0.3.0",
+    "gc-server==0.3.0",
+    "gc-mcp==0.3.0",
 ]
 
 [project.optional-dependencies]
