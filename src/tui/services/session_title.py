@@ -82,7 +82,7 @@ def display_name(tui_meta: Optional[Mapping]) -> str:
 def task_subtitle(tui_meta: Optional[Mapping]) -> str:
     """Подзаголовок карточки F2: last_actual / task по приоритету заголовка.
 
-    - заголовок = title → task, иначе last_actual;
+    - заголовок = title → task, иначе last_actual (кандидат, равный title, пропускаем);
     - заголовок = task → last_actual, если есть и отличается;
     - иначе пусто (дубликат не нужен).
     """
@@ -91,7 +91,10 @@ def task_subtitle(tui_meta: Optional[Mapping]) -> str:
     task = task_title(meta)
     last = _stripped(meta.get("last_actual"))
     if title:
-        return task or last
+        for candidate in (task, last):
+            if candidate and candidate != title:
+                return candidate
+        return ""
     if task:
         if last and last != task:
             return last

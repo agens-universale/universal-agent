@@ -143,3 +143,12 @@ def test_should_update_task_allows_working_turn_over_existing():
     from tui.services.session_title import should_update_task
     meta = {"task": "починить парсер"}
     assert should_update_task(meta, turn_tool_calls=1) is True
+
+
+def test_task_subtitle_skips_candidate_equal_to_manual_title():
+    """«Ctrl+R, Enter» без правок: title == task → дубль не показываем,
+    но отличный last_actual остаётся подзаголовком (и в поиске)."""
+    from tui.services.session_title import task_subtitle
+    assert task_subtitle({"title": "Написать тесты", "task": "Написать тесты"}) == ""
+    assert task_subtitle({"title": "Написать тесты", "task": "Написать тесты",
+                          "last_actual": "напиши тесты к скрипту"}) == "напиши тесты к скрипту"
