@@ -163,33 +163,19 @@ def test_turn_finish_schema_declares_task():
     assert '"task": "string (required)"' in prompt
 
 
-def test_turn_finish_rejects_missing_task():
+def test_turn_finish_task_is_optional_passthrough():
+    """task — подсказка модели: отсутствие/пустота не отклоняют ход."""
     tool = SubmitSolution()
-    bad = json.loads(
+    out = json.loads(
         tool(solution_type="full_solution", task_report="Done", handoff='{"x":1}')
     )
-    assert bad["ok"] is False
-    assert bad["error"]["field"] == "task"
-
-
-def test_turn_finish_rejects_invalid_empty_and_long_task():
-    tool = SubmitSolution()
-    for task, error_type in ((123, "invalid_argument"), ("   ", "invalid_argument"),
-                             ("x" * 1001, "limit_exceeded")):
-        bad = json.loads(
-            tool(
-                solution_type="full_solution",
-                task=task,  # type: ignore[arg-type]
-                task_report="Done",
-                handoff='{"x":1}',
-            )
-        )
-        assert bad["ok"] is False
-        assert bad["error"] == {
-            "type": error_type,
-            "field": "task",
-            "message": bad["error"]["message"],
-        }
+    assert out["ok"] is True
+    assert out["task"] is None
+    out = json.loads(
+        tool(solution_type="full_solution", task="  ", task_report="Done", handoff='{"x":1}')
+    )
+    assert out["ok"] is True
+    assert out["task"] is None
 
 
 def test_cycle_stop_output_preserves_task():

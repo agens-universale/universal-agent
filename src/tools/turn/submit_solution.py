@@ -391,60 +391,6 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 },
             )
 
-        # Validate task (required)
-        if task is None:
-            return self._result(
-                ok=False,
-                status="rejected",
-                message="Validation failed.",
-                task=None,
-                task_report="",
-                error={
-                    "type": "invalid_argument",
-                    "field": "task",
-                    "message": "task is required and must be a non-empty string.",
-                },
-            )
-        if not isinstance(task, str):
-            return self._result(
-                ok=False,
-                status="rejected",
-                message="Validation failed.",
-                task=None,
-                task_report="",
-                error={
-                    "type": "invalid_argument",
-                    "field": "task",
-                    "message": "task must be a string.",
-                },
-            )
-        if not task.strip():
-            return self._result(
-                ok=False,
-                status="rejected",
-                message="Validation failed.",
-                task=None,
-                task_report="",
-                error={
-                    "type": "invalid_argument",
-                    "field": "task",
-                    "message": "task cannot be empty or whitespace only.",
-                },
-            )
-        if len(task.strip()) > 1000:
-            return self._result(
-                ok=False,
-                status="rejected",
-                message="Validation failed.",
-                task=None,
-                task_report="",
-                error={
-                    "type": "limit_exceeded",
-                    "field": "task",
-                    "message": "task is too long. Keep it to a short title (1–2 phrases).",
-                },
-            )
-
         handoff_data = kwargs.get("handoff_data")
         if not isinstance(handoff_data, dict):
             return self._result(
@@ -492,7 +438,9 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                     },
                 )
 
-        task_norm = self._normalize_text(task)
+        # task — подсказка модели, не валидируем: turn_finish идёт через
+        # check_trace_finished мимо apply_tool, reject отсюда до модели не дошёл бы.
+        task_norm = self._normalize_text(task) if isinstance(task, str) and task.strip() else None
         task_report_norm = self._normalize_text(task_report)
         comment_norm = self._normalize_text(comment) if comment and comment.strip() else None
 
