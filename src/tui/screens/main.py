@@ -2,6 +2,7 @@
 пикерами (skill/arg/file), ask_human-баннер, pending-реплики и polling треда."""
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -57,7 +58,7 @@ from tui.services.subagent_sidecar_mapper import (
     resolve_nested_tool_detail,
     trace_events_from_nested_detail,
 )
-from tui.services.trace_mapper import collect_skipped_call_ids, map_message
+from tui.services.trace_mapper import coerce_args, collect_skipped_call_ids, map_message
 from tui.services.trace_render import (
     LINE_INTERMEDIATE_CLASS,
     LINE_USER_CLASS,
@@ -93,6 +94,8 @@ from tui.services.session_title import (
     LAST_ACTUAL_MIN,
     display_name,
     normalize_prompt_title,
+    should_update_task,
+    task_title,
 )
 from tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from tui.services.voice_pill import render_pill
@@ -269,6 +272,7 @@ class TraceScreen(Screen):
         self._brand_row = None                 # контейнер карточки (ссылка, не запрос)
         self._task_events: list = []  # list[TraceEvent]; пополняется в _render_record/_render_segments
         self._last_agent_summary: Optional[str] = None  # A1: дедуп равных user-facing рядов
+        self._live_turn_tool_calls: int = 0  # живые call-события текущего хода (эвристика имени)
         self._store: Optional[FileTaskStore] = None
         self._cursor: Optional[TaskCursor] = None
         self._next_no: int = 1
@@ -1416,6 +1420,7 @@ class TraceScreen(Screen):
         self._active_task_id = task_id
         self.app.tui_state.active_task_id = task_id
         self._session_lock_hb_mono = 0.0
+        self._live_turn_tool_calls = 0   # смена задачи (не stream_reset: там счётчик хода нужен)
         self._reset_render_state()
         self._store = FileTaskStore(
             threads_dir=self.app._threads_dir or "",
@@ -1953,10 +1958,39 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
+    def _seed_or_update_task_from_submit(self, ev) -> None:
+        """Записать ``meta.tui.task`` из arguments turn_finish и обновить OSC.
+
+        Эвристика (should_update_task): первый task сеется безусловно; дальше
+        имя обновляет только ход с реальной работой (``_live_turn_tool_calls``),
+        чтобы «спасибо»/«пока» не переименовывали сессию. Совпадающее значение
+        не перезаписывается (no-op guard)."""
+        if self._active_task_id is None or self._store is None:
+            return
+        payload = ev.full_payload if isinstance(ev.full_payload, dict) else {}
+        args = coerce_args(payload.get("arguments"))
+        task = task_title({"task": args.get("task")})
+        if not task:
+            return
+        try:
+            meta = self._store.get_task_meta(self._active_task_id) or {}
+        except Exception:
+            return
+        tui_meta = meta.get("tui") or {}
+        if not should_update_task(tui_meta, self._live_turn_tool_calls):
+            return
+        if task_title(tui_meta) == task:
+            return
+        try:
+            self._store.update_tui_meta(self._active_task_id, {"task": task})
+        except Exception:
+            return
+        self._update_terminal_title()
+
     def _update_terminal_title(self) -> None:
         """Заголовок терминала = имя сессии + текущий статус (для таба/таскбара).
 
-        R5 (in-session-rename): промпт = display_name(meta.tui) (title >
+        R5 (in-session-rename): промпт = display_name(meta.tui) (title > task >
         last_actual > «Без названия»), а не _resumed_prompt. _resumed_prompt
         остаётся для attach/cancel и НЕ является именем сессии. Статус — live
         (_session_status_word). Дедуп: OSC пишем только при смене — поллер зовёт каждый тик."""
@@ -1988,7 +2022,7 @@ class TraceScreen(Screen):
         """R2 (in-session-rename): открыть RenameScreen(current=display_name) активной сессии.
 
         Гейт: ``_active_task_id`` и ``_store`` не None. Текущее имя =
-        ``_session_display_name()`` (title > last_actual > «Без названия»).
+        ``_session_display_name()`` (title > task > last_actual > «Без названия»).
         Результат → ``_on_rename_result`` (R3).
         """
         if self._active_task_id is None or self._store is None:
@@ -2081,6 +2115,12 @@ class TraceScreen(Screen):
             # Previous submit_solutions are now considered completed answers,
             # not retry candidates for collapse.
             self._submit_solution_widgets.clear()
+            if live:
+                # Граница хода для эвристики имени — именно user-запись ядра:
+                # она есть и при обычном старте, и при подхвате очереди бегущим
+                # раннером как нового хода (Enter в TUI там не через
+                # _prepare_for_new_run). Ответ на ask_human user-записи не даёт.
+                self._live_turn_tool_calls = 0
 
             # Reconcile с pending: матч по WIRE (то, что executor записал в .jsonl как
             # content), а НЕ по ev.summary: у skill-сообщений summary = display_content
@@ -2101,6 +2141,13 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "agent":
+            # Метаданные финализатора обрабатываем независимо от визуального
+            # дедупа ниже: task_report может совпасть с предыдущей agent-прозой.
+            # Без гейта на live: перерисовка после компакции (stream_reset) —
+            # единственный путь финализатора, если poll-тик не успел до неё;
+            # от записей на реплее защищает should_update_task (счётчик live-only).
+            if ev.tool_name == "submit_solution":
+                self._seed_or_update_task_from_submit(ev)
             # A1: дубль контента (проза → тот же финализатор / повтор) — молча
             # опускаем второй ряд (контент уже показан первым). Exact-match (strip),
             # без маркера: завершение хода и так видно по готовому инпуту.
@@ -2181,6 +2228,11 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "call":
+            if live and ev.tool_name not in COGNITIVE_TOOLS:
+                # Работа хода для эвристики имени — только действие в мире
+                # (когнитивные тулы — не работа; финализатор и intermediate_reply
+                # приходят kind="agent" и сюда не попадают).
+                self._live_turn_tool_calls += 1
             if ev.tool_name in COGNITIVE_TOOLS:
                 # Когнитивный тул продолжает эпизод (без call_id — просто no-op,
                 # НЕ рвёт эпизод и не попадает в interrupt).
@@ -5596,7 +5648,6 @@ class TraceScreen(Screen):
         Флаг `--raw` принимается в `arg`, но MVP-формат один (JSON с отступами);
         семантика raw vs formatted зарезервирована за будущим.
         """
-        import json
         from tui.screens.viewer import ViewerScreen
 
         tid = self.app.tui_state.active_task_id
