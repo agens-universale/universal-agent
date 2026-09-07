@@ -18,7 +18,7 @@ PRESET_HINT = "провайдеры · печать — фильтр/свой а
 # `pick()` вернёт None и просто свернёт список, оставив набранное; обещать «Enter —
 # подставить» значило бы врать на самом видном месте, под полем адреса.
 # Печать сюда больше не приводит: набранное без совпадений сворачивает список
-# (`connection._PRESET_NO_MATCH_CLOSED`) — канон в редакции 2026-08-18.
+# (`connection.PRESET_NO_MATCH_CLOSED`) — канон в редакции 2026-08-18.
 # Глагол — тот же, что в футере шага (`onboarding._FOOTER_PRESET_LIST_NO_MATCH`): обе
 # строки видны одновременно, и звать одну клавишу двумя словами нельзя.
 PRESET_HINT_NO_MATCH = "в списке такого нет · Enter — оставить свой адрес · Esc — свернуть"
@@ -60,7 +60,7 @@ def preset_list_controller(host, *, presets: list, row_class: str, input_id: str
     """
     presets = list(presets)
     # Колонка имени — по самому длинному (короткий фикс ширины резал бы выравнивание
-    # url, когда имя длиннее: «основной конфиг» и т.п.).
+    # url, когда имя длиннее: «раздел «Подключение»» и т.п.).
     name_w = max((len(p.name) for p in presets), default=0) + 3
 
     def render(preset, *, selected: bool) -> Text:
@@ -80,10 +80,17 @@ def preset_list_controller(host, *, presets: list, row_class: str, input_id: str
         None, а не 0 при несовпадении: список раскрывается и поверх СВОЕГО адреса
         (форсированное раскрытие, спека 2026-08-06 §2.4), и подсветка первой строки
         означала бы, что Enter заменит рабочий адрес чужим. Канон языка и моделей
-        (`_lang_initial_index`) — тот же."""
+        (`_lang_initial_index`) — тот же.
+
+        Пункт-наследование (`.inherit`) из поиска исключён: он означает ровно одно
+        состояние — поле ПУСТОЕ, — а url несёт тот же, что унаследован, и часто
+        совпадает с обычным пресетом. Стоя первым, он забирал бы совпадение себе, и
+        курсор над своим, набранным адресом говорил бы «наследуете» (находка
+        владельца по смоку)."""
         if not value:
             return 0
-        return next((i for i, p in enumerate(items) if p.url == value), None)
+        return next((i for i, p in enumerate(items)
+                     if p.url == value and not getattr(p, "inherit", False)), None)
 
     return FieldListController(
         host, input_id=input_id, row_class=row_class,

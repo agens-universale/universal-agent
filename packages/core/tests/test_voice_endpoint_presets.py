@@ -45,16 +45,13 @@ def test_appconfig_defaults_to_voice_presets():
     assert [p.name for p in cfg.voice_endpoint_presets] == ["OpenAI", "Groq", "Mistral"]
 
 
-def test_load_config_flattens_custom_voice_presets_into_config_dict(tmp_path, monkeypatch):
+def test_load_config_flattens_custom_voice_presets_into_config_dict(tmp_path):
     """Зеркало `test_load_config_flattens_custom_presets_into_config_dict`
     (tests/test_endpoint_presets.py): та же регрессия могла повториться на соседнем
     ключе — `flatten_app_config` однажды не пробрасывал `endpoint_presets`, и
     пользовательские пресеты из config.yml до TUI не доезжали, оставался кодовый
     дефолт. У `voice_endpoint_presets` свой ключ схемы — проверяем его отдельно."""
     from gc_core import config as cfgmod
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(cfgmod, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(

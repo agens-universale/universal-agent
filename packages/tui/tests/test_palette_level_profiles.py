@@ -467,11 +467,18 @@ def test_build_real_executor_force_legacy_false_without_cli_model_override(tmp_p
 # --- Пикер /profiles (спека §12.1, ревизия 2026-07-28) ----------------------
 
 def _picker_app(tmp_path, monkeypatch, *, base_profile="", session=None):
-    """App с двумя глобальными профилями (alpha, smoke) для тестов пикера."""
+    """App с двумя глобальными профилями (alpha, smoke) для тестов пикера.
+
+    `config.yml` кладётся НА ДИСК, а не только в `_config_path`: пикер и гейт
+    выбора судят профиль настоящей сборкой, и без базового файла не собирается
+    ни один профиль — стенд без него врал бы «не применится» про здоровых."""
     monkeypatch.chdir(tmp_path)
     profiles_dir = tmp_path / "base" / "profiles"
     profiles_dir.mkdir(parents=True)
+    (tmp_path / "base" / "config.yml").write_text(
+        "backend:\n  completions_url: http://b\n", encoding="utf-8")
     (profiles_dir / "smoke.yml").write_text(
+        # token: "" — правило пары: свой адрес идёт со своим токеном (сервер ключа не требует).
         "models:\n  gc:\n    url: http://x\n    token: \"\"\nslots:\n  default: gc\n", encoding="utf-8")
     (profiles_dir / "alpha.yml").write_text("models: {}\n", encoding="utf-8")
 
@@ -533,6 +540,24 @@ def test_profile_picker_hint_shows_target_slots_not_effective(tmp_path, monkeypa
     assert "default gc" in hint and "глобальный" in hint
 
 
+def test_profile_picker_hint_survives_an_undecodable_profile(tmp_path, monkeypatch):
+    """Файл профиля в чужой кодировке не роняет палитру.
+
+    `UnicodeDecodeError` — подкласс `ValueError`, а не `OSError`, и мимо
+    перехвата `(OSError, yaml.YAMLError)` он уходил наружу: стрелка вниз по
+    списку профилей валила приложение трейсбеком (живой смок). Профиль при этом
+    даже не выбран — хинт строится на одном лишь наведении курсора.
+    """
+    from gc_tui.toggles import profile_picker_hint
+
+    app = _picker_app(tmp_path, monkeypatch)
+    bad = tmp_path / "base" / "profiles" / "enc.yml"
+    bad.write_bytes("slots:\n  default: gc\n".encode("utf-16"))
+
+    hint = profile_picker_hint(app, "enc")
+    assert isinstance(hint, str)          # хинт без состава, а не крах
+
+
 def test_profile_picker_hint_none_value(tmp_path, monkeypatch):
     from gc_tui.toggles import profile_picker_hint
 
@@ -574,6 +599,24 @@ async def test_arg_picker_dynamic_footer_hint_follows_selection(tmp_path):
         assert any("default gc" in t for t in texts)
 
 
+def test_arg_picker_paints_a_refusal_status_as_an_error(tmp_path):
+    """Статус-колонка красится по СМЫСЛУ статуса: «✗ не применится» зелёным цветом
+    достижения читалось бы как «всё в порядке». Правило — по глифу отказа, а не
+    по литералу: пикер не знает ни про профили, ни про их тексты."""
+    from gc_tui import palette as p
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    picker = ArgPicker([("normal", "глобальный", "● активен"),
+                        ("broken", "глобальный", "✗ не применится")])
+
+    spans = {}
+    for opt in picker._options:
+        row = picker._format_row(opt)
+        spans[opt[0]] = [row.plain[s.start:s.end] for s in row.spans if s.style == p.ERR]
+    assert spans["broken"] == ["✗ не применится"]
+    assert spans["normal"] == []
+
+
 def _bare_trace_screen(monkeypatch, app):
     from gc_tui.screens.main import TraceScreen
     scr = TraceScreen()
@@ -604,7 +647,7 @@ def test_cmd_profiles_unknown_name_honest_refusal(tmp_path, monkeypatch):
     calls, hints = [], []
     app.switch_session_profile = lambda name: calls.append(name)
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
     scr._cmd_profiles("wrok")
     assert calls == []
     assert hints and "wrok" in hints[0] and "smoke" in hints[0]
@@ -624,9 +667,24 @@ def test_cmd_profiles_write_failure_shows_hint_not_crash(tmp_path, monkeypatch):
     hints = []
     app.switch_session_profile = _raiser(OSError("read-only"))
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
     scr._cmd_profiles("smoke")
     assert hints and "не сохранено" in hints[0] and "read-only" in hints[0]
+
+
+def test_refusal_hint_outlives_the_ephemeral_default(tmp_path, monkeypatch):
+    """Отказ с причиной держится 5с (`_show_footer_refusal`): 2-секундного
+    дефолта эфемерных подсказок не хватает прочитать координату и причину
+    («slots.default: алиас "ghost" не найден…») — живой смок владельца
+    2026-09-04."""
+    app = _picker_app(tmp_path, monkeypatch)
+    seen = []
+    app.switch_session_profile = _raiser(ValueError("slots.default: алиас"))
+    scr = _bare_trace_screen(monkeypatch, app)
+    scr._show_footer_hint = lambda text, **kw: seen.append((text, kw.get("seconds")))
+    scr._cmd_profiles("smoke")
+    assert seen and "не сохранено" in seen[0][0]
+    assert seen[0][1] == 5.0
 
 
 def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(tmp_path, monkeypatch):
@@ -634,7 +692,7 @@ def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(tmp_path, monkeypa
     hints = []
     app.switch_session_profile = _raiser(OSError("disk full"))
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
     scr._cmd_profiles("без профиля")
     assert hints and "не сохранено" in hints[0]
 
@@ -646,7 +704,7 @@ def test_cmd_profiles_vanished_profile_shows_hint_not_crash(tmp_path, monkeypatc
     hints = []
     app.switch_session_profile = _raiser(ValueError("профиль не найден"))
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text: hints.append(text)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
     scr._cmd_profiles("smoke")
     assert hints and "не сохранено" in hints[0]
 
@@ -660,6 +718,179 @@ def test_cmd_profiles_no_arg_opens_picker(tmp_path, monkeypatch):
     assert opened == [True]
 
 
+def _add_unassemblable_profile(tmp_path) -> None:
+    """К стенду `_picker_app` — профиль в UTF-16: в списке он есть, а собраться
+    с ним конфиг не может (файл не читается)."""
+    (tmp_path / "base" / "profiles" / "broken-enc.yml").write_text(
+        """models: {}
+""", encoding="utf-16")
+
+
+def test_cmd_profiles_refuses_a_profile_that_does_not_assemble(tmp_path, monkeypatch):
+    """Вход 1 (набранная команда), НАСТОЯЩИЙ `switch_session_profile`, не мок:
+    профиль, с которым конфиг не собирается, отклоняется на месте — тем же
+    «✗ не сохранено», что и сорвавшийся персист. Путь файла в отказе остаётся:
+    рядом с палитрой его, в отличие от раздела «Профили» в настройках, никто не
+    печатает — без него человеку нечего чинить."""
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+    hints = []
+    scr = _bare_trace_screen(monkeypatch, app)
+    scr._show_footer_hint = lambda text, **kw: hints.append(text)
+
+    scr._cmd_profiles("broken-enc")
+
+    assert hints and "не сохранено" in hints[0]
+    assert "broken-enc.yml" in hints[0]
+    assert "profile" not in app._session_overrides
+
+
+def test_apply_toggle_profiles_propagates_the_refusal(tmp_path, monkeypatch):
+    """Вход 2 (палитра): у `/profiles` ←/→ и Enter раскрывают пикер, а его выбор
+    уходит в тот же `_cmd_profiles` — но generic-путь `apply_toggle` остаётся
+    объявленным API тоггла. Он обязан ПРОПУСКАТЬ отказ наружу: оба обработчика в
+    `main.py` ловят `(ValueError, OSError)` и показывают «✗ не сохранено»;
+    проглоченное здесь исключение вернуло бы тихий фоллбэк через чёрный ход."""
+    from gc_tui.toggles import apply_toggle
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_toggle(app, "profiles", "broken-enc")
+
+    assert "broken-enc.yml" in str(excinfo.value)
+    assert "profile" not in app._session_overrides
+
+
+def _add_unresolvable_slot_profile(tmp_path) -> None:
+    """Второй способ сломать профиль — не файлом, а СБОРКОЙ: файл читается, YAML
+    валиден, но `slots.default` зовёт алиас, которого нет в merged-реестре
+    моделей. Витрина обязана судить сборкой, а не читаемостью файла."""
+    (tmp_path / "base" / "profiles" / "broken-slot.yml").write_text(
+        "slots:\n  default: nope\n", encoding="utf-8")
+
+
+def test_profile_picker_marks_a_profile_that_does_not_assemble(tmp_path, monkeypatch):
+    """Профиль, который гейт выбора отклонит, помечен статусом ДО нажатия Enter:
+    отказ после нажатия — половина дела (решение владельца по живому смоку)."""
+    from gc_tui.toggles import profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+
+    by_name = {name: status for name, _, status in profile_picker_options(app)}
+    assert by_name["broken-enc"] == "✗ не применится"
+
+
+def test_profile_picker_marks_a_profile_whose_slot_does_not_resolve(tmp_path, monkeypatch):
+    """Тот же статус там, где ломается не чтение файла, а сборка стека: судья —
+    полная сборка конфига, а не «читается ли файл» (иначе половина негодных
+    профилей проходила бы витрину молча)."""
+    from gc_tui.toggles import profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unresolvable_slot_profile(tmp_path)
+
+    by_name = {name: status for name, _, status in profile_picker_options(app)}
+    assert by_name["broken-slot"] == "✗ не применится"
+
+
+def test_profile_picker_leaves_healthy_profiles_without_a_status(tmp_path, monkeypatch):
+    """Сторож: рядом с негодным соседом здоровые профили остаются без статуса.
+    Пометка «всех подряд» (например, когда не собирается сама база) обесценила бы
+    метку — по ней перестали бы отличать негодный профиль от годного."""
+    from gc_tui.toggles import profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+    _add_unresolvable_slot_profile(tmp_path)
+
+    by_name = {name: status for name, _, status in profile_picker_options(app)}
+    assert by_name["alpha"] == "" and by_name["smoke"] == ""
+    assert by_name["без профиля"] == "● активен"
+
+
+def test_profile_picker_keeps_active_marker_on_a_broken_active_profile(tmp_path, monkeypatch):
+    """Действующий профиль помечен «● активен», даже если его файл испортили под
+    ногами: он УЖЕ применён и работает, а «не применится» звало бы человека
+    чинить выбор, который никуда не переключается. Два статуса в одной колонке
+    не показываем — приоритет у того, что описывает текущее состояние."""
+    from gc_tui.toggles import profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch, base_profile="broken-enc")
+    _add_unassemblable_profile(tmp_path)
+
+    by_name = {name: status for name, _, status in profile_picker_options(app)}
+    assert by_name["broken-enc"] == "● активен"
+
+
+def test_profile_picker_hint_names_the_reason_a_profile_will_not_apply(tmp_path, monkeypatch):
+    """Статус говорит ЧТО, подсказка — ПОЧЕМУ: без причины человеку нечего чинить
+    (текст ядра самодостаточен — «<путь>: не удалось прочитать: …»)."""
+    from gc_tui.toggles import profile_picker_hint
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)
+
+    hint = profile_picker_hint(app, "broken-enc")
+    assert "broken-enc.yml" in hint and "не удалось прочитать" in hint
+
+
+def test_profile_picker_hint_reuses_the_opening_probe(tmp_path, monkeypatch):
+    """Открытие пикера (`profile_picker_options`) уже пробует сборку каждого
+    непроверенного профиля — хинт подвала (`profile_picker_hint`, зовётся на
+    каждый highlight И на каждый тик поллинга `ArgPicker.desired_height`, 0.25 с)
+    не имеет права звать вторую полную сборку конфига (`probe_profile_assembly` →
+    `load_config_ex`, ~6 мс на профиль) для профиля, который уже пробовала
+    витрина списка."""
+    from gc_tui.toggles import profile_picker_hint, profile_picker_options
+
+    app = _picker_app(tmp_path, monkeypatch)
+    _add_unassemblable_profile(tmp_path)   # alpha, smoke — здоровые; broken-enc — нет
+
+    calls: list = []
+    original = app.probe_profile_assembly
+
+    def counted(name):
+        calls.append(name)
+        return original(name)
+
+    monkeypatch.setattr(app, "probe_profile_assembly", counted)
+
+    options = profile_picker_options(app)             # «открытие» пикера
+    probed_on_open = list(calls)
+    assert probed_on_open, "открытие обязано пробовать хотя бы один профиль"
+    calls.clear()
+
+    names = [name for name, _, _ in options if name != "без профиля"]
+    for name in names:                                 # «наведение» — хинт каждой строки
+        profile_picker_hint(app, name)
+    assert calls == [], (
+        f"хинт перепробовал профили, уже проверенные открытием: {calls}")
+
+
+def test_profile_picker_hint_probes_once_across_repeated_polling(tmp_path, monkeypatch):
+    """Хинт одного и того же (ещё не пробованного открытием) профиля, спрошенный
+    повторно — как это делает поллинг `ArgPicker.desired_height` каждые 0.25 с,
+    пока список просто открыт, — не должен звать пробу заново."""
+    from gc_tui.toggles import profile_picker_hint
+
+    app = _picker_app(tmp_path, monkeypatch, base_profile="smoke")   # smoke — эффективный,
+    calls: list = []                                                # options() его не трогает
+    original = app.probe_profile_assembly
+
+    def counted(name):
+        calls.append(name)
+        return original(name)
+
+    monkeypatch.setattr(app, "probe_profile_assembly", counted)
+
+    for _ in range(4):
+        profile_picker_hint(app, "smoke")
+    assert calls == ["smoke"], f"повторный хинт того же профиля пробует заново: {calls}"
+
+
 def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
     """§9.1 ревизия: сессионное "" при конфиг-указателе — чистый конфиг
     (пере-мерж БЕЗ профиля), а не база с профилем."""
@@ -667,6 +898,7 @@ def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
     base_dir = tmp_path / "base"
     (base_dir / "profiles").mkdir(parents=True)
     (base_dir / "profiles" / "work.yml").write_text(
+        # token: "" — правило пары: свой адрес идёт со своим токеном (сервер ключа не требует).
         "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n",
         encoding="utf-8")
     (base_dir / "config.yml").write_text(

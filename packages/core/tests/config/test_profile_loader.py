@@ -9,8 +9,10 @@ import yaml
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.config_modules.profiles import (
+    discover_all_refs,
     discover_profiles,
     load_profile_document,
+    profile_display_summary,
     profile_roots,
     resolve_profile,
 )
@@ -159,6 +161,41 @@ def test_reserved_profile_name_ignored_and_pointer_errors(tmp_path):
         resolve_profile("light", roots)
 
 
+def test_directory_named_like_a_profile_is_not_discovered(tmp_path):
+    """Каталог `work.yml` — не профиль: глоб отбирал его наравне с файлами, и
+    дальше он либо ронял открытие (`OSError` мимо всех сторожей), либо — как
+    тёзка из ПРИОРИТЕТНОГО корня — заслонял настоящий профиль из второго.
+    Managed/project слои от того же отбираются по `isfile`."""
+    project_dir = tmp_path / "proj"
+    base_config = tmp_path / "base" / "config.yml"
+    base_config.parent.mkdir(parents=True)
+    base_config.write_text("agent:\n  model: x\n", encoding="utf-8")
+    roots = profile_roots(project_dir, base_config)
+    (roots[0] / "work.yml").mkdir(parents=True)
+    _write_yaml(roots[1] / "work.yml", {"agent": {"model": "real"}})
+    _write_yaml(roots[0] / "corp.yml", {"agent": {"model": "corp"}})
+
+    discovered = discover_profiles(roots)
+    assert discovered["work"].path == roots[1] / "work.yml"
+    assert "corp" in discovered
+    assert [ref.path for ref in discover_all_refs(roots)["work"]] == [roots[1] / "work.yml"]
+    assert resolve_profile("work", roots).path == roots[1] / "work.yml"
+
+
+def test_unopenable_profile_file_is_a_value_error(tmp_path):
+    """Путь профиля НА МЕСТЕ, но не открывается (права, каталог на месте файла,
+    отвалившийся сетевой диск) — это `ValueError` с тем же «<path>: …», по
+    которому `explain_broken_config` опознаёт виноватый файл. Голый `OSError`
+    уходил мимо `except ValueError` обеих точек входа и мимо всех трёх ступеней
+    лестницы починки — человек получал трейсбек."""
+    unreadable = tmp_path / "profiles" / "work.yml"
+    unreadable.mkdir(parents=True)
+
+    with pytest.raises(ValueError) as exc_info:
+        load_profile_document(unreadable)
+    assert str(exc_info.value).startswith(f"{unreadable}: не удалось прочитать: ")
+
+
 # --- Интеграционный уровень: load_config_ex (base→managed→project→profile→compat→validate) ---
 
 
@@ -281,3 +318,138 @@ def test_project_profile_literal_token_warns(isolated_cwd, tmp_path):
     cfg, meta = load_config_ex(str(base_config))
     assert any("token" in n and "sk-literal-secret" not in n for n in meta.notices)
     assert any("token" in n for n in cfg["compat_notices"])
+
+
+def test_base_root_profile_literal_token_does_not_warn(isolated_env, isolated_cwd, tmp_path):
+    """Обратная половина предыдущего: предупреждение адресное, а не всеобщее.
+
+    Смысл warning'а — «этот файл обычно лежит в репозитории» (§3.5), и он
+    привязан к корню (`config.py`: `warn_literal_tokens=(root_kind == "project")`).
+    Без негативной половины страж молчал бы о снятии условия: варнить на КАЖДЫЙ
+    литеральный токен значит варнить на приватный `~/.gc/profiles/*.yml`, где
+    секрет лежит законно, — и приучить пользователя не читать notice."""
+    from gc_core.config import load_config_ex
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, _MINIMAL_BASE)
+
+    _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "work"})
+    _write_yaml(
+        base_config.parent / "profiles" / "work.yml",
+        {"models": {"flash": {"url": "http://x/v1/chat/completions",
+                              "token": "sk-literal-secret"}}},
+    )
+
+    cfg, meta = load_config_ex(str(base_config))
+    assert meta.ref is not None and meta.ref.root_kind == "base"
+    assert not [n for n in meta.notices if "token" in n]
+    assert not [n for n in cfg["compat_notices"] if "token" in n]
+
+
+def test_registry_merges_across_layers_overlay_cannot_remove_a_model(isolated_cwd, tmp_path):
+    """§14 «мерж реестров по слоям»: добавление алиаса, перекрытие алиаса и
+    «оверлей не может убрать модель» — три семантики одним снимком.
+
+    Родовой `test_config_merge.py` проверяет их на абстрактном dict, но реестр
+    моделей проходит через `flatten_app_config`, и то, что `models` не попал в
+    список секций-исключений мержа, не утверждает никто.
+
+    Громкую половину последствий фаза 2 ловит сама: профиль, заменивший реестр
+    базы, оставил бы `slots.default` базового слоя висеть на исчезнувшем алиасе,
+    и загрузка упала бы с `slots.default: алиас "keep" не найден в
+    merged-реестре models`. Именно так этот тест и валится под мутацией мержа —
+    по ГРОМКОМУ пути.
+
+    Молчит фаза 2 в другом случае: оверлей подменяет реестр ВМЕСТЕ со слотами —
+    ссылки сходятся, ошибки нет, модели базового слоя просто исчезают (проверено
+    отдельно: `load_config_ex` отдаёт реестр из одного профиля). Такого сценария
+    тест НЕ строит. Первый ассерт ниже, состав реестра, поймал бы и его, но
+    доказано это здесь только на громком пути."""
+    from gc_core.config import load_config_ex
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, _MINIMAL_BASE)
+
+    _write_yaml(isolated_cwd / ".gc" / "config.yml", {
+        "profile": "work",
+        "models": {"keep": {"url": "http://keep/v1", "token": "sk-keep"},
+                   "shared": {"url": "http://base/v1", "token": "sk-base"}},
+        "slots": {"default": "keep"},
+    })
+    # Перекрытие алиаса — парой целиком (§2): слой, задавший только адрес, увёз бы
+    # токен базы на свой хост и отвергается правилом ещё до мержа.
+    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
+        "models": {"shared": {"url": "http://profile/v1", "token": "sk-profile"},
+                   "added": {"url": "http://added/v1", "token": "sk-added"}},
+    })
+
+    cfg, _meta = load_config_ex(str(base_config))
+    models = cfg["models"]
+
+    assert set(models) == {"keep", "shared", "added"}
+    assert models["keep"]["url"] == "http://keep/v1"          # оверлей не убрал
+    assert models["shared"]["url"] == "http://profile/v1"     # оверлей перекрыл
+    assert models["added"]["url"] == "http://added/v1"        # оверлей добавил
+
+
+def test_model_inherits_from_backend_overridden_by_profile(isolated_cwd, tmp_path):
+    """§14 Router: наследование от ЭФФЕКТИВНОГО backend, «включая перекрытый
+    профилем». Запись реестра без своих url/token берёт их из backend ПОСЛЕ мержа
+    всей стопки — то есть из профиля, если тот перекрыл backend; иначе профиль
+    «сменить провайдера одной строкой» уводил бы адрес только у явных записей."""
+    from gc_core.config import load_config_ex
+    from gc_core.model_router import ModelRouter
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, _MINIMAL_BASE)
+
+    _write_yaml(isolated_cwd / ".gc" / "config.yml", {
+        "profile": "work",
+        "models": {"bare": {}},
+        "slots": {"default": "bare"},
+    })
+    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
+        "backend": {"completions_url": "http://from-profile/v1/chat/completions"},
+    })
+
+    cfg, _meta = load_config_ex(str(base_config))
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+
+    assert resolved.alias == "bare"
+    assert resolved.url == "http://from-profile/v1/chat/completions"
+
+
+def test_pointer_into_a_directory_named_like_a_profile_fails_as_value_error(
+    isolated_cwd, tmp_path
+):
+    """Раскладка ревью: указатель `profile: "work"` в базе, а `profiles/work.yml`
+    создан КАТАЛОГОМ. Загрузка обязана отказать `ValueError` — тем классом, что
+    ловят обе точки входа и лестница починки; `PermissionError`/`IsADirectoryError`
+    отсюда были бы трейсбеком вместо объяснения."""
+    from gc_core.config import load_config_ex
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, {**_MINIMAL_BASE, "profile": "work"})
+    (tmp_path / "profiles" / "work.yml").mkdir(parents=True)
+
+    with pytest.raises(ValueError):
+        load_config_ex(str(base_config))
+def test_the_read_failure_is_self_sufficient(tmp_path):
+    """Текст отказа чтения профиля самодостаточен: путь + причина.
+
+    Витрина «Профили» и отказ открытия печатают его как есть, поэтому свой
+    префикс «не удалось прочитать» им добавлять нечего — иначе человек читает
+    «не удалось прочитать: <путь>: не удалось прочитать: …». Тот же канон, что у
+    отказа записи реестра: человеческий текст доезжает дословно."""
+    unreadable = tmp_path / "enc.yml"
+    unreadable.write_bytes("slots:\n  default: x\n".encode("utf-16"))
+    summary = profile_display_summary(unreadable)
+    assert summary.error is not None
+    assert str(unreadable) in summary.error
+    assert summary.error.count("не удалось прочитать") == 1
+
+    broken = tmp_path / "yaml.yml"
+    broken.write_text("a: : :\n", encoding="utf-8")
+    yaml_summary = profile_display_summary(broken)
+    assert yaml_summary.error is not None
+    assert str(broken) in yaml_summary.error       # и у YAML-ошибки путь свой

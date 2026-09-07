@@ -806,7 +806,10 @@ class SubagentRunner:
                     loaded = fd.read().strip()
                 if loaded:
                     return loaded
-            except OSError:
+            # Первый кандидат — путь ИЗ КОНФИГА: файл человека, кодировка его.
+            # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и уходил
+            # мимо этого фолбэка, роняя запуск сабагента вместо отката на пакетный.
+            except (OSError, UnicodeDecodeError):
                 _log.warning(
                     "Failed to read subagent system prompt from %s",
                     prompt_path,

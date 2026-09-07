@@ -7,6 +7,10 @@
 merged-реестра, ключи `assign.subagents` → канонический реестр имён субагентов.
 Кросс-слойные ссылки (слот в config.yml на алиас из профиля) легальны и
 проверяются только тут — до мержа проверить нечего.
+
+Отсюда же уходят стартовые notices про сами записи (§7 спеки пары: ослабленный
+транспорт под общим токеном) — канал у предупреждений один, и второго заводить
+незачем: `load_config` мёржит их в `config_dict["compat_notices"]`.
 """
 from __future__ import annotations
 
@@ -19,17 +23,21 @@ from gc_core.config_modules.root import AppConfig
 # config_modules.*, см. runner.py/special_agent.py) и завёл бы конфиг на модуль
 # с побочными эффектами регистрации инструментов ради одного списка строк.
 # Держать в синхроне со SUBAGENT_CLASSES — задача стража (см. план волны A, Task 15).
-_SUBAGENT_NAMES = frozenset(
-    {
-        "subagent_worker",
-        "subagent_code_generator",
-        "subagent_code_planner",
-        "subagent_planner",
-        "subagent_critic",
-        "subagent_code_reviewer",
-        "subagent_special_agent",
-    }
+#
+# Кортеж, а не сразу frozenset: ПОРЯДОК реестра (тот же, что у SUBAGENT_CLASSES) —
+# витрина для UI, перечисляющего субагентов поимённо (секция «Модели», привязки);
+# у множества порядка нет, и строки привязок прыгали бы от запуска к запуску.
+# Проверке ключей порядок не нужен — ей достаётся frozenset ниже.
+SUBAGENT_NAMES = (
+    "subagent_worker",
+    "subagent_code_generator",
+    "subagent_code_planner",
+    "subagent_planner",
+    "subagent_critic",
+    "subagent_code_reviewer",
+    "subagent_special_agent",
 )
+_SUBAGENT_NAMES = frozenset(SUBAGENT_NAMES)
 
 _ASSIGN_SCALAR_FIELDS = (
     "finish_gate",
@@ -57,6 +65,23 @@ def _check_assign_value(models: dict, coordinate: str, value: str, prefix: str, 
     )
 
 
+def default_slot_required(models, slots) -> bool:
+    """Нужен ли ЯВНЫЙ слот, чтобы реестр резолвился (спека §4): при 2+ моделях и ни
+    одном заданном слоте вывести `default` не из чего.
+
+    Отдельным предикатом, потому что спрашивают его двое: валидатор — чтобы
+    пожаловаться, и слой записи — чтобы форма успела спросить человека ДО записи.
+    Написанное дважды от руки, это правило уже разъезжалось: одна копия считала по
+    слитому стеку, другая по одному файлу, и вопрос «какая модель по умолчанию» не
+    задавался там, где запись потом отвергал гейт."""
+    return (
+        len(models) >= 2
+        and slots.light is None
+        and slots.default is None
+        and slots.max is None
+    )
+
+
 def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[str]:
     """Ссылочная целостность models/slots/assign на итоговом merged-конфиге.
 
@@ -76,12 +101,7 @@ def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[st
         if alias is not None and alias not in models:
             errors.append(f'{prefix}slots.{slot_name}: алиас "{alias}" не найден в merged-реестре models')
 
-    if (
-        len(models) >= 2
-        and cfg.slots.light is None
-        and cfg.slots.default is None
-        and cfg.slots.max is None
-    ):
+    if default_slot_required(models, cfg.slots):
         errors.append(
             f"{prefix}slots.default: моделей в реестре ≥2 — укажите slots.default "
             "(или любой другой слот — default резолвится по матрице фоллбэков)"
@@ -105,6 +125,17 @@ def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[st
     if errors:
         raise ValueError("; ".join(errors))
 
+    # §7 спеки пары: запись, не задавшая своего подключения, работает ОБЩИМ токеном —
+    # и вправе при этом ослабить транспорт под собой (`use_ssl: false`, клиентский
+    # сертификат). Отказом это не считается (решение владельца 2), но и молчать нельзя:
+    # что общий ключ уходит по ослабленному каналу, видно только отсюда — в самой
+    # записи это выглядит одним сетевым квирком. Предикат — у записи
+    # (`ModelEntry.weakens_shared_transport`), здесь только СЛОВА предупреждения.
+    notices = [
+        f"{prefix}запись {alias} ослабляет защиту запроса, который идёт с общим токеном"
+        for alias, entry in models.items() if entry.weakens_shared_transport()
+    ]
     if not models and assign_touched:
-        return [f"{prefix}assign: привязки без реестра моделей не действуют (models пуст)"]
-    return []
+        notices.append(
+            f"{prefix}assign: привязки без реестра моделей не действуют (models пуст)")
+    return notices

@@ -10,6 +10,7 @@ from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Static
 
+from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 from gc_tui.widgets.loading_wave import wave_glyph
 
@@ -349,8 +350,9 @@ class McpSectionEditor(Vertical):
         banner = Static(
             Text(f"Удалить пакет {row.name} из venv? Подключение уже снято, "
                  f"файлы пакета будут удалены. Enter — удалить · Esc — отмена", style=WARN),
-            classes="mcp-confirm onb-dyn", markup=False)
+            classes=f"mcp-confirm onb-dyn {KEEP_IN_VIEW}", markup=False)
         self.mount(banner)
+        reveal_focus(self)              # вопрос ниже вьюпорта = Enter вслепую
         return True
 
     def request_install(self, names: list, *, verb: str) -> bool:
@@ -359,8 +361,9 @@ class McpSectionEditor(Vertical):
         self._pending = {"kind": "install", "names": list(names)}
         banner = Static(
             Text(f"{verb}: {', '.join(names)}? Enter — {verb.lower()} · Esc — отмена", style=WARN),
-            classes="mcp-confirm onb-dyn", markup=False)
+            classes=f"mcp-confirm onb-dyn {KEEP_IN_VIEW}", markup=False)
         self.mount(banner)
+        reveal_focus(self)
         return True
 
     def begin_enter(self) -> bool:

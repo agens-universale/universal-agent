@@ -128,8 +128,8 @@ def test_run_reset_config_refuses_project_local(monkeypatch, tmp_path, capsys):
     local_cfg = gc_dir / "config.yml"
     local_cfg.write_text("backend:\n  completions_url: \"http://x\"\n", encoding="utf-8")
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(local_cfg)))
-    from gc_core import config as config_mod
-    monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: str(local_cfg))
+    from gc_core.config_modules import env_vars
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(local_cfg))
     called = []
     monkeypatch.setattr(cli.config_sync, "reset_config", lambda *a, **k: called.append(1))
     assert cli._run_reset_config() == 1
@@ -168,16 +168,29 @@ def test_is_unconfigured_true_when_everything_placeholder():
     assert onboarding.is_unconfigured(config) is True
 
 
-def test_is_unconfigured_false_when_registry_non_empty_even_with_placeholders():
-    """Спека §11: заполненный merged-реестр (`models` непуст) закрывает требование —
-    легаси-плейсхолдеры тогда не блокируют, они лишь база наследования."""
+def test_is_unconfigured_false_when_registry_covers_model_placeholder():
+    """Спека §11: заполненный merged-реестр (`models` непуст) закрывает требование
+    МОДЕЛИ — плейсхолдер `agent.model` при нём не блокирует."""
+    config = {
+        "completions_url": "http://real/v1",
+        "chat_completion_headers": {"Authorization": "Bearer sk-1"},
+        "model": onboarding.MODEL_SENTINEL,
+        "models": {"flash": {"url": "http://x"}},
+    }
+    assert onboarding.is_unconfigured(config) is False
+
+
+def test_is_unconfigured_true_when_registry_but_endpoint_placeholder():
+    """…и только его: адрес/токен реестр не закрывает. Записи, которые пишет мастер
+    (решение 10 волны B), наследуют url/токен от плоского `backend` — плейсхолдерный
+    endpoint при живом реестре означает «нечем работать»."""
     config = {
         "completions_url": onboarding.URL_SENTINEL,
         "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"url": "http://x"}},
     }
-    assert onboarding.is_unconfigured(config) is False
+    assert onboarding.is_unconfigured(config) is True
 
 
 def test_is_unconfigured_false_when_legacy_fields_filled():

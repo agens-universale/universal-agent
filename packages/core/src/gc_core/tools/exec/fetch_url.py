@@ -10,10 +10,12 @@ import requests
 import trafilatura
 from readability import Document
 
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.security.url_policy import enforce_url_policy
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class FetchUrl(AbstractSimpleTool):
     timeout_seconds = 20
     max_content_chars = 20_000

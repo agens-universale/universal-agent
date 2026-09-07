@@ -611,9 +611,11 @@ def load_command_judge_prompt(kind: str) -> str:
 
 
 def _load_prompt_file(path: Path) -> str:
+    # «Недоступен» — это и «не декодируется» (`UnicodeDecodeError` подкласс
+    # `ValueError`, а не `OSError`): судья отключается, а не роняет ход.
     try:
         text = path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise JudgeUnavailable(f"Command judge prompt file is unavailable: {path}") from exc
     if not text:
         raise JudgeUnavailable(f"Command judge prompt file is empty: {path}")

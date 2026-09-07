@@ -17,6 +17,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -233,3 +234,14 @@ def managed_config_path() -> Path:
     зависимость, которая мешает вынести MCP в отдельный дистрибутив.
     """
     return effective_config_dir() / "config.local.yml"
+
+
+def project_local_config_path() -> Optional[str]:
+    """Абсолютный путь к `<cwd>/.gc/config.yml`, если файл есть, иначе None.
+
+    Живёт рядом с `project_gc_dir`, чей ответ и проверяет: это вопрос раскладки
+    каталогов, а не загрузки конфига. Слой наложения (`config_modules.layers`)
+    и потребители снаружи спрашивают отсюда."""
+    candidate = str((project_gc_dir() / "config.yml").resolve())
+    return candidate if os.path.isfile(candidate) else None
+

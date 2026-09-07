@@ -42,6 +42,7 @@ from gc_core.utils.fs_search_walk import (
 )
 from gc_core.utils.glob_to_regex import compile_glob
 from gc_core.utils.tool_report_paths import tool_report_abspath
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.security.read_guard import (
     enforce_read_guard,
@@ -85,6 +86,7 @@ class _ScanShared:
     shortlist_len: int = 0
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class FindInFiles(AbstractSimpleTool):
     """Поиск совпадений текста/регулярки внутри файлов файловой системы."""
 

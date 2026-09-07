@@ -16,6 +16,7 @@ from textual.widgets import Input, Static
 
 from gc_tui.palette import ACCENT, BRIGHT, DIM, INK
 from gc_tui.services.session_delete_select import select_for_deletion
+from gc_core.utils.is_number import is_number
 
 _MODES = ("keep_last", "older_than_days")
 _MODE_LABEL = {
@@ -73,7 +74,7 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
 
     def _n(self) -> Optional[int]:
         raw = self.query_one("#mass-n", Input).value.strip()
-        return int(raw) if raw.isdigit() else None
+        return int(raw) if is_number(raw) else None
 
     def _ids(self) -> list:
         n = self._n()

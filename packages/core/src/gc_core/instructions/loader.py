@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from gc_core.instructions.layers import instruction_layer_specs
+from gc_core.utils.user_text import read_user_text_or_none
 
 _PREAMBLE = (
     "Precedence: when instructions conflict, more specific instructions override "
@@ -24,10 +25,8 @@ class LoadedInstructions:
 
 
 def _read(path) -> str | None:
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return None
+    # Файл человека (AGENTS.md и слои инструкций) может лежать в любой кодировке.
+    return read_user_text_or_none(path)
 
 
 def _wrap(sections: list[str]) -> str:

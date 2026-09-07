@@ -6,6 +6,7 @@ from gc_core.intent_guard.trace_digest import FinishGateTraceDigest, build_finis
 from gc_core.intent_guard.validation_result import ValidationResult, fail_open_validation_result, parse_validator_response
 from gc_core.summarize.llm import auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens, request_auxiliary_completion_text
 from gc_core.bundled_assets import bundled_root
+from gc_core.utils.user_text import read_user_text
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = str(bundled_root())
@@ -73,8 +74,8 @@ def _load_guard_prompt(prompt_path: str | None = None) -> str:
         raise FileNotFoundError(
             f"Intent guard prompt file not found: {path}"
         )
-    with open(path, "r", encoding="utf-8") as fd:
-        prompt = fd.read().strip()
+    # Путь задаёт конфиг (`chat_completions_intent_guard_prompt_path`).
+    prompt = read_user_text(path).strip()
     if not prompt:
         raise ValueError(
             f"Intent guard prompt file is empty: {path}"

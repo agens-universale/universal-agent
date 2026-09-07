@@ -78,3 +78,31 @@ async def test_mass_delete_escape_returns_none():
         await pilot.press("escape")
         await pilot.pause()
     assert result["v"] is None
+
+
+@pytest.mark.asyncio
+async def test_mass_delete_superscript_digit_is_not_a_count():
+    """Класс «isdigit + int»: `²` проходит `isdigit()`, а `int("²")` падает —
+    и `_n()` зовётся на КАЖДОЙ отрисовке, так что диалог рушился прямо под
+    пальцами. Ввод обязан читаться как «числа нет»: ноль под удаление."""
+    pytest.importorskip("textual")
+    from textual.app import App
+    from textual.widgets import Input, Static
+    from gc_tui.screens.mass_delete import MassDeleteScreen
+    now = datetime(2026, 6, 6, tzinfo=timezone.utc)
+    tasks = [_task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00") for i in range(5)]
+    result = {"v": "unset"}
+
+    class _A(App):
+        def on_mount(self):
+            self.push_screen(MassDeleteScreen(tasks=tasks, now=now),
+                             lambda v: result.update(v=v))
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        scr.query_one("#mass-n", Input).value = "²"
+        await pilot.pause()
+        assert "0 из 5" in str(scr.query_one("#mass-count", Static).render())
+        await pilot.press("enter")
+        await pilot.pause()
+    assert result["v"] == "unset"   # ничего не выбрано — диалог не закрывается

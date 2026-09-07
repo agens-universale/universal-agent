@@ -103,6 +103,8 @@ class Finding:
 #: держит те же имена, но отвечает на другой вопрос — куда имя переехало;
 #: расхождение между ними ловит `test_legacy_list_covers_module_map`.
 LEGACY_TOPLEVEL = frozenset({
+    # Приехал с develop 07.09.2026 вместе с loop-notice (PR #90).
+    "loop_detector",
     "agent_executor", "app_version", "arg_parser", "backends",
     "bundled_assets", "cli", "config", "config_modules", "config_origin",
     "config_raw", "config_sync", "constants", "diff_tui",

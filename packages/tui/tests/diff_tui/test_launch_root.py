@@ -14,7 +14,10 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     captured: dict = {}
 
     class FakeApp:
-        def __init__(self, *, threads_dir, system, config):
+        # `**_kw` не лень: дубль обязан переживать НОВЫЙ аргумент настоящего
+        # TuiApp (последним приехал profile_override) — иначе проводка ломает
+        # тест, который про неё ничего не знает.
+        def __init__(self, *, threads_dir, system, config, **_kw):
             captured["config"] = config
             self._config_path = None
             self._config_project_local = None
@@ -34,7 +37,13 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     from gc_core.config_modules.profiles import ProfileMeta
 
     monkeypatch.setattr(
-        tui_pkg.importlib, "import_module", lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock()
+        # Подмена ГЛОБАЛЬНАЯ: сюда прилетают и чужие ленивые импорты
+        # (`dateutil` зовёт `import_module(".parser", __name__)` — с package),
+        # и однопозиционная лямбда роняла их TypeError'ом. Ловилось это по
+        # настроению порядка импортов: обособленно тест падал всегда, в полном
+        # прогоне — только когда dateutil ещё не был подтянут соседом.
+        tui_pkg.importlib, "import_module",
+        lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock(),
     )
     monkeypatch.setattr(
         "gc_core.config.load_config_ex",
@@ -50,7 +59,7 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
         lambda _cfg: str(tmp_path / "threads"),
     )
     monkeypatch.setattr("gc_core.config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
-    monkeypatch.setattr("gc_core.config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path", lambda: None)
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.ensure_project_gc_dir",
         lambda: None,
@@ -72,7 +81,7 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     captured: dict = {}
 
     class FakeApp:
-        def __init__(self, *, threads_dir, system, config):
+        def __init__(self, *, threads_dir, system, config, **_kw):
             # Имитация: cwd уже сменился к моменту конструктора.
             import os
 
@@ -96,7 +105,13 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     from gc_core.config_modules.profiles import ProfileMeta
 
     monkeypatch.setattr(
-        tui_pkg.importlib, "import_module", lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock()
+        # Подмена ГЛОБАЛЬНАЯ: сюда прилетают и чужие ленивые импорты
+        # (`dateutil` зовёт `import_module(".parser", __name__)` — с package),
+        # и однопозиционная лямбда роняла их TypeError'ом. Ловилось это по
+        # настроению порядка импортов: обособленно тест падал всегда, в полном
+        # прогоне — только когда dateutil ещё не был подтянут соседом.
+        tui_pkg.importlib, "import_module",
+        lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock(),
     )
     monkeypatch.setattr(
         "gc_core.config.load_config_ex",
@@ -112,7 +127,7 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
         lambda _cfg: str(tmp_path / "threads"),
     )
     monkeypatch.setattr("gc_core.config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
-    monkeypatch.setattr("gc_core.config._project_local_config_path", lambda: None)
+    monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path", lambda: None)
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.ensure_project_gc_dir",
         lambda: None,

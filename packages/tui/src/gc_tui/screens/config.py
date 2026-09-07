@@ -72,15 +72,35 @@ def _paths_block(config: dict, config_path: str | None,
     return t
 
 
-def _profile_header_text(config: dict, profile_source: str | None) -> Text:
-    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local».
+def _effective_model_name(config: dict) -> str:
+    """Действующая модель снимка — резолв `ModelRouter` (§6/§7), а не плоский ключ:
+    тот же канон, что у футера (`main.py::_footer_model_name`) и `/status`. С волны B
+    мастер `agent.model` не пишет вовсе, а на легаси-конфигах ключ может быть просто
+    устаревшим — обе беды показывали бы моделью не то, чем идёт работа.
 
-    Шаблонный сентинел `agent.model` (Task 14) — не имя модели, показываем «—»."""
+    Уровень берём из того же снимка, что и строка «уровень:» рядом, — шапка обязана
+    быть внутренне согласованной. Резолв не удался (реестр нерезолвим, алиаса нет) —
+    честный фоллбэк на плоский ключ, шапка не место для отказа.
+
+    Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4)."""
     from gc_core.onboarding import MODEL_SENTINEL
+    from gc_core.model_router import ModelRouter
+    name = config.get("model")
+    try:
+        resolved = ModelRouter(
+            config, level_provider=lambda: config.get("level") or "default",
+        ).resolve("main", check_breaker=False)
+        name = resolved.alias or resolved.model
+    except Exception:
+        pass
+    return name if name and name != MODEL_SENTINEL else "—"
+
+
+def _profile_header_text(config: dict, profile_source: str | None) -> Text:
+    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local»."""
     profile = config.get("profile") or None
     level = config.get("level") or "default"
-    raw_model = config.get("model")
-    model = raw_model if raw_model and raw_model != MODEL_SENTINEL else "—"
+    model = _effective_model_name(config)
     t = Text()
     t.append("профиль: ", style=DIM)
     if profile:

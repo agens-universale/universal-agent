@@ -11,9 +11,11 @@ from pathlib import Path
 
 import yaml
 
-from gc_core.config import _default_config_path
+from gc_core.config import _default_config_path, flatten_app_config
+from gc_core.config_modules.model_sections_validation import validate_model_sections
 from gc_core.config_modules.root import AppConfig
 from gc_testkit.paths import REPO
+from gc_core.model_router import ModelRouter
 
 # dotted-пути, где шаблон НАМЕРЕННО отличается от кодового дефолта:
 # сентинелы онбординга и preset-значения шаблона. Пополнять только осознанно.
@@ -67,6 +69,8 @@ EXPERT_ONLY_KEYS: set = {
     # лежит закомментированным — как образец формата (сторож этого —
     # test_default_presets_are_not_materialized_into_the_template).
     "endpoint_presets",
+    # Голосовой каталог — тот же класс и то же правило.
+    "voice_endpoint_presets",
     # --- agent: тюнинги finish gate / output storage ---
     # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
     "agent.finish_gate_max_iterations",
@@ -282,10 +286,116 @@ def test_default_template_matches_code_defaults():
     )
 
 
+# Якорь — корень репозитория из gc_testkit.paths, а не `parents[1]`: у develop
+# тест лежал в корневом tests/, у нас — в packages/core/tests, и тот же счёт
+# вёл бы в packages/core.
+DEMO_CONFIG_PATH = REPO / "demo_config.yml"
+
+
+def test_default_template_with_live_profile_anchor_stays_legacy():
+    """§14 «Стражи»: шаблон с живым якорем `profile: ""` остаётся ЛЕГАСИ.
+
+    Второй рубеж, а не единственный: ожившую в шаблоне секцию моделей ловят и
+    A1, и A2 выше (`models`, `slots.*`, `assign.*` лежат в `EXPERT_ONLY_KEYS`,
+    и появление их в шаблоне даёт `stale` — проверено раскомментированием).
+    Ценность здесь в другом: те двое падают на бухгалтерии ключей и говорят
+    «whitelist разошёлся с шаблоном», а требование §14 — про ПОВЕДЕНИЕ. Этот
+    формулирует его прямо и спрашивает Router: пакетная поставка обязана
+    резолвиться плоскими ключами, как до профилей, иначе уровни включились бы
+    всем, кто ещё ничего не настраивал.
+    """
+    raw = _template_raw()
+    assert raw["profile"] == ""
+    assert raw["level"] == "default"
+
+    router = ModelRouter(
+        flatten_app_config(AppConfig.model_validate(raw)),
+        level_provider=lambda: raw["level"],
+    )
+    assert router.registry_empty() is True
+    assert router.resolve("main").source == "легаси"
+
+
 def test_demo_config_validates_against_schema():
-    demo = REPO / "demo_config.yml"
-    raw = yaml.safe_load(demo.read_text(encoding="utf-8")) or {}
+    raw = yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")) or {}
     AppConfig.model_validate(raw)
+
+
+def test_demo_config_carries_live_profile_and_level_pointers():
+    """§13: demo_config.yml демонстрирует заполнение указателей `profile`/`level`.
+
+    В отличие от секций моделей (страж ниже) указатели в демо ЖИВЫЕ — это их
+    штатная форма записи, и демо показывает именно её. Стража на них не было:
+    оба ключа удалялись из demo_config, не роняя ни одного теста из 133 —
+    соседний `test_demo_config_validates_against_schema` требует лишь, чтобы
+    файл проходил схему, а схема оба ключа считает опциональными.
+    """
+    raw = yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    assert raw.get("profile") == "", (
+        'demo_config.yml потерял живой указатель `profile: ""` — §13 требует '
+        "демонстрации заполнения указателей"
+    )
+    assert raw.get("level") == "default", (
+        "demo_config.yml потерял живой указатель `level: default`"
+    )
+
+
+def _anchor_line(lines: list[str], anchor: str) -> int:
+    """Индекс строки-якоря блока. Якорь опознаётся по началу строки: у секций есть
+    хвостовой комментарий-пояснение (`# slots:   # уровни — УКАЗАТЕЛИ ...`)."""
+    return next(i for i, line in enumerate(lines) if line.startswith(anchor))
+
+
+def _uncomment_block(text: str, anchor: str) -> str:
+    """Блок закомментированного YAML от строки `anchor` до первой не-комментарной
+    строки, со снятым `# `. Пустая строка-разделитель внутри блока — сам `#`."""
+    lines = text.splitlines()
+    start = _anchor_line(lines, anchor)
+    out = []
+    for line in lines[start:]:
+        if not line.startswith("#"):
+            break
+        out.append(line[2:] if line.startswith("# ") else line[1:])
+    return "\n".join(out)
+
+
+def test_demo_config_carries_commented_model_sections_example():
+    """§13/§14: demo_config.yml несёт ЗАКОММЕНТИРОВАННЫЙ пример секций моделей.
+
+    `test_demo_config_validates_against_schema` рядом этого не ловит: комментарии
+    для `yaml.safe_load` невидимы, и он одинаково зелен, если блок удалить и если
+    его раскомментировать. Здесь проверяется ровно то, чего он не видит:
+    пример на месте, живым он НЕ становится (иначе demo перестал бы показывать
+    легаси-умолчание), а все три секции — из тех, что демонстрирует §13.
+    """
+    text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    for anchor in ("# models:", "# slots:", "# assign:"):
+        assert any(line.startswith(anchor) for line in lines), (
+            f"demo_config.yml потерял закомментированный якорь {anchor!r} — "
+            "§13 требует пример секций моделей как обычных конфиг-секций"
+        )
+    raw = yaml.safe_load(text) or {}
+    for section in ("models", "slots", "assign"):
+        assert section not in raw, (
+            f"секция {section} в demo_config.yml ожила — пример обязан оставаться "
+            "закомментированным (§13: демо показывает и легаси-умолчание тоже)"
+        )
+
+
+def test_demo_config_commented_example_is_valid_when_uncommented():
+    """Пример существует, чтобы его раскомментировали, — значит он обязан
+    грузиться. Проверяется тем же путём, что и правка руками: блок снимается с
+    комментария, кладётся поверх остального demo_config и идёт через обе фазы
+    (схема + ссылочная целостность на merged), а не только через `safe_load`."""
+    text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
+    example = yaml.safe_load(_uncomment_block(text, "# models:")) or {}
+    assert set(example) == {"models", "slots", "assign"}, (
+        f"из блока-примера вынулись не те секции: {sorted(example)}"
+    )
+    merged = (yaml.safe_load(text) or {}) | example
+    cfg = AppConfig.model_validate(merged)
+    assert validate_model_sections(cfg) == []
 
 
 def _leaf_paths(obj, prefix: str = "") -> set:

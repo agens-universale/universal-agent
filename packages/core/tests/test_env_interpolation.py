@@ -3,7 +3,7 @@ import os as _os
 
 import pytest
 
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.env_interpolation import resolve_env_only, resolve_env_placeholders
 
 
 def test_replaces_marker(monkeypatch):
@@ -180,3 +180,52 @@ def test_file_path_can_come_from_env(tmp_path, monkeypatch):
         _os.chmod(f, 0o600)
     monkeypatch.setenv("SECRET_DIR", str(tmp_path))
     assert resolve_env_placeholders("${FILE:${ENV:SECRET_DIR}/tok}") == "combo"
+
+
+# --- resolve_env_only (только ${ENV:...}, для мест без права на файловый I/O) --
+
+def test_env_only_replaces_env_marker(monkeypatch):
+    monkeypatch.setenv("MY_TOK2", "secret123")
+    assert resolve_env_only("${ENV:MY_TOK2}") == "secret123"
+
+
+def test_env_only_leaves_file_marker_as_a_literal_reference(tmp_path):
+    f = tmp_path / "tok"
+    f.write_text("file-secret")
+    assert resolve_env_only(f"${{FILE:{f}}}") == f"${{FILE:{f}}}"
+
+
+def test_env_only_never_touches_the_filesystem(tmp_path, monkeypatch):
+    """Не просто «оставляет ссылку как текст» — файловый резолвер вообще не
+    задет: чистая функция для мест, где резолвить можно только на UI-потоке
+    (`tui/editors/model_entry_form.py::_as_validator_sees`) и файловое чтение
+    подвесило бы интерфейс."""
+    from gc_core.config_modules import env_interpolation as env_interp
+
+    calls: list = []
+    monkeypatch.setattr(env_interp, "_read_secret_file",
+                        lambda *a, **k: (calls.append(a), "")[1])
+    f = tmp_path / "tok"
+    f.write_text("v")
+    resolve_env_only(f"${{FILE:{f}}}")
+    assert calls == []
+
+
+def test_env_only_missing_var_empty_and_silent(monkeypatch, caplog):
+    """Без логирования вовсе (не только без дедупа) — вызывающая сторона
+    (`_pair_env_missing`) уже называет причину текстом в самой форме, и
+    WARNING на каждый набранный символ был бы шумом, а не сигналом."""
+    monkeypatch.delenv("NOPE2", raising=False)
+    with caplog.at_level(logging.WARNING):
+        assert resolve_env_only("${ENV:NOPE2}") == ""
+    assert not any("NOPE2" in r.getMessage() for r in caplog.records)
+
+
+def test_env_only_nested_structures(monkeypatch):
+    monkeypatch.setenv("T3", "tok")
+    out = resolve_env_only({"a": ["${ENV:T3}", 5], "b": {"c": "${ENV:T3}"}, "n": True})
+    assert out == {"a": ["tok", 5], "b": {"c": "tok"}, "n": True}
+
+
+def test_env_only_none_passthrough():
+    assert resolve_env_only(None) is None

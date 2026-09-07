@@ -5,10 +5,11 @@
 `list[tuple[str, str] | tuple[str, str, str]]` (value, description[, status]) из
 `Command.arg_options` — открывает вызывающий код (TraceScreen) для любой команды с
 непустым arg_options. 2-tuple — простое value+описание (`/export` и т.п.); 3-tuple
-добавляет status-колонку справа, цветом OK (`/profiles`, задача 10 — активный
-профиль)."""
+добавляет status-колонку справа (`/profiles`, задача 10 — активный профиль,
+цветом OK; ✗-статус отказа — цветом ERR)."""
 from __future__ import annotations
 
+import textwrap
 from typing import Callable, Optional
 
 from rich.text import Text
@@ -41,6 +42,13 @@ class ArgPicker(VerticalScroll):
         # Динамический хинт подсвеченного пункта (спека §12.1, /profiles: состав
         # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
         self._hint_provider = hint_provider
+        # Кэш последнего посчитанного хинта — на ОДИН выбор (см. `_hint_text`):
+        # `_build_footer` и `desired_height` спрашивали провайдер каждый по-своему,
+        # а поллинг главного экрана (0.25 с) дёргает `desired_height`, пока пикер
+        # просто открыт — без кэша полная проба (у /profiles — сборка конфига
+        # целиком) шла 4 раза в секунду на UI-потоке ради текста одного и того же
+        # пункта.
+        self._hint_cache: Optional[tuple] = None
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
     def compose(self) -> ComposeResult:
@@ -62,7 +70,7 @@ class ArgPicker(VerticalScroll):
         if self._hint_provider is not None:
             # palette-keys и у динамического хинта: воздух над ним, отделяющий
             # хинт от строк списка (ревизия 2026-07-28 по живому смоку).
-            children.append(Static(self._hint_provider(self.selected_value()),
+            children.append(Static(self._hint_text(self.selected_value()),
                                    classes="palette-hint palette-keys", markup=False))
         children.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
         return Vertical(*children, classes="palette-footer")
@@ -91,14 +99,19 @@ class ArgPicker(VerticalScroll):
         пикеры — /export и т.п. — не должны заметить правку). `(value, desc,
         status)` — опции со статус-колонкой (`/profiles`, задача 10): `Text` с
         правым статусом цветом OK, ровно как активный маркер в /settings
-        (`_profile_row_text`); статус пуст у неактивных строк."""
+        (`_profile_row_text`), и цветом ERR у ✗-отказа; статус пуст у строк,
+        которым нечего сказать."""
         if len(opt) == 3:
             value, desc, status = opt
             if not desc and not status:
                 return Text(f" {value}")
             t = Text(f" {value.ljust(self._value_col_w())}{desc.ljust(self._desc_col_w())}")
             if status:
-                t.append(status, style=_pal.OK)
+                # Цвет — по смыслу статуса: ✗-отказ («не применится») зелёным
+                # цветом достижения читался бы как «всё в порядке». Правило по
+                # глифу, а не по литералу: пикер не знает ни про профили, ни про
+                # их тексты.
+                t.append(status, style=_pal.ERR if status.startswith("✗") else _pal.OK)
             return t
         value, desc = opt
         if not desc:
@@ -119,17 +132,56 @@ class ArgPicker(VerticalScroll):
         declared `height: auto`."""
         self.styles.min_height = self.desired_height
 
+    def _footer_line_count(self, text: str) -> int:
+        """Сколько СТРОК займёт строка подвала при текущей ширине.
+
+        Не «одна», как считалось раньше: `text-wrap: nowrap` стоит только у
+        `.palette-row`, а `.palette-hint` переносится. Причина отказа профиля
+        (путь + текст исключения, 130+ символов) не влезает в строку даже при 120
+        колонках, а клавиш-подсказка перестаёт влезать к 60.
+
+        Ширина текста = ширина пикера минус рамка (2) и `padding: 0 1` (2). До
+        первого layout-прохода ширины ещё нет — считаем по одной строке, тем же
+        ответом, что и раньше; `_apply_size` зовётся заново на каждой перерисовке
+        (`_rebuild`), а `main.py` спрашивает высоту уже после `call_after_refresh`.
+
+        Модель переноса — `textwrap` (жадная укладка по словам, длинное слово
+        ломается), а не деление длины на ширину: делением можно ЗАНИЗИТЬ, а занижение
+        и есть баг — подвал рисуется выше выданного места и накрывает хвост списка."""
+        width = self.size.width - 4
+        if width < 1 or not text:
+            return 1
+        return max(1, len(textwrap.wrap(text, width)))
+
+    def _hint_text(self, value: Optional[str]) -> str:
+        """Текст провайдера для `value`, посчитанный не чаще раза на выбор.
+
+        И `_build_footer`, и `desired_height` спрашивают хинт подсвеченного
+        пункта — а `desired_height` вдобавок дёргается поллингом главного экрана
+        (0.25 с) на каждом тике, пока пикер просто открыт. Кэш на одну запись
+        (значение → текст): смена подсветки — новый счёт, тот же пункт в том же
+        или следующем кадре — прежний ответ без второго вызова провайдера."""
+        if self._hint_provider is None:
+            return ""
+        if self._hint_cache is not None and self._hint_cache[0] == value:
+            return self._hint_cache[1]
+        text = self._hint_provider(value) or ""
+        self._hint_cache = (value, text)
+        return text
+
     @property
     def desired_height(self) -> int:
         """Честная желаемая высота: строки списка (или одна no-match-строка) +
-        докнутый footer (margin-top hint'а(1) + строка hint'а(1)) + рамка .palette(2).
+        докнутый footer (у каждой его строки — свой margin-top(1) и СВОИ строки
+        после переноса) + рамка .palette(2).
         main.py::_sync_trace_max_height берёт это значение напрямую — недосчёт
         выдавливал бы нижнюю рамку пикера за экран."""
         rows = self._visible_rows()
         flow = len(rows) if rows else 1
-        # динамический хинт = строка + свой margin-top (palette-keys)
-        extra = 2 if self._hint_provider is not None else 0
-        return flow + 2 + 2 + extra
+        footer = 1 + self._footer_line_count(_HINT)
+        if self._hint_provider is not None:
+            footer += 1 + self._footer_line_count(self._hint_text(self.selected_value()))
+        return flow + 2 + footer
 
     def set_filter(self, prefix: str) -> None:
         self._filter = prefix

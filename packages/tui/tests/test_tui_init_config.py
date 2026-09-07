@@ -17,7 +17,6 @@ def _isolate(tmp_path, monkeypatch):
         "data": tmp_path / "d", "cache": tmp_path / "c",
     })
     monkeypatch.setattr(env_vars, "project_slug", lambda: "p")
-    monkeypatch.setattr(config, "_project_local_config_path", lambda: None)
 
 
 def test_tui_init_config_creates_and_exits(tmp_path, monkeypatch, capsys):

@@ -12,7 +12,7 @@
 # Профили и уровни моделей: указатели на активный профиль/уровень. "" = профиль не выбран.
 # Секции models/slots/assign (реестр моделей, уровни, привязки) — опциональны.
 profile: ""
-level: default
+level: default               # light | default | max
 
 # Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
 # раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
@@ -71,6 +71,8 @@ agent:
   # Аварийная LLM-суммаризация трейса при лимите (step/tool/token limit).
   # Возвращает envelope с raw_trace_summary; false — пустой summary.
   limit_trace_summary: true
+  loop_detector:
+    enabled: true
   no_tool_call_max_count: 3
   strict_turn_finish_validation: true
   # Имя HTTP-заголовка для внешнего trace_id (флаг gc-cli --trace-id или поле
@@ -311,13 +313,16 @@ pricing:
 #     url: https://routerai.ru/api/v1/chat/completions
 
 # Пресеты выпадающего списка в поле «URL» голосового ввода (можно дополнять своими).
-voice_endpoint_presets:
-  - name: OpenAI
-    url: https://api.openai.com/v1/audio/transcriptions
-  - name: Groq
-    url: https://api.groq.com/openai/v1/audio/transcriptions
-  - name: Mistral
-    url: https://api.mistral.ai/v1/audio/transcriptions
+# Закомментировано намеренно — по той же причине, что и `endpoint_presets` выше:
+# пока ключа тут нет, работает список из кода и обновляется вместе с версией агента.
+# Раскомментируете — ваш список перекроет кодовый и с обновлениями меняться уже не будет.
+# voice_endpoint_presets:
+#   - name: OpenAI
+#     url: https://api.openai.com/v1/audio/transcriptions
+#   - name: Groq
+#     url: https://api.groq.com/openai/v1/audio/transcriptions
+#   - name: Mistral
+#     url: https://api.mistral.ai/v1/audio/transcriptions
 
 # -----------------------------------------------------------------------------
 # Сборка мусора (gc.collect) — точки C1/C2/C3.

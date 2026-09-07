@@ -67,8 +67,9 @@ level: default
 #     token: sk-...
 #
 # slots:                                    # уровни — УКАЗАТЕЛИ в models (не копии)
-#   light: flash
-#   default: glm-local
+#   light: flash                            # незаданный слот резолвится матрицей
+#   default: glm-local                      # фоллбэков соседних уровней
+#   max: deepseek-max
 #
 # assign:                                   # справа — уровень (индирекция через slots)
 #   finish_gate: light                      # ИЛИ алиас (жёсткий пин конкретной модели)
@@ -252,6 +253,8 @@ agent:
   # session_token_limit: 200000   # бюджет input+output токенов на один ран
   # max_tool_calls: 100           # макс. вызовов инструментов на один ран
   no_tool_call_max_count: 3
+  loop_detector:
+    enabled: true
   strict_turn_finish_validation: true
   # Finish gate (quality gate): макс. reject turn_finish за user turn / subagent run
   finish_gate_max_iterations: 10
@@ -635,11 +638,16 @@ mcp:
       # whitelist:
       #   enabled: true
       #   tools: [read_document, list_sheets]   # базовые имена из tools/list; [] = ноль тулов
+      # Loop detector для MCP выключен по умолчанию. Включить generic-профиль
+      # точечно (базовые имена) или на все тулы сервера:
+      # loop_control_tools: [read_document]
+      # loop_control_tools: all
     science:
       transport: stream_http
       url: http://127.0.0.1:8765/mcp
       server-name: science
       description: Unified scientific literature search across 10 public APIs
+      loop_control_tools: all
       # Где исполняется протокол этого сервера. Ось независима от transport.
       #   agent      — в процессе агента (дефолт, нынешнее поведение);
       #   os_backend — в окружении, где работают тулы (контейнер задачи), через
@@ -674,6 +682,7 @@ mcp:
       command: ddgs-mcp
       server-name: duckduckgo
       description: Web and news search via DuckDuckGo (DDGS)
+      loop_control_tools: all
     # browser_playwright (опционально):
     #   transport: stream_stdio
     #   command: <путь npx из install.py>
@@ -732,13 +741,16 @@ pricing:
 #     url: https://routerai.ru/api/v1/chat/completions
 
 # Пресеты выпадающего списка в поле «URL» голосового ввода (можно дополнять своими).
-voice_endpoint_presets:
-  - name: OpenAI
-    url: https://api.openai.com/v1/audio/transcriptions
-  - name: Groq
-    url: https://api.groq.com/openai/v1/audio/transcriptions
-  - name: Mistral
-    url: https://api.mistral.ai/v1/audio/transcriptions
+# Закомментировано намеренно — по той же причине, что и `endpoint_presets` выше:
+# пока ключа тут нет, работает список из кода и обновляется вместе с версией агента.
+# Раскомментируете — ваш список перекроет кодовый и с обновлениями меняться уже не будет.
+# voice_endpoint_presets:
+#   - name: OpenAI
+#     url: https://api.openai.com/v1/audio/transcriptions
+#   - name: Groq
+#     url: https://api.groq.com/openai/v1/audio/transcriptions
+#   - name: Mistral
+#     url: https://api.mistral.ai/v1/audio/transcriptions
 
 # Сборка мусора (gc.collect) — точки C1/C2/C3.
 # C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.

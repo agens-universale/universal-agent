@@ -1,10 +1,7 @@
 """TDD: strip_tags_projection normalize + load_config → configure_for_model_tags."""
 
-from pathlib import Path
-
 import yaml
 
-from gc_core import config as cfgmod
 from gc_core.config import load_config
 from gc_core.config_modules.strip_tags_projection import StripTagsProjectionConfig, normalize_strip_tags_projection_config
 from gc_core.message_projection import configure_for_model_tags, project_text_for_model
@@ -48,14 +45,8 @@ def test_configure_from_normalized_tags_affects_project():
         configure_for_model_tags([])
 
 
-def _isolate_config_overlays(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(cfgmod, "managed_config_path", lambda: tmp_path / "none.yml")
-
-
-def test_load_config_wires_strip_tags_into_project(tmp_path, monkeypatch):
+def test_load_config_wires_strip_tags_into_project(tmp_path):
     """Регрессия: забыли configure_for_model_tags в load_config → extras молча no-op."""
-    _isolate_config_overlays(monkeypatch, tmp_path)
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
         yaml.safe_dump(
@@ -72,8 +63,7 @@ def test_load_config_wires_strip_tags_into_project(tmp_path, monkeypatch):
     assert project_text_for_model(_SAMPLE) == "ok"
 
 
-def test_load_config_empty_tags_strips_only_think(tmp_path, monkeypatch):
-    _isolate_config_overlays(monkeypatch, tmp_path)
+def test_load_config_empty_tags_strips_only_think(tmp_path):
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
         "backend:\n  api_mode: chat_completions\n"

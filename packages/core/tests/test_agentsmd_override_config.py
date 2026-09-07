@@ -10,13 +10,10 @@ def test_instructions_overwrite_removed_from_paths():
     assert not hasattr(PathsConfig(), "instructions_overwrite")
 
 
-def test_agentsmd_override_e2e_config_to_state(tmp_path, monkeypatch):
+def test_agentsmd_override_e2e_config_to_state(tmp_path):
     """tui.agentsmd_override: true в конфиге → config_dict → State.agentsmd_override is True."""
     from gc_core import config as cfgmod
     from gc_core.states import State
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(cfgmod, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text("tui:\n  agentsmd_override: true\n", encoding="utf-8")

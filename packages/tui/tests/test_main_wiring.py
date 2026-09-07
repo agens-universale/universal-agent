@@ -231,3 +231,41 @@ def test_main_voice_autostart_does_not_block_startup(monkeypatch, tmp_path):
     assert rc == 0
     assert len(created) == 1
     assert created[0]._voice_autostart_pending is True   # гейт прошёл — вердикт ждёт TuiApp
+
+
+def test_main_hands_the_profile_flag_to_the_app(monkeypatch, tmp_path):
+    """`--profile` обязан доехать до приложения тем же значением, что ушло в
+    загрузчик: `TuiApp._profile_override` отдаёт его каждому перечитыванию
+    (`reload_config`), иначе флаг живёт до первого сохранения из /settings.
+    Ветка `--init-config` его НЕ передаёт: чинилка читает и пишет пользовательский
+    файл, и `--profile` там не в счёт (см. комментарий в main)."""
+    pytest.importorskip("textual")
+
+    from gc_tui import app as tui_app
+    called: dict = {}
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            called.update(kw)
+
+        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+            self._config_path = path
+
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg, **kw: None)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
+
+    from gc_tui import main
+
+    cfg_path = _cfg_for_main(tmp_path)
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "work.yml").write_text("slots: {}\n", encoding="utf-8")
+    rc = main(argv=["--config", str(cfg_path), "--profile", "work"])
+    assert rc == 0
+    assert called.get("profile_override") == "work"

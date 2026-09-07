@@ -39,6 +39,29 @@ def test_whitelist_survives_config_dump():
     assert dumped["whitelist"] == {"enabled": True, "tools": ["a"]}
 
 
+def test_loop_control_tools_default_empty():
+    assert _srv().loop_control_tools == []
+
+
+def test_loop_control_tools_all():
+    assert _srv(loop_control_tools="all").loop_control_tools == "all"
+
+
+def test_loop_control_tools_list_normalizes():
+    cfg = _srv(loop_control_tools=[" search ", "read", "search", ""])
+    assert cfg.loop_control_tools == ["search", "read"]
+
+
+def test_loop_control_tools_invalid_string():
+    with pytest.raises(ValidationError):
+        _srv(loop_control_tools="some")
+
+
+def test_loop_control_tools_must_be_all_or_list():
+    with pytest.raises(ValidationError):
+        _srv(loop_control_tools={"tools": ["a"]})
+
+
 import logging
 
 from gc_core.tools.connect_mcp import registry as reg

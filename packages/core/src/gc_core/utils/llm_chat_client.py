@@ -24,7 +24,7 @@ from gc_core.usage.context import usage_scope
 # сегодня — ушёл бы на активную модель вопреки этой цели. Пока безвредно (вызовов
 # auto_judge ещё нет); каким быть его поведению на мёртвой привязке — решает
 # волна C, вместе с появлением самого вызова.
-_CONSUMER_RU_LABEL = {
+CONSUMER_RU_LABEL = {
     "finish_gate": "судья finish_gate",
     "text_answer_judge": "судья text_answer_judge",
     "command_judge": "судья command_judge",
@@ -345,7 +345,7 @@ def request_chat_completion_text(
         raise primary_exc
 
     logger = getattr(ctx, "logger", None)
-    who = _CONSUMER_RU_LABEL.get(consumer, consumer)
+    who = CONSUMER_RU_LABEL.get(consumer, consumer)
     message = f"{who}: {failed_alias} недоступна — выполнено активной {active_resolved.model}"
     if logger is not None:
         logger.warning(message)

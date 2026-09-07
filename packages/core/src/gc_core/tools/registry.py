@@ -1,6 +1,8 @@
 import copy
 from typing import Any, Dict, Optional
 
+from gc_core.loop_detector.constants import LOOP_WARN_KEY, copy_loop_warn
+
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.file_info import FileInfo
@@ -44,11 +46,15 @@ def _tool_entry(
     # (TypeError: unexpected keyword argument 'reason').
     spec = tool_cls.tool_description(config_dict)
     description = tool_cls.prompt_description(config_dict)
-    return {
+    entry: Dict[str, Any] = {
         "tool_fabric": tool_cls,
         "spec": copy.deepcopy(spec),
         "description": description,
     }
+    warn = copy_loop_warn(tool_cls)
+    if warn is not None:
+        entry[LOOP_WARN_KEY] = warn
+    return entry
 
 
 def _fs_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:

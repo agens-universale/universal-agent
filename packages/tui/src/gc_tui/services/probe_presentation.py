@@ -4,9 +4,6 @@
 Модуль-владелец смысла `ProbeResult` для экранов: и мастер, и /settings читают
 вердикт отсюда, а не разбирают поля у себя — разошедшиеся прочтения одного
 результата уже давали противоречащие друг другу тексты на одном экране.
-Здесь же модельный хвост строки: если проба нашла конкретный id среди моделей
-сервера, строка это подтверждает, если нет — честно предупреждает вместо
-молчаливого «доступен».
 
 Слой презентации: чистые функции над результатом, без Textual-виджетов."""
 from __future__ import annotations
@@ -28,24 +25,56 @@ def plural_models(n: int) -> str:
     return "моделей"
 
 
-def probe_line_text(result, *, model_id: str = "") -> Text:
+def connection_line_text(result) -> Text:
+    """Строка вердикта пробы — ОДНА на все места, где её показывают: секция
+    «Подключение», форма записи модели, шаг мастера «Подключение».
+
+    Проба у них давно общая (`settings_probe.probe_connection`), а слова были
+    разные: один и тот же результат читался в соседних секциях то «✗ токен
+    отклонён (401)», то «✓ сервер доступен · ✗ токен отклонён (401)». Формат
+    оставлен совокупный — сервер и токен два отдельных утверждения, и второе
+    произносится только когда за ним стоит вердикт.
+
+    Смысл авторизации — из `auth_state` (его ставит `interpret_auth`), а не из
+    текста `detail`: литерал в detail сам по себе ничего не «включает».
+
+    Модельного хвоста здесь нет намеренно: differential-проба судит по
+    chat/completions и списка моделей не приносит (`models` всегда None) — хвост
+    был мёртвым уже у прежней короткой строки."""
     if result is None:
         return Text("— не проверено", style=DEEP_DIM)
     if result.verdict == "ok":
-        msg = f"✓ {result.detail} · {result.latency_ms} ms"
-        if result.models:
-            n = len(result.models)
-            msg += f" · {n} {plural_models(n)} на сервере"
-        if model_id and result.models is not None:
-            ids = {getattr(m, "id", None) for m in result.models}
-            if model_id in ids:
-                msg += f" · {model_id} найдена на сервере"
-            else:
-                return Text(f"⚠ модель {model_id} на сервере не найдена", style=WARN)
-        return Text(msg, style=OK)
+        # Сырой config-probe (auth_state=None, без differential auth) «ок» читаем
+        # нейтрально — токен не проверяли, утверждать «принят» нечестно.
+        if result.auth_state == "accepted":
+            t = Text("✓ сервер доступен · ", style=OK)
+            t.append("✓ токен принят", style=OK)
+            return t
+        if result.auth_state == "not_required":
+            return Text("✓ сервер доступен · авторизация не требуется", style=OK)
+        return Text("✓ сервер доступен", style=OK)
+    if result.verdict == "rejected" and result.http_status == 401:
+        if result.auth_state == "required":
+            # токена не было вовсе (сервер отклонил control-запрос без него) —
+            # не «токен отклонён» (нечего было отклонять)
+            t = Text("✓ сервер доступен · ", style=OK)
+            t.append(f"⚠ {result.detail}", style=WARN)
+            return t
+        t = Text("✓ сервер доступен · ", style=OK)
+        t.append("✗ токен отклонён (401)", style=WARN)
+        return t
+    if result.offline:
+        # Винить сервер можно только когда до него не дошли. Раньше сюда попадал
+        # любой unknown без статуса — в том числе наш внутренний сбой, и причина
+        # терялась вместе с detail.
+        return Text("✗ сервер недоступен", style=WARN)
     if result.verdict == "rejected":
+        # Отказ по существу (404 про путь/модель, нелатиница в токене): сервер
+        # ОТВЕТИЛ, и «не удалось проверить» было бы неправдой — проверили, отказ.
+        # Раньше сюда попадала только секция, форма записи модели говорила это
+        # честнее; единый словарь берёт честный вариант.
         return Text(f"✗ {result.detail}", style=ERR)
-    return Text(f"⚠ не удалось проверить: {result.detail}", style=WARN)
+    return Text(f"? не удалось проверить: {result.detail}", style=WARN)
 
 
 def save_warning(result) -> str:
@@ -95,4 +124,10 @@ def token_accepted(result, *, has_token: bool):
         return None             # отвечал справочник моделей — он токен не судит
     if not has_token:
         return True if result.verdict == "ok" else None
+    if result.verdict == "unknown":
+        # До ответа по маршруту не дошли вовсе (сервер лёг, канарейка не различила,
+        # своя ошибка) — судить не по чему, ровно как в ветке «токена нет» выше.
+        # Без этой строки фолбэк объявлял токен принятым по факту наличия токена:
+        # выключенный сервер получал зелёное «токен принят».
+        return None
     return True

@@ -12,6 +12,7 @@ from gc_core.config import (
     cli_forces_legacy_model,
     load_config,
     load_config_ex,
+    resolve_config_path,
     user_config_path,
     _bootstrap_user_config,
 )
@@ -123,27 +124,64 @@ def _run_init() -> int:
     """`gc-cli --init-config`: настроить конфиг (интерактивно на TTY) и выйти."""
     path = user_config_path()
     just_created = _bootstrap_user_config()
-    config_dict = load_config(None)
+    # «Чинилка» обязана работать именно тогда, когда конфиг сломан: лестница
+    # ступеней и текст деградации — общие с gc-ua (onboarding, один дом).
+    try:
+        loaded = onboarding.load_config_for_repair()
+    except onboarding.RepairRefused as exc:
+        # M10: ступень шаблона при живом указателе профиля — запись мастера
+        # обречена (гейт судит стек следующего старта), и вести человека через
+        # все вопросы с вводом токена к отказу записи нечестно. Текст готов у
+        # лестницы — печатаем как есть.
+        print(str(exc), file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        # Лестница исчерпана: не собирается и шаблон — сломан слой, в который
+        # мастер не пишет (оверлей). Чинить его мастером нечем: то же объяснение,
+        # что на обычном старте, и код 1 — не трейсбек.
+        print(onboarding.explain_broken_config(str(path), exc), file=sys.stderr)
+        return 1
+    config_dict = loaded.config
+    if loaded.message:
+        # Мастер gc-cli плоский, экран не занимает — stderr человек видит.
+        print(f"[gc] {loaded.message}", file=sys.stderr)
     if _interactive():
         from gc_cli import onboarding_wizard
-        onboarding_wizard.run(config_dict, path, review_all=True,
-                              io=onboarding_wizard.default_io())   # без mcp — gc-cli не ставит MCP
+        configured = onboarding_wizard.run(
+            config_dict, path, review_all=True,
+            io=onboarding_wizard.default_io(),   # без mcp — gc-cli не ставит MCP
+            # Ступень «без профиля» значит, что конфиг собрался только со снятым
+            # профилем: финал обязан снять и указатель, иначе записать починку
+            # некуда. Но снять его мастер может не всегда (указатель в managed-слое),
+            # и судит об этом лестница: своя редакция признака обещала бы человеку
+            # деактивацию, которую писатель не сделает, — а пустой якорь в базу
+            # уже уехал бы (ревью D3).
+            deactivate_profile=loaded.deactivate_profile)
+        # run() отдаёт False не только на трейсбеке, но и когда человек прошёл
+        # мастер, а конфиг всё равно остался ненастроенным (пропущенные поля,
+        # отказ записи, файл, который не удалось перечитать) — код возврата
+        # обязан отражать это, а не рапортовать успех при честном stderr рядом.
+        return 0 if configured else 1
     else:
-        print(onboarding.setup_guide(str(path), config_dict, just_created=just_created), file=sys.stderr)
+        # Гайд знает ступень лестницы: на деградировавшей «настроен — можно
+        # запускать» врало бы человеку, чей следующий старт падает.
+        print(onboarding.setup_guide(str(path), config_dict, just_created=just_created,
+                                     repair=loaded), file=sys.stderr)
     return 0
 
 
 def _run_sync_config() -> int:
     """`gc-cli --sync-config`: обновить config.yml по свежему шаблону и выйти."""
     from pathlib import Path
-    from gc_core.config import _default_config_path, _project_local_config_path
+    from gc_core.config import _default_config_path
+    from gc_core.config_modules.env_vars import project_local_config_path
 
     config_arg = arg_parser.run_args.config
     target = Path(config_arg) if config_arg else user_config_path()
     bundled = Path(_default_config_path()).resolve()
 
     # I5: project-local overlay — частичный файл, sync его не трогает
-    project_local = _project_local_config_path()
+    project_local = project_local_config_path()
     if project_local and Path(project_local).resolve() == target.resolve():
         print(
             "[gc] project-local .gc/config.yml — частичный overlay, sync его не обновляет\n"
@@ -195,13 +233,14 @@ def _run_reset_config() -> int:
     выбранный профиль после сброса деактивирован). Интерактивное y/N-подтверждение;
     без TTY — честный отказ (не молчаливое да и не молчаливый отказ)."""
     from pathlib import Path
-    from gc_core.config import _default_config_path, _project_local_config_path
+    from gc_core.config import _default_config_path
+    from gc_core.config_modules.env_vars import project_local_config_path
 
     config_arg = arg_parser.run_args.config
     target = Path(config_arg) if config_arg else user_config_path()
     bundled = Path(_default_config_path()).resolve()
 
-    project_local = _project_local_config_path()
+    project_local = project_local_config_path()
     if project_local and Path(project_local).resolve() == target.resolve():
         print(
             "[gc] project-local .gc/config.yml — частичный overlay, сброс к пакетному "
@@ -351,10 +390,19 @@ def main() -> int:
         return _run_init_agents_md()
 
     config_arg = arg_parser.run_args.config
+    profile_arg = getattr(arg_parser.run_args, "profile", None)
     just_created = _bootstrap_user_config() if config_arg is None else False
-    config_dict, _profile_meta = load_config_ex(
-        config_arg, profile_override=getattr(arg_parser.run_args, "profile", None)
-    )
+    try:
+        config_dict, _profile_meta = load_config_ex(config_arg, profile_override=profile_arg)
+    except ValueError as exc:
+        # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый traceback
+        # из глубины загрузки (см. onboarding.explain_broken_config). Профиль —
+        # тот же, что грузили: по указателю из файла объяснение описывало бы
+        # чужой стек.
+        print(onboarding.explain_broken_config(
+            resolve_config_path(config_arg), exc, profile_override=profile_arg),
+            file=sys.stderr)
+        return 1
 
     # Единая точка применения CLI-override поверх config.yml.
     apply_cli_overrides(

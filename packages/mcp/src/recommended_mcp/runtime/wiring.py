@@ -11,7 +11,9 @@ from typing import Any
 
 import yaml
 
-from gc_core.config_modules.env_vars import managed_config_path
+# managed_config_path — в config_modules.env_vars (см. её докстринг).
+from gc_core.config_modules import env_vars as mcp_paths
+from gc_core.utils.user_text import read_user_text
 
 _PLACEHOLDER_RE = re.compile(r"\{[a-z_]+\}")
 
@@ -33,21 +35,24 @@ def read_snippet(recipe_dir: Path) -> dict[str, Any]:
     snippet = recipe_dir / "agent_config.snippet.yml"
     if not snippet.is_file():
         raise FileNotFoundError(f"snippet не найден: {snippet}")
-    data = yaml.safe_load(snippet.read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load(read_user_text(snippet)) or {}
     if not isinstance(data, dict) or not data:
         raise ValueError(f"snippet пуст/некорректен: {snippet}")
     return data
 
 
 def load_managed() -> dict[str, Any]:
-    path = managed_config_path()
+    path = mcp_paths.managed_config_path()
     if not path.is_file():
         return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    # Managed-слой пишет `gc-mcp`, но лежит он в домашнем каталоге и открывается
+    # человеком наравне с базой: чтение обязано отказать с именем файла, а не
+    # голой жалобой кодека — иначе `gc-mcp` падает трейсбеком на каждой команде.
+    return yaml.safe_load(read_user_text(path)) or {}
 
 
 def save_managed(data: dict[str, Any]) -> None:
-    path = managed_config_path()
+    path = mcp_paths.managed_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 

@@ -345,3 +345,58 @@ def _reset_message_projection_tags():
     configure_for_model_tags([])
     yield
     configure_for_model_tags([])
+
+@pytest.fixture(autouse=True)
+def _isolated_config_layers(tmp_path, monkeypatch):
+    """Managed- и проектный слои конфига видны тесту, только если он сам их и положил.
+
+    Приехало из develop (`tests/conftest.py`), где у набора был общий корневой
+    conftest. У нас его нет — autouse-фикстуры живут здесь, в плагине, поэтому
+    фикстура переносится сюда вместе с гейтом `_OUR_SUITE`: в ЧУЖОМ прогоне она
+    обязана промолчать, а не тянуть gc_core.
+
+    Оба слоя адресуются от МАШИНЫ: проектный — от cwd (`<cwd>/.gc/config.yml`),
+    managed — от каталога конфигов (`~/.gc/config.local.yml`). Тест, который ни
+    того ни другого не переносил, мержит `.gc` репозитория и `~/.gc`
+    разработчика: набор зелёный только на чистой машине, а у того, кто агентом
+    пользуется, краснеет. Читать — полбеды: финал мастера уходил ПИСАТЬ в
+    проектный конфиг разработчика, снимая там указатель профиля.
+
+    Правило одно на оба слоя и не знает ни одного теста поимённо: адрес слоя
+    снимается ДО теста, и слой отдаётся, только если тест этот адрес сдвинул сам —
+    `monkeypatch.chdir` для проектного, свой `gc_home`/`gc_config_dir` (или прямая
+    подмена `managed_config_path`) для managed. Managed-слой теста живёт в
+    `tmp_path/config.local.yml`: кому слой нужен НЕПУСТЫМ, достаточно записать
+    этот файл.
+
+    Подменяются ВЛАДЕЛЬЦЫ обеих функций. У нас владелец обеих — один и тот же
+    модуль `gc_core.config_modules.env_vars`: `managed_config_path` переехала
+    туда из `mcp_runtime.paths` вместе с разделением на пакеты (путь принадлежит
+    конфигу, и держать его в MCP-подсистеме значило заставлять config.py
+    статически от неё зависеть). На develop это два разных модуля — отсюда
+    расхождение с оригиналом фикстуры.
+    """
+    if not _OUR_SUITE:
+        yield
+        return
+
+    from gc_core.config_modules import env_vars
+
+    inherited_project = env_vars.project_gc_dir().resolve()
+    inherited_managed = env_vars.managed_config_path().resolve()
+    real_project = env_vars.project_local_config_path
+    real_managed = env_vars.managed_config_path
+    sandbox_managed = tmp_path / "config.local.yml"
+
+    def project_layer():
+        if env_vars.project_gc_dir().resolve() == inherited_project:
+            return None
+        return real_project()
+
+    def managed_layer():
+        path = real_managed()
+        return sandbox_managed if path.resolve() == inherited_managed else path
+
+    monkeypatch.setattr(env_vars, "project_local_config_path", project_layer)
+    monkeypatch.setattr(env_vars, "managed_config_path", managed_layer)
+    yield

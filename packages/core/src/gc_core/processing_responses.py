@@ -12,6 +12,9 @@ from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import should_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, get_function_call_output_text
 from gc_core.intent_scope.hook import maybe_update_intent_scope_from_tool
+from gc_core.loop_detector.detector import flush as flush_loop_detector
+from gc_core.loop_detector.detector import observe as observe_loop_detector
+from gc_core.loop_detector.detector import clear as clear_loop_detector
 from gc_core.intent_scope.final_answer import maybe_record_final_answer_intent
 from gc_core.message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from gc_core.message_policy.stop_persist import is_persist_discarded
@@ -446,6 +449,7 @@ def _request_backend_canonical_once(
             sanitized_messages,
             chat_state,
             max_tokens=max_tokens,
+            config_dict=cfg,
             resolved=resolved,
         )
 
@@ -877,6 +881,7 @@ def process_tool_calls(
             config=getattr(ctx, "config_dict", {}) or {},
             logger=getattr(ctx, "logger", None),
         )
+        observe_loop_detector(state, ctx, tool_name, tool_arguments)
         if tool_name != FINISH_TOOL_NAME:
             maybe_update_intent_scope_from_tool(
                 tool_name=tool_name,
@@ -918,6 +923,9 @@ def process_tool_calls(
         # run_agent после stop часто выходит на check_stop до обычного persist —
         # закрывающие A/B пишем сразу (исключение discard_writes).
         _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
+        # Прогон остановлен: notice агенту не нужен, окно прошлого батча
+        # не должно всплыть при продолжении сессии.
+        clear_loop_detector(state)
 
     # Если внутри batch сработал session_compact — вместо сырых output'ов
     # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
@@ -938,6 +946,15 @@ def process_tool_calls(
             technical_type=TECHNICAL_TYPE_TECHNICAL,
         )
         tools_outputs = [*preserved, resume]
+
+    notice = flush_loop_detector(state)
+    if notice:
+        tools_outputs.append(
+            _make_technical_feedback_user_message(
+                notice,
+                technical_type=TECHNICAL_TYPE_TECHNICAL,
+            )
+        )
 
     # C3: один collect на границе «батч тулов → LLM-шаг» — подбираем циклический
     # мусор между шагами. Default on для CLI/TUI, off для server; явный
@@ -976,6 +993,9 @@ def _pickup_pending_as_new_turn(
     pending = get_pending_messages()
     if not pending:
         return None
+    # Новый пользовательский ход: окно прошлого хода не должно давать
+    # ложный повтор на первом же чтении с теми же аргументами.
+    clear_loop_detector(state)
     try:
         begin_turn_main_trace(state, ctx)
     except Exception as exc:
@@ -1023,6 +1043,7 @@ def run_agent(
     state.last_batch_invalid_arguments_count = 0
     while True:
         if check_stop is not None and check_stop():
+            clear_loop_detector(state)
             return None
         if get_pending_messages is not None:
             pending = get_pending_messages()
@@ -1305,6 +1326,7 @@ def run_agent(
                                 # все завершают ход одинаково.
                                 state.steps += 1
                                 state.flush_current_user_intent()
+                                clear_loop_detector(state)
                                 if turn_end_compaction_hook is not None:
                                     turn_end_compaction_hook()
                                 # Сообщение, пришедшее во время (блокирующей) компакции, не
@@ -1319,6 +1341,7 @@ def run_agent(
                         else:
                             state.current_user_intent = []
                             state.steps += 1
+                            clear_loop_detector(state)
                             return finish_arguments
                     else:
                         messages = process_tool_calls(
@@ -1385,6 +1408,7 @@ def run_agent(
                                 assistant_text=assistant_text, state=state, ctx=ctx
                             )
                             state.flush_current_user_intent()
+                            clear_loop_detector(state)
                         finally:
                             if mark_finalizing is not None:
                                 mark_finalizing(False)

@@ -7,6 +7,7 @@ import yaml
 from gc_core.config import apply_cli_overrides, load_config, sync_logging_flat_and_params
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.bundled_assets import bundled_root, repo_root
+from gc_core.utils.user_text import read_user_text
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +102,10 @@ def load_server_config() -> Dict[str, Any]:
     # и неудачный резолв однажды уже поднял сервер с auth_token: None молча.
     logger.info("config_server.yml: читаю %s", cfg_path)
 
-    with open(cfg_path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    # config_server.yml человек правит руками так же, как config.yml, — значит и
+    # «файл на месте, но не читается» здесь такой же рабочий сценарий. Отказ должен
+    # назвать файл: без пути оператор сервера видит голую жалобу кодека.
+    raw = yaml.safe_load(read_user_text(cfg_path)) or {}
 
     # ${ENV:VAR} / ${FILE:path} — как в основном config.yml, чтобы серверные
     # секреты (server.auth_token и пр.) не приходилось держать в файле открытым

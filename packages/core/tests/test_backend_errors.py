@@ -137,6 +137,33 @@ def test_model_unavailable_covers_network_errors():
     assert is_model_unavailable_error(requests.exceptions.ProxyError("proxy")) is True
 
 
+def test_model_unavailable_covers_4xx_of_a_renamed_or_revoked_model():
+    """§14 «404-переименование тем же путём»: провайдер снял или переименовал
+    модель — это недоступность алиаса, а не ошибка запроса, и лечится она сменой
+    уровня или профиля, как и 5xx. 401/403 здесь же: ключ отозвали именно у этой
+    записи реестра (у каждой свой token), поэтому гаснет алиас, а не весь агент.
+
+    Ветка `status_code in (401, 403, 404)` до этого теста не исполнялась ни разу:
+    фоллбэк-сценарии гоняются на 500/503, а соседние тесты подают только сетевые
+    и не-сетевые `RequestException` — её удаление не роняло ничего.
+    """
+    from gc_core.utils.backend_errors import is_model_unavailable_error
+    for code in (401, 403, 404):
+        resp = requests.Response(); resp.status_code = code
+        assert is_model_unavailable_error(
+            requests.exceptions.HTTPError(f"{code}", response=resp)
+        ) is True, f"HTTPError {code} не признан недоступностью модели"
+        assert is_model_unavailable_error(
+            BackendStreamError("model not found", status_code=code)
+        ) is True, f"BackendStreamError {code} не признан недоступностью модели"
+
+    # 400 — ошибка запроса, а не модели: смена уровня её не исправит.
+    resp_400 = requests.Response(); resp_400.status_code = 400
+    assert is_model_unavailable_error(
+        requests.exceptions.HTTPError("400", response=resp_400)
+    ) is False
+
+
 def test_model_unavailable_ignores_non_network_request_exceptions():
     """Предохранитель гасит алиас на ВСЮ сессию, поэтому «недоступность» — только
     сетевые ошибки и 5xx/401/403/404. Битое тело ответа живого провайдера и кривой

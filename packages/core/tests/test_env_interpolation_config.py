@@ -68,11 +68,15 @@ def test_validate_config_text_interpolates_before_compat(monkeypatch):
     load_config_ex, который перенёс интерполяцию на per-file фазу до compat/валидации).
     Пин через spy на реальных функциях модуля — не зависит от текущего (пустого)
     состояния config_modules.compat.RENAMES."""
+    # Порядок держит `validate_config_text`, а её дом — `config_modules.layers`
+    # (агрегатор `config` только ре-экспортирует). Подменять надо там, где имена
+    # резолвятся, иначе шпион до функции не доходит и `calls` остаётся пустым.
     from gc_core import config as config_mod
+    from gc_core.config_modules import layers as layers_mod
 
     calls: list[str] = []
-    orig_interp = config_mod.resolve_env_placeholders
-    orig_compat = config_mod.apply_compat
+    orig_interp = layers_mod.resolve_env_placeholders
+    orig_compat = layers_mod.apply_compat
 
     def spy_interp(obj):
         calls.append("interp")
@@ -82,8 +86,8 @@ def test_validate_config_text_interpolates_before_compat(monkeypatch):
         calls.append("compat")
         return orig_compat(raw)
 
-    monkeypatch.setattr(config_mod, "resolve_env_placeholders", spy_interp)
-    monkeypatch.setattr(config_mod, "apply_compat", spy_compat)
+    monkeypatch.setattr(layers_mod, "resolve_env_placeholders", spy_interp)
+    monkeypatch.setattr(layers_mod, "apply_compat", spy_compat)
 
     config_mod.validate_config_text('backend:\n  completions_url: "http://h/v1/chat/completions"\n')
     assert calls == ["interp", "compat"]

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.user_text import read_user_text_or_none
 
 
 def _is_command(text: str) -> bool:
@@ -56,9 +57,11 @@ class InputHistory:
         self._entries = []
         if not self._file.exists():
             return
-        try:
-            content = self._file.read_text(encoding="utf-8")
-        except OSError:
+        # Читается на СТАРТЕ TUI: отказ здесь — это не «без истории», а «приложение
+        # не открылось». Файл лежит в проекте рядом с исходниками, и правят его
+        # руками так же, как любой другой файл проекта.
+        content = read_user_text_or_none(self._file)
+        if content is None:
             return
         for line in content.splitlines():
             line = line.strip()

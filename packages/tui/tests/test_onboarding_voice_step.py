@@ -3,7 +3,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-from gc_tui.screens.onboarding import _VOICE_STEP
+from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
+                                    STEP_VOICE)
 
 
 class FakeVoice:
@@ -53,7 +54,7 @@ async def _to_voice_step(pilot, screen):
     screen._values["completions_url"] = "http://h:1/v1/chat/completions"
     screen._values["Authorization"] = ""
     screen._values["model"] = "m"
-    screen._step = _VOICE_STEP                     # шаг «Голосовой ввод»
+    screen._step = screen._steps.index(STEP_VOICE)                     # шаг «Голосовой ввод»
     screen._render_step()
     await pilot.pause()
 
@@ -72,7 +73,7 @@ async def test_voice_step_default_cursor_and_options(monkeypatch):
         assert any("Локальный сервис (рекомендуется)" in t for t in texts)
         assert any("Свой endpoint" in t for t in texts)
         assert any("Без голосового ввода" in t for t in texts)
-        assert screen._idx.get(_VOICE_STEP, 0) == 0            # дефолт-курсор — локальный
+        assert screen._idx.get(STEP_VOICE, 0) == 0            # дефолт-курсор — локальный
 
 
 @pytest.mark.asyncio
@@ -110,7 +111,7 @@ async def test_voice_step_local_confirm_shows_short_model(monkeypatch, tmp_path)
         await pilot.press("enter")                    # «Локальный сервис» — выбор
         await pilot.press("enter")                    # …и далее
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         body = str(screen.query(".onb-dyn").first().render())
         assert "локальный сервис · faster-whisper-small" in body
 
@@ -124,7 +125,7 @@ def test_voice_step_footer_follows_mark():
     from gc_tui.screens.onboarding import OnboardingScreen
     scr = OnboardingScreen(config={}, config_path="X:/nope/config.yml", review_all=True,
                            on_commit=lambda: None)
-    scr._step = _VOICE_STEP
+    scr._step = scr._steps.index(STEP_VOICE)
     footer = scr._footer_text()
     assert "Space/Enter — выбрать" in footer and "PgDn — далее" in footer
     assert len(footer) <= 90
@@ -141,7 +142,7 @@ def test_mcp_step_footer_keeps_space_hint():
     from gc_tui.screens.onboarding import OnboardingScreen
     scr = OnboardingScreen(config={}, config_path="X:/nope/config.yml", review_all=True,
                            on_commit=lambda: None)
-    scr._step = 2
+    scr._step = scr._steps.index(STEP_MCP)
     assert "Space — выбрать" in scr._footer_text()
 
 
@@ -158,12 +159,12 @@ async def test_voice_space_selects_stays_then_enter_advances(monkeypatch):
         await pilot.press("space")                   # курсор по умолчанию на «Локальный сервис»
         await pilot.pause()
         assert screen._voice_choice == "local"
-        assert screen._step == _VOICE_STEP                     # остались на шаге
+        assert screen._step_id() == STEP_VOICE                     # остались на шаге
         texts = [str(w.render()) for w in screen.query(".onb-option")]
         assert any("(●) Локальный сервис" in t for t in texts)
         await pilot.press("enter")                    # выбор уже сделан → далее
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         assert screen._voice_choice == "local"
 
 
@@ -184,7 +185,7 @@ async def test_voice_pagedown_after_space_ignores_cursor_drift(monkeypatch):
         await pilot.pause()
         await pilot.press("pagedown")
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         assert screen._voice_choice == "local"          # не «skip» — курсор не при чём
 
 
@@ -203,7 +204,7 @@ async def test_voice_enter_on_other_option_reselects(monkeypatch):
         await pilot.press("down")                     # курсор → «Без голосового ввода»
         await pilot.press("enter")
         await pilot.pause()
-        assert screen._step == _VOICE_STEP                       # не «далее», а перевыбор
+        assert screen._step_id() == STEP_VOICE                       # не «далее», а перевыбор
         assert screen._voice_choice == "skip"
         texts = [str(w.render()) for w in screen.query(".onb-option")]
         assert any("(●) Без голосового ввода" in t for t in texts)
@@ -227,10 +228,10 @@ async def test_voice_enter_marks_then_advances(monkeypatch):
         await pilot.press("enter")
         await pilot.pause()
         assert screen._voice_choice == "skip"
-        assert screen._step == _VOICE_STEP                       # пометили и остались
+        assert screen._step_id() == STEP_VOICE                       # пометили и остались
         await pilot.press("enter")
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
 
 
 @pytest.mark.asyncio
@@ -248,7 +249,7 @@ async def test_voice_pagedown_without_choice_takes_cursor_option(monkeypatch):
         await pilot.press("pagedown")
         await pilot.pause()
         assert screen._voice_choice == "skip"
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
 
 
 @pytest.mark.asyncio
@@ -325,7 +326,7 @@ async def test_voice_space_on_cloud_reveals_fields_and_stays(monkeypatch):
         await pilot.press("space")
         await pilot.pause()
         assert screen._voice_choice == "cloud"
-        assert screen._step == _VOICE_STEP                       # шаг тот же — не advance
+        assert screen._step_id() == STEP_VOICE                       # шаг тот же — не advance
         assert screen.query_one("#voice-url", Input)
         assert screen._voice_cursor_group() == "variants"
         assert screen.focused is None
@@ -349,7 +350,7 @@ async def test_voice_step_cloud_reveals_fields_and_confirm_line(monkeypatch):
         screen.query_one("#voice-model", Input).value = "wh-1"
         await pilot.press("enter")                   # submit полей → advance
         await pilot.pause()
-        assert screen._step == 4                     # подтверждение
+        assert screen._step_id() == STEP_CONFIRM                     # подтверждение
         assert screen._voice_choice == "cloud"
         body = str(screen.query(".onb-dyn").first().render())
         assert "endpoint stt.x" in body
@@ -370,7 +371,7 @@ async def test_commit_local_calls_switch_to_local(monkeypatch, tmp_path):
         await pilot.press("enter")                   # …и далее
         await pilot.pause()
         assert screen._voice_choice == "local"
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         monkeypatch.setattr(screen, "_commit_config", lambda: True)
         screen._commit()
         assert voice.calls == ["switch_to_local"]
@@ -396,13 +397,13 @@ async def test_pageup_after_cloud_confirm_not_stuck(monkeypatch):
         screen.query_one("#voice-model", Input).value = "wh-1"
         await pilot.press("enter")                   # submit полей → advance (confirm)
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         await pilot.press("pageup")
         await pilot.pause()
-        assert screen._step == _VOICE_STEP                     # PgUp жив после cloud-полей
+        assert screen._step_id() == STEP_VOICE                     # PgUp жив после cloud-полей
         await pilot.press("pageup")
         await pilot.pause()
-        assert screen._step == 2                     # и остаётся живым дальше
+        assert screen._step_id() == STEP_MCP                     # и остаётся живым дальше
 
 
 @pytest.mark.asyncio
@@ -421,10 +422,10 @@ async def test_pageup_from_live_cloud_fields_not_stuck(monkeypatch):
         await pilot.pause()
         await pilot.press("pageup")                   # назад прямо из живых полей
         await pilot.pause()
-        assert screen._step == 2
+        assert screen._step_id() == STEP_MCP
         await pilot.press("pageup")                   # каскад: ещё раз назад
         await pilot.pause()
-        assert screen._step == 1
+        assert screen._step_id() == STEP_LEVELS
 
 
 @pytest.mark.asyncio
@@ -541,10 +542,10 @@ async def test_voice_cloud_draft_survives_pageup(monkeypatch):
         screen.query_one("#voice-url", Input).value = "https://stt.x/v1/audio/transcriptions"
         await pilot.press("pageup")                  # назад на шаг MCP
         await pilot.pause()
-        assert screen._step == 2
+        assert screen._step_id() == STEP_MCP
         await pilot.press("pagedown")                # и снова вперёд
         await pilot.pause()
-        assert screen._step == _VOICE_STEP
+        assert screen._step_id() == STEP_VOICE
         assert screen.query_one("#voice-url", Input).value == \
             "https://stt.x/v1/audio/transcriptions"
 
@@ -639,7 +640,7 @@ async def test_voice_cloud_invalid_url_error_inside_editor(monkeypatch):
         screen.query_one("#voice-url", Input).value = "ttp://bad"
         await pilot.press("enter")
         await pilot.pause()
-        assert screen._step == _VOICE_STEP                      # остались на шаге
+        assert screen._step_id() == STEP_VOICE                      # остались на шаге
         ed = screen.query_one(VoiceEndpointEditor)
         assert any("http" in str(w.render()) for w in ed.query(".onb-warn"))
         assert "Голосовой ввод" == str(screen.query_one("#onb-body", Static).render())
@@ -780,10 +781,10 @@ async def test_arrows_walk_an_open_list_not_the_mode_rows():
         ed.focus_field("model")
         await pilot.pause()
         await pilot.pause()
-        before = screen._idx.get(_VOICE_STEP)
+        before = screen._idx.get(STEP_VOICE)
         await pilot.press("down")
         await pilot.pause()
-        assert screen._idx.get(_VOICE_STEP) == before      # курсор шага не сдвинулся
+        assert screen._idx.get(STEP_VOICE) == before      # курсор шага не сдвинулся
 
 
 @pytest.mark.asyncio
@@ -807,7 +808,7 @@ async def test_enter_on_an_open_list_picks_a_model_instead_of_advancing():
         await pilot.press("down")                                 # подсветить первую
         await pilot.press("enter")
         await pilot.pause()
-        assert screen._step == _VOICE_STEP                                  # не ушли дальше
+        assert screen._step_id() == STEP_VOICE                                  # не ушли дальше
         assert screen.query_one("#voice-model", Input).value in _MODELS
         assert not ed.model_list.is_open
 
@@ -989,7 +990,7 @@ async def test_advancing_after_a_url_pick_with_empty_model_shows_the_form_error(
         assert screen.query_one("#voice-model", Input).value == ""
         await pilot.press("enter")                    # «далее»
         await pilot.pause()
-        assert screen._step == _VOICE_STEP
+        assert screen._step_id() == STEP_VOICE
         assert any("выберите модель" in str(w.render()) for w in ed.query(".onb-warn"))
 
 
@@ -1131,14 +1132,14 @@ async def test_arrows_in_fields_do_not_move_variants(tmp_path):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам (спека 2026-08-05 §3)
         # и первая же стрелка уходит ему, а не курсору формы (см. test_tab_moves_between_groups).
         scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
-        variant_before = scr._idx.get(_VOICE_STEP, 0)
+        variant_before = scr._idx.get(STEP_VOICE, 0)
         choice_before = scr._voice_choice
         await pilot.press("tab")                           # в поля
         await pilot.press("down")
         await pilot.pause()
         assert scr._voice_cursor_group() == "fields"
         assert scr._voice_cursor_field() == "token"
-        assert scr._idx.get(_VOICE_STEP, 0) == variant_before, "строка режима не сдвинулась"
+        assert scr._idx.get(STEP_VOICE, 0) == variant_before, "строка режима не сдвинулась"
         assert scr._voice_choice == choice_before
         assert scr.query_one("#voice-token", Input).has_focus
 
@@ -1239,7 +1240,7 @@ async def test_marking_does_not_reopen_a_list_shut_by_escape(tmp_path):
         await pilot.press("enter")                         # пометить «Свой endpoint»
         await pilot.pause()
         assert scr._voice_choice == "cloud"                # пометка сделана…
-        assert scr._step == _VOICE_STEP                    # …и шаг не прыгнул
+        assert scr._step_id() == STEP_VOICE                    # …и шаг не прыгнул
         assert not scr._voice_model_list().is_open, "Esc отменён пометкой"
 
 
@@ -1275,7 +1276,7 @@ async def test_field_cursor_resets_with_the_group_on_leaving_the_step(monkeypatc
         screen.query_one("#voice-model", Input).value = "wh-1"
         await pilot.press("pagedown")                      # ушли со шага…
         await pilot.pause()
-        assert screen._step == 4
+        assert screen._step_id() == STEP_CONFIRM
         await pilot.press("pageup")                        # …и вернулись
         await pilot.pause()
         calls_before = len(voice.model_calls)
@@ -1303,10 +1304,10 @@ async def test_returning_to_the_step_starts_in_the_variants_group(tmp_path):
         assert scr._voice_cursor_group() == "fields"
         await pilot.press("pagedown")                      # далее — на подтверждение
         await pilot.pause()
-        assert scr._step == 4
+        assert scr._step_id() == STEP_CONFIRM
         await pilot.press("pageup")                        # и обратно на шаг голоса
         await pilot.pause()
-        assert scr._step == _VOICE_STEP
+        assert scr._step_id() == STEP_VOICE
         assert scr._voice_cursor_group() == "variants"
         assert pilot.app.focused is None
 
@@ -1498,15 +1499,16 @@ def _screen_with_config(app, voice, config):
 
 
 async def _goto_voice_step(pilot, screen):
-    """Как _to_voice_step, но ставит актуальный номер шага (_VOICE_STEP): тот хелпер
+    """Как _to_voice_step, но ставит актуальный номер шага (STEP_VOICE): тот хелпер
     завязан на нумерацию ДО объединения шагов «Адрес»/«Авторизация» в «Подключение»
     и чинится отдельной задачей плана — здесь его не трогаем."""
-    from gc_tui.screens.onboarding import _VOICE_STEP
+    from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
+                                    STEP_VOICE)
     await pilot.pause()
     screen._values["completions_url"] = "http://h:1/v1/chat/completions"
     screen._values["Authorization"] = ""
     screen._values["model"] = "m"
-    screen._step = _VOICE_STEP
+    screen._step = screen._steps.index(STEP_VOICE)
     screen._render_step()
     await pilot.pause()
 
@@ -1549,7 +1551,7 @@ async def test_voice_step_prefills_cloud_from_config(tmp_path, monkeypatch):
     для этого теста — не только in-memory словарь, но и файл на диске."""
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import VoiceStatus
-    from gc_tui.screens.onboarding import _VOICE_OPTIONS, _VOICE_STEP
+    from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
     from textual.widgets import Input
     from gc_core.onboarding import display_secret
     _isolate_voice_state(monkeypatch, tmp_path)
@@ -1569,7 +1571,7 @@ async def test_voice_step_prefills_cloud_from_config(tmp_path, monkeypatch):
         await app.push_screen(screen)
         await _goto_voice_step(pilot, screen)
         assert screen._voice_choice == "cloud"
-        assert _VOICE_OPTIONS[screen._idx[_VOICE_STEP]][0] == "cloud"
+        assert _VOICE_OPTIONS[screen._idx[STEP_VOICE]][0] == "cloud"
         assert screen.query_one("#voice-url", Input).value == \
             "https://stt.example.com/v1/audio/transcriptions"
         assert screen.query_one("#voice-model", Input).value == "whisper-large-v3"
@@ -1629,7 +1631,7 @@ async def test_voice_step_prefills_local_from_config(tmp_path, monkeypatch):
     """То же самое для локального сервиса: курсор встаёт на «Локальный сервис»."""
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import VoiceStatus
-    from gc_tui.screens.onboarding import _VOICE_OPTIONS, _VOICE_STEP
+    from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice(installed=True)
@@ -1641,7 +1643,7 @@ async def test_voice_step_prefills_local_from_config(tmp_path, monkeypatch):
         await app.push_screen(screen)
         await _goto_voice_step(pilot, screen)
         assert screen._voice_choice == "local"
-        assert _VOICE_OPTIONS[screen._idx[_VOICE_STEP]][0] == "local"
+        assert _VOICE_OPTIONS[screen._idx[STEP_VOICE]][0] == "local"
 
 
 @pytest.mark.asyncio
@@ -1690,7 +1692,8 @@ async def test_voice_step_prefill_noop_when_nothing_configured(tmp_path, monkeyp
     попадают в except Exception раньше, чем доходят до mode == "off"."""
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import VoiceStatus
-    from gc_tui.screens.onboarding import _VOICE_STEP
+    from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
+                                    STEP_VOICE)
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
@@ -1701,7 +1704,7 @@ async def test_voice_step_prefill_noop_when_nothing_configured(tmp_path, monkeyp
         await app.push_screen(screen)
         await _goto_voice_step(pilot, screen)
         assert screen._voice_choice == ""
-        assert screen._idx.get(_VOICE_STEP, 0) == 0
+        assert screen._idx.get(STEP_VOICE, 0) == 0
 
 
 @pytest.mark.asyncio
@@ -1742,7 +1745,7 @@ async def test_passing_through_voice_step_keeps_cloud_backend(tmp_path, monkeypa
     Task 7 (_voice_advance брал вариант под курсором, а тот по умолчанию нулевой)."""
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import VoiceStatus
-    from gc_tui.screens.onboarding import _LAST_STEP
+    from gc_tui.screens.onboarding import STEP_CONFIRM
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
@@ -1761,7 +1764,7 @@ async def test_passing_through_voice_step_keeps_cloud_backend(tmp_path, monkeypa
         await _goto_voice_step(pilot, screen)
         await pilot.press("pagedown")                    # пролистали, ничего не тронув
         await pilot.pause()
-        assert screen._step == _LAST_STEP
+        assert screen._step_id() == STEP_CONFIRM
         assert screen._voice_choice == "cloud"
 
 
@@ -1814,7 +1817,7 @@ async def test_pagedown_recovers_cloud_fields_when_cursor_drifted_away(tmp_path,
     продвигаться дальше (task-7-report.md, находка 6)."""
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import VoiceStatus
-    from gc_tui.screens.onboarding import _VOICE_OPTIONS, _VOICE_STEP
+    from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
@@ -1831,11 +1834,11 @@ async def test_pagedown_recovers_cloud_fields_when_cursor_drifted_away(tmp_path,
         assert screen._voice_choice == "cloud"
         await pilot.press("down")                        # cloud → «Без голосового ввода»
         await pilot.pause()
-        assert _VOICE_OPTIONS[screen._idx[_VOICE_STEP]][0] == "skip"
+        assert _VOICE_OPTIONS[screen._idx[STEP_VOICE]][0] == "skip"
         await pilot.press("pagedown")                     # раньше здесь падал NoMatches
         await pilot.pause()
-        assert screen._step == _VOICE_STEP                # не продвинулись
-        assert _VOICE_OPTIONS[screen._idx[_VOICE_STEP]][0] == "cloud"   # курсор вернулся
+        assert screen._step_id() == STEP_VOICE                # не продвинулись
+        assert _VOICE_OPTIONS[screen._idx[STEP_VOICE]][0] == "cloud"   # курсор вернулся
         assert screen.query(VoiceEndpointEditor)           # поля снова раскрыты
 
 

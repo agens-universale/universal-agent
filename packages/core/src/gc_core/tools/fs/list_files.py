@@ -4,6 +4,7 @@ import os
 from typing import List, Dict, Any, Optional
 from gc_core.backends.protocol import WalkOutputTooLargeError
 from gc_core.tools.schema_optional import coalesce_optional_string
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.glob_to_regex import compile_glob
 from gc_core.utils.tool_report_paths import tool_report_abspath
@@ -18,6 +19,7 @@ from gc_core.security.path_policy import resolve_tool_context, _extract_config_d
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class ListFiles(AbstractSimpleTool):
     """List files and directories under a path with optional depth and glob filter."""
 

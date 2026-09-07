@@ -30,6 +30,8 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
 
     state = State.__new__(State)
     snapshot.setdefault("logger", None)
+    snapshot.setdefault("loop_detector_window", [])
+    snapshot.setdefault("loop_detector_pending", [])
     state.__dict__ = snapshot
 
     shared_raw = state.__dict__.get("shared")
@@ -94,6 +96,9 @@ class StateSerializer:
         raw.pop("logger", None)
         # Live I/O handle (backend inside): rebuilt by RunContext on resume.
         raw.pop("workspace", None)
+        # Loop detector window is per-run in-memory; do not persist.
+        raw.pop("loop_detector_window", None)
+        raw.pop("loop_detector_pending", None)
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (

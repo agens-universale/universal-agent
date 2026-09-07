@@ -11,6 +11,11 @@ DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS = 3
 DEFAULT_EXEC_TIMEOUT_SEC = 120
 
 
+class LoopDetectorConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+
+
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str = "MiniMax-M2.7"
@@ -75,6 +80,7 @@ class AgentConfig(BaseModel):
     # Steering-текст: при рендере system prompt дописывается в <special_instructions>
     # для любой активной модели (пока непустой). Пусто / omit — без инжекта.
     model_steering: str = ""
+    loop_detector: LoopDetectorConfig = Field(default_factory=LoopDetectorConfig)
 
     @field_validator("session_token_limit", "max_tool_calls")
     @classmethod

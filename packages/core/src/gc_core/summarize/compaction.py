@@ -1,7 +1,11 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from gc_core.intent_log import serialize, serialize_for_meta, tail_preview
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
+from gc_core.loop_detector.detector import clear as clear_loop_detector
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_DIALOG_SUMMARY,
+    wrap_technical_user_content,
+)
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total
@@ -320,6 +324,7 @@ def run_summary_compaction(
         memory_delta_chars=delta_chars,
         archive_suffix=archive_suffix,
     )
+    clear_loop_detector(state)
 
 
 def maybe_run_summary_compaction(

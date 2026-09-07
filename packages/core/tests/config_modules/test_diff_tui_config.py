@@ -30,12 +30,9 @@ def test_app_config_includes_diff_tui():
     assert app.diff_tui.max_diff_chars == 100_000
 
 
-def test_flatten_exposes_diff_tui(tmp_path, monkeypatch):
+def test_flatten_exposes_diff_tui(tmp_path):
     """Значение из config.yml доходит до config_dict['diff_tui']."""
     from gc_core import config as cfgmod
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(cfgmod, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(

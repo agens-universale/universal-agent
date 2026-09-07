@@ -5,6 +5,7 @@ import os
 from gc_core.summarize.summary_spec import MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER, SUMMARY_OUTPUT_SHAPE_PLACEHOLDER, SUMMARY_SECTIONS_PLACEHOLDER, render_output_shape_for_prompt, render_sections_for_prompt, render_summary_tags_for_memory_patch_prompt
 from gc_core.summarize.working_memory_gateway import inject_working_memory_prompt_placeholders
 from gc_core.bundled_assets import bundled_root
+from gc_core.utils.user_text import read_user_text
 
 
 def default_prompt_path() -> str:
@@ -32,8 +33,10 @@ def load_prompt_template(path: str) -> str:
         ValueError: Если после `strip()` текст пустой — иначе LLM получил бы
             пустой system prompt.
     """
-    with open(path, "r", encoding="utf-8") as fd:
-        prompt = fd.read().strip()
+    # Путь задаёт КОНФИГ (`summary_prompt_path`) — файл может быть чей угодно и в
+    # любой кодировке. Отказ обязан назвать его: без пути человек читает голую
+    # жалобу кодека и не знает, какой из промптов чинить.
+    prompt = read_user_text(path).strip()
     if not prompt:
         raise ValueError(f"Summary prompt file is empty: {path}")
     if SUMMARY_SECTIONS_PLACEHOLDER in prompt:
@@ -74,8 +77,7 @@ This compaction is for a **subagent** child dialog. Session memory registers are
 
 
 def _load_memory_patch_prompt(path: str, *, subagent: bool = False) -> str:
-    with open(path, "r", encoding="utf-8") as fd:
-        prompt = fd.read().strip()
+    prompt = read_user_text(path).strip()
     if not prompt:
         raise ValueError(f"Memory patch prompt file is empty: {path}")
     if MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER in prompt:

@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_CONSTRAINTS as _DEFAULT_MAX_CHARS_CONSTRAINTS, DEFAULT_MAX_CHARS_GOAL as _DEFAULT_MAX_CHARS_GOAL, DEFAULT_MAX_CHARS_KNOWLEDGE as _DEFAULT_MAX_CHARS_KNOWLEDGE, DEFAULT_MAX_CHARS_STATE as _DEFAULT_MAX_CHARS_STATE, DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS, working_memory_limits_from_params
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
+from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 REGISTER_GOAL = "goal"
@@ -50,6 +51,7 @@ def _total_chars(registers: Dict[str, str]) -> int:
     return sum(len(registers.get(name, "")) for name in REGISTER_ORDER)
 
 
+@loop_warn_on_repeat(**GENERIC_PROFILE)
 class WorkingMemory(AbstractSimpleTool):
     tool_name = SESSION_MEMORY_TOOL_NAME
 

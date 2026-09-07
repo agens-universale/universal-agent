@@ -9,9 +9,10 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 
 from gc_server.swarm import storage as storage
-from gc_core.config import _project_local_config_path, resolve_base_config_path
+from gc_core.config import resolve_base_config_path
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.merge import deep_merge
+from gc_core.utils.user_text import read_user_text_or_none
 
 
 logger = logging.getLogger(__name__)
@@ -114,17 +115,22 @@ def _materialize_runtime_config(
     Возвращает путь к материализованному файлу на хосте (для логирования/тестов).
     """
     # === Слой 1: base ===
-    try:
-        with open(host_config_path, "r", encoding="utf-8") as f:
-            base = yaml.safe_load(f) or {}
-        config_dir = os.path.dirname(os.path.abspath(host_config_path))
-    except FileNotFoundError:
+    # «Нет файла» и «файл на месте, но не читается» здесь один исход — пустая база
+    # с варнингом. Прежде второй класс уходил наружу: конфиг человека, сохранённый
+    # в UTF-16, валил материализацию трейсбеком (`UnicodeDecodeError` — подкласс
+    # `ValueError`, а не `OSError`, и мимо `FileNotFoundError` уходил тем более).
+    base_text = read_user_text_or_none(host_config_path)
+    if base_text is None:
         logger.warning(
-            "runtime config materialization: base config %s not found, using empty base",
+            "runtime config materialization: base config %s not found or unreadable, "
+            "using empty base",
             host_config_path,
         )
         base = {}
         config_dir = os.getcwd()
+    else:
+        base = yaml.safe_load(base_text) or {}
+        config_dir = os.path.dirname(os.path.abspath(host_config_path))
 
     raw: Dict[str, Any] = base
 
@@ -134,7 +140,7 @@ def _materialize_runtime_config(
     # `project_path != host_config_path` обходит самомерж когда base file
     # лежит в <cwd>/.gc/ (это бывает, если сервер запущен из проектной директории).
     try:
-        project_path = _project_local_config_path()
+        project_path = env_vars.project_local_config_path()
     except Exception:  # noqa: BLE001
         project_path = None
 
@@ -142,16 +148,14 @@ def _materialize_runtime_config(
         project_path is not None
         and os.path.abspath(project_path) != os.path.abspath(host_config_path)
     ):
-        try:
-            with open(project_path, "r", encoding="utf-8") as f:
-                project_raw = yaml.safe_load(f) or {}
-            raw = deep_merge(raw, project_raw)
-        except OSError:
+        project_text = read_user_text_or_none(project_path)
+        if project_text is None:
             logger.warning(
                 "runtime config materialization: failed to read project overlay %s",
                 project_path,
-                exc_info=True,
             )
+        else:
+            raw = deep_merge(raw, yaml.safe_load(project_text) or {})
 
     # === Слой 3: SWARM_* env vars (raw paths.*) ===
     _apply_swarm_env_to_raw(raw, config_dir)
