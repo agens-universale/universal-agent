@@ -101,4 +101,29 @@ def resolve_env_placeholders(obj: Any) -> Any:
     return resolved
 
 
-__all__ = ["resolve_env_placeholders"]
+def _resolve_env_only(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _resolve_env_only(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_env_only(v) for v in obj]
+    if isinstance(obj, str):
+        return _ENV_MARKER.sub(lambda m: os.environ.get(m.group(1), ""), obj)
+    return obj
+
+
+def resolve_env_only(obj: Any) -> Any:
+    """Рекурсивная немутирующая копия с подстановкой ТОЛЬКО ``${ENV:VAR}``.
+
+    ``${FILE:path}`` остаётся ссылкой как есть — файловый резолвер сюда не входит
+    вообще, ни чтением, ни статом. Для мест, где раскрытое значение нужно
+    посчитать на UI-потоке (`tui/editors/model_entry_form.py::_as_validator_sees`):
+    там, где `resolve_env_placeholders` читал бы файл-кред с диска синхронно на
+    каждое нажатие клавиши, эта функция гарантированно не тронет диск.
+
+    Без warning вовсе (не только без дедупа): вызывающая сторона такого места сама
+    называет причину человеку текстом на экране, и лог на каждый набранный символ
+    был бы шумом, а не сигналом."""
+    return _resolve_env_only(obj)
+
+
+__all__ = ["resolve_env_only", "resolve_env_placeholders"]

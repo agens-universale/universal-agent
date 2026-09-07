@@ -393,6 +393,18 @@ def test_auth_not_claimed_when_with_token_network_fails():
     assert r.auth_state != "accepted" and r.verdict == "unknown"
 
 
+def test_auth_network_failure_keeps_the_offline_flag():
+    """Повтор с токеном упал по сети — `offline` обязан доехать до результата.
+    Ручная пересборка по полям теряла его (и потеряет любое будущее поле
+    ProbeResult): рендер печатал «? не удалось проверить…» вместо
+    «✗ сервер недоступен», а глиф «Подключения» судил по неполным данным."""
+    wt = ProbeResult("unknown", None, None, 5000, "нет соединения (ConnectionError)",
+                     offline=True)
+    r = interpret_auth(_r401(), wt, has_token=True)
+    assert r.offline is True
+    assert r.verdict == "unknown" and r.auth_state != "accepted"
+
+
 def test_auth_unknown_control_passes_through():
     """Сеть/VPN на контроле → unknown, авторизацию не наказываем."""
     ctrl = ProbeResult("unknown", None, None, 5000, "нет соединения (timeout)")

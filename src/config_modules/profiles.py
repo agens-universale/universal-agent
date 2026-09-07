@@ -14,11 +14,29 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import yaml
+from pydantic import ValidationError
 
 from config_modules.compat import apply_compat
 from config_modules.env_interpolation import resolve_env_placeholders
 from config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
-from config_modules.root import AppConfig
+from config_modules.root import (AppConfig, PROFILE_SCHEMA_ERROR_PREFIX,
+                                 schema_error_details)
+from utils.user_text import unreadable_reason
+
+
+# Бланк нового файла профиля (`onboarding_config_writer.create_profile_file`):
+# ТОЛЬКО шапка-инструкция, без якорей секций (ревизия владельца по смоку:
+# `models: {}` / `slots: {}` заставляли свежий профиль «переопределять» секции,
+# которых он не трогал, — витрина честно перечисляла ключи файла и путала).
+# Секции допишет writer при первом реальном действии (`ensure_section_anchor`
+# синтезирует якорь сам). Именно бланк, а не учебный пример с готовой записью:
+# пример нёс бы литеральный токен и висячие ссылки слотов на алиас, которого у
+# пользователя нет.
+PROFILE_SKELETON = (
+    "# Профиль — отдельный файл-конфиг: переключаемый набор любых настроек\n"
+    "# (модели, уровни, гварды и другие секции). Впишите здесь только то, что\n"
+    "# должно отличаться, — незаданное наследуется от основного конфига.\n"
+)
 
 
 @dataclass(frozen=True)
@@ -50,6 +68,24 @@ def profile_roots(project_dir: Path, base_config_path: Path) -> list[Path]:
     ]
 
 
+def _profile_files(root: Path) -> list[Path]:
+    """Файлы-кандидаты профиля в корне: имя `*.yml` И ФАКТ ФАЙЛА.
+
+    Отбор по `isfile` — то же правило, каким загрузчик отбирает managed-слой
+    (`layers._merge_layers`: `managed_path.is_file()`). Голый глоб отдавал сюда и
+    КАТАЛОГ с именем `work.yml`, а дальше он вредил дважды: открытие такого
+    «профиля» падало `OSError` мимо всех сторожей (трейсбек вместо объяснения), а
+    тёзка из ПРИОРИТЕТНОГО корня ещё и заслонял настоящий профиль из второго —
+    дедупликация ниже идёт по имени, и победитель уже не пересматривается. Первое
+    чинится и обёрткой чтения (она есть, `_read_yaml_document`), второе — только
+    здесь: витрина (`discover_all_refs`) и список «есть: …» тоже обязаны не
+    называть профилем то, что им не является.
+
+    Дом общий на оба обхода корней: вторая редакция того же отбора разъехалась бы
+    с первой ровно так, как разъехались управляемые слои и профили."""
+    return [path for path in sorted(root.glob("*.yml")) if path.is_file()]
+
+
 def discover_profiles(
     roots: list[Path], *, notices: Optional[list[str]] = None
 ) -> dict[str, "ProfileRef"]:
@@ -64,7 +100,7 @@ def discover_profiles(
         root = Path(root)
         if not root.is_dir():
             continue
-        for path in sorted(root.glob("*.yml")):
+        for path in _profile_files(root):
             name = path.stem
             if name in RESERVED_WORDS:
                 if notices is not None:
@@ -113,8 +149,30 @@ def resolve_profile(
 
 
 def _read_yaml_document(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8") as file:
-        raw = yaml.safe_load(file) or {}
+    # Неразбираемый файл — `ValueError`, как и не-словарь ниже: `validate_profile_text`
+    # тот же перевод уже держит для текста, а на файл его не распространили, и
+    # `yaml.YAMLError` уходил мимо `except (OSError, ValueError)` у pre-write
+    # валидации стека — то есть ронял UI вместо отката к одному файлу.
+    #
+    # `OSError` — та же граница, что у слоёв (`layers._readable_layer_document`):
+    # путь НА МЕСТЕ (его отобрал `_profile_files`), но не открывается — права,
+    # каталог на месте файла, отвалившийся сетевой диск. Голым он уходил мимо
+    # `except ValueError` ОБЕИХ точек входа (`cli._run_init`, `tui.main`) и мимо
+    # всех трёх ступеней лестницы починки (`onboarding.load_config_for_repair`):
+    # человек получал трейсбек ровно там, где заводили объяснение. Формат
+    # сообщения — тот же «<path>: …», по которому `explain_broken_config`
+    # опознаёт виноватый файл. Слой профиля читается ОТСЮДА, а не через
+    # `_readable_layer_document`, и своей границы у него до сих пор не было.
+    # `UnicodeDecodeError` (профиль сохранён в UTF-16) — тот же «не прочитался»,
+    # только подкласс `ValueError`: без пути в сообщении объяснение винило базу.
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            try:
+                raw = yaml.safe_load(file) or {}
+            except yaml.YAMLError as exc:
+                raise ValueError(f"{path}: невалидный YAML: {exc}") from exc
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(unreadable_reason(path, exc)) from exc
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: профиль должен быть YAML-документом (словарём)")
     return raw
@@ -134,6 +192,29 @@ def find_literal_tokens(raw: dict) -> list[str]:
         if isinstance(token, str) and token and "${ENV:" not in token:
             aliases.append(alias)
     return aliases
+
+
+def _validate_profile_document(raw: dict, *, source: Optional[str] = None) -> None:
+    """Общая фаза-1 валидация документа профиля: схема `AppConfig` (резерв-имена
+    алиасов моделей проверяет её field_validator) + запрет ключа `profile`
+    (анти-рекурсия, спека §3.2). Переиспользуется `load_profile_document`
+    (документ уже прочитан с диска, `source` — путь файла для сообщения) и
+    `validate_profile_text` (документ ещё не записан на диск, `source` не задан —
+    сообщение без привязки к пути, как `config.validate_config_text`)."""
+    prefix = f"{source}: " if source else ""
+    try:
+        AppConfig.model_validate(raw)
+    except ValidationError as exc:
+        # Не сырой `str(exc)`: pydantic-дамп несёт `input_value=<repr записи>` —
+        # токен НЕАКТИВНОГО профиля уезжал в нотис секции «Модели» этим, вторым
+        # путём (первый — `layers._app_config_from_raw`; ревью MR #80, L28).
+        raise ValueError(
+            f"{prefix}{PROFILE_SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
+        ) from exc
+    if "profile" in raw:
+        raise ValueError(
+            f'{prefix}ключ "profile" внутри профиля запрещён — цепочки профилей запрещены'
+        )
 
 
 def load_profile_document(
@@ -168,12 +249,31 @@ def load_profile_document(
     # и половина пары, наложенная на чужую полную, даёт корректный на вид итог,
     # пока токен базы уходит на адрес этого файла. Здесь же видно, чей это файл.
     validate_registry_pairs(raw, source=str(path))
-    AppConfig.model_validate(raw)
-    if "profile" in raw:
-        raise ValueError(
-            f'{path}: ключ "profile" внутри профиля запрещён — цепочки профилей запрещены'
-        )
+    _validate_profile_document(raw, source=str(path))
     return raw
+
+
+def validate_profile_text(text: str) -> None:
+    """Контрольная валидация текста профиля перед записью (writer/Settings).
+
+    Тот же конвейер, что `load_profile_document`, но от строки, ещё не записанной
+    на диск: YAML → env-интерполяция → compat → фаза-1 схема → запрет ключа
+    `profile`. Факты compat здесь отбрасываются (канала notices у pre-write
+    валидатора нет, а докладывает их загрузчик при следующем чтении файла) —
+    важно, что вердикт «валидно» совпадает с вердиктом загрузчика. Инъецируется
+    в `onboarding_config_writer.write_text/write_values(..., validate=)` — та же
+    роль, что `config.validate_config_text` у config.yml. Бросает `ValueError`
+    (на кривом YAML — с координатой строки/столбца из парсера).
+    """
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"невалидный YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("профиль должен быть YAML-документом (словарём)")
+    raw = resolve_env_placeholders(raw)
+    apply_compat(raw)
+    _validate_profile_document(raw)
 
 
 def mtime_or_none(path: Path) -> Optional[float]:
@@ -197,7 +297,7 @@ def discover_all_refs(roots: list[Path]) -> dict[str, list["ProfileRef"]]:
         root = Path(root)
         if not root.is_dir():
             continue
-        for path in sorted(root.glob("*.yml")):
+        for path in _profile_files(root):
             name = path.stem
             if name in RESERVED_WORDS:
                 continue
@@ -256,6 +356,7 @@ __all__ = [
     "ProfileRef",
     "ProfileMeta",
     "ProfileDisplaySummary",
+    "PROFILE_SKELETON",
     "mtime_or_none",
     "profile_roots",
     "discover_profiles",
@@ -264,5 +365,6 @@ __all__ = [
     "resolve_profile",
     "find_literal_tokens",
     "load_profile_document",
+    "validate_profile_text",
     "profile_display_summary",
 ]

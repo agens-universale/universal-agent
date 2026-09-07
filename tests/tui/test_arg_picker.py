@@ -161,3 +161,69 @@ async def test_hint_visible_on_open_with_small_screen_no_scroll(tmp_path):
         assert len(hint) == 1
         assert hint[0].region.bottom <= 16                     # на экране
         assert hint[0].region.bottom <= picker.region.bottom   # внутри рамки пикера, видна без скролла
+
+
+_LONG_REASON = (
+    "C:/Users/dmitr/.gc/profiles/broken-enc.yml: не удалось прочитать: "
+    "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
+)
+
+
+async def _picker_with_hint(pilot, hint: str):
+    """Пикер с ДИНАМИЧЕСКИМ хинтом, открытый настоящим экраном (настоящие стили:
+    .palette-row nowrap, .palette-hint — переносится)."""
+    from tui.widgets.arg_picker import ArgPicker
+    pilot.app.screen._open_arg_picker(
+        options=[("без профиля", "работать чистым конфигом", ""),
+                 ("alpha", "глобальный", ""),
+                 ("broken-enc", "глобальный", "✗ не применится")],
+        prefix="",
+        hint_provider=lambda v: hint,
+    )
+    await pilot.pause()
+    await pilot.pause()
+    return pilot.app.query_one(ArgPicker)
+
+
+@pytest.mark.parametrize("width", (120, 100, 80, 60))
+@pytest.mark.asyncio
+async def test_desired_height_covers_a_wrapping_hint(tmp_path, width):
+    """`desired_height` — БЮДЖЕТ, который `main.py::_sync_trace_max_height` вычитает
+    из экрана. Занизив его, пикер рисуется выше выданного места: подвал накрывает
+    хвост списка, а нижняя рамка уезжает за край.
+
+    У `.palette-row` намеренно `text-wrap: nowrap`, у `.palette-hint` — нет, и
+    причина отказа (путь + текст исключения, 130+ символов) переносится на 2-3
+    строки уже при 80 колонках. Резерв «ровно одна строка» врал на каждой из них."""
+    pytest.importorskip("textual")
+    async with _mk_app(tmp_path).run_test(size=(width, 40)) as pilot:
+        picker = await _picker_with_hint(pilot, _LONG_REASON)
+        assert picker.desired_height >= picker.outer_size.height, (
+            f"ширина {width}: заявлено {picker.desired_height}, "
+            f"нарисовано {picker.outer_size.height}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_wrapping_hint_keeps_the_whole_reason_on_screen(tmp_path):
+    """Резерв растёт под причину, а не режет её: путь профиля рядом с палитрой не
+    печатает больше никто — без него человеку нечего чинить."""
+    pytest.importorskip("textual")
+    async with _mk_app(tmp_path).run_test(size=(80, 40)) as pilot:
+        picker = await _picker_with_hint(pilot, _LONG_REASON)
+        hint = picker.query(".palette-keys")[0]
+        assert hint.region.height > 1                     # причина правда переносится
+        assert hint.region.bottom <= picker.region.bottom  # и целиком внутри рамки
+        assert str(hint.render()).startswith("C:/Users/dmitr/.gc/profiles/broken-enc.yml")
+
+
+@pytest.mark.asyncio
+async def test_short_hint_still_reserves_one_line(tmp_path):
+    """Короткий хинт не должен дорожать: резерв считается по ТЕКСТУ, а не «на всякий
+    случай максимумом» — иначе список без нужды теряет строки."""
+    pytest.importorskip("textual")
+    async with _mk_app(tmp_path).run_test(size=(80, 40)) as pilot:
+        picker = await _picker_with_hint(pilot, "default gc · глобальный")
+        # 3 строки + рамка(2) + клавиши (margin + строка) + хинт (margin + строка)
+        assert picker.desired_height == 3 + 2 + 2 + 2
+        assert picker.desired_height >= picker.outer_size.height

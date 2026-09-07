@@ -137,11 +137,24 @@ class TuiApp(App):
         threads_dir: Optional[str] = None,
         system: str = "cli",
         config: Optional[dict] = None,
+        profile_override: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._threads_dir = threads_dir
         self._system = system
         self._config = config or {}
+        # Профиль, выбранный флагом запуска `--profile` (`""` — «без профиля»), либо
+        # None — флага не было. Тот же оверрайд, что main() отдал загрузчику на
+        # старте: каждое перечитывание (`reload_config`) обязано отдавать его снова,
+        # иначе первое же сохранение из /settings молча возвращает указатель из файла
+        # — и совет «--profile "", чтобы обойти сломанный профиль» живёт до первой
+        # записи. Хранится ОТДЕЛЬНО от сессионного выбора, а не кладётся в него:
+        # сессионный выбор персистится в мету треда и переживает перезапуск, а флаг
+        # запуска — свойство ЭТОГО процесса (`gc-ua --profile ""` не имеет права
+        # прилипнуть к треду и обходить уже починенный профиль на следующем старте).
+        # Выбор из приложения (`/profiles`) остаётся сильнее: он ложится поверх
+        # базы, собранной под флагом (`_session_base_config`).
+        self._profile_override = profile_override
         # Сессионные переопределения конфига (спека 2026-07-20-session-scoped-settings):
         # база — self._config (файл), это — то, что переключено в текущем треде.
         # Хранятся по dotted-именам; накладываются в effective_config().
@@ -159,6 +172,14 @@ class TuiApp(App):
         self.last_terminal_outcome: Optional[str] = None
         self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
         self._onboarding_mode = None          # None | "auto" | "review"; ставит tui/__init__.py
+        # Лестница загрузки приземлилась на ступень «без профиля» — финал мастера
+        # обязан снять указатель (ставит tui/__init__.py). Один признак, а не весь
+        # `RepairLoad`: приложению от лестницы нужен ровно этот ответ.
+        self._onboarding_deactivate_profile = False
+        # Текст деградации загрузки для экрана мастера (ставит tui/__init__.py;
+        # None — деградации не было). Тем же приёмом и по той же причине, что и
+        # признак выше: рантайм-уведомление под мастером недостижимо.
+        self._onboarding_degraded = None
         self._config_path = None              # путь к конфигу на диске; задаётся снаружи после __init__
         # Мтайм-набор активного указателя (спека §3.3): база/managed/проектный конфиг +
         # оба кандидатных пути активного профиля. Расширение прежнего одиночного
@@ -172,6 +193,10 @@ class TuiApp(App):
         # Профили, уже отдавшие notice активации в этой сессии (спека §3.5) — не спамить
         # повторно при каждом пере-мерже одного и того же выбора.
         self._profile_notice_seen: set = set()
+        # Источник действующего профиля на момент последней сборки базы (спека §3.1):
+        # (имя, путь, корень). Нужен ИМЕННО снимком — `active_profile_ref()` резолвит
+        # по диску, и после появления тёзки «прежнее» значение уже не восстановить.
+        self._profile_source: Optional[tuple] = None
         from model_router import CircuitBreaker
         # Сессионный предохранитель моделей (спека §8) — владелец: сессия-тред;
         # персист/restore — persist_circuit_breaker()/load_circuit_breaker() (meta треда).
@@ -331,6 +356,8 @@ class TuiApp(App):
                 config_path=self._onboarding_config_path,
                 review_all=self._onboarding_mode == "review",
                 on_commit=self._finish_onboarding,
+                deactivate_profile=self._onboarding_deactivate_profile,
+                degraded_note=self._onboarding_degraded,
             )
         return TraceScreen()
 
@@ -366,6 +393,17 @@ class TuiApp(App):
         прочитало этот же файл."""
         self._config_path = path
         self._config_mtime_set = self._compute_mtime_set()
+        self._profile_source = self._current_profile_source()
+
+    def _current_profile_source(self) -> Optional[tuple]:
+        """`(имя, путь, корень)` действующего профиля или None. Снимок для
+        сравнения «до/после» в `reload_config` — резолв идёт по диску, поэтому
+        прежнее значение обязано быть сохранено заранее, а не пере-вычислено."""
+        try:
+            ref = self.active_profile_ref()
+        except Exception:
+            return None
+        return None if ref is None else (ref.name, str(ref.path), ref.root_kind)
 
     def _active_profile_name_for_mtime(self) -> Optional[str]:
         """Действующее имя профиля для мтайм-набора (спека §3.3 — «выбор, не
@@ -396,6 +434,42 @@ class TuiApp(App):
         except OSError:
             return {}
 
+    def _load_base_config(self) -> dict:
+        """`load_config_ex` под флагом запуска `--profile` — база окна.
+
+        Стек под флагом не собрался — отказ уходит наверх, к тому же гейту, что
+        держит окно на битом config.yml (`reload_config_if_changed`): прежняя база,
+        причина в `/notices`. Флаг при этом не гасится и профиль не подменяется
+        указателем из файла — ни того, ни другого отказ не заслуживает:
+
+        • отличить «профиль исчез навсегда» от мгновенной гонки записи (соседнее
+          окно или редактор дописывает файл профиля ровно сейчас) одной неудачной
+          попыткой нечем — а цена ошибки несимметрична: снятый флаг не возвращается
+          до перезапуска, и `--profile ""` молча воскрешает сломанный профиль на
+          первом же сохранении из /settings (ровно та регрессия, ради которой флаг
+          и заведён), тогда как лишний раз оставшаяся прежней база живёт до
+          следующей проверки свежести;
+        • подмена профиля указателем поднимает В РАБОТУ тот самый профиль, от
+          которого человек ушёл флагом, — со своими адресами и моделями;
+        • `reload_config` до этого места ничего не меняет, поэтому снимок
+          мтайм-набора отказ не двигает: следующий заход в Настройки пробует снова,
+          и дописанный (или возвращённый) файл чинит окно сам.
+
+        Ловим только классы, которыми загрузчик докладывает о СОСТОЯНИИ файлов
+        (`ValueError` — битый YAML/схема/нерезолвимый указатель, `OSError` — файл не
+        читается), и лишь затем, чтобы назвать виновником флаг, а не config.yml.
+        `TypeError`/`KeyError` — дефект кода, и под видом «профиль больше не
+        собирается» он жил бы до первого чтения логов."""
+        from config import load_config_ex
+        name = self._profile_override
+        if name is None:
+            return load_config_ex(self._config_path)[0]
+        try:
+            return load_config_ex(self._config_path, profile_override=name)[0]
+        except (ValueError, OSError) as exc:
+            what = f'профиль "{name}" из флага --profile' if name else 'флаг --profile ""'
+            raise ValueError(f"{what}: {exc}") from exc
+
     def reload_config(self) -> None:
         """Hot-apply (спека B, B3): перечитать конфиг с диска и применить к app.
 
@@ -410,11 +484,15 @@ class TuiApp(App):
         файла) сбрасывает предохранитель моделей (починка мёртвой модели не должна
         пережить починку — «сброс: изменение конфиг-набора»); сессионный выбор
         профиля, ставший битым под новой базой, — санация (§9.4); boot-frozen-ключи,
-        разошедшиеся между старой и новой эффективной базой, — notice (§3.2)."""
-        from config import load_config_ex, apply_cli_overrides
+        разошедшиеся между старой и новой эффективной базой, — notice (§3.2).
+
+        База собирается под флагом запуска `--profile` (`_profile_override`) — тем
+        же оверрайдом, что и на старте: перечитывание без него молча возвращало
+        указатель из файла."""
+        from config import apply_cli_overrides
         from thread_store import resolve_threads_dir
         from tui.runtime_config import carry_over_runtime_fields
-        cfg, _meta = load_config_ex(self._config_path)
+        cfg = self._load_base_config()
         apply_cli_overrides(cfg)
         # launch_root и прочие поля рантайма TUI в файле конфига отсутствуют: без переноса
         # они исчезают при первом же сохранении настроек — /diff перестаёт работать, а
@@ -422,6 +500,7 @@ class TuiApp(App):
         carry_over_runtime_fields(self._config or {}, cfg)
         old_effective = self.effective_config()
         old_mtime_set = self._config_mtime_set
+        old_source = self._profile_source
         self._config = cfg
         self._threads_dir = resolve_threads_dir(cfg)
         self._session_profile_cache = None   # база сменилась — пере-мерж под сессионный профиль устарел
@@ -434,17 +513,26 @@ class TuiApp(App):
         self._config_mtime_set = self._compute_mtime_set()
         if old_mtime_set != self._config_mtime_set:
             self._circuit_breaker.reset()
+        self._notice_profile_source_change(old_source)
         self._notice_boot_frozen_diff(old_effective, self.effective_config())
-        # Экран мог закэшировать куски конфига (голосовой flow строится один раз на
-        # voice-секцию) — без сигнала правка из /settings подействовала бы только со
-        # следующего запуска. Снимок mtime здесь больше не трогаем: одиночный
-        # `_config_mtime` сменился набором `_config_mtime_set`, его считает
-        # `_compute_mtime_set()` строкой выше.
-        if self.is_running:
-            main = self._main_screen()
-            if main is not None and hasattr(main, "config_reloaded"):
-                main.config_reloaded()
+        # Снимок mtime здесь больше не трогаем: одиночный `_config_mtime` сменился
+        # набором `_config_mtime_set`, его считает `_compute_mtime_set()` выше.
+        self._notify_screen_config_changed()
         self.invalidate_runner()
+
+    def _notify_screen_config_changed(self) -> None:
+        """Сказать главному экрану, что действующий конфиг сменился.
+
+        Экран кэширует куски конфига один раз на секцию (голосовой flow строится
+        на voice-секцию), поэтому сигнал обязателен КАЖДОМУ пути смены: и
+        перечитке с диска, и сессионному выбору профиля. Точка одна — иначе у
+        второго пути заводится свой канал и расходится с первым (сессионный
+        профиль со своей секцией `voice` оставлял Ctrl+T на прежнем endpoint)."""
+        if not self.is_running:
+            return
+        main = self._main_screen()
+        if main is not None and hasattr(main, "config_reloaded"):
+            main.config_reloaded()
 
     def reload_config_if_changed(self) -> None:
         """Гейт свежести окна: перечитать базу (reload_config), только если мтайм-набор
@@ -467,6 +555,16 @@ class TuiApp(App):
         mtime_set = self._compute_mtime_set()
         if mtime_set == self._config_mtime_set:
             return
+        self._reload_config_or_notice()
+
+    def _reload_config_or_notice(self) -> None:
+        """Перечитка ПОД ГЕЙТОМ: отказ загрузчика (битый файл, непрочитанный слой,
+        не собравшийся стек флага `--profile`) — уведомление, а не крэш Textual.
+
+        Точка одна на всех вызывающих `reload_config` из UI: своя редакция того же
+        перехвата разъехалась бы с первой — а окно, роняющее себя из-за диагностики
+        чужого файла, теряет несохранённое у человека, который в этом файле не
+        виноват."""
         try:
             self.reload_config()
         except Exception as exc:
@@ -559,9 +657,7 @@ class TuiApp(App):
         """Спека §3.5: первая активация ПРОЕКТНОГО профиля в сессии — notice с
         файлом и урлами моделей: файл приезжает с клоном репозитория и уводит
         запросы на свои адреса — пользователь должен видеть это сам, не только в
-        логах провайдера. Про уходящий туда ОБЩИЙ токен речи больше нет: адрес и
-        токен записи — атомарная пара, задать чужой адрес под чужим ключом
-        нельзя."""
+        логах провайдера."""
         ref = meta.ref
         if ref is None or ref.root_kind != "project" or name in self._profile_notice_seen:
             return
@@ -592,10 +688,9 @@ class TuiApp(App):
         base_name = (self._config or {}).get("profile") or None
         if name == base_name:
             return
-        from config import load_config_ex
         try:
-            load_config_ex(self._config_path, profile_override=name)
-        except Exception:
+            self.probe_profile_assembly(name)
+        except Exception as exc:
             acting = base_name or "без профиля"
             self._session_overrides.pop("profile", None)
             self._session_profile_cache = None
@@ -604,10 +699,33 @@ class TuiApp(App):
                 self.persist_session_overrides()
             except OSError:
                 pass   # тред недоступен — в памяти уже чисто, персист догонит позже
+            # Причина, а не один её частный случай: «не найден» посылало искать
+            # пропажу, когда файл лежит на месте и не читается (профиль в UTF-16,
+            # неразбираемый YAML) — человек шёл не туда и не находил чинить что.
+            # Причина самодостаточна («<путь>: …»), тот же приём, что у соседа
+            # `session_profile_remerge_failed`.
             push_runtime_notice(Notice(
                 "warning", "session_profile_stale",
-                f'профиль "{name}" из сессии не найден — действует "{acting}"', ()))
+                f'профиль "{name}" из сессии снят ({exc}) — действует "{acting}"', ()))
             self.invalidate_runner()
+
+    def probe_profile_assembly(self, name: str) -> None:
+        """Собирается ли конфиг с профилем `name` — проба, а не применение: ответ
+        выбрасывается, спрашивается лишь «собирается ли», исключение уходит
+        вызывающему как есть (`ValueError` с путём и причиной).
+
+        Побочки сбора (конвейер проекций, предупреждения TLS) глобальны и
+        необратимы — их несёт `_profile_remerge`, который профиль действительно
+        применяет. Проба, идущая другим поводом (санация, гейт выбора, витрина
+        пикера), не должна двигать рантайм: сорвавшийся следом персист оставил бы
+        процесс перепривязанным к профилю, которого нет ни в сессии, ни в мете.
+
+        Имя публичное: судья «годен ли профиль» ОДИН на всех, и метку пикера
+        (`toggles.profile_picker_options`) ставит он же. Вторая редакция правила
+        разошлась бы с первой — витрина звала бы Enter туда, где Enter отказывает."""
+        from config import load_config_ex
+        load_config_ex(self._config_path, profile_override=name,
+                       apply_to_process=False)
 
     def switch_session_profile(self, name: str) -> None:
         """Переключить профиль сессии (спека §9.1/§9.3): применяет как обычный
@@ -616,10 +734,25 @@ class TuiApp(App):
         и кэш пере-мержа сбрасывает `set_session_override`; здесь — то, что
         специфично для МОМЕНТА выбора: boot-frozen-diff notice и, при живом ране,
         notice отложенного применения (пересборка сама откладывается существующим
-        `invalidate_runner` — единый механизм с обычной перечиткой конфига)."""
+        `invalidate_runner` — единый механизм с обычной перечиткой конфига).
+
+        Профиль, с которым конфиг не собирается, отклоняется ДО применения:
+        `_profile_remerge` деградирует на прежнюю базу молча для рендера, и без
+        гейта выбор доезжал до футера и до меты треда — витрина называла профиль,
+        которого нет ни в одном запросе, а негодное имя восстанавливалось на
+        каждом attach. Проба идёт первой: после `apply_session_override` имя уже
+        в мете, и снимать его пришлось бы вторым действием, по дороге к которому
+        есть свои способы не доехать.
+
+        Снятие (`name == ""`) пробы не знает — это дверь наружу, и судить её по
+        сборке снимаемого значило бы запереть человека внутри битого выбора."""
+        base_name = (self._config or {}).get("profile") or None
+        if name and name != base_name:
+            self.probe_profile_assembly(name)
         old_effective = self.effective_config()
         self.apply_session_override("profile", name)
         self._notice_boot_frozen_diff(old_effective, self.effective_config())
+        self._notify_screen_config_changed()
         runner = self.active_runner
         live = runner is not None and runner.is_running()
         self.invalidate_runner()
@@ -628,6 +761,38 @@ class TuiApp(App):
             push_runtime_notice(Notice(
                 "info", "profile_switch_deferred",
                 f"{what} применится после завершения текущей задачи", ()))
+
+    def _notice_profile_source_change(self, old_source: Optional[tuple]) -> None:
+        """Спека §3.1: у активного профиля сменился ФАЙЛ-источник при том же имени.
+
+        Типовой случай — `git pull` принёс `<проект>/.gc/profiles/<имя>.yml`:
+        проектный корень выигрывает у базового, и профиль того же имени начинает
+        приносить другие модели, адреса и токены. Имя в футере при этом не
+        меняется, поэтому без уведомления подмену не по чему заметить (обратный
+        переезд, когда проектный файл удалили, — ровно так же).
+
+        Молчим, когда сменилось само ИМЯ профиля (это осознанное переключение, о
+        нём говорят свои каналы) и когда путь тот же — правка файла источником не
+        является, иначе notice сыпался бы на каждое сохранение из /settings.
+        """
+        self._profile_source = self._current_profile_source()
+        new_source = self._profile_source
+        if old_source is None or new_source is None:
+            return
+        old_name, old_path, old_kind = old_source
+        new_name, new_path, new_kind = new_source
+        if old_name != new_name or old_path == new_path:
+            return
+        # Подпись корня — той же формулой, что у соседних витрин
+        # (`main.py:4025`, `settings.py:2214`): своего словаря здесь не заводим.
+        old_ru = "проектный" if old_kind == "project" else "глобальный"
+        new_ru = "проектный" if new_kind == "project" else "глобальный"
+        push_runtime_notice(Notice(
+            "warning", "profile_source_changed",
+            f'профиль "{new_name}" теперь берётся из другого файла: '
+            f"{new_path} ({new_ru}) вместо {old_path} ({old_ru})",
+            (new_path, old_path),
+        ))
 
     def _notice_boot_frozen_diff(self, old_cfg: dict, new_cfg: dict) -> None:
         """Спека §3.2: boot-frozen-ключи разошлись между старой и новой эффективной
@@ -841,7 +1006,10 @@ class TuiApp(App):
         """Финал онбординга (auto и review одинаково): reload_config + переход
         на главный экран — «завершил настройку → стартует агент»."""
         self.set_config_path(self._onboarding_config_path)
-        self.reload_config()
+        # Тем же гейтом, что и остальные перечитки из UI: файл могли сломать в зазоре
+        # между записью визарда и финалом, и трейсбек поверх только что законченной
+        # настройки — цена, несоразмерная поводу. Причина уходит в /notices.
+        self._reload_config_or_notice()
         self._onboarding_mode = None
         # OnboardingScreen — базовый экран (get_default_screen), у него нет result-callback,
         # из-за чего switch_screen падает на _pop_result_callback (IndexError: pop from empty).

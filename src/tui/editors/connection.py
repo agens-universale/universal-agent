@@ -17,14 +17,14 @@ from onboarding_fields import (
     NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
     NO_AUTH_LABEL as _NO_AUTH_LABEL,
     NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
+    URL_EMPTY as _URL_EMPTY,
+    URL_ERROR as _URL_ERROR,
 )
 from tui.editors.field_list import write_field
 from tui.editors.preset_list import PRESET_HINT as _PRESET_HINT, preset_list_controller
 from tui.palette import DEEP_DIM
 from tui.widgets.paste_input import PasteInput
 
-_URL_ERROR = "нужны http(s):// и хост"
-_URL_EMPTY = "введите адрес"
 _TOKEN_EMPTY = "введите токен"
 _TOKEN_PH_CREATE = "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"
 _TOKEN_PH_CLEARED = "токен очищен · будет удалён при сохранении"
@@ -33,7 +33,7 @@ _PRESET_HINT_EMPTY = "выберите провайдера или впишит�
 # Набранного нет в каталоге: список свёрнут (предлагать нечего), но молчать об этом —
 # значит оставить человека гадать, сработал ли фильтр. Клавиша названа та же, что и в
 # обычном свёрнутом состоянии: у `Enter` здесь ровно его всегдашний смысл — сохранить.
-_PRESET_NO_MATCH_CLOSED = "в списке такого нет · Alt+↓ — показать список"
+PRESET_NO_MATCH_CLOSED = "в списке такого нет · Alt+↓ — показать список"
 
 
 def _auth_active(header: str | None) -> int | None:
@@ -274,6 +274,34 @@ class ConnectionEditor(Vertical):
             # Замороженное поле токена (● без авторизации) курсор пропускает —
             # фокусировать disabled-Input нельзя, делать там нечего.
             self._idx = (self._idx + delta) % len(self._positions)
+        self._land()
+
+    def on_click(self, event) -> None:
+        """Клик мышью по полю — тоже перемещение курсора (спека §4.3, тот же
+        приём, что `ModelEntryForm.on_click`): без приземления Space на галке и
+        футер судили по «прошлому» месту курсора, а список над пустым адресом не
+        раскрывался. Клик по текущему полю — no-op (раскрытый список не
+        пересобирается); замороженный токен (`● без авторизации`) мышь не
+        оживляет. Событие не глушится — выделение текста живёт как жило."""
+        wid = getattr(getattr(event, "control", None), "id", None)
+        if wid == "conn-noauth":
+            wid = None          # позиция галки в _positions — None (ревью N7, н.3)
+        elif wid is None or wid not in self._positions:
+            return
+        pos = self._positions.index(wid)
+        if pos == self._idx or (self._no_auth and wid == "conn-token"):
+            return
+        if self._presets_ctrl.is_open:
+            self._presets_ctrl.close()
+        self._idx = pos
+        self._land()
+        # Мышь обязана обновить футер экрана, как клавиатурные маршруты
+        # (ревью N7, находка 2).
+        getattr(self.screen, "_refresh_footer", lambda: None)()
+
+    def _land(self) -> None:
+        """Приземление курсора на текущую позицию: раскрытие пресет-листа над
+        пустым адресом, подсветка галки, фокус — один хвост на стрелки и мышь."""
         target = self._positions[self._idx]
         if target == "conn-url":
             # Канон 2026-08-17: раскрываем, только если поле пусто (решает `can_open`).
@@ -357,7 +385,7 @@ class ConnectionEditor(Vertical):
                 # оставить свой адрес» — выдуманное значение клавиши, которая везде
                 # сохраняет форму; заодно первое нажатие уходило на сворачивание,
                 # а не на переход дальше.
-                self._presets_ctrl.close(closed_hint=_PRESET_NO_MATCH_CLOSED)
+                self._presets_ctrl.close(closed_hint=PRESET_NO_MATCH_CLOSED)
                 return
             if self._presets_ctrl.is_open:
                 self._presets_ctrl.apply_filter(value)

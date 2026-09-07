@@ -230,7 +230,11 @@ class AgentExecutor:
                 try:
                     with open(prompt_path, "r", encoding="utf-8") as fd:
                         chat_completions_system_prompt = fd.read().strip()
-                except OSError as e:
+                # Путь берётся из конфига — файл человека, кодировка его.
+                # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`: он
+                # уходил мимо этой ветки, то есть run падал БЕЗ объяснения, какой
+                # файл виноват.
+                except (OSError, UnicodeDecodeError) as e:
                     if effective_verbose:
                         print(
                             f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
@@ -249,7 +253,7 @@ class AgentExecutor:
                 try:
                     with open(si_path.strip(), "r", encoding="utf-8") as fd:
                         special_instructions = fd.read().strip() or None
-                except OSError:
+                except (OSError, UnicodeDecodeError):
                     special_instructions = None
             special_instructions = merge_special_instructions_with_model_steering(
                 special_instructions,

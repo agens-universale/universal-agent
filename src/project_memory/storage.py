@@ -14,6 +14,7 @@ from pathlib import Path
 
 from config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_CHARS
 from utils.atomic_io import atomic_replace
+from utils.user_text import read_user_text, read_user_text_or_none
 
 DEFAULT_MAX_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS
 MAX_CHARS: int = DEFAULT_MAX_CHARS
@@ -66,9 +67,8 @@ def stat(path: Path, *, backup: Path | None = None) -> ProjectMemoryStat:
                 pass
         if not path.is_file():
             return ProjectMemoryStat(exists=False, chars=0, lines=0)
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
+        text = read_user_text_or_none(path)
+        if text is None:
             return ProjectMemoryStat(exists=False, chars=0, lines=0)
         return ProjectMemoryStat(
             exists=True,
@@ -105,10 +105,7 @@ def read(path: Path, *, backup: Path | None = None) -> str:
                 pass
         if not path.is_file():
             return ""
-        try:
-            return path.read_text(encoding="utf-8")
-        except OSError:
-            return ""
+        return read_user_text_or_none(path) or ""
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -140,6 +137,8 @@ def append(
     Raises ProjectMemoryError("empty_content") if `delta` is empty/whitespace.
     Raises ProjectMemoryError("limit_exceeded") when the resulting size would exceed
     MAX_CHARS; in that case the file on disk is left unchanged.
+    Raises ProjectMemoryError("io_error") when the existing file cannot be read
+    (permissions, foreign encoding); the file on disk is left unchanged.
 
     If `backup` is given, mirrors the resulting content to that path after the
     primary write succeeds (mkdir parents as needed). Backup failures are silenced.
@@ -147,7 +146,15 @@ def append(
     if not isinstance(delta, str) or not delta.strip():
         raise ProjectMemoryError("empty_content", "delta must be non-empty for append.")
     with _lock:
-        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        # Дописывание — это read-modify-write: непрочитанное «существующее» уходит
+        # в файл ПУСТЫМ, то есть стирает память проекта дописанной заметкой. Поэтому
+        # здесь, в отличие от `read`/`stat`, нечитаемый файл — отказ, а не "".
+        # Файл человек правит руками (в том числе блокнотом), так что чужая
+        # кодировка тут не экзотика.
+        try:
+            existing = read_user_text(path) if path.is_file() else ""
+        except ValueError as exc:
+            raise ProjectMemoryError("io_error", str(exc)) from exc
         existing_stripped = existing.strip()
         delta_stripped = delta.strip()
         new_text = (

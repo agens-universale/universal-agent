@@ -21,13 +21,14 @@ from textual.css.query import NoMatches
 from textual.widgets import Input, Static
 
 from tui.editors.field_list import (FieldListController, LIST_EMPTY, LIST_FAILED,
-                                     LIST_LOADING, write_field as _write_field)
+                                    LIST_LOADING,
+                                    MODEL_RELOAD_HINT as _MODEL_RELOAD_HINT,
+                                    write_field as _write_field)
 from tui.editors.preset_list import PRESET_HINT, preset_list_controller
 from tui.palette import ACCENT, DEEP_DIM
 from tui.widgets.paste_input import PasteInput
 
-_URL_ERROR = "нужны http(s):// и хост"   # тот же текст, что EndpointEditor/ConnectionEditor
-_URL_EMPTY = "введите адрес"
+from onboarding_fields import URL_EMPTY as _URL_EMPTY, URL_ERROR as _URL_ERROR
 # Имя `LIST_EMPTY` уже занято статусом списка моделей («сервер не вернул моделей»,
 # `field_list`) — та же формула ошибки submit'а (§4.2), но своё имя, иначе объявление
 # здесь молча переопределило бы импортированную константу списка (обе строки
@@ -122,7 +123,6 @@ _LANG_CODE_W = 6          # колонка кода: 2-3 символа + воз
 # («показать список»), а раскрытый — этой строкой («перечитать список»), и клавиша на
 # одном поле звалась двумя глаголами в зависимости от состояния, хотя делает одно и то
 # же — идёт на сервер).
-_MODEL_RELOAD_HINT = "Alt+↓ — перечитать список"
 _MODEL_HINT = ("модели · печать — фильтр/свой id · Enter — подставить · "
                f"Esc — свернуть · {_MODEL_RELOAD_HINT}")
 _MODEL_HINT_NO_MATCH = "свой id · Enter — сохранить как есть · Esc — свернуть"

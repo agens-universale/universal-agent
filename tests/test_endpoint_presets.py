@@ -35,10 +35,14 @@ def test_default_presets_are_not_materialized_into_the_template():
     в песочнице осталось три пресета из пяти)."""
     import pathlib
     root = pathlib.Path(__file__).resolve().parents[1]
-    for name in ("config.default.yml", "demo_config.yml"):
-        text = (root / name).read_text(encoding="utf-8")
-        assert "\nendpoint_presets:" not in text, f"{name}: блок развёрнут"
-        assert "# endpoint_presets:" in text, f"{name}: нет закомментированного образца"
+    # Правило одно на ВСЕ каталоги пресетов, а не на первый заведённый: голосовой
+    # каталог приехал в шаблоны развёрнутым именно потому, что сторож спрашивал про
+    # `endpoint_presets`, а `voice_endpoint_presets` под это условие не подпадал.
+    for key in ("endpoint_presets", "voice_endpoint_presets"):
+        for name in ("config.default.yml", "demo_config.yml"):
+            text = (root / name).read_text(encoding="utf-8")
+            assert f"\n{key}:" not in text, f"{name}: блок {key} развёрнут"
+            assert f"# {key}:" in text, f"{name}: нет закомментированного образца {key}"
 
 
 def test_from_config_missing_key_gives_default():
@@ -56,15 +60,11 @@ def test_from_config_invalid_entries_fall_back_to_default():
     assert endpoint_presets_from_config({"endpoint_presets": "garbage"}) == list(DEFAULT_ENDPOINT_PRESETS)
 
 
-def test_load_config_flattens_custom_presets_into_config_dict(tmp_path, monkeypatch):
+def test_load_config_flattens_custom_presets_into_config_dict(tmp_path):
     """Регрессия (fix Important-1): flatten_app_config не пробрасывал
     endpoint_presets — TUI видел только кодовый дефолт, пользовательские
     пресеты из config.yml были мертвы."""
     import config as cfgmod
-    import mcp_runtime.paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(

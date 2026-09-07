@@ -105,20 +105,6 @@ async def _wait_probe_settled(pilot, scr):
     await pilot.pause()
 
 
-def _isolate_config_layers(monkeypatch, tmp_path):
-    """Слои поверх базового config.yml — на tmp (тот же приём, что автофикстура
-    test_settings_voice). Нужны ВСЕМ секциям /settings, не только голосу:
-    `SettingsScreen.__init__` → `_read_origins()` → `config_origin._overlay_paths`
-    читает настоящие `~/.gc/config.local.yml` и `<cwd>/.gc/config.yml`, и стоит
-    любому из них перекрыть адрес, токен, модель или прокси — в кадр домонтируется
-    строка «⚠ действует … — перекрыто». Без подмены кадр чист лишь случайно."""
-    import config as config_mod
-    import mcp_runtime.paths as mcp_paths
-    monkeypatch.setattr(mcp_paths, "managed_config_path",
-                        lambda: tmp_path / "config.local.yml")
-    monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: None)
-
-
 def _app(tmp_path, config=None):
     """Приложение под снимок. Конфиг тот же, что у экрана: вход в секцию /settings
     забирает конфиг у приложения (`_sync_config_from_app`), и с пустым `config={}`
@@ -129,8 +115,16 @@ def _app(tmp_path, config=None):
 
 # --- мастер первого запуска ---
 
-def test_wizard_connection_snapshot(snap_compare, tmp_path):
+def _isolate_snapshot_cwd(monkeypatch, tmp_path):
+    """Работать из `tmp_path`: снимок не должен зависеть от того, из какого
+    каталога запущен pytest (тот же приём, что у
+    `tests/tui/conftest.py::wizard_connection_step`)."""
+    monkeypatch.chdir(tmp_path)
+
+
+def test_wizard_connection_snapshot(snap_compare, tmp_path, monkeypatch):
     """Шаг «Подключение» мастера: три поля, пресеты раскрыты под адресом."""
+    _isolate_snapshot_cwd(monkeypatch, tmp_path)
     app = _app(tmp_path)
 
     async def setup(pilot):
@@ -143,11 +137,12 @@ def test_wizard_connection_snapshot(snap_compare, tmp_path):
     assert snap_compare(app, terminal_size=_WIZARD_SIZE, run_before=setup)
 
 
-def test_wizard_model_snapshot(snap_compare, tmp_path):
+def test_wizard_model_snapshot(snap_compare, tmp_path, monkeypatch):
     """Шаг «Модель» мастера: список моделей + строка фильтра."""
     from tui.editors.connection import ConnectionEditor
     from tui.editors.model import ModelEditor
     from textual.widgets import Input
+    _isolate_snapshot_cwd(monkeypatch, tmp_path)
     app = _app(tmp_path)
 
     async def setup(pilot):
@@ -168,7 +163,7 @@ def test_wizard_model_snapshot(snap_compare, tmp_path):
 
 def test_wizard_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
     """Шаг «Голосовой ввод» мастера: выбран «Свой endpoint», под ним — его поля."""
-    from tui.screens.onboarding import _VOICE_STEP
+    from tui.screens.onboarding import STEP_VOICE
     _isolate_voice_state(monkeypatch, tmp_path)
     app = _app(tmp_path)
 
@@ -182,7 +177,7 @@ def test_wizard_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
         scr._values["completions_url"] = "https://h/v1/chat/completions"
         scr._values["Authorization"] = ""
         scr._values["model"] = "test-model"
-        scr._step = _VOICE_STEP
+        scr._step = scr._steps.index(STEP_VOICE)
         scr._render_step()
         await pilot.pause()
         await pilot.press("down")               # курсор → «Свой endpoint»
@@ -195,13 +190,12 @@ def test_wizard_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
 
 # --- /settings ---
 
-def test_settings_connection_snapshot(snap_compare, tmp_path, monkeypatch):
+def test_settings_connection_snapshot(snap_compare, tmp_path):
     """/settings → «Подключение»: три поля, галка «без авторизации», строка пробы.
 
     Пресет-лист здесь не раскрыт — в отличие от мастера: адрес уже настроен, а канон
     2026-08-17 поднимает список только на ПУСТОМ поле. Под адресом вместо списка стоит
     постоянная строка «Alt+↓ — показать список»."""
-    _isolate_config_layers(monkeypatch, tmp_path)
     app = _app(tmp_path, _cfg())
     cfg_file = _write_cfg(tmp_path)
 
@@ -224,7 +218,6 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
     # Инъекции fetch у секции «Модель» нет (список берёт `model_picker.fetch_models`
     # прямо на монтировании) — подменяем сам модуль-источник.
     monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **k: _models())
-    _isolate_config_layers(monkeypatch, tmp_path)
     app = _app(tmp_path, _cfg())
     cfg_file = _write_cfg(tmp_path)
 
@@ -233,7 +226,7 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
         scr = _mk_settings(config_path=str(cfg_file))
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        open_settings_section(scr, "Модель")
+        open_settings_section(scr, "Модели")
         await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
                          and scr.query(ModelEditor).first().models_loaded, "models loaded")
         await _freeze_cursors(pilot)
@@ -243,7 +236,6 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
 
 def test_settings_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
     """/settings → «Голос»: курсор на «Свой endpoint», под ним — четыре поля."""
-    _isolate_config_layers(monkeypatch, tmp_path)
     _isolate_voice_state(monkeypatch, tmp_path)
     app = _app(tmp_path, {"voice": {}})
 

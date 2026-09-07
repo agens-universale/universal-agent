@@ -67,8 +67,9 @@ level: default
 #     token: sk-...
 #
 # slots:                                    # уровни — УКАЗАТЕЛИ в models (не копии)
-#   light: flash
-#   default: glm-local
+#   light: flash                            # незаданный слот резолвится матрицей
+#   default: glm-local                      # фоллбэков соседних уровней
+#   max: deepseek-max
 #
 # assign:                                   # справа — уровень (индирекция через slots)
 #   finish_gate: light                      # ИЛИ алиас (жёсткий пин конкретной модели)
@@ -740,13 +741,16 @@ pricing:
 #     url: https://routerai.ru/api/v1/chat/completions
 
 # Пресеты выпадающего списка в поле «URL» голосового ввода (можно дополнять своими).
-voice_endpoint_presets:
-  - name: OpenAI
-    url: https://api.openai.com/v1/audio/transcriptions
-  - name: Groq
-    url: https://api.groq.com/openai/v1/audio/transcriptions
-  - name: Mistral
-    url: https://api.mistral.ai/v1/audio/transcriptions
+# Закомментировано намеренно — по той же причине, что и `endpoint_presets` выше:
+# пока ключа тут нет, работает список из кода и обновляется вместе с версией агента.
+# Раскомментируете — ваш список перекроет кодовый и с обновлениями меняться уже не будет.
+# voice_endpoint_presets:
+#   - name: OpenAI
+#     url: https://api.openai.com/v1/audio/transcriptions
+#   - name: Groq
+#     url: https://api.groq.com/openai/v1/audio/transcriptions
+#   - name: Mistral
+#     url: https://api.mistral.ai/v1/audio/transcriptions
 
 # Сборка мусора (gc.collect) — точки C1/C2/C3.
 # C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.

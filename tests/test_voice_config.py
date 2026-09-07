@@ -4,18 +4,6 @@ import pytest
 from config_modules.voice import VoiceConfig, voice_enabled, voice_section_filled
 
 
-@pytest.fixture(autouse=True)
-def _isolate_config_layers(monkeypatch, tmp_path):
-    """Слои поверх базового конфига — на tmp. Без этого load_config подмешивал бы
-    РЕАЛЬНЫЙ ~/.gc/config.local.yml разработчика (voice-секцию туда пишет наш же UI)
-    и .gc/config.yml рабочего каталога: тест «перекрытия нет» падал бы на машине, где
-    голосовой ввод настроен, — то есть ровно у того, кто его и разрабатывает."""
-    import config as config_mod
-    monkeypatch.setattr(config_mod, "managed_config_path",
-                        lambda: tmp_path / "config.local.yml")
-    monkeypatch.setattr(config_mod, "_project_local_config_path", lambda: None)
-
-
 def test_voice_config_defaults():
     cfg = VoiceConfig()
     assert cfg.provider == "openai"
@@ -77,7 +65,7 @@ def test_voice_overridden_fact_computed(tmp_path, monkeypatch):
         "  token: local\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("config.managed_config_path", lambda: managed)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: managed)
     cfg = config_mod.load_config(str(base))
     assert cfg["voice_overridden_by_managed"] == \
         "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -109,8 +97,9 @@ def test_voice_override_notice_is_silent_when_the_project_layer_wins(tmp_path, m
         "voice:\n  url: https://project.example/v1/audio/transcriptions\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("config.managed_config_path", lambda: managed)
-    monkeypatch.setattr("config._project_local_config_path", lambda: str(project))
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: managed)
+    monkeypatch.setattr("config_modules.env_vars.project_local_config_path",
+                        lambda: str(project))
 
     cfg = config_mod.load_config(str(base))
     assert cfg["voice"]["url"] == "https://project.example/v1/audio/transcriptions"
@@ -135,8 +124,9 @@ def test_voice_override_notice_survives_a_project_layer_about_other_keys(tmp_pat
     )
     project = tmp_path / "project.yml"
     project.write_text("voice:\n  language: en\n", encoding="utf-8")
-    monkeypatch.setattr("config.managed_config_path", lambda: managed)
-    monkeypatch.setattr("config._project_local_config_path", lambda: str(project))
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: managed)
+    monkeypatch.setattr("config_modules.env_vars.project_local_config_path",
+                        lambda: str(project))
 
     cfg = config_mod.load_config(str(base))
     assert cfg["voice"]["language"] == "en"
@@ -159,7 +149,7 @@ def test_voice_overridden_fact_ignores_the_address_form(tmp_path, monkeypatch):
         "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n"
         "  model: small\n",
         encoding="utf-8")
-    monkeypatch.setattr("config.managed_config_path", lambda: managed)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: managed)
     cfg = config_mod.load_config(str(base))
     assert cfg["voice_overridden_by_managed"] is None
 
@@ -185,7 +175,7 @@ def test_voice_overridden_fact_token_only(tmp_path, monkeypatch):
         "  token: local\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("config.managed_config_path", lambda: managed)
+    monkeypatch.setattr("mcp_runtime.paths.managed_config_path", lambda: managed)
     cfg = config_mod.load_config(str(base))
     assert cfg["voice_overridden_by_managed"] == "<без url>"
 
@@ -198,11 +188,11 @@ def test_broken_voice_section_fails_validation_not_arithmetic(tmp_path):
     «dictionary update sequence element #0 has length 1» — про собственный конфиг он
     из такого сообщения не узнавал ничего."""
     import config as config_mod
-    from pydantic import ValidationError
 
     base = tmp_path / "config.yml"
     base.write_text("voice: broken\n", encoding="utf-8")
 
-    with pytest.raises(ValidationError) as exc:
+    # отказ схемы приходит завёрнутым (MR #80, L28) — ключ назван, дампа нет
+    with pytest.raises(ValueError, match="не проходит схему") as exc:
         config_mod.load_config(str(base))
     assert "voice" in str(exc.value)

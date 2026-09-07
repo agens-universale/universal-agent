@@ -198,3 +198,129 @@ async def test_onboarding_is_modal_for_help_and_notices(tmp_path):
         await pilot.press("f4")
         await pilot.pause()
         assert isinstance(app.screen, OnboardingScreen), "F4 открыл /notices поверх мастера"
+
+
+# ---------------------------------------------------------------------------
+# Test 7: признак ступени «без профиля» доезжает до экрана мастера
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_review_mode_forwards_the_deactivation_flag(tmp_path):
+    """`tui/__init__.py` ставит признак атрибутом приложения — приложение обязано
+    донести его до экрана: иначе финал мастера не снимет указатель и упрётся в
+    отказ записи (стек следующего старта поднимет сломанный профиль)."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import OnboardingScreen
+
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "review"
+    app._onboarding_config_path = tmp_path / "config.yml"
+    app._onboarding_deactivate_profile = True
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, OnboardingScreen)
+        assert scr._deactivate_profile is True
+
+
+@pytest.mark.asyncio
+async def test_onboarding_does_not_deactivate_by_default(tmp_path):
+    """Отрицательный сторож: обычный первый запуск (признак не ставился) — мастер
+    к указателю профиля не прикасается."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import OnboardingScreen
+
+    cfg = {"completions_url": "http://your-backend:PORT/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
+           "model": "<ВПИШИТЕ_МОДЕЛЬ>"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "auto"
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, OnboardingScreen)
+        assert scr._deactivate_profile is False
+
+
+@pytest.mark.asyncio
+async def test_review_mode_forwards_the_degradation_message(tmp_path):
+    """Текст деградации загрузки ставит атрибутом та же точка входа — приложение
+    обязано донести его до экрана: под мастером глобальная навигация заблокирована,
+    и другого адреса показа у текста нет."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import OnboardingScreen
+
+    cfg = {"completions_url": "https://h/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "review"
+    app._onboarding_config_path = tmp_path / "config.yml"
+    app._onboarding_degraded = "config.yml не читается с профилем \"work\""
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, OnboardingScreen)
+        assert scr._degraded_note == app._onboarding_degraded
+
+
+@pytest.mark.asyncio
+async def test_onboarding_has_no_degradation_message_by_default(tmp_path):
+    """Отрицательный сторож: обычный первый запуск — деградации не было, и
+    показывать нечего."""
+    from tui.app import TuiApp
+    from tui.screens.onboarding import OnboardingScreen
+
+    cfg = {"completions_url": "http://your-backend:PORT/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
+           "model": "<ВПИШИТЕ_МОДЕЛЬ>"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "auto"
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, OnboardingScreen)
+        assert scr._degraded_note is None
+
+
+@pytest.mark.asyncio
+async def test_finish_onboarding_survives_a_config_that_stopped_loading(tmp_path,
+                                                                       monkeypatch):
+    """Финал онбординга перечитывает конфиг — и обязан делать это ЗА ГЕЙТОМ, тем же,
+    что держит окно на битом config.yml (`reload_config_if_changed`): причина в
+    `/notices`, окно на прежней базе.
+
+    Файл ломается в зазоре между записью визарда и финалом (соседнее окно, редактор
+    с автосохранением, оборванная запись) — редко, но цена несоразмерна поводу:
+    неперехваченный отказ загрузчика уходит крэшем Textual поверх настройки, которую
+    человек только что закончил, и терять её ради диагностики не за что."""
+    from runtime_notices import collect_runtime_notices
+    from tui.app import TuiApp
+    from tui.screens.main import TraceScreen
+    from tui.screens.onboarding import OnboardingScreen
+
+    monkeypatch.chdir(tmp_path)
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text("backend: [this is not, valid: yaml:", encoding="utf-8")
+    cfg = {"completions_url": "http://your-backend:PORT/v1/chat/completions",
+           "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
+           "model": "<ВПИШИТЕ_МОДЕЛЬ>"}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._onboarding_mode = "auto"
+    app._onboarding_config_path = str(cfg_file)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, OnboardingScreen)
+
+        app._finish_onboarding()          # финал на сломавшемся файле
+        await pilot.pause()
+
+        assert isinstance(app.screen, TraceScreen)   # человек на главном, а не в трейсбеке
+        codes = [n.code for n in collect_runtime_notices()]
+        assert "config_reload_failed" in codes, codes

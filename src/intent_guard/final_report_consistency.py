@@ -14,6 +14,7 @@ from summarize.llm import (
     request_auxiliary_completion_text,
 )
 from bundled_assets import bundled_root
+from utils.user_text import read_user_text
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = str(bundled_root())
@@ -81,8 +82,8 @@ def _load_guard_prompt(prompt_path: str | None = None) -> str:
         raise FileNotFoundError(
             f"Intent guard prompt file not found: {path}"
         )
-    with open(path, "r", encoding="utf-8") as fd:
-        prompt = fd.read().strip()
+    # Путь задаёт конфиг (`chat_completions_intent_guard_prompt_path`).
+    prompt = read_user_text(path).strip()
     if not prompt:
         raise ValueError(
             f"Intent guard prompt file is empty: {path}"

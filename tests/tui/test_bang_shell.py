@@ -67,6 +67,15 @@ def test_parse_clear_meta_invalid():
     assert meta is None and err is not None
 
 
+def test_parse_clear_meta_rejects_a_superscript_digit():
+    """Класс «isdigit + int»: `²` проходит `isdigit()`, а `int("²")` падает
+    голым ValueError — `! clear ²` роняло разбор строки ввода вместо честного
+    «использование: ! clear [N]». Минус перед ней бьёт в ту же пару: знак
+    снимается ДО проверки, и `-²` доезжает до того же `int()`."""
+    assert parse_clear_meta("clear ²") == (None, "использование: ! clear [N]")
+    assert parse_clear_meta("clear -²") == (None, "использование: ! clear [N]")
+
+
 def test_normalize_crlf():
     assert normalize_output("a\r\nb\r\n") == "a\nb\n"
     assert normalize_output("a\nb") == "a\nb"

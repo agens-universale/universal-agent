@@ -39,7 +39,8 @@ def test_run_prints_rule_header_and_final_check(tmp_path, monkeypatch):
     idx = next(i for i, l in enumerate(lines) if l.strip().startswith("✓ Готово"))
     assert lines[idx - 1] == ""                               # пустая строка перед финалом
     assert lines[-1] == ""                                    # и после (воздух перед промптом)
-    assert idx == len(lines) - 2                              # ✓ Готово — предпоследняя строка
+    # После «✓ Готово» идут 3 строки сводки (три уровня) + пустая строка
+    assert idx == len(lines) - 5
 
 
 def test_endpoint_rendered_as_section(tmp_path, monkeypatch):
@@ -69,6 +70,10 @@ def test_blank_line_separates_blocks(tmp_path, monkeypatch):
         "agent:\n  model: \"m\"\n", encoding="utf-8")
     monkeypatch.setattr(wz, "_reload_config", lambda: {
         "completions_url": "https://x/v1", "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"})
+    # Список моделей не участвует в проверке — без подмены шаг «Модель» реально
+    # стучится на «https://x/v1» (зелёный тест сейчас — только потому, что DNS
+    # не резолвит этот хост).
+    monkeypatch.setattr("model_picker.fetch_models", lambda *a, **k: None)
     io, lines = _capture()
     wz.run({"completions_url": "https://x/v1",
             "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"},

@@ -7,8 +7,6 @@ Space — отметить, Enter — выполнить отмеченное, E
 ИЛИ Esc — `on_unmount`), не раньше: крэш до закрытия должен повторить показ."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -16,6 +14,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
+from tui.form_frame import cap_frame_height
 from tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
 
 _FOOTER = "Space — отметить · Enter — выполнить отмеченное · Esc — позже (доступно в /settings)"
@@ -61,8 +60,13 @@ class PostUpdateScreen(Screen):
         self._stamped = False
 
     def on_mount(self) -> None:
+        self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
         if self._wired:
             self.run_worker(self._scan_mcp_updates, thread=True, name="post-update-mcp-scan")
+
+    def on_resize(self, event: events.Resize) -> None:
+        # Потолок рамки зависит только от высоты окна и хрома (см. form_frame).
+        cap_frame_height(self, "#pu-scroll")
 
     def _scan_mcp_updates(self) -> None:
         """Фоновый воркер: у кого из подключённых версия отстала от рецепта."""
@@ -100,14 +104,11 @@ class PostUpdateScreen(Screen):
 
     def _compute_needs_sync(self) -> bool:
         from config import _default_config_path
-        try:
-            user_text = Path(self._config_path).read_text(encoding="utf-8")
-        except OSError:
-            user_text = ""
-        try:
-            template_text = Path(_default_config_path()).read_text(encoding="utf-8")
-        except OSError:
-            template_text = ""
+        from utils.user_text import read_user_text_or_none
+        # Экран показывается СРАЗУ после апгрейда, до первой сессии: отказ здесь —
+        # это «агент не открылся после обновления», а не «одним пунктом меньше».
+        user_text = read_user_text_or_none(self._config_path) or ""
+        template_text = read_user_text_or_none(_default_config_path()) or ""
         try:
             return bool(self._config_sync.needs_sync(user_text, template_text))
         except ValueError:

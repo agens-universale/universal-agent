@@ -83,32 +83,27 @@ def test_apply_finish_gate_mode_smart_sets_both_runtime_keys():
 # --- §7 test 4a: коллизия через реальный config.yml (load_config/flatten_app_config) ---
 
 
-def _load(tmp_path, monkeypatch, yaml_text):
-    """load_config на изолированном config.yml (overlay-слои нейтрализованы — тот же
-    паттерн, что test_flatten_exposes_tui_text_answer_mode в test_adaptive_bounce_flag.py)."""
+def _load(tmp_path, yaml_text):
+    """load_config на изолированном config.yml (слои поверх него нейтрализует общая
+    автофикстура `tests/conftest.py::_isolated_config_layers`)."""
     import config as cfgmod
-    import mcp_runtime.paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(yaml_text, encoding="utf-8")
     return cfgmod.load_config(str(conf))
 
 
-def test_explicit_global_off_without_tui_key_is_off_e2e(tmp_path, monkeypatch):
+def test_explicit_global_off_without_tui_key_is_off_e2e(tmp_path):
     """agent.strict_turn_finish_validation: false явно, tui.finish_gate_mode отсутствует
     → через реальный load_config/flatten_app_config эффективный /gate = off."""
-    cfg = _load(tmp_path, monkeypatch, "agent:\n  strict_turn_finish_validation: false\n")
+    cfg = _load(tmp_path, "agent:\n  strict_turn_finish_validation: false\n")
     assert effective_finish_gate_mode(cfg) == "off"
 
 
-def test_explicit_tui_key_beats_explicit_global_off_e2e(tmp_path, monkeypatch):
+def test_explicit_tui_key_beats_explicit_global_off_e2e(tmp_path):
     """Тот же явный global off + явный tui.finish_gate_mode: on → tui-ключ побеждает."""
     cfg = _load(
         tmp_path,
-        monkeypatch,
         'agent:\n  strict_turn_finish_validation: false\ntui:\n  finish_gate_mode: "on"\n',
     )
     assert effective_finish_gate_mode(cfg) == "on"

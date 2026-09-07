@@ -384,6 +384,8 @@ class TraceScreen(Screen):
         self._esc_confirm_kind: Optional[str] = None  # "clear" | "stop" | None
         self._footer_hint_timer = None                # textual.Timer
         self._footer_hint_active: bool = False
+        self._footer_refusal_active: bool = False
+        self._refusal_run_id = None   # прогон, ШЕДШИЙ при постановке отказа
         # Input history: per-project ↑/↓ навигация.
         # _history создаётся в on_mount (project_dir = threads_dir.parent).
         self._history = None  # type: Optional["InputHistory"]
@@ -931,11 +933,7 @@ class TraceScreen(Screen):
             return self._voice_footer_render().plain
         if self.app.tui_state.ask_human_state is not None:
             return "Esc/stop  Enter/ответить"
-        if self.app.tui_state.active_task_id is None:
-            return _FOOTER_LEFT
-        runner = getattr(self.app, "active_runner", None)
-        is_running = runner is not None and runner.is_running()
-        return _FOOTER_RUNNING_LEFT if is_running else _FOOTER_LEFT
+        return _FOOTER_RUNNING_LEFT if self._run_in_progress() else _FOOTER_LEFT
 
     def _footer_left_text(self) -> str:
         """Команды footer-left + счётчик уведомлений, собранные по фактической ширине.
@@ -986,6 +984,12 @@ class TraceScreen(Screen):
         if self._voice is not None and self._voice.state != "idle":
             left.update(self._voice_footer_render())
             return
+        # Подсказка уступает место запущенному прогону: пока отказ дожёвывает
+        # свои 5 секунд, человек мог отправить запрос — футер обязан показать
+        # «Ctrl+C/stop», а не устаревший текст (живой смок владельца 2026-09-04).
+        if (self._footer_refusal_active and self._run_in_progress()
+                and self.app.tui_state.active_task_id != self._refusal_run_id):
+            self._reset_footer_hint_state()
         if not self._footer_hint_active:
             left.update(self._footer_left_text())
 
@@ -998,8 +1002,33 @@ class TraceScreen(Screen):
         """Рабочая папка сессии — фиксирована = папка запуска процесса."""
         return str(Path.cwd())
 
+    def _show_footer_refusal(self, text: str) -> None:
+        """Содержательный отказ («✗ не сохранено: <причина>») в footer-left.
+
+        Отдельно от `_show_footer_hint`: у отказа есть причина с координатой
+        («slots.default: алиас "ghost" не найден…»), и 2-секундного дефолта
+        эфемерных подсказок не хватает её прочитать (живой смок владельца
+        2026-09-04) — отказ держится 5с, как paste-hint. Но не ценой
+        актуальности: следующее действие человека (клавиша, печать, запуск
+        прогона) гасит его раньше — `_footer_refusal_active` сужает это правило
+        до отказов, esc-confirm и paste-hint живут по своим канонам."""
+        self._show_footer_hint(text, seconds=5.0)
+        self._footer_refusal_active = True
+        # Снимок прогона НА МОМЕНТ постановки: «прогон вытесняет отказ» — только
+        # про прогон, начавшийся ПОСЛЕ. Отказ, поставленный во время работы
+        # агента (/gate из палитры), без снимка гас первым же тиком опроса —
+        # 5 секунд не читались никогда именно там, где отказы и жмут (ревью
+        # 2026-09-04, находка 1).
+        self._refusal_run_id = (self.app.tui_state.active_task_id
+                                if self._run_in_progress() else None)
+
     def _show_footer_hint(self, text: str, seconds: float = 2.0) -> None:
-        """Короткая подсказка в footer-left (esc-confirm — 2с, paste-hint — 5с)."""
+        """Короткая подсказка в footer-left (esc-confirm — 2с, paste-hint — 5с,
+        содержательные отказы — `_show_footer_refusal`)."""
+        # Новая подсказка снимает режим отказа: иначе paste-hint, показанный
+        # ПОСЛЕ отказа, гасился бы первой печатью — не по своему канону
+        # (`_show_footer_refusal` ставит флаг заново, после этого вызова).
+        self._footer_refusal_active = False
         self._footer_hint_active = True
         self.query_one("#footer-left").update(text)
         if self._footer_hint_timer is not None:
@@ -1011,21 +1040,39 @@ class TraceScreen(Screen):
         self._esc_confirm_kind = kind
         self._show_footer_hint(_HINT_TEXT[kind])
 
-    def _clear_footer_hint(self) -> None:
-        """Сбросить hint-state (esc + paste) + восстановить footer-left (команды)."""
+    def _reset_footer_hint_state(self) -> None:
+        """Снять hint-state без перерисовки — для вызова ИЗ `_refresh_footer`
+        (полный `_clear_footer_hint` зовёт его сам и зациклился бы)."""
         self._esc_confirm_kind = None
         self._footer_hint_active = False
+        self._footer_refusal_active = False
+        self._refusal_run_id = None
         if self._footer_hint_timer is not None:
             self._footer_hint_timer.stop()
             self._footer_hint_timer = None
+
+    def _clear_footer_hint(self) -> None:
+        """Сбросить hint-state (esc + paste) + восстановить footer-left (команды)."""
+        self._reset_footer_hint_state()
         self._refresh_footer()
+
+    def _run_in_progress(self) -> bool:
+        """Прогон реально идёт: активная задача + живой раннер. Один предикат на
+        выбор `Ctrl+C/stop` в footer-left и на уступку подсказки прогону."""
+        runner = getattr(self.app, "active_runner", None)
+        return (self.app.tui_state.active_task_id is not None
+                and runner is not None and runner.is_running())
 
     # --- голосовой ввод (Ctrl+T) ---------------------------------------
 
     def _voice_config(self) -> dict:
         """voice-секция + прокси агента: у голоса своего поля прокси нет, а в облако
-        он ходит по тем же правилам, что backend (копия — оригинал не трогаем)."""
-        cfg = getattr(self.app, "_config", None) or {}
+        он ходит по тем же правилам, что backend (копия — оригинал не трогаем).
+
+        Читаем из ЕДИНОЙ точки (`effective_config`), как витрины и сборка executor:
+        база `app._config` не знает про сессионный слой, и профиль, выбранный на
+        сессию, со своей секцией `voice` до диктовки бы не доехал."""
+        cfg = self.app.effective_config() or {}
         voice = dict(cfg.get("voice") or {})
         voice.setdefault("proxy", cfg.get("proxy"))
         return voice
@@ -1114,7 +1161,7 @@ class TraceScreen(Screen):
         Дёшево и без сети: `status_cheap` смотрит state.json и конфиг."""
         try:
             from tui.services.voice_setup import status_cheap
-            cfg = getattr(self.app, "_config", None) or {}
+            cfg = self.app.effective_config() or {}   # единая точка, как в _voice_config
             return status_cheap(cfg).mode == "local"
         except Exception:
             return False
@@ -1151,7 +1198,7 @@ class TraceScreen(Screen):
         """Поднять батарейку фоном. Запись не начинаем сами: холодный старт долгий, и
         человек за это время успевает уйти — зовём его обратно тостом."""
         self._voice_service_pending = True
-        cfg = getattr(self.app, "_config", None) or {}
+        cfg = self.app.effective_config() or {}   # единая точка, как в _voice_config
 
         def _work() -> None:
             from voice_runtime.autostart import ensure_voice_service
@@ -3542,8 +3589,12 @@ class TraceScreen(Screen):
             event.prevent_default()
             return
 
-        # Любая не-Esc клавиша сбрасывает pending hint (без прерывания обработки).
-        if event.key != "escape" and self._esc_confirm_kind is not None:
+        # Любая не-Esc клавиша сбрасывает pending hint (без прерывания обработки) —
+        # и esc-confirm, и содержательный отказ: раз человек продолжил работать,
+        # подсказка прочитана, футеру пора показывать актуальное.
+        if event.key != "escape" and (
+            self._esc_confirm_kind is not None or self._footer_refusal_active
+        ):
             self._clear_footer_hint()
 
         # Голосовой ввод: Ctrl+T — toggle записи (не работает при открытых
@@ -3782,7 +3833,7 @@ class TraceScreen(Screen):
                 try:
                     apply_toggle(self.app, cmd.name, new_value)
                 except (ValueError, OSError) as exc:
-                    self._show_footer_hint(f"✗ не сохранено: {exc}")
+                    self._show_footer_refusal(f"✗ не сохранено: {exc}")
                 else:
                     self._palette.refresh_toggle_state()
                 event.stop()
@@ -3803,8 +3854,14 @@ class TraceScreen(Screen):
             return
         # Печать в input после 1-го Esc сбрасывает pending hint — клавиша уже
         # «не Esc», подтверждать нечего. Screen.on_key для печатных не вызывается
-        # (TextArea их потребляет), поэтому ловим здесь.
+        # (TextArea их потребляет), поэтому ловим здесь. Содержательный отказ —
+        # то же правило (человек продолжил печатать), НО только на непустом
+        # тексте: `inp.text = ""` в командах стоит ДО исполнения, а Changed от
+        # него доставляется ПОСЛЕ — когда отказ уже показан, и пустое изменение
+        # гасило его в момент появления (живой смок владельца 2026-09-04).
         if self._esc_confirm_kind is not None:
+            self._clear_footer_hint()
+        elif self._footer_refusal_active and event.text_area.text:
             self._clear_footer_hint()
         # Сброс history-navigation state при user-правке input.
         # Программные правки из _history_prev/_next запоминают последний text;
@@ -4187,7 +4244,7 @@ class TraceScreen(Screen):
                 try:
                     apply_toggle(self.app, cmd.name, new_value)
                 except (ValueError, OSError) as exc:
-                    self._show_footer_hint(f"✗ не сохранено: {exc}")
+                    self._show_footer_refusal(f"✗ не сохранено: {exc}")
                 else:
                     self._palette.refresh_toggle_state()
                 return
@@ -5323,7 +5380,7 @@ class TraceScreen(Screen):
             available = effective_toggle_names(self.app, "profiles")
             if value not in available:
                 tail = f" · доступно: {', '.join(available)}" if available else ""
-                self._show_footer_hint(f'✗ профиль "{value}" не найден{tail}')
+                self._show_footer_refusal(f'✗ профиль "{value}" не найден{tail}')
                 return
             target = value
         # Единственная точка вызова на оба исхода: `apply_session_override`
@@ -5335,7 +5392,7 @@ class TraceScreen(Screen):
         try:
             self.app.switch_session_profile(target)
         except (ValueError, OSError) as exc:
-            self._show_footer_hint(f"✗ не сохранено: {exc}")
+            self._show_footer_refusal(f"✗ не сохранено: {exc}")
 
     def _toggle_info_command(self, name: str) -> None:
         """`/gate` или `/answers`, набранные и подтверждённые текстом (не через

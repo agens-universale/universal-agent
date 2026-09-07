@@ -142,6 +142,35 @@ def test_legacy_when_merged_registry_empty():
     assert router.registry_empty() is True
 
 
+def test_assign_bindings_are_inert_while_registry_is_empty():
+    """§14: «assign уровнями при пустом реестре — валиден, инертен + warning».
+
+    Схема и warning закрыты в `tests/config/test_model_sections_phase2.py`
+    (`test_empty_registry_assign_level_valid_and_warns`), а ИНЕРТНОСТЬ — только
+    здесь: конфиг с привязками, но без реестра, обязан резолвиться легаси
+    ЦЕЛИКОМ. Иначе привязка `finish_gate: light` увела бы судью на
+    несуществующий слот — ровно тот случай, ради которого warning и написан.
+    """
+    router = _router({
+        "assign": {
+            "finish_gate": "light",
+            "summary": "max",
+            "subagents": {"subagent_critic": "max", "*": "light"},
+        },
+        "backend": {"completions_url": "http://legacy/v1/chat/completions"},
+        "agent": {"model": "legacy-model"},
+    })
+    assert router.registry_empty() is True
+
+    for consumer in ("main", "finish_gate", "summary",
+                     "subagent:subagent_critic", "subagent:subagent_worker"):
+        resolved = router.resolve(consumer)
+        assert resolved.alias is None, f"{consumer}: привязка сработала без реестра"
+        assert resolved.model == "legacy-model"
+        assert resolved.url == "http://legacy/v1/chat/completions"
+        assert resolved.source == "легаси"
+
+
 def test_legacy_force_overrides_nonempty_registry():
     router = _router({
         "models": {"flash": {"url": "http://flash/v1", "token": ""}},

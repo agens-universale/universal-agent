@@ -6,6 +6,7 @@ import yaml
 from config import apply_cli_overrides, load_config, sync_logging_flat_and_params  # type: ignore
 from config_modules.env_interpolation import resolve_env_placeholders
 from bundled_assets import bundled_root
+from utils.user_text import read_user_text
 
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
@@ -44,8 +45,10 @@ def load_server_config() -> Dict[str, Any]:
             "logging": {},
         }
 
-    with open(cfg_path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    # config_server.yml человек правит руками так же, как config.yml, — значит и
+    # «файл на месте, но не читается» здесь такой же рабочий сценарий. Отказ должен
+    # назвать файл: без пути оператор сервера видит голую жалобу кодека.
+    raw = yaml.safe_load(read_user_text(cfg_path)) or {}
 
     # ${ENV:VAR} / ${FILE:path} — как в основном config.yml, чтобы серверные
     # секреты (server.auth_token и пр.) не приходилось держать в файле открытым

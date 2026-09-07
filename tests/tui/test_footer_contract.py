@@ -30,10 +30,16 @@ def _all_footer_strings():
     Перебор по `dir()` + `isinstance(str)` пропустил бы главный футер «Подключения»:
     он живёт значением словаря, а не отдельной константой. Мастер перебирается
     наравне с настройками: сторож, знающий один экран, пропустил бы ту же ложь,
-    переехавшую на соседний."""
+    переехавшую на соседний.
+
+    Футеры секций, вынесенных в свои модули-редакторы, перебираются здесь же
+    (Global Constraints волны B): у секции «Модели» футер позиционный и живёт
+    целиком в `models_section` — сторож, смотрящий только в экраны, не увидел бы
+    ни одной её строки."""
+    from tui.editors import models_section
     from tui.screens import onboarding, settings
     out = {}
-    for module in (settings, onboarding):
+    for module in (settings, onboarding, models_section):
         for name in dir(module):
             if not name.startswith(("_FOOTER", "_VOICE_FOOTER")):
                 continue
@@ -53,10 +59,17 @@ def _all_hint_strings():
     `settings`/`onboarding`: сторож, смотрящий только в экраны (`_all_footer_strings`),
     пропустил бы подмену клавиши здесь (спека 2026-08-06 §4.5, задача 5 бланка).
 
-    Суффикс `_HINT`/`_HINT_NO_MATCH` — не `_HINT_CLASS` (CSS-класс, не текст)."""
-    from tui.editors import field_list, preset_list, voice_endpoint
+    Суффикс `_HINT`/`_HINT_NO_MATCH` — не `_HINT_CLASS` (CSS-класс, не текст).
+
+    Новый модуль формы регистрируется здесь той задачей, которая его создаёт
+    (Global Constraints волны B): `model_entry_form` называет обе клавиши своих
+    списков, `models_section` — подсказки строк и своего инлайн-пикера,
+    `voice_endpoint` — списки адреса, модели и языка голосовой секции."""
+    from tui.editors import (field_list, model_entry_form, models_section,
+                             preset_list, voice_endpoint)
     out = {}
-    for module in (field_list, preset_list, voice_endpoint):
+    for module in (field_list, model_entry_form, models_section, preset_list,
+                   voice_endpoint):
         for name in dir(module):
             if not (name.endswith("_HINT") or name.endswith("_HINT_NO_MATCH")):
                 continue
@@ -64,6 +77,136 @@ def _all_hint_strings():
             if isinstance(value, str):
                 out[f"{module.__name__}.{name}"] = value
     return out
+
+
+def _model_section_notice_strings():
+    """Notice- и confirm-константы редакторов моделей — те же обещания клавиш,
+    что в футерах, только сказанные телом секции (спека эффективного вида §5,
+    [Р2a-N15]).
+
+    Единственный модуль, который сегодня кладёт такие тексты module-level
+    константой под этим префиксом, — `models_section`: `settings`/`onboarding`
+    собирают свои отказы f-строкой по месту (в перебор по `dir()` они не
+    попадают в принципе), а `model_entry_form` отказов не заводит вовсе.
+    Перебор сужен до модуля, который реально даёт вклад, — иначе молчаливый
+    нулевой вклад остальных ничем не ловится (в отличие от `_all_footer_strings`
+    ниже, где вклад несут все перебираемые модули). Расширять охват на
+    settings/onboarding можно только вместе с переименованием их текстов под
+    этот префикс.
+
+    Заодно это сторож «текст — module-level константа»: сообщение, собранное
+    f-строкой по месту, в перебор не попадёт вовсе, и подмена клавиши в нём
+    осталась бы незамеченной."""
+    from tui.editors import models_section
+    out = {}
+    for module in (models_section,):
+        for name in dir(module):
+            if not (name.startswith("_NOTICE") or name.startswith("_CONFIRM")):
+                continue
+            value = getattr(module, name)
+            if isinstance(value, str):
+                out[f"{module.__name__}.{name}"] = value
+    return out
+
+
+def test_notice_and_confirm_texts_are_collected_at_all():
+    """Сам сборщик — тоже предмет: пустой перебор молча проходил бы все проверки
+    ниже. Секция «Модели» несёт ОБА отказа эффективного вида — Del и Enter на
+    записи основного конфига: имя, не попавшее в перебор, оставило бы предмет
+    стража за его же границей."""
+    from tui.editors import models_section as m
+    collected = set(_model_section_notice_strings().values())
+    assert m._NOTICE_REMOVE_REFUSED_INHERITED in collected
+    assert m._NOTICE_EDIT_REFUSED_INHERITED in collected
+    # Итог записи — тоже константа: собранный f-строкой по месту, он в перебор не
+    # попадал бы вовсе.
+    assert m._NOTICE_ENTRY_SAVED in collected
+
+
+def test_collected_refusals_follow_the_canon_grammar():
+    """Канон отказов Global Constraints — «✗ не <глагол>: <причина>»: одна форма на
+    все витрины, иначе отказ читается как сбой, а не как ответ."""
+    import re
+    for name, value in _model_section_notice_strings().items():
+        if not value.startswith("✗"):
+            continue
+        assert re.match(r"^✗ не \w+: ", value), f"{name}: отказ мимо канона — {value}"
+
+
+def test_the_inherited_row_footer_promises_neither_del_nor_enter():
+    """На унаследованной строке не работают ни Del, ни Enter — править и удалять
+    запись основного конфига секция профиля не вправе. Футер обязан молчать про
+    обе клавиши (канон «недоступное не обещаем») и обещать то, что там реально
+    работает."""
+    from tui.editors import models_section as m
+    footer = m._FOOTER_PROFILE_BASE_ENTRY
+    assert "Del" not in footer and "Enter" not in footer
+    assert "n — добавить" in footer
+    assert m.FOOTERS_WITH_VIEW[footer].count("Enter") == 0
+
+
+def test_the_file_viewer_key_is_promised_only_in_the_profile_sub_view():
+    """§11a: `v` открывает файл профиля, и клавиша эта — ПОД-ВИДА профиля.
+    Строки её обещания живут производными от футеров под-вида (`_FOOTERS_WITH_
+    VIEW`), а не вторыми литералами: дописанная в одном месте клавиша обязана
+    появиться в обоих, а бюджет двух строк — считаться и для варианта с `v`
+    (он длиннее оригинала, и именно он попадает на экран).
+
+    Ведёт клавишу ЭКРАН (`settings`), поэтому и обещание гасится его настройкой
+    — но слова обещания стоят рядом с остальными футерами секции, иначе их не
+    видел бы ни один сборщик."""
+    from tui.editors import models_section as m
+    promised = set(m.FOOTERS_WITH_VIEW.values())
+    for name, value in _all_footer_strings().items():
+        if m.VIEW_KEY in value:
+            assert value in promised, f"{name}: обещает просмотр файла вне под-вида"
+    for base, viewed in m.FOOTERS_WITH_VIEW.items():
+        assert m.VIEW_KEY not in base
+        assert viewed.count(m.VIEW_KEY) == 1
+        assert viewed.endswith(m._EXIT_TO_LIST), viewed   # выход остаётся последним
+
+
+@pytest.mark.asyncio
+async def test_main_section_empty_body_keeps_the_menu_exit_under_an_overlay(
+        tmp_path, monkeypatch):
+    """Страж над СОСТОЯНИЕМ (а): основная секция, реестр цели пуст и перекрыт слоем
+    выше — строк нет, Esc уводит в МЕНЮ хаба. Прежний футер безусловно отдавал
+    профильное «Esc — к списку»: списка профилей на этом экране нет, обещание вело
+    в никуда (M5 ревью MR #80). `is_profile=False` не имеет права выдавать футер с
+    хвостом `_EXIT_TO_LIST` ни в одном состоянии."""
+    from tests.tui.test_settings_models_section import (_PROJECT_REGISTRY, _editor,
+                                                        _section_over_layers)
+    from tui.editors import models_section as m
+    async with _section_over_layers(tmp_path, monkeypatch, project=_PROJECT_REGISTRY) \
+            as (_pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        assert ed._is_profile is False and ed._row_at_cursor() is None, \
+            "предпосылка: основная секция без единой строки"
+        footer = ed.footer_text()
+        assert m._EXIT_TO_LIST not in footer, footer
+        assert "n — добавить запись" in footer
+        assert m._EXIT_TO_LIST not in _set_footer_widget(scr)
+
+
+@pytest.mark.asyncio
+async def test_main_section_empty_body_keeps_the_menu_exit_with_collapsed_blocks(
+        tmp_path):
+    """Страж над СОСТОЯНИЕМ (б): основная секция, все три блока свёрнуты, резервной
+    строки нет (`agent.model` пуст) — `_rows()` пуст и здесь, вопреки снятому
+    комментарию «строк нет только у профиля». Хвост выхода обязан остаться «Esc»
+    в меню, а не профильным «Esc — к списку» (M5 ревью MR #80)."""
+    from tests.tui.test_settings_models_section import _REGISTRY, _editor, _section
+    from tui.editors import models_section as m
+    async with _section(tmp_path, _REGISTRY, model='""') as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        for kind in ("entry", "slot", "assign"):
+            ed._toggle_block(kind)
+        await pilot.pause()
+        assert ed._is_profile is False and ed._row_at_cursor() is None, \
+            "предпосылка: все блоки свёрнуты, строк нет"
+        footer = ed.footer_text()
+        assert m._EXIT_TO_LIST not in footer, footer
+        assert "n — добавить запись" in footer
 
 
 def test_no_footer_promises_tab_as_probe():
@@ -176,18 +319,24 @@ async def test_wizard_footer_names_the_right_key_per_step(tmp_path):
     где есть проба (шаг «Подключение», карта проб §2.5), раскрытие/перечитывание
     списка ушло на `Alt+↓`. Шаг «Подключение» обещает обе — пробу и `Alt+↓ —
     показать список» (список свёрнут); шаг «Модель» — только `Alt+↓ — перечитать
-    список», `Ctrl+Space` там больше не обещана; шаг MCP молчит про обе."""
-    from tests.tui.conftest import wizard_voice_step
-    async with wizard_voice_step(tmp_path, mode="cloud") as (_pilot, scr):
-        scr._step = 0
+    список», `Ctrl+Space` там больше не обещана; шаг MCP молчит про обе.
+
+    Шаги адресуются ИМЕНАМИ (волна B, Task 8): состав шагов зависит от дискавери
+    профилей, и номер «2» с этого момента у разных прогонов разный."""
+    from tests.tui.conftest import wizard_connection_step
+    from tui.screens.onboarding import STEP_CONNECTION, STEP_MCP, STEP_MODEL
+    async with wizard_connection_step(tmp_path) as (pilot, scr):
+        await pilot.press("escape")   # свернуть пресет-лист, раскрытый по умолчанию
+        await pilot.pause()
+        scr._step = scr._steps.index(STEP_CONNECTION)
         footer = scr._footer_text()
         assert "Ctrl+Space — проверить связь" in footer
         assert "Alt+↓ — показать список" in footer
-        scr._step = 1
+        scr._step = scr._steps.index(STEP_MODEL)
         footer = scr._footer_text()
         assert "Alt+↓ — перечитать список" in footer
         assert "Ctrl+Space" not in footer
-        scr._step = 2
+        scr._step = scr._steps.index(STEP_MCP)
         footer = scr._footer_text()
         assert "Ctrl+Space" not in footer   # на шаге MCP клавиша молчит
         assert "Alt+↓" not in footer
@@ -289,7 +438,7 @@ async def test_no_live_wizard_footer_tells_an_outdated_story(tmp_path):
     from tests.tui.conftest import wizard_voice_step
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         seen = []
-        for step in (0, 1, 2, 3, 4):
+        for step in range(len(scr._steps)):     # весь состав прогона, не «первые четыре»
             scr._step = step
             seen.append(scr._footer_text())
         await pilot.press("tab")
@@ -369,18 +518,24 @@ def test_settings_preset_footers_stay_on_one_line_at_the_canon_width():
         assert len(footer) <= 118, f"{len(footer)} > 118: {footer}"
 
 
-def test_settings_model_footer_promises_alt_down_and_stays_quiet_about_ctrl_space():
-    """Клавиша перечитывает список моделей и в настройках тоже, а секция о ней молчала:
-    ни в футере, ни строкой-подсказкой (у `ModelEditor` списка со своим хинтом нет).
-    При лежавшем сервере секция выглядела безнадёжно сломанной. Молчание о работающей
-    клавише — та же ложь, что обещание неработающей (докстринг файла).
+def test_models_section_footers_split_the_probe_from_the_list():
+    """Пин переехал с `_FOOTERS[_MODEL]` на футеры секции «Модели»: секция поглотила
+    легаси-«Модель», её футер стал позиционным и живёт в своём модуле.
 
-    Роль ушла с `Ctrl+Space` на `Alt+↓` (спека 2026-08-06 §2, §4.2): пробы в «Модели»
-    нет (§5.2 спеки) — обещать `Ctrl+Space` здесь значило бы соврать про несуществующую
-    роль."""
-    from tui.screens.settings import _FOOTERS, _MODEL
-    assert "Alt+↓ — перечитать список" in _FOOTERS[_MODEL]
-    assert "Ctrl+Space" not in _FOOTERS[_MODEL]
+    Развод клавиш (спека 2026-08-06 §2, контракт п.4 волны B) остался тем же, но
+    теперь он ПОЗИЦИОННЫЙ: там, где под курсором список моделей и никакой пробы нет
+    (легаси-редактор, он же под-форма резервной), обещан только `Alt+↓`; проба
+    (`Ctrl+Space`) есть исключительно в форме записи реестра — у неё свои адрес и
+    токен, которые и проверяются."""
+    from tui.editors import models_section as m
+    for footer in (m._FOOTER_EMPTY, m._FOOTER_RESERVE_FORM):
+        assert "Alt+↓ — перечитать список" in footer
+        assert "Ctrl+Space" not in footer
+    assert "Ctrl+Space — проверить связь" in m._FOOTER_FORM_MODEL
+    assert "Alt+↓ — перечитать список" in m._FOOTER_FORM_MODEL
+    assert "Alt+↓ — показать список" in m._FOOTER_FORM_URL
+    for footer in (m._FOOTER_ENTRY, m._FOOTER_RESERVE):
+        assert "Alt+↓" not in footer and "Ctrl+Space" not in footer
 
 
 def test_both_screens_call_ctrl_space_by_the_canon_words():
@@ -446,9 +601,25 @@ def test_network_list_statuses_come_from_one_dictionary():
     дыру не закрыл бы — экраны точно так же разъехались бы на следующей правке одного
     из них. `model.LIST_LOADING is field_list.LIST_LOADING` доказывает, что имя в
     `model.py` — это импорт, а не повторное объявление."""
-    from tui.editors import field_list, model, voice_endpoint
+    from tui.editors import field_list, model, model_entry_form, voice_endpoint
     assert model.LIST_LOADING is field_list.LIST_LOADING
     assert model.LIST_FAILED is field_list.LIST_FAILED
     assert voice_endpoint.LIST_LOADING is field_list.LIST_LOADING
     assert voice_endpoint.LIST_FAILED is field_list.LIST_FAILED
     assert voice_endpoint.LIST_EMPTY is field_list.LIST_EMPTY
+    # Постоянная строка под полем со списком — тот же класс: у формы записи реестра и
+    # у голосовой панели она обязана быть ОДНОЙ (приезжали из двух объявлений).
+    assert model_entry_form.MODEL_RELOAD_HINT is field_list.MODEL_RELOAD_HINT
+    assert voice_endpoint._MODEL_RELOAD_HINT is field_list.MODEL_RELOAD_HINT
+
+
+def test_url_error_comes_from_one_dictionary():
+    """Отказ структурной проверки адреса — тоже ОДНА константа
+    (`onboarding_fields.URL_ERROR`) на все формы с полем адреса, и по той же причине:
+    списанный заново текст расходится с оригиналом на первой самостоятельной правке
+    одной из форм. Сравнение по IDENTITY — одинаковый текст двух разных констант
+    дыру не закрывает."""
+    from onboarding_fields import URL_ERROR
+    from tui.editors import connection, model_entry_form
+    assert connection._URL_ERROR is URL_ERROR
+    assert model_entry_form._URL_ERROR is URL_ERROR

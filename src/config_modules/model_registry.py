@@ -49,7 +49,85 @@ def validate_level_value(value: str) -> str:
     return value
 
 
-def validate_registry_pairs(raw: dict, source: str = "") -> None:
+def connection_parts(
+    *, url: Any, token: Any, completions_url: Any, proxy: Any, authorization: Any
+) -> tuple[bool, bool]:
+    """§2, ЕДИНОЕ определение «адрес задан» / «токен задан» для всех точек проверки.
+
+    Публичное: кроме обеих точек валидации им считает пару форма записи реестра
+    (`tui/editors/model_entry_form`) — интерфейс обязан не давать собрать то, что
+    отвергнет валидатор, а своё определение в форме было бы третьим.
+
+    Адрес — по truthiness, потому что так его резолвит рантайм: or-цепочка
+    `url → backend.completions_url → общий completions_url`
+    (`model_router._resolve_alias`). Значит `url: ""` — это «своего адреса нет, пара
+    наследуется», и правило обязано читать его так же, иначе отвергает законную форму,
+    а `{url: "", token: ...}` пропускает как целую пару.
+
+    Токен — по «значение задано» (`is not None`), потому что так его читает
+    `ModelEntry.authorization_header`: `None` — наследовать, `""` — ЗАДАННЫЙ токен
+    «сервер не требует авторизации»."""
+    return (
+        bool(url or completions_url or proxy),
+        token is not None or authorization is not None,
+    )
+
+
+def resolve_entry_address(*, url: Any, completions_url: Any, inherited: Any = "") -> str:
+    """ДЕЙСТВУЮЩИЙ адрес записи реестра — одна or-цепочка на всех, кто её произносит:
+    свой `url` → своё второе написание `backend.completions_url` → унаследованный из
+    эффективной секции `backend`. Тем же порядком резолвит рантайм
+    (`model_router._resolve_alias`); разъехавшись, витрина назвала бы не тот хост, на
+    который уйдёт запрос.
+
+    Живёт рядом с `connection_parts` и по той же причине: спрашивают цепочку и витрина
+    реестра (`tui/editors/models_section`), и форма записи (`tui/editors/
+    model_entry_form`), а импортом друг у друга им не обойтись — секция сама тянет
+    форму. Роутер сюда не ходит: у него свой слой снимка.
+
+    `inherited=""` — вопрос «что задаёт САМА запись»: пусто значит «своего адреса нет,
+    работает общий»."""
+    return url or completions_url or inherited or ""
+
+
+def _pair_violation(label: str, has_address: bool, has_token: bool) -> str | None:
+    """Текст отказа правила пары (§3) или None, если пара целая. Один на обе точки —
+    иначе формулировки разъезжаются так же, как разъехались бы определения."""
+    if has_address and not has_token:
+        return (
+            f'{label}: задан свой адрес, но не задан токен — укажите token '
+            '(или token: "" — «сервер не требует авторизации»), либо уберите адрес, '
+            "чтобы запись работала через общее подключение"
+        )
+    if has_token and not has_address:
+        return (
+            f"{label}: задан свой токен, но не задан адрес — укажите url, "
+            "либо уберите token, чтобы запись работала через общее подключение"
+        )
+    return None
+
+
+def _unresolved_pair_refs(entry) -> list[str]:
+    """Имена переменных, из-за которых поля СВЯЗИ записи оказались пустыми.
+
+    Смотрит ДОРЕЗОЛВНОЕ значение: после подстановки от `${ENV:X}` не остаётся ничего,
+    кроме пустой строки, и назвать причину уже нечем."""
+    from config_raw import missing_env_refs
+    if not isinstance(entry, dict):
+        return []
+    backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+    headers = (backend.get("chat_completion_headers")
+               if isinstance(backend.get("chat_completion_headers"), dict) else {})
+    names: list[str] = []
+    for value in (entry.get("url"), entry.get("token"), backend.get("completions_url"),
+                  backend.get("proxy"), headers.get("Authorization")):
+        for name in missing_env_refs(value):
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> None:
     """§3, точка B: проверка правила пары на СЫРОМ документе одного слоя, до слияния.
 
     Нужна отдельно от валидатора `ModelEntry`: слои сливаются `deep_merge` рекурсивно по
@@ -57,8 +135,18 @@ def validate_registry_pairs(raw: dict, source: str = "") -> None:
     запись с полной парой — и проверка итогового документа молчит, пока токен базы уходит
     на адрес слоя. Здесь же видно, ЧЕЙ это файл.
 
-    Работает по сырому словарю намеренно: `url: null` («слой снимает адрес») отличается от
-    отсутствия ключа только наличием ключа, и после pydantic это различие уже потеряно."""
+    Работает по сырому словарю потому, что другой формы у слоя до слияния нет: схема
+    применяется один раз, к итоговому документу. Определение пары — общее с точкой A
+    (`connection_parts`): pre-write валидаторы гоняют только A, и разъехавшиеся
+    определения дали бы записанный из Settings файл, который следующий старт отвергнет
+    здесь.
+
+    `raw_source` — ТОТ ЖЕ документ до подстановки `${ENV:…}`. Правило судит значения
+    ПОСЛЕ неё (решение владельца 2026-08-26, вариант Б), и незаданная переменная
+    честно ломает пару: конфиг без неё работать не может. Но винить за это конфиг
+    нельзя — человек забыл `export`, а не ошибся в файле, — поэтому причину называем
+    по дорезолвному виду. Без `raw_source` поведение прежнее: имя переменной в
+    подставленном значении не сохраняется, и выдумывать его нечестно."""
     models = (raw or {}).get("models")
     if not isinstance(models, dict):
         return
@@ -69,21 +157,27 @@ def validate_registry_pairs(raw: dict, source: str = "") -> None:
         backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
         headers = (backend.get("chat_completion_headers")
                    if isinstance(backend.get("chat_completion_headers"), dict) else {})
-        has_address = bool(entry.get("url") or backend.get("completions_url")
-                           or backend.get("proxy"))
-        has_token = "token" in entry and entry["token"] is not None
-        has_token = has_token or headers.get("Authorization") is not None
-        if has_address and not has_token:
-            raise ValueError(
-                f'{prefix}models.{alias}: задан свой адрес, но не задан токен — укажите '
-                'token (или token: "" — «сервер не требует авторизации»), либо уберите '
-                "адрес, чтобы запись работала через общее подключение"
-            )
-        if has_token and not has_address:
-            raise ValueError(
-                f"{prefix}models.{alias}: задан свой токен, но не задан адрес — укажите "
-                "url, либо уберите token, чтобы запись работала через общее подключение"
-            )
+        problem = _pair_violation(
+            f"{prefix}models.{alias}",
+            *connection_parts(
+                url=entry.get("url"),
+                token=entry.get("token"),
+                completions_url=backend.get("completions_url"),
+                proxy=backend.get("proxy"),
+                authorization=headers.get("Authorization"),
+            ),
+        )
+        if problem:
+            names = _unresolved_pair_refs(
+                ((raw_source or {}).get("models") or {}).get(alias))
+            if names:
+                raise ValueError(
+                    f"{prefix}models.{alias}: не задана переменная окружения "
+                    f"{', '.join(names)} — ссылка ${{ENV:…}} подставилась пустой, и "
+                    "запись осталась без половины пары «адрес + токен». Экспортируйте "
+                    "переменную либо впишите значение в конфиг прямо"
+                )
+            raise ValueError(problem)
 
 
 class ModelEntry(BaseModel):
@@ -116,6 +210,24 @@ class ModelEntry(BaseModel):
             )
         return self
 
+    def _connection_parts(self) -> tuple[bool, bool]:
+        """(адрес задан, токен задан) для этой записи — ядровым определением §2.
+
+        Одна адаптация формы `ModelEntry` на всех спрашивающих: и правило пары, и
+        предупреждение об ослабленном транспорте (§7) судят по одному ответу — второе
+        прочтение тех же ключей разъехалось бы на первой же правке определения."""
+        backend = self.backend
+        return connection_parts(
+            url=self.url,
+            token=self.token,
+            completions_url=backend.completions_url if backend is not None else None,
+            proxy=backend.proxy if backend is not None else None,
+            authorization=(
+                backend.chat_completion_headers.get("Authorization")
+                if backend is not None else None
+            ),
+        )
+
     @model_validator(mode="after")
     def _validate_connection_pair(self) -> "ModelEntry":
         """§2: своё подключение задаётся ЦЕЛИКОМ. Адрес и токен принадлежат одному
@@ -124,29 +236,28 @@ class ModelEntry(BaseModel):
 
         Прокси считается адресом: он определяет, куда физически уходит запрос
         (`connect_backend.resolve_network_params`). `use_ssl`/сертификаты — не адрес, у них
-        своё предупреждение (спека §7)."""
-        backend = self.backend
-        has_address = bool(
-            self.url is not None
-            or (backend is not None and (backend.completions_url or backend.proxy))
-        )
-        has_token = bool(
-            self.token is not None
-            or (backend is not None
-                and backend.chat_completion_headers.get("Authorization") is not None)
-        )
-        if has_address and not has_token:
-            raise ValueError(
-                'models.<alias>: задан свой адрес, но не задан токен — укажите token '
-                '(или token: "" — «сервер не требует авторизации»), либо уберите адрес, '
-                "чтобы запись работала через общее подключение"
-            )
-        if has_token and not has_address:
-            raise ValueError(
-                "models.<alias>: задан свой токен, но не задан адрес — укажите url, "
-                "либо уберите token, чтобы запись работала через общее подключение"
-            )
+        своё предупреждение (спека §7). Что считать заданным — `connection_parts`, общее
+        с проверкой слоя."""
+        problem = _pair_violation("models.<alias>", *self._connection_parts())
+        if problem:
+            raise ValueError(problem)
         return self
+
+    def weakens_shared_transport(self) -> bool:
+        """§7: запись с УНАСЛЕДОВАННОЙ парой меняет транспорт под собой.
+
+        `use_ssl`/`cert_path`/`key_path` в правило пары не входят (решение владельца 2):
+        они не меняют адрес, а ослабляют защиту запроса — поэтому notice, а не отказ.
+        Ослабляется при этом запрос, который уходит с ОБЩИМ токеном, и сказать об этом
+        человеку обязаны: сам он в записи видит только сетевой квирк.
+
+        Своя пара сюда не попадает: там по изменённому каналу уходит свой ключ записи
+        на свой адрес — про общий токен предупреждать не о чем. Текст предупреждения —
+        у того, кто собирает стартовые notices секций моделей."""
+        backend = self.backend
+        if backend is None or any(self._connection_parts()):
+            return False
+        return not backend.use_ssl or bool(backend.cert_path) or bool(backend.key_path)
 
     @property
     def authorization_header(self) -> str | None:
