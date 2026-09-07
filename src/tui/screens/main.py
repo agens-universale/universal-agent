@@ -58,7 +58,7 @@ from tui.services.subagent_sidecar_mapper import (
     resolve_nested_tool_detail,
     trace_events_from_nested_detail,
 )
-from tui.services.trace_mapper import collect_skipped_call_ids, map_message
+from tui.services.trace_mapper import coerce_args, collect_skipped_call_ids, map_message
 from tui.services.trace_render import (
     LINE_INTERMEDIATE_CLASS,
     LINE_USER_CLASS,
@@ -1920,18 +1920,8 @@ class TraceScreen(Screen):
         не перезаписывается (no-op guard)."""
         if self._active_task_id is None or self._store is None:
             return
-        args = {}
         payload = ev.full_payload if isinstance(ev.full_payload, dict) else {}
-        raw_args = payload.get("arguments")
-        if isinstance(raw_args, dict):
-            args = raw_args
-        elif isinstance(raw_args, str) and raw_args.strip():
-            try:
-                parsed = json.loads(raw_args)
-            except json.JSONDecodeError:
-                parsed = None
-            if isinstance(parsed, dict):
-                args = parsed
+        args = coerce_args(payload.get("arguments"))
         task = task_title({"task": args.get("task")})
         if not task:
             return
@@ -5601,7 +5591,6 @@ class TraceScreen(Screen):
         Флаг `--raw` принимается в `arg`, но MVP-формат один (JSON с отступами);
         семантика raw vs formatted зарезервирована за будущим.
         """
-        import json
         from tui.screens.viewer import ViewerScreen
 
         tid = self.app.tui_state.active_task_id

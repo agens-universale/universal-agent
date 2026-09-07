@@ -122,7 +122,8 @@ class SessionsScreen(Screen):
             if self._branch_filter == "current" and self._current_branch is not None:
                 if (t.tui_meta or {}).get("branch") != self._current_branch:
                     continue
-            if f and f not in (t.thread_id or "").lower() and f not in self._title_of(t).lower():
+            if f and f not in (t.thread_id or "").lower() and f not in self._title_of(t).lower() \
+                    and f not in task_subtitle(t.tui_meta or {}).lower():
                 continue
             out.append(t)
         return out

@@ -548,3 +548,23 @@ async def test_r10_ctrl_cyrillic_k_upper_renames(tmp_path):
         scr._rename_selected = lambda: called.append(1)  # type: ignore[assignment]
         await pilot.press("ctrl+К")
         assert called == [1], called
+
+
+@pytest.mark.asyncio
+async def test_search_matches_subtitle(tmp_path):
+    """Поиск в пикере ищет и по подзаголовку (last_actual под агентским task)."""
+    pytest.importorskip("textual")
+    _seed(tmp_path, "sub11111", "уникальный маркер бета",
+          task="Написать тесты", last_actual="уникальный маркер бета")
+    _seed(tmp_path, "sub22222", "совсем другое", task="Починить парсер", last_actual="совсем другое")
+    from tui.screens.sessions import SessionsScreen
+    from textual.widgets import Input
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        pilot.app.screen.query_one("#sessions-filter", Input).value = "бета"
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "Написать тесты" in text
+        assert "Починить парсер" not in text
