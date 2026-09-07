@@ -119,3 +119,27 @@ def test_normalize_keeps_short_text_unchanged():
 def test_threshold_min_is_30():
     assert LAST_ACTUAL_MIN == 30
     assert LAST_ACTUAL_MAX == 200
+
+
+# ---------------------------------------------------------------------------
+# should_update_task: политика перезаписи meta.tui.task ходом (эвристика
+# «имя обновляет только ход с реальной работой»).
+# ---------------------------------------------------------------------------
+
+def test_should_update_task_seeds_unconditionally_when_empty():
+    from tui.services.session_title import should_update_task
+    assert should_update_task({}, turn_tool_calls=0) is True
+    assert should_update_task(None, turn_tool_calls=0) is True
+    assert should_update_task({"task": "   "}, turn_tool_calls=0) is True
+
+
+def test_should_update_task_rejects_idle_turn_over_existing():
+    from tui.services.session_title import should_update_task
+    meta = {"task": "починить парсер"}
+    assert should_update_task(meta, turn_tool_calls=0) is False
+
+
+def test_should_update_task_allows_working_turn_over_existing():
+    from tui.services.session_title import should_update_task
+    meta = {"task": "починить парсер"}
+    assert should_update_task(meta, turn_tool_calls=1) is True

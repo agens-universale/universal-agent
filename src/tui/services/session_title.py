@@ -50,6 +50,16 @@ def task_title(tui_meta: Optional[Mapping]) -> str:
     return " ".join(task.split())[:LAST_ACTUAL_MAX]
 
 
+def should_update_task(tui_meta: Optional[Mapping], turn_tool_calls: int) -> bool:
+    """Политика перезаписи ``meta.tui.task`` ходом (симметрия с LAST_ACTUAL_MIN
+    для last_actual): первый task сеется безусловно; дальше имя обновляет только
+    ход с реальной работой (≥1 вызов тула, финализатор не считается) — «спасибо»
+    и «пока» сессию не переименовывают."""
+    if not task_title(tui_meta):
+        return True
+    return turn_tool_calls > 0
+
+
 def display_name(tui_meta: Optional[Mapping]) -> str:
     """Приоритетное имя сессии: title > task > last_actual > «Без названия».
 
