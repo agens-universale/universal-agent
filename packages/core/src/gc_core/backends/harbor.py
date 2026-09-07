@@ -8,12 +8,13 @@ read/list use shell through exec.
 """
 import asyncio
 import base64
+import contextlib
 import posixpath
 import shlex
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any, Callable, ContextManager, Iterable, Optional, Sequence
 
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
@@ -74,15 +75,11 @@ class HarborBackend(FsBackend):
     def _await(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
 
-    def _bound(
-        self, result: ExecResult, *, max_chars: Optional[int] = None
-    ) -> ExecResult:
-        cap = (
-            self.exec_output_capture_max_chars
-            if max_chars is None
-            else max_chars
+    def _capture_cap(self, max_chars: Optional[int]) -> int:
+        """``None`` → tool-trace cap (~60k), else the per-call ceiling."""
+        return (
+            self.exec_output_capture_max_chars if max_chars is None else max_chars
         )
-        return bound_exec_result(result, cap)
 
     @staticmethod
     def _is_exec_timeout(exc: BaseException) -> bool:
@@ -92,10 +89,36 @@ class HarborBackend(FsBackend):
             return True
         return "Command timed out after" in str(exc)
 
-    @staticmethod
-    def _partial_stream(exc: BaseException, name: str) -> str:
-        val = getattr(exc, name, None)
-        return val if isinstance(val, str) else ""
+    def _output_capture(
+        self, cap: int
+    ) -> tuple[ContextManager[None], dict[str, list[str]]]:
+        """Scope Harbor's public ``scoped_output_callback`` around one exec and
+        collect the streamed chunks per stream.
+
+        Returns ``(context_manager, buffers)``; ``buffers`` maps stream name to a
+        list of chunks. Without the hook (env does not stream) the context is a
+        no-op and the buffers stay empty — empty output on timeout is legal.
+
+        With the hook active Harbor uses its streamed reader for successful
+        execs too (line-based, stderr merged into stdout at the subprocess
+        level in both readers), so the successful ``ExecResult`` is unchanged.
+        Accumulation stops at the first chunk that crosses ``cap``: that chunk
+        is kept so ``bound_exec_result`` sees ``len > cap`` and sets the
+        ``hit_capture_cap`` flag, like the local reader does.
+        """
+        buffers: dict[str, list[str]] = {"stdout": [], "stderr": []}
+        seen = {"stdout": 0, "stderr": 0}
+        scope = getattr(self._env, "scoped_output_callback", None)
+        if scope is None:
+            return contextlib.nullcontext(), buffers
+
+        async def on_output(text: str, stream: str) -> None:
+            if seen[stream] > cap:
+                return  # drain & discard: already past the cap
+            buffers[stream].append(text)
+            seen[stream] += len(text)
+
+        return scope(on_output), buffers
 
     # --- shell ---
     def _exec(
@@ -115,28 +138,34 @@ class HarborBackend(FsBackend):
             )
             command = f"{prefix} {command}"
         full = f"cd {shlex.quote(cwd)} && {command}" if cwd else command
+        cap = self._capture_cap(capture_max_chars)
+        scope, streamed = self._output_capture(cap)
         try:
-            res = self._await(self._env.exec(full, timeout_sec=timeout))
+            with scope:
+                res = self._await(self._env.exec(full, timeout_sec=timeout))
         except Exception as exc:
             if not self._is_exec_timeout(exc):
                 raise
-            return self._bound(
+            # Timeout = partial completion: what the command printed before the
+            # kill, via the same stream Harbor uses for trial logs. Harbor's
+            # timeout exception carries no output itself.
+            return bound_exec_result(
                 ExecResult(
-                    stdout=self._partial_stream(exc, "stdout"),
-                    stderr=self._partial_stream(exc, "stderr"),
+                    stdout="".join(streamed["stdout"]),
+                    stderr="".join(streamed["stderr"]),
                     return_code=None,
                     timed_out=True,
                 ),
-                max_chars=capture_max_chars,
+                cap,
             )
-        return self._bound(
+        return bound_exec_result(
             ExecResult(
                 stdout=res.stdout or "",
                 stderr=res.stderr or "",
                 return_code=res.return_code,
                 timed_out=bool(getattr(res, "timed_out", False)),
             ),
-            max_chars=capture_max_chars,
+            cap,
         )
 
     def exec(
