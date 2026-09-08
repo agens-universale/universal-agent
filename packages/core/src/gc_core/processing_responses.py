@@ -580,9 +580,9 @@ def partition_work_then_finish(
 ) -> tuple[List[Dict], List[Dict]]:
     """Work в порядке батча, затем не больше одного ``turn_finish``.
 
-    Work — все вызовы кроме ``turn_finish`` (``turn_ask_human`` не режет
-    соседей). Позиция finish work не режет. Первый finish идёт после work,
-    остальные — skip. Успешный ``turn_ask_human`` подавляет finish уже по
+    Work — все вызовы кроме ``turn_finish``. Позиция finish work не режет.
+    Первый finish идёт после work, остальные — skip. Успешный
+    ``turn_ask_human`` подавляет весь оставшийся work и finish уже по
     фактическому output, не здесь.
     """
     work: List[Dict] = []
@@ -705,11 +705,11 @@ def process_tool_calls(
          собрать function_call_output.
 
     До цикла по batch:
-      - work (все кроме turn_finish) в порядке батча; ask_human work не режет
-        и сам не skip'ает соседей-ask;
+      - work (все кроме turn_finish) в порядке батча;
       - только первый turn_finish в executed; остальные extra-finish — skip
         сразу (сообщение «лишний finish», не «ход уже сдан»);
-      - успешный ask в цикле даёт skip-output первому finish (ход у человека);
+      - успешный ask в цикле даёт skip-output всему оставшемуся work и первому
+        finish: эти вызовы были сгенерированы до ответа человека;
       - skip extra-finish готовим заранее, чтобы сфлашить их до ask_human
         вместе с уже выполненными тулами.
 
@@ -781,16 +781,16 @@ def process_tool_calls(
             break
 
         tool_name = str(m.get("name") or "")
-        if tool_name == FINISH_TOOL_NAME and successful_ask_human:
+        if successful_ask_human:
             tools_outputs.append({
                 "id": generate_message_id_func("fco"),
                 "type": "function_call_output",
                 "call_id": m["call_id"],
                 "output": (
                     f'{{"ok": false, "skipped": true, "message": '
-                    f'"Skipped: the turn was already handed to the user by '
-                    f"{ASK_HUMAN_TOOL_NAME}. Read the user's answer and continue "
-                    f'based on it instead of finalizing the turn."}}'
+                    f'"Skipped: {ASK_HUMAN_TOOL_NAME} already received the '
+                    f'user reply. This call was generated before that reply; '
+                    f'reconsider it based on the reply in a new batch."}}'
                 ),
             })
             continue

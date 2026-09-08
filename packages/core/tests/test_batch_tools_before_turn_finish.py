@@ -154,7 +154,7 @@ def test_split_memory_then_finish_is_all_work_order():
     assert skipped == []
 
 
-def test_split_ask_human_does_not_cut_work_and_defers_finish_decision():
+def test_split_ask_human_defers_runtime_barrier_decision():
     memory, ask, later, finish = (
         {"name": "session_memory"},
         {"name": "turn_ask_human"},
@@ -256,11 +256,11 @@ def test_process_tool_calls_ask_human_is_work_and_blocks_finish(monkeypatch):
         _fc("turn_finish", "c_fin", _finish_args()),
     ]
     outs = pr.process_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
-    assert calls == ["session_memory", "turn_ask_human", "fs_read_file"]
+    assert calls == ["session_memory", "turn_ask_human"]
     by_call = _outputs_by_call(outs)
     assert json.loads(by_call["c_mem"]["output"])["ok"] is True
-    assert json.loads(by_call["c_read"]["output"])["ok"] is True
-    assert "skipped" in by_call["c_fin"]["output"]
+    assert json.loads(by_call["c_read"]["output"])["skipped"] is True
+    assert json.loads(by_call["c_fin"]["output"])["skipped"] is True
 
 
 def test_process_tool_calls_rejected_ask_human_does_not_block_finish(monkeypatch):
@@ -663,7 +663,7 @@ def test_run_agent_successful_ask_keeps_turn_open(monkeypatch):
     assert applied == ["turn_ask_human"]
     by_call = _outputs_by_call(state.messages)
     assert "skipped" in by_call["call_finish"]["output"]
-    assert "handed to the user" in by_call["call_finish"]["output"]
+    assert "generated before that reply" in by_call["call_finish"]["output"]
 
 
 def test_run_agent_tool_rejected_finish_keeps_work_and_stays_open(monkeypatch):

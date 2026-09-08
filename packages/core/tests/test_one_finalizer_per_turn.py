@@ -2,7 +2,7 @@
 from gc_core.processing_responses import partition_work_then_finish
 
 
-def test_split_ask_human_does_not_cut_work():
+def test_split_ask_human_defers_barrier_until_result_is_known():
     calls = [{"name": "read_file"}, {"name": "turn_ask_human"}, {"name": "turn_ask_human"}]
     executed, skipped = partition_work_then_finish(calls)
     assert executed == calls
