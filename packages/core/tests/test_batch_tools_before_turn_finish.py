@@ -383,8 +383,8 @@ def _patch_run_agent_apply(monkeypatch, applied, *, finish_output=None):
     monkeypatch.setattr(pr, "apply_tool", fake_apply)
 
 
-def test_run_agent_loop_notice_stays_after_finish_output(monkeypatch):
-    """D2: notice loop-detector'а не вклинивается между work и finish-выводом."""
+def test_run_agent_accepted_finish_drops_loop_notice(monkeypatch):
+    """Закрывающий finish не оставляет technical user началом нового хода."""
     applied: list[str] = []
     _patch_run_agent_apply(monkeypatch, applied)
     state = _agent_state()
@@ -416,34 +416,63 @@ def test_run_agent_loop_notice_stays_after_finish_output(monkeypatch):
     )
     assert result == finish["arguments"]
 
-    fco_idx = [
-        i
-        for i, m in enumerate(state.messages)
-        if m.get("type") == "function_call_output"
-    ]
-    notice_idx = [
-        i
-        for i, m in enumerate(state.messages)
+    notices = [
+        m
+        for m in state.messages
         if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))
     ]
-    assert fco_idx and notice_idx
-    assert max(fco_idx) < notice_idx[0]
+    assert notices == []
     by_call = _outputs_by_call(state.messages)
     assert by_call["c1"]["call_id"] == "c1"
     assert "call_finish" in by_call
 
-    persist_fco_idx = [
-        i
-        for i, m in enumerate(persisted)
-        if m.get("type") == "function_call_output"
-    ]
-    persist_notice_idx = [
-        i
-        for i, m in enumerate(persisted)
+    persisted_notices = [
+        m
+        for m in persisted
         if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))
     ]
-    assert persist_fco_idx and persist_notice_idx
-    assert max(persist_fco_idx) < persist_notice_idx[0]
+    assert persisted_notices == []
+
+
+def test_run_agent_accepted_finish_drops_compact_resume(monkeypatch):
+    """Compact-resume не переживает батч, который успешно закрыл ход."""
+    _patch_run_agent_apply(monkeypatch, [])
+    finish = _fc("turn_finish", "call_finish", _finish_args())
+    finish_output = json.dumps(
+        {
+            "tool": "turn_finish",
+            "ok": True,
+            "status": "submitted",
+            "task_report": "Сделано",
+        },
+        ensure_ascii=False,
+    )
+    resume = {"role": "user", "content": "session_compact finished. Continue."}
+
+    def _stub_process_tool_calls(*_args, **_kwargs):
+        return [
+            {
+                "type": "function_call_output",
+                "call_id": "call_finish",
+                "output": finish_output,
+            },
+            resume,
+        ]
+
+    monkeypatch.setattr(pr, "process_tool_calls", _stub_process_tool_calls)
+    state = _agent_state()
+    persisted: list[dict] = []
+
+    result = run_agent(
+        [finish],
+        state,
+        _agent_ctx(),
+        persist_messages_callback=lambda msgs: persisted.extend(msgs),
+    )
+
+    assert result == finish["arguments"]
+    assert resume not in state.messages
+    assert resume not in persisted
 
 
 def test_run_agent_memory_then_finish_writes_memory_and_closes(monkeypatch):

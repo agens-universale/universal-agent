@@ -1338,8 +1338,10 @@ def run_agent(
                             )
                         )
                         # Work до гейта; finish в state до гейта (I3: persist после
-                        # apply); хвост (notice/compact) после finish — порядок
-                        # ролей из process_tool_calls не переставляем.
+                        # apply). Technical-хвост нужен только при reject, когда
+                        # агент продолжит ход. После принятого finish его нельзя
+                        # оставлять в state/jsonl: следующий пользователь иначе
+                        # увидит устаревший notice как начало нового хода.
                         if work_new:
                             state.messages += work_new
                             _maybe_persist(
@@ -1348,8 +1350,6 @@ def run_agent(
                         if finish_new:
                             # I3: finish output в state до gate; persist — после apply.
                             state.messages += finish_new
-                        if tail_new:
-                            state.messages += tail_new
                         finish_arguments = closing_finish.get("arguments")
                         if backend_mode == "chat_completions":
                             gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
@@ -1376,10 +1376,6 @@ def run_agent(
                                 logger=run_logger,
                                 persist_messages_callback=persist_messages_callback,
                             )
-                            if tail_new:
-                                _maybe_persist(
-                                    persist_messages_callback, tail_new, state
-                                )
                             final_submit_output = get_function_call_output_text(
                                 state.messages, finish_call_id
                             )
@@ -1391,6 +1387,11 @@ def run_agent(
                                 ctx=ctx,
                             )
                             if decision.outcome == "reject":
+                                if tail_new:
+                                    state.messages += tail_new
+                                    _maybe_persist(
+                                        persist_messages_callback, tail_new, state
+                                    )
                                 feedback = (decision.feedback_text or "").strip()
                                 if not feedback and decision.validation is not None:
                                     feedback = build_finish_gate_feedback(
@@ -1428,10 +1429,6 @@ def run_agent(
                             if finish_new:
                                 _maybe_persist(
                                     persist_messages_callback, finish_new, state
-                                )
-                            if tail_new:
-                                _maybe_persist(
-                                    persist_messages_callback, tail_new, state
                                 )
                             state.current_user_intent = []
                             state.steps += 1
