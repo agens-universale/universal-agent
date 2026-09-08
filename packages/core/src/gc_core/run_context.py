@@ -374,23 +374,14 @@ def _finish_run_context(
         tools_cache=tools_cache,
         thread_store=thread_store,
     )
+    # ``is_tui`` контекст только ПОМЕЧАЕТ. Обёртку в ``TrackingFsBackend``
+    # (diff-журнал) ставит сам TUI — ``gc_tui.diff_tui.tracking.attach_to_context``,
+    # его зовёт ``TuiApp``. Здесь стоял лениво-импортируемый вызов
+    # ``wrap_local_for_tui``: это была ЕДИНСТВЕННАЯ зависимость ``gc_core`` от
+    # фронтенда, и 27.08.2026 её сняли разделением на пакеты. Вливание веток
+    # вернуло её — а вместе с ней и вторую обёртку поверх первой, потому что
+    # TUI к этому моменту уже оборачивает сам.
     ctx.is_tui = bool(is_tui)
-
-    if is_tui and not prep.backend_was_overridden:
-        # diff_tui едет вместе с extra [tui]: в headless-профиле пакета нет.
-        # Ядро обязано это пережить — без diff-журнала прогон полностью
-        # работоспособен, поэтому деградируем в no-op, а не роняем сборку
-        # контекста (тот же приём, что в mcp_daemon_autostart).
-        try:
-            from gc_tui.diff_tui.tracking import wrap_local_for_tui
-        except ImportError:
-            wrap_local_for_tui = None
-
-        if wrap_local_for_tui is not None:
-            wrapped = wrap_local_for_tui(backend, ctx)
-            if wrapped is not backend:
-                ctx.os_backend = wrapped
-                ctx.workspace = build_execution_workspace(wrapped, config_dict)
 
     run_logger.debug(
         "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",
