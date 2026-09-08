@@ -131,6 +131,17 @@ def test_turn_finish_task_report_too_long():
     )
     assert bad["ok"] is False
     assert bad["error"]["type"] == "limit_exceeded"
+    assert bad["error"]["message"] == "task_report exceeds 10000 chars, got 10001"
+
+
+def test_turn_finish_task_report_schema_names_char_budget():
+    spec = SubmitSolution.tool_description()
+    desc = spec["parameters"]["properties"]["task_report"]["description"]
+    assert "10000" in desc
+    prompt = SubmitSolution.prompt_description()
+    assert "10000" in prompt
+    required = spec["parameters"]["required"]
+    assert "task" in required
 
 
 def test_turn_finish_invalid_comment_type():

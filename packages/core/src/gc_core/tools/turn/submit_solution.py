@@ -17,6 +17,8 @@ SOLUTION_TYPES = (
     "abandoned",
 )
 
+TASK_REPORT_MAX_CHARS = 10000
+
 class SubmitSolution(AbstractSimpleTool):
 
     @staticmethod
@@ -156,7 +158,8 @@ class SubmitSolution(AbstractSimpleTool):
                         "type": "string",
                         "description": (
                             "Final human-facing summary for this turn: what was done, result, assumptions, evidence. "
-                            "Plain text, no markdown. Not for mid-task status updates."
+                            f"Plain text, no markdown. Max {TASK_REPORT_MAX_CHARS} characters. "
+                            "Not for mid-task status updates."
                         ),
                     },
                     "comment": {
@@ -192,7 +195,7 @@ Input schema:
 {
   "solution_type": "full_solution" | "partial_solution" | "direct_answer" | "couldnt_solve" | "need_additional_info" | "abandoned",
   "task": "string (required)",
-  "task_report": "string (required)",
+  "task_report": "string (required, max ''' + str(TASK_REPORT_MAX_CHARS) + ''' chars)",
   "comment": "string (optional)",
   "handoff": "{}" (required; JSON object encoded as a string)
 }
@@ -229,7 +232,7 @@ Choosing solution_type (for current turn):
 - abandoned: stopped by explicit choice/instruction.
 
 - task: What the user asked this turn, in 1–2 phrases, in the user's terms. Not what was done — that is task_report.
-- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief.
+- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief. Max ''' + str(TASK_REPORT_MAX_CHARS) + ''' characters.
 - comment: Optional caveats, risks, unresolved items, or next steps.
 - handoff: Required JSON object string (see Handoff format). Minimal valid value: "{}".
 
@@ -320,7 +323,8 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                     "message": "task_report cannot be empty or whitespace only.",
                 },
             )
-        if len(task_report.strip()) > 10000:
+        report_len = len(task_report.strip())
+        if report_len > TASK_REPORT_MAX_CHARS:
             return self._result(
                 ok=False,
                 status="rejected",
@@ -330,7 +334,9 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 error={
                     "type": "limit_exceeded",
                     "field": "task_report",
-                    "message": "task_report is too long. Keep under 10-20 sentences.",
+                    "message": (
+                        f"task_report exceeds {TASK_REPORT_MAX_CHARS} chars, got {report_len}"
+                    ),
                 },
             )
 
