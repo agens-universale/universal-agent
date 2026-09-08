@@ -91,6 +91,10 @@ backend:
   # Слать ли провайдеру поле function.strict в схемах тулов.
   # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
   send_tool_strict: true
+  # Разметка prompt cache для claude-моделей в главном цикле: не задано — авто по id
+  # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
+  # отвергает разметку; можно на одну модель: models.<alias>.backend).
+  # claude_prompt_cache: false
   # Vendor-specific параметры. Настраивайте под свой провайдер.
   chat_completion_kwargs:
     temperature: 0.7

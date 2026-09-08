@@ -41,6 +41,10 @@ backend:
   # Слать ли провайдеру поле function.strict в схемах тулов.
   # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
   send_tool_strict: true
+  # Разметка prompt cache для claude-моделей в главном цикле: не задано — авто по id
+  # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
+  # отвергает разметку; можно на одну модель: models.<alias>.backend).
+  # claude_prompt_cache: false
   use_retry: true
   # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
   request_timeout_sec: 600

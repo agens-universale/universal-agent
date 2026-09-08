@@ -939,6 +939,7 @@ _HONORED_PER_MODEL = {
     "completions_url",                              # model_router: адрес модели
     "proxy", "request_timeout_sec", "use_retry", "use_ssl",   # resolve_network_params
     "retry_embedded_choice_errors",                 # там же
+    "claude_prompt_cache",                                 # разметка prompt cache: create_call_data_completions
     "use_max_tokens_param",                         # выбор max_tokens/max_completion_tokens
 }
 
