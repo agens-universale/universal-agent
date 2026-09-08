@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import httpx
@@ -467,7 +468,57 @@ async def arequest_backend_chat_completions(
 
 
 
-def create_call_headers(state, ctx, resolved: Optional[ResolvedModel] = None) -> Dict[str, str]:
+async def aresolve_auth_token(auth_connector, *, force: bool = False) -> str:
+    """Токен, не морозя loop.
+
+    ``AuthConnector.get_token()`` делает два последовательных блокирующих
+    HTTP-вызова (GET, потом POST, по 10 с таймаута каждый) одноразовым
+    синхронным клиентом. Звали его из ``async def`` напрямую — при истечении
+    токена (примерно раз в десять минут) и на каждом 401-ретрае, — и loop мог
+    замереть до двадцати секунд, останавливая ВСЕХ агентов и TUI на нём. Это
+    ровно тот бюджет отзывчивости, который заявлен в docs/async.md.
+
+    Свой ``aget_token`` у коннектора — идём через него нативно. Нет —
+    единственный честный вариант для чужого синхронного кода: поток. Заход в
+    пул стоит десятки микросекунд против сотен миллисекунд самого запроса к
+    модели, поэтому быстрый путь (токен ещё свеж) отдельно не выделяем — он
+    того не стоит, а ветвление стоило бы знания о внутренностях коннектора.
+    """
+    aget = getattr(auth_connector, "aget_token", None)
+    if callable(aget):
+        return await aget(force=force)
+
+    # Зовём РОВНО так, как звали синхронные вызывающие: без `force` — совсем
+    # без аргумента. Чужие коннекторы (и тестовые двойники) объявляют
+    # `get_token()` без параметров, и лишний позиционный аргумент их ломает.
+    def _get() -> str:
+        return auth_connector.get_token(force=True) if force else auth_connector.get_token()
+
+    return await asyncio.to_thread(_get)
+
+
+async def acreate_call_headers(
+    state, ctx, resolved: Optional[ResolvedModel] = None
+) -> Dict[str, str]:
+    """Асинхронный двойник :func:`create_call_headers`.
+
+    Отличие ровно одно и несущее: токен берётся не на loop. Всё остальное —
+    работа со словарями.
+    """
+    auth_connector = getattr(ctx, "auth_connector", None)
+    token = None
+    if auth_connector is not None:
+        token = await aresolve_auth_token(auth_connector)
+    return create_call_headers(state, ctx, resolved, _token=token)
+
+
+def create_call_headers(
+    state,
+    ctx,
+    resolved: Optional[ResolvedModel] = None,
+    *,
+    _token: Optional[str] = None,
+) -> Dict[str, str]:
     """
     Сформировать заголовки вызова для backend API на основе State и RunContext.
 
@@ -499,7 +550,9 @@ def create_call_headers(state, ctx, resolved: Optional[ResolvedModel] = None) ->
     elif authorization_override:
         call_headers["Authorization"] = authorization_override
     elif auth_connector is not None:
-        token = auth_connector.get_token()
+        # ``_token`` приходит от асинхронного двойника, который взял его вне
+        # loop. Своего похода в сеть тут быть не должно — см. `acreate_call_headers`.
+        token = _token if _token is not None else auth_connector.get_token()
         call_headers["Authorization"] = f"Bearer {token}"
 
     # Дополнительные заголовки для chat/completions передаются

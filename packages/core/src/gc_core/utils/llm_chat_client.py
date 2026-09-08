@@ -10,6 +10,7 @@ from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     backend_override_value,
+    acreate_call_headers,
     create_call_headers,
     resolve_network_params,
 )
@@ -232,7 +233,7 @@ async def _asend_chat_completion_text(
         else _min_response_tokens_override,
         default=1024,
     )
-    headers = create_call_headers(state, ctx, resolved=resolved)
+    headers = await acreate_call_headers(state, ctx, resolved=resolved)
     url = resolved.url if resolved is not None else cfg["completions_url"]
     (verify, cert, use_retry, timeout, config_proxy,
      retry_embedded_choice_errors) = resolve_network_params(cfg, resolved)

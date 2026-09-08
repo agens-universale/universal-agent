@@ -1,15 +1,18 @@
 from typing import Any, Dict, List, Optional
 
-from gc_core.tools.connect_mcp.transport import aget_transport, get_transport
+from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, aget_transport, get_transport
 
 
-# Параметры `initialize`, общие для всех локусов: один источник, иначе при подъёме
-# версии протокола агентский и контейнерный путь разъедутся молча.
-MCP_INIT_PARAMS: Dict[str, Any] = {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {"roots": {"listChanged": True}, "sampling": {}},
-    "clientInfo": {"name": "SurfaceClient", "version": "1.0.0"},
-}
+#: Параметры ``initialize`` — ОДИН источник на все локусы.
+#:
+#: Источников было два, и починили только один. В ``_INIT_PAYLOAD`` объявленные
+#: capabilities опустошили после замера (сервер, поверивший обещанию roots,
+#: шлёт ``roots/list`` и ждёт свой таймаут целиком — 64 с на первом вызове
+#: @playwright/mcp), а здесь всё осталось как было: легаси-http и carrier
+#: по-прежнему обещали roots и sampling, которых этот клиент не обслуживает.
+#: Сторож ``test_mcp_declared_capabilities`` смотрел только на ``_INIT_PAYLOAD``
+#: и расхождения не видел.
+MCP_INIT_PARAMS: Dict[str, Any] = _INIT_PAYLOAD["params"]
 
 # Кэш MCP-сессий в рамках процесса:
 # ключ — имя сервера из конфига (server_name), значение — session_id.
@@ -311,6 +314,19 @@ def _get_or_init_session_id(
     return session_id
 
 
+def forget_session(server_key: str) -> None:
+    """Забыть session_id сервера у ТЕКУЩЕГО владельца.
+
+    Единственный законный способ снять запись. Кэш ключуется парой
+    ``(владелец, сервер)`` — с тех пор как сессии развели по владельцам,
+    чтобы параллельные агенты не сносили сессии друг другу. Вызывающие,
+    оставшиеся на ``pop(server_name)``, промахивались мимо ключа молча:
+    ветка «сессия истекла → переинициализировать» доставала из кэша тот же
+    протухший id и повторяла неудачный запрос.
+    """
+    _MCP_SESSIONS.pop((current_owner(), server_key), None)
+
+
 async def _aget_or_init_session_id(
     server_key: str,
     url: str,
@@ -335,6 +351,7 @@ async def _aget_or_init_session_id(
 __all__ = [
     "MCP_INIT_PARAMS",
     "_MCP_SESSIONS",
+    "forget_session",
     "_normalize_url",
     "_send_initialized_notification",
     "_init_mcp_session",

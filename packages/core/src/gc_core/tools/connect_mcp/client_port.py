@@ -11,6 +11,7 @@ import httpx
 
 from gc_core.tools.connect_mcp.client import (
     _MCP_SESSIONS,
+    forget_session,
     _acall_mcp_tool,
     _aget_or_init_session_id,
     _atools_list_request,
@@ -91,18 +92,21 @@ class McpClientPort(ABC):
 
 
 def _effective_transport(server_cfg: Dict[str, Any]) -> str:
-    """`persistent_session: true` routes legacy sse/http through the SDK client.
+    """Транспорт, которым реально пойдёт запрос, — по ОБЩИМ правилам.
 
-    Same rule as before, kept in one place instead of duplicated in registry
-    and api.
+    Здесь была третья копия правил выбора, и она умела только половину:
+    поднимала легаси-транспорт до SDK лишь при ``persistent_session``. Про
+    депрекейт ``sse`` она не знала, поэтому непersistent ``transport: sse``
+    уходил в одноразовый ``_arequest_sse`` — тот самый путь, про который
+    докстрока политики говорит «405 на spec-серверах». Дискавери при этом шла
+    через ``stream_sse``, и в лог писалось «Запрос отправлен через stream_sse»:
+    сообщение было правдой про дискавери и ложью про вызов тула.
+
+    Единственный источник правил — ``transport_policy.resolve_effective_transport``.
     """
-    transport = str(server_cfg.get("transport") or "")
-    if server_cfg.get("persistent_session"):
-        if transport == "sse":
-            return "stream_sse"
-        if transport == "http":
-            return "stream_http"
-    return transport
+    from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
+
+    return resolve_effective_transport(server_cfg)
 
 
 class AgentRuntimeClient(McpClientPort):
@@ -160,7 +164,7 @@ class AgentRuntimeClient(McpClientPort):
                 url, session_id=session_id, server_cfg=self.server_cfg, token=token
             )
         except httpx.HTTPStatusError:
-            _MCP_SESSIONS.pop(self.server_name, None)
+            forget_session(self.server_name)
             session_id = _get_or_init_session_id(
                 self.server_name, url, self.server_cfg, token=token
             )
@@ -237,7 +241,7 @@ class AgentRuntimeClient(McpClientPort):
         try:
             data = do_call(session_id)
         except httpx.HTTPStatusError:
-            _MCP_SESSIONS.pop(self.server_name, None)
+            forget_session(self.server_name)
             session_id = _get_or_init_session_id(
                 self.server_name, url, self.server_cfg, token=token, timeout=timeout
             )
@@ -249,7 +253,7 @@ class AgentRuntimeClient(McpClientPort):
             data = do_call(session_id)
 
         if data == {} and transport == "sse":
-            _MCP_SESSIONS.pop(self.server_name, None)
+            forget_session(self.server_name)
             session_id = _get_or_init_session_id(
                 self.server_name, url, self.server_cfg, token=token, timeout=timeout
             )
@@ -302,7 +306,7 @@ class AgentRuntimeClient(McpClientPort):
                 url, session_id=session_id, server_cfg=self.server_cfg, token=token
             )
         except httpx.HTTPStatusError:
-            _MCP_SESSIONS.pop(self.server_name, None)
+            forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
                 self.server_name, url, self.server_cfg, token=token
             )
@@ -377,7 +381,7 @@ class AgentRuntimeClient(McpClientPort):
         try:
             data = await ado_call(session_id)
         except httpx.HTTPStatusError:
-            _MCP_SESSIONS.pop(self.server_name, None)
+            forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
                 self.server_name, url, self.server_cfg, token=token, timeout=timeout
             )
@@ -389,7 +393,7 @@ class AgentRuntimeClient(McpClientPort):
             data = await ado_call(session_id)
 
         if data == {} and transport == "sse":
-            _MCP_SESSIONS.pop(self.server_name, None)
+            forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
                 self.server_name, url, self.server_cfg, token=token, timeout=timeout
             )

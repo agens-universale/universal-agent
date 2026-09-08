@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from gc_core.utils import llm_chat_client
 from gc_testkit import run_coro
+from gc_testkit import as_coro
 
 
 def _cfg(**overrides):
@@ -28,7 +29,7 @@ def _patch_policy(monkeypatch):
         _fake_policy,
     )
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
     return captured
 

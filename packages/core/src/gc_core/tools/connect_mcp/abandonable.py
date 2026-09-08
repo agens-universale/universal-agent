@@ -32,12 +32,23 @@ _MAX_WORKERS = 8
 _slots = threading.BoundedSemaphore(_MAX_WORKERS)
 
 
-async def run_abandonable(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
-    """Выполнить ``fn`` в потоке-демоне и дождаться результата.
+async def run_abandonable_in(
+    slots: "threading.BoundedSemaphore",
+    fn: Callable[..., Any],
+    /,
+    *args: Any,
+    _thread_name: str = "mcp-blocking",
+    **kwargs: Any,
+) -> Any:
+    """То же, что :func:`run_abandonable`, но с ЯВНЫМ набором слотов.
 
-    Если вызывающего отменили (истёк ``asyncio.timeout``), поток продолжит
-    работу в фоне: результат к тому моменту уже никому не нужен, а прервать
-    блокирующий сокет всё равно нечем.
+    Слоты разделены не из аккуратности. Пока пул был один на процесс, тела
+    гвардов делили восемь слотов с MCP-дискавери и вызовами тулов, а тело
+    модерации в режиме ``ask`` держит слот всё время, пока человек думает над
+    подтверждением. Несколько агентов на одном loop (собственный критерий
+    приёмки ветки) с ожидающими подтверждениями выбирали пул целиком и
+    останавливали MCP-вызовы СОСЕДНИХ агентов. Докстрока в ``dual_wrapper``
+    при этом обещала «не в общем пуле», не замечая, что это и есть пул MCP.
     """
     loop = asyncio.get_running_loop()
     future: asyncio.Future = loop.create_future()
@@ -65,7 +76,7 @@ async def run_abandonable(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) 
     ctx_snapshot = copy_context_for_thread()
 
     def _target() -> None:
-        with _slots:
+        with slots:
             try:
                 result = ctx_snapshot.run(fn, *args, **kwargs)
             except BaseException as exc:  # noqa: BLE001 — переносим как есть
@@ -73,10 +84,18 @@ async def run_abandonable(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) 
             else:
                 _deliver(future.set_result, result)
 
-    threading.Thread(
-        target=_target, daemon=True, name="mcp-blocking"
-    ).start()
+    threading.Thread(target=_target, daemon=True, name=_thread_name).start()
     return await future
 
 
-__all__ = ["run_abandonable"]
+async def run_abandonable(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+    """Выполнить ``fn`` в потоке-демоне на пуле MCP и дождаться результата.
+
+    Если вызывающего отменили (истёк ``asyncio.timeout``), поток продолжит
+    работу в фоне: результат к тому моменту уже никому не нужен, а прервать
+    блокирующий сокет всё равно нечем.
+    """
+    return await run_abandonable_in(_slots, fn, *args, **kwargs)
+
+
+__all__ = ["run_abandonable", "run_abandonable_in"]

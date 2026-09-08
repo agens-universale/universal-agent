@@ -349,18 +349,10 @@ class LocalFsBackend(FsBackend):
 # поток; после cap — drain & discard (НЕ kill). Без записи на диск.
 
 _READ_CHUNK = 8192
-# После proc.wait: ждём только публикацию captured (≤60k). Обычно уже готово
-# (hit_cap по ходу) или EOF по мелкому остатку в pipe — мгновенно.
-_CAPTURED_READY_TIMEOUT_SEC = 30
 # Discard после cap — fire-and-forget: данные уже в sink. Короткий join, чтобы
 # не копить зомби-треды на типичном хвосте; если discard долгий — уходим с
 # captured, reader дочитает в фоне как daemon (не блокирует process exit).
 _DRAIN_JOIN_TIMEOUT_SEC = 2
-
-
-
-
-
 
 
 # --- асинхронный запуск процесса (async-переезд, Задача 18) -----------------
@@ -498,7 +490,24 @@ async def _arun_bounded_process(
                 stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
             )
 
-    if stdin_text is not None and proc.stdin is not None:
+    # Читатели ЗАПУСКАЮТСЯ ПЕРВЫМИ, до записи в stdin, и это не стилистика.
+    # Труба двусторонняя и обе стороны конечны: если stdin больше буфера трубы
+    # с high-water (около 128 КиБ), а ребёнок до чтения stdin успевает выдать
+    # больше ~192 КиБ (asyncio перестаёт читать на 2×limit), то родитель встаёт
+    # в `drain()`, ребёнок — в `write()`, и это взаимная блокировка НАВСЕГДА:
+    # таймаут тула стартует ниже, в `_await_process_exit`, и до этой фазы не
+    # доходит. Достижимо из `skills_run_script` (аргументы уходят JSON'ом через
+    # stdin) и `arun_python` с большим кодом. На синхронном пути читатели тоже
+    # стартовали до записи — регрессию внёс переезд на asyncio.
+    out_sink, err_sink = _Capture(), _Capture()
+    out_task = asyncio.ensure_future(
+        _adrain_stream(proc.stdout, capture_max_chars, out_sink)
+    )
+    err_task = asyncio.ensure_future(
+        _adrain_stream(proc.stderr, capture_max_chars, err_sink)
+    )
+
+    async def _feed_stdin() -> None:
         try:
             proc.stdin.write(stdin_text.encode("utf-8"))
             await proc.stdin.drain()
@@ -510,12 +519,12 @@ async def _arun_bounded_process(
             except Exception:
                 pass
 
-    out_sink, err_sink = _Capture(), _Capture()
-    out_task = asyncio.ensure_future(
-        _adrain_stream(proc.stdout, capture_max_chars, out_sink)
-    )
-    err_task = asyncio.ensure_future(
-        _adrain_stream(proc.stderr, capture_max_chars, err_sink)
+    # Запись держим под ТЕМ ЖЕ дедлайном, что и сам процесс: ребёнок, который
+    # не читает свой stdin вовсе, иначе снова подвесил бы шаг без предохранителя.
+    stdin_task = (
+        asyncio.ensure_future(_feed_stdin())
+        if stdin_text is not None and proc.stdin is not None
+        else None
     )
 
     timed_out = False
@@ -531,6 +540,10 @@ async def _arun_bounded_process(
                 await _await_process_exit(proc, 5)
             except Exception:
                 pass
+        finally:
+            # Ребёнок мёртв или дочитан — писать больше некому и незачем.
+            if stdin_task is not None and not stdin_task.done():
+                stdin_task.cancel()
 
         # Хвост pipe дочитываем ограниченно: долгий discard не должен удерживать
         # tool-call — тот же приём, что у синхронного join с таймаутом.

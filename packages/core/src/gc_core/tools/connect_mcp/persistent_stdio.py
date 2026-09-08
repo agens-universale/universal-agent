@@ -312,7 +312,6 @@ class PersistentStdioSession:
             await _aterminate_process_tree(proc, graceful_timeout=5.0)
 
     def _close_prologue(self, proc: "subprocess.Popen") -> None:
-        self._close_prologue_head(proc)
         close_tool = self._close_tool_name()
         if close_tool is not None:
             try:
@@ -320,10 +319,9 @@ class PersistentStdioSession:
                 self._read_matching_on(proc, req_id, 10.0)
             except Exception:
                 pass
-        self._close_stdin(proc)
+        self._close_prologue_tail(proc)
 
     async def _aclose_prologue(self, proc: "subprocess.Popen") -> None:
-        self._close_prologue_head(proc)
         close_tool = self._close_tool_name()
         if close_tool is not None:
             try:
@@ -331,7 +329,7 @@ class PersistentStdioSession:
                 await self._aread_matching_on(proc, req_id, 10.0)
             except Exception:
                 pass
-        self._close_stdin(proc)
+        self._close_prologue_tail(proc)
 
     def _close_tool_name(self) -> "Optional[str]":
         """Имя тула, которым сервер гасит своих внешних детей, если он есть.
@@ -371,10 +369,24 @@ class PersistentStdioSession:
             except Exception:
                 pass
 
-    def _close_prologue_head(self, proc: "subprocess.Popen") -> None:
-        """Отцепить читателя. Общее начало обоих закрытий, ничего не ждёт."""
-        # Читатель stdout живёт столько же, сколько процесс: без этого его
-        # запись осталась бы в реестре навсегда.
+    def _close_prologue_tail(self, proc: "subprocess.Popen") -> None:
+        """Общий ХВОСТ обоих закрытий: закрыть stdin и отцепить читателя.
+
+        Порядок здесь несущий, и он менялся не из вкуса. Пока отцепление
+        стояло в НАЧАЛЕ, ответ close-тула прочитать было некому: первый
+        ``_LineReader`` уже стоял в ``readline()`` на той же трубе и забирал
+        строку в очередь, которую после ``forget`` никто не читает, а
+        ``_read_matching_on`` заводил ВТОРОЙ читатель и честно ждал свои 10
+        секунд. Каждое закрытие сервера с настроенным
+        ``persistent_session_close_tool`` (документированный playwright с
+        ``browser_close_all``) стоило ровно 10 с — и браузер при этом не
+        закрывался, ответ не был увиден. Плюс два потока читали один
+        ``TextIOWrapper``.
+
+        Отцеплять всё равно надо: читатель живёт столько же, сколько процесс,
+        иначе его запись останется в реестре навсегда.
+        """
+        self._close_stdin(proc)
         forget_stdio_reader(getattr(proc, "stdout", None))
 
     def _write_line(self, payload: Dict[str, Any]) -> None:

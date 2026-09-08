@@ -1,4 +1,5 @@
 import asyncio
+import asyncio
 import threading
 import time
 from dataclasses import dataclass
@@ -34,13 +35,18 @@ class ActiveRun:
     done: bool = False
     result: Any = None
     error: Optional[BaseException] = None
+    #: Прогон СНЯЛИ, а не он упал: остановка uvicorn, явная отмена таски.
+    #: Отдельно от ``error``, иначе клиент не отличит отказ агента от штатного
+    #: завершения сервера — раньше ``except BaseException`` записывал отмену
+    #: в ``error`` и репортил прогон упавшим.
+    cancelled: bool = False
 
 
 class AgentRunRegistry:
     """
     Реестр активных запусков агента (в памяти процесса).
 
-    Ключ: (system, task_id) -> тред с `AgentExecutor.run()`.
+    Ключ: (system, task_id) -> тред с `AgentExecutor.arun()`.
     Если запуск уже идёт — можно докидывать сообщения в процесс через `add_user_message()`.
     """
 
@@ -119,6 +125,19 @@ class AgentRunRegistry:
                             run_ref.result = result
                             run_ref.last_activity_at = time.time()
                             run_ref.finished_at = time.time()
+                except asyncio.CancelledError:
+                    # Отмена — не отказ прогона. Так выглядит остановка uvicorn
+                    # и явная отмена таски; помечать это как failed значит
+                    # врать клиенту и мешать отличить падение от штатного
+                    # завершения сервера. Дальше отмену пробрасываем: гасить её
+                    # здесь — значит соврать уже планировщику.
+                    with self._lock:
+                        if run_ref is not None:
+                            run_ref.done = True
+                            run_ref.cancelled = True
+                            run_ref.last_activity_at = time.time()
+                            run_ref.finished_at = time.time()
+                    raise
                 except BaseException as e:  # noqa: BLE001
                     with self._lock:
                         if run_ref is not None:

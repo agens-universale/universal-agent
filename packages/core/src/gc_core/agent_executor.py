@@ -786,18 +786,6 @@ class AgentExecutor:
 
     async def acompact_thread(self, thread_id: str, system: str | None = None) -> bool:
         """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
-        (оркестрация суммаризации, вне run-loop). Основная реализация."""
-        from gc_core.manual_compaction import acompact_thread as _acompact_thread
-        return await _acompact_thread(
-            ctx=self._ctx,
-            _lock=self._lock,
-            self_state=self._state,
-            thread_id=thread_id,
-            system=system
-        )
-
-    async def acompact_thread(self, thread_id: str, system: str | None = None) -> bool:
-        """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
         (оркестрация суммаризации, вне run-loop)."""
         from gc_core.manual_compaction import acompact_thread as _acompact_thread
         return await _acompact_thread(
@@ -807,3 +795,4 @@ class AgentExecutor:
             thread_id=thread_id,
             system=system
         )
+

@@ -33,6 +33,7 @@ from __future__ import annotations
 import functools
 import inspect
 from typing import Any, Callable, Generator
+import threading
 
 
 def _start(flow: Generator) -> tuple[bool, Any]:
@@ -48,6 +49,21 @@ def _start(flow: Generator) -> tuple[bool, Any]:
     return True, None
 
 
+#: Слоты для ТЕЛ ГВАРДОВ — свои, не общие с MCP.
+#:
+#: Прежняя редакция звала ``run_abandonable``, у которого пул один на процесс,
+#: и обещала в докстроке «не в общем пуле», не замечая, что это и есть пул
+#: MCP-дискавери и MCP-вызовов. Тело модерации в режиме ``ask`` держит слот всё
+#: время, пока человек думает над подтверждением: несколько агентов на одном
+#: loop с ожидающими подтверждениями выбирали восемь слотов и останавливали
+#: MCP-вызовы соседей.
+#:
+#: Потолок здесь щедрее, потому что эти потоки почти всё время ЖДУТ — человека
+#: или судью, — а не считают. Он нужен лишь чтобы сорвавшийся цикл не завёл
+#: неограниченное число потоков.
+_GUARD_SLOTS = threading.BoundedSemaphore(32)
+
+
 async def _off_loop(fn: Callable[..., Any], *args: Any) -> Any:
     """Исполнить блокирующую часть гварда вне loop — на своём потоке.
 
@@ -55,12 +71,14 @@ async def _off_loop(fn: Callable[..., Any], *args: Any) -> Any:
     бы в очередь за чужой работой. Замерено на забитом пуле — команда, которая
     сама идёт секунду, занимала 2.25 с, потому что сперва ждала слот.
 
-    ``run_abandonable`` даёт поток-демон на вызов; ровно для этого он и
-    написан, см. его докстроку.
+    Поток-демон на вызов даёт ``run_abandonable_in``; слоты передаём СВОИ —
+    см. ``_GUARD_SLOTS``.
     """
-    from gc_core.tools.connect_mcp.abandonable import run_abandonable
+    from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
 
-    return await run_abandonable(fn, *args)
+    return await run_abandonable_in(
+        _GUARD_SLOTS, fn, *args, _thread_name="guard-blocking"
+    )
 
 
 def _finish(flow: Generator, result: Any) -> Any:

@@ -38,6 +38,24 @@ def test_no_capability_we_cannot_serve():
     )
 
 
+def test_every_init_source_declares_the_same():
+    """Источник параметров ``initialize`` обязан быть ОДИН.
+
+    Их было два: ``_INIT_PAYLOAD`` (одноразовый stdio и persistent) и
+    ``MCP_INIT_PARAMS`` (легаси-http и carrier). Опустошили только первый —
+    второй продолжал обещать roots и sampling, и по этому пути сервер по-прежнему
+    ждал нас до таймаута. Гейт выше смотрел лишь на ``_INIT_PAYLOAD`` и
+    расхождения не видел, поэтому проверяем и совпадение источников.
+    """
+    from gc_core.tools.connect_mcp.client import MCP_INIT_PARAMS
+
+    assert MCP_INIT_PARAMS == _INIT_PAYLOAD["params"], (
+        "параметры initialize разъехались между локусами"
+    )
+    offenders = sorted(set(MCP_INIT_PARAMS["capabilities"]) & set(_UNIMPLEMENTED))
+    assert offenders == [], f"легаси-путь объявляет {offenders}"
+
+
 def test_client_has_no_incoming_request_handler():
     """Фиксируем причину: обработчика входящих запросов в клиенте нет.
 

@@ -53,6 +53,7 @@ class MCPToolWrapper:
             tools_registry=self._tools_registry,
             timeout=self._timeout,
             default_use_retry=self._default_use_retry,
+            os_backend=self._os_backend,
         )
 
 
@@ -507,6 +508,7 @@ def _assemble_mcp_tools_data(
     status_map: Dict[str, Dict[str, Any]],
     config_dict: Dict[str, Any],
     servers_cfg: Dict[str, Any],
+    os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Собрать tools_data из результата дискавери. Ни сети, ни ожидания.
 
@@ -595,7 +597,9 @@ async def aget_mcp_tools_data_for_config(
     except Exception:
         logger.error("Failed to load MCP tools", exc_info=True)
         return {}, {}
-    return _assemble_mcp_tools_data(mcp_registry, status_map, config_dict, servers_cfg)
+    return _assemble_mcp_tools_data(
+        mcp_registry, status_map, config_dict, servers_cfg, os_backend=os_backend
+    )
 
 
 def get_mcp_tools_data_for_config(

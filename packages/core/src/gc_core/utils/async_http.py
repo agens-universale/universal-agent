@@ -129,6 +129,14 @@ def get_async_client(
             verify=ssl_context,
             mounts=mounts_from_proxies(proxies, ssl_context),
             trust_env=False,
+            # Редиректы следуем, как синхронная `NO_NETRC_SESSION` и как
+            # `requests.Session`, откуда транспорт переезжал: у httpx дефолт
+            # обратный, и `raise_for_status()` бросает уже на 3xx. Ретрай это
+            # не спасал — 307 не 429 и не 5xx. Корпоративные шлюзы отвечают
+            # 307/308 на нормализацию http→https или завершающего слэша у
+            # `/v1/chat/completions`; такие конфиги работали и обязаны работать.
+            # 307/308 сохраняют метод и тело, то есть POST остаётся POST.
+            follow_redirects=True,
             # Таймаут НЕ здесь: он у каждого запроса свой (backend.request_timeout_sec
             # против коротких проб), а клиент переиспользуется. Зашитый в клиент
             # таймаут молча применился бы к чужому запросу.
@@ -138,7 +146,18 @@ def get_async_client(
 
 
 #: Сколько владельцев (обычно ``AsyncAgent``) держат пул этого loop.
-_holders: dict[int, int] = {}
+#: Значение — ``(weakref на loop, счётчик)``: голого ``id`` мало по той же
+#: причине, что и у ``_clients`` — id переиспользуются между последовательными
+#: ``asyncio.run``, и новый loop унаследовал бы чужой счётчик.
+_holders: dict[int, tuple["weakref.ref", int]] = {}
+
+
+def _holder_count(loop) -> int:
+    entry = _holders.get(id(loop))
+    if entry is None:
+        return 0
+    loop_ref, count = entry
+    return count if loop_ref() is loop else 0
 
 
 def acquire_clients() -> None:
@@ -148,18 +167,18 @@ def acquire_clients() -> None:
     владельцев ``aclose`` одного агента закрывал бы клиенты, которыми прямо
     сейчас пользуется соседний, и рвал его запрос к модели на полуслове.
     """
-    loop_key = id(asyncio.get_running_loop())
-    _holders[loop_key] = _holders.get(loop_key, 0) + 1
+    loop = asyncio.get_running_loop()
+    _holders[id(loop)] = (weakref.ref(loop), _holder_count(loop) + 1)
 
 
 async def release_clients() -> None:
     """Отпустить пул текущего loop; закрыть, когда ушёл последний владелец."""
-    loop_key = id(asyncio.get_running_loop())
-    left = _holders.get(loop_key, 0) - 1
+    loop = asyncio.get_running_loop()
+    left = _holder_count(loop) - 1
     if left > 0:
-        _holders[loop_key] = left
+        _holders[id(loop)] = (weakref.ref(loop), left)
         return
-    _holders.pop(loop_key, None)
+    _holders.pop(id(loop), None)
     await aclose_clients()
 
 

@@ -106,3 +106,75 @@ def test_harbor_declares_itself_bridging():
         "локальный бэкенд объявил себя мостящим — все файловые операции уедут "
         "в пул, хотя стоят микросекунды"
     )
+
+
+# --- генераторные двойники у мостящего бэкенда ----------------------------
+
+
+class _BridgingBackend:
+    """Мостящий бэкенд-двойник: синхронный обход блокирует поток.
+
+    Так ведёт себя ``HarborBackend``: его ``walk`` внутри делает
+    ``run_coroutine_threadsafe(...).result()`` на чужом loop, то есть держит
+    поток, пока идёт сетевой обход.
+    """
+
+    bridges_to_loop = True
+
+    def __init__(self):
+        self.thread_of_work = None
+
+    def iter_walk(self, path, *, should_descend=None):
+        import threading
+
+        for i in range(3):
+            # Работа происходит ЗДЕСЬ, при итерации, а не при вызове функции.
+            self.thread_of_work = threading.current_thread().name
+            yield (f"f{i}", False)
+
+
+
+async def test_generator_twin_does_the_work_off_the_calling_thread():
+    """Работа генератора обязана уйти с потока вызывающего.
+
+    Регрессия, которую нашло ревью: двойник уводил в поток ВЫЗОВ генераторной
+    функции, а тот возвращается мгновенно, отдав генератор. Настоящая работа
+    шла потом, при итерации, на loop вызывающего — то есть ровно та блокировка,
+    которую примесь обещает снять. Снаружи выглядело как рабочий async-двойник.
+    """
+    import threading
+
+    from gc_core.backends.protocol import AsyncFileOps
+
+    class _Backend(AsyncFileOps, _BridgingBackend):
+        # Флаг ставим ЗДЕСЬ: у `AsyncFileOps` он объявлен False, и в MRO
+        # примесь идёт раньше — значение базы иначе бы победило.
+        bridges_to_loop = True
+
+    backend = _Backend()
+    _BridgingBackend.__init__(backend)
+    here = threading.current_thread().name
+
+    result = await backend.aiter_walk("/x")
+    items = list(result)
+
+    assert items == [("f0", False), ("f1", False), ("f2", False)], items
+    assert backend.thread_of_work is not None, "генератор так и не проитерировался"
+    assert backend.thread_of_work != here, (
+        f"обход исполнился на потоке вызывающего ({here}) — двойник уводит в "
+        f"поток только вызов функции, а не саму работу"
+    )
+
+
+async def test_local_backend_keeps_the_lazy_generator():
+    """Локальному бэкенду материализация не нужна — он остаётся ленивым."""
+    import inspect
+
+    from gc_core.backends.local import LocalFsBackend
+
+    result = await LocalFsBackend().aiter_walk(".")
+
+    assert inspect.isgenerator(result), (
+        "локальный бэкенд начал материализовать обход — это лишняя память "
+        "там, где блокировки нет"
+    )

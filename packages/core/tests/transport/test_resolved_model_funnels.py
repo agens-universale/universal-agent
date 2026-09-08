@@ -226,7 +226,7 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     router = SimpleNamespace(
@@ -312,7 +312,7 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     router = SimpleNamespace(
@@ -837,7 +837,7 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = SimpleNamespace(
@@ -922,7 +922,7 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {})
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     router = SimpleNamespace(resolve=Mock(return_value=_resolved(
         backend_overrides={"retry_embedded_choice_errors": False})))

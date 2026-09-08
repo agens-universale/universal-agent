@@ -479,6 +479,16 @@ def _stdio_command(server_cfg: Dict[str, Any]) -> Tuple[List[str], Any, Dict[str
     return cmd, cwd, env
 
 
+# Потолок строки JSON-RPC у asyncio-подпроцесса. Дефолт ``StreamReader`` —
+# 64 КиБ, и на строке длиннее ``readline()`` бросает ``ValueError: Separator
+# is not found, and chunk exceed the limit``, теряя буфер. Через этот порог
+# перешагивает обычный ``tools/list`` сервера на пару сотен инструментов и
+# любой сколько-нибудь крупный результат ``tools/call``; на ``Popen(text=True)``,
+# откуда транспорт переезжал, потолка не было вовсе. 32 МиБ — это про
+# «не съесть память на мусорном потоке», а не про формат ответа.
+_STDIO_READ_LIMIT = 32 * 1024 * 1024
+
+
 async def _aspawn_stdio_process(server_cfg: Dict[str, Any]):
     """Запустить процесс MCP-сервера на текущем loop.
 
@@ -494,6 +504,7 @@ async def _aspawn_stdio_process(server_cfg: Dict[str, Any]):
         stderr=asyncio.subprocess.DEVNULL,
         cwd=cwd,
         env=env,
+        limit=_STDIO_READ_LIMIT,
     )
 
 

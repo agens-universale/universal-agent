@@ -42,6 +42,8 @@ from gc_core.runtime_notices import maybe_push_llm_failure_notice
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     backend_override_value,
+    acreate_call_headers,
+    aresolve_auth_token,
     create_call_headers,
     resolve_network_params,
 )
@@ -375,7 +377,9 @@ async def _arequest_backend_canonical(
                 run_logger.warning(
                     "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
                 )
-                auth_connector.get_token(force=True)
+                # Пере-выпуск — тот же блокирующий поход в сеть, что и обычный
+                # `get_token`, только гарантированный: `force=True` мимо кэша.
+                await aresolve_auth_token(auth_connector, force=True)
                 try:
                     return await _arequest_backend_canonical_once(
                         messages, state, ctx, set_previous_response_id=set_previous_response_id
@@ -408,7 +412,7 @@ async def _arequest_backend_canonical_once(
     # иначе /level посреди хода уводил бы запрос на другой слот. Без ctx.model_router
     # (легаси/тестовые двойники) — resolved=None, воронки читают cfg напрямую как раньше.
     resolved = _resolve_main_for_turn(state, ctx)
-    call_headers = create_call_headers(state, ctx, resolved=resolved)
+    call_headers = await acreate_call_headers(state, ctx, resolved=resolved)
     cfg = getattr(ctx, "config_dict", {}) or {}
     backend_mode = _get_backend_api_mode(ctx)
     # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
@@ -1533,8 +1537,6 @@ async def arun_agent(
         elif count_completed_step:
             state.steps += 1
 
-
-# --- синхронные двойники --------------------------------------------------
 #
 # Реализация у каждой ступени цикла одна — асинхронная. Здесь только портал:
 # сигнатуры, блокирующая семантика и возвращаемые значения прежние, поэтому

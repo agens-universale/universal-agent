@@ -5,6 +5,7 @@ import pytest
 from gc_core.summarize import llm as summary_llm
 from gc_core.utils import llm_chat_client
 from gc_testkit import run_coro
+from gc_testkit import as_coro
 
 
 def test_auxiliary_llm_completion_kwargs_matches_chat_completions_llm():
@@ -139,7 +140,7 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
         _fake_policy,
     )
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = SimpleNamespace(

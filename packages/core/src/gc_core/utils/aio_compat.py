@@ -22,19 +22,47 @@ import inspect
 from typing import Any, Coroutine
 
 
+async def _closing_clients(coro: Coroutine[Any, Any, Any]) -> Any:
+    """Выполнить корутину и прибрать за ней пул httpx на ЭТОМ loop.
+
+    Без этого каждый вызов протекал. ``get_async_client`` кэширует клиент по
+    ключу с ``id(loop)``, а loop здесь одноразовый: клиент, его keep-alive
+    сокет и сам мёртвый loop оставались в модульном реестре навсегда. Защита
+    «заменим запись, если id повторился» не срабатывала — мёртвый loop не
+    собирался сборщиком, потому что реестр держал на него ссылку.
+
+    Заметнее всего это на конфиге по умолчанию (``command_moderation.enabled``,
+    ``mode: ask``): судья модерации живёт в теле гварда, которое исполняется
+    вне loop, поэтому КАЖДЫЙ модерируемый ``exec_command`` терял сокет и пул и
+    платил новый TLS-handshake.
+
+    Закрываем только клиентов текущего loop (``aclose_clients`` фильтрует по
+    нему) — чужие живут на своих loop, и закрыть их отсюда всё равно нечем.
+    """
+    from gc_core.utils.async_http import aclose_clients
+
+    try:
+        return await coro
+    finally:
+        await aclose_clients()
+
+
 def run_coro_blocking(coro: Coroutine[Any, Any, Any]) -> Any:
     """Дождаться корутины из синхронного кода.
 
     Нет активного loop — обычный ``asyncio.run``. Есть — уводим корутину в
     отдельный поток с собственным loop: сам вызывающий поток при этом честно
     блокируется, как и ожидает синхронный код вокруг.
+
+    В обоих случаях loop одноразовый, поэтому за ним прибираем: см.
+    :func:`_closing_clients`.
     """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return asyncio.run(_closing_clients(coro))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(asyncio.run, coro).result()
+        return ex.submit(asyncio.run, _closing_clients(coro)).result()
 
 
 async def await_callback(result: Any) -> Any:

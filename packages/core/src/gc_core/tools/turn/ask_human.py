@@ -4,7 +4,6 @@ import json
 import logging
 from typing import Optional, Dict, Any
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.aio_compat import run_coro_blocking
 
 _logger = logging.getLogger(__name__)
 
@@ -39,50 +38,20 @@ _TOOL_DESCRIPTION = (
 )
 
 
-def _read_human_response(ctx: "Any", question: str) -> str:
+
+
+async def _aread_human_response(ctx: "Any", question: str) -> str:
     """Спросить человека через порт вызывающего, а по умолчанию — через stdin.
 
     Ядро — библиотека: у встраивающего приложения свой способ спросить
     пользователя (веб-форма, чат, очередь), и ``input()`` там не просто
-    неуместен, а невозможен — stdin принадлежит не ему.
+    неуместен, а невозможен — stdin принадлежит не ему. Порт задаётся полем
+    ``ctx.ask_human``: обычная функция или корутинная, принимаются обе.
 
-    Порт задаётся полем ``ctx.ask_human``: обычная функция или корутинная —
-    принимаются обе. Порт не задан → прежнее поведение, чтение stdin построчно
-    до пустой строки или EOF; так работает CLI, и его контракт не меняется.
-    """
-    port = getattr(ctx, "ask_human", None)
-    if callable(port):
-        result = port(question)
-        if inspect.isawaitable(result):
-            # Порт вызывающего асинхронный, а этот вход синхронный: ждём через
-            # общий хелпер — он умеет и «нет loop», и «loop уже крутится».
-            # Асинхронный вход сюда не заходит, см. _aread_human_response.
-            result = run_coro_blocking(result)
-        return (str(result) if result is not None else "").strip()
-
-    lines: list[str] = []
-    while True:
-        try:
-            line = input()
-            if line == "":
-                break
-            lines.append(line)
-        except EOFError:
-            break
-    return "\n".join(lines).strip()
-
-
-async def _aread_human_response(ctx: "Any", question: str) -> str:
-    """То же, но корутинный порт ждётся НА LOOP ВЫЗЫВАЮЩЕГО.
-
-    Синхронный двойник гонит его через ``run_coro_blocking``, а тот при живом
-    loop заводит одноразовый поток с одноразовым event loop
-    (``utils/aio_compat``). Порт встраивающего исполнялся на loop, которого
-    приложение не создавало: всё, что порт держит привязанным к своему loop —
-    очередь, соединение, сессия — там просто не работает.
-
-    Ожидание человека при этом ничем не ограничено, и синхронный путь держал
-    на нём слот общего пула ``to_thread``. Здесь не занят ни поток, ни loop.
+    Корутинный порт ждётся НА LOOP ВЫЗЫВАЮЩЕГО. Снятый синхронный двойник
+    гонял его через ``run_coro_blocking``, то есть на одноразовом loop в
+    одноразовом потоке: всё, что порт держит привязанным к своему loop —
+    очередь, соединение, сессия, — там просто не работало.
     """
     port = getattr(ctx, "ask_human", None)
     if callable(port):

@@ -138,6 +138,22 @@ class MemoryThreadStore:
             stamped["created_at"] = stamped["updated_at"]
         self._meta[self._key(system_id, thread_id)] = stamped
 
+    def _stamp(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Штампы записи — обязанность ХРАНИЛИЩА на КАЖДОМ пути записи.
+
+        Не только у ``save_meta``: файловая реализация штампует и патчи
+        рантайма, а здесь их не было — расхождение ровно в том свойстве,
+        которое дока называет «легко нарушить», и конформанс-набор его не
+        видел, потому что проверял штампы только у ``save_meta``.
+        """
+        from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+
+        stamped = ThreadMetaMapper.ensure_v2_meta(meta)
+        stamped["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if not stamped.get("created_at"):
+            stamped["created_at"] = stamped["updated_at"]
+        return stamped
+
     def patch_runtime_flag(
         self,
         system_id: str,
@@ -163,6 +179,7 @@ class MemoryThreadStore:
         # расхождение здесь означало бы, что переезд на БД меняет форму meta.
         if not runtime:
             meta.pop("runtime", None)
+        self._meta[self._key(system_id, thread_id)] = self._stamp(meta)
 
     def update_runtime_meta(
         self, system_id: str, thread_id: str, patch: Dict[str, Any]
@@ -173,6 +190,7 @@ class MemoryThreadStore:
         runtime.update(copy.deepcopy(patch))
         if not runtime:
             meta.pop("runtime", None)
+        self._meta[self._key(system_id, thread_id)] = self._stamp(meta)
 
     def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
         self._hit("discard_message")

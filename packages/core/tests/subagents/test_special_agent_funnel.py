@@ -126,7 +126,7 @@ def test_special_agent_role_generation_uses_subagent_usage_category(monkeypatch)
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = SimpleNamespace(
@@ -155,7 +155,7 @@ def test_special_agent_role_generation_declares_own_consumer(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     router = SimpleNamespace(resolve=Mock(return_value=_resolved()))
@@ -186,7 +186,7 @@ def test_special_agent_role_generation_uses_configured_max_tokens_default(monkey
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = SimpleNamespace(
@@ -216,7 +216,7 @@ def test_special_agent_role_generation_respects_configured_max_tokens_override(m
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = SimpleNamespace(

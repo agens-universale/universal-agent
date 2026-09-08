@@ -361,3 +361,52 @@ def test_fetch_url_cache_keyed_by_proxy(monkeypatch):
     # и отдавать прямой ответ на запрос через прокси нельзя.
     assert first["ok"] is True and second["ok"] is True
     assert calls["n"] == 2
+
+
+# --- прокси у simple_fetch_url --------------------------------------------
+#
+# Два теста ниже вернулись: при переезде на httpx они были УДАЛЕНЫ без замены,
+# и прокси у `simple_fetch_url` осталась непокрытой вовсе. Форма изменилась —
+# у requests прокси задавалась на запросе, у httpx при создании клиента, —
+# поэтому наблюдаем за фабрикой клиента (`seen`), а не за вызовом `.get`.
+
+
+def test_simple_fetch_url_passes_proxy_to_the_client(monkeypatch):
+    """Прокси обязана доехать до клиента, а не потеряться по дороге."""
+    seen: dict = {}
+    _install(monkeypatch, _resp("<html>hi</html>"), seen)
+
+    proxy = "socks5h://127.0.0.1:1080"
+    data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy=proxy))
+
+    assert data["ok"] is True, data
+    proxies = [c.get("proxies") for c in seen.get("calls", [])]
+    assert any(proxy in str(p) for p in proxies), proxies
+
+
+def test_simple_fetch_url_proxy_validation(monkeypatch):
+    """Схему прокси проверяем ДО сети: мусор не должен уходить в клиент."""
+    seen: dict = {}
+    _install(monkeypatch, _resp("<html>hi</html>"), seen)
+
+    data = json.loads(
+        _call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy="ftp://x")
+    )
+
+    assert data["ok"] is False, data
+    assert data["error"]["field"] == "proxy", data
+    assert seen.get("calls") in (None, []), "запрос ушёл при невалидной прокси"
+
+
+def test_simple_fetch_url_empty_proxy_is_direct(monkeypatch):
+    """Пустая строка — это «без прокси», а не «прокси с пустым адресом»."""
+    seen: dict = {}
+    _install(monkeypatch, _resp("<html>hi</html>"), seen)
+
+    for value in ("", "   "):
+        data = json.loads(
+            _call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy=value)
+        )
+        assert data["ok"] is True, data
+    for call in seen.get("calls", []):
+        assert not call.get("proxies"), call

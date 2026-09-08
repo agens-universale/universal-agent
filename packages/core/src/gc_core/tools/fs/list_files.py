@@ -17,6 +17,7 @@ from gc_core.security.read_guard import (
 )
 from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
+from gc_core.tools.fs.cooperative import LoopYielder
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
@@ -272,7 +273,7 @@ Examples:
                     rg_cfg=_rg_cfg, rg_root=_rg_root, rg_extra=_rg_extra,
                 )
             else:
-                hit_limit = self._walk_directory(
+                hit_limit = await self._walk_directory(
                     path,
                     result,
                     file_matcher=file_matcher,
@@ -373,7 +374,7 @@ Examples:
 
         return False
 
-    def _walk_directory(
+    async def _walk_directory(
         self,
         root_path: str,
         result: List[Dict[str, Any]],
@@ -404,7 +405,12 @@ Examples:
         except OSError as e:
             raise RuntimeError(f"Failed to walk directory '{root_path}': {e}") from e
 
+        yielder = LoopYielder()
         for rel, is_d in walk_iter:
+            # Тот же обход, что у поиска по имени, и та же цена: см. модуль
+            # `cooperative`. Метод стал корутиной ради этой строки —
+            # единственный вызывающий и так `acall`.
+            await yielder.tick()
             if is_agent_hidden(os.path.basename(rel)):
                 continue
             if file_matcher is not None and not file_matcher(rel):

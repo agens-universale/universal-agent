@@ -63,6 +63,22 @@ def _run_agent(executor, a, *, thread_id, start_new_thread, system) -> None:
     asyncio.run(_body())
 
 
+async def _compact_body(executor, thread_id: str, system: "str | None") -> None:
+    """Форс-сжатие со своим loop — и с той же уборкой, что у прогона.
+
+    ``/compact`` поднимает собственный ``asyncio.run``, значит заводит и
+    собственный пул httpx-клиентов. Без закрытия каждое сжатие оставляло
+    открытый ``AsyncClient`` в реестре ``async_http`` на всю жизнь процесса —
+    ровно та утечка, от которой путь прогона выше уже защищён.
+    """
+    from gc_core.utils.async_http import aclose_clients
+
+    try:
+        await executor.acompact_thread(thread_id, system=system)
+    finally:
+        await aclose_clients()
+
+
 class AgentRunner:
     """Управляет жизненным циклом одного run AgentExecutor."""
 
@@ -217,7 +233,7 @@ class AgentRunner:
             def _target() -> None:
                 try:
                     executor = self._ensure_executor()
-                    asyncio.run(executor.acompact_thread(thread_id, system=system))
+                    asyncio.run(_compact_body(executor, thread_id, system))
                 except Exception as exc:
                     self._emit_error(exc)
 

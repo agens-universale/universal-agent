@@ -331,6 +331,46 @@ def check_update_runtime_meta(store: Any) -> None:
         _fail("update_runtime_meta затёр чужую секцию", f"meta={meta!r}")
 
 
+def check_every_write_path_stamps_meta(store: Any) -> None:
+    """Штампы meta ставит КАЖДЫЙ путь записи, а не только ``save_meta``.
+
+    Набор проверял штампы только у ``save_meta``, и две наши собственные
+    реализации разошлись ровно здесь, оставаясь зелёными: ``FileThreadStore``
+    штампует и в ``patch_runtime_flag``/``update_runtime_meta``, а
+    ``MemoryThreadStore`` писал только секцию ``runtime``.
+
+    Расхождение дорогое: без ``state_schema_version`` следующий прогон
+    ОТКАЖЕТСЯ читать тред, и заметно это лишь на ВТОРОМ прогоне — первый
+    проходит нормально. А ``updated_at`` после патча флага — то, по чему
+    хвостовой читатель понимает, что тред жив.
+    """
+    # ВАЖНО: тред заводится САМИМ проверяемым путём, без предварительного
+    # ``save_meta``. Иначе штампы достались бы в наследство от него, и
+    # проверка стала бы пустой — ровно так расхождение и пряталось.
+    for label, write in (
+        ("patch_runtime_flag",
+         lambda tid: store.patch_runtime_flag(SYS, tid, "summarizing", active=True)),
+        ("update_runtime_meta",
+         lambda tid: store.update_runtime_meta(SYS, tid, {"trace_ids": ["z"]})),
+    ):
+        tid = f"t-stamp-{label}"
+        write(tid)
+        meta = store.load_meta(SYS, tid)
+
+        if not meta.get("state_schema_version"):
+            _fail(
+                f"{label} не проставил state_schema_version",
+                "без версии схемы следующий прогон откажется читать тред —"
+                "\n  и увидите вы это только на ВТОРОМ прогоне.",
+            )
+        for field in ("created_at", "updated_at"):
+            if not meta.get(field):
+                _fail(
+                    f"{label} не проставил {field}",
+                    "штампы ставит каждый путь записи, а не только save_meta.",
+                )
+
+
 def check_discard(store: Any) -> None:
     """Удаление по id, ``False`` на несуществующем."""
     store.append_messages(SYS, "t-disc", [_msg("d1"), _msg("d2")])
@@ -410,6 +450,7 @@ BEHAVIOUR_CHECKS: tuple = (
     check_meta_roundtrip,
     check_meta_is_stamped_on_write,
     check_runtime_flag_is_pointwise,
+    check_every_write_path_stamps_meta,
     check_update_runtime_meta,
     check_discard,
     check_reset,

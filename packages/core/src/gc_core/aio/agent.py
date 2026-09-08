@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any, AsyncIterator
 
 from gc_core.agent_executor import AgentExecutor
 from gc_core.run_context import acreate_run_context
-from gc_core.utils.async_http import acquire_clients
+from gc_core.utils.async_http import acquire_clients, release_clients
 
 #: Метка «прогон кончился» в очереди дельт. Отдельный объект, а не None:
 #: None — легальное значение, которое может прийти от колбэка.
@@ -78,13 +79,22 @@ class AsyncAgent:
             if on_stream_delta is not None:
                 on_stream_delta(kind, text)
 
+        # Права на пул заявляем ДО сборки: она сама ходит в сеть (MCP), и без
+        # заявки соседний агент мог бы закрыть пул у неё под руками. Но если
+        # сборка упадёт — а падает она в первую очередь на отказе
+        # MCP-дискавери, — заявку надо снять: иначе счётчик владельцев этого
+        # loop никогда не дойдёт до нуля и пул не закроется до конца процесса.
         acquire_clients()
-        ctx = await acreate_run_context(
-            config_dict,
-            auth_connector=auth_connector,
-            on_stream_delta=_sink,
-            **context_kwargs,
-        )
+        try:
+            ctx = await acreate_run_context(
+                config_dict,
+                auth_connector=auth_connector,
+                on_stream_delta=_sink,
+                **context_kwargs,
+            )
+        except BaseException:
+            await release_clients()
+            raise
         return cls(AgentExecutor(ctx), subscribers)
 
     @property
@@ -122,19 +132,40 @@ class AsyncAgent:
         self._subscribers.add(queue)
         task = asyncio.create_task(self.run(prompt, **kwargs))
         task.add_done_callback(lambda _t: queue.put_nowait(_DONE))
+        cancelled = False
         try:
             while True:
                 item = await queue.get()
                 if item is _DONE:
                     break
                 yield item
+        except asyncio.CancelledError:
+            # Отмена и брошенный итератор — РАЗНЫЕ вещи, и лечатся по-разному.
+            # Брошенный итератор (``break`` у потребителя) — ход всё равно
+            # доигрываем: см. ниже. Отмена — это `wait_for`, отвалившийся
+            # клиент, остановка приложения; вызывающий просит прекратить
+            # СЕЙЧАС. Пока обе ветки шли через один `await task`, отмена
+            # откладывалась до конца хода: `TimeoutError` приходил не через
+            # заявленные 0.2 с, а через все три секунды прогона, и LLM-вызовы
+            # с тулами продолжали идти.
+            cancelled = True
+            self._executor.stop_run()      # кооперативно: дать ходу закрыться
+            task.cancel()
+            raise
         finally:
             # Отписаться ПЕРВЫМ делом: если потребитель бросил итератор, дельты
             # не должны копиться в осиротевшей очереди до конца хода.
             self._subscribers.discard(queue)
-            # Ждём ход даже если потребитель бросил итератор на полпути:
-            # иначе прогон осиротеет, а его исключение всплывёт «ниоткуда».
-            self._last_answer = await task
+            if cancelled:
+                # Ход уже отменён — ждём только его завершения, результат
+                # брать неоткуда. Исключение отмены здесь не поднимаем: наверх
+                # уже летит своё.
+                with contextlib.suppress(BaseException):
+                    await task
+            else:
+                # Ждём ход даже если потребитель бросил итератор на полпути:
+                # иначе прогон осиротеет, а его исключение всплывёт «ниоткуда».
+                self._last_answer = await task
 
     @property
     def last_answer(self) -> Any:

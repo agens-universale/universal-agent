@@ -52,6 +52,7 @@ from gc_core.security.read_guard import (
     _resolve_skills_root,
 )
 from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
+from gc_core.tools.fs.cooperative import LoopYielder
 
 # Python-path fallbacks where an in-sandbox needle prefilter is worth a try: the
 # recipe exists (grep+find), only the pattern/glob could not be expressed natively.
@@ -1861,7 +1862,11 @@ class FindInFiles(AbstractSimpleTool):
                     prune_dot_dirs=prune_dot,
                 )
             )
+            yielder = LoopYielder()
             for entry in entries:
+                # Питоновский фоллбек читает КАЖДЫЙ файл и гоняет по нему
+                # regex — самая дорогая инлайн-операция из всех файловых.
+                await yielder.tick()
                 if entry.is_dir:
                     continue
                 relpath = entry.rel

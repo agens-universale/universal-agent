@@ -6,6 +6,8 @@
 перетирает явный Authorization и даёт 401.
 """
 import itertools
+import json
+from pathlib import Path
 
 import pytest
 
@@ -84,20 +86,47 @@ def test_broken_cidr_does_not_explode():
     assert should_bypass_proxies("http://10.1.2.3/", "10.0.0.0/99") is False
 
 
-requests_utils = pytest.importorskip(
-    "requests.utils",
-    reason="requests убран из зависимостей ядра; сверка возможна только там, "
-           "где он ещё стоит как транзитивный",
-)
+#: Эталон, снятый с ``requests.utils.should_bypass_proxies`` в момент отказа от
+#: requests. Без него сверка была ЖИВОЙ и висела на модульном
+#: ``importorskip("requests.utils")`` — а requests из зависимостей ядра ушёл, и
+#: в чистой установке пропускался ВЕСЬ файл, включая проверки выше, которые
+#: requests не нужны вовсе. Таблица делает эквивалентность проверяемой везде.
+_REFERENCE = json.loads(
+    (Path(__file__).parent / "fixtures" / "no_proxy_reference_requests.json")
+    .read_text(encoding="utf-8")
+)["pairs"]
 
 
-@pytest.mark.parametrize("url,no_proxy", list(itertools.product(_URLS, _LISTS)))
-def test_no_proxy_matches_requests(url, no_proxy):
+def test_reference_covers_every_pair():
+    """Эталон обязан покрывать всю решётку — иначе он тихо усохнет."""
+    assert len(_REFERENCE) == len(_URLS) * len(_LISTS), (
+        f"в эталоне {len(_REFERENCE)} пар, а решётка даёт "
+        f"{len(_URLS) * len(_LISTS)} — пересними fixture"
+    )
+    assert any(r[2] for r in _REFERENCE) and not all(r[2] for r in _REFERENCE), (
+        "эталон вырожден: все ответы одинаковые, сверять нечего"
+    )
+
+
+@pytest.mark.parametrize("url,no_proxy,expected", _REFERENCE)
+def test_no_proxy_matches_the_requests_reference(url, no_proxy, expected):
     """Поведение совпадает с requests пара-в-пару.
 
     Это и есть доказательство, что переезд с requests ничего не изменил.
-    Тест сам себя выключает там, где requests уже нет.
     """
+    assert should_bypass_proxies(url, no_proxy) is expected
+
+
+@pytest.mark.parametrize("url,no_proxy", list(itertools.product(_URLS, _LISTS)))
+def test_reference_still_matches_live_requests(url, no_proxy):
+    """Там, где requests ещё стоит, сверяем и ЖИВОЙ ответ.
+
+    Страхует от протухшего эталона: если requests изменит поведение, таблицу
+    надо пересматривать осознанно, а не узнавать об этом от пользователя.
+    Пропускается там, где requests нет, — и пропускается ОДИН тест, а не файл.
+    """
+    requests_utils = pytest.importorskip("requests.utils")
+
     assert should_bypass_proxies(url, no_proxy) == requests_utils.should_bypass_proxies(
         url, no_proxy=no_proxy
     )

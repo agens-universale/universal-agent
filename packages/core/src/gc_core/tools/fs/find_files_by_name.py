@@ -34,6 +34,7 @@ from gc_core.utils.fs_search_walk import (
 )
 from gc_core.utils.glob_to_regex import glob_to_regex
 from gc_core.utils.tool_report_paths import tool_report_abspath
+from gc_core.tools.fs.cooperative import LoopYielder
 
 _GLOB_META_RE = re.compile(r"[*?\[\]]")
 
@@ -432,7 +433,12 @@ class FindFilesByName(AbstractSimpleTool):
                 prune_names=tuple(sorted(exclude_names)),
                 prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
             )
+            yielder = LoopYielder()
             for entry in walk_iter:
+                # Обход идёт инлайн на loop вызывающего и ограничен ЧИСЛОМ
+                # записей, а не временем: на 24 тысячах он съедает весь бюджет
+                # приёмки одной операцией. Уступаем по времени — см. модуль.
+                await yielder.tick()
                 rel, is_d = entry.rel, entry.is_dir
                 base = os.path.basename(rel)
                 if is_agent_hidden(base):

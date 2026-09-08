@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from gc_testkit.paths import module_dir
 from gc_testkit import run_coro
+from gc_testkit import as_coro
 
 
 def teardown_module(_module) -> None:
@@ -75,7 +76,7 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
         )
 
     monkeypatch.setattr(
-        processing_module, "create_call_headers", _fake_create_call_headers
+        processing_module, "acreate_call_headers", as_coro(_fake_create_call_headers)
     )
     monkeypatch.setattr(
         processing_module, "create_call_data_completions", _fake_create_call_data

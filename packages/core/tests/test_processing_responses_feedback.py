@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from gc_core.utils.convertations import sanitize_messages_for_chat_completions
 from gc_testkit.paths import module_dir
 from gc_testkit import run_coro
+from gc_testkit import as_coro
 
 
 def teardown_module(_module) -> None:
@@ -121,7 +122,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         }
 
     monkeypatch.setattr(
-        processing_module, "create_call_headers", _fake_create_call_headers
+        processing_module, "acreate_call_headers", as_coro(_fake_create_call_headers)
     )
     monkeypatch.setattr(
         "gc_core.request_backend_policy.arequest_backend_chat_completions",

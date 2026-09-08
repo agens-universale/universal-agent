@@ -203,11 +203,36 @@ class AsyncFileOps:
     async def awalk(self, path):
         return await self._afile(self.walk, path)
 
+    async def _aiter(self, fn, *args, **kwargs):
+        """То же, что ``_afile``, но для ГЕНЕРАТОРНЫХ методов.
+
+        Отдельная ветка нужна не для красоты. ``_afile`` уводил в поток вызов
+        генераторной функции — а тот возвращается МГНОВЕННО, отдав генератор:
+        настоящая работа шла потом, при итерации, на loop вызывающего. Для
+        мостящего бэкенда это ровно та блокировка, которую примесь обещает
+        снять (``walk`` у Harbor внутри делает ``run_coroutine_threadsafe(...)
+        .result()``). Поэтому здесь генератор МАТЕРИАЛИЗУЕТСЯ в потоке, и
+        наружу уходит готовый список.
+
+        Цена — память под весь обход; она приемлема ровно там, где эта ветка
+        и включается: у мостящего бэкенда каждый шаг обхода стоит сетевого
+        обращения, и по сравнению с ним список в памяти ничего не стоит.
+        Локальный бэкенд по-прежнему отдаёт ленивый генератор инлайн.
+        """
+        if self.bridges_to_loop:
+            import asyncio
+
+            return await asyncio.to_thread(lambda: list(fn(*args, **kwargs)))
+        return fn(*args, **kwargs)
+
     async def aiter_walk(self, path, *, should_descend=None):
-        return await self._afile(self.iter_walk, path, should_descend=should_descend)
+        return await self._aiter(self.iter_walk, path, should_descend=should_descend)
 
     async def aiter_files(self, path, *, should_descend=None):
-        return await self._afile(self.iter_files, path, should_descend=should_descend)
+        return await self._aiter(self.iter_files, path, should_descend=should_descend)
+
+    async def aiter_walk_entries(self, path, **kwargs):
+        return await self._aiter(self.iter_walk_entries, path, **kwargs)
 
 class FsBackend(AsyncFileOps, ABC):
     # Self-isolated sandbox (task container); tools use it to skip host-only

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import asyncio
+import weakref
 from urllib.parse import urlsplit, urlunsplit
 
 from gc_core.utils.url_addr import is_loopback
@@ -56,6 +57,8 @@ class _PersistentSessionManager:
         self._sessions: Dict[tuple, Any] = {}
         # (owner, id(loop), server_key) -> стек контекст-менеджеров для закрытия
         self._cm_stacks: Dict[tuple, Any] = {}
+        # key -> weakref на loop: голого id мало, они переиспользуются.
+        self._loops: Dict[tuple, Any] = {}
 
     @staticmethod
     def _loop_id() -> int:
@@ -64,15 +67,36 @@ class _PersistentSessionManager:
     def _key(self, server_key: str) -> tuple:
         return (current_owner(), self._loop_id(), server_key)
 
+    def _same_loop(self, key: tuple) -> bool:
+        """Тот ли это loop, на котором сессию заводили.
+
+        ``id`` переиспользуются между последовательными ``asyncio.run`` —
+        проверено, шестой прогон получил id третьего. У ``async_http`` та же
+        ловушка уже закрыта weakref'ом, а здесь оставалась открытой, хотя
+        сценарий ровно наш: TUI собирает контекст на одном loop, а ходы гоняет
+        на новых, и сессия мёртвого loop досталась бы живому.
+        """
+        ref = self._loops.get(key)
+        if ref is None:
+            return False
+        try:
+            return ref() is asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+
     def get_session(self, server_key: str) -> Optional[Any]:
         try:
-            return self._sessions.get(self._key(server_key))
+            key = self._key(server_key)
         except RuntimeError:
             # Живого loop нет — значит и сессии на нём быть не может.
             return None
+        if not self._same_loop(key):
+            return None
+        return self._sessions.get(key)
 
     def set_session(self, server_key: str, session: Any, cm_stack: Any) -> None:
         key = self._key(server_key)
+        self._loops[key] = weakref.ref(asyncio.get_running_loop())
         self._sessions[key] = session
         self._cm_stacks[key] = cm_stack
 
