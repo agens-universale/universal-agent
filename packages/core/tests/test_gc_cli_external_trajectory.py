@@ -122,13 +122,16 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
         def __init__(self, ctx):
             pass
 
-        def run(self, messages):
+        async def arun(self, messages):
             raise RuntimeError("HTTPError from backend")  # mimics the abort
 
         def get_state(self):
             return partial_state
 
-    monkeypatch.setattr("gc_core.run_context.create_run_context", lambda *a, **k: SimpleNamespace())
+    async def _actx(*a, **k):
+        return SimpleNamespace()
+
+    monkeypatch.setattr("gc_core.run_context.acreate_run_context", _actx)
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", FakeExecutor)
 
     agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m", session_id="s",

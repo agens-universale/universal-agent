@@ -563,7 +563,7 @@ class GcCliExternal(BaseAgent):
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        from gc_core.run_context import create_run_context
+        from gc_core.run_context import acreate_run_context
         from gc_core.agent_executor import AgentExecutor
 
         loop = asyncio.get_running_loop()
@@ -593,10 +593,9 @@ class GcCliExternal(BaseAgent):
             # Host-side archive for ATIF dump; core State does not retain these.
             self._evicted_messages.extend(dropped)
 
-        def _run_loop():
+        async def _agent_run():
             nonlocal executor
-            timings.attach()  # sink routing is per thread — bind inside the worker
-            ctx = create_run_context(
+            ctx = await acreate_run_context(
                 config_dict,
                 environment=environment,
                 loop=loop,
@@ -604,18 +603,30 @@ class GcCliExternal(BaseAgent):
             )
             self._write_skills_debug(ctx, skill_sources)
             executor = AgentExecutor(ctx)
-            executor.run([instruction])
+            await executor.arun([instruction])
             return executor.get_state()
 
-        # Run the synchronous gc-cli loop off the event loop so backend bridging works,
-        # then dump the final message history as ATIF trajectory.json.
+        def _run_loop():
+            timings.attach()  # sink routing is per thread — bind inside the worker
+            return asyncio.run(_agent_run())
+
+        # Агент идёт СВОИМ `asyncio.run` в рабочем потоке — не через портал и не
+        # на loop Harbor.
         #
-        # asyncio.to_thread's future can't be cancelled: on a Harbor timeout,
-        # asyncio.wait_for(...) raises CancelledError here but the worker thread keeps
-        # running unattended (up to the pod's infra time limit) since nothing tells the
-        # executor to stop. Use run_in_executor instead so we hold the underlying future
-        # and, on cancellation, call executor.stop_run() (cooperative flag checked by the
-        # step loop) and give the thread a grace period to exit before re-raising.
+        # На loop Harbor его вести нельзя, и это проверено зависанием: файловый
+        # API `FsBackend` синхронный (`read`, `is_file`, `upload_file`), а у
+        # `HarborBackend` он мостится через `run_coroutine_threadsafe(...).result()`
+        # на ТОТ ЖЕ loop. Вызов такого метода с самого loop — вечный дедлок.
+        # Асинхронный порт (шаг A1) снял это только с запуска команд; файловые
+        # операции остались синхронными, потому что синхронен сам протокол.
+        #
+        # Рабочий поток остаётся, а портал уходит: внутри потока свой
+        # `asyncio.run`, и мост к бэкенду работает как раньше — маршалинг идёт
+        # между РАЗНЫМИ потоками.
+        #
+        # Отменяемость не изменилась: future от `run_in_executor` по-прежнему не
+        # отменить, поэтому на таймауте зовём `stop_run()` (кооперативный флаг,
+        # который проверяет цикл) и даём потоку время выйти.
         state = None
         fut = loop.run_in_executor(None, _run_loop)
         try:

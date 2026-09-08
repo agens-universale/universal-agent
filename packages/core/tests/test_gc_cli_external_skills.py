@@ -38,6 +38,14 @@ def _skill(root: Path, name: str) -> Path:
     return skill_dir
 
 
+def _as_async(fn):
+    """Заглушка сборки контекста стала корутинной вместе со швом адаптера."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return _wrapped
+
+
 def test_resolve_picks_nested_skill_dirs_and_skips_siblings(tmp_path):
     _skill(tmp_path, "threat-model")
     _skill(tmp_path, "finding-discovery")
@@ -158,15 +166,17 @@ def _stub_core(monkeypatch, captured: dict):
         def __init__(self, ctx):
             captured["config"] = ctx.config_dict
 
-        def run(self, messages):
+        # Адаптер ведёт агента своим `asyncio.run(executor.arun(...))`:
+        # синхронного `run` на этом пути больше нет.
+        async def arun(self, messages):
             return None
 
         def get_state(self):
             return SimpleNamespace(messages=[])
 
     monkeypatch.setattr(
-        "gc_core.run_context.create_run_context",
-        lambda cfg, **kw: SimpleNamespace(config_dict=cfg, os_backend=None),
+        "gc_core.run_context.acreate_run_context",
+        _as_async(lambda cfg, **kw: SimpleNamespace(config_dict=cfg, os_backend=None)),
     )
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", StubExecutor)
 
