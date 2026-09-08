@@ -92,7 +92,124 @@ def argv_to_posix_command(argv: list, *, stdin: Optional[str] = None) -> str:
     return command
 
 
-class FsBackend(ABC):
+class AsyncFileOps:
+    """Асинхронные двойники файловых операций — примесь, а не тело порта.
+
+    Примесью, потому что носителей ДВА: сам ``FsBackend`` и обёртки вокруг
+    него (``gc_tui.diff_tui.TrackingFsBackend``), которые порт не наследуют,
+    но обязаны повторять его поверхность. Копия двадцати пяти методов в
+    обёртке разъехалась бы с оригиналом первой же правкой.
+
+    Двойники зовут ``self.<метод>``, а не внутренний бэкенд: у обёртки это её
+    собственный, отслеживающий метод.
+
+    Зачем они вообще. Тулы зовут файловые методы ИНЛАЙН внутри ``acall`` — у
+    файлов нет нативной асинхронной формы, и поход в пул стоит дороже самой
+    работы (40 мкс против микросекунд). Для ``LocalFsBackend`` это так и
+    остаётся.
+
+    Но «файл» у бэкенда не обязан быть файлом. У ``HarborBackend``
+    ``exists()`` — это ``test -e`` по сети, ``read()`` — ``env.download_file``,
+    и оба ЖДУТ корутину ЧУЖОГО loop через
+    ``run_coroutine_threadsafe(...).result()``. Позови такой метод инлайн с
+    того же loop — поток заблокирует сам себя навсегда. Проверено зависанием,
+    когда агента попробовали вести на loop Harbor.
+
+    Отсюда развилка в ОДНОМ месте (``_afile``), а не в двадцати пяти:
+    мостящий бэкенд поднимает флаг и получает поток, локальный идёт инлайн.
+    Чужой бэкенд не делает ничего — дефолт зовёт его синхронный метод инлайн,
+    то есть ровно то, что происходит сегодня.
+    """
+
+    #: Бэкенд мостит операции на ЧУЖОЙ event loop (Harbor). Синхронный метод у
+    #: такого блокирует поток, поэтому двойники обязаны уходить с текущего
+    #: потока — иначе дедлок на собственном loop.
+    bridges_to_loop: bool = False
+
+    async def _afile(self, fn, *args, **kwargs):
+        """Исполнить файловую операцию, не заблокировав СВОЙ loop."""
+        if self.bridges_to_loop:
+            import asyncio
+
+            return await asyncio.to_thread(lambda: fn(*args, **kwargs))
+        return fn(*args, **kwargs)
+
+    async def aexists(self, path):
+        return await self._afile(self.exists, path)
+
+    async def alexists(self, path):
+        return await self._afile(self.lexists, path)
+
+    async def ais_file(self, path):
+        return await self._afile(self.is_file, path)
+
+    async def ais_dir(self, path):
+        return await self._afile(self.is_dir, path)
+
+    async def ais_symlink(self, path):
+        return await self._afile(self.is_symlink, path)
+
+    async def agetsize(self, path):
+        return await self._afile(self.getsize, path)
+
+    async def astat_info(self, path, follow_symlinks=False):
+        return await self._afile(self.stat_info, path, follow_symlinks)
+
+    async def areadable(self, path):
+        return await self._afile(self.readable, path)
+
+    async def awritable(self, path):
+        return await self._afile(self.writable, path)
+
+    async def arealpath(self, path):
+        return await self._afile(self.realpath, path)
+
+    async def ais_hidden(self, path):
+        return await self._afile(self.is_hidden, path)
+
+    async def aread(self, path):
+        return await self._afile(self.read, path)
+
+    async def aread_bytes(self, path):
+        return await self._afile(self.read_bytes, path)
+
+    async def aiter_lines(self, path):
+        return await self._afile(self.iter_lines, path)
+
+    async def aread_head_bytes(self, path, n):
+        return await self._afile(self.read_head_bytes, path, n)
+
+    async def asha256_bytes(self, path):
+        return await self._afile(self.sha256_bytes, path)
+
+    async def awrite(self, path, content, encoding='utf-8'):
+        return await self._afile(self.write, path, content, encoding)
+
+    async def awrite_bytes(self, path, data):
+        return await self._afile(self.write_bytes, path, data)
+
+    async def aappend(self, path, content, encoding='utf-8'):
+        return await self._afile(self.append, path, content, encoding)
+
+    async def acopy(self, src, dst):
+        return await self._afile(self.copy, src, dst)
+
+    async def amakedirs(self, path):
+        return await self._afile(self.makedirs, path)
+
+    async def alistdir(self, path):
+        return await self._afile(self.listdir, path)
+
+    async def awalk(self, path):
+        return await self._afile(self.walk, path)
+
+    async def aiter_walk(self, path, *, should_descend=None):
+        return await self._afile(self.iter_walk, path, should_descend=should_descend)
+
+    async def aiter_files(self, path, *, should_descend=None):
+        return await self._afile(self.iter_files, path, should_descend=should_descend)
+
+class FsBackend(AsyncFileOps, ABC):
     # Self-isolated sandbox (task container); tools use it to skip host-only
     # affordances. Security guards do NOT read this flag.
     is_sandbox: bool = False

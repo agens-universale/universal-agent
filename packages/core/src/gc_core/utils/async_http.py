@@ -15,11 +15,20 @@ from __future__ import annotations
 
 import asyncio
 import ssl
+import weakref
 from typing import Any, Optional, Union
 
 import httpx
 
-_clients: dict[tuple, httpx.AsyncClient] = {}
+#: ``ключ -> (слабая ссылка на loop, клиент)``. Слабая ссылка — не украшение.
+#:
+#: Ключ включает ``id(loop)``, а id в CPython ПЕРЕИСПОЛЬЗУЮТСЯ: у loop, созданных
+#: подряд через ``asyncio.run``, адреса повторяются (проверено запуском — шестой
+#: совпал с третьим). Без сверки самого объекта новый loop получил бы клиента
+#: МЁРТВОГО, и запрос к модели падал бы «Event loop is closed» в самом неудобном
+#: месте. Пока агент жил на одном долгом loop (портал), дыра была недостижима;
+#: с переходом фронтендов на свой ``asyncio.run`` на прогон — достижима.
+_clients: dict[tuple, tuple] = {}
 
 
 def build_ssl_context(
@@ -100,13 +109,20 @@ def get_async_client(
     proxies: Optional[dict] = None,
 ) -> httpx.AsyncClient:
     """Клиент для текущего loop. Переиспользуется — пул соединений живёт."""
-    loop_key = id(asyncio.get_running_loop())
+    loop = asyncio.get_running_loop()
+    loop_key = id(loop)
     proxy_key = tuple(sorted((proxies or {}).items()))
     # verify кладём в ключ КАК ЕСТЬ, а не bool(verify): при bool() два разных
     # CA-бандла попадали в одну ячейку, и вызывающий получал клиент с чужим
     # корнем доверия — чьим именно, решал порядок вызовов.
     key = (loop_key, verify, cert, proxy_key)
-    client = _clients.get(key)
+    entry = _clients.get(key)
+    client = None
+    if entry is not None:
+        loop_ref, cached = entry
+        # Тот ли это loop, для которого клиент создан: id совпал, а объект мог
+        # смениться (см. комментарий у `_clients`).
+        client = cached if loop_ref() is loop else None
     if client is None or client.is_closed:
         ssl_context = build_ssl_context(verify, cert)
         client = httpx.AsyncClient(
@@ -117,7 +133,7 @@ def get_async_client(
             # против коротких проб), а клиент переиспользуется. Зашитый в клиент
             # таймаут молча применился бы к чужому запросу.
         )
-        _clients[key] = client
+        _clients[key] = (weakref.ref(loop), client)
     return client
 
 
@@ -158,7 +174,7 @@ async def aclose_clients() -> None:
     loop_key = id(asyncio.get_running_loop())
     _holders.pop(loop_key, None)
     for key in [k for k in _clients if k[0] == loop_key]:
-        client = _clients.pop(key)
+        _loop_ref, client = _clients.pop(key)
         await client.aclose()
 
 
