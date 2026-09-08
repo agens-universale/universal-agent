@@ -75,18 +75,14 @@ def _stub_tools_modules() -> None:
         except Exception:
             payload = {}
         if tool_name == "turn_finish":
-            result = {
-                "tool": "turn_finish",
-                "ok": True,
-                "status": "submitted",
-                "message": "Task outcome submitted.",
-                "error": None,
-            }
-            if isinstance(payload, dict):
-                for key in ("solution_type", "comment", "task_report", "handoff"):
-                    if key in payload:
-                        result[key] = payload[key]
-            return json.dumps(result, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "tool": "turn_finish",
+                    "ok": True,
+                    "status": "submitted",
+                },
+                ensure_ascii=False,
+            )
         result = {
             "tool": tool_name,
             "ok": True,
@@ -391,8 +387,11 @@ def test_turn_finish_commits_current_user_intent_on_success():
     ]
     assert len(synthetic_outputs) == 1
     output_payload = json.loads(synthetic_outputs[0]["output"])
-    assert output_payload["message"] == "Task outcome submitted."
-    assert output_payload["task_report"] == "Сделано по запросу пользователя"
+    assert output_payload["tool"] == "turn_finish"
+    assert output_payload["ok"] is True
+    assert output_payload["status"] == "submitted"
+    assert output_payload["finish_gate"]["runtime_outcome"] == "skipped"
+    assert "task_report" not in output_payload
     assert "Dialog turn finished" not in synthetic_outputs[0]["output"]
 
 
@@ -440,7 +439,11 @@ def test_finish_batch_executes_neighbor_tools_not_cycle_stop_stubs():
     assert "call_finish" in by_call
     assert "call_other" in by_call
     finish_payload = json.loads(by_call["call_finish"]["output"])
-    assert finish_payload["task_report"] == "Сделано по запросу пользователя"
+    assert finish_payload["tool"] == "turn_finish"
+    assert finish_payload["ok"] is True
+    assert finish_payload["status"] == "submitted"
+    assert finish_payload["finish_gate"]["runtime_outcome"] == "skipped"
+    assert "task_report" not in finish_payload
     assert "Dialog turn finished" not in by_call["call_finish"]["output"]
     other_payload = json.loads(by_call["call_other"]["output"])
     assert other_payload["ok"] is True

@@ -49,7 +49,7 @@ def test_apply_finish_gate_decision_reject_marks_output_not_ok():
     assert payload["status"] == "rejected_by_finish_gate"
     assert "Finish gate: fix_report" in payload["message"]
     assert payload["finish_gate"]["action"] == "fix_report"
-    assert payload["task_report"] == "done"
+    assert "task_report" not in payload
     assert "Dialog turn finished" not in patched
 
 

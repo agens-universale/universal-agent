@@ -71,7 +71,8 @@ def test_invalid_call_output_is_an_invalid_arguments_envelope(monkeypatch):
     assert payload["error"]["tool"] == "session_think"
     assert payload["error"]["message"] == "Unexpected field 'bogus'"
     assert "Wrong arguments for `session_think`" in payload["message"]
-    assert '{"bogus": 1}' in payload["message"]
+    assert '{"bogus": 1}' not in payload["message"]
+    assert "You sent:" not in payload["message"]
 
 
 def test_invalid_calls_are_counted_for_the_error_budget(monkeypatch):

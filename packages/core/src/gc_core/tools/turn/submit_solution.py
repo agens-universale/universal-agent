@@ -38,9 +38,15 @@ class SubmitSolution(AbstractSimpleTool):
             "tool": SubmitSolution.registered_tool_name(),
             "ok": ok,
             "status": status,
-            "message": message,
-            "error": error,
         }
+        # Успешный turn_finish — управляющий ack. Содержательные поля уже есть
+        # в function_call.arguments: их повтор раздувает trace, digest судьи и
+        # intent log. Диагностику сохраняем только для отказного результата.
+        if ok:
+            return json.dumps(out, ensure_ascii=False)
+
+        out["message"] = message
+        out["error"] = error
         if solution_type is not None:
             out["solution_type"] = solution_type
         if comment is not None:
@@ -236,7 +242,8 @@ Choosing solution_type (for current turn):
 - comment: Optional caveats, risks, unresolved items, or next steps.
 - handoff: Required JSON object string (see Handoff format). Minimal valid value: "{}".
 
-Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","task":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
+Success return format (compact JSON ack): {"tool":"turn_finish","ok":true,"status":"submitted"}
+Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rejected","message":"...","error":{...},"task_report":""}
 '''
 
     def __call__(
@@ -387,30 +394,14 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                     },
                 )
 
-        # task — подсказка модели, не валидируем: turn_finish идёт через
-        # check_trace_finished мимо apply_tool, reject отсюда до модели не дошёл бы.
-        task_norm = self._normalize_text(task) if isinstance(task, str) and task.strip() else None
-        task_report_norm = self._normalize_text(task_report)
-        comment_norm = self._normalize_text(comment) if comment and comment.strip() else None
-
         return self._result(
             ok=True,
             status="submitted",
             message="Task outcome submitted.",
-            task=task_norm,
-            task_report=task_report_norm,
+            task=None,
+            task_report="",
             solution_type=solution_type,
-            comment=comment_norm,
-            handoff=handoff_data,
+            comment=None,
+            handoff=None,
             error=None,
         )
-
-    def _normalize_text(self, text: str) -> str:
-        """Normalize line endings and trim extra whitespace."""
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        lines = [line.rstrip() for line in text.split('\n')]
-        while lines and not lines[0].strip():
-            lines.pop(0)
-        while lines and not lines[-1].strip():
-            lines.pop()
-        return '\n'.join(lines)
