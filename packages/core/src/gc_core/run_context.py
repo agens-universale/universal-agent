@@ -173,6 +173,20 @@ async def _acreate_run_context_impl(
         config_dict, run_id=run_id, environment=environment, loop=loop,
         os_backend=os_backend, log_handlers=log_handlers,
     )
+    # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
+    # прогреваются, хотя `awarm_capabilities` для этого есть.
+    #
+    # Во-первых, прогрев уводит пробы в поток, а сборка контекста обязана
+    # обходиться без потоков — это отдельное свойство со своей историей
+    # (прежняя форма давала 8 event loop'ов и пик в 10 потоков на ОДНУ сборку),
+    # и стережёт его `test_context_build_native_async`.
+    #
+    # Во-вторых, прогрев плату не убирает, а переносит: пробы кэшируются и
+    # стоят однократно на процесс. Прогрев при сборке заставил бы платить за
+    # них КАЖДЫЙ прогон, включая те, что ни разу не ищут по файлам.
+    #
+    # Кому перенос нужен (фронтенд, знающий, что поиск будет) — зовёт
+    # `backend.awarm_capabilities()` сам, вне горячего пути.
     with use_owner(prep.mcp_session_owner):
         tools = await abuild_tools_data(
             config_dict,
