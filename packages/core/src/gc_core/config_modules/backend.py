@@ -44,6 +44,10 @@ class BackendConfig(BaseModel):
     use_max_tokens_param: bool = False
     openai_strict_tools_schema: bool = False
     send_tool_strict: bool = True
+    # Разметка prompt cache в запросах главного цикла: не задано → авто по id модели
+    # (подстрока claude); true/false — принудительно включить/выключить (в т.ч. на
+    # одну модель через models.<alias>.backend).
+    claude_prompt_cache: bool | None = None
     use_ssl: bool | str = True
     cert_path: str | None = None
     key_path: str | None = None

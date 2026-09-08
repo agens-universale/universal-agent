@@ -121,13 +121,15 @@ def test_chat_completions_no_proxy_bypasses_config(monkeypatch):
 
 
 def test_trust_env_stays_false():
-    """Контракт один на оба транспорта: ~/.netrc и env-прокси не читаем.
+    """Контракт один на оба клиента: ~/.netrc и env-прокси не читаем.
 
-    У requests это флаг сессии, у httpx — флаг клиента; проверяем оба, чтобы
-    переезд не увёз половину контракта."""
+    Синхронный общий клиент (`NO_NETRC_SESSION`) из `connect_backend` ушёл
+    вместе с легаси-транспортом, но живёт для `model_picker` и `prod_auth` —
+    его и проверяем по месту, а не через реэкспорт."""
     from gc_core.utils.async_http import get_async_client
+    from gc_core.utils.http_session import NO_NETRC_SESSION
 
-    assert connect_backend._NO_NETRC_SESSION.trust_env is False
+    assert NO_NETRC_SESSION.trust_env is False
 
     async def _check():
         from gc_core.utils.async_http import aclose_clients

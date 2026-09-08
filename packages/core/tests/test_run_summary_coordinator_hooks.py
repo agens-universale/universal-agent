@@ -30,9 +30,10 @@ def ctx_stub():
 
 
 def _patch_save_thread_meta(monkeypatch) -> None:
-    """pre_backend_compaction_hook вызывает _summarizing_flag → patch_runtime_flag;
-    в unit-тестах с MagicMock thread_session это не цель проверки."""
-    monkeypatch.setattr(rsc, "patch_runtime_flag", lambda *_a, **_k: None)
+    """Флаг «идёт суммаризация» координатор ставит через ``ts.store``, а тот в
+    этих тестах MagicMock — подменять в модуле нечего, вызов и так уходит
+    в заглушку."""
+    return
 
 
 def _thread_session_mock() -> MagicMock:
