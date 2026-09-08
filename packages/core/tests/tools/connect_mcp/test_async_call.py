@@ -11,7 +11,7 @@ import threading
 
 import pytest
 
-from gc_core.tools.connect_mcp import api, stream_client
+from gc_core.tools.connect_mcp import api, client_port, stream_client
 from gc_core.tools.connect_mcp.agent_tools import MCPToolWrapper
 
 _REGISTRY = {
@@ -43,8 +43,11 @@ async def test_sdk_transport_runs_without_spawning_a_thread(monkeypatch):
     async def _fake_call(**kwargs):
         return {"content": [{"type": "text", "text": "ответ тула"}]}
 
+    # Диспетчер теперь один — порт клиента (`McpClientPort.acall_tool`), а не
+    # switch по транспортам внутри `api`. Свойство проверяется то же, но точка
+    # подмены переехала туда, где SDK-путь реально выбирается.
     monkeypatch.setattr(stream_client, "acall_tool_stream_http", _fake_call)
-    monkeypatch.setattr(api, "acall_tool_stream_http", _fake_call)
+    monkeypatch.setattr(client_port, "acall_tool_stream_http", _fake_call)
     monkeypatch.setattr(threading, "Thread", _Counting)
 
     out = await api.acall_mcp_tool(
@@ -59,12 +62,15 @@ async def test_legacy_transport_goes_to_an_abandonable_thread(monkeypatch):
     """Легаси блокирующий — уходит в поток, но результат тот же."""
     seen = {}
 
-    def _fake_sync(full_tool_name, arguments, servers_cfg, tools_registry,
-                   timeout, default_use_retry):
+    def _fake_sync(self, tool_name, arguments, *, timeout):
         seen["thread"] = threading.current_thread().name
-        return '{"tool": "mcp_srv_echo", "ok": true}'
+        return {"tool": "mcp_srv_echo", "ok": True}
 
-    monkeypatch.setattr(api, "call_mcp_tool", _fake_sync)
+    # Легаси-путь порта — `run_abandonable(self.call_tool, ...)`; подменяем
+    # именно блокирующий метод клиента, чтобы поток выбирался настоящим кодом.
+    monkeypatch.setattr(
+        client_port.AgentRuntimeClient, "call_tool", _fake_sync, raising=True
+    )
 
     out = await api.acall_mcp_tool(
         "mcp_srv_echo", {}, _LEGACY_CFG, _REGISTRY, timeout=5

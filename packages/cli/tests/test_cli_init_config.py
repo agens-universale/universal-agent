@@ -23,7 +23,10 @@ def _isolate(tmp_path, monkeypatch):
         "data": tmp_path / "d", "cache": tmp_path / "c",
     })
     monkeypatch.setattr(env_vars, "project_slug", lambda: "p")
-    monkeypatch.setattr(config, "_project_local_config_path", lambda: None)
+    # Проектный слой заглушает autouse-фикстура `_isolated_config_layers`
+    # (gc_testkit.plugin): она отдаёт слой, только если тест сам сдвинул cwd.
+    # Алиас `config._project_local_config_path` develop снёс — подмена по нему
+    # и до того НИЧЕГО не делала, а теперь ещё и падает AttributeError.
 
 
 def test_cli_init_creates_config(tmp_path, monkeypatch, capsys):

@@ -59,6 +59,30 @@ HANDOFF CONTRACT
         """
         ...
 
+    def finalize_role(self, ctx: Any, state: Any) -> None:
+        """Хук для субагентов, чья роль резолвится ПОСЛЕ сборки child-контекста
+        (нужен ``ctx.model_router``/сетевые параметры — например, LLM-генерация
+        роли у ``special_agent``). Вызывается runner'ом между ``create_instance``
+        и ``get_initial_data``. По умолчанию no-op — субагенты со статичной
+        ``agent_role`` (заданной на уровне класса) ничего не резолвят.
+        """
+        return
+
+    async def afinalize_role(self, ctx: Any, state: Any) -> None:
+        """Асинхронный двойник :meth:`finalize_role`; его и зовёт runner.
+
+        Правило то же, что у тулов: объявил нативную форму — идём через неё;
+        не объявил — синхронную уводим в поток, чтобы чужая реализация не
+        морозила loop. Звать синхронную напрямую нельзя не «на всякий случай»:
+        у ``special_agent`` она делает LLM-вызов через портал, а портал из-под
+        работающего loop сознательно отказывает — ``except`` в runner'е
+        превращал этот отказ в ``subagent_role_generation_failed``, и
+        special_agent не работал вовсе.
+        """
+        import asyncio
+
+        await asyncio.to_thread(self.finalize_role, ctx, state)
+
     @abstractmethod
     def get_initial_data(self) -> Tuple[str, str]:
         """

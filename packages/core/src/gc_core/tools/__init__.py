@@ -3,6 +3,8 @@ import difflib
 import inspect
 import json
 import traceback
+
+import sys
 import logging
 from typing import Any, Dict, Iterable, Tuple, Optional
 
@@ -21,6 +23,70 @@ from gc_core.tools.schema_optional import apply_openai_strict_parameters, augmen
 
 _fallback_logger = logging.getLogger(__name__)
 _LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
+
+INTERNAL_TOOL_ERROR = "internal_tool_error"
+_INTERNAL_TOOL_ERROR_MESSAGE_CAP = 500
+_INTERNAL_TOOL_ERROR_GUIDANCE_CAP = 800
+_INTERNAL_TOOL_ERROR_GUIDANCE = (
+    "Client runtime failed while executing the tool "
+    "(not an arguments-schema rejection). "
+    "Do not retry the identical call hoping for a different schema outcome. "
+    "Change strategy, pick another tool, or report the failure if the task is blocked."
+)
+
+
+def _truncate_for_tool_output(text: str, cap: int) -> str:
+    if cap <= 0:
+        return ""
+    if len(text) <= cap:
+        return text
+    if cap <= 3:
+        return text[:cap]
+    return text[: cap - 3] + "..."
+
+
+def format_internal_tool_error_output(
+    *,
+    tool_name: str | None,
+    exc: BaseException,
+    call_id: str | None = None,
+) -> str:
+    """Slim JSON tool output for unexpected exceptions in apply_tool (no traceback)."""
+    message = str(exc).strip()
+    if not message:
+        message = type(exc).__name__
+    message = _truncate_for_tool_output(
+        message.replace("\n", " ").strip(),
+        _INTERNAL_TOOL_ERROR_MESSAGE_CAP,
+    )
+    guidance = _truncate_for_tool_output(
+        _INTERNAL_TOOL_ERROR_GUIDANCE,
+        _INTERNAL_TOOL_ERROR_GUIDANCE_CAP,
+    )
+    payload: Dict[str, Any] = {
+        "ok": False,
+        "error": INTERNAL_TOOL_ERROR,
+        "exception_type": type(exc).__name__,
+        "message": message,
+        "guidance": guidance,
+    }
+    if isinstance(tool_name, str) and tool_name:
+        payload["tool"] = tool_name
+    if isinstance(call_id, str) and call_id:
+        payload["call_id"] = call_id
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def is_internal_tool_error_output(output: str) -> bool:
+    if not isinstance(output, str) or not output:
+        return False
+    try:
+        parsed = json.loads(output)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return parsed.get("ok") is False and parsed.get("error") == INTERNAL_TOOL_ERROR
 
 
 def format_unknown_tool_output(tool_name: str, available_names: Iterable[str]) -> str:
@@ -348,6 +414,34 @@ class _SubagentTool:
         )
 
 
+def tool_arguments_valid(
+    tool_name: str,
+    arguments: Any,
+    tools_data_: Dict[str, Dict[str, Any]],
+) -> bool:
+    """True, если аргументы прошли бы валидацию apply_tool (те же правила и spec).
+
+    Неизвестный тул или запись без spec не судим (True): решать будет сам
+    apply_tool. Исключение ловится здесь же, поэтому результат не зависит от
+    того, какое поколение модуля держит вызывающая сторона.
+    """
+    entry = tools_data_.get(tool_name) or {}
+    spec = entry.get("spec")
+    if not isinstance(spec, dict):
+        return True
+    try:
+        parse_and_validate_tool_arguments(
+            tool_name=tool_name,
+            arguments=arguments,
+            tool_spec=spec,
+            allow_empty_for_empty_schema=True,
+            tool_fabric=entry.get("tool_fabric"),
+        )
+    except WrongFunctionArgumentsException:
+        return False
+    return True
+
+
 def _prepare_tool_call(
     tool_name: str,
     arguments: str | Dict[str, Any],
@@ -480,13 +574,42 @@ def _prepare_tool_call(
     return tool, arguments
 
 
-def _tool_exception_output(exc: BaseException) -> str:
-    """Текст, который агент увидит вместо результата упавшего тула."""
-    return (
-        str(exc)
-        + "\n"
-        + "Agent tool execution Error in cli agent tool execution: "
-        + traceback.format_exc()
+def _tool_failure_output(
+    exc: BaseException,
+    *,
+    tool_name: str,
+    ctx: Optional[Any],
+    call_id: Any,
+) -> str:
+    """Общий разбор упавшего тула для обоих входов.
+
+    Стек остаётся в логах, модель получает слим-конверт (контракт
+    docs_md/actual/2026-08-14-apply-tool-internal-error-CONTRACT.ru.md).
+
+    Один хелпер, а не копия на каждый вход: асинхронный путь отдавал модели
+    `str(exc)` вместе с полным traceback — доперезаписанная форма, которую
+    develop заменил конвертом. Расхождение было незаметным: тул падал, агент
+    получал текст, всё «работало» — только контракт в синхронном и
+    асинхронном вызове был разный, а traceback уезжал в контекст модели.
+    """
+    log = _fallback_logger
+    if ctx is not None and hasattr(ctx, "logger"):
+        candidate = getattr(ctx, "logger")
+        if isinstance(candidate, logging.Logger):
+            log = candidate
+
+    if not isinstance(call_id, str):
+        call_id = None
+
+    log.exception(
+        "apply_tool internal error tool=%s call_id=%s",
+        tool_name,
+        call_id,
+    )
+    return format_internal_tool_error_output(
+        tool_name=tool_name,
+        exc=exc,
+        call_id=call_id,
     )
 
 
@@ -521,10 +644,19 @@ def apply_tool(
             f"Tool {tool_name} is async; call it through aapply_tool() "
             f"(sync apply_tool cannot await)."
         )
+    # log.debug(
+    #    "apply_tool log:\nkwargs:\n%s\narguments:\n %s\ntool_fabric:\n%s\ntool:\n%s",
+    #    kwargs,
+    #    arguments,
+    #    tool_fabric,
+    #    tool,
+    #)
     try:
         res = tool(**args)
     except Exception as e:  # noqa: BLE001
-        res = _tool_exception_output(e)
+        return _tool_failure_output(
+            e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
+        )
     return _tool_result_to_text(res)
 
 
@@ -557,15 +689,21 @@ async def aapply_tool(
         else:
             res = await asyncio.to_thread(lambda: tool(**args))
     except Exception as e:  # noqa: BLE001
-        res = _tool_exception_output(e)
+        return _tool_failure_output(
+            e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
+        )
     return _tool_result_to_text(res)
 
 
 __all__ = [
     "WrongFunctionArgumentsException",
+    "INTERNAL_TOOL_ERROR",
     "build_tools_data",
     "apply_tool",
     "aapply_tool",
+    "tool_arguments_valid",
+    "format_internal_tool_error_output",
     "format_unknown_tool_output",
+    "is_internal_tool_error_output",
     "is_unknown_tool_output",
 ]

@@ -4,6 +4,7 @@
 и переезд ядра на asyncio не имеет права требовать от них переписывания.
 """
 import asyncio
+import json
 import threading
 
 from gc_core.tools import aapply_tool, apply_tool
@@ -89,7 +90,11 @@ async def test_async_tool_exception_becomes_agent_visible_text():
     """Падение тула — текст агенту, а не всплывшее исключение в цикле.
 
     Тот же контракт, что у синхронного пути: цикл продолжается, агент видит,
-    что именно сломалось.
+    что именно сломалось. Форма — слим-конверт
+    (docs_md/actual/2026-08-14-apply-tool-internal-error-CONTRACT.ru.md), а не
+    прежние `str(exc)` + traceback: стек остаётся в логах и в контекст модели
+    не уезжает. Проверка «тот же контракт» — в
+    `test_internal_tool_error.py::test_async_entry_gives_the_same_slim_envelope`.
     """
     class _Boom(_SyncTool):
         async def __call__(self, x: str) -> str:
@@ -98,7 +103,10 @@ async def test_async_tool_exception_becomes_agent_visible_text():
     out = await aapply_tool("t_async", {"x": "1"}, _data(_Boom, "t_async"),
                             ctx=None, config_dict={})
     assert "тул сломался" in out
-    assert "Agent tool execution Error" in out
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert payload["exception_type"] == "ValueError"
+    assert "Traceback (most recent call last)" not in out
 
 
 async def test_sync_tool_exception_via_async_dispatch():

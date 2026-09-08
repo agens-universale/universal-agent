@@ -93,10 +93,20 @@ def _source_text() -> str:
 
 
 def _unread_leaves() -> list[str]:
+    """Ключи схемы, чьего имени нет ни в одном исходнике вне config_modules.
+
+    Читателем считается и аксессор ``<ключ>_from_ctx``: `config_modules` держит
+    его для ключей, которые нужны в местах без готового профиля (см.
+    ``subagent_role_max_tokens_from_ctx``). Голый ``\b<ключ>\b`` такой вызов не
+    видит — за именем идёт ``_``, — и подключённый ключ выглядел бы как
+    забытый. Ровно этот ложный крик и получился при вливании веток.
+    """
     source = _source_text()
     return [
         leaf for leaf in _schema_leaves(AppConfig)
-        if not re.search(r"\b" + re.escape(leaf.rsplit(".", 1)[-1]) + r"\b", source)
+        if not re.search(
+            r"\b" + re.escape(leaf.rsplit(".", 1)[-1]) + r"(_from_ctx)?\b", source
+        )
     ]
 
 

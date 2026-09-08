@@ -31,7 +31,8 @@ import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from gc_testkit.paths import REPO, _MAP_PATH
+from gc_testkit.paths import REPO, _MAP_PATH, module_map, package_src_dirs
+from gc_testkit.sources import ensure_sources_on_path
 
 #: Каталоги корня, которые сканировать НЕ надо. Раньше здесь был обратный
 #: список — перечень сканируемых каталогов, и он протух молча: в нём остался
@@ -89,14 +90,17 @@ def _top_level_names() -> set[str]:
     во время миграции — дореформенные имена из module_map.json. Брать сюда
     вложенные подпакеты нельзя: `fs`, `exec`, `session` дают ложные
     срабатывания на обычных строках (`f"fs{i:04d}"` — идентификатор сессии).
+
+    Каталоги пакетов спрашиваются у `paths.package_src_dirs()` — тем же
+    источником, из которого их берёт бутстрап `sys.path`, а не своим `glob`
+    (B8).
     """
     names: set[str] = set()
-    for pkg_src in (REPO / "packages").glob("*/src"):
+    for pkg_src in package_src_dirs():
         for child in pkg_src.iterdir():
             if child.is_dir() and (child / "__init__.py").exists():
                 names.add(child.name)
-    if _MAP_PATH.is_file():
-        names |= set(json.loads(_MAP_PATH.read_text(encoding="utf-8")))
+    names |= set(module_map())
     src = REPO / "src"
     if src.exists():
         for p in src.iterdir():
@@ -119,6 +123,21 @@ def _looks_like_our_module(lit: str, ours: set[str], *, strict: bool = False) ->
     if lit.split(".")[0] not in ours:
         return False
     return bool(_DOTTED.match(lit)) if strict else True
+
+
+def _touches_sys_modules(body: list) -> bool:
+    """Есть ли внутри `body` обращение к ``sys.modules``.
+
+    Признак цикла выселения. Смотрим на атрибут ``.modules`` у имени ``sys`` —
+    этого хватает и для ``sys.modules.pop(mod)``, и для ``del sys.modules[mod]``,
+    и для ``sys.modules[mod] = stub``.
+    """
+    for stmt in body:
+        for sub in ast.walk(stmt):
+            if (isinstance(sub, ast.Attribute) and sub.attr == "modules"
+                    and isinstance(sub.value, ast.Name) and sub.value.id == "sys"):
+                return True
+    return False
 
 
 def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
@@ -196,6 +215,39 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
                         and _looks_like_our_module(first.value, ours, strict=True)):
                     refs.append(Ref(rel, node.lineno, "fstring", first.value))
 
+            # 4c) строки ВНУТРИ кортежа/списка/множества в двух формах цикла
+            # выселения: `for mod in ("a", "b"): sys.modules.pop(mod)` и
+            # `if name in ("a", "b"): sys.modules.pop(name)`. Отдельным пунктом,
+            # потому что кодмод переезда правит узлы import и ОДИНОЧНЫЕ
+            # литералы, а элементы кортежа не трогает — и сюда уже проехали
+            # дореформенные "agent_executor" / "run_summary_coordinator"
+            # (packages/core/tests/test_summary_triggers.py, найдено ревью
+            # 02.09.2026). Промах бесшумный: pop по несуществующему ключу — это
+            # no-op, набор остаётся зелёным, а заглушки текут между файлами.
+            #
+            # Обязательное условие — тело РЯДОМ трогает sys.modules. Без него
+            # проверка ловит любой кортеж строк, начинающийся с имени пакета:
+            # список каталогов ('tui', 'diff_tui'), ключ конфига
+            # 'intent_scope', вид события 'usage'. Проверено: сплошной скан дал
+            # ровно семь таких ложных срабатываний и ни одной настоящей находки
+            # сверх той, ради которой пункт и заведён.
+            seqs = []
+            if isinstance(node, ast.For) and _touches_sys_modules(node.body):
+                seqs.append(node.iter)
+            elif isinstance(node, ast.If) and _touches_sys_modules(node.body):
+                test = node.test
+                if isinstance(test, ast.Compare) and any(
+                    isinstance(op, (ast.In, ast.NotIn)) for op in test.ops
+                ):
+                    seqs.extend(test.comparators)
+            for seq in seqs:
+                if not isinstance(seq, (ast.Tuple, ast.List, ast.Set)):
+                    continue
+                for elt in seq.elts:
+                    if (isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                            and _looks_like_our_module(elt.value, ours, strict=True)):
+                        refs.append(Ref(rel, elt.lineno, "sys_modules", elt.value))
+
             # 5) "literal" in sys.modules
             if isinstance(node, ast.Compare) and isinstance(node.left, ast.Constant):
                 if isinstance(node.left.value, str) and _looks_like_our_module(node.left.value, ours):
@@ -244,14 +296,28 @@ def scan() -> tuple[list[Ref], list[tuple[Ref, str]]]:
 
     Раньше эта логика жила внутри main(), и тест её переиспользовать не мог —
     поэтому сетка гонялась только руками и дважды пропустила регрессию.
+
+    Каталоги исходников кладёт `gc_testkit.sources` — та же функция, что зовёт
+    плагин и соседняя сетка `import_health`. Своя копия цикла брала сырой
+    `glob` в порядке ФС, а копия в `import_health` — отсортированный список из
+    `paths`: два источника и два порядка на одну задачу (B8).
     """
-    for pkg in (REPO / "packages").glob("*/src"):
-        entry = str(pkg)
-        if entry not in sys.path:
-            sys.path.insert(0, entry)
+    ensure_sources_on_path()
 
     ours = _top_level_names()
-    paths = [p for d in scan_dirs() for p in d.rglob("*.py") if "__pycache__" not in p.parts]
+    # SKIP_DIRS проверяется по ВСЕМ компонентам пути, а не только по верхнему
+    # уровню: `scan_dirs()` отсеивает корни, но `rglob` ниже спускается куда
+    # угодно. Без этого сетка лезла в `external/vendor/*/.venv` — venv вендора
+    # появляется у любого, кто хоть раз прогнал его тесты, — и краснела на
+    # чужом `mcp/server/__main__.py`, где `getLogger("server")` к нашей
+    # раскладке отношения не имеет.
+    _skip = SKIP_DIRS | {"__pycache__"}
+    paths = [
+        p
+        for d in scan_dirs()
+        for p in d.rglob("*.py")
+        if _skip.isdisjoint(p.parts)
+    ]
     paths += [REPO / f for f in SCAN_FILES if (REPO / f).exists()]
 
     refs = collect(paths, ours)

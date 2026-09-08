@@ -1,13 +1,11 @@
 """TDD спека 08: strip на aux LLM choke; не на tool args/outputs."""
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
 
-from gc_core import config as cfgmod
 from gc_core.config import load_config
 from gc_core.intent_guard.validation_result import parse_validator_response
 from gc_core.intent_scope.summarizer import build_fallback_aggregated_content
@@ -57,6 +55,7 @@ def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
         state=SimpleNamespace(),
         messages=[{"role": "user", "content": "hi"}],
         request_label="intent_scope:exec_command",
+        consumer="intent_scope",
     )
     assert out == "one-line summary"
     assert logged["output_text"] == "<think>r</think>one-line summary"
@@ -100,14 +99,8 @@ def test_command_judge_uses_project_and_config_extra_tag():
         configure_for_model_tags([])
 
 
-def _isolate_config_overlays(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(cfgmod, "managed_config_path", lambda: tmp_path / "none.yml")
-
-
 def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     """YAML extras → load_config → summary / compaction / finish-gate / judge."""
-    _isolate_config_overlays(monkeypatch, tmp_path)
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
         yaml.safe_dump(
@@ -143,6 +136,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
             state=state,
             messages=[{"role": "user", "content": "hi"}],
             request_label="intent_scope:exec_command",
+            consumer="intent_scope",
         )
         == "one-line summary"
     )
@@ -175,6 +169,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         messages=[{"role": "user", "content": "validate"}],
         max_tokens=100,
         request_label="intent_guard_finish_gate",
+        consumer="finish_gate",
         log_prompt=False,
     )
     assert projected_finish == json.dumps(finish_payload)

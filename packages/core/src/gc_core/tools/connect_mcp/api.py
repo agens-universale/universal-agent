@@ -11,20 +11,15 @@ import uuid
 import httpx
 
 from gc_core.config import load_config
-from gc_core.tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
-from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry, is_persistent_stdio
+from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.registry import get_all_tools
 from gc_core.tools.connect_mcp.abandonable import run_abandonable
-from gc_core.tools.connect_mcp.stream_client import (
-    acall_tool_stream_http,
-    acall_tool_stream_sse,
-    acall_tool_stream_stdio,
-    call_tool_stream_http,
-    call_tool_stream_sse,
-    call_tool_stream_stdio,
-)
+from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
-from gc_core.tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
+from gc_core.tools.connect_mcp.validation import (
+    _validate_tool_arguments,
+    format_mcp_tool_result,
+)
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.retry import retry_with_backoff
 
@@ -241,6 +236,10 @@ class _McpCallTarget:
     token: Optional[str]
     transport: Optional[str]
     effective_transport: Optional[str]
+    # Клиент выбран ОДИН раз, здесь: выбор — детерминированное решение по
+    # конфигу, и неверная пара локус/транспорт обязана падать сразу, а не
+    # ретраиться с backoff и логироваться ERROR трижды (комментарий develop).
+    client: Any
     use_retry: bool
 
 
@@ -250,6 +249,7 @@ def _prepare_mcp_call(
     servers_cfg: Dict[str, Dict[str, Any]],
     tools_registry: Dict[str, Dict[str, Any]] | None,
     default_use_retry: bool,
+    os_backend: Any = None,
 ) -> _McpCallTarget:
     """Разобрать имя тула, найти сервер, провалидировать аргументы.
 
@@ -324,7 +324,10 @@ def _prepare_mcp_call(
         server_cfg, server_name=server_key
     )
 
+    client = resolve_mcp_client(server_key, server_cfg, os_backend=os_backend)
+
     return _McpCallTarget(
+        client=client,
         server_key=server_key,
         server_cfg=server_cfg,
         base_tool_name=base_tool_name,
@@ -344,6 +347,8 @@ def call_mcp_tool(
     tools_registry: Dict[str, Dict[str, Any]] | None = None,
     timeout: float = 10.0,
     default_use_retry: bool = False,
+    *,
+    os_backend: Any = None,
 ) -> Any:
     """
     Вызвать инструмент на соответствующем MCP-сервере.
@@ -362,7 +367,8 @@ def call_mcp_tool(
       и возвращает result (data['result'] из MCP-ответа).
     """
     target = _prepare_mcp_call(
-        full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry
+        full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry,
+        os_backend=os_backend,
     )
     server_key = target.server_key
     server_cfg = target.server_cfg
@@ -380,82 +386,7 @@ def call_mcp_tool(
         no_more_retries_log_level=logging.ERROR,
     )
     def _do_mcp_call() -> Any:
-        if effective_transport == "stream_sse":
-            return call_tool_stream_sse(
-                url=url,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-                tool_name=base_tool_name,
-                arguments=arguments_obj,
-            )
-        if effective_transport == "stream_http":
-            return call_tool_stream_http(
-                url=url,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-                tool_name=base_tool_name,
-                arguments=arguments_obj,
-            )
-        if transport == "stream_stdio":
-            return call_tool_stream_stdio(
-                server_cfg=server_cfg,
-                timeout=timeout,
-                tool_name=base_tool_name,
-                arguments=arguments_obj,
-            )
-        if is_persistent_stdio(server_cfg):
-            session = PersistentStdioRegistry.instance().get_or_create(
-                server_key, server_cfg
-            )
-            return session.call(
-                "tools/call",
-                {"name": base_tool_name, "arguments": arguments_obj},
-                timeout,
-            )
-
-        session_id = _get_or_init_session_id(
-            server_key, url, server_cfg, token=token, timeout=timeout
-        )
-        if not session_id:
-            raise RuntimeError(
-                f"Failed to initialize MCP session for server '{server_key}'"
-            )
-
-        def do_call(sid: str):
-            return _call_mcp_tool(
-                url=url,
-                session_id=sid,
-                tool_name=base_tool_name,
-                arguments=arguments_obj,
-                server_cfg=server_cfg,
-                token=token,
-                timeout=timeout,
-                server_key=server_key,
-            )
-
-        try:
-            data_local = do_call(session_id)
-        except httpx.HTTPStatusError:
-            _MCP_SESSIONS.pop(server_key, None)
-            session_id = _get_or_init_session_id(
-                server_key, url, server_cfg, token=token, timeout=timeout
-            )
-            if not session_id:
-                raise RuntimeError(
-                    f"Failed to re-initialize MCP session for server '{server_key}'"
-                )
-            data_local = do_call(session_id)
-
-        if data_local == {} and transport == "sse":
-            _MCP_SESSIONS.pop(server_key, None)
-            session_id = _get_or_init_session_id(
-                server_key, url, server_cfg, token=token, timeout=timeout
-            )
-            if session_id:
-                data_local = do_call(session_id)
-        return data_local
+        return client.call_tool(base_tool_name, arguments_obj, timeout=timeout)
 
     data = _do_mcp_call(
         use_retry=use_retry,
@@ -489,6 +420,8 @@ async def acall_mcp_tool(
     tools_registry: Dict[str, Dict[str, Any]] | None = None,
     timeout: float = 10.0,
     default_use_retry: bool = False,
+    *,
+    os_backend: Any = None,
 ) -> Any:
     """Вызвать MCP-тул, не занимая поток на время ожидания.
 
@@ -509,22 +442,9 @@ async def acall_mcp_tool(
       при прямом вызове в корутине).
     """
     target = _prepare_mcp_call(
-        full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry
+        full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry,
+        os_backend=os_backend,
     )
-
-    if target.effective_transport not in ("stream_sse", "stream_http", "stream_stdio"):
-        # Легаси-транспорт: подготовку уже сделали, но сам вызов блокирующий.
-        # Отдаём синхронной функции целиком — она повторит подготовку (дёшево,
-        # это словари и валидация) и сходит в сеть в брошенном потоке.
-        return await run_abandonable(
-            call_mcp_tool,
-            full_tool_name,
-            arguments,
-            servers_cfg,
-            tools_registry,
-            timeout,
-            default_use_retry,
-        )
 
     @retry_with_backoff_async(
         operation_name=(
@@ -534,29 +454,17 @@ async def acall_mcp_tool(
         no_more_retries_log_level=logging.ERROR,
     )
     async def _ado_mcp_call() -> Any:
-        if target.effective_transport == "stream_sse":
-            return await acall_tool_stream_sse(
-                url=target.url,
-                server_cfg=target.server_cfg,
-                token=target.token,
-                timeout=timeout,
-                tool_name=target.base_tool_name,
-                arguments=target.arguments_obj,
-            )
-        if target.effective_transport == "stream_http":
-            return await acall_tool_stream_http(
-                url=target.url,
-                server_cfg=target.server_cfg,
-                token=target.token,
-                timeout=timeout,
-                tool_name=target.base_tool_name,
-                arguments=target.arguments_obj,
-            )
-        return await acall_tool_stream_stdio(
-            server_cfg=target.server_cfg,
-            timeout=timeout,
-            tool_name=target.base_tool_name,
-            arguments=target.arguments_obj,
+        # Диспетчер один — порт клиента (`McpClientPort`), который develop ввёл
+        # в PR #88 вместе с `execute_on`. Прежний switch по транспортам здесь и
+        # был той второй копией правил выбора, про которую предупреждает
+        # докстринг `_McpCallTarget`: разъезжалась она уже дважды.
+        #
+        # `acall_tool` порт получил вместе с этим вливанием: у develop он был
+        # только синхронным, и звать его отсюда значило морозить loop на всё
+        # время обмена. SDK-транспорты внутри идут нативно, легаси и persistent
+        # stdio — через `run_abandonable`, ровно как дискавери.
+        return await target.client.acall_tool(
+            target.base_tool_name, target.arguments_obj, timeout=timeout
         )
 
     data = await _ado_mcp_call(use_retry=target.use_retry, logger=logger)

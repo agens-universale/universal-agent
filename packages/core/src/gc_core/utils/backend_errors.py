@@ -4,6 +4,7 @@ from __future__ import annotations
 import httpx
 from typing import NamedTuple
 
+from gc_core.model_router import AliasCircuitOpenError
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 _HTTP_RETRY_SKIP_STATUSES = {401, 403, 404}
@@ -156,6 +157,57 @@ def normalize_finish_reason(finish_reason, *, has_content: bool, has_tool_calls:
     if has_content or has_tool_calls:
         return FinishDecision(accept=True, unknown=True)
     return FinishDecision(accept=False, unknown=True)
+
+
+def is_model_unavailable_error(exc: BaseException) -> bool:
+    """«Недоступна» модель (спека §8): сетевые ошибки, 5xx, 401/403, 404 —
+    после исчерпания существующих ретраев (transport + adaptive max_tokens +
+    401-refresh) — либо алиас уже открыт в предохранителе (`AliasCircuitOpenError`,
+    та же недоступность, просто уже подтверждённая другим вызовом этой сессии).
+    Решает, ставить ли алиас в `model_router.CircuitBreaker` — не путать с
+    `is_retriable_backend_error` (годится ли ошибка для повторной попытки ВНУТРИ
+    текущего запроса, до исчерпания ретраев).
+
+    Сетевые — именно `Timeout`/`ConnectionError` (со всеми их подклассами: SSLError,
+    ProxyError, ConnectTimeout, ReadTimeout), а НЕ общий `RequestException`: тот
+    накрывает и битый ответ живого провайдера (`JSONDecodeError`), и кривой
+    url/прокси (`MissingSchema`, `InvalidURL`, `TooManyRedirects`) — от таких
+    предохранитель гасил бы алиас на всю сессию, хотя модель жива."""
+    if isinstance(exc, AliasCircuitOpenError):
+        return True
+    if is_context_overflow_error(exc):
+        return False
+    # Транспорт здесь httpx, а не requests: предикат приехал с develop, где
+    # ветка была синхронной. Спрашиваем общие кортежи модуля — они и заведены
+    # ради того, чтобы правило не зависело от транспорта.
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        status_code = http_status_code(exc)
+    elif isinstance(exc, BackendStreamError):
+        status_code = exc.status_code
+    elif isinstance(exc, EmbeddedChoiceError):
+        # Прокси кладёт отказ ВНУТРЬ HTTP-200 (choices[0].error / top-level error):
+        # снаружи запрос «успешен», и без этой ветки тот же самый отказ модели —
+        # 5xx, 401, 404 — не считался бы недоступностью только из-за обёртки.
+        # status_code=None (нечисловой код вроде insufficient_quota либо код
+        # отсутствует вовсе) уходит на общий путь ниже и даёт False: гасить алиас
+        # на всю сессию по неизвестной причине нельзя.
+        status_code = exc.status_code
+    elif isinstance(exc, HTTP_TRANSPORT_ERRORS):
+        # Только транспортные сбои (таймаут, обрыв, DNS), а не любой сбой
+        # клиента: от битого url или лишних редиректов предохранитель гасил бы
+        # алиас на всю сессию, хотя модель жива. У httpx это ровно
+        # TransportError/TimeoutException — см. кортеж выше.
+        return True
+    else:
+        return False
+    if status_code is None:
+        return False
+    if status_code in (401, 403, 404):
+        return True
+    try:
+        return int(status_code) >= 500
+    except (TypeError, ValueError):
+        return False
 
 
 def is_context_overflow_error(exc: BaseException) -> bool:

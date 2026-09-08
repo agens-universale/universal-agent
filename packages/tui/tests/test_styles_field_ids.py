@@ -1,6 +1,7 @@
 """Каждый Input с id обязан быть перечислен в CSS — иначе Textual рисует дефолтную
 рамку глифами, которых нет в консольных шрифтах (баг поля «Прокси», смок 2026-08-02)."""
 from pathlib import Path
+from gc_testkit.paths import TUI_PKG
 
 # Путь — из gc_testkit.paths: исходники TUI лежат в packages/tui/src/gc_tui,
 # и арифметика уровней от __file__ здесь уже ломалась.
@@ -9,7 +10,10 @@ from gc_testkit.paths import TUI_PKG
 _STYLES = TUI_PKG / "styles.tcss"
 
 # id полей, которые обязаны иметь и плоский, и framed-стиль
-_FRAMED_FIELD_IDS = ("conn-url", "conn-token", "conn-proxy", "onb-model")
+_FRAMED_FIELD_IDS = ("conn-url", "conn-token", "conn-proxy", "onb-model",
+                     "onb-level-model", "mef-alias", "mef-model", "mef-url",
+                     "mef-token", "set-profile-name",
+                     "voice-url", "voice-token", "voice-model", "voice-lang")
 
 
 def _css() -> str:
@@ -37,18 +41,23 @@ def test_every_framed_field_has_framed_rule():
 
 def test_disabled_token_border_is_dimmed():
     """«Без авторизации» замораживает поле токена — рамка приглушается до $deep-dim,
-    иначе замороженное поле читается как активное."""
+    иначе замороженное поле читается как активное.
+
+    Полей токена столько же, сколько форм с галкой «без авторизации», и сторож
+    обходит их СПИСКОМ: правило, записанное для «Подключения», молча не
+    распространяется на форму записи реестра — её пропажу прежний сторож не видел."""
     css = _css()
-    line = next((ln for ln in css.splitlines()
-                 if "#conn-token.set-framed:disabled" in ln), None)
-    assert line is not None, "нет правила для замороженного поля токена"
-    assert "$deep-dim" in line, f"рамка не приглушена: {line}"
+    for field in ("conn-token", "mef-token"):
+        line = next((ln for ln in css.splitlines()
+                     if f"#{field}.set-framed:disabled" in ln), None)
+        assert line is not None, f"нет правила для замороженного #{field}"
+        assert "$deep-dim" in line, f"рамка #{field} не приглушена: {line}"
 
 
 def test_dropdown_scroll_rule_exists():
-    """Потолок высоты выпадающих списков (пресеты адреса, список моделей) — без
-    него длинный список раскатывает страницу (§3.4 спеки). Тест держит его на
-    месте."""
+    """Потолок высоты выпадающих списков. Правило принесла голосовая фича, в develop
+    его нет — при разносе на ветки оно обязано уехать в ux-polish, иначе список
+    моделей там раскатает страницу (§3.4 спеки). Тест держит его на месте."""
     assert ".dropdown-scroll" in _css()
     assert "max-height: 14" in _css()
 
@@ -66,7 +75,7 @@ def test_auth_nested_is_gone_everywhere():
     src = TUI_PKG
     hits = []
     for path in src.rglob("*"):
-        if not path.is_file() or path.suffix == ".pyc":
+        if not path.is_file() or path.suffix in {".pyc", ".bak"}:
             continue
         try:
             text = path.read_text(encoding="utf-8")

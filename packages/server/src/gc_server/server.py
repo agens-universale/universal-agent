@@ -5,16 +5,23 @@ from typing import Any, Dict, Optional
 import logging
 
 import uvicorn
+import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from gc_core.run_context import acreate_run_context, create_run_context
 from gc_core.agent_executor import AgentExecutor
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
-from gc_core.config import build_auth_connector
-from gc_core.thread_store import load_thread_messages, load_thread_meta, resolve_threads_dir, validate_thread_id
+from gc_core.config import build_auth_connector, cli_forces_legacy_model
+from gc_core.thread_store import (
+    load_thread_messages,
+    load_thread_meta,
+    resolve_threads_dir,
+    sanitize_system_id,
+    validate_thread_id,
+)
 from gc_server.rest_api.agent_execution_registry import agent_run_registry
-from gc_server.rest_api.server_config import PROJECT_ROOT, build_agent_config_for_server, load_server_config
+from gc_server.rest_api.server_config import build_agent_config_for_server, load_server_config
 from gc_server.rest_api.utils import ensure_task_id, normalize_system
 from gc_server.server_cleanup_threads import register_cleanup_threads_on_startup, register_swarm_cleanup_on_startup
 from gc_core.trace_id import normalize_trace_id
@@ -43,8 +50,19 @@ except (ModuleNotFoundError, ImportError) as e:
 
 
 
-SERVER_CONFIG: Dict[str, Any] = load_server_config()
-BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
+try:
+    # Обе функции читают конфиг на импорте модуля: сломанный config_server.yml
+    # (load_server_config сам не защищён — голый open/yaml.safe_load) или
+    # сломанный агентский config.yml (build_agent_config_for_server → load_config)
+    # иначе роняли бы импорт server голым traceback'ом ещё до старта uvicorn —
+    # тот же приём, что config_modules/env_vars.py уже применяет к битым
+    # GC_*-переменным окружения.
+    SERVER_CONFIG: Dict[str, Any] = load_server_config()
+    BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
+except (ValueError, OSError, yaml.YAMLError) as exc:
+    raise SystemExit(
+        f"[gc] сервер не стартовал: конфиг не загружается ({exc})"
+    ) from exc
 if _SWARM_MODULES_AVAILABLE and build_swarm_config is not None:
     SWARM_CONFIG: Dict[str, Any] = build_swarm_config(SERVER_CONFIG)
 else:
@@ -280,7 +298,15 @@ async def events_webhook(request: Request):
             detail={"status": "error", "payload": "JSON body must be an object"},
         )
 
-    task_id = ensure_task_id(payload)
+    try:
+        task_id = ensure_task_id(payload)
+    except ValueError as e:
+        # Присланный task_id уезжает в имя каталога и дальше в пути ФС.
+        # Отвергаем ДО любого побочного эффекта, а не падаем позже в сторе.
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": f"invalid task_id: {e}"},
+        )
 
     # trace_id — поле контекста задачи, а не часть запроса к модели: снимаем его
     # ДО json.dumps(payload) ниже, иначе значение уедет в промпт модели.
@@ -344,11 +370,19 @@ async def events_webhook(request: Request):
         # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
         config_dict["trace_id"] = trace_id
     auth_connector = build_auth_connector(config_dict)
+    # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх непустого
+    # реестра моделей — тот же контракт, что CLI --model (agent_overrides перекрывают
+    # config.yml так же, как CLI-аргументы).
+    force_legacy = cli_forces_legacy_model(config_dict)
+    if force_legacy:
+        logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
     # Асинхронная сборка: внутри MCP-дискавери — сетевые вызовы к каждому
     # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на всё
     # это время, а с переездом прогоны стали тасками на общем loop, поэтому
     # заморозка била разом по всем эндпоинтам и всем идущим прогонам.
-    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
+    ctx = await acreate_run_context(
+        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+    )
 
     await agent_run_registry.astart_if_absent(
         system=system,
@@ -507,7 +541,15 @@ async def swarm_run(request: Request):
         )
 
     # Нормализуем system и task_id по тем же правилам, что и в вебхуке.
-    task_id = ensure_task_id(payload)
+    try:
+        task_id = ensure_task_id(payload)
+    except ValueError as e:
+        # Присланный task_id уезжает в имя каталога и дальше в пути ФС.
+        # Отвергаем ДО любого побочного эффекта, а не падаем позже в сторе.
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": f"invalid task_id: {e}"},
+        )
     # trace_id — поле контекста задачи, а не часть запроса к модели. Снимаем его
     # ДО того, как payload уедет в песочницу целиком: он доставляется ребёнку
     # аргументом `-q`, то есть оставленный в теле трейс попал бы в промпт модели
@@ -522,7 +564,14 @@ async def swarm_run(request: Request):
     source_value = payload.get("system")
     defaults = SERVER_CONFIG.get("defaults") or {}
     default_system = str(defaults.get("system", "generic"))
-    system = normalize_system(source_value, default_system=default_system)
+    # `system` тоже уезжает в имя каталога `swarm_<system>_<task_id>`, а
+    # `normalize_system` делает лишь strip+lower — `../` проходил насквозь.
+    # Здесь коэрсинг, а не отказ: в имени системы законны пробелы и регистр,
+    # 400 сломал бы живых клиентов. У `task_id` наоборот отказ — коэрсинг
+    # молча склеил бы разные задачи в один тред.
+    system = sanitize_system_id(
+        normalize_system(source_value, default_system=default_system)
+    )
     payload["system"] = system
     swarm_id = f"swarm_{system}_{task_id}"
 
@@ -630,12 +679,25 @@ async def get_swarm_status(system: str, task_id: str):
             detail={"status": "error", "reason": "swarm_disabled"},
         )
 
-    sys_norm = str(system or "").lower().strip()
-    task_norm = str(task_id or "").strip()
-    if not sys_norm or not task_norm:
+    # `task_id` из URL уезжает в путь `threads_dir/swarm_<sys>_<task>/meta.json`.
+    # Один strip() пропускал `../`, и обычный GET читал произвольный файл. Разбор
+    # тот же, что у соседнего `/logs/{system}/{task_id}`; `system` не отвергаем, а
+    # нормализуем — там законны пробелы и регистр.
+    # Пустоту проверяем ДО санитайзера: он на пустой строке кидает ValueError,
+    # а голый ValueError из хендлера — это 500, тогда как контракт эндпоинта
+    # (и тест на `%20`) обещает 400.
+    if not str(system or "").strip() or not str(task_id or "").strip():
         raise HTTPException(
             status_code=400,
             detail={"status": "error", "payload": "system and task_id are required"},
+        )
+    sys_norm = sanitize_system_id(str(system).lower().strip())
+    try:
+        task_norm = validate_thread_id(str(task_id))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": str(e)},
         )
 
     swarm_id = f"swarm_{sys_norm}_{task_norm}"
@@ -686,12 +748,25 @@ async def get_swarm_logs(system: str, task_id: str):
             detail={"status": "error", "reason": "swarm_disabled"},
         )
 
-    sys_norm = str(system or "").lower().strip()
-    task_norm = str(task_id or "").strip()
-    if not sys_norm or not task_norm:
+    # `task_id` из URL уезжает в путь `threads_dir/swarm_<sys>_<task>/meta.json`.
+    # Один strip() пропускал `../`, и обычный GET читал произвольный файл. Разбор
+    # тот же, что у соседнего `/logs/{system}/{task_id}`; `system` не отвергаем, а
+    # нормализуем — там законны пробелы и регистр.
+    # Пустоту проверяем ДО санитайзера: он на пустой строке кидает ValueError,
+    # а голый ValueError из хендлера — это 500, тогда как контракт эндпоинта
+    # (и тест на `%20`) обещает 400.
+    if not str(system or "").strip() or not str(task_id or "").strip():
         raise HTTPException(
             status_code=400,
             detail={"status": "error", "payload": "system and task_id are required"},
+        )
+    sys_norm = sanitize_system_id(str(system).lower().strip())
+    try:
+        task_norm = validate_thread_id(str(task_id))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": str(e)},
         )
 
     swarm_id = f"swarm_{sys_norm}_{task_norm}"
@@ -725,6 +800,34 @@ async def healthcheck():
     return {"status": "ok"}
 
 
+#: Уровни, которые понимает uvicorn. `logging` знает и другие написания
+#: (`WARN`, `FATAL`), а uvicorn делает по значению прямой `LOG_LEVELS[level]` и
+#: падает KeyError. До этой ветки `server.log_level` читался и НИКУДА не
+#: передавался, поэтому конфиг с `warn` работал; передав его в uvicorn, мы бы
+#: уронили такие установки на старте.
+_UVICORN_LOG_LEVELS = frozenset({"critical", "error", "warning", "info", "debug", "trace"})
+
+#: Написания, которые logging принимает как синонимы, а uvicorn — нет.
+_LOG_LEVEL_ALIASES = {"warn": "warning", "fatal": "critical"}
+
+
+def _normalize_log_level(raw) -> str:
+    """Привести `server.log_level` к тому, что примет uvicorn.
+
+    Неизвестное значение не роняет старт, а даёт `info` и предупреждение:
+    поднятый сервер с неожиданной подробностью логов лучше, чем упавший.
+    """
+    level = str(raw if raw is not None else "info").strip().lower()
+    level = _LOG_LEVEL_ALIASES.get(level, level)
+    if level not in _UVICORN_LOG_LEVELS:
+        logger.warning(
+            "server.log_level=%r uvicorn не понимает (допустимы: %s) — беру info",
+            raw, ", ".join(sorted(_UVICORN_LOG_LEVELS)),
+        )
+        return "info"
+    return level
+
+
 def serve() -> int:
     """Поднять REST-сервер по config_server.yml. Тело точки входа gc-serve."""
     server_cfg = SERVER_CONFIG.get("server", {}) or {}
@@ -735,10 +838,48 @@ def serve() -> int:
     except (TypeError, ValueError):
         port = 8000
 
+    # basicConfig ровно здесь, а не на импорте модуля: gc_server импортируют и
+    # как библиотеку (cleanup_threads, тесты), и настраивать чужое логирование
+    # за них нельзя. Без этого вызова наши logger.info/warning не доходили
+    # никуда: uvicorn поднимает только СВОИ логгеры, а до stderr через
+    # logging.lastResort пролезал лишь WARNING+. То есть строка «читаю такой-то
+    # config_server.yml» существовала, но в проде её не видел никто.
+    log_level = _normalize_log_level(server_cfg.get("log_level"))
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    # Какой конфиг прочитан — печатаем ЗДЕСЬ, а не в резолвере. `SERVER_CONFIG`
+    # вычисляется на уровне модуля, то есть ДО того, как `serve()` дойдёт до
+    # `basicConfig` выше: строка из резолвера уходила через `logging.lastResort`
+    # с порогом WARNING и не доходила никуда. Проверено живым `gc-serve` —
+    # конфиг был найден, а строки в выводе не было. Всё нужное уже лежит в
+    # `SERVER_CONFIG["config_path"]`, читать файл заново не требуется.
+    logger.info(
+        "config_server.yml: %s",
+        SERVER_CONFIG.get("config_path") or "не найден, взят минимальный дефолт",
+    )
+
+    # Тревога по СОСТОЯНИЮ, а не по факту «файл не найден». Прежде она жила в
+    # резолвере конфига и срабатывала только когда файла нет нигде — а найденный
+    # конфиг с пустым auth_token молчал, хотя это ровно тот же незащищённый
+    # сервер. Именно туда ведёт подхват постороннего config_server.yml.
+    if not server_cfg.get("auth_token"):
+        logger.warning(
+            "сервер стартует БЕЗ авторизации: auth_token не задан (конфиг: %s). "
+            "Любой, кто дотянется до %s:%s, получит доступ к агенту.",
+            SERVER_CONFIG.get("config_path") or "минимальный дефолт",
+            host,
+            port,
+        )
+
     # Было "src.server:app": под установленным колесом (sources = ["src"]) модуль
     # называется server, поэтому строка резолвилась только при запуске из корня
     # репозитория, а из wheel падала ModuleNotFoundError.
-    uvicorn.run("gc_server.server:app", host=host, port=port)
+    # log_level передаётся явно — server.log_level из конфига читался и не
+    # использовался нигде.
+    uvicorn.run("gc_server.server:app", host=host, port=port, log_level=log_level)
     return 0
 
 

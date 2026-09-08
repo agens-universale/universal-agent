@@ -2,13 +2,18 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, WALK_OUTPUT_MAX_CHARS
 
 DEFAULT_FINISH_GATE_MAX_ITERATIONS = 10
 DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS = 3
 # Дефолтный таймаут execute_command / run_python_code (секунды).
 # Harbor и длинные бенчи поднимают через config (обычно 600).
 DEFAULT_EXEC_TIMEOUT_SEC = 120
+
+
+class LoopDetectorConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
 
 
 class AgentConfig(BaseModel):
@@ -67,11 +72,15 @@ class AgentConfig(BaseModel):
     exec_timeout_sec: int = DEFAULT_EXEC_TIMEOUT_SEC
     # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec.
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    # Потолок приватного канала обхода дерева (Harbor: find -printf для walk/listdir),
+    # decoded chars. Переполнение — fail-closed (walk_too_large), не частичный список.
+    walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS
     # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
     inject_tool_fields: dict[str, str] = Field(default_factory=dict)
     # Steering-текст: при рендере system prompt дописывается в <special_instructions>
     # для любой активной модели (пока непустой). Пусто / omit — без инжекта.
     model_steering: str = ""
+    loop_detector: LoopDetectorConfig = Field(default_factory=LoopDetectorConfig)
 
     @field_validator("session_token_limit", "max_tool_calls")
     @classmethod
@@ -163,6 +172,18 @@ def exec_output_capture_max_chars_from_config_dict(
     except (TypeError, ValueError):
         return DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
     return n if n >= 0 else DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+
+
+def walk_output_max_chars_from_config_dict(
+    config_dict: dict[str, Any] | None,
+) -> int:
+    """Потолок приватного канала обхода (Harbor walk/listdir) из плоского config_dict."""
+    raw = (config_dict or {}).get("walk_output_max_chars", WALK_OUTPUT_MAX_CHARS)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return WALK_OUTPUT_MAX_CHARS
+    return n if n > 0 else WALK_OUTPUT_MAX_CHARS
 
 
 def resolve_model_steering_text(

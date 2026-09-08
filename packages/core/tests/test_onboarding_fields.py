@@ -33,7 +33,7 @@ def test_display_secret_routes_header_and_bare_key():
     assert onboarding.display_secret("Bearer sk-abcdef") == "Bearer sk-***"
     assert onboarding.display_secret("gsk_8xEXAMPLEabcdefghVZdf4") == "gsk_…Zdf4"
     # ссылка секретом не является — показывается как есть (+ статус переменной)
-    assert onboarding.display_secret("${ENV:API_TOKEN}").startswith("${ENV:API_TOKEN}")
+    assert onboarding.display_secret("${ENV:VOICE_TOKEN}").startswith("${ENV:VOICE_TOKEN}")
 
 
 def test_onboarding_fields_shape():

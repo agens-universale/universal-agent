@@ -1,4 +1,5 @@
 from gc_core import config
+from gc_core import onboarding
 from gc_core.config_modules import env_vars
 
 
@@ -13,7 +14,7 @@ def test_bootstrap_creates_user_config(tmp_path, monkeypatch):
     assert not dest.exists()
     cfg = config.load_config()          # no --config, no ~/.gc/config.yml
     assert dest.is_file()               # bootstrap создал
-    assert cfg["model"] == "gigacode_agent_v1.6_rc"
+    assert cfg["model"] == onboarding.MODEL_SENTINEL
 
 
 def test_bootstrap_does_not_clobber_existing(tmp_path, monkeypatch):

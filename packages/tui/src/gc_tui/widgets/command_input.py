@@ -85,7 +85,7 @@ class CommandTextArea(TextArea):
     def _on_text_area_changed(self, event: TextArea.Changed) -> None:
         # Буфер опустел (отправка/очистка) — плашки потеряли привязку к тексту.
         # Сбрасываем стор здесь, а не в Enter-ветке: Enter теперь не всегда
-        # «отправка» (например, файловый пикер достраивает путь, оставляя текст в поле).
+        # «отправка» (стоп записи голосом оставляет текст в поле).
         if not self.text:
             self._clear_chip_state()
 

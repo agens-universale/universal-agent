@@ -339,53 +339,53 @@ class _SimpleStub:
     def add_message(self, m): pass
 
 
-def test_confirm_submit_session_returns_session():
-    """submit_confirm_reply('session') → make_tui_confirm-замыкание возвращает 'session'."""
+def test_confirm_submit_allow_remember_returns_allow_remember():
+    """submit_confirm_reply('allow_remember') → make_tui_confirm-замыкание возвращает 'allow_remember'."""
     runner = AgentRunner(executor=_SimpleStub())
 
     def present(title, question, fields):
         def _reply():
             time.sleep(0.05)
-            runner.submit_confirm_reply("session")
+            runner.submit_confirm_reply("allow_remember")
         threading.Thread(target=_reply, daemon=True).start()
 
     confirm = runner.make_tui_confirm(present)
     result = confirm(title="t", question="q", fields=[])
-    assert result == "session"
+    assert result == "allow_remember"
 
 
-def test_confirm_submit_once_returns_once():
-    """submit_confirm_reply('once') → make_tui_confirm-замыкание возвращает 'once'."""
+def test_confirm_submit_allow_once_returns_allow_once():
+    """submit_confirm_reply('allow_once') → make_tui_confirm-замыкание возвращает 'allow_once'."""
     runner = AgentRunner(executor=_SimpleStub())
 
     def present(title, question, fields):
         def _reply():
             time.sleep(0.05)
-            runner.submit_confirm_reply("once")
+            runner.submit_confirm_reply("allow_once")
         threading.Thread(target=_reply, daemon=True).start()
 
     confirm = runner.make_tui_confirm(present)
     result = confirm(title="t", question="q", fields=[])
-    assert result == "once"
+    assert result == "allow_once"
 
 
-def test_confirm_submit_deny_returns_deny():
-    """submit_confirm_reply('deny') → make_tui_confirm-замыкание возвращает 'deny'."""
+def test_confirm_submit_deny_remember_returns_deny_remember():
+    """submit_confirm_reply('deny_remember') → make_tui_confirm-замыкание возвращает 'deny_remember'."""
     runner = AgentRunner(executor=_SimpleStub())
 
     def present(title, question, fields):
         def _reply():
             time.sleep(0.05)
-            runner.submit_confirm_reply("deny")
+            runner.submit_confirm_reply("deny_remember")
         threading.Thread(target=_reply, daemon=True).start()
 
     confirm = runner.make_tui_confirm(present)
     result = confirm(title="t", question="q", fields=[])
-    assert result == "deny"
+    assert result == "deny_remember"
 
 
-def test_confirm_cancel_returns_deny():
-    """cancel_confirm() → make_tui_confirm-замыкание возвращает 'deny'."""
+def test_confirm_cancel_returns_deny_once():
+    """cancel_confirm() → make_tui_confirm-замыкание возвращает 'deny_once'."""
     runner = AgentRunner(executor=_SimpleStub())
 
     def present(title, question, fields):
@@ -393,11 +393,11 @@ def test_confirm_cancel_returns_deny():
 
     confirm = runner.make_tui_confirm(present)
     result = confirm(title="t", question="q", fields=[])
-    assert result == "deny"
+    assert result == "deny_once"
 
 
 def test_confirm_stop_unblocks_blocked_confirm():
-    """stop() разблокирует агент-поток, зависший в confirm (возвращает 'deny')."""
+    """stop() разблокирует агент-поток, зависший в confirm (возвращает 'deny_once')."""
     runner = AgentRunner(executor=_SimpleStub())
 
     # present ничего не делает — confirm будет ждать вечно, пока не придёт stop()
@@ -416,4 +416,4 @@ def test_confirm_stop_unblocks_blocked_confirm():
     runner.stop()
     t.join(timeout=2.0)
     assert not t.is_alive(), "confirm-поток не разблокировался за 2 с"
-    assert result_holder == ["deny"]
+    assert result_holder == ["deny_once"]

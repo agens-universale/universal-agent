@@ -176,3 +176,55 @@ async def test_ask_human_still_accepts_a_sync_port():
     out = await tool.acall(question="как дела?")
 
     assert "синхронный ответ" in str(out)
+
+
+async def test_find_in_files_runs_grep_through_the_async_backend(tmp_path):
+    """``fs_find_in_files`` зовёт grep через ``aexec``, а не через пул.
+
+    Пятый тул той же категории, приехал с develop. У него ДВА процессных
+    бюджета — 120 с у нативного grep и 60 с у префильтра, — и оба он держал бы
+    целиком: инлайн отнял бы loop у приложения, поток из пула занял бы слот.
+    У запуска процесса нативная асинхронная форма есть, значит идём через неё.
+
+    Проверяется факт маршрута, а не тайминг: подменяются ОБЕ формы бэкенда, и
+    синхронная обязана остаться нетронутой.
+    """
+    from gc_core.tools.fs.find_in_files import FindInFiles
+
+    (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
+
+    tool = FindInFiles(ctx=local_ctx())
+    backend = tool._backend
+    if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
+        pytest.skip("в песочнице нет grep/find — нативного пути нет")
+
+    seen = {"sync": 0, "async": 0}
+    orig_aexec, orig_aexec_argv = backend.aexec, backend.aexec_argv
+
+    async def _aexec(command, **kwargs):
+        seen["async"] += 1
+        return await orig_aexec(command, **kwargs)
+
+    async def _aexec_argv(argv, **kwargs):
+        seen["async"] += 1
+        return await orig_aexec_argv(argv, **kwargs)
+
+    def _sync_trap(*_a, **_k):
+        seen["sync"] += 1
+        raise AssertionError("нативный grep ушёл в синхронный exec")
+
+    backend.aexec, backend.aexec_argv = _aexec, _aexec_argv
+    backend.exec, backend.exec_argv = _sync_trap, _sync_trap
+    try:
+        out = await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
+    finally:
+        for name in ("aexec", "aexec_argv", "exec", "exec_argv"):
+            try:
+                delattr(backend, name)
+            except AttributeError:
+                pass
+
+    data = json.loads(out)
+    assert data["search_backend"] == "grep"
+    assert seen["async"] >= 1, "асинхронная форма бэкенда не звалась"
+    assert seen["sync"] == 0

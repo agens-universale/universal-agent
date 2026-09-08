@@ -101,6 +101,17 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--reset-config",
+    action="store_true",
+    dest="reset_config",
+    help=(
+        "Сбросить config.yml к актуальному пакетному умолчанию (интерактивное "
+        "y/N-подтверждение; старый файл — в бэкап; профили и сессионные "
+        "оверрайды не трогает) и выйти"
+    ),
+)
+
+parser.add_argument(
     "--init",
     action="store_true",
     help="Сгенерировать AGENTS.md сканом репозитория и выйти (агент не запускается)",
@@ -236,6 +247,23 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--profile",
+    type=str,
+    default=None,
+    help=(
+        "Активировать профиль <имя> поверх указателя profile: из config.yml "
+        "(~/.gc/profiles/ или <project>/.gc/profiles/)"
+    ),
+)
+
+parser.add_argument(
+    "--level",
+    choices=["light", "default", "max"],
+    default=None,
+    help="Активный уровень модели на этот запуск (перекрывает config.yml и профиль)",
+)
+
+parser.add_argument(
     "--agentsmd-override",
     action="store_true",
     help=(
@@ -269,21 +297,29 @@ if (
     not parsed_args.init_config
     and not getattr(parsed_args, "init", False)
     and not parsed_args.sync_config
+    and not getattr(parsed_args, "reset_config", False)
     and not parsed_args.check_update
     and not parsed_args.update
     and not parsed_args.query
 ):
     parser.error(
         "Нужен -q/--query "
-        "(или --init-config для конфига, --sync-config для обновления конфига, --init для AGENTS.md, "
+        "(или --init-config для конфига, --sync-config для обновления конфига, "
+        "--reset-config для сброса конфига, --init для AGENTS.md, "
         "--check-update/--update для обновления агента)."
     )
 if parsed_args.init_config and parsed_args.query:
     parser.error("--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит.")
 if parsed_args.sync_config and parsed_args.query:
     parser.error("--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит.")
+if parsed_args.reset_config and parsed_args.query:
+    parser.error("--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит.")
 if parsed_args.init_config and parsed_args.sync_config:
     parser.error("--init-config и --sync-config нельзя вместе: используйте одно из двух.")
+if parsed_args.reset_config and parsed_args.sync_config:
+    parser.error("--reset-config и --sync-config нельзя вместе: используйте одно из двух.")
+if parsed_args.reset_config and parsed_args.init_config:
+    parser.error("--reset-config и --init-config нельзя вместе: используйте одно из двух.")
 if parsed_args.check_update and parsed_args.query:
     parser.error("--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит.")
 if parsed_args.update and parsed_args.query:
@@ -294,6 +330,8 @@ if parsed_args.new and not parsed_args.thread_id:
     parser.error("Аргумент -n/--new можно использовать только вместе с -t/--thread-id.")
 run_args = parsed_args
 extra_config_overrides = _parse_unknown_args(list(unknown_args))
+if parsed_args.level is not None:
+    extra_config_overrides["level"] = parsed_args.level
 
 
 if __name__ == "__main__":

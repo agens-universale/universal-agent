@@ -28,3 +28,21 @@ def as_coro(fn):
         return fn(*args, **kwargs)
 
     return _wrapped
+
+
+def run_coro(coro):
+    """Выполнить корутину из синхронного теста.
+
+    Тест-side адаптер к тому же шву, что и :func:`as_coro`: часть внутренних
+    функций ядра стала корутинами (``SubagentRunner._build_child_ctx``,
+    ``_arequest_backend_canonical_once``), а приехавшие с develop тесты зовут
+    их напрямую. Своим ``asyncio.run``, а не порталом: у такого теста своего
+    loop нет, а портал из-под работающего loop сознательно отказывает
+    (``SyncApiInsideEventLoopError``).
+
+    Живёт здесь, а не копией в каждом файле: копий было две и они уже начали
+    расходиться комментариями.
+    """
+    import asyncio
+
+    return asyncio.run(coro)

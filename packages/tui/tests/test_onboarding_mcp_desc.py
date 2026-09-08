@@ -24,13 +24,13 @@ async def test_onboarding_mcp_row_shows_description(tmp_path):
     # строка MCP на онбординге показывает приглушённое описание (тот же источник, что /settings)
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+    from gc_tui.screens.onboarding import STEP_MCP
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._step = 2
-        scr._render_step()
+        scr._goto(STEP_MCP)
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query(".onb-option"))
         assert "веб-поиск" in blob

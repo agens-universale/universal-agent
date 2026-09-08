@@ -19,8 +19,9 @@ from gc_core.updater.source import UpdateSource
 def build_install_target(source: UpdateSource) -> str:
     """Строка переустановки ТЕМ ЖЕ профилем, что стоит сейчас.
 
-    Агент ставится одним из четырёх дистрибутивов (`gc-ua` — всё, `gc-cli` —
-    ядро, `gc-tui`, `gc-server`). Голый `git+URL` всегда резолвится в корневой
+    Агент ставится одним из профилей `app_version.PROFILE_DISTS`: мета `gc-ua` —
+    всё сразу, листовые `gc-tui` / `gc-server` / `gc-cli` / `gc-mcp` — свой кусок,
+    `gc-core` — библиотека. Голый `git+URL` всегда резолвится в корневой
     манифест, то есть в полный профиль: без явного имени и подкаталога
     `--update` на headless-установке молча раздул бы её до полной, а на
     `gc-tui` — потерял бы TUI.
@@ -35,9 +36,38 @@ def build_install_target(source: UpdateSource) -> str:
 
 
 def build_install_command(source: UpdateSource, extra_args: list) -> list:
+    """Команда переустановки. Повторяет ВСЁ, что нужно профилю, а не только имя.
+
+    `uv tool install` не дописывает к существующей установке, а переписывает её
+    по этой командной строке: чего в строке нет — того после обновления не
+    будет. Забытый `--with-executables-from gc-mcp` поэтому и стоил команд:
+    человек ставил листовой профиль так, как велят readme и docs/packaging.md,
+    получал `gc-mcp` и `gc-mcp-install` в PATH, а первое же `--update` их молча
+    уносило. `uv` при этом рапортует «Installed 1 executable» и считает
+    обновление удачным, в TUI ничего не ломается (`/mcp` импортирует модуль
+    напрямую) — замечает только тот, кто наберёт `gc-mcp` в шелле.
+
+    До разбиения на профили этого быть не могло: единственный дистрибутив
+    объявлял команды MCP в своём `[project.scripts]`, и любая переустановка
+    возвращала их сама.
+    """
     uv = shutil.which("uv") or "uv"
     target = build_install_target(source)
-    return [uv, "tool", "install", "--force", "--reinstall", target] + list(extra_args)
+    cmd = [uv, "tool", "install", "--force", "--reinstall", target]
+    cmd += _executables_args(source.dist)
+    return cmd + list(extra_args)
+
+
+def _executables_args(dist: str) -> list:
+    """`--with-executables-from` для профилей, которым команды MCP не принадлежат.
+
+    Мета `gc-ua` объявляет все шесть команд сама. `gc-mcp` — их владелец. Ядро
+    команд не объявляет вовсе и как инструмент не ставится. Остальным трём флаг
+    нужен, иначе `uv` вынесет наружу только их собственную команду.
+    """
+    if dist in ("gc-ua", "gc-mcp", "gc-core"):
+        return []
+    return ["--with-executables-from", "gc-mcp"]
 
 
 def install_location_phrase() -> str:

@@ -106,6 +106,10 @@ def _stub_tools_modules() -> None:
     # Цикл импортирует ещё и распознаватель «неизвестный тул» — заглушка обязана
     # его отдавать, иначе импорт processing_responses падает на пустом месте.
     tools_pkg.is_unknown_tool_output = lambda *_a, **_k: False
+    # Имена приехали с develop: processing_responses импортирует их из пакета,
+    # и заглушка обязана их отдавать, иначе импорт модуля падает целиком.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_k: False
+    tools_pkg.tool_arguments_valid = lambda *_a, **_k: True
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg

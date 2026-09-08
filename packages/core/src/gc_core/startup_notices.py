@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from gc_core.config_modules.pricing import resolve_model_tariff
 
@@ -203,11 +203,18 @@ def collect_startup_notices(
     mcp_status: Optional[Dict[str, Any]],
     *,
     is_tui: bool,
+    extra: Sequence[Notice] = (),
     deprecated_keys_used: Optional[List[str]] = None,
     upgrade_info=None,
     compat_notices: Optional[List[str]] = None,
 ) -> List[Notice]:
-    """Единая точка сборки. Warnings перед infos, внутри — по источнику."""
+    """Единая точка сборки. Warnings перед infos, внутри — по источнику.
+
+    `extra` — уведомления фронтенда, которые ядру собирать нечем: голосовые
+    живут в TUI, потому что и голос включается только там. Подставляются НА
+    МЕСТО прежнего `_voice`, а не в хвост: внутри уровня порядок источников
+    значим, и дописка в конец тихо переставила бы строки на экране.
+    """
     warns: List[Notice] = []
     infos: List[Notice] = []
     for n in (
@@ -215,6 +222,7 @@ def collect_startup_notices(
         + _subagent_definitions(config_dict)
         + _mcp_failed(mcp_status)
         + _agentsmd(config_dict, is_tui=is_tui)
+        + list(extra)
         + _compat(compat_notices)
         + _pricing_no_rates(config_dict)
         + _deprecated(deprecated_keys_used)

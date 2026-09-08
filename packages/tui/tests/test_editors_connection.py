@@ -421,7 +421,7 @@ async def test_section_entry_shows_the_whole_preset_list(tmp_path):
     (мутация на ревью 2026-08-18 проходит). Проверяется полнота списка на боевом пути
     раскрытия секции."""
     from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
-    from form_helpers import settings_connection
+    from form_harness import settings_connection
     from gc_tui.editors.connection import ConnectionEditor
     async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[1].url) as (pilot, scr):
         ed = scr.query_one(ConnectionEditor)
@@ -744,3 +744,20 @@ async def test_probe_snapshot_follows_the_no_auth_toggle():
         ed.move(2)                                   # → позиция галки
         assert ed.toggle_no_auth() is True
         assert ed.probe_snapshot() != before
+
+@pytest.mark.asyncio
+async def test_a_mouse_click_lands_the_cursor_like_the_arrows_do():
+    """Клик мышью по полю — тоже перемещение курсора (спека §4.3): без
+    приземления клик не двигал позицию формы — Space на галке и футер судили
+    по «прошлому» месту курсора, а список над пустым адресом не раскрывался
+    (живой смок 2026-09-04, тот же класс, что у формы записи реестра)."""
+    from gc_tui.editors.connection import ConnectionEditor
+    ed = ConnectionEditor(url_current="http://host/v1/chat/completions",
+                          auth_header="Bearer tok")
+    async with _harness(ed).run_test() as pilot:
+        await pilot.pause()
+        assert ed._positions[ed._idx] == "conn-url"     # предусловие
+        await pilot.click("#conn-token")
+        await pilot.pause()
+        assert ed._positions[ed._idx] == "conn-token", "клик не приземлил курсор"
+

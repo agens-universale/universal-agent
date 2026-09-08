@@ -22,6 +22,11 @@ from gc_core.config import _default_config_path, validate_config_text
 from gc_core.config_modules import compat
 from gc_core.onboarding_config_writer import find_anchor, insert_missing, section_end
 from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.user_text import read_user_text
+
+
+class ResetReport(NamedTuple):
+    backup_path: str        # старый файл, в бэкап
 
 
 class SyncReport(NamedTuple):
@@ -142,8 +147,12 @@ def _verbatim_block(user_text: str, top_key: str) -> Optional[str]:
         return None
 
 
-def _prune_backups(backup_dir: Path, name: str, *, keep: int) -> None:
-    """Оставить последние `keep` бэкапов `<name>.bak-*`, старые удалить (bounded рост)."""
+def prune_backups(backup_dir: Path, name: str, *, keep: int = 10) -> None:
+    """Оставить последние `keep` бэкапов `<name>.bak-*`, старые удалить (bounded рост).
+
+    Публичная: конвенцию бэкапов держит этот модуль, и правило роста — её
+    часть. Зовут и сброс конфига, и удаление профиля из /settings; своя
+    редакция у второго и приводила к каталогу без предела."""
     baks = sorted(backup_dir.glob(name + ".bak-*"))
     for old in baks[:-keep]:
         try:
@@ -152,11 +161,48 @@ def _prune_backups(backup_dir: Path, name: str, *, keep: int) -> None:
             pass
 
 
+def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -> ResetReport:
+    """«Сбросить к умолчанию» (спека §11): подменить `path` актуальным пакетным
+    `config.default.yml` целиком (не line-copy, как `sync_config`) — старый файл
+    уходит в бэкап той же конвенцией (`backups/<name>.bak-<ts>`, prune keep=10).
+
+    Файлы профилей и сессионные оверрайды это действие не трогает — оно
+    заменяет ровно один файл (`path`)."""
+    path = Path(path)
+    template_path = Path(template_path or _default_config_path())
+    # Тем же переводом, что и `sync_config`: вызывающий («Сбросить к умолчанию»
+    # в /settings) ловит `ValueError`. Голый `read_text` отдавал ему `OSError`
+    # трейсбеком, а на шаблоне в чужой кодировке (корп-сборка, правленный ассет) —
+    # `UnicodeDecodeError` без имени файла.
+    template_text = read_user_text(template_path)
+    validate_config_text(template_text)
+
+    ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
+    backup_dir = path.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup = backup_dir / (path.name + f".bak-{ts}")
+    shutil.copyfile(path, backup)
+    prune_backups(backup_dir, path.name)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(template_text, encoding="utf-8")
+        atomic_replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+    return ResetReport(str(backup))
+
+
 def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) -> SyncReport:
     path = Path(path)
     template_path = Path(template_path or _default_config_path())
-    user_text = path.read_text(encoding="utf-8")
-    template_text = template_path.read_text(encoding="utf-8")
+    # Оба чтения — под общим переводом в `ValueError`: вызывающий (`gc-cli
+    # --sync-config`) ловит именно его и печатает «config.yml НЕ обновлён: …».
+    # `OSError` мимо этого перехвата уходил трейсбеком, а `UnicodeDecodeError`
+    # хоть и подкласс `ValueError`, но без имени файла: на конфиге в чужой
+    # кодировке человек читал голое «codec can't decode» и не знал, о чём речь.
+    user_text = read_user_text(path)
+    template_text = read_user_text(template_path)
     try:
         user_raw = yaml.safe_load(user_text) or {}
         template_raw = yaml.safe_load(template_text) or {}
@@ -251,7 +297,7 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup = backup_dir / (path.name + f".bak-{ts}")
     shutil.copyfile(path, backup)
-    _prune_backups(backup_dir, path.name, keep=10)
+    prune_backups(backup_dir, path.name)
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
         tmp.write_text(result, encoding="utf-8")

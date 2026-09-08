@@ -82,6 +82,11 @@ TraceScreen #trace { height: auto; }
     border-top: solid $deep-dim;
     border-bottom: solid $deep-dim;
 }
+/* Запись голосом: оливковый бордер = «микрофон активен» (гаснет на стопе). */
+#input-row.recording {
+    border-top: solid $olive;
+    border-bottom: solid $olive;
+}
 #input-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left top; padding: 0; }
 #cmdinput {
     height: auto;                       /* растёт со строками */
@@ -362,20 +367,37 @@ CopyBufferScreen #root { height: 1fr; }
 TextArea.ask-human-mode { border: solid $run-color; }
 
 /* confirm banner — служебный/security, бирюзовый (accent) вместо янтарного.
- * max-height как у ask_human: длинные fields не выдавливают футер. */
+ * Тело (.cb-body) скроллится; .cb-options dock:bottom — Y/O/N/T всегда видны.
+ * При cap main.py ставит height=cap (needs_height_when_capped): одного max_height
+ * мало — Textual клипает box, а undocked-дети layout'ятся полной высотой. */
 .confirm-banner {
     background: #161A23;
     border: round $accent;
     padding: 0 1;
     margin: 0 1;
     height: auto;
-    max-height: 50%;
     width: 1fr;
+    layout: vertical;
+    overflow-y: hidden;
 }
-.cb-label    { color: $bright; text-style: bold; }
-.cb-question { color: $ink; }
-.cb-field    { color: $dim; }
-.cb-options  { color: $accent; }
+.confirm-banner > .cb-body {
+    height: 1fr;
+    width: 1fr;
+    scrollbar-size-vertical: 1;
+}
+.cb-label    { color: $bright; text-style: bold; height: auto; }
+.cb-question { color: $ink; height: auto; }
+.cb-field    { color: $dim; height: auto; }
+.cb-payload  { color: $bright; text-style: bold; height: auto; }
+.cb-options  {
+    dock: bottom;
+    color: $accent;
+    height: auto;
+    min-height: 5;       /* padding-top + 4 choice rows */
+    padding-top: 1;
+    background: #161A23;
+    width: 100%;
+}
 
 /* скрытый input-row при confirm (одиночные клавиши y/N без TextArea) */
 #input-row.hidden { display: none; }
@@ -440,23 +462,39 @@ TextArea.ask-human-mode { border: solid $run-color; }
    teal-карточка (лого+тэглайн+степпер+шаг) — контент между ними, по размеру. */
 #onb-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
 #header-left { width: 1fr; color: $deep-dim; }
-#onb-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
+/* Рамку рисует САМ скроллящий контейнер (канон раскладки форм, см.
+   `tui/form_frame.py`): граница — часть его коробки и потому стоит на месте,
+   а внутри неё едет содержимое. Пока рамка сидела ВНУТРИ скролла, её концы уезжали
+   за вьюпорт — рамка выглядела разорванной. Потолок высоты ставится из кода
+   (`cap_frame_height`): `max-height: 100%` меряется по всему `#root` вместе с шапкой
+   и футером и выдавливал футер за нижний край экрана. */
+#onb-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
 #onb-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
-#onb-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+#onb-frame { height: auto; width: 1fr; }
 #onb-logo { height: auto; padding: 0; }
 #onb-tagline { height: auto; color: $deep-dim; margin-top: 1; padding: 0; }
 #onb-stepper { height: auto; padding: 2 0; }
 #onb-summary { height: 1; margin-bottom: 1; }   /* строка сводки — клип по краю, без переноса; воздух перед заголовком шага */
+/* Плашка о деградации загрузки: абзац в 2-3 строки, и под ним обязан быть воздух —
+   иначе она сливается со следующей за ней плашкой о перекрывающем слое (тоже
+   абзац, тоже цветом предупреждения) в одно нечитаемое полотно. */
+#onb-degraded-warn { height: auto; margin-bottom: 1; }
 #onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
 /* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
-#onb-model, #conn-url, #conn-token, #conn-proxy { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
-#onb-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus { border: none; background: $band-bg; }
+#onb-model, #onb-level-model, #conn-url, #conn-token, #conn-proxy, #mef-alias, #mef-model, #mef-url, #mef-token, #set-profile-name, #voice-url, #voice-token, #voice-model, #voice-lang { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#onb-model:focus, #onb-level-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus,
+#mef-alias:focus, #mef-model:focus, #mef-url:focus, #mef-token:focus,
+#set-profile-name:focus, #voice-url:focus, #voice-token:focus, #voice-model:focus,
+#voice-lang:focus { border: none; background: $band-bg; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
 /* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
    отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
 .onb-option.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
 .onb-mcp-row { text-wrap: nowrap; text-overflow: ellipsis; }
 .set-spaced { margin-bottom: 1; }   /* воздух между строками-опциями в /settings-секциях */
+/* Вариант БЕЗ второй строки описания в списке, где у соседа она есть: воздух добирает
+   недостающую строку, и блоки вариантов встают одинаковой высоты (голосовой шаг мастера). */
+.set-spaced-2 { margin-bottom: 2; }
 /* Первая строка-действие: зазор сверху (от инфо-строк) И снизу (между действиями) одним
    shorthand — раздельные longhand'ы .set-gap+.set-spaced на одном элементе Textual перетирает
    (последний .set-gap обнулял margin-bottom → пропадал воздух под первым действием). */
@@ -468,9 +506,10 @@ TextArea.ask-human-mode { border: solid $run-color; }
 
 /* /settings — хаб настроек (визуальный контракт §2-3; идиомы = onb-*) */
 #set-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
-#set-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
+/* Рамка — на скроллящем контейнере (тот же канон, что у мастера выше). */
+#set-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
 #set-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
-#set-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+#set-frame { height: auto; width: 1fr; }
 /* Единая левая граница контента = padding 0 1 у ВСЕХ элементов секции/меню
    (frame даёт +2, элементы +1 → всё на 3 от рамки; рассинхрон отступов был
    причиной «адрес левее / авторизация поехала»). */
@@ -484,7 +523,9 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-row { height: auto; padding: 0 1; }
 .set-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
 /* Разделитель групп секции «Режимы работы» (ревизия 7) — тот же приём, что .palette-group-sep. */
-.set-group-sep { color: $deep-dim; padding: 0 1; height: 1; margin: 0; }
+/* Плотность B: строки блока впритык, воздух несут ГРАНИЦЫ — разделитель/подпись
+   блока отбивается сверху от чужого блока и стоит вплотную к своим строкам. */
+.set-group-sep { color: $deep-dim; padding: 0 1; height: 1; margin: 1 0 0 0; }
 .set-hint { color: $deep-dim; padding: 0 1; margin-top: 1; }   /* воздух перед контекст-подсказкой */
 .set-info { height: auto; padding: 0 1; }   /* инфо-строки (Версия/Источник) — тот же отступ */
 /* Подписи редакторов (Модель/Подключение) несут .onb-hint/.onb-warn из онбординга
@@ -494,11 +535,30 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-gap { margin-top: 1; }                 /* вертикальный зазор между смысловыми группами */
 .set-warnflash { color: $warn; }
 .set-probe { margin-top: 1; }               /* воздух перед строкой статуса probe */
+/* Строка перекрытия голосовой секции: она стоит НАД вариантами режима, поэтому
+   воздух нужен с обеих сторон — иначе предупреждение слипается с первой строкой
+   режима и снова читается как её свойство. Оба отступа ОДНИМ shorthand и правилом
+   НИЖЕ `.set-hint`: раздельный margin-bottom рядом с её margin-top Textual
+   перетирает (та же причина, что у `.set-spaced-gap` выше). */
+.set-voiceoverride { margin: 1 0 1 0; }
 
 /* Пост-апдейт (D4) — карточка по контенту, как #set-frame (визуальный контракт §6);
-   раньше сидел в #trace{height:1fr} и раскатывался на весь пустой экран. */
-#pu-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
-#pu-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+   раньше сидел в #trace{height:1fr} и раскатывался на весь пустой экран.
+   Рамка — на скроллящем контейнере, потолок из кода: тот же канон, что у мастера
+   и /settings (см. `tui/form_frame.py`). */
+#pu-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+#pu-frame { height: auto; width: 1fr; }
+
+/* Компактный режим рамки (`tui/form_frame.py::cap_frame_height`) — на тесных окнах
+   собственная коробка скролла (граница `round` + вертикальный `padding: 1 2`, 4
+   строки разом) съедала остаток экрана раньше, чем до неё доходило содержимое:
+   рамка рисовалась пустой уже при остатке в 4-5 строк. Без границы и вертикального
+   отступа тот же остаток достаётся содержимому целиком; горизонтальный отступ
+   сохранён — левый край текста не должен прыгать при переключении режима. */
+#set-scroll.frame-compact, #onb-scroll.frame-compact, #pu-scroll.frame-compact {
+    border: none;
+    padding: 0 1;
+}
 .pu-title { height: auto; padding: 0 0 1 0; border-bottom: solid $deep-dim; margin-bottom: 1; }
 .pu-title.solo { padding: 0; border-bottom: none; margin-bottom: 0; }   /* нечего обновлять — линии под заголовком нет */
 .post-update-hint { height: auto; color: $deep-dim; padding: 0; }
@@ -506,23 +566,35 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; }
 .set-flash-ok   { background: $band-bg; border-left: outer $ok;   padding: 0 1; margin-top: 1; color: $ok; }
 .set-flash-warn { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; color: $warn; }
+/* Отчёт операции (`_report`): плашка-блок для чтения, но НЕ тревога — бордер
+   успеха, как у флэша, а не янтарный язык подтверждений. Текст остаётся
+   обычным: читают содержимое, а не цвет. */
+.set-report { background: $band-bg; border-left: outer $ok; padding: 0 1; margin-top: 1; }
 #set-notice { margin-top: 1; }              /* отделить notice (итог install/удаления) от контента над ним */
 /* Обёртка слота-синглтона (_singleton): нужна, чтобы новая плашка не столкнулась id'ом
    с ещё не отсоединённой старой. Собственной высоты не имеет — только содержимое. */
 .set-slot { height: auto; width: 1fr; }
 /* Поле ввода в /settings — скруглённая amber-рамка (id+class специфичнее flat
    #onb-* → онбординг остаётся без рамки, как принят). */
-#onb-model.set-framed,
-#conn-url.set-framed, #conn-token.set-framed, #conn-proxy.set-framed {
+#onb-model.set-framed, #onb-level-model.set-framed,
+#conn-url.set-framed, #conn-token.set-framed, #conn-proxy.set-framed,
+#mef-alias.set-framed, #mef-model.set-framed, #mef-url.set-framed, #mef-token.set-framed,
+#set-profile-name.set-framed,
+#voice-url.set-framed, #voice-token.set-framed, #voice-model.set-framed, #voice-lang.set-framed {
     border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg;
 }
-#onb-model.set-framed:focus,
-#conn-url.set-framed:focus, #conn-token.set-framed:focus, #conn-proxy.set-framed:focus {
+#onb-model.set-framed:focus, #onb-level-model.set-framed:focus,
+#conn-url.set-framed:focus, #conn-token.set-framed:focus, #conn-proxy.set-framed:focus,
+#mef-alias.set-framed:focus, #mef-model.set-framed:focus,
+#mef-url.set-framed:focus, #mef-token.set-framed:focus, #set-profile-name.set-framed:focus,
+#voice-url.set-framed:focus, #voice-token.set-framed:focus, #voice-model.set-framed:focus,
+#voice-lang.set-framed:focus {
     border: round $run-color; background: $band-bg;
 }
 /* Замороженное поле токена при «● без авторизации»: поле на месте, но disabled —
-   рамка приглушается, чтобы читалось «не участвует». */
-#conn-token.set-framed:disabled { border: round $deep-dim; }
+   рамка приглушается, чтобы читалось «не участвует». Оба поля — одной строкой:
+   страж (`test_disabled_token_border_is_dimmed`) читает правило построчно. */
+#conn-token.set-framed:disabled, #mef-token.set-framed:disabled { border: round $deep-dim; }
 /* Placeholder говорит одно из двух, и это должно быть видно, не читая текст
    (спека 2026-08-03 §3.4): подсказка-объяснение приглушена, маска сохранённого
    значения — цветом значения. Своего правила на placeholder у нас не было вовсе,
@@ -573,6 +645,26 @@ PasteInput > .input--placeholder { color: $deep-dim; }
    не 14: рамка уехала на группу, height больше не border-box списка (спека §3.3). */
 .field-group > .dropdown-scroll { border: none; max-height: 12; }
 
+/* Поле-факт (локальный режим: адрес/токен/модель сервиса) — не правится и выглядит
+   приглушённо. Через id: цвет поля задан id-селектором выше, класс его не перебил бы. */
+#voice-url.set-readonly, #voice-token.set-readonly,
+#voice-model.set-readonly, #voice-lang.set-readonly { color: $deep-dim; }
+
 /* Редакторы полей — Vertical по дефолту height:1fr и растягивают рамку;
    принудительно height:auto, чтобы рамка (#onb-frame/#set-frame) обнимала контент. */
-ModelEditor, McpSectionEditor, ConnectionEditor { height: auto; }
+ModelEditor, McpSectionEditor, ConnectionEditor, ModelEntryForm,
+ModelsSectionEditor, VoiceEndpointEditor { height: auto; }
+/* Секция «Модели»: строки реестра — те же .set-row, что у «Профилей»/«Режимов»
+   (подсветка и отступы общие); свои классы нужны только для адресации из кода.
+   Confirm-баннер удаления — язык баннера MCP (.mcp-confirm), общий с ним. */
+.models-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; }
+.models-picker-hint { color: $deep-dim; padding: 0 1; }
+/* «запись: <полный путь>» — первая строка секции: свой воздух не нужен, отбивку
+   от неё даёт margin-top первой черты-подписи (.set-group-sep). Шортхенд гасит
+   margin-top базового .set-hint. nowrap: длинный путь усекается краем рамки, а не
+   рвёт строку на две. */
+.models-target { margin: 0; text-wrap: nowrap; }
+/* Строка-якорь раскрытого пикера: без нижнего воздуха .set-spaced — список стоит
+   вплотную к своей строке. Шортхенд и позиция ПОСЛЕ .set-spaced в файле: правило
+   побеждает порядком при равной специфичности. */
+.models-picker-anchor { margin: 0; }

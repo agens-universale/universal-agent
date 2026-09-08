@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-core"
-version = "0.5.0"
+version = "0.3.0"
 description = "GigaCode Universal Agent — ядро агента (SDK): цикл, тулы, конфиг, безопасность, память, MCP-клиент"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0.3",
     "pydantic>=2.9.0",
     "pydantic-settings>=2.0",
+    "requests[socks]",
     "trafilatura",
     "readability-lxml",
     "jsonschema>=4.0.0",
@@ -37,7 +38,11 @@ packages = ["src/gc_core"]
 "assets/config.default.yml" = "gc_core/assets/config.default.yml"
 
 [tool.pytest.ini_options]
-# Набор пакета самодостаточен: `cd packages/core && pytest` — доказательство,
-# что пакет не тянет соседей. Общая инфраструктура приезжает из gc-testkit.
+# Набор пакета гоняется отдельно: `cd packages/core && pytest`. Зелёный
+# автономный прогон изоляции НЕ доказывает: плагин тест-кита кладёт на
+# sys.path все шесть packages/*/src при любом нашем rootdir, поэтому чужой
+# импорт спокойно резолвится. Изоляцию доказывает статический сторож
+# tests/test_test_ownership.py — он смотрит на текст импортов.
+# Общая инфраструктура приезжает из gc-testkit.
 testpaths = ["tests"]
 asyncio_mode = "auto"

@@ -1,7 +1,9 @@
 """Тесты для src/swarm/runner.py.
 
 Покрывает start_swarm_process() с моком subprocess.Popen:
-- meta.json создаётся в queued, потом обновляется на running с pid + deadline_at;
+- meta.json появляется только после успешного Popen, сразу в running с pid + deadline_at;
+- отсутствующий/неисполнимый wrapper_path отвергается ДО Popen и без следов на диске;
+- провал на любом шаге до Popen не оставляет песочницы;
 - sandbox-каталог создаётся;
 - env пробрасывается через Popen со всеми SWARM_* переменными;
 - start_new_session=True передан в Popen.
@@ -201,15 +203,26 @@ def test_start_swarm_env_inherits_host_environ(base_swarm_cfg, mock_popen, monke
     assert env["MY_HOST_VAR"] == "host_value"
 
 
-def test_start_swarm_meta_queued_persisted_before_popen(base_swarm_cfg, mock_popen, tmp_path):
-    """До Popen в meta должен быть status=queued. После — running."""
-    state = {"queued_seen": False}
+def test_start_swarm_writes_queued_meta_before_popen(base_swarm_cfg, mock_popen):
+    """До Popen meta уже есть, в статусе queued. После — running с PID.
+
+    Порядок «сначала след, потом процесс» закрывает окно, в котором живой
+    процесс остаётся неучтённым: если запись статуса running упадёт (права,
+    диск), дерево bwrap+CLI уже работает, и без предварительной meta о нём не
+    узнал бы никто — ни monitor, ни дедлайн, ни /swarm/status, а песочница жила
+    бы до TTL-janitor.
+
+    Обратную беду — залипший queued после провала запуска — закрывает удаление
+    meta в finally, см. test_start_swarm_popen_failure_leaves_no_meta_and_no_sandbox.
+
+    Подмена, которую ловит тест: убрать save_swarm_meta перед Popen.
+    """
+    state = {"meta_before_popen": None}
 
     def capture_popen_side(*args, **kwargs):
-        meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
-        sm = meta.get("swarm_meta", {})
-        if sm.get("status") == "queued":
-            state["queued_seen"] = True
+        state["meta_before_popen"] = storage.load_swarm_meta(
+            base_swarm_cfg["threads_dir"], "swarm_g_t",
+        )
         proc = MagicMock()
         proc.pid = 999
         return proc
@@ -219,11 +232,125 @@ def test_start_swarm_meta_queued_persisted_before_popen(base_swarm_cfg, mock_pop
     runner.start_swarm_process(
         base_swarm_cfg, system="g", task_id="t", payload={},
     )
-    assert state["queued_seen"], "meta status=queued должен существовать до Popen"
+
+    before = state["meta_before_popen"]
+    assert before, "meta обязана существовать ДО Popen — иначе процесс может остаться без учёта"
+    assert before["swarm_meta"]["status"] == "queued"
 
     meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
     assert meta["swarm_meta"]["status"] == "running"
     assert meta["swarm_meta"]["pid"] == 999
+
+
+def test_start_swarm_live_process_is_never_unaccounted(base_swarm_cfg, mock_popen):
+    """Popen удался, запись running упала — meta всё равно на диске.
+
+    Ровно тот случай, ради которого meta пишется заранее: процесс уже живёт, и
+    потерять его нельзя. Статус останется queued, но sworm виден и учтён.
+
+    Подмена: вернуть запись meta только после Popen — тест краснеет, потому что
+    на диске не останется ничего.
+    """
+    proc = MagicMock()
+    proc.pid = 4242
+    mock_popen.return_value = proc
+
+    calls = {"n": 0}
+    real_save = storage.save_swarm_meta
+
+    def _fail_second_save(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_save(*a, **kw)
+        raise OSError("нет места на диске")
+
+    with patch.object(runner.storage, "save_swarm_meta", _fail_second_save):
+        with pytest.raises(OSError):
+            runner.start_swarm_process(
+                base_swarm_cfg, system="g", task_id="t", payload={},
+            )
+
+    meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
+    assert meta, "живой процесс остался без следа на диске"
+    assert meta["swarm_meta"]["status"] == "queued"
+
+
+def test_start_swarm_popen_failure_leaves_no_meta_and_no_sandbox(base_swarm_cfg, mock_popen):
+    """Провал Popen не должен оставлять ни meta, ни песочницы."""
+    mock_popen.side_effect = OSError("boom")
+
+    with pytest.raises(OSError):
+        runner.start_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", payload={},
+        )
+
+    assert storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t") == {}
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
+
+
+def test_start_swarm_failure_before_popen_also_removes_sandbox(
+    base_swarm_cfg, mock_popen, monkeypatch,
+):
+    """Уборка обязана покрывать ВЕСЬ участок между makedirs и Popen.
+
+    Между созданием песочницы и запуском идут материализация runtime-конфига и
+    сборка env; если ловить только OSError вокруг Popen, их исключение оставит
+    каталог сиротой до TTL-janitor'а — то есть на сутки.
+    """
+    def boom(*args, **kwargs):
+        raise RuntimeError("config resolve failed")
+
+    monkeypatch.setattr(runner, "_resolve_host_config_path", boom)
+
+    with pytest.raises(RuntimeError):
+        runner.start_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", payload={},
+        )
+
+    mock_popen.assert_not_called()
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
+
+
+def test_start_swarm_missing_wrapper_rejected_before_popen(base_swarm_cfg, mock_popen, tmp_path):
+    """Несуществующий wrapper_path — отказ ДО Popen и без следов на диске.
+
+    Ровно этот случай давал HTTP 500 на первом POST /swarm/run: шаблон
+    config_server.yml остался с "scripts/run-cli-in-sandbox.sh", который после
+    переезда обёртки внутрь пакета резолвился в gc_server/swarm/scripts/.
+    """
+    base_swarm_cfg["wrapper_path"] = str(tmp_path / "nope" / "run-cli-in-sandbox.sh")
+
+    with pytest.raises(FileNotFoundError):
+        runner.start_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", payload={},
+        )
+
+    mock_popen.assert_not_called()
+    assert storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t") == {}
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
+
+
+def test_start_swarm_non_executable_wrapper_rejected_before_popen(
+    base_swarm_cfg, mock_popen, tmp_path,
+):
+    """Обёртка без бита +x — тоже отказ до Popen, с внятным сообщением."""
+    wrapper = tmp_path / "run-cli-in-sandbox.sh"
+    wrapper.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    wrapper.chmod(0o644)
+    base_swarm_cfg["wrapper_path"] = str(wrapper)
+
+    with pytest.raises(PermissionError):
+        runner.start_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", payload={},
+        )
+
+    mock_popen.assert_not_called()
 
 
 def test_start_swarm_optional_agentmd_skills_in_env(base_swarm_cfg, mock_popen):
@@ -340,6 +467,80 @@ def test_materialize_copies_swarm_agent_md(tmp_path):
     assert dst_agent.read_text() == "# swarm agent prompt\n"
     written = _yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
     assert written["paths"]["agent_md_path"] == "/work/.gc/agent.md"
+
+
+def test_materialize_copies_swarm_skills(tmp_path):
+    """Если каталог скиллов есть — содержимое едет в песочницу, path обновляется."""
+    import yaml as _yaml
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("backend: {}\n")
+    src_skills = tmp_path / "swarm_skills" / "hello"
+    src_skills.mkdir(parents=True)
+    (src_skills / "SKILL.md").write_text("# hello\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+
+    runner._materialize_runtime_config(
+        str(host_cfg), str(sandbox),
+        {"skills_dir": str(tmp_path / "swarm_skills")},
+    )
+    assert (sandbox / ".gc" / "skills" / "hello" / "SKILL.md").exists()
+    written = _yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
+    assert written["paths"]["skills_data_path"] == "/work/.gc/skills"
+
+
+def test_materialize_warns_when_skills_dir_missing(tmp_path, caplog):
+    """Промах по skills_dir обязан быть слышным.
+
+    Без копирования paths.skills_data_path не переопределяется, песочница
+    поднимается без скиллов, а sworm завершается «успешно» — ни ошибки, ни
+    строки в лог. Ровно так и жил дефолт, указывавший в несуществующий
+    <assets>/swarm_skills.
+
+    Кричим ТОЛЬКО про путь, который человек выписал руками
+    (`skills_dir_configured`): дефолт непустой всегда, и без этого различения
+    предупреждение сыпалось бы на каждом запуске у всех, кто swarm-скиллы не
+    заводил, — то есть приучало бы его пропускать.
+    """
+    import logging
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("backend: {}\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    missing = tmp_path / "no_such_skills"
+
+    with caplog.at_level(logging.WARNING, logger="gc_server.swarm.runner"):
+        runner._materialize_runtime_config(
+            str(host_cfg), str(sandbox),
+            {"skills_dir": str(missing), "skills_dir_configured": True},
+        )
+
+    assert str(missing) in caplog.text
+    assert "скилл" in caplog.text.lower()
+    assert not (sandbox / ".gc" / "skills").exists()
+
+
+def test_materialize_silent_when_skills_dir_not_configured(tmp_path, caplog):
+    """Незаданный skills_dir — законная конфигурация, предупреждать не о чем.
+
+    Проверяется НЕ пустая строка (её `build_swarm_config` больше вернуть не
+    может — дефолт непустой), а именно случай «дефолт, и каталога нет»: свежая
+    установка, где swarm-скиллы не заводили.
+    """
+    import logging
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("backend: {}\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    default_missing = tmp_path / "gc-data" / "swarm_skills"
+
+    with caplog.at_level(logging.WARNING, logger="gc_server.swarm.runner"):
+        runner._materialize_runtime_config(
+            str(host_cfg), str(sandbox),
+            {"skills_dir": str(default_missing), "skills_dir_configured": False},
+        )
+
+    assert "скилл" not in caplog.text.lower()
 
 
 def test_materialize_missing_host_config_uses_empty_base(tmp_path):

@@ -174,6 +174,17 @@ class StreamAssembler:
             self._role = delta["role"]
 
         rc = delta.get("reasoning_content")
+        if not (isinstance(rc, str) and rc):
+            # Второе имя того же поля: OpenRouter шлёт рассуждение как `reasoning`
+            # (проверено живой пробой 27.08.2026 на anthropic/claude-opus-5). Берём
+            # ОДНО из двух, а не сумму: провайдер, приславший оба, удвоил бы и текст
+            # рассуждения, и счётчик прогресса.
+            #
+            # Правка приехала с develop, где сборка потока ещё была инлайн-циклом в
+            # chat_completions_stream. Здесь она попала бы под нож мержа: async-ветка
+            # вынесла сборку в этот класс, и git сопоставил хвост одного файла с телом
+            # цикла другого. Перенесено руками.
+            rc = delta.get("reasoning")
         if isinstance(rc, str) and rc:
             self._reasoning_parts.append(rc)
             if self._on_delta is not None:
@@ -206,6 +217,14 @@ class StreamAssembler:
                 slot["function"]["name"] = fn["name"]
             if fn.get("arguments"):
                 slot["function"]["arguments"] += fn["arguments"]
+                if self._on_delta is not None:
+                    # Отдельный вид, а не "answer": аргументы — не текст ответа, в
+                    # блок потока им нельзя (иначе на экран полезет сырой JSON).
+                    # Но это ЕДИНСТВЕННОЕ, что модель генерирует на шаге с вызовом
+                    # инструмента, и без этой дельты счётчик прогресса на таком шаге
+                    # оставался нулём. У агента же почти каждый шаг такой — включая
+                    # финальный ответ, который едет в аргументе turn_finish.
+                    self._on_delta("tool", fn["arguments"])
 
     # --- выход --------------------------------------------------------------
 

@@ -5,17 +5,19 @@ from typing import Any, Dict, Optional
 
 from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample, count_lines_in_text, decode_text_bytes, guess_encoding
 from gc_core.security.read_guard import enforce_read_guard
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
 DEFAULT_MAX_HASH_BYTES = 100 * 1024 * 1024
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class FileInfo(AbstractSimpleTool):
     max_hash_bytes = DEFAULT_MAX_HASH_BYTES
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_file_info",
@@ -39,7 +41,7 @@ class FileInfo(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return (
             "Tool name: fs_file_info\n"
             "Cheap read-only metadata before editing a file.\n"

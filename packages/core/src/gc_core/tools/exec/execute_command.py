@@ -1,5 +1,6 @@
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 import json
+from typing import Any, Dict, Optional
 
 from typing import Any
 
@@ -21,7 +22,7 @@ class ExecuteCommand(AbstractSimpleTool):
     timeout = DEFAULT_EXEC_TIMEOUT_SEC
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
             "type": "function",
             "name": "exec_command",
@@ -76,7 +77,7 @@ class ExecuteCommand(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = ('''Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
 Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(DEFAULT_EXEC_TIMEOUT_SEC) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
@@ -109,7 +110,7 @@ Important Usage Rules:
    - After ensuring proper quoting, execute the command.
    - Capture the output of the command.
    - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings
-3. VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. You MUST avoid read tools like `cat`, `head`, `tail`, and `ls`, and instead use filesystem tools (`fs_search_files`, `fs_list_files`, `fs_read_file`, `fs_search_and_replace`, …).
+3. Read and search file contents with the filesystem tools (`fs_read_file`, `fs_find_in_files`, `fs_find_files_by_name`, `fs_list_files`, `fs_search_and_replace`, …): they are permission-checked and return structured results. Do NOT use shell `cat`/`head`/`tail`/`grep`/`rg`/`find` to read or search file contents — use those tools instead. Shell is right for everything else; remember exec stdout is capped (~60k chars) and may truncate.
 4. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.
     <good-example>
     pytest /foo/bar/tests

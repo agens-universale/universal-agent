@@ -10,7 +10,7 @@
 # "master") and Docker serves the stale cached clone — this is exactly the KeyError we hit.
 #
 #   SHA=$(git rev-parse origin/master)          # or a specific commit you want to build
-#   DOCKER_BUILDKIT=1 docker build --ssh default -f harbor/Dockerfile \
+#   DOCKER_BUILDKIT=1 docker build --ssh default -f integrations/harbor/Dockerfile \
 #     --build-arg GC_REF=$SHA \
 #     -t registry.mlrnd.ru/docker-mlrnd/<ns>/harbor-gccli:$SHA .
 #

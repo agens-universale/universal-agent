@@ -35,6 +35,7 @@ FORBIDDEN_RUNTIME_TOOLS = (
     "fs_read_file",
     "fs_write_file",
     "fs_list_files",
+    "fs_find_files_by_name",
     "fs_append_file",
     "exec_command",
     "exec_python",

@@ -215,7 +215,8 @@ tools:
 tools:
   - fs_read_file
   - fs_list_files
-  - fs_search_files
+  - fs_find_files_by_name
+  - fs_find_in_files
   - fs_file_info
 ```
 

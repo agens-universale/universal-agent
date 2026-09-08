@@ -37,7 +37,7 @@ security:
 
 Перед тем как команда уйдёт в subprocess, `execute_command` и `run_python_code` проходят через `command_guard` — детерминированный сканер токенов команды. Он ловит прямые обращения к protected-путям в тексте команды (например, `rm -rf .gc`) и блокирует их **до** запуска процесса. Это закрывает сценарий, при котором агент сам себе стирал `.gc` через `execute_command` (баг TSKBCKGRNDGNT-2).
 
-Обфускацию (`$(echo .gc)` и т.п.) tripwire не ловит — второй рубеж там LLM-судья (`command_moderation`).
+Обфускацию (`$(printf '.%s' gc)`, base64, переменные окружения) tripwire не ловит — второй рубеж там LLM-судья (`command_moderation`).
 
 Список protected-путей передаётся в prompt судьи как `never_touch_paths`; если судья недоступен — fail-closed (команда блокируется).
 
@@ -330,6 +330,7 @@ gc-cli -q "..." --command_moderation "{enabled: true, mode: deny}"
 }
 
 // command_moderation fail-closed (judge offline, mode=deny)
+// (no command/code preview — model already has full args in the tool call)
 {
   "tool": "run_python_code",
   "ok": false,
@@ -338,7 +339,7 @@ gc-cli -q "..." --command_moderation "{enabled: true, mode: deny}"
     "mode": "deny",
     "reason": "Judge is unavailable; fail-closed policy blocks execution.",
     "guidance": "Do NOT retry the same command, and do NOT run a rewritten, split-up or otherwise equivalent command that reaches the same result …",
-    "code_preview": "print(open('/etc/passwd').read()[:200])"
+    "risk_flags": []
   }
 }
 

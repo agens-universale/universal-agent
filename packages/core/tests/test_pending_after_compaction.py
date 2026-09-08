@@ -209,3 +209,37 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
     assert result == _expected_finish_return()
     # finish-gate отработал дважды: первый ход + продолженный (после компакции)
     assert len(gate_calls) == 2
+
+
+def test_pending_survives_failed_turn_begin(monkeypatch, caplog):
+    """`get_pending_messages` — drain, а не peek: очередь уже пуста к моменту, когда
+    фиксация модели нового хода может упасть (алиас в предохранителе → честная
+    ошибка класса 2). Уронив ход здесь, мы потеряли бы набранное пользователем
+    сообщение бесследно — вернуть его в очередь некуда. Поэтому ход продолжается
+    на модели прошлого хода, а отказ приходит из транспорта единым текстом."""
+    def _boom(_state, _ctx):
+        raise RuntimeError("Модель 'flash' (алиас 'flash') недоступна")
+
+    monkeypatch.setattr(pr, "begin_turn_main_trace", _boom)
+    queue = [{"role": "user", "content": "второе сообщение", "id": "m_new"}]
+
+    def _drain():
+        out = list(queue)
+        queue.clear()
+        return out
+
+    with caplog.at_level(logging.WARNING):
+        picked = pr._pickup_pending_as_new_turn(_drain, _make_state(), _make_ctx())
+
+    assert picked == [{"role": "user", "content": "второе сообщение", "id": "m_new"}]
+    assert "недоступна" in caplog.text
+
+
+def test_pending_empty_queue_does_not_begin_turn(monkeypatch):
+    """Пустая очередь — ход завершается как обычно: фиксацию модели не трогаем
+    (её ошибка не должна всплывать на ровном месте, когда подхватывать нечего)."""
+    calls: list = []
+    monkeypatch.setattr(pr, "begin_turn_main_trace", lambda *a: calls.append(a))
+
+    assert pr._pickup_pending_as_new_turn(lambda: [], _make_state(), _make_ctx()) is None
+    assert calls == []

@@ -3,11 +3,13 @@ from typing import Any, Dict, Optional
 
 from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT, intent_scope_from_config_dict
 from gc_core.intent_log import deserialize_list, read_info, read_page
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _TOOL_NAME = "session_read_user_intent_log"
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class ReadUserIntentLog(AbstractSimpleTool):
     tool_name = _TOOL_NAME
 
@@ -24,7 +26,7 @@ class ReadUserIntentLog(AbstractSimpleTool):
         return deserialize_list(raw)
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         default_records = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
         return {
             "type": "function",
@@ -68,7 +70,7 @@ class ReadUserIntentLog(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         page_limit = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
         return f"""Tool name: session_read_user_intent_log
 Tool description: Read-only paginated access to closed user_intent_log (completed turns).

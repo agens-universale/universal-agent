@@ -14,7 +14,7 @@ from pathlib import Path
 
 from textual.widgets import Input, Static
 from gc_testkit.tui_support import open_settings_section, wait_until
-from form_helpers import blocking_probe, ok_probe, recording_probe, settings_connection
+from form_harness import blocking_probe, ok_probe, recording_probe, settings_connection
 from test_settings_screen import _cfg, _fake_probe, _mk_screen, _write_cfg
 
 

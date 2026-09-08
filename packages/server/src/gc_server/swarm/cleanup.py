@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """TTL-janitor для swarm-режима (шаг 3.1).
 
-Удаляет каталоги swarm_threads/<id>/ старше TTL + соответствующие
-sandbox-каталоги. Можно запускать вручную или из cron / startup-loop
-(шаг 3.2).
+Удаляет каталоги swarm_threads/<id>/ старше TTL и, отдельным проходом,
+sandbox-каталоги старше TTL. Можно запускать вручную или из cron /
+startup-loop (шаг 3.2).
 
-Sandbox удаляется ВМЕСТЕ с meta — это согласуется с AR-2: артефакты
-живут до TTL для возможности reuse_strategy=continue в будущем (после
-завершения процесса sandbox помечен sandbox_status=completed, но
-физически жив).
+Треды и песочницы расцеплены: тред живёт по timestamp'у из своего
+meta.json, песочница — по собственному mtime, парой они не удаляются.
+Это согласуется с AR-2: артефакты живут до TTL для возможности
+reuse_strategy=continue в будущем (после завершения процесса sandbox
+помечен sandbox_status=completed, но физически жив).
 
 Usage:
-  python scripts/cleanup_swarm_threads.py \\
+  python -m gc_server.swarm.cleanup \\
     --threads-dir ~/.local/state/gc/projects/<slug>/swarm/threads \\
     --sandbox-root-dir ~/.local/state/gc/projects/<slug>/swarm/sandboxes \\
     --ttl-hours 24 \\
@@ -175,10 +176,20 @@ def main() -> int:
     )
 
     prefix = "[DRY RUN] " if args.dry_run else ""
+    # Печатаем ровно те ключи, которые кладёт cleanup_threads(): threads_removed
+    # / sandboxes_removed / kept / errors. Раньше здесь были ещё «matching» и
+    # `stats['orphan_sandboxes_removed']` — оба из той версии, где песочница
+    # удалялась ВМЕСТЕ со своим тредом, а «осиротевшие» досчитывались отдельным
+    # проходом. Проходы давно слиты: песочницы чистятся независимо, по
+    # собственному mtime (см. комментарий в cleanup_threads), и делить их на
+    # «парные» и «сиротские» больше нечем — счётчик не восстанавливаем, а
+    # убираем. Опечатка дожила до колеса, потому что этот файл был скопирован
+    # байт-в-байт из scripts/cleanup_swarm_threads.py, а scripts/ не попадал ни
+    # в одно колесо: KeyError вылетал ПОСЛЕ удаления каталогов, exit 1 при
+    # выполненной работе, и cron ретраил.
     print(
         f"{prefix}swarm cleanup: removed {stats['threads_removed']} threads, "
-        f"{stats['sandboxes_removed']} matching sandboxes, "
-        f"{stats['orphan_sandboxes_removed']} orphan sandboxes; "
+        f"{stats['sandboxes_removed']} sandboxes; "
         f"kept {stats['kept']} active; "
         f"errors {stats['errors']}"
     )

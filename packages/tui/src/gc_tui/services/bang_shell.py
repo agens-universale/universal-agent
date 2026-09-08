@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from gc_core.utils.is_number import is_number
 from gc_core.utils.win_console import preserve_console_mode
 
 DEFAULT_MAX_OUTPUT_BYTES = 32768
@@ -109,9 +110,9 @@ def parse_clear_meta(body: str) -> tuple[Optional[ClearMeta], Optional[str]]:
     if len(parts) != 2:
         return None, "использование: ! clear [N]"
     raw = parts[1]
-    if raw.startswith("-") and len(raw) > 1 and raw[1:].isdigit():
+    if raw.startswith("-") and len(raw) > 1 and is_number(raw[1:]):
         raw = raw[1:]
-    if not raw.isdigit():
+    if not is_number(raw):
         return None, "использование: ! clear [N]"
     n = int(raw)
     if n < 1:

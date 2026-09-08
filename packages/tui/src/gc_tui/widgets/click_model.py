@@ -5,6 +5,9 @@
 (заменён Ctrl+кликом). Меняешь модификатор или порядок действий — меняешь
 здесь, а не в четырёх виджетах (TraceRow, ToolCallRow, UserReplyContainer,
 BlockPanel).
+
+Симметрия распространяется и на гейт security-confirm: экран события не
+открывает НИ Enter, НИ Ctrl+клик, пока баннер ждёт ответа (`confirm_is_active`).
 """
 from __future__ import annotations
 
@@ -12,6 +15,19 @@ from typing import Optional
 
 from textual import events
 from textual.message import Message
+
+
+def confirm_is_active(widget) -> bool:
+    """Висит ли на экране security-confirm, ждущий ответа юзера.
+
+    Общий предикат для обеих половин клик-модели: пока баннер не отвечен,
+    строка не открывает свой экран — иначе он накрывает баннер, тот перестаёт
+    получать клавиши, а агент продолжает ждать ответа, которого уже не видно.
+    """
+    try:
+        return bool(getattr(widget.screen, "_confirm_active", False))
+    except Exception:
+        return False
 
 
 class ClickModelMixin:
@@ -35,7 +51,12 @@ class ClickModelMixin:
         raise NotImplementedError
 
     def on_click(self, event: events.Click) -> None:
-        if event.ctrl:
+        # Мышиная половина того же гейта, что и Enter в on_key: пока висит
+        # security-confirm, Ctrl+клик не открывает detail/viewer — иначе экран
+        # события накрывает баннер, [Y] уходит в него, а агент ждёт ответа,
+        # которого юзер уже не видит. Ctrl+клик при этом ведёт себя как обычный
+        # клик (просто выделяет строку) — обычный клик не трогаем.
+        if event.ctrl and not confirm_is_active(self):
             message = self._open_request()
             if message is not None:
                 event.stop()
@@ -51,6 +72,11 @@ class ClickModelMixin:
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "enter":
+            # Confirm-баннер перехватывает Enter на Screen, но focused-строка
+            # получает Key раньше (bubble). Не открывать detail/viewer, пока
+            # висит security-confirm — иначе [Y]/Enter открывает tool detail.
+            if confirm_is_active(self):
+                return
             message = self._open_request()
             if message is not None:
                 event.stop()

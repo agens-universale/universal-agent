@@ -130,19 +130,17 @@ class TestSidecarPersistCallResult:
         monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
         monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
-        try:
-            pr.process_tool_calls(
-                messages=[_fc("fs_read_file", "c_bad")],
-                state=_state(),
-                ctx=_child_ctx(tmp_path),
-                run_agent_func=None,
-            )
-            assert False, "expected WrongFunctionArgumentsException"
-        except WrongFunctionArgumentsException:
-            pass
+        outs = pr.process_tool_calls(
+            messages=[_fc("fs_read_file", "c_bad")],
+            state=_state(),
+            ctx=_child_ctx(tmp_path),
+            run_agent_func=None,
+        )
+        assert [o["call_id"] for o in outs] == ["c_bad"]
 
         rows = read_subagent_trace(str(tmp_path), "cli", "task-1")
         assert [r["kind"] for r in rows] == ["call", "error"]
+        assert rows[1]["payload"]["call_id"] == "c_bad"
         assert "bad args" in rows[1]["payload"]["output"]
 
     def test_ask_human_not_persisted(self, tmp_path, monkeypatch):

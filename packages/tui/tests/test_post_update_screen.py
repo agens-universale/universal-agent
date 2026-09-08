@@ -8,8 +8,14 @@ class _Upg:  # UpgradeInfo-подобный
 
 
 def _states(monkeypatch, updates: dict):
-    """installed_state-заглушка: {имя: версия-обновления|None}."""
+    """installed_state-заглушка: {имя: версия-обновления|None}.
+
+    Заодно гасит пункт голосового движка: он смотрит в РЕАЛЬНЫЙ state.json машины, и на
+    стенде с отставшей установкой всплыл бы сам — сдвинул бы индексы строк, а на Enter
+    запустил бы настоящую переустановку speaches прямо из тестов."""
     from recommended_mcp.runtime import cli as cli
+    from gc_tui.voice_runtime import state as voice_state
+    monkeypatch.setattr(voice_state, "load_state", lambda: None)
     monkeypatch.setattr(cli, "load_manifest_entries", lambda config=None: ([], None))
     monkeypatch.setattr(cli, "installed_state",
                         lambda name, config=None, manifest=None:
@@ -77,6 +83,76 @@ async def test_post_update_hides_config_when_nothing_to_sync(monkeypatch):
         app.push_screen(scr); await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(Static))
         assert "Обновить config.yml" not in body          # нечего синхронизировать → скрыт
+
+
+class _VoiceState:
+    def __init__(self, version):
+        self.version = version
+        self.root = "/data/voice/speaches"
+        self.port = 8735
+        self.model = "Systran/faster-whisper-small"
+
+
+def _voice(monkeypatch, *, installed: str | None, pin: str = "v0.9.0"):
+    """Локальный движок версии `installed` (None — не установлен) при пине `pin`."""
+    from gc_tui.voice_runtime import state as voice_state
+    monkeypatch.setattr(voice_state, "SPEACHES_PIN", pin)
+    monkeypatch.setattr(voice_state, "load_state",
+                        lambda: _VoiceState(installed) if installed else None)
+
+
+async def test_post_update_offers_voice_engine_when_behind(monkeypatch):
+    """Движок обновляется только отсюда: `gc-voice install` руками никто не гоняет."""
+    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    _voice(monkeypatch, installed="v0.8.3")
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "[●] Обновить голосовой движок" in body     # отмечен по умолчанию
+        assert "v0.8.3 → v0.9.0" in body
+
+
+async def test_post_update_hides_voice_when_at_pin_or_absent(monkeypatch):
+    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        _voice(monkeypatch, installed="v0.9.0")            # уже на пине
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        assert "голосовой движок" not in \
+            " ".join(str(w.render()) for w in scr.query(Static))
+        _voice(monkeypatch, installed=None)                # не установлен вовсе
+        scr2 = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        assert scr2._voice_update is None
+
+
+async def test_post_update_enter_updates_voice_engine(monkeypatch):
+    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_core import upgrade_gate; from gc_tui import app as app_mod
+    from gc_tui.screens.post_update import PostUpdateScreen
+    from gc_tui.services import voice_setup
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: None)
+    _voice(monkeypatch, installed="v0.8.3")
+    updated = []
+    monkeypatch.setattr(voice_setup, "update_local",
+                        lambda config, echo=print: updated.append(config) or True)
+    cfg = {"voice": {"url": "http://127.0.0.1:8735/v1/audio/transcriptions"}}
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config=cfg, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert updated == [cfg]        # конфиг доезжает: им поднимают сервис обратно
 
 
 async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):

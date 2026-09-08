@@ -26,7 +26,7 @@ class ThreadNotes(AbstractSimpleTool):
         self._state = state
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "thread_notes",
@@ -70,7 +70,7 @@ class ThreadNotes(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return f'''Tool name: thread_notes
 Tool description: Persistent per-thread markdown notes stored in thread meta. Can be read, appended, or rewritten.
 

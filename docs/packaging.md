@@ -1,23 +1,29 @@
 [Назад к README](../readme.md)
 
-# Как устроена упаковка: пять дистрибутивов, четыре пакета
+# Как устроена упаковка: шесть дистрибутивов, пять пакетов
 
 Код разбит на настоящие пакеты с собственным пространством имён:
-`gc_core` (SDK), `gc_cli`, `gc_tui`, `gc_server`. Каждый живёт в своём каталоге
-под `packages/` и собирается своим манифестом.
+`gc_core` (SDK), `gc_cli`, `gc_tui`, `gc_server`, `recommended_mcp`. Каждый живёт
+в своём каталоге под `packages/` и собирается своим манифестом.
 
 ## Профили
 
 | Дистрибутив | Пакет | Модулей | Команды |
 |---|---|---|---|
-| `gc-core` | `gc_core` | 277 | **нет** — это библиотека |
-| `gc-cli` | `gc_cli` | 3 | `gc-cli` + mcp |
-| `gc-tui` | `gc_tui` | 112 | `gc-ua` + mcp |
-| `gc-server` | `gc_server` | 12 | `gc-serve` + mcp |
-| `gc-ua` | — (только лаунчер) | 1 | все пять |
+| `gc-core` | `gc_core` | 287 | **нет** — это библиотека |
+| `gc-cli` | `gc_cli` | 4 | `gc-cli` |
+| `gc-tui` | `gc_tui` | 137 | `gc-ua`, `gc-voice` |
+| `gc-server` | `gc_server` | 15 | `gc-serve` |
+| `gc-mcp` | `recommended_mcp` | 14 | `gc-mcp`, `gc-mcp-install` |
+| `gc-ua` | — (только метаданные) | 0 | все шесть |
 
-`gc-cli`, `gc-tui` и `gc-server` зависят от `gc-core`; друг от друга — нет.
-`gc-ua` тянет все четыре.
+`gc-cli`, `gc-tui` и `gc-server` зависят от `gc-core` и `gc-mcp`; друг от друга —
+нет. `gc-mcp` зависит от `gc-core`. `gc-ua` тянет все пять.
+
+Колесо меты пустое (`bypass-selection = true`): она объявляет зависимости и
+точки входа, но не несёт ни одного файла. Раньше в ней жил `meta/gc_ua_launcher.py`,
+где каждая функция делала `from X import main; return main()`; он появился, когда
+цели точек входа лежали в разных местах, и осиротел, как только стали прямыми.
 
 Ассеты (`prompts/`, `skills/`, `config.default.yml`) принадлежат `gc-core` и
 лежат в `packages/core/assets/`. Фронтенды дотягиваются до них через
@@ -28,91 +34,25 @@
 
 ```bash
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"
-uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
-uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"       --with-executables-from gc-mcp
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"       --with-executables-from gc-mcp
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 ```
+
+`--with-executables-from gc-mcp` у узких профилей не украшение: `uv` выносит в
+`PATH` команды только запрошенного дистрибутива, а `gc-mcp` приезжает
+зависимостью и остаётся внутри venv инструмента. Без флага `gc-mcp` и
+`gc-mcp-install` в `PATH` не появятся. Мете он не нужен — она объявляет все шесть
+команд сама. Тот же флаг дописывает и обновление, см. `updater.runner`.
 
 Смена профиля — это переустановка, нужен `--force`.
 
-> **Две оговорки, пока раскладка не влита в дефолтную ветку.** Проверено
-> прогоном 24.08.2026.
->
-> 1. **Только SSH.** Репозиторий приватный, и `git+https://` падает на
->    `fatal: could not read Username for 'https://gitverse.ru'`. Подставляйте
->    `git+ssh://git@gitverse.ru/gigacode-ai/universal-agent` (нужен ключ) либо
->    токен в URL для CI.
-> 2. **Ревизия обязательна.** В `master` каталога `packages/` ещё нет — там
->    старая плоская раскладка и `gc-ua 0.2.3`. Установка без ревизии либо
->    падает (`does not appear to be a Python project: neither 'setup.py' nor
->    'pyproject.toml' found` — для любого `#subdirectory=packages/…`), либо
->    молча ставит версию двухлетней давности (для короткой команды `gc-ua`).
->    Пока `feat/module-split` не влита, дописывайте `@<ветка|тег|sha>` перед
->    решёткой.
-
-### Ядро как библиотека: `pip install` и `uv pip install`
-
-У `gc-core` нет команд — `uv tool install` для него бессмысленен (он кладёт в
-PATH исполняемые файлы, а их нет). Встраивающему нужен обычный install в своё
-окружение:
-
-```bash
-REPO=git+ssh://git@gitverse.ru/gigacode-ai/universal-agent
-REV=feat/async-core        # пока раскладка не в master — см. оговорку выше
-
-pip install    "gc-core @ $REPO@$REV#subdirectory=packages/core"
-uv pip install "gc-core @ $REPO@$REV#subdirectory=packages/core"
-```
-
-Форма `имя @ git+…@<ревизия>#subdirectory=…` — это PEP 508 direct reference;
-pip и uv понимают её одинаково. Ревизией может быть ветка, тег или sha —
-`@88e6214e` даёт воспроизводимую установку.
-
-В зависимости проекта — `uv add` с той же строкой. Он разложит её в
-`[tool.uv.sources]` и прибьёт в `uv.lock` конкретный коммит, поэтому у коллеги
-после `uv sync` встанет ровно та же ревизия, а не «что сейчас в ветке»:
-
-```bash
-uv add "gc-core @ $REPO@$REV#subdirectory=packages/core"
-```
-
-записывает в манифест:
-
-```toml
-[tool.uv.sources]
-gc-core = { git = "ssh://git@gitverse.ru/gigacode-ai/universal-agent", subdirectory = "packages/core", rev = "feat/async-core" }
-```
-
-У pip лока нет: в `requirements.txt` попадёт ветка, и завтра приедет другой
-коммит — если нужна воспроизводимость, указывайте тег или sha явно.
-
-Обновление, когда ветка уехала вперёд, а версия не менялась: без явного флага
-оба менеджера решат, что пакет уже стоит, и сборку пропустят.
-
-```bash
-pip install --force-reinstall --no-deps "gc-core @ $REPO@$REV#subdirectory=packages/core"
-uv pip install --reinstall              "gc-core @ $REPO@$REV#subdirectory=packages/core"
-uv lock --upgrade-package gc-core && uv sync     # если добавляли через uv add
-```
-
-Проверка, что встало именно ядро и оно не тянет фронтенды:
-
-```bash
-python -c "import gc_core, sys; \
-print([m for m in ('gc_cli','gc_tui','gc_server') if m in sys.modules])"
-# []
-```
-
-> **Async-фасад `gc_core.aio` пока живёт только в ветке `feat/async-core`.**
-> Установка без ревизии берёт дефолтную ветку, где его ещё нет, и
-> `import gc_core.aio` упадёт с `ModuleNotFoundError`. Пока ветка не влита,
-> указывайте её явно:
->
-> ```bash
-> pip install "gc-core @ git+ssh://git@gitverse.ru/gigacode-ai/universal-agent@feat/async-core#subdirectory=packages/core"
-> ```
->
-> Что даёт async-вход и когда он нужен — [docs/async.md](async.md).
+**Мету и листовой дистрибутив рядом не поставить.** `gc-ua` объявляет объединение
+команд всех листьев, поэтому `uv tool install gc-ua` поверх отдельно
+установленного `gc-mcp` (и наоборот) отвечает `error: Executables already exist`.
+Это ожидаемо: мета уже содержит всё, что даёт лист. Если всё же нужно
+переставить — `--force`; но после него на `gc-mcp` претендуют два инструмента, и
+`uv tool uninstall gc-mcp` унесёт команду у полного профиля.
 
 ### Почему у частичных профилей есть `#subdirectory=`, а у `gc-ua` нет
 
@@ -172,10 +112,69 @@ packages = ["src/gc_tui"]
 Ровно та болезнь, ради лечения которой ядро и делали SDK: было 45 родовых имён,
 после разбиения осталось четыре, теперь два.
 
-`recommended_mcp` и `external` пока остаются наверху: первый — настоящий
-импортируемый пакет (`mcp_daemon_autostart` тянет `recommended_mcp.autostart`),
-второй обязан быть его соседом, потому что манифест MCP ссылается на
-`../external/<name>-mcp`. Их выносит отдельная задача.
+Наверху остаётся один `recommended_mcp` — настоящий импортируемый пакет (его
+зовёт `recommended_mcp.runtime.daemon_autostart`). Исходники MCP-серверов лежат
+в `packages/mcp/external/vendor/<имя>` — внутри пакета-владельца, а в колесо
+`gc-mcp` через `force-include` едет **только `ddgs-mcp`**, и тоже внутрь пакета:
+
+```toml
+[tool.hatch.build.targets.wheel.force-include]
+"external/vendor/ddgs-mcp/pyproject.toml" = "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml"
+"external/vendor/ddgs-mcp/src/ddgs_mcp"   = "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp"
+```
+
+**Почему цель внутри пакета.** До 03.09.2026 вендоры уезжали РЯДОМ с рецептами,
+и `gc-mcp` был единственным из семи дистрибутивов, кто занимал в `site-packages`
+второе родовое имя верхнего уровня — `external`. В Python 3 любой каталог на
+`sys.path` это namespace-пакет, поэтому у проекта со своим `external/` пути
+склеивались:
+
+```
+import external -> ['<проект>/external', '<venv>/site-packages/external']
+```
+
+а если у проекта `external/__init__.py` есть, то наоборот — обычный пакет
+затирал наш каталог целиком, и бандловый `ddgs-mcp` переставал находиться. Оба
+варианта воспроизведены в чистом venv. Лечится тем же приёмом, что и ассеты
+ядра (`gc_core/assets/`): цель уходит внутрь имени, которое дистрибутив и так
+занимает по праву. Третьего родового имени (`packages/…`) при этом не
+появляется — повторять путь манифеста по-прежнему нельзя.
+
+**Почему вендоры лежат внутри пакета, а не в корне.** Раньше они жили в
+`<repo>/external/vendor/`, и ключ выше выглядел как `../../external/…` — за
+пределами каталога пакета. Из рабочего дерева такое собиралось, а вот колесо ИЗ
+sdist — нет: hatchling ищет исходник относительно корня распакованного архива, а
+там `../..` ведёт наружу. `uv build --all-packages` падал `Forced include not
+found`, причём ПОСЛЕ сборки остальных шести — в `dist/` оставался `gc_mcp.tar.gz`
+без колеса, то есть частичный релиз, с виду похожий на полный. Держит
+`test_force_include_keys_stay_inside_project_root`.
+
+Переехали все четыре, а не только `ddgs-mcp`: перенос одного расщепил бы
+раскладку и лишил бы смысла единственную константу пути. Заодно это объясняет,
+почему вендоры вообще оказались в корне — до разбиения корень И БЫЛ пакетом.
+
+Цена переезда — две константы вместо одной (`install.py`): в колесе исходники
+лежат внутри пакета (`site-packages/recommended_mcp/external/vendor/`), а
+`#subdirectory` для git-установки считается от корня репозитория
+(`packages/mcp/external/vendor/`). Раньше оба ответа совпадали буквой, теперь
+нет; склеить их обратно значит сделать так, что в установленном колесе бандл
+перестанет находиться и установка молча уедет в git-метод.
+
+Причина — цена бандла: `ddgs-mcp` это наша тонкая обёртка над `ddgs`, 6 файлов
+на 5,7 КБ, и веб-поиск нужен агенту в базовой поставке. Остальные три
+(`office`, `science`, `computer`) — 165 файлов на ~1,6 МБ, и они ставятся
+`pip install` из git-подкаталога (`repo_url` + `#subdirectory=packages/mcp/external/vendor/<имя>`
+из манифеста рецептов), то есть требуют сети. Так же было и до разбиения на
+пакеты: корневой манифест на `develop` force-include'ил ровно `external/ddgs-mcp`
+и ничего больше — переезд только переименовал путь. Если понадобится
+полностью офлайновый контур, force-include расширяется, и колесо растёт на
+эти ~1,6 МБ.
+
+В манифесте при этом стоит ИМЯ каталога, а не путь: относительный путь
+резолвился от каталога рецептов и после их переезда в `packages/mcp/src` начал
+вести в никуда, молча сваливая установку в git-метод. Имя ищет
+`install._vendor_candidates` — в колесе и в рабочей копии, без арифметики путей.
+Вынос обоих имён наверх — отдельная задача.
 
 Закреплено тестом `test_core_wheel_does_not_squat_generic_names`.
 
@@ -183,12 +182,12 @@ packages = ["src/gc_tui"]
 
 ```bash
 uv build --wheel -o dist packages/core
-python -c "import zipfile;print(sorted(zipfile.ZipFile('dist/gc_core-0.5.0-py3-none-any.whl').namelist())[:20])"
+python -c "import zipfile;print(sorted(zipfile.ZipFile('dist/gc_core-0.3.0-py3-none-any.whl').namelist())[:20])"
 ```
 
 ## Главный инвариант: колёса не пересекаются
 
-Все пять колёс обязаны иметь **непересекающиеся** множества путей. Если два
+Все шесть колёс обязаны иметь **непересекающиеся** множества путей. Если два
 колеса заявят один и тот же файл, установка двух профилей затрёт его, и чья
 версия победит — решит порядок распаковки.
 
@@ -203,15 +202,19 @@ python -c "import zipfile;print(sorted(zipfile.ZipFile('dist/gc_core-0.5.0-py3-n
 `uv tool install` кладёт в PATH скрипты **только запрошенного дистрибутива** —
 скрипты зависимостей он не экспортирует (дословно из доки uv: «Executables
 provided by dependencies of tool packages are not installed»). Поэтому команду
-объявляет тот дистрибутив, которому принадлежит её код:
+объявляет тот дистрибутив, которому принадлежит её код — а для точек входа,
+живущих в ядре (`gc-ua`, `gc-serve`), тот профиль, который эту возможность даёт
+пользователю: ядро библиотека и команд не объявляет. `gc-voice` — уже не такой
+случай: 27.08.2026 голос переехал из ядра в `gc_tui`, и команда указывает на
+`gc_tui.voice_runtime.cli:main`, то есть на код своего же дистрибутива:
 
 | Дистрибутив | Объявляет |
 |---|---|
 | `gc-cli` | `gc-cli` |
-| `gc-tui` | `gc-ua` |
+| `gc-tui` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc-serve` |
 | `gc-mcp` | `gc-mcp`, `gc-mcp-install` |
-| `gc-ua` (мета) | все пять — через собственный лаунчер |
+| `gc-ua` (мета) | все шесть |
 | `gc-core` | ничего, это библиотека |
 
 ### Почему имена не должны пересекаться
@@ -233,7 +236,7 @@ error: Executables already exist: gc-mcp, gc-mcp-install (use `--force` to overw
 безвредно, какой профиль ни выиграл бы — команда отработает одинаково». Это
 неверно: uv не перезаписывает, он **отказывает**. Проверено установкой.
 
-Сейчас четыре дистрибутива ставятся подряд без единого `--force`, и снятие
+Сейчас профили ставятся подряд без единого `--force`, и снятие
 любого не трогает чужие команды.
 
 ### Следствие для узкого профиля
@@ -326,11 +329,37 @@ URL и форки работают без дополнительной наст�
 
 ## Версии
 
-Версия во всех пяти манифестах обязана совпадать, пины друг на друга —
-точные (`gc-core==0.5.0`). Иначе можно собрать установку из разных коммитов.
+Версия во всех семи манифестах обязана совпадать, пины друг на друга —
+точные (`gc-core==0.3.0`). Иначе можно собрать установку из разных коммитов.
 Закреплено тестом `test_versions_are_pinned_together`.
 
-Релиз становится атомарной операцией над пятью файлами: бампать надо все.
+Релиз становится атомарной операцией над семью файлами: бампать надо все
+(шесть дистрибутивов плюс dev-only `gc-testkit`).
+
+## Локфайл
+
+`uv.lock` хранится в репозитории. Он пинит 171 пакет — точные версии и хэши
+дистрибутивов, — и без него «упало только у меня» перестаёт быть отлаживаемым:
+набор на 8 тысяч тестов у двоих разработчиков собирается из разных версий.
+
+Файл какое-то время был вынесен в `.gitignore` с обоснованием «lock пинит хэши
+из публичного PyPI, во внутреннем контуре не резолвится». Обоснование неверное,
+и это проверено на поднятом PEP 503-зеркале: хэш — это хэш самого дистрибутива,
+зеркало отдаёт его побайтово тем же, а индекс переопределяется через
+`UV_DEFAULT_INDEX` / `[[tool.uv.index]]`. Расходятся только поля `source` и
+`url`.
+
+Настоящая боль во внутреннем контуре другая, и её стоит знать заранее:
+
+| режим | что происходит |
+|---|---|
+| `uv sync --locked` | жёсткий отказ: «lockfile needs to be updated» |
+| `uv sync --frozen` | идёт на `files.pythonhosted.org`, **игнорируя** переопределение индекса |
+| `uv sync` | молча перерезолвит и **перепишет** отслеживаемый файл |
+
+То есть в закрытом контуре либо отказ, либо грязное дерево у каждого. Лечится
+это точечно — отдельным корп-локом или `--no-lock` в контурной инструкции, — а
+не удалением файла у всех.
 
 ## Разработка
 
@@ -346,8 +375,17 @@ uv run pytest
 `gc_tui/` и `gc_server/` в `site-packages`, который идёт в `sys.path` раньше
 каталогов `packages/*/src` — и прогон начал бы молча исполнять устаревшую копию.
 
-`conftest.py` в корне кладёт на `sys.path` все `packages/*/src` плюс сам корень
-(там лежит `recommended_mcp` — отдельный импортируемый пакет). Пути к исходникам
+На `sys.path` каталоги `packages/*/src` кладёт не корневой `conftest.py` (его в
+дереве нет), а плагин тест-кита: `gc_testkit.plugin` подхватывается через
+entry point `pytest11` и зовёт `gc_testkit.sources.ensure_sources_on_path()` —
+но только когда `rootdir` собираемого набора принадлежит нашей рабочей копии.
+Условие не формальность: `pytest11` грузится в ЛЮБОМ прогоне окружения, и без
+гейта наши исходники уезжали в чужие наборы (например вендоренных MCP).
+Бутстрап переехал туда, когда наборы разъехались по пакетам и прогон стал
+возможен из `packages/<имя>`, где корневого conftest не видно. Сам корень
+репозитория на `sys.path` не кладётся: он делал бы namespace-пакетами `docs`,
+`external`, `integrations`, `packages` и `tests`, а наш `external/` — соседом
+стороннего дистрибутива того же имени в одном `_NamespacePath`. Пути к исходникам
 внутри тестов берутся из `gc_testkit.paths`, а не собираются вручную: при
 следующем переезде правится один файл, а не сорок.
 
@@ -360,7 +398,7 @@ uv run pytest
 
 | Функция | Что возвращает | Для чего |
 |---|---|---|
-| `bundled_assets.bundled_root()` | каталог ассетов: `packages/core/assets` в репо, `site-packages` в колесе | `prompts/`, `skills/`, `config.default.yml` |
+| `bundled_assets.bundled_root()` | каталог ассетов: `packages/core/assets` в репо, `gc_core/assets` внутри пакета в колесе | `prompts/`, `skills/`, `config.default.yml` |
 | `bundled_assets.repo_root()` | корень рабочей копии либо **`None`** | `config_server.yml`, `integrations/` |
 
 До разбиения на пакеты маркер `prompts/` лежал в корне репозитория, поэтому

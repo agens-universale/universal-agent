@@ -121,3 +121,46 @@ def test_get_portal_returns_the_same_instance():
         assert get_portal() is get_portal()
     finally:
         shutdown_portal()
+
+
+def test_system_exit_from_a_coroutine_reaches_the_caller_and_leaves_the_portal_alive():
+    """`SystemExit` обязан развернуть стек у вызывающего, а не повесить процесс.
+
+    asyncio обрабатывает `SystemExit`/`KeyboardInterrupt` особо: задача получает
+    исключение, и оно же летит сквозь `run_forever`. Поток портала на этом
+    умирает, перенос результата в `concurrent.futures.Future` (через
+    `call_soon_threadsafe`) разбирать становится некому — и `.result()` висит
+    навсегда: ни исключения, ни таймаута. В синхронном ядре `sys.exit()` внутри
+    тула просто разворачивал стек, так что это была бы регрессия, которую видно
+    только зависанием.
+
+    Таймаут здесь несущий: без обёртки тест не падает, а вешает прогон.
+    """
+    shutdown_portal()
+
+    async def boom():
+        raise SystemExit("stop")
+
+    async def work():
+        return "ok"
+
+    done = threading.Event()
+    outcome: list = []
+
+    def _call():
+        try:
+            get_portal().run(boom())
+        except BaseException as exc:  # noqa: BLE001 — ловим ровно SystemExit
+            outcome.append(exc)
+        finally:
+            done.set()
+
+    caller = threading.Thread(target=_call, daemon=True)
+    caller.start()
+    try:
+        assert done.wait(timeout=10), "портал повис на SystemExit из корутины"
+        assert isinstance(outcome[0], SystemExit)
+        # Портал переживает такой исход: следующий синхронный вызов работает.
+        assert get_portal().run(work()) == "ok"
+    finally:
+        shutdown_portal()

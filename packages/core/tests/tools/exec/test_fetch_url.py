@@ -28,7 +28,7 @@ def _resp(text="", content_type="text/html", status_code=200, content=None):
     )
 
 
-def _install(monkeypatch, handler):
+def _install(monkeypatch, handler, seen: dict | None = None):
     """Подменить транспорт httpx у HTTP-тулов.
 
     ``handler`` — либо ``httpx.Response``, либо функция ``request → Response``,
@@ -41,9 +41,13 @@ def _install(monkeypatch, handler):
             return handler(request)
         return handler
 
-    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
-        transport=httpx.MockTransport(_dispatch)
-    )
+    def factory(**kw):
+        # `seen` нужен прокси-тестам: у httpx прокси задаётся при СОЗДАНИИ
+        # клиента, а не аргументом запроса, как было у requests. Поэтому и
+        # наблюдаем за фабрикой, а не за вызовом `.get`.
+        if seen is not None:
+            seen.setdefault("calls", []).append(kw)
+        return httpx.AsyncClient(transport=httpx.MockTransport(_dispatch))
 
     # Патчим globals САМОЙ функции тула, а не модуль «по имени»: conftest
     # каталога tests/tools подменяет gc_core.tools на время импорта, и класс
@@ -294,3 +298,66 @@ def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
     assert data["ok"] is True
     assert data["is_binary"] is False
     assert data["result_type"] == "content"
+
+
+# --- прокси -------------------------------------------------------------------
+#
+# Пять тестов ниже приехали с develop, где сеть шла через `requests.get` и прокси
+# читались из `kwargs["proxies"]` вызова. У httpx прокси — свойство КЛИЕНТА,
+# поэтому наблюдаем за фабрикой `get_async_client`. Проверяемое поведение то же:
+# прокси доезжает, пустая строка означает прямой ход, кэш ответов разведён по
+# прокси.
+
+
+def test_fetch_url_passes_proxy_to_client(monkeypatch):
+    seen: dict = {}
+    _install(monkeypatch, _resp("<html><body><p>hello via proxy</p></body></html>"), seen)
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura, "extract", lambda *a, **k: "hello via proxy"
+    )
+
+    proxy = "socks5h://127.0.0.1:1080"
+    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com", proxy=proxy))
+
+    assert data["ok"] is True
+    assert data["content"] == "hello via proxy"
+    proxies = [c.get("proxies") for c in seen.get("calls", [])]
+    assert any(proxy in str(p) for p in proxies), proxies
+
+
+def test_fetch_url_empty_proxy_is_direct(monkeypatch):
+    seen: dict = {}
+    _install(monkeypatch, _resp("<html></html>"), seen)
+    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "ok")
+
+    for value in ("", "   "):
+        data = json.loads(
+            with_local_ctx(FetchUrl)(url="https://example.com", proxy=value)
+        )
+        assert data["ok"] is True
+    for call in seen.get("calls", []):
+        assert not call.get("proxies"), call
+
+
+def test_fetch_url_cache_keyed_by_proxy(monkeypatch):
+    calls = {"n": 0}
+
+    def _handler(_request):
+        calls["n"] += 1
+        return _resp("<html></html>")
+
+    _install(monkeypatch, _handler)
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura, "extract", lambda *a, **k: f"body-{calls['n']}"
+    )
+
+    state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
+    tool = with_local_ctx(FetchUrl, state=state)
+
+    first = json.loads(tool(url="https://example.com"))
+    second = json.loads(tool(url="https://example.com", proxy="socks5h://127.0.0.1:1080"))
+
+    # Разный прокси — разный ключ кэша: ответ через прокси может отличаться,
+    # и отдавать прямой ответ на запрос через прокси нельзя.
+    assert first["ok"] is True and second["ok"] is True
+    assert calls["n"] == 2

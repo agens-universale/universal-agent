@@ -6,6 +6,8 @@
 
 Технический слой — без бизнес-логики.
 """
+import re
+from functools import lru_cache
 from pathlib import Path
 
 _MARKER = "prompts"
@@ -51,6 +53,49 @@ def bundled_root() -> Path:
     )
 
 
+#: Строгий маркер рабочей копии: `packages/core/pyproject.toml`, объявляющий
+#: `name = "gc-core"`. Прежний маркер — «каталог packages/ рядом с
+#: pyproject.toml» — ловил ЛЮБОЕ чужое монорепо: в проекте с `packages/*/src`
+#: и нашими колёсами в его .venv repo_root() возвращал ЕГО корень (сервер брал
+#: чужой config_server.yml, установщик MCP искал external/vendor в чужом
+#: дереве). tomllib не используется намеренно: проверяется ровно одна строка, а
+#: копии этой функции в gc_testkit и recommended_mcp обязаны совпадать с ней
+#: дословно — при том что gc-testkit объявляет requires-python >= 3.10, где
+#: tomllib ещё нет.
+_GC_CORE_NAME = re.compile(r'^[ \t]*name[ \t]*=[ \t]*["\']gc-core["\'][ \t]*$', re.MULTILINE)
+
+
+def _declares_gc_core(candidate: Path) -> bool:
+    """Лежит ли в `candidate` наш `packages/core/pyproject.toml`."""
+    try:
+        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(
+            encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return _GC_CORE_NAME.search(text) is not None
+
+
+def repo_root_from(start: Path) -> Path | None:
+    """Корень РАБОЧЕЙ КОПИИ вверх от `start`, иначе None.
+
+    Отдельный вход от :func:`repo_root` нужен тем, кто ищет корень не от своего
+    ``__file__``, а от переданного каталога: адаптер Harbor резолвит промпты от
+    каталога адаптеров.
+
+    Это КАНОНИЧЕСКАЯ реализация маркера. Две её копии — в
+    ``recommended_mcp.runtime.repo_path`` и ``gc_testkit.paths`` — оставлены
+    осознанно: обе работают ДО того, как gc_core попадает на ``sys.path``
+    (прямой запуск ``install.py`` только этим и занят, а плагин тест-кита сам
+    кладёт исходники на путь), поэтому импортировать отсюда им нечем.
+    Совпадение трёх копий стережёт ``tests/test_repo_root_marker.py``.
+    """
+    for parent in Path(start).resolve().parents:
+        if _declares_gc_core(parent):
+            return parent
+    return None
+
+
+@lru_cache(maxsize=1)
 def repo_root() -> Path | None:
     """Корень РАБОЧЕЙ КОПИИ репозитория, если код запущен из неё, иначе None.
 
@@ -62,12 +107,8 @@ def repo_root() -> Path | None:
     поехали в несуществующий ``assets/scripts/…`` — молча, потому что рядом не
     было ни одной проверки существования.
 
-    Маркер — каталог ``packages/`` рядом с ``pyproject.toml``. В установленном
-    колесе рабочей копии нет, поэтому здесь честный ``None``: вызывающий обязан
-    решить, что делать (взять cwd, взять переменную окружения, отказаться), а не
-    получить путь, которого не существует.
+    В установленном колесе рабочей копии нет, поэтому здесь честный ``None``:
+    вызывающий обязан решить, что делать (взять cwd, взять переменную
+    окружения, отказаться), а не получить путь, которого не существует.
     """
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "packages").is_dir() and (parent / "pyproject.toml").is_file():
-            return parent
-    return None
+    return repo_root_from(Path(__file__))

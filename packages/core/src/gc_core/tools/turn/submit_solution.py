@@ -26,6 +26,7 @@ class SubmitSolution(AbstractSimpleTool):
         status: str,
         message: str,
         task_report: str,
+        task: str | None = None,
         solution_type: str | None = None,
         comment: str | None = None,
         handoff: Dict[str, Any] | None = None,
@@ -44,6 +45,7 @@ class SubmitSolution(AbstractSimpleTool):
             out["comment"] = comment
         if handoff is not None:
             out["handoff"] = handoff
+        out["task"] = task
         out["task_report"] = task_report
         return json.dumps(out, ensure_ascii=False)
 
@@ -86,6 +88,10 @@ class SubmitSolution(AbstractSimpleTool):
         if not isinstance(task_report, str):
             task_report = "" if task_report is None else str(task_report)
 
+        task = payload.get("task")
+        if not isinstance(task, str):
+            task = None if task is None else str(task)
+
         comment = payload.get("comment")
         if comment is not None and not isinstance(comment, str):
             comment = str(comment)
@@ -96,6 +102,7 @@ class SubmitSolution(AbstractSimpleTool):
             ok=True,
             status="submitted",
             message="Task outcome submitted.",
+            task=task,
             task_report=task_report,
             solution_type=solution_type,
             comment=comment if isinstance(comment, str) and comment.strip() else None,
@@ -109,6 +116,7 @@ class SubmitSolution(AbstractSimpleTool):
             ok=False,
             status="cycle_stop_output_error",
             message=detail,
+            task=None,
             task_report="",
             error={"type": "cycle_stop", "message": detail},
         )
@@ -170,7 +178,7 @@ class SubmitSolution(AbstractSimpleTool):
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_finish",
@@ -192,6 +200,13 @@ class SubmitSolution(AbstractSimpleTool):
                             "Turn outcome: full_solution (objective done), partial_solution (meaningful progress, not done), "
                             "direct_answer (direct answer/explanation completed this turn), couldnt_solve, need_additional_info (blocked), "
                             "abandoned."
+                        ),
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": (
+                            "What the user asked this turn, in 1–2 phrases, in the user's terms. "
+                            "Not what was done — that is task_report."
                         ),
                     },
                     "task_report": {
@@ -217,22 +232,23 @@ class SubmitSolution(AbstractSimpleTool):
                         ),
                     },
                 },
-                "required": ["solution_type", "task_report", "handoff"],
+                "required": ["solution_type", "task", "task_report", "handoff"],
                 "additionalProperties": False,
             },
             "strict": True,
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return '''Tool name: turn_finish
 Tool description: Finalizes turn: yes. Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.
 IMPORTANT: This marks end of the current turn, NOT end of the whole thread/session.
-Use solution_type to classify the turn outcome; task_report for what was done in this turn; comment for caveats or next steps.
+Use solution_type to classify the turn outcome; task for what the user asked this turn; task_report for what was done in this turn; comment for caveats or next steps.
 
 Input schema:
 {
   "solution_type": "full_solution" | "partial_solution" | "direct_answer" | "couldnt_solve" | "need_additional_info" | "abandoned",
+  "task": "string (required)",
   "task_report": "string (required)",
   "comment": "string (optional)",
   "handoff": "{}" (required; JSON object encoded as a string)
@@ -269,11 +285,12 @@ Choosing solution_type (for current turn):
 - couldnt_solve: attempted but could not solve with available means.
 - abandoned: stopped by explicit choice/instruction.
 
+- task: What the user asked this turn, in 1–2 phrases, in the user's terms. Not what was done — that is task_report.
 - task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief.
 - comment: Optional caveats, risks, unresolved items, or next steps.
 - handoff: Required JSON object string (see Handoff format). Minimal valid value: "{}".
 
-Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
+Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","task":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
 '''
 
     async def acall(self, *args: Any, **kwargs: Any) -> str:
@@ -284,6 +301,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
         self,
         solution_type: str,
         task_report: str,
+        task: str | None = None,
         comment: str | None = None,
         handoff: str | None = None,
         handoff_data: Dict[str, Any] | None = None,
@@ -291,6 +309,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
     ) -> str:
         return self._submit(
             solution_type=solution_type,
+            task=task,
             task_report=task_report,
             comment=comment,
             handoff=handoff,
@@ -303,6 +322,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
         self,
         solution_type: str,
         task_report: str,
+        task: str | None = None,
         comment: str | None = None,
         **kwargs: Any,
     ) -> str:
@@ -312,6 +332,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 ok=False,
                 status="rejected",
                 message="Validation failed.",
+                task=None,
                 task_report="",
                 error={
                     "type": "invalid_argument",
@@ -324,6 +345,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 ok=False,
                 status="rejected",
                 message="Validation failed.",
+                task=None,
                 task_report="",
                 error={
                     "type": "invalid_argument",
@@ -338,6 +360,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 ok=False,
                 status="rejected",
                 message="Validation failed.",
+                task=None,
                 task_report="",
                 error={
                     "type": "invalid_argument",
@@ -350,6 +373,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 ok=False,
                 status="rejected",
                 message="Validation failed.",
+                task=None,
                 task_report="",
                 error={
                     "type": "invalid_argument",
@@ -362,6 +386,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 ok=False,
                 status="rejected",
                 message="Validation failed.",
+                task=None,
                 task_report="",
                 error={
                     "type": "limit_exceeded",
@@ -376,6 +401,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 ok=False,
                 status="rejected",
                 message="Validation failed.",
+                task=None,
                 task_report="",
                 error={
                     "type": "invalid_argument",
@@ -394,6 +420,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                     ok=False,
                     status="rejected",
                     message="Validation failed.",
+                    task=None,
                     task_report="",
                     error={
                         "type": "invalid_argument",
@@ -406,6 +433,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                     ok=False,
                     status="rejected",
                     message="Validation failed.",
+                    task=None,
                     task_report="",
                     error={
                         "type": "limit_exceeded",
@@ -414,6 +442,9 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                     },
                 )
 
+        # task — подсказка модели, не валидируем: turn_finish идёт через
+        # check_trace_finished мимо apply_tool, reject отсюда до модели не дошёл бы.
+        task_norm = self._normalize_text(task) if isinstance(task, str) and task.strip() else None
         task_report_norm = self._normalize_text(task_report)
         comment_norm = self._normalize_text(comment) if comment and comment.strip() else None
 
@@ -421,6 +452,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
             ok=True,
             status="submitted",
             message="Task outcome submitted.",
+            task=task_norm,
             task_report=task_report_norm,
             solution_type=solution_type,
             comment=comment_norm,

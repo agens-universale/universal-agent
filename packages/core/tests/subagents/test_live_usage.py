@@ -25,6 +25,11 @@ class _FakeChildState:
 
 def _wire_runner(monkeypatch, runner, child):
     class _Inst:
+        # Runner зовёт асинхронный хук порта: синхронный ушёл бы в поток и
+        # оттуда в портал, а тот из-под работающего loop отказывает.
+        async def afinalize_role(self, ctx, state):
+            return None
+
         def get_initial_data(self):
             return "role", "assignment"
 

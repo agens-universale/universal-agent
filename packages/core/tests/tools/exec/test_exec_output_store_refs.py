@@ -14,6 +14,7 @@ import pytest
 from gc_core.config_modules.stored_outputs import DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_core.tools.exec.stream_preview import CAPTURE_CAP_MARKER
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 
@@ -157,13 +158,15 @@ class TestExecuteCommandPreview:
 
         # Output fits in preview but hit_capture_cap → ref needed for page
         assert r["stdout_hit_capture_cap"] is True
-        assert r["stdout"] == "short"  # full preview
+        assert r["stdout"].startswith("short")
+        assert r["stdout"].endswith(CAPTURE_CAP_MARKER)
         assert r["truncated"] is False  # preview not cut
         ref = r["stdout_output_ref"]
         assert ref is not None
         record = state.tool_call_outputs_store.get(ref)
         assert record is not None
         assert record.text == "short"
+        assert CAPTURE_CAP_MARKER not in record.text
 
     def test_meta_fields_balance(self):
         """original = kept_head + kept_tail + omitted."""

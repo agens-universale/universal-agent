@@ -113,11 +113,27 @@ def _system_skills_root() -> Path:
 
 
 def _repo_root():
-    """Корень репозитория — по маркеру, а не по числу уровней."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "packages").is_dir() or (parent / ".git").exists():
-            return parent
-    return None
+    """Корень НАШЕЙ рабочей копии, если скрипт запущен из неё, иначе None.
+
+    Маркер не свой — спрашиваем ядро. `gc_core.bundled_assets.repo_root_from`
+    ищет `packages/core/pyproject.toml` со строкой `name = "gc-core"`; ядро
+    пришло к такому маркеру ровно потому, что прежний («у родителя есть
+    packages/ или .git») объявлял нашим корнем ЛЮБОЕ чужое монорепо. Здесь
+    стоял именно прежний, слабый: разбиение на пакеты сдвинуло скрипт на
+    уровень глубже, фиксированную глубину заменили маркерным поиском и взяли
+    тот, от которого ядро уже ушло. Своей копии маркера тут нет намеренно:
+    `tests/test_repo_root_marker.py` стережёт, что копий ровно три и каждая —
+    там, где ядро физически недоступно.
+
+    Ядра может не быть на пути: скрипт запускают через `sys.executable`, но в
+    песочнице бэкенд подставляет голый `python3`. Тогда честный None — корня
+    рабочей копии мы не знаем, и project-слой определяется по cwd.
+    """
+    try:
+        from gc_core.bundled_assets import repo_root_from  # type: ignore
+    except Exception:
+        return None
+    return repo_root_from(Path(__file__))
 
 
 def _detect_source_layer(skill_path: Path) -> str:
@@ -133,9 +149,9 @@ def _detect_source_layer(skill_path: Path) -> str:
     """
     skill_resolved = skill_path.resolve()
 
-    # 1. Project — try cwd first, then repo root (parents[3]) as fallback.
-    # cwd works for the typical case of running from the project root; repo root
-    # fallback covers running the script from a subdirectory.
+    # 1. Project — сначала cwd, затем корень рабочей копии (если скрипт запущен
+    # из неё). cwd покрывает обычный случай «запустили из корня проекта»,
+    # корень рабочей копии — запуск из подкаталога.
     _repo = _repo_root()
     project_candidates = [Path.cwd().resolve() / ".gc" / "skills"]
     if _repo is not None:
@@ -150,11 +166,17 @@ def _detect_source_layer(skill_path: Path) -> str:
     # 2. User layer — try gc_paths() if available
     user_skills_path = None
     try:
-        # gc_paths() живёт в ядре: кладём на sys.path исходники пакетов.
-        if _repo is not None:
-            for _src in sorted(_repo.glob("packages/*/src")):
-                if str(_src) not in sys.path:
-                    sys.path.insert(0, str(_src))
+        # gc_paths() живёт в ядре и импортируется штатно: в колесе gc_core лежит
+        # в site-packages, в рабочей копии его кладёт editable-установка.
+        # Раньше перед этим импортом сюда доставляли на sys.path все
+        # `<корень>/packages/*/src`. В колесе это не срабатывало никогда (корень
+        # считался фиксированной глубиной и упирался в site-packages, где нет ни
+        # packages/, ни src/), а после разбиения глубину заменили слабым
+        # маркером — и доставка ожила в ЧУЖОМ дереве: колесо в .venv чужого
+        # репозитория молча клало его `packages/*/src` в НАЧАЛО sys.path того
+        # процесса, который агент запускает от имени пользователя. Убрано: там,
+        # где ядро не установлено, честнее уйти в fallback ниже, чем угадывать
+        # исходники по соседнему дереву.
         from gc_core.config_modules.env_vars import gc_paths  # type: ignore
         user_skills_path = (gc_paths()["data"] / "skills").resolve()
     except Exception:
@@ -172,7 +194,9 @@ def _detect_source_layer(skill_path: Path) -> str:
         except ValueError:
             pass
 
-    # 3. System (repo/skills/)
+    # 3. System — скиллы, приехавшие с дистрибутивом. Раньше лежали в
+    #    <репо>/skills/, после переезда ассетов — в packages/core/assets/skills/
+    #    (в колесе: <site-packages>/gc_core/assets/skills/).
     repo_skills = _system_skills_root()
     try:
         skill_resolved.relative_to(repo_skills.resolve())

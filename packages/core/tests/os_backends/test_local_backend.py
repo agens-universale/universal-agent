@@ -233,12 +233,24 @@ def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be):
     exec, то есть на том, что реально важно вызывающему.
     """
     be.exec_output_capture_max_chars = 40
-    res = be.exec('python -c "print(\'z\' * 20000)"', timeout=15)
+    # sys.executable, а не голое `python`: имени `python` в PATH может не быть
+    # (в окружениях uv/pyenv ставится только `python3`), и тест падал бы на
+    # `command not found` — не на том свойстве, которое проверяет.
+    res = be.exec(f'{sys.executable} -c "print(\'z\' * 20000)"', timeout=15)
 
     assert len(res.stdout) <= 40
     assert res.stdout_hit_capture_cap is True
     assert res.return_code == 0
     assert res.timed_out is False
+
+
+def test_exec_per_call_capture_max_overrides_default(be):
+    be.exec_output_capture_max_chars = 50
+    res = be.exec("yes A | head -c 5000", timeout=15, capture_max_chars=400)
+    assert res.return_code == 0
+    assert len(res.stdout) <= 400
+    assert len(res.stdout) > 50
+    assert res.stdout_hit_capture_cap is True
 
 
 def test_exec_bounded_stdout_not_killed(be):

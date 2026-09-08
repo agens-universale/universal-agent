@@ -9,6 +9,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
+from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
@@ -32,11 +33,12 @@ def _counts(items: List[Dict[str, str]]) -> Dict[str, int]:
     }
 
 
+@loop_warn_on_repeat(**GENERIC_PROFILE)
 class SessionTodo(AbstractSimpleTool):
     tool_name = SESSION_TODO_TOOL_NAME
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": SESSION_TODO_TOOL_NAME,
@@ -90,7 +92,7 @@ class SessionTodo(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return """Tool name: session_todo
 Tool description: Structured checklist of the CURRENT task (plan + progress). Each call fully replaces the list; empty list clears it. Statuses: pending | in_progress | completed.
 

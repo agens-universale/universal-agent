@@ -1,10 +1,12 @@
 
+from typing import Any, Dict, Optional
+
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 class UpdatePlan(AbstractSimpleTool):
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
             "type": "function",
             "name": "update_plan",
@@ -25,7 +27,7 @@ class UpdatePlan(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = '''Tool name: update_plan
 Tool description: Write current plan TODOs. What you should do for solving initial user task.
 Input schema: {"type": "object", "properties": {"current_plan": {"type": "string", "description": "Plan as list of TODOs. Steps for solving initial user task."}, "required": ["current_plan"], "additionalProperties": false}

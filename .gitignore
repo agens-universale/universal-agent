@@ -30,8 +30,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-.gc/
 # Type checking
 .mypy_cache/
 .dmypy.json
@@ -71,7 +69,7 @@ docs/plans/
 .superpowers/
 
 # Домашний каталог агента в тестовых прогонах (GC_HOME=.gc): туда смоуки установки
-# кладут склонированные пакеты — тысячи чужих файлов, которые `git add -A` утащил бы в коммит.
+# кладут клоны speaches — тысячи чужих файлов, которые `git add -A` утащил бы в коммит.
 .gc/
 
 # Logs and dumps
@@ -137,3 +135,4 @@ docs/tui/
 docs/2026-06-23-corp-mirror-config-overlay.md
 docs/CHANGES-vs-master.md
 snapshot_report.html
+

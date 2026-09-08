@@ -91,10 +91,14 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_core import config as cfg_mod
     from gc_core import thread_store as ts_mod
+    from gc_core.config_modules.profiles import ProfileMeta
 
     on_disk = {"completions_url": "https://h/v1/chat/completions",
                "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}
-    monkeypatch.setattr(cfg_mod, "load_config", lambda p=None: dict(on_disk))  # файл: без launch_root
+    # файл: без launch_root
+    monkeypatch.setattr(cfg_mod, "load_config_ex", lambda p=None, **kw: (
+        dict(on_disk), ProfileMeta(active_name=None, ref=None, mtime_set={})
+    ))
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t"))
 
@@ -245,6 +249,10 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
     _bump_mtime(cfg_path)
 
     class _Ctx:
+        # У настоящего RunContext бэкенд есть всегда; двойнику он нужен, потому что
+        # TuiApp включает diff-журнал сам (attach_to_context) — раньше это делало
+        # ядро внутри create_run_context, то есть внутри подменённой функции.
+        os_backend = None
         tools_data = {}
         mcp_status = {}
         logging_path = "/tmp/agent_main_test.log"
@@ -268,6 +276,192 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
     app._build_real_executor()
 
     assert seen_cfg["completions_url"] == "http://x/v1"   # база НЕ перечитана из файла
+
+
+# --- флаг запуска --profile переживает перечитывание, как сессионный выбор ---
+#
+# Старт передавал выбранный флагом профиль в загрузчик, а горячее перечитывание —
+# нет: первое же сохранение из /settings молча возвращало указатель из файла. Совет
+# «gc-ua --profile "", чтобы обойти сломанный профиль» жил до первой записи — после
+# неё окно снова упиралось в него. Флаг хранится у приложения отдельно от сессионного
+# выбора (тот персистится в мету треда и переживает перезапуск сессии — у флага
+# запуска такого права нет) и передаётся загрузчику при каждом перечитывании.
+
+
+@pytest.fixture
+def _profile_stack(tmp_path, monkeypatch):
+    """База с указателем на профиль `work` и каталог профилей рядом, изолированные
+    от слоёв машины (тот же приём, что `stack` в tests/config)."""
+    from gc_core.config_modules import env_vars
+    from gc_core.config_modules.env_vars import EnvVars
+    from gc_core.runtime_notices import clear_runtime_notices
+
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path / "gc_home"))
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        'profile: "work"\nbackend:\n  completions_url: "http://x/v1"\n'
+        'models:\n  gc:\n    model: "base-m"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('slots:\n  default: "ghost"\n', encoding="utf-8")
+    clear_runtime_notices()
+    return cfg_file, profiles
+
+
+def _app_started_with(cfg_file, profile_override):
+    """Приложение, как его собирает main(): конфиг загружен С флагом, путь связан."""
+    from gc_core import config as cfg_mod
+    cfg, _meta = cfg_mod.load_config_ex(str(cfg_file), profile_override=profile_override)
+    app = app_mod.TuiApp(config=cfg, profile_override=profile_override)
+    app.set_config_path(str(cfg_file))
+    return app
+
+
+def test_reload_config_keeps_the_profile_flag_that_bypasses_a_broken_pointer(_profile_stack):
+    """`gc-ua --profile ""` на сломанном профиле из указателя: перечитывание обязано
+    собираться так же, как старт, — без профиля. Без флага загрузчик падает на
+    `slots.default: ghost`, и окно упиралось бы в профиль, который флаг обошёл."""
+    cfg_file, _profiles = _profile_stack
+    app = _app_started_with(cfg_file, "")
+    assert app._config["profile"] == ""
+
+    app.reload_config()                      # без флага здесь ValueError
+
+    assert app._config["profile"] == ""
+    assert app.effective_config()["profile"] == ""
+
+
+def test_reload_config_keeps_the_profile_named_by_the_flag(_profile_stack):
+    cfg_file, profiles = _profile_stack
+    (profiles / "corp.yml").write_text(
+        'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n',
+        encoding="utf-8")
+    app = _app_started_with(cfg_file, "corp")
+
+    app.reload_config()
+
+    assert app._config["profile"] == "corp"
+    assert "corp" in app._config["models"]
+    # Мтайм-набор следит за файлом профиля флага, а не за указателем файла.
+    assert any("corp.yml" in path for path in app._config_mtime_set)
+
+
+def test_session_choice_still_wins_over_the_profile_flag(_profile_stack):
+    """Выбор из приложения (`/profiles`) сильнее флага запуска — как и сильнее
+    указателя файла: сессионное снятие профиля при флаге `corp` действует."""
+    cfg_file, profiles = _profile_stack
+    (profiles / "corp.yml").write_text(
+        'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n',
+        encoding="utf-8")
+    app = _app_started_with(cfg_file, "corp")
+    app.set_session_override("profile", "")
+
+    app.reload_config()
+
+    assert app._config["profile"] == "corp"            # база окна — по флагу
+    assert app.effective_config()["profile"] == ""     # действует выбор сессии
+
+
+_CORP = 'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n'
+
+
+def _app_that_could_lose_the_flag(cfg_file, profiles):
+    """Стек, из которого флаг РЕАЛЬНО может выпасть: указатель базы пуст (без
+    профиля база собирается), профиль флага `corp` — на диске.
+
+    Дефолтный `_profile_stack` для этого не годится: там указатель ведёт на битый
+    `work`, и подмена профиля указателем упала бы сама — «флаг на месте» зеленело
+    бы, ничего не проверив."""
+    cfg_file.write_text(
+        'profile: ""\nbackend:\n  completions_url: "http://x/v1"\n'
+        'models:\n  gc:\n    model: "base-m"\n', encoding="utf-8")
+    (profiles / "corp.yml").write_text(_CORP, encoding="utf-8")
+    return _app_started_with(cfg_file, "corp")
+
+
+def test_a_vanished_flag_profile_keeps_the_flag_and_the_previous_base(_profile_stack):
+    """Профиль флага пропал под ногами: окно остаётся на прежней базе с причиной в
+    `/notices` — той же деградацией, что и на битом config.yml, — и НЕ подменяет
+    профиль указателем из файла.
+
+    Флаг переживает отказ: он свойство запуска, а не файла, и снятый однажды не
+    возвращается — `--profile ""` тем же вечером молча воскресил бы сломанный
+    профиль на первом сохранении из /settings. Снимок мтайм-набора отказ не
+    двигает, поэтому следующий заход в Настройки пробует снова: вернули файл —
+    окно чинится само."""
+    from gc_core.runtime_notices import collect_runtime_notices
+    cfg_file, profiles = _profile_stack
+    corp = profiles / "corp.yml"
+    app = _app_that_could_lose_the_flag(cfg_file, profiles)
+    corp.unlink()
+
+    app.reload_config_if_changed()           # профиля флага больше нет
+
+    assert app._profile_override == "corp"
+    assert app._config["profile"] == "corp"          # база — прежняя, не подменённая
+    notices = [n for n in collect_runtime_notices() if n.code == "config_reload_failed"]
+    assert notices, collect_runtime_notices()
+    # Причина названа флагом, а не одним лишь config.yml: чинить надо профиль.
+    assert 'профиль "corp" из флага --profile' in notices[-1].message
+
+    corp.write_text(_CORP, encoding="utf-8")
+    _bump_mtime(corp)
+    app.reload_config_if_changed()           # вернули файл — окно чинится само
+
+    assert app._profile_override == "corp"
+    assert "corp" in app._config["models"]
+
+
+def test_a_broken_write_race_on_the_flag_profile_does_not_lose_the_flag(_profile_stack):
+    """Соседнее окно (или редактор) пишет файл профиля в момент перечитки: половина
+    YAML — это не «профиль исчез навсегда», и отличить одно от другого одной
+    неудачной попыткой нечем. Поэтому не гасим ничего: прежняя база, причина в
+    уведомлении, следующая попытка — на дописанном файле."""
+    cfg_file, profiles = _profile_stack
+    corp = profiles / "corp.yml"
+    app = _app_that_could_lose_the_flag(cfg_file, profiles)
+    corp.write_text("models:\n  corp:\n   model: [\n", encoding="utf-8")   # недописанный файл
+    _bump_mtime(corp)
+
+    app.reload_config_if_changed()
+
+    assert app._profile_override == "corp"
+    assert app._config["profile"] == "corp"          # и профиль не подменён базой
+    corp.write_text(                                                       # запись дописана
+        'models:\n  corp:\n    model: "corp-m"\n  extra:\n    model: "x"\n'
+        'slots:\n  default: "corp"\n', encoding="utf-8")
+    _bump_mtime(corp, seconds=10.0)
+    app.reload_config_if_changed()
+
+    assert "extra" in app._config["models"]
+
+
+def test_a_bug_inside_the_loader_is_not_relabelled_as_a_stale_profile(
+        _profile_stack, monkeypatch):
+    """`TypeError`/`KeyError` из загрузчика — дефект кода, а не «профиль больше не
+    собирается»: под флагом ловим только классы, которыми загрузчик докладывает о
+    СОСТОЯНИИ файлов (`ValueError`/`OSError`), остальное летит как есть — иначе
+    первый же баг в схеме живёт под видом сломанного профиля."""
+    from gc_core import config as cfg_mod
+    cfg_file, profiles = _profile_stack
+    app = _app_that_could_lose_the_flag(cfg_file, profiles)
+    real = cfg_mod.load_config_ex
+
+    def boom(path=None, **kw):
+        # Ломается ТОЛЬКО сборка под флагом: сборка по указателю обязана
+        # оставаться рабочей, иначе тест краснел бы на её отказе, а не на том,
+        # проглочен ли дефект кода под видом протухшего профиля.
+        if kw.get("profile_override") is not None:
+            raise TypeError("схема поехала")
+        return real(path, **kw)
+
+    monkeypatch.setattr(cfg_mod, "load_config_ex", boom)
+
+    with pytest.raises(TypeError):
+        app.reload_config()
 
 
 # --- screen_config: единая точка получения базы для ОТКРЫТИЯ экрана ---

@@ -48,17 +48,26 @@ sysctl kernel.unprivileged_userns_clone   # должно вернуть 1
 ## Минимальная установка
 
 ```bash
-# 1. Системные зависимости
-sudo apt-get install -y bubblewrap coreutils jq
+# 1. Системные зависимости. bubblewrap — сама песочница, coreutils — `timeout`,
+#    которым обёртка ограничивает время жизни sworm'а.
+sudo apt-get install -y bubblewrap coreutils
 
-# 2. gc-cli в отдельный venv (важно: НЕ uv-venv, нужен системный python3 —
-#    он подхватится через ro-bind /usr внутри bwrap)
+# 2. Профиль сервера в отдельный venv. Ставит ТОЛЬКО uv: манифест пинит
+#    gc-core==0.3.0 / gc-cli==0.3.0 / gc-mcp==0.3.0, а те резолвятся через
+#    [tool.uv.sources] workspace = true и на PyPI не публикуются. Обычный pip
+#    этой секции не понимает и падает
+#    `No matching distribution found for gc-cli==0.3.0` — см. usage.md,
+#    «Через pip — не работает».
 python3 -m venv /opt/gc-cli/.venv
-# pip тут не годится: корневой манифест — мета gc-ua, её листья резолвятся
-# через uv-workspace и на PyPI не публикуются. Ставим профиль сервера из git.
-/opt/gc-cli/.venv/bin/pip install \
+uv pip install --python /opt/gc-cli/.venv/bin/python \
   "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
-/opt/gc-cli/.venv/bin/pip install psutil    # для memory/cpu enforcement
+# Ставить что-либо отдельно не нужно: gc-cli (его и запускает песочница),
+# psutil для memory/cpu enforcement и uvicorn объявлены зависимостями gc-server.
+
+# venv можно собрать и через `uv venv` — обёртка резолвит символическую ссылку
+# .venv/bin/python и добавляет --ro-bind на корень интерпретатора, поэтому
+# uv-managed python внутри песочницы виден. Системный python3 просто короче:
+# он уже лежит под /usr, а /usr обёртка биндит всегда.
 
 # 3. config_server.yml с включённым swarm (см. ниже)
 # 4. Запуск сервера. Профиль gc-server кладёт в PATH команду gc-serve;
@@ -79,7 +88,8 @@ swarm:
   enabled: true                           # обязательно для активации ручек
 
   # Корни для артефактов. Принимают абсолютный путь (как есть) ИЛИ относительный
-  # (резолвится от корня репо сервера); если опустить — дефолт:
+  # (резолвится от каталога САМОГО config_server.yml — то есть от того места, где
+  #  вы этот путь и видите); если опустить — дефолт:
   #   swarm_threads_dir = <state>/projects/<project-slug>/swarm/threads
   #   sandbox_root_dir  = <state>/projects/<project-slug>/swarm/sandboxes
   # (в отличие от cli_venv_root/agent_dep_dir/extra_mounts — те только абсолютные).
@@ -91,8 +101,8 @@ swarm:
   # Куда на хосте сохранять агентские .gc/logs из песочницы при финализации.
   # Это делает сам swarm (lifecycle.check_and_finalize), на хост-стороне —
   # поэтому логи агента сохраняются даже если bwrap снят / убит по таймауту / упал.
-  # Абсолютный путь (как есть) / относительный (от корня репо); пусто → дефолт
-  # swarm_threads_dir/<swarm_id>/agent_logs/. При задании — <swarm_logs_dir>/<swarm_id>/.
+  # Абсолютный путь (как есть) / относительный (от каталога config_server.yml, см. выше);
+  # пусто → дефолт swarm_threads_dir/<swarm_id>/agent_logs/. При задании — <swarm_logs_dir>/<swarm_id>/.
   swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
 
   # Сколько одновременных sworm'ов разрешено. При превышении → 503.
@@ -115,11 +125,21 @@ swarm:
   # Какой sandbox-tool. На данный момент поддерживается только bubblewrap.
   sandbox_tool: "bubblewrap"
 
-  # Путь к wrapper-скрипту (по умолчанию gc_server/swarm/run-cli-in-sandbox.sh в репо).
+  # Путь к wrapper-скрипту. Дефолт — run-cli-in-sandbox.sh ВНУТРИ пакета
+  # (gc_server/swarm/, едет в колесе как package data, поэтому работает и в
+  # установленном профиле). Относительный путь ищется рядом с config_server.yml,
+  # затем в каталоге пакета; не нашёлся нигде — WARNING и пакетная обёртка,
+  # чтобы копия шаблона с develop не роняла каждый POST /swarm/run.
   wrapper_path: "/opt/gc-cli/gc_server/swarm/run-cli-in-sandbox.sh"
 
   # Venv c gc-cli и зависимостями. Биндится --ro-bind внутрь песочницы.
   # ПРИНИМАЕТСЯ ТОЛЬКО АБСОЛЮТНЫЙ путь; пустое или относительное игнорируется.
+  # Если не задать — берётся venv, в котором работает сам сервер: `gc-cli`
+  # приезжает зависимостью gc-server и лежит именно там. Наружу, в PATH, uv
+  # выносит только gc-serve — команды зависимостей он не экспортирует, поэтому
+  # прежний PATH-fallback в установке через `uv tool install` команду не находил
+  # и КАЖДЫЙ sworm падал с exit 127. Задавать вручную нужно, только если CLI
+  # живёт в отдельном venv.
   cli_venv_root: "/opt/gc-cli/.venv"
 
   # Доп. директория с зависимостями MCP (например ~/.local/share/gc/node для playwright).
@@ -132,11 +152,17 @@ swarm:
     - "/opt/gc-cli/skills"
 
   # Опц. пути к agent.md и skills_data_dir, которые материализуются в sandbox.
-  # Относительные резолвятся от корня репозитория сервера.
+  # У них РАЗНЫЕ якоря, и это не случайность: agentmd_path целится в файл ВНУТРИ
+  # дистрибутива, поэтому относительный путь резолвится от корня bundled-ассетов
+  # (дефолтный prompts/server_agent.md там и лежит). skills_dir — пользовательский
+  # контент, его относительный путь резолвится от каталога config_server.yml, а
+  # дефолт лежит в <gc-data>/swarm_skills и переживает `uv tool upgrade`.
+  # Если каталога скиллов нет, sworm идёт БЕЗ них; в лог об этом пишется только
+  # когда путь задан явно.
   # Отдельного swarm-промпта нет: по умолчанию используется тот же
   # prompts/server_agent.md, что и в webhook-режиме (вход — JSON-payload).
   agentmd_path: "prompts/server_agent.md"
-  skills_dir: "swarm_skills"
+  skills_dir: "/var/lib/gc-cli/swarm/skills"
 ```
 
 Дефолты (если поле опущено): `enabled=false`, `max_concurrent=10`, `ttl_seconds=86400`, `limits={memory_mb=1024, disk_mb=2048, cpu_percent=50, timeout_seconds=1800}`, `cli_command="gc-cli"`, `sandbox_tool="bubblewrap"`.
@@ -172,7 +198,8 @@ client                 server                   wrapper.sh             bwrap + g
 
 1. **HTTP-вход.** `POST /swarm/run` приходит в `server.py:swarm_run`. Проверяется `swarm.enabled` (иначе 503), парсится JSON, нормализуются `task_id` и `system`, формируется `swarm_id = "swarm_<system>_<task_id>"` (префикс `swarm_` — чтобы каталоги отличались от обычных тредов вебхука).
 2. **Идемпотентность (AR-3).** Под глобальным `_SWARM_RUN_LOCK` читается `meta.json`:
-   - exist & `status ∈ {queued, running}` → **409 `swarm_id_already_active`**;
+   - exist & `status ∈ {queued, running}` → **409 `swarm_id_already_active`**
+     (`queued` на диск больше не пишется: `runner.start_swarm_process` сохраняет meta ровно один раз, уже после успешного `Popen`, сразу в `running` — иначе провал запуска оставлял на диске `queued`, и следующий вызов получал 409 сутки, до janitor'а. В проверке имя оставлено ради meta, написанных прежними версиями);
    - exist & `status` final → **409 `swarm_id_already_finalized`**;
    - `reuse_strategy != "reject"` → **501 `not_implemented`** (MVP поддерживает только `reject`).
 3. **Защита от перегрузки.** Если `monitor.active_count >= max_concurrent` → **503 `too_many_concurrent_swarm_processes`**.
@@ -220,7 +247,7 @@ client                 server                   wrapper.sh             bwrap + g
 Текущий статус задачи. Вызывает `check_and_finalize` с `heavy_checks=False` (без `du`/`psutil`-проверок — быстро для HTTP).
 
 **Ответ:** `{"status", "system", "task_id", "meta": {swarm_meta: {...}}}`.
-`status` ∈ `{queued, running, completed, failed, timeout, unknown_failed}`. Финальные статусы — `{completed, failed, timeout, unknown_failed}` (см. `lifecycle.FINAL_STATUSES`).
+`status` ∈ `{running, completed, failed, timeout, unknown_failed}`. Финальные статусы — `{completed, failed, timeout, unknown_failed}` (см. `lifecycle.FINAL_STATUSES`). `queued` встречается только в meta от прежних версий: свежий запуск пишет meta один раз, уже в `running` (см. шаг 2 выше).
 
 Если `meta.json` отсутствует — `404`.
 

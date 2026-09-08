@@ -5,6 +5,7 @@
 """
 import asyncio
 import pytest
+import sys
 import threading
 import time
 
@@ -15,7 +16,7 @@ from gc_core.backends.protocol import ExecResult
 
 async def test_exec_runs_and_captures_output():
     port = aexec_port(LocalFsBackend())
-    res = await port.aexec('python -c "print(42)"')
+    res = await port.aexec(f'{sys.executable} -c "print(42)"')
     assert res.stdout.strip() == "42"
     assert res.return_code == 0
     assert res.timed_out is False
@@ -26,8 +27,8 @@ async def test_two_commands_run_concurrently():
     port = aexec_port(LocalFsBackend())
     started = time.monotonic()
     a, b = await asyncio.gather(
-        port.aexec('python -c "import time; time.sleep(0.3); print(\'a\')"'),
-        port.aexec('python -c "import time; time.sleep(0.3); print(\'b\')"'),
+        port.aexec(f'{sys.executable} -c "import time; time.sleep(0.3); print(\'a\')"'),
+        port.aexec(f'{sys.executable} -c "import time; time.sleep(0.3); print(\'b\')"'),
     )
     elapsed = time.monotonic() - started
 
@@ -39,20 +40,20 @@ async def test_no_helper_threads_per_call():
     """Ради этого всё и делалось: дренажных потоков на вызов больше нет."""
     port = aexec_port(LocalFsBackend())
     before = threading.active_count()
-    await port.aexec('python -c "print(\'x\' * 100000)"')
+    await port.aexec(f'{sys.executable} -c "print(\'x\' * 100000)"')
     assert threading.active_count() == before
 
 
 async def test_timeout_kills_process():
     port = aexec_port(LocalFsBackend())
-    res = await port.aexec('python -c "import time; time.sleep(5)"', timeout=1)
+    res = await port.aexec(f'{sys.executable} -c "import time; time.sleep(5)"', timeout=1)
     assert res.timed_out is True
     assert res.return_code is None
 
 
 async def test_stderr_captured_separately():
     port = aexec_port(LocalFsBackend())
-    res = await port.aexec('python -c "import sys; sys.stderr.write(\'беда\')"')
+    res = await port.aexec(f'{sys.executable} -c "import sys; sys.stderr.write(\'беда\')"')
     assert "беда" in res.stderr
     assert res.stdout == ""
 
@@ -61,7 +62,7 @@ async def test_output_is_bounded_and_flagged():
     """Буфер ограничен, но процесс не виснет: хвост дочитывается в никуда."""
     backend = LocalFsBackend(exec_output_capture_max_chars=100)
     port = aexec_port(backend)
-    res = await port.aexec('python -c "print(\'y\' * 50000)"')
+    res = await port.aexec(f'{sys.executable} -c "print(\'y\' * 50000)"')
 
     assert len(res.stdout) <= 100
     assert res.stdout_hit_capture_cap is True
@@ -76,7 +77,7 @@ async def test_run_python_receives_code_via_stdin():
 
 async def test_argv_form_needs_no_shell():
     port = aexec_port(LocalFsBackend())
-    res = await port.aexec_argv(["python", "-c", "print('argv')"])
+    res = await port.aexec_argv([sys.executable, "-c", "print('argv')"])
     assert res.stdout.strip() == "argv"
 
 
@@ -100,7 +101,7 @@ async def test_native_backend_is_used_directly():
 async def test_async_and_sync_results_agree():
     """Паритет: тот же результат, что у синхронного пути."""
     backend = LocalFsBackend()
-    cmd = 'python -c "print(\'паритет\')"'
+    cmd = f'{sys.executable} -c "print(\'паритет\')"'
     sync_res = await asyncio.to_thread(lambda: backend.exec(cmd))
     async_res = await backend.aexec(cmd)
 
@@ -126,7 +127,7 @@ async def test_captured_survives_drain_timeout():
     """
     backend = LocalFsBackend(exec_output_capture_max_chars=1000)
     res = await backend.aexec(
-        "python -c \"print('A'*200000)\"; (sleep 20 &)", timeout=10
+        f"{sys.executable} -c \"print('A'*200000)\"; (sleep 20 &)", timeout=10
     )
 
     assert res.stdout_hit_capture_cap is True
@@ -162,7 +163,7 @@ async def test_cancel_kills_the_child():
         return [p for p in out.split() if p and int(p) != os.getpid()]
 
     backend = LocalFsBackend()
-    task = asyncio.create_task(backend.aexec_argv(["python", "-c", code]))
+    task = asyncio.create_task(backend.aexec_argv([sys.executable, "-c", code]))
     await asyncio.sleep(0.8)
     assert len(alive()) == 1, "процесс не стартовал — тест ничего не проверяет"
 

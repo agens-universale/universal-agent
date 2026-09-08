@@ -1,5 +1,4 @@
 import logging
-import os
 import threading
 import time
 from typing import Any, Dict
@@ -42,6 +41,14 @@ def _cleanup_threads_loop(
                 logger.warning("каталог тредов не найден: %s", threads_dir)
             elif stats["errors"]:
                 logger.error("чистка тредов: %s ошибок, %s", stats["errors"], stats)
+            elif stats.get("removed_meta"):
+                # Удаление обязано оставлять след. Прежде молчал именно успешный
+                # проход: «каталога нет» кричало предупреждением, а снос десятка
+                # тредов не печатал ничего — громкость была устроена наоборот.
+                logger.info(
+                    "чистка тредов: удалено %d старше %d дн. из %s",
+                    stats["removed_meta"], ttl_days, threads_dir,
+                )
         except Exception as e:  # noqa: BLE001
             logger.warning("threads cleanup failed: %r", e)
 
@@ -63,7 +70,23 @@ def register_cleanup_threads_on_startup(
 
     def _resolve_cleanup_cfg() -> tuple[int, int] | None:
         cleanup_cfg = server_config.get("threads_cleanup") or {}
-        enabled = bool(cleanup_cfg.get("enabled", True))
+        # Дефолт ВЫКЛЮЧЕН. Чистка удаляет треды из каталога, который принадлежит
+        # не только серверу: `resolve_threads_dir` даёт то же самое, что у
+        # `gc-cli` и TUI — проверено сравнением, а не по коду. То есть сервер,
+        # поднятый в каталоге проекта, сносил бы историю интерактивной работы.
+        # `docs/server.md` это прямо запрещает: «любые ротации/очистки
+        # рекомендуется настраивать отдельно … вне этого приложения».
+        #
+        # Дефолт `True` пришёл с develop, но там у него не было этой цены: точки
+        # входа `gc-serve` не существовало, а `uvicorn.run("src.server:app")`
+        # резолвился только из корня репозитория — сервер из установленного
+        # колеса не запускался в принципе. Ветка добавила `gc-serve`, и жестом
+        # «поднял сервер в своём проекте» стало можно потерять переписку.
+        #
+        # Когда разрушающее действие затрагивает чужие данные, включать его
+        # обязан человек. Цена ошибки в одну сторону — растущий диск и строка в
+        # логе, в другую — безвозвратно удалённые треды.
+        enabled = bool(cleanup_cfg.get("enabled", False))
         if not enabled:
             return None
 
@@ -91,6 +114,15 @@ def register_cleanup_threads_on_startup(
         interval_seconds, ttl_days = cfg
 
         threads_dir = resolve_threads_dir(base_agent_config)
+        # Объявляемся вслух. Строка стоит ЗДЕСЬ, а не на регистрации хука:
+        # регистрация идёт на импорте модуля, до `logging.basicConfig` в
+        # `serve()`, и запись ушла бы в никуда через `logging.lastResort`
+        # (порог WARNING). Каталог общий с CLI и TUI, поэтому человек обязан
+        # видеть, что именно чистится и с каким сроком.
+        logger.info(
+            "чистка тредов включена: каталог %s, ttl %d дн., интервал %d с",
+            threads_dir, ttl_days, interval_seconds,
+        )
 
         threading.Thread(
             target=_cleanup_threads_loop,

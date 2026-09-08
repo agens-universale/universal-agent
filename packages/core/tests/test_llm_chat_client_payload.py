@@ -26,7 +26,9 @@ def _patch_policy(monkeypatch):
         "arequest_chat_completions_with_policy",
         _fake_policy,
     )
-    monkeypatch.setattr(llm_chat_client, "create_call_headers", lambda _s, _c: {})
+    monkeypatch.setattr(
+        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+    )
     return captured
 
 
@@ -51,6 +53,7 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         request_label="summary_batch_1",
+        consumer="summary",
     )
 
     raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
@@ -66,6 +69,7 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         request_label="summary_batch_2",
+        consumer="summary",
     )
 
     raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
@@ -95,6 +99,7 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
         state=state,
         messages=[{"role": "user", "content": "hello"}],
         max_tokens=321,
+        consumer="summary",
     )
 
     assert result == "ok"
@@ -119,6 +124,7 @@ def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(monkeypa
         state=state,
         messages=[{"role": "user", "content": "hello"}],
         max_tokens=444,
+        consumer="summary",
     )
 
     assert captured["payload"]["max_tokens"] == 444
@@ -141,6 +147,7 @@ def test_request_chat_completion_text_omits_empty_tools(monkeypatch):
         state=state,
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
+        consumer="summary",
     )
 
     assert "tools" not in captured["payload"]

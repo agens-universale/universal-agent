@@ -2,7 +2,7 @@
 
 # Тесты
 
-Один раз в корне репо: `uv sync`. Подтягивает dev/test-зависимости (`textual`, `rich` — в основных deps; `office-mcp` из `external/office-mcp` — в test-группе).
+Один раз в корне репо: `uv sync`. Подтягивает dev/test-зависимости (`textual`, `rich` — в основных deps; `office-mcp` из `packages/mcp/external/vendor/office-mcp` — в test-группе).
 
 `uv tool install -e .` и `gc-mcp-install` — для **запуска агента** (`gc-cli` / `gc-ua`), не для pytest. Тесты гоняйте через `uv run pytest`, а не из venv `uv tool`.
 
@@ -11,19 +11,16 @@
 uv run pytest
 
 # office-mcp (свой venv через --directory)
-uv run --directory external/office-mcp pytest
+uv run --directory packages/mcp/external/vendor/office-mcp pytest
 
 # science-mcp
-uv run --directory external/science-mcp pytest
+uv run --directory packages/mcp/external/vendor/science-mcp pytest
 
 # computer-mcp (на Linux)
-uv run --directory external/computer-mcp pytest -m "not windows"
+uv run --directory packages/mcp/external/vendor/computer-mcp pytest -m "not windows"
 ```
 
 Папка или файл: `uv run pytest packages/core/tests/security/ -q`
-
-Живые MCP-серверы, настоящий браузер и реальная модель автоматическим набором
-не покрываются — для них есть [ручные тесты](manual-tests.md).
 
 ## Наборы живут при пакетах
 
@@ -31,12 +28,12 @@ uv run --directory external/computer-mcp pytest -m "not windows"
 
 | Каталог | Что проверяет | Тестов |
 |---|---|---|
-| `packages/core/tests` | ядро/SDK | 3285 |
-| `packages/tui/tests` | TUI | 2250 |
-| `packages/mcp/tests` | рецепты и менеджер MCP | 137 |
-| `packages/server/tests` | server и swarm | 170 |
-| `packages/cli/tests` | CLI | 93 |
-| `tests` | репозиторий целиком: колёса, литералы модулей, принадлежность тестов | 21 |
+| `packages/core/tests` | ядро/SDK | 4069 |
+| `packages/tui/tests` | TUI | 3381 |
+| `packages/server/tests` | server и swarm | 216 |
+| `packages/mcp/tests` | рецепты и менеджер MCP | 159 |
+| `packages/cli/tests` | CLI | 129 |
+| `tests` | репозиторий целиком: колёса, литералы модулей, принадлежность тестов | 66 |
 | `external/litellm/tests` | батарейка LiteLLM Proxy | 13 |
 
 Принадлежность закреплена тестом `tests/test_test_ownership.py`: набор пакета не
@@ -51,7 +48,7 @@ uv run --directory external/computer-mcp pytest -m "not windows"
 Набор пакета самодостаточен, и это проверяемое утверждение, а не пожелание:
 
 ```bash
-cd packages/core && uv run --project ../.. pytest -q     # 3252 passed
+cd packages/core && uv run --project ../.. pytest -q
 ```
 
 Если ядро случайно потянет TUI или server, эта команда покраснеет — при общем
@@ -69,11 +66,39 @@ cd packages/core && uv run --project ../.. pytest -q     # 3252 passed
   `Path(__file__).resolve().parents[N]` ломается при любом переезде файла, причём
   молча: если каталог по ошибочному пути не существует, `rglob` вернёт пустоту и
   проверка пройдёт вхолостую.
-- `gc_testkit.plugin` — подключается автоматически через entry point `pytest11`;
+- `gc_testkit.plugin` — подключается автоматически через entry point `pytest11`,
+  но бутстрап включает только для НАШИХ наборов: гейт сверяет `rootdir`
+  собираемого набора с корнем рабочей копии;
   отдельный `conftest.py` в пакете для этого не нужен.
 - `gc_testkit.helpers`, `gc_testkit.intent_fixtures`, `gc_testkit.tui_support`,
   `gc_testkit.tui_fixtures`, `gc_testkit.harbor_fakes` — импортируемые хелперы.
 
-Тестовые файлы **не импортируют друг друга**: каталогов `tests` теперь пять, и
-общего имени, по которому они видны друг другу, не существует. Всё общее едет
-через `gc_testkit`.
+В тест-ките лежит только то, что нужно наборам НЕСКОЛЬКИХ пакетов и не зависит от
+их файлов. `gc_testkit.tui_support` — три функции про экраны вообще (`wait_until`,
+`open_settings_section`, `settings_section_index`). Монтаж конкретных форм, их фейки
+и изоляторы живут в наборе TUI, в `packages/tui/tests/form_harness.py`: они лениво
+импортируют соседние тест-модули, и в общем дистрибутиве это перевернуло бы
+зависимость — тест-кит стал бы зависеть от тестовых файлов одного пакета.
+
+**Через границу пакетов тестовые файлы друг друга не импортируют**: каталогов
+`tests` пять, общего имени, по которому они видны друг другу, нет — всё общее едет
+через `gc_testkit`. ВНУТРИ одного набора соседний импорт по голому имени работает и
+используется (`form_harness` тянет `test_settings_screen`, ядро — `from
+test_project_data_backend import FakeSandboxBackend`): pytest кладёт каталог набора
+на `sys.path`.
+
+## Где подменять `managed_config_path`
+
+Точка подмены зависит от того, что изолируете, и это не произвол, а отражение того,
+кто как связывает имя. Дом функции один — `gc_core.config_modules.env_vars`.
+
+| Что изолируете | Что подменять |
+|---|---|
+| `load_config` (плоский `config_dict`) | `gc_core.config.managed_config_path` — `config.py` связывает имя на импорте |
+| перекрытия в `/settings` (`config_origin`) | `gc_core.config_modules.env_vars.managed_config_path` — он импортирует лениво |
+| запись managed-слоя рецептами | `recommended_mcp.runtime.wiring.managed_config_path` |
+
+Первую строку легко перепутать со второй: подмена «дома» до `load_config` не
+доезжает, а тест при этом ЗЕЛЁНЫЙ — просто читает настоящий `~/.gc/config.local.yml`
+запускающего. Десять таких подмен так и жили, пока реэкспорт в `mcp_runtime.paths`
+не убрали и они не упали громко.

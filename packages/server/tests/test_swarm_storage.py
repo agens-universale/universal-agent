@@ -223,6 +223,26 @@ def test_load_stdout_stderr_missing_returns_empty_tuple(tmp_path):
     assert err == []
 
 
+def test_load_stdout_stderr_survives_undecodable_bytes(tmp_path):
+    """Логи пишет ПРОИЗВОЛЬНЫЙ CLI в песочнице — байты приходят какие угодно.
+
+    Один невалидный байт ронял чтение целиком, а с ним и весь ответ эндпоинта
+    диагностики (`server.py`): вместо логов, ради которых человек туда и пришёл,
+    он получал пятисотку. Отказ здесь неуместен и по другой причине: конфиг с
+    битым байтом использовать нельзя, а лог — можно читать, пометив нечитаемое.
+    """
+    base = tmp_path / "sid"
+    base.mkdir()
+    (base / "stdout.log").write_bytes(b"ok line\n\xff\xfe broken\n")
+    (base / "stderr.log").write_bytes(b"\xfferr\n")
+
+    out, err = storage.load_swarm_stdout_stderr(str(tmp_path), "sid")
+
+    assert out[0] == "ok line"          # читаемое доехало целиком
+    assert len(out) == 2 and out[1]     # битая строка не потеряна, а помечена
+    assert len(err) == 1 and "err" in err[0]
+
+
 def test_load_stdout_stderr_returns_lines(tmp_path):
     base = tmp_path / "sid"
     base.mkdir()

@@ -13,7 +13,9 @@ from gc_testkit.paths import module_dir
 
 def _restore_tools_and_dependents() -> None:
     for name in list(sys.modules):
-        if name in ("agent_executor", "run_summary_coordinator"):
+        # Полные имена: ключ в sys.modules — "gc_core.agent_executor". Старые
+        # плоские имена пережили переезд внутри кортежа, и pop был no-op.
+        if name in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
             sys.modules.pop(name, None)
         elif name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)

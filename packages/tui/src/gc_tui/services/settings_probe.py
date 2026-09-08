@@ -14,7 +14,7 @@ Express/гейтвея) — путь не найден, токен не вини
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from gc_core import model_picker
@@ -216,26 +216,26 @@ def interpret_auth(control: ProbeResult, with_token: Optional[ProbeResult],
         if (canary is not None
                 and canary.http_status == with_token.http_status
                 and canary.body_signature == with_token.body_signature):
-            return ProbeResult(
-                "unknown", with_token.http_status, None, with_token.latency_ms,
-                f"не удалось подтвердить токен: на заведомо неверный сервер "
-                f"отвечает так же ({with_token.http_status})")
+            # `replace`, а не пересборка по полям: `offline` (и любое будущее
+            # поле ProbeResult) обязан доехать до потребителей — ручной
+            # перечень терял его молча, auth_state здесь намеренно пуст.
+            return replace(
+                with_token, verdict="unknown", models=None,
+                detail=f"не удалось подтвердить токен: на заведомо неверный "
+                       f"сервер отвечает так же ({with_token.http_status})",
+                auth_state=None)
         if with_token.verdict == "ok":
-            return ProbeResult("ok", with_token.http_status, with_token.models,
-                               with_token.latency_ms, "токен принят",
-                               auth_state="accepted")
+            return replace(with_token, verdict="ok", detail="токен принят",
+                           auth_state="accepted")
         if with_token.http_status not in (None, 401):
             # Отказ «переехал» дальше авторизации (401 без токена → 404/5xx с токеном
             # на ТОМ ЖЕ маршруте) → путь существует и токен принят; остаток отказа —
             # про модель/сервер, забота других секций (живой кейс gigacode ST:
             # несуществующая модель даёт 404-не-JSON, неотличимый от кривого пути).
-            return ProbeResult("ok", with_token.http_status, with_token.models,
-                               with_token.latency_ms, "токен принят",
-                               auth_state="accepted")
+            return replace(with_token, verdict="ok", detail="токен принят",
+                           auth_state="accepted")
         auth_state = "rejected" if with_token.http_status == 401 else None
-        return ProbeResult(with_token.verdict, with_token.http_status,
-                           with_token.models, with_token.latency_ms,
-                           with_token.detail, auth_state=auth_state)
+        return replace(with_token, auth_state=auth_state)
     return control
 
 

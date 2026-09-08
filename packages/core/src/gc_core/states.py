@@ -115,10 +115,25 @@ class State:
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
         self.turn_tool_calls: int = 0   # вызовов инструментов за текущий ход (smart-гейт, спека §3)
+        # Уровень моделей, зафиксированный на текущий ход (`turn_boundary.begin_turn`).
+        # None — ход ещё не начинали; транспорт тогда резолвит живой уровень. Объявлено
+        # здесь, а не заводится на лету: читатели берут поле через getattr, и без
+        # объявления «не начинали» было бы неотличимо от «поля нет».
+        self.turn_level: Optional[str] = None
         self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors"
         self.last_unknown_tool_name: Optional[str] = None
         self.unknown_tool_repeat_count: int = 0
         self.last_batch_unknown_tool_count: int = 0
+        # То же для internal_tool_error: тул, падающий одинаково на каждом шаге,
+        # иначе жжёт весь бюджет шагов (tool_error_cnt обнуляется, когда
+        # неизвестных тулов в батче нет).
+        self.last_internal_error_tool_name: Optional[str] = None
+        self.internal_error_repeat_count: int = 0
+        self.last_batch_invalid_arguments_count: int = 0
+        # Loop detector: per-run in-memory ring of all tool-call fingerprints.
+        # Not persisted (StateSerializer pops it); not thread meta.
+        self.loop_detector_window: list[str] = []
+        self.loop_detector_pending: list[dict] = []
         self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
         # Шаги без вызова session_todo (todo_reminder); переживает ход через meta.

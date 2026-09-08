@@ -6,6 +6,7 @@ import copy
 import logging
 from typing import Any, Dict, Optional
 
+from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
 from gc_core.tools.connect_mcp.api import acall_mcp_tool, call_mcp_tool
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.schema_optional import apply_openai_strict_object
@@ -27,12 +28,15 @@ class MCPToolWrapper:
         tools_registry: Dict[str, Dict[str, Any]],
         timeout: float,
         default_use_retry: bool,
+        *,
+        os_backend: Any = None,
     ) -> None:
         self._full_tool_name = full_tool_name
         self._servers_cfg = servers_cfg
         self._tools_registry = tools_registry
         self._timeout = timeout
         self._default_use_retry = default_use_retry
+        self._os_backend = os_backend
 
     async def acall(self, **arguments: Any) -> Any:
         """Быстрый путь для цикла агента: диспетчер зовёт его без потока.
@@ -60,6 +64,7 @@ class MCPToolWrapper:
             tools_registry=self._tools_registry,
             timeout=self._timeout,
             default_use_retry=self._default_use_retry,
+            os_backend=self._os_backend,
         )
 
 
@@ -368,6 +373,39 @@ def normalize_tool_spec_for_agent(
     return spec
 
 
+def _mcp_base_tool_name(full_name: str, entry: Dict[str, Any]) -> str:
+    """Базовое имя тула как в tools/list, без префикса mcp_<server>_."""
+    metadata = entry.get("metadata") if isinstance(entry, dict) else None
+    if isinstance(metadata, dict):
+        raw = metadata.get("mcp_tool_name")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    prefix = "mcp_"
+    if full_name.startswith(prefix):
+        rest = full_name[len(prefix):]
+        _, sep, tool = rest.partition("_")
+        if sep and tool:
+            return tool
+    return full_name
+
+
+def _loop_warn_for_mcp_tool(
+    server_cfg: Dict[str, Any] | None,
+    base_tool_name: str,
+) -> Dict[str, int] | None:
+    """Opt-in: generic-профиль только для явно указанных тулов сервера."""
+    if not isinstance(server_cfg, dict):
+        return None
+    raw = server_cfg.get("loop_control_tools")
+    if raw == "all":
+        return dict(GENERIC_PROFILE)
+    if not isinstance(raw, list):
+        return None
+    allowed = {str(name).strip() for name in raw if str(name).strip()}
+    if base_tool_name in allowed:
+        return dict(GENERIC_PROFILE)
+    return None
+
 
 # Транспорты, у которых есть канал HTTP-заголовков.
 _TRACE_HEADER_TRANSPORTS = {"http", "sse", "stream_http", "stream_sse"}
@@ -427,6 +465,7 @@ def _prepare_mcp_tools_data(
     config_dict: Dict[str, Any],
     *,
     tools_cache: Optional[ToolsCache] = None,
+    os_backend: Any = None,
 ):
     """Подготовить кэш и конфиг серверов перед дискавери.
 
@@ -461,7 +500,10 @@ def _prepare_mcp_tools_data(
     }
 
     if tools_cache is None:
-        tools_cache = ToolsCache(cfg)
+        # `os_backend` приехал с develop: через него говорят клиенты
+        # `execute_on: os_backend`. У ЧУЖОГО кэша бэкенд уже свой — владелец
+        # завёл его вместе с кэшем, и переопределять его здесь нельзя.
+        tools_cache = ToolsCache(cfg, os_backend=os_backend)
     else:
         # Чужой кэш адресуется по СОДЕРЖИМОМУ mcp-servers (_make_cache_key), а
         # cfg здесь пересобран из config_dict — поэтому обновляем ссылку, чтобы
@@ -500,6 +542,7 @@ def _assemble_mcp_tools_data(
                 mcp_registry,
                 timeout,
                 default_use_retry=default_use_retry,
+                os_backend=os_backend,
             )
 
         return fabric
@@ -518,11 +561,24 @@ def _assemble_mcp_tools_data(
             tool_entry, openai_strict=openai_strict
         )
 
-        result[full_name] = {
+        metadata = entry.get("metadata") if isinstance(entry, dict) else None
+        server_key = None
+        if isinstance(metadata, dict):
+            server_key = metadata.get("mcp_server_key")
+        server_cfg = servers_cfg.get(server_key) if server_key else None
+        loop_warn = _loop_warn_for_mcp_tool(
+            server_cfg if isinstance(server_cfg, dict) else None,
+            _mcp_base_tool_name(full_name, entry if isinstance(entry, dict) else {}),
+        )
+
+        tool_data: Dict[str, Any] = {
             "tool_fabric": make_fabric(full_name),
             "spec": normalized_spec,
             "description": normalized_spec.get("description", ""),
         }
+        if loop_warn is not None:
+            tool_data[LOOP_WARN_KEY] = loop_warn
+        result[full_name] = tool_data
     return result, status_map
 
 
@@ -531,13 +587,16 @@ async def aget_mcp_tools_data_for_config(
     on_progress=None,
     *,
     tools_cache: Optional[ToolsCache] = None,
+    os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """MCP-тулы в формате tools_data, без потока на дискавери.
 
     Основная реализация. Синхронное имя ``get_mcp_tools_data_for_config``
     сохранено и работает через портал — на нём сидят прямые вызовы и тесты.
     """
-    prepared = _prepare_mcp_tools_data(config_dict, tools_cache=tools_cache)
+    prepared = _prepare_mcp_tools_data(
+        config_dict, tools_cache=tools_cache, os_backend=os_backend
+    )
     if prepared is None:
         return {}, {}
     cache, servers_cfg = prepared
@@ -555,6 +614,7 @@ def get_mcp_tools_data_for_config(
     on_progress=None,
     *,
     tools_cache: Optional[ToolsCache] = None,
+    os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Синхронный двойник. Реализация одна — асинхронная.
 
@@ -567,7 +627,7 @@ def get_mcp_tools_data_for_config(
 
     return run_coro_blocking(
         aget_mcp_tools_data_for_config(
-            config_dict, on_progress, tools_cache=tools_cache
+            config_dict, on_progress, tools_cache=tools_cache, os_backend=os_backend
         )
     )
 

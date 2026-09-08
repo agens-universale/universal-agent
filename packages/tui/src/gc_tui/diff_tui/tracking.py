@@ -83,6 +83,27 @@ def wrap_local_for_tui(inner: Any, ctx: Any) -> Any:
     return TrackingFsBackend(inner, ctx)
 
 
+def attach_to_context(ctx: Any, config_dict: dict) -> None:
+    """Включить diff-журнал на готовом контексте: обернуть backend и пересобрать workspace.
+
+    Живёт здесь, а не в ядре. До 27.08.2026 эти три действия делал сам
+    `gc_core.run_context.create_run_context` под `if is_tui`, и ради них ядро
+    импортировало `gc_tui.diff_tui.tracking` — единственная его зависимость от
+    фронтенда. Знание «обернул backend — пересобери workspace» принадлежит тому, кто
+    оборачивает, поэтому переехало к обёртке; ядро о diff-экране больше не знает.
+
+    Идемпотентна: повторный вызов ничего не меняет (`wrap_local_for_tui` возвращает
+    тот же объект, если он уже Tracking или не Local).
+    """
+    from gc_core.execution_workspace import build_execution_workspace
+
+    wrapped = wrap_local_for_tui(ctx.os_backend, ctx)
+    if wrapped is ctx.os_backend:
+        return
+    ctx.os_backend = wrapped
+    ctx.workspace = build_execution_workspace(wrapped, config_dict)
+
+
 class TrackingFsBackend:
     """Декоратор LocalFsBackend: DiffStore snapshot + TouchedJournal."""
 
@@ -99,6 +120,24 @@ class TrackingFsBackend:
     @exec_output_capture_max_chars.setter
     def exec_output_capture_max_chars(self, value: int) -> None:
         self._inner.exec_output_capture_max_chars = int(value)
+
+    # Capability probes живут на inner (ленивый кэш там же) — обёртка только
+    # пробрасывает, иначе native-пути (find/grep) молча считаются недоступными.
+    @property
+    def has_find(self) -> bool:
+        return self._inner.has_find
+
+    @property
+    def has_grep(self) -> bool:
+        return self._inner.has_grep
+
+    @property
+    def grep_exclude_dir(self) -> bool:
+        return self._inner.grep_exclude_dir
+
+    @property
+    def grep_include(self) -> bool:
+        return self._inner.grep_include
 
     @property
     def inner(self) -> Any:
@@ -216,9 +255,16 @@ class TrackingFsBackend:
         cwd: Optional[str] = None,
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
     ) -> Any:
         return self._track_shell_delta(
-            lambda: self._inner.exec(command, cwd=cwd, timeout=timeout, env=env)
+            lambda: self._inner.exec(
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
+            )
         )
 
     def exec_argv(
@@ -229,10 +275,16 @@ class TrackingFsBackend:
         cwd: Optional[str] = None,
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
     ) -> Any:
         return self._track_shell_delta(
             lambda: self._inner.exec_argv(
-                argv, stdin=stdin, cwd=cwd, timeout=timeout, env=env
+                argv,
+                stdin=stdin,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
             )
         )
 
@@ -313,6 +365,26 @@ class TrackingFsBackend:
     ) -> Iterable[tuple[str, bool]]:
         return self._inner.iter_walk(path, should_descend=should_descend)
 
+    def walk_entries(self, path: str, *, prune_names=(), prune_dot_dirs: bool = False) -> list:
+        return self._inner.walk_entries(
+            path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+        )
+
+    def iter_walk_entries(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+        prune_names=(),
+        prune_dot_dirs: bool = False,
+    ):
+        return self._inner.iter_walk_entries(
+            path,
+            should_descend=should_descend,
+            prune_names=prune_names,
+            prune_dot_dirs=prune_dot_dirs,
+        )
+
     def iter_files(
         self,
         path: str,
@@ -326,3 +398,6 @@ class TrackingFsBackend:
 
     def join(self, base: str, name: str) -> str:
         return self._inner.join(base, name)
+
+    def isabs(self, path: str) -> bool:
+        return self._inner.isabs(path)

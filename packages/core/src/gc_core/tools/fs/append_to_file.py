@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Any, Dict, Optional
 
 from gc_core.tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -11,7 +12,7 @@ from gc_core.security.path_policy import enforce_write_guard
 class AppendToFile(AbstractSimpleTool):
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
             "type": "function",
             "name": "fs_append_file",
@@ -71,7 +72,7 @@ class AppendToFile(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = '''Tool name: fs_append_file
 Tool description: Appends content to an existing file (e.g., for notes, logs, analysis results).
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}, "separator": {"type": "string", "description": "Text put between the current file end and the new content. Prefer two newlines unless another separator is needed; empty string means no separation."}}, "required": ["path", "content", "separator"], "additionalProperties": false}

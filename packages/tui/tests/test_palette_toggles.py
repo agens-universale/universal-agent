@@ -1089,7 +1089,9 @@ async def test_palette_navigation_does_not_change_footer_row_count(tmp_path):
             return [c.name for c in palette._visible_toggle_rows()]
 
         assert palette.selected_command().name == "help"
-        assert _names() == ["rigor", "gate", "answers"]   # дети видны сразу, без навигации
+        # level/profiles — новая группа «чем работаем» перед rigor (спека §12.1);
+        # дети rigor (gate, answers) видны сразу, без навигации.
+        assert _names() == ["level", "profiles", "rigor", "gate", "answers"]
         expected = len(_names())
 
         regular_count = len(palette._visible_rows())

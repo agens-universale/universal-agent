@@ -222,7 +222,7 @@ def map_message(
 
     # ASK_HUMAN — kind=ask_human, summary=question (TraceScreen mounts banner).
     if typ == "function_call" and name == "ask_human":
-        args = _coerce_args(msg.get("arguments"))
+        args = coerce_args(msg.get("arguments"))
         question = args.get("question", "")
         if isinstance(question, str) and question.strip():
             return TraceEvent(
@@ -236,7 +236,7 @@ def map_message(
     # SUBMIT_SOLUTION call — task_report как kind=agent;
     # comment кладём sidecar-ключом в копию payload, чтобы не мутировать оригинал.
     if typ == "function_call" and name == "submit_solution":
-        args = _coerce_args(msg.get("arguments"))
+        args = coerce_args(msg.get("arguments"))
         report = args.get("task_report") or ""
         comment = args.get("comment") or ""
         if isinstance(report, str) and report.strip():
@@ -254,7 +254,7 @@ def map_message(
     # INTERMEDIATE_REPLY call — answer как kind=agent (проза с маркером ·);
     # output глушим (машинный статус пользователю не нужен).
     if typ == "function_call" and name == "intermediate_reply":
-        args = _coerce_args(msg.get("arguments"))
+        args = coerce_args(msg.get("arguments"))
         answer = args.get("answer") or ""
         if isinstance(answer, str) and answer.strip():
             return TraceEvent(
@@ -376,7 +376,7 @@ def map_message(
     return None
 
 
-def _coerce_args(arguments: Any) -> dict:
+def coerce_args(arguments: Any) -> dict:
     if isinstance(arguments, dict):
         return arguments
     if isinstance(arguments, str):
@@ -549,6 +549,10 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         # error может быть dict {type, message, ...} — извлекаем message/type.
         if isinstance(err, dict):
             err = err.get("message") or err.get("type") or json.dumps(err, ensure_ascii=False)
+        elif isinstance(err, str) and data.get("message"):
+            # Плоский код ошибки (напр. internal_tool_error) сам по себе ничего
+            # не сообщает, а человекочитаемый текст лежит рядом в "message".
+            err = data["message"]
         return str(err)[:160]
 
     bits: list[str] = []
@@ -595,7 +599,7 @@ def _map_function_event(
     call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
 
     if typ == "function_call":
-        args = _coerce_args(msg.get("arguments"))
+        args = coerce_args(msg.get("arguments"))
         summary = f"{name or '<tool>'}({_arg_summary(name or '', args)})"
         return TraceEvent(
             no=no, event_ts_utc_iso=ts, kind="call",

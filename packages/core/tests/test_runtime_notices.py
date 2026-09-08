@@ -1,28 +1,25 @@
 """Runtime notices: LLM failures → ephemeral Notice list."""
 from __future__ import annotations
+from gc_testkit import as_coro
 
 import json
 from types import SimpleNamespace
 
 import pytest
-import httpx
+import requests
 
 from gc_core import request_backend_policy as policy
-from gc_core.runtime_notices import (
-    clear_runtime_notices,
-    collect_runtime_notices,
-    notice_from_llm_failure,
-    push_runtime_notice,
-)
+from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices, notice_from_llm_failure, push_runtime_notice
 from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import EmbeddedChoiceError
 
 
-def _http_error(status: int, body: dict) -> httpx.HTTPStatusError:
-    """Ошибка HTTP в форме httpx: requests ушёл из зависимостей ядра."""
-    request = httpx.Request("POST", "http://backend.invalid/v1")
-    resp = httpx.Response(status, json=body, request=request)
-    return httpx.HTTPStatusError("http error", request=request, response=resp)
+def _http_error(status: int, body: dict) -> requests.exceptions.HTTPError:
+    resp = requests.Response()
+    resp.status_code = status
+    resp._content = json.dumps(body).encode("utf-8")
+    err = requests.exceptions.HTTPError(response=resp)
+    return err
 
 
 def setup_function():
@@ -68,12 +65,12 @@ def test_push_dedup_same_code_and_message():
 def test_policy_pushes_notice_on_final_failure(monkeypatch):
     clear_runtime_notices()
 
-    async def boom(*args, **kwargs):
+    def boom(*args, **kwargs):
         raise _http_error(400, {"message": "bad request"})
 
-    monkeypatch.setattr(policy, "arequest_backend_chat_completions", boom)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(requests.exceptions.HTTPError):
         policy.request_chat_completions_with_policy(
             payload_factory=lambda mt: {"model": "m", "messages": []},
             initial_max_tokens=1400,
@@ -95,12 +92,12 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
 def test_policy_skips_notice_when_disabled(monkeypatch):
     clear_runtime_notices()
 
-    async def boom(*args, **kwargs):
+    def boom(*args, **kwargs):
         raise _http_error(500, {"message": "fail"})
 
-    monkeypatch.setattr(policy, "arequest_backend_chat_completions", boom)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(requests.exceptions.HTTPError):
         policy.request_chat_completions_with_policy(
             payload_factory=lambda mt: {"model": "m", "messages": []},
             initial_max_tokens=1400,

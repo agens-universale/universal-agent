@@ -1,7 +1,7 @@
-import asyncio
 """E2E finish gate — регрессия §1.2 SPEC (две оси, fix_report без повтора ask_human)."""
 
 import importlib
+from gc_testkit import as_coro
 import json
 import logging
 import sys
@@ -45,6 +45,8 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
+    # Ветка await'ит `aapply_tool`: синхронная заглушка здесь давала бы
+    # `TypeError: object str can't be used in 'await' expression`.
     async def _apply_tool(*_args, **_kwargs):
         arguments = _kwargs.get("arguments")
         try:
@@ -68,13 +70,13 @@ def _stub_tools_modules() -> None:
         return {}, [], []
 
     tools_pkg.aapply_tool = _apply_tool
+    # Имена приехали с develop: processing_responses импортирует их из
+    # пакета, и заглушка обязана их отдавать — иначе падает импорт модуля.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_k: False
+    tools_pkg.is_unknown_tool_output = lambda *_a, **_k: False
+    tools_pkg.tool_arguments_valid = lambda *_a, **_k: True
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
-    # Заглушка обязана покрывать ВСЁ, что импортирует processing_responses:
-    # иначе файл падает ImportError при изолированном прогоне и проходит
-    # только в компании соседей, успевших импортировать настоящий модуль.
-    from gc_core.tools import is_unknown_tool_output as _is_unknown
-    tools_pkg.is_unknown_tool_output = _is_unknown
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
@@ -95,24 +97,23 @@ def _load_processing_responses():
     processing_module = pm
     run_agent = ra
     State = St
+    # Заглушка ставится ПРЯМЫМ присваиванием (не monkeypatch), поэтому снимать
+    # её обязаны мы сами. Раньше teardown выбрасывал только модули из
+    # sys.modules, а `processing_responses.aapply_tool` оставался заглушкой на
+    # весь остаток прогона — и `test_parity_smoke` падал пятью тестами, проходя
+    # при этом в одиночку.
     pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
     yield
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    # Вернуть НАСТОЯЩИЙ диспетчер. Выбросить пакет из sys.modules мало: имена
-    # уже связаны в модулях-потребителях (`from gc_core.tools import ...`), и
-    # без восстановления заглушка, отдающая turn_finish на ЛЮБОЙ тул, жила бы
-    # до конца сессии — все последующие тесты с настоящим вызовом тулов
-    # молча проверяли бы её вместо ядра. Так же поступает teardown в
-    # test_summary_triggers.py.
-    import importlib
-
-    real_tools = importlib.import_module("gc_core.tools")
-    pm.aapply_tool = real_tools.aapply_tool
-    pm.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
+    # Сохранить «прежнее» значение до yield нельзя: к этому моменту оно уже
+    # заглушка — pm импортирован после подмены. Настоящую функцию берём
+    # переимпортом уже очищенного пакета.
+    import gc_core.tools as real_tools
     from gc_core.message_policy import cycle_stop as cycle_stop_mod
 
+    pm.aapply_tool = real_tools.aapply_tool
     cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
@@ -165,7 +166,7 @@ def _submit_solution_call(
     }
 
 
-async def _scenario_12_validation(**_kwargs):
+def _scenario_12_validation(**_kwargs):
     """trace_ok: ask_human уже был; report_ok: full_solution не подходит."""
     return ValidationResult(
         ok=False,
@@ -184,7 +185,7 @@ async def _scenario_12_validation(**_kwargs):
 
 
 def test_fix_report_feedback_does_not_repeat_ask_human():
-    validation = asyncio.run(_scenario_12_validation())
+    validation = _scenario_12_validation()
     feedback = build_finish_gate_feedback(validation)
     assert "fix_report" in feedback
     assert "without repeating" in feedback
@@ -198,7 +199,7 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
-        _scenario_12_validation,
+            as_coro(_scenario_12_validation),
     )
     state = _make_state()
     seed_state_intent(
@@ -221,10 +222,10 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
-        _scenario_12_validation,
+            as_coro(_scenario_12_validation),
     )
 
-    async def _stub_user_ask(_messages, _state, _ctx):
+    def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -237,7 +238,9 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+    )
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -267,7 +270,7 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
 
 
 def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
-    async def _accept(**_kwargs):
+    def _accept(**_kwargs):
         return ValidationResult(
             ok=True,
             action="accept",
@@ -284,7 +287,7 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
-        _accept,
+            as_coro(_accept),
     )
 
     state = _make_state(parent_state_id="orch-parent")
@@ -304,7 +307,7 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
     assert state.current_user_intent == []
 
 
-async def _continue_work_validation(**_kwargs):
+def _continue_work_validation(**_kwargs):
     return ValidationResult(
         ok=False,
         action="continue_work",
@@ -319,7 +322,7 @@ async def _continue_work_validation(**_kwargs):
     )
 
 
-async def _handoff_phantom_validation(**_kwargs):
+def _handoff_phantom_validation(**_kwargs):
     return ValidationResult(
         ok=False,
         action="fix_report",
@@ -335,7 +338,7 @@ async def _handoff_phantom_validation(**_kwargs):
 
 
 def test_handoff_artifacts_fix_report_lists_paths():
-    feedback = build_finish_gate_feedback(asyncio.run(_handoff_phantom_validation()))
+    feedback = build_finish_gate_feedback(_handoff_phantom_validation())
     assert "fix_report" in feedback
     assert "phantom_plan.md" in feedback
 
@@ -344,10 +347,10 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
-        _continue_work_validation,
+            as_coro(_continue_work_validation),
     )
 
-    async def _stub_user_ask(_messages, _state, _ctx):
+    def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -360,7 +363,9 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+    )
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -390,7 +395,7 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
 
 
 def test_main_accept_after_ask_human_trace(monkeypatch):
-    async def _accept(**kwargs):
+    def _accept(**kwargs):
         assert kwargs.get("finish_handoff_arguments")
         args = kwargs["finish_handoff_arguments"]
         if isinstance(args, str):
@@ -412,7 +417,7 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
-        _accept,
+            as_coro(_accept),
     )
 
     state = _make_state(max_steps=0)
@@ -441,10 +446,10 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
-        _handoff_phantom_validation,
+            as_coro(_handoff_phantom_validation),
     )
 
-    async def _stub_user_ask(_messages, _state, _ctx):
+    def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -457,7 +462,9 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+    )
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -490,7 +497,7 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
 def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     captured: dict = {}
 
-    async def _capture(**kwargs):
+    def _capture(**kwargs):
         captured.update(kwargs)
         return ValidationResult(
             ok=True,
@@ -508,7 +515,7 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
-        _capture,
+            as_coro(_capture),
     )
     state = _make_state()
     seed_state_intent(state, current="open task", log="closed task")
@@ -536,10 +543,10 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
     """Reject finish gate must not return finish_arguments; inject technical user feedback."""
     validate_calls = {"n": 0}
 
-    async def _validate(**_kwargs):
+    def _validate(**_kwargs):
         validate_calls["n"] += 1
         if validate_calls["n"] == 1:
-            return await _scenario_12_validation()
+            return _scenario_12_validation()
         return ValidationResult(
             ok=True,
             action="accept",
@@ -556,27 +563,26 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
-        _validate,
+            as_coro(_validate),
     )
-    async def _noop_intent_scope(**_kwargs):
-        return None
-
     monkeypatch.setattr(
         processing_module,
         "amaybe_update_intent_scope_from_tool",
-        _noop_intent_scope,
+        as_coro(lambda **_kwargs: None),
     )
 
     user_ask_batches: list[list] = []
 
-    async def _stub_user_ask(in_messages, _state, _ctx):
+    def _stub_user_ask(in_messages, _state, _ctx):
         user_ask_batches.append(list(in_messages))
         return (
             [_submit_solution_call(solution_type="direct_answer")],
             "rid_retry",
         )
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _stub_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+    )
 
     state = _make_state(max_steps=10)
     seed_state_intent(

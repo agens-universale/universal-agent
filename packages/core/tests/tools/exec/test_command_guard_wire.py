@@ -7,6 +7,7 @@ Covers:
 - protection_enabled=False → tripwire skipped, command runs (execute_command)
 - rm -rf .gc → denied (run_python_code, code containing .gc path reference)
 - ask path → confirmed → allowed; not confirmed → denied (execute_command)
+- обе ветки декоратора отдают один и тот же конверт: message + guidance
 """
 import json
 import types
@@ -175,6 +176,32 @@ def test_execute_command_ask_path_not_confirmed_blocks(tmp_path, monkeypatch):
     )
     assert result["ok"] is False
     assert result["error"]["type"] == "protected_path_denied"
+
+
+def test_blocked_envelope_form_is_the_same_in_both_branches(tmp_path, monkeypatch):
+    """ask-отказ и deny отдают модели один конверт: message + отдельный guidance.
+
+    Раньше ask-ветка приклеивала NO_WORKAROUND_NOTICE к message, а deny клала
+    его в guidance — один и тот же гвард говорил с моделью двумя формами.
+    """
+    from gc_core.config_modules import env_vars
+    from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+
+    tool = with_local_ctx(ExecuteCommand)
+
+    monkeypatch.setattr(cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask")
+    monkeypatch.setattr("gc_core.security.confirm_port.request_confirm", lambda **k: False)
+    asked = json.loads(tool(command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path)))["error"]
+
+    monkeypatch.setattr(cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "deny")
+    denied = json.loads(tool(command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path)))["error"]
+
+    assert set(asked) == set(denied) == {"type", "message", "guidance"}
+    assert asked["guidance"] == denied["guidance"] == NO_WORKAROUND_NOTICE
+    # Приклейка к message — ровно то, что убрали: она обязана НЕ вернуться.
+    assert "Do NOT retry" not in asked["message"]
+    assert "Do NOT retry" not in denied["message"]
 
 
 # ---------------------------------------------------------------------------

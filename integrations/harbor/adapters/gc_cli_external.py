@@ -18,6 +18,7 @@ Usage:
 import asyncio
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,16 @@ from harbor.models.trajectories import (
 from harbor.utils.trajectory_utils import format_trajectory_json
 
 from adapters.gc_cli_config import build_gc_cli_config
+from adapters.step_timings import StepTimings
+
+# Harbor task transports -> gc-cli transports, 1:1. Harbor normalises `http` to
+# `streamable-http` (models/task/config.py), so those three are all we ever see.
+_HARBOR_TRANSPORT_MAP = {
+    "streamable-http": "stream_http",
+    "sse": "sse",
+    "stdio": "stdio",
+}
+
 
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-ua`), so it imports directly — no source-dir / PYTHONPATH.
@@ -63,11 +74,14 @@ if not _PROMPTS_DIR.is_dir():                            # editable/local: fall 
     # Корень репозитория ищем ПО МАРКЕРУ, а не фиксированной глубиной: адаптер
     # уже переезжал (harbor/ → integrations/harbor/), и счётчик .parent молча
     # уводил на уровень выше нужного — промпты переставали находиться.
-    _repo_root = None
-    for _candidate in _ADAPTER_DIR.parents:
-        if (_candidate / "packages").is_dir() and (_candidate / "pyproject.toml").is_file():
-            _repo_root = _candidate
-            break
+    # Реализация маркера одна на всех — gc_core.bundled_assets. Своя копия тут
+    # была слабой («packages/ рядом с pyproject.toml») и в чужом монорепо
+    # объявляла корнем ЕГО корень. Импорт локальный, внутри ветки: в образе
+    # промпты лежат рядом с адаптерами, эта ветка не выполняется вовсе, и
+    # адаптер не обязан тянуть ядро на старте.
+    from gc_core.bundled_assets import repo_root_from as _find_repo_root
+
+    _repo_root = _find_repo_root(_ADAPTER_DIR)
     if _repo_root is None:                               # не рабочая копия — оставляем как есть
         _repo_root = _ADAPTER_DIR.parent.parent
     # Ассеты принадлежат дистрибутиву gc-core и лежат рядом с его исходниками;
@@ -391,6 +405,34 @@ class GcCliExternal(BaseAgent):
             "`skills_load` to load the relevant one before solving."
         )
 
+    def _populate_usage(self, context: Any, state: Any) -> dict[str, Any] | None:
+        """Hand `state.usage` totals to Harbor, which otherwise writes nulls.
+
+        Totals cover every LLM call — main loop, summariser, finish gate, subagents.
+        `n_input_tokens` includes cache on both sides. `cost_usd` is left unset: vllm
+        returns no price, so cost is computed downstream from tokens and the tariff.
+        Best-effort like `_write_trajectory` — runs in a `finally` that may be
+        unwinding a timeout. Returns the totals for the caller's metadata.
+        """
+        try:
+            usage = getattr(state, "usage", None) if state is not None else None
+            totals = usage.totals() if usage is not None else None
+            if not totals or not totals["calls"]:
+                return totals
+            context.n_input_tokens = totals["input"]
+            context.n_output_tokens = totals["output"]
+            context.n_cache_tokens = totals["cached"]
+            if totals["missing_usage_calls"]:
+                self.logger.warning(
+                    "%d of %d LLM calls returned no usage; token totals are short by those",
+                    totals["missing_usage_calls"],
+                    totals["calls"],
+                )
+            return totals
+        except Exception:
+            self.logger.exception("could not report token usage to Harbor")
+            return None
+
     def _write_trajectory(self, state: Any) -> int:
         """Dump the gc-cli run as ATIF `trajectory.json`, mirroring Terminus2.
 
@@ -425,6 +467,99 @@ class GcCliExternal(BaseAgent):
             self.logger.error("Failed to write ATIF trajectory.json", exc_info=True)
             return 0
 
+    @staticmethod
+    def _harbor_mcp_to_config(servers: list, *, logger: Any = None) -> dict:
+        """Task-declared MCP servers as gc-cli `mcp-servers` entries.
+
+        The task's own environment is where these servers live, so they are
+        tagged `execute_on: os_backend`. The transport is carried through
+        unchanged — the locus is a separate axis.
+        """
+        # The rule for which transports survive a stateless exec lives in the
+        # resolver; a local copy would drift the moment a transport is added.
+        # gc-cli is imported lazily here, like everywhere else in this adapter.
+        from gc_core.tools.connect_mcp.execute_on import OS_BACKEND_TRANSPORTS
+
+        mapped: dict = {}
+        for server in servers or []:
+            name = getattr(server, "name", None)
+            transport = getattr(server, "transport", None)
+            if not name or not transport:
+                continue
+            gc_transport = _HARBOR_TRANSPORT_MAP.get(str(transport))
+            if gc_transport is None:
+                if logger is not None:
+                    logger.warning(
+                        "MCP server %r: unsupported harbor transport %r, skipped",
+                        name, transport,
+                    )
+                continue
+            key = re.sub(r"[^A-Za-z0-9_]", "_", str(name))
+            if key in mapped and logger is not None:
+                logger.warning(
+                    "MCP server %r collides with an earlier server on key %r after "
+                    "sanitising; the earlier one is dropped",
+                    name, key,
+                )
+            # `sse` needs a live session, which a stateless exec cannot hold, so
+            # tagging it os_backend would build a config the resolver is
+            # guaranteed to reject. It stays on the agent locus: unreachable from
+            # there is an honest connection error, not a self-inflicted config one.
+            locus = (
+                "os_backend" if gc_transport in OS_BACKEND_TRANSPORTS else "agent"
+            )
+            if locus == "agent" and logger is not None:
+                logger.warning(
+                    "MCP server %r uses transport %r, which needs a live session "
+                    "and cannot run inside the task environment; it will be tried "
+                    "from the agent runtime instead",
+                    name, transport,
+                )
+            entry: dict = {
+                "transport": gc_transport,
+                "server-name": str(name),
+                "execute_on": locus,
+            }
+            if gc_transport == "stdio":
+                entry["command"] = str(getattr(server, "command", "") or "")
+                entry["args"] = [str(a) for a in (getattr(server, "args", None) or [])]
+            else:
+                entry["url"] = str(getattr(server, "url", "") or "")
+            mapped[key] = entry
+        return mapped
+
+    @staticmethod
+    def _apply_mcp_servers(
+        config_dict: dict, servers: list, *, logger: Any = None
+    ) -> None:
+        """Merge task MCP servers into the run config; existing entries win.
+
+        An explicit entry in the agent's own config is a deliberate statement
+        about that server (including its locus), so autotagging never overrides
+        it.
+        """
+        mapped = GcCliExternal._harbor_mcp_to_config(servers, logger=logger)
+        if not mapped:
+            return
+        existing = dict(config_dict.get("mcp-servers") or {})
+        # An explicit entry wins — including when the user wrote the server's
+        # natural name (`user-server`) and the mapper sanitised it to
+        # `user_server`. Comparing raw keys would register the sidecar twice and
+        # discover it under two tool prefixes.
+        claimed = {re.sub(r"[^A-Za-z0-9_]", "_", str(k)) for k in existing}
+        fresh = {k: v for k, v in mapped.items() if k not in claimed}
+        config_dict["mcp-servers"] = {**fresh, **existing}
+        meta = dict(config_dict.get("mcp-meta") or {})
+        # Every MCP operation is now an exec round-trip into the container, and a
+        # sim-user answer is a full LLM call on the other side.
+        meta["request_timeout_sec"] = max(
+            int(meta.get("request_timeout_sec") or 0), 600
+        )
+        meta["discovery_timeout_sec"] = max(
+            int(meta.get("discovery_timeout_sec") or 0), 120
+        )
+        config_dict["mcp-meta"] = meta
+
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
@@ -433,6 +568,9 @@ class GcCliExternal(BaseAgent):
 
         loop = asyncio.get_running_loop()
         config_dict = self._build_config()
+        self._apply_mcp_servers(
+            config_dict, getattr(self, "mcp_servers", None) or [], logger=self.logger
+        )
         skills_dir = getattr(self, "skills_dir", None)
         container_skills = (
             skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
@@ -448,6 +586,8 @@ class GcCliExternal(BaseAgent):
 
         executor = None
         self._evicted_messages: list = []
+        # Wall-clock split per step: LLM wait vs tool exec.
+        timings = StepTimings(self.logs_dir / "timings.jsonl")
 
         def _on_messages_evicted(dropped: list) -> None:
             # Host-side archive for ATIF dump; core State does not retain these.
@@ -455,6 +595,7 @@ class GcCliExternal(BaseAgent):
 
         def _run_loop():
             nonlocal executor
+            timings.attach()  # sink routing is per thread — bind inside the worker
             ctx = create_run_context(
                 config_dict,
                 environment=environment,
@@ -468,26 +609,61 @@ class GcCliExternal(BaseAgent):
 
         # Run the synchronous gc-cli loop off the event loop so backend bridging works,
         # then dump the final message history as ATIF trajectory.json.
+        #
+        # asyncio.to_thread's future can't be cancelled: on a Harbor timeout,
+        # asyncio.wait_for(...) raises CancelledError here but the worker thread keeps
+        # running unattended (up to the pod's infra time limit) since nothing tells the
+        # executor to stop. Use run_in_executor instead so we hold the underlying future
+        # and, on cancellation, call executor.stop_run() (cooperative flag checked by the
+        # step loop) and give the thread a grace period to exit before re-raising.
         state = None
+        fut = loop.run_in_executor(None, _run_loop)
         try:
-            state = await asyncio.to_thread(_run_loop)
+            state = await fut
+        except asyncio.CancelledError:
+            if executor is not None:
+                executor.stop_run()
+            try:
+                state = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "gc-cli worker thread still running after stop_run(); "
+                    "abandoning it and dumping best-effort partial state"
+                )
+            raise
         finally:
             # On a Harbor agent timeout (CancelledError) or a backend error the worker
-            # thread is abandoned before _run_loop returns, so `state` stays None. Recover
-            # whatever the executor reached (get_state() is lock-guarded) and still dump a
-            # partial ATIF trajectory — otherwise timed-out/errored runs are a black hole
-            # with no trace to debug. The original exception re-raises after this block.
-            # ponytail: the orphaned thread can't be killed; partial state is best-effort.
+            # thread may be abandoned before _run_loop returns, so `state` stays None.
+            # Recover whatever the executor reached (get_state() is lock-guarded) and
+            # still dump a partial ATIF trajectory — otherwise timed-out/errored runs
+            # are a black hole with no trace to debug. The original exception re-raises
+            # after this block.
+            # ponytail: best-effort only — if stop_run() didn't unblock the thread in
+            # time, the thread is still orphaned; raise the grace timeout if this needs
+            # a harder kill later.
             if state is None and executor is not None:
                 state = executor.get_state()
             n_steps = self._write_trajectory(state)
+            # On a timeout the worker is abandoned mid-call: these are the totals
+            # reached so far, and timings.jsonl names the call still running.
+            timing_summary = timings.summary()
+            timings.close()
+            self.logger.info("timings: %s", timing_summary)
 
-            # Populate AgentContext so the run isn't a black box. gc-cli does not track
-            # token usage in `state`, so token/cost counters stay None (would need core
-            # accounting); metadata at least records the run shape for log triage.
-            if context is not None and context.metadata is None:
-                context.metadata = {
-                    "agent": self.name(),
-                    "session_id": self._session_id,
-                    "total_steps": n_steps,
-                }
+            # Populate AgentContext so the run isn't a black box: token counters the
+            # same way every other Harbor agent reports them, plus metadata for triage.
+            if context is not None:
+                totals = self._populate_usage(context, state)
+                if context.metadata is None:
+                    context.metadata = {
+                        "agent": self.name(),
+                        "session_id": self._session_id,
+                        "total_steps": n_steps,
+                        "timings": timing_summary,
+                        # A zero token count means "no calls"; a missing one means "not
+                        # counted". Record both so the difference stays visible.
+                        "llm_calls": totals["calls"] if totals else None,
+                        "llm_calls_without_usage": (
+                            totals["missing_usage_calls"] if totals else None
+                        ),
+                    }

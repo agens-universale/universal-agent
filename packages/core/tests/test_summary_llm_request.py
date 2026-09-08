@@ -54,6 +54,7 @@ def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
         state=SimpleNamespace(default_model="m"),
         messages=[{"role": "user", "content": "hi"}],
         request_label="summary_batch_1",
+        consumer="summary",
     )
 
     assert out == "summary ok"
@@ -82,6 +83,7 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
         state=SimpleNamespace(default_model="m"),
         messages=[{"role": "user", "content": "hi"}],
         request_label="summary_batch_1",
+        consumer="summary",
         payload_overrides={"temperature": 0.2},
     )
     assert captured["payload_overrides"] == {
@@ -97,6 +99,7 @@ def test_request_summary_text_requires_chat_completions_llm_on_ctx():
             state=SimpleNamespace(default_model="m"),
             messages=[{"role": "user", "content": "hi"}],
             request_label="summary_batch_1",
+            consumer="summary",
         )
 
 
@@ -134,7 +137,9 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
         "arequest_chat_completions_with_policy",
         _fake_policy,
     )
-    monkeypatch.setattr(llm_chat_client, "create_call_headers", lambda _s, _c: {})
+    monkeypatch.setattr(
+        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+    )
 
     ctx = SimpleNamespace(
         config_dict={
@@ -154,6 +159,7 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
         state=SimpleNamespace(default_model="test-model"),
         messages=[{"role": "user", "content": "hello"}],
         max_tokens=321,
+        consumer="summary",
         payload_overrides={
             "reasoning_effort": "none",
             "separate_reasoning": False,

@@ -11,14 +11,15 @@ from typing import Any, Optional
 from gc_core.bundled_assets import bundled_root
 from gc_core.summarize.llm import arequest_auxiliary_completion_text
 
-from gc_core.config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
+from gc_core.config_modules.project_memory import (
+    DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS,
+    project_memory_from_config_dict,
+)
 
 SOFT_APPEND_INPUT_LIMIT_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _COMPACTION_PROMPT_PATH = bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
-
-_COMPACTION_MAX_TOKENS: int = 4_000  # roughly enough for compressed project_memory.md.
 
 
 @dataclass(frozen=True)
@@ -72,13 +73,15 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
         {"role": "system", "content": system},
         {"role": "user", "content": text},
     ]
+    max_tokens = project_memory_from_config_dict(cfg).compaction_max_tokens
     try:
         compressed = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
             messages=messages,
-            max_tokens=_COMPACTION_MAX_TOKENS,
+            max_tokens=max_tokens,
             request_label="project_memory_compaction",
+            consumer="memory_compaction",
         )
     except Exception as exc:  # noqa: BLE001 — caller wants explicit ok=false, not exception.
         return CompactionResult(

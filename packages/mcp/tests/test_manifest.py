@@ -436,18 +436,32 @@ def test_manifest_parses_optional_flag(tmp_path):
 
 
 def test_manifest_dist_matches_pyproject_when_source_present():
-    """Где source-папка на диске есть — install.dist == [project].name из pyproject."""
+    """Где source-папка на диске есть — install.dist == [project].name из pyproject.
+
+    Существование папки проверяется ТЕМ ЖЕ ``_vendor_candidates``, которым её
+    ищет установщик. Раньше здесь была своя арифметика ``root / install.source``
+    (root — каталог рецептов), она не попадала в цель ни разу, цикл всегда делал
+    ``continue``, и тест был вакуумным: он проходил бы и при ``_dist_name``,
+    всегда возвращающей None. Счётчик ниже стережёт именно это.
+    """
     import dataclasses
     from recommended_mcp import install as inst
     from recommended_mcp.manifest import default_manifest_path, load_manifest
     from recommended_mcp.runtime.manifest_resolve import recipe_root
     root = recipe_root()
+    checked = 0
     for e in load_manifest(default_manifest_path(root)):
         if e.install.type == "source" and e.install.dist and e.install.source:
-            pp = (root / e.install.source).resolve() / "pyproject.toml"
-            if not pp.is_file():
+            name = inst._source_dir_name(e.install.source)
+            if not any((c / "pyproject.toml").is_file()
+                       for c in inst._vendor_candidates(name, root)):
                 continue
+            checked += 1
             no_dist = dataclasses.replace(
                 e, install=dataclasses.replace(e.install, dist=None))
             assert e.install.dist == inst._dist_name(no_dist, root), \
                 f"{e.name}: install.dist={e.install.dist} != имя из pyproject"
+    assert checked, (
+        "ни одной source-папки не найдено — тест вакуумен; проверьте, что "
+        "external/vendor/* на месте и _vendor_candidates их находит"
+    )

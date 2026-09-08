@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from gc_core.config_modules.endpoint_presets import (
     DEFAULT_ENDPOINT_PRESETS,
     EndpointPreset,
@@ -35,17 +33,19 @@ def test_default_presets_are_not_materialized_into_the_template():
     впечатывался бы копией в конфиг каждому при первом запуске, и следующий
     добавленный провайдер до людей уже не доехал бы (живой случай 2026-08-17:
     в песочнице осталось три пресета из пяти)."""
-    # Пути к шаблону и демо-конфигу — из gc_testkit.paths, а не арифметикой от
-    # __file__: шаблон уехал в packages/core/assets/, а demo_config.yml остался
-    # в корне репозитория, и общего родителя у них больше нет.
-    from gc_core.config import _default_config_path
-    from gc_testkit.paths import REPO
-
-    for label, path in (("config.default.yml", Path(_default_config_path())),
-                        ("demo_config.yml", REPO / "demo_config.yml")):
-        text = path.read_text(encoding="utf-8")
-        assert "\nendpoint_presets:" not in text, f"{label}: блок развёрнут"
-        assert "# endpoint_presets:" in text, f"{label}: нет закомментированного образца"
+    from gc_testkit.paths import ASSETS, REPO
+    # Шаблон ядра уехал в packages/core/assets/, demo_config.yml остался
+    # в корне репозитория — считать оба от __file__ больше нельзя.
+    # Правило одно на ВСЕ каталоги пресетов, а не на первый заведённый:
+    # голосовой каталог приехал в шаблоны развёрнутым именно потому, что
+    # сторож спрашивал про `endpoint_presets`, а `voice_endpoint_presets`
+    # под это условие не подпадал.
+    for key in ("endpoint_presets", "voice_endpoint_presets"):
+        for path in (ASSETS / "config.default.yml", REPO / "demo_config.yml"):
+            name = path.name
+            text = path.read_text(encoding="utf-8")
+            assert f"\n{key}:" not in text, f"{name}: блок {key} развёрнут"
+            assert f"# {key}:" in text, f"{name}: нет закомментированного образца {key}"
 
 
 def test_from_config_missing_key_gives_default():
@@ -63,15 +63,11 @@ def test_from_config_invalid_entries_fall_back_to_default():
     assert endpoint_presets_from_config({"endpoint_presets": "garbage"}) == list(DEFAULT_ENDPOINT_PRESETS)
 
 
-def test_load_config_flattens_custom_presets_into_config_dict(tmp_path, monkeypatch):
+def test_load_config_flattens_custom_presets_into_config_dict(tmp_path):
     """Регрессия (fix Important-1): flatten_app_config не пробрасывал
     endpoint_presets — TUI видел только кодовый дефолт, пользовательские
     пресеты из config.yml были мертвы."""
     from gc_core import config as cfgmod
-    from gc_core.mcp_runtime import paths as mpaths
-
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
 
     conf = tmp_path / "config.yml"
     conf.write_text(

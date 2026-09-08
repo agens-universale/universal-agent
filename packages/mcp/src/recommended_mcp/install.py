@@ -14,24 +14,30 @@ import tomllib
 import urllib.request
 import zipfile
 from itertools import takewhile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional, Tuple
 # Позволяет запускать файл напрямую: `python recommended_mcp/install.py`.
 # При `python -m recommended_mcp.install` и при import из тестов — no-op.
 if __package__ in (None, ""):
-    _repo_root = Path(__file__).resolve().parents[1]
-    # Исходники разъехались по packages/<дистрибутив>/src; единого <repo>/src
-    # больше нет, и вставка мёртвого пути оставляла gc_core ненаходимым —
-    # прямой запуск (документированный фолбэк, когда gc-mcp недоступен) падал
-    # на ModuleNotFoundError. Ветка legacy оставлена для дореформенных копий.
-    for _p in (_repo_root, *sorted(_repo_root.glob("packages/*/src"))):
-        sys.path.insert(0, str(_p))
-    _legacy_src = _repo_root / "src"
-    if _legacy_src.is_dir():
-        sys.path.insert(0, str(_legacy_src))
+    # Единственная арифметика, которая тут допустима: каталог, из которого
+    # виден САМ пакет рецептов (`packages/mcp/src` в рабочей копии,
+    # site-packages в колесе). Без него не собрать `import recommended_mcp`,
+    # то есть не позвать общий поиск корня.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    # Дальше корень ищет repo_path ПО МАРКЕРУ. Жёсткая глубина здесь уже один
+    # раз сломалась: `parents[1]` указывал на корень до переезда рецептов, а
+    # после переезда стал указывать на packages/mcp/src — gc_core оставался
+    # ненаходимым, и прямой запуск (документированный фолбэк, когда gc-mcp
+    # недоступен) падал на ModuleNotFoundError. Менять её на parents[4] —
+    # повторять ту же ошибку. repo_path знает и дореформенную раскладку с
+    # единым <repo>/src, и кладёт на путь все packages/*/src разом.
+    from recommended_mcp.runtime.repo_path import ensure_repo_on_sys_path
+
+    ensure_repo_on_sys_path()
     __package__ = "recommended_mcp"
 
 from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
+from recommended_mcp.runtime.repo_path import repo_root_from
 from gc_core.mcp_runtime.state import save_runtime_state
 from recommended_mcp.runtime.venv import active_pip_python, ensure_mcp_venv, pip_argv, pip_install_argv, pip_install_target, query_installed_version
 from recommended_mcp.manifest import (
@@ -97,19 +103,43 @@ def find_entry(manifest, name: str):
 
 
 def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
-    """Имя дистрибутива для `pip uninstall`. Приоритет: явное install.dist (source-dir-независимо) → тип-специфичный фолбэк
-    (pypi → package; source → [project].name из pyproject; wheel → имя .whl)."""
+    """Имя дистрибутива для `pip uninstall`. Приоритет: явное install.dist
+    (source-dir-независимо) → тип-специфичный фолбэк (pypi → package;
+    source → [project].name из pyproject; wheel → имя .whl).
+
+    Для source исходники ищет ТОТ ЖЕ ``_vendor_candidates``, что и установщик.
+    Раньше здесь была своя арифметика — ``root / install.source`` — и она не
+    попадала в цель НИ в одной настоящей раскладке: ``root`` — это каталог
+    рецептов, а исходники лежат либо рядом с ним (колесо), либо в
+    ``external/vendor`` рабочей копии. Функция всегда возвращала None, и
+    деинсталл рецепта без явного ``dist:`` молча пропускался — при том что
+    поле ``dist`` опционально и в readme не документировано.
+    """
     if entry.install.dist:
         return entry.install.dist
     itype = entry.install.type
     if itype == "pypi" and entry.install.package:
         return _pypi_distribution_name(entry.install.package)
     if itype == "source" and entry.install.source is not None:
-        pyproject = (root / entry.install.source).resolve() / "pyproject.toml"
-        if pyproject.is_file():
-            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        for cand in _vendor_candidates(_source_dir_name(entry.install.source), root):
+            pyproject = cand / "pyproject.toml"
+            if not pyproject.is_file():
+                continue
+            try:
+                data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+                # Битый pyproject у одного кандидата не повод бросать поиск:
+                # следующим идёт external/vendor рабочей копии.
+                continue
             name = (data.get("project") or {}).get("name")
-            return str(name) if name else None
+            if name:
+                return str(name)
+            # Имени нет — кандидат не подходит, но поиск не окончен: следующим
+            # идёт external/vendor рабочей копии, где имя объявлено. Прежний
+            # `return None` обрывал перебор на первом же неполном pyproject, и
+            # `gc-mcp remove` рапортовал успех, оставив пакет установленным, —
+            # тот самый тихий пропуск, ради которого соседний except и написан.
+            continue
         return None
     if itype == "wheel":
         pkg_path = (root / entry.path).resolve() / "dist"
@@ -236,10 +266,30 @@ def _install_docker(name: str, pkg_path: Path) -> None:
     )
 
 
-#: Где лежат исходники наших MCP относительно корня репозитория.
-#: Одно место на весь модуль: и для поиска локальных исходников, и для
-#: вычисления #subdirectory при git-установке.
-VENDOR_REL = "external/vendor"
+#: Где лежат исходники наших MCP. ДВА разных ответа, и их нельзя склеивать.
+#:
+#: Раньше константа была одна: пока вендоры лежали в `<repo>/external/vendor`, а
+#: force-include клал их в колесо под тем же именем, обе раскладки совпадали
+#: буквой. После переезда вендоров внутрь пакета (`packages/mcp/external/vendor`)
+#: они разошлись, и одна константа стала бы тихой поломкой: в установленном
+#: колесе бандловый ddgs-mcp перестал бы находиться, а установка молча съехала бы
+#: в git-метод — то есть потребовала бы сети и закрытой аутентификации там, где
+#: обязана обойтись бандлом.
+#:
+#: В КОЛЕСЕ: `site-packages/recommended_mcp/external/vendor/` — ВНУТРИ пакета.
+#: Раньше вендоры лежали рядом с ним, и дистрибутив занимал в site-packages
+#: второе родовое имя верхнего уровня, `external`. Любой каталог на sys.path в
+#: Python 3 — namespace-пакет, поэтому у проекта со своим `external/` пути
+#: склеивались, а при `external/__init__.py` наш каталог просто затирался
+#: (проверено в чистом venv на обоих вариантах). Повторять путь манифеста
+#: (`packages/mcp/…`) по-прежнему нельзя — тогда родовым именем стало бы
+#: `packages`; путь внутрь пакета снимает вопрос целиком, как это сделано с
+#: ассетами ядра (`gc_core/assets/`).
+VENDOR_REL_WHEEL = "external/vendor"
+
+#: В РЕПОЗИТОРИИ: путь от его корня. Тем же значением вычисляется
+#: `#subdirectory` для git-установки — pip резолвит его именно от корня.
+VENDOR_REL_REPO = "packages/mcp/external/vendor"
 
 
 def _vendor_candidates(name: str, root: Path) -> list[Path]:
@@ -256,34 +306,92 @@ def _vendor_candidates(name: str, root: Path) -> list[Path]:
     список. Арифметики путей нет — переживёт следующий переезд.
     """
     candidates = [
-        # Колесо: site-packages/recommended_mcp/ и site-packages/external/vendor/
-        (root.parent / VENDOR_REL / name),
+        # Колесо: site-packages/recommended_mcp/external/vendor/<name>.
+        # От `root`, а не от `root.parent`: вендоры лежат ВНУТРИ пакета, чтобы
+        # не занимать `external` в корне site-packages (см. VENDOR_REL_WHEEL).
+        (root / VENDOR_REL_WHEEL / name),
     ]
-    repo = _repo_root(root)
+    # Корень рабочей копии ищем ПО СТРОГОМУ МАРКЕРУ и общей реализацией.
+    # Своя копия здесь была слабой («packages/ рядом с pyproject.toml») и в
+    # чужом монорепо объявляла корнем ЕГО корень — мы шли искать external/vendor
+    # в чужом дереве. Считаем от переданного root, а не от __file__: у тестов
+    # свой синтетический root, и подмена его настоящим корнем репозитория
+    # ломала бы проверку git-фолбэка.
+    repo = repo_root_from(root)
     if repo is not None:
-        candidates.append(repo / VENDOR_REL / name)
+        candidates.append(repo / VENDOR_REL_REPO / name)
     return [c.resolve() for c in candidates]
 
 
-def _repo_root(root: Path) -> Path | None:
-    """Корень рабочей копии по маркеру «packages/ рядом с pyproject.toml»."""
-    for parent in root.resolve().parents:
-        if (parent / "packages").is_dir() and (parent / "pyproject.toml").is_file():
-            return parent
-    return None
+#: Уже отруганные дореформенные значения install.source: `[warn]` печатается
+#: один раз на процесс, а не на каждый вызов резолвера (их два на рецепт).
+_LEGACY_SOURCE_WARNED: set[str] = set()
 
 
-def _repo_subdir(source: str, root: Path) -> str:
+#: Дореформенные формы `install.source`, которые мы терпим. Ровно те, что
+#: реально лежали в манифесте develop (`../external/<имя>`) и их вариант без
+#: ведущего `..`. Всё остальное — не «старый формат», а ошибка.
+_LEGACY_SOURCE_PREFIXES = ("../external/", "external/")
+
+
+def _source_dir_name(source: object) -> str:
+    """Имя каталога MCP из `install.source`.
+
+    С 18.08.2026 в манифесте лежит ИМЯ каталога (`office-mcp`), а не путь.
+    Старую форму (`../external/office-mcp`) мы ТЕРПИМ, а не отвергаем: у
+    пользователя может лежать свой `<gc_config>/recommended_mcp/config.local.yml`,
+    дословно снятый с develop, — он побеждает бандловый манифест. Раньше на нём
+    вылетал InstallError, его ловил общий обработчик, рецепт молча пропускался
+    (`[warn] … пропущен`), CLI возвращал 0, и онбординг шёл дальше уже без MCP.
+    Берём последний сегмент и ругаемся один раз.
+
+    Терпимость ограничена ровно этими двумя формами, и это исправление: сначала
+    здесь брался последний сегмент ЛЮБОГО пути. На develop `_repo_subdir`
+    отвергал выход за пределы репозитория (`../../sibling/pkg` → InstallError),
+    и это проверял отдельный тест; вместе с переходом «путь → имя» проверка
+    пропала, а тест не переехал. `source: ../../sibling/pkg` молча превращался в
+    `git+<repo>#subdirectory=…/vendor/pkg`, установка уходила в сеть за
+    несуществующим подкаталогом, и человек получал невнятную ошибку pip вместо
+    внятной ошибки конфигурации — на шаг позже и не про то.
+
+    Падаем на всём остальном: пустая строка, `.`, `..`, голый слэш, абсолютный
+    путь, любой другой относительный. Смысл поля — ИМЯ подкаталога вендора, и
+    путь, ведущий не туда, означает ошибку в манифесте, а не вольность записи.
+    """
+    raw = str(source).strip()
+    name = PurePosixPath(raw.replace("\\", "/")).name
+    if not name or name in (".", ".."):
+        raise InstallError(
+            f"install.source {source!r}: не удалось выделить имя каталога MCP"
+        )
+    normalized = raw.replace("\\", "/")
+    if name != normalized.strip("/") and not any(
+        normalized.startswith(pref) for pref in _LEGACY_SOURCE_PREFIXES
+    ):
+        raise InstallError(
+            f"install.source {source!r}: ожидается ИМЯ каталога MCP "
+            f"(например {name!r}) или дореформенный путь вида "
+            f"'../external/{name}'. Путь ведёт за пределы каталога вендоров, и "
+            f"git-установка искала бы несуществующий подкаталог."
+        )
+    if name != raw.strip("/") and raw not in _LEGACY_SOURCE_WARNED:
+        _LEGACY_SOURCE_WARNED.add(raw)
+        print(
+            f"[warn] install.source {raw!r} — устаревший формат (путь); "
+            f"с 18.08.2026 ожидается ИМЯ каталога, читаю как {name!r}"
+        )
+    return name
+
+
+def _repo_subdir(source: str) -> str:
     """Путь внутри репозитория для git `#subdirectory`.
 
-    source — имя каталога MCP (`office-mcp`), а не путь: см. _vendor_candidates.
+    Параметра `root` здесь больше нет: тело его не читало (на develop он шёл в
+    `root.name`, а после переезда путь стал константой модуля). Берём
+    РЕПОЗИТОРНУЮ константу: pip резолвит `#subdirectory` от корня репо, а не
+    от раскладки колеса.
     """
-    name = str(source).strip().strip("/")
-    if "/" in name or name.startswith(".."):
-        raise InstallError(
-            f"install.source {source!r} должен быть ИМЕНЕМ каталога, а не путём"
-        )
-    return f"{VENDOR_REL}/{name}"
+    return f"{VENDOR_REL_REPO}/{_source_dir_name(source)}"
 
 
 def _install_source(
@@ -297,7 +405,8 @@ def _install_source(
 ) -> None:
     if source is None:
         raise InstallError(f"mcp {name!r}: install.type=source requires install.source")
-    tried = _vendor_candidates(str(source), root)
+    name_dir = _source_dir_name(source)
+    tried = _vendor_candidates(name_dir, root)
     src_path = next((c for c in tried if (c / "pyproject.toml").exists()), tried[0])
     if (src_path / "pyproject.toml").exists():
         # method-1: локальные исходники из клона
@@ -311,7 +420,7 @@ def _install_source(
         return
     # method-2: локальных исходников нет → ставим из git-подкаталога репо
     if repo_url:
-        subdir = _repo_subdir(source, root)
+        subdir = _repo_subdir(name_dir)
         ref = f"@{repo_ref}" if repo_ref else ""
         spec = f"git+{repo_url}{ref}#subdirectory={subdir}"
         print(f"[install] {name}: pip install {spec}")

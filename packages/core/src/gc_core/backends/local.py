@@ -8,11 +8,33 @@ import stat as stat_module
 import subprocess
 import time
 import sys
-from typing import Any, Callable, Dict, Iterable, Optional
+import threading
+from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 from gc_core.utils.aio_compat import run_coro_blocking
-from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, ExecResult, FsBackend
+from gc_core.backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    ExecResult,
+    FsBackend,
+)
+from gc_core.backends.walk_util import WalkEntry, pruned_dir_predicate
 from gc_core.utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
+
+
+def _is_real_dir(entry: os.DirEntry) -> bool:
+    try:
+        return entry.is_dir(follow_symlinks=False)
+    except OSError:
+        return False
+
+
+def _size_without_following(entry: os.DirEntry) -> Optional[int]:
+    try:
+        if entry.is_symlink():
+            return None
+        return entry.stat(follow_symlinks=False).st_size
+    except OSError:
+        return None
 
 
 class LocalFsBackend(FsBackend):
@@ -66,16 +88,23 @@ class LocalFsBackend(FsBackend):
         return os.path.realpath(path)
 
     def is_hidden(self, path: str) -> bool:
+        """Точка в имени ИЛИ скрытый атрибут Windows.
+
+        Поле информационное (метка в выдаче list/by-name), и его значение обязано
+        совпадать с песочницей — там скрытость определяется только точкой
+        (тест паритета list_files это и требует). Одной атрибутной проверки мало:
+        на Windows у `.env` / `.gitignore` атрибута нет, а служебными они остаются.
+        """
         basename = os.path.basename(path)
+        if basename.startswith("."):
+            return True
         if os.name == "nt":
             try:
                 attrs = os.stat(path).st_file_attributes  # Windows-specific
-                return bool(attrs & stat_module.FILE_ATTRIBUTE_HIDDEN)
-            except AttributeError:
-                return basename.startswith(".")
-            except Exception:
+            except (AttributeError, OSError):
                 return False
-        return basename.startswith(".")
+            return bool(attrs & stat_module.FILE_ATTRIBUTE_HIDDEN)
+        return False
 
     # --- read ---
     def read(self, path: str) -> str:
@@ -152,30 +181,9 @@ class LocalFsBackend(FsBackend):
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
-        """Stream top-down DFS via ``os.walk`` (dirs first, then files per level)."""
-        for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
-            dirnames.sort()
-            filenames.sort()
-            rel_dir = os.path.relpath(dirpath, path)
-            prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
-
-            for d in dirnames:
-                full = os.path.join(dirpath, d)
-                try:
-                    st = os.lstat(full)
-                    is_dir = stat_module.S_ISDIR(st.st_mode)
-                except OSError:
-                    is_dir = False
-                yield (prefix + d, is_dir)
-
-            for f in filenames:
-                yield (prefix + f, False)
-
-            if should_descend is not None:
-                dirnames[:] = [
-                    d for d in dirnames
-                    if should_descend(os.path.join(dirpath, d))
-                ]
+        """``iter_walk_entries`` without sizes (dirs first, then files per level)."""
+        for entry in self.iter_walk_entries(path, should_descend=should_descend):
+            yield entry.rel, entry.is_dir
 
     def iter_files(
         self,
@@ -201,6 +209,57 @@ class LocalFsBackend(FsBackend):
     def walk(self, path: str) -> list:
         return list(self.iter_walk(path))
 
+    def iter_walk_entries(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> Iterable[WalkEntry]:
+        """Top-down DFS over ``os.scandir``: dirs first, then files per level (sorted).
+
+        Sizes come from the directory listing (``DirEntry.stat(follow_symlinks=False)``:
+        free on Windows, one ``lstat`` elsewhere) — no second stat per file. A
+        symlink's size is unknown (``None``), never the link's own length. A pruned
+        or non-descendable directory is still listed; only its subtree is skipped.
+        Symlinks are never followed (``os.walk(followlinks=False)`` parity).
+        """
+        pruned = pruned_dir_predicate(prune_names, prune_dot_dirs)
+
+        def _level(abs_dir: str, prefix: str) -> Iterable[WalkEntry]:
+            try:
+                with os.scandir(abs_dir) as it:
+                    children = sorted(it, key=lambda e: e.name)
+            except OSError:
+                return
+            dirs = [e for e in children if _is_real_dir(e)]
+            files = [e for e in children if not _is_real_dir(e)]
+            for d in dirs:
+                yield WalkEntry(prefix + d.name, True)
+            for f in files:
+                yield WalkEntry(prefix + f.name, False, _size_without_following(f))
+            for d in dirs:
+                if pruned(d.name):
+                    continue
+                full = os.path.join(abs_dir, d.name)
+                if should_descend is not None and not should_descend(full):
+                    continue
+                yield from _level(full, prefix + d.name + "/")
+
+        yield from _level(path, "")
+
+    def walk_entries(
+        self,
+        path: str,
+        *,
+        prune_names: Sequence[str] = (),
+        prune_dot_dirs: bool = False,
+    ) -> list:
+        return list(
+            self.iter_walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
+        )
+
     # --- path semantics ---
     def normpath(self, path: str) -> str:
         return os.path.normpath(path)
@@ -208,25 +267,37 @@ class LocalFsBackend(FsBackend):
     def join(self, base: str, name: str) -> str:
         return os.path.join(base, name)
 
+    def _exec_capture_max_chars(self, capture_max_chars: Optional[int]) -> int:
+        if capture_max_chars is None:
+            return self.exec_output_capture_max_chars
+        return capture_max_chars
+
     # --- exec ---
     def exec(self, command: str, *, cwd: Optional[str] = None,
              timeout: Optional[int] = None,
-             env: Optional[dict] = None) -> ExecResult:
+             env: Optional[dict] = None,
+             capture_max_chars: Optional[int] = None) -> ExecResult:
         # Реализация одна — асинхронная (см. _arun_bounded_process): она не
         # держит по два дренажных потока на вызов. Синхронный вход остаётся
-        # блокирующим, как и был.
-        return run_coro_blocking(self.aexec(command, cwd=cwd, timeout=timeout, env=env))
+        # блокирующим, как и был. `capture_max_chars` приехал с develop
+        # (потолок захвата на ВЫЗОВ, а не на бэкенд) и просто проезжает дальше.
+        return run_coro_blocking(self.aexec(
+            command, cwd=cwd, timeout=timeout, env=env,
+            capture_max_chars=capture_max_chars,
+        ))
 
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
                   timeout: Optional[int] = None,
-                  env: Optional[dict] = None) -> ExecResult:
+                  env: Optional[dict] = None,
+                  capture_max_chars: Optional[int] = None) -> ExecResult:
         # Shell-less on purpose: the base-class default builds a POSIX shell
         # string, which breaks under Windows cmd.exe (no printf, single quotes
         # not honored). An argv list + stdin goes through CreateProcess /
         # execvp uniformly on every OS.
         return run_coro_blocking(
-            self.aexec_argv(argv, stdin=stdin, cwd=cwd, timeout=timeout, env=env)
+            self.aexec_argv(argv, stdin=stdin, cwd=cwd, timeout=timeout, env=env,
+                            capture_max_chars=capture_max_chars)
         )
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,
@@ -239,22 +310,25 @@ class LocalFsBackend(FsBackend):
     # --- exec (async) ---
     async def aexec(self, command: str, *, cwd: Optional[str] = None,
                     timeout: Optional[int] = None,
-                    env: Optional[dict] = None) -> ExecResult:
+                    env: Optional[dict] = None,
+                    capture_max_chars: Optional[int] = None) -> ExecResult:
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
         return await _arun_bounded_process(
             command, shell=True, cwd=cwd, timeout=timeout, env=merged_env,
-            stdin_text=None, capture_max_chars=self.exec_output_capture_max_chars,
+            stdin_text=None,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     async def aexec_argv(self, argv: list, *, stdin: Optional[str] = None,
                          cwd: Optional[str] = None,
                          timeout: Optional[int] = None,
-                         env: Optional[dict] = None) -> ExecResult:
+                         env: Optional[dict] = None,
+                         capture_max_chars: Optional[int] = None) -> ExecResult:
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
         return await _arun_bounded_process(
             [str(a) for a in argv], shell=False, cwd=cwd, timeout=timeout,
             env=merged_env, stdin_text=stdin,
-            capture_max_chars=self.exec_output_capture_max_chars,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     async def arun_python(self, code: str, *, cwd: Optional[str] = None,

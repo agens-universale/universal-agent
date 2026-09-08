@@ -73,7 +73,29 @@ class ToggleSpec:
     preset-тогглов); `state` — читатель эффективного значения; `palette_default` —
     показывать ли в пустом фильтре палитры (спека §4.1: /gate,/answers — False);
     `preset_keys` — непусто ⇔ тоггл-пресет над этими ключами (значение = имя пресета
-    от резолвера, применение раскладывается в пару; спека §6)."""
+    от резолвера, применение раскладывается в пару; спека §6).
+
+    Профили v2 (спека §12.1, group «чем работаем» — `/level`, `/profiles`):
+    `group` — семья тоггла для потребителей, которым нужна ТОЛЬКО «rigor»-семья
+    (Settings «Режимы работы» — секция про самопроверку/формат ответа, не про
+    модели; см. `group_toggle_names`); дефолт `"rigor"` — существующие
+    gate/answers/rigor ничего не меняют, только новые `models`-тогглы указывают
+    свой. `show_track` — False у trackless-тоггла (`/profiles`: произвольное
+    число профилей, шкала не имеет смысла — сразу значение-имя, спека §12.1).
+    `values_provider(app) -> значения` — динамический набор значений вместо
+    статического `values` (профили из файлов, а не фиксированный список);
+    `hint_provider(app, value) -> текст` — динамический hint вместо статического
+    `ToggleValue.hint` (модель, резолвнутая Router'ом для `/level`; состав
+    профиля для `/profiles`) — оба переносятся с прототипа `feat/model-profiles`
+    (адаптация под flat-группы ревизий 5-7: без `group`-based разделителей —
+    граница «models»→«rigor» уже покрыта существующим правилом «черта перед
+    preset-родителем, который не первый», т.к. `/rigor` сам такой родитель).
+    `session_switch_profile` — True у `/profiles`: применение идёт через
+    `app.switch_session_profile` (пересборка + notice + предохранитель,
+    спека §9.1), не generic `apply_session_override`. `rebuild_on_apply` —
+    False у `/level`: единственный тоггл, переключаемый БЕЗ `invalidate_runner`
+    (спека §6.4 — уровень фиксируется на ход инжектируемым провайдером, не
+    снимком executor)."""
 
     values: Tuple[ToggleValue, ...]
     state: Callable[[Dict[str, Any]], str]
@@ -82,13 +104,370 @@ class ToggleSpec:
     dotted: str = ""
     palette_default: bool = True
     preset_keys: Tuple[str, ...] = ()
+    group: str = "rigor"
+    # Подпись строки в Настройках, когда она обязана отличаться от `label`.
+    # Палитра и Настройки правят РАЗНОЕ: `/level` крутит сессию, секция пишет в
+    # файл — уточнение «по умолчанию» верно только во втором и соврало бы в первой.
+    settings_label: str = ""
+    show_track: bool = True
+    # Trackless: чем показать пустое значение (у /profiles «без профиля» —
+    # осмысленное состояние, не «не задано», ревизия 2026-07-28).
+    empty_value_text: str = "—"
+    values_provider: Optional[Callable[[Any], Tuple[ToggleValue, ...]]] = None
+    hint_provider: Optional[Callable[[Any, str], str]] = None
+    session_switch_profile: bool = False
+    rebuild_on_apply: bool = True
 
     @property
     def names(self) -> Tuple[str, ...]:
         return tuple(v.value for v in self.values)
 
 
+# --- /level: трек уровней, хинты из Router (спека §12.1) --------------------
+LEVEL_ROLE_TEXT: Dict[str, str] = {
+    "light": "быстрая и дешёвая: простые задачи",
+    "default": "основная рабочая: повседневные задачи",
+    "max": "самая сильная: сложные задачи",
+}
+
+
+def level_value_hint(app: Any, value: str) -> str:
+    """Динамический hint позиции `/level` (спека §12.1, копирайт §1): модель,
+    резолвнутая Router'ом ДЛЯ ЭТОГО уровня (не обязательно активного —
+    `ModelRouter.resolve_level`), + роль уровня. Легаси/легаси-форс — честные
+    пометки вместо модели+роли (канон §12.1); фоллбэк уровня — честная стрелка
+    «light → default» вместо модели притворного light-слота."""
+    from gc_core.model_router import AliasCircuitOpenError
+    router = app.display_router()
+    try:
+        resolved = router.resolve_level(value)
+    except AliasCircuitOpenError as exc:
+        return f"{exc.alias} недоступна (предохранитель) · переключите /profiles"
+    except ValueError:
+        return f'уровень "{value}" не резолвится · настройте slots в config.yml'
+    if router.force_legacy:
+        return f"{resolved.model} · --model: уровни отключены на этот запуск"
+    if router.registry_empty():
+        return f"{resolved.model} · легаси: уровни появятся с реестром моделей"
+    role = LEVEL_ROLE_TEXT.get(value, "")
+    if resolved.source.startswith("фоллбэк "):
+        chain = resolved.source[len("фоллбэк "):]
+        return f"{resolved.alias} ({chain}) · {role}"
+    return f"{resolved.alias} · {role}"
+
+
+# --- /profiles: trackless-строка, циклический выбор файла-профиля -----------
+_PROFILE_EMPTY_HINT = (
+    "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · "
+    "пример — в /settings → Профили"
+)
+_LEVEL_ORDER = {"light": 0, "default": 1, "max": 2}
+
+
+def _profile_roots(app: Any) -> list:
+    from pathlib import Path
+    import os
+
+    from gc_core.config import resolve_config_path
+    from gc_core.config_modules.profiles import profile_roots
+
+    config_path = getattr(app, "_config_path", None)
+    base_path = Path(resolve_config_path(config_path))
+    return profile_roots(Path(os.getcwd()), base_path)
+
+
+def _discovered_profiles(app: Any) -> Dict[str, Any]:
+    from gc_core.config_modules.profiles import discover_profiles
+
+    return discover_profiles(_profile_roots(app))
+
+
+def profile_values(app: Any) -> Tuple[ToggleValue, ...]:
+    """Алфавитный объединённый список профилей (спека §3.1/§12.1): тёзка — одна
+    позиция (`discover_profiles` уже разрешает коллизию в пользу проектного).
+    Цвет/hint не несут смысла здесь — trackless, `hint_provider` динамический."""
+    return tuple(ToggleValue(name, "", _pal.INK) for name in sorted(_discovered_profiles(app)))
+
+
+def _profile_slots_summary(cfg: Dict[str, Any]) -> str:
+    slots = cfg.get("slots") or {}
+    models = cfg.get("models") or {}
+    pairs = []
+    for level, alias in slots.items():
+        entry = models.get(alias)
+        if entry is None:
+            continue
+        pairs.append((level, f"{level} {entry.get('model') or alias}"))
+    pairs.sort(key=lambda pair: _LEVEL_ORDER.get(pair[0], 99))
+    return " · ".join(text for _, text in pairs)
+
+
+def _profile_mcp_rebuild_note(app: Any, value: str) -> str:
+    if _discovered_profiles(app).get(value) is None:
+        return ""
+    # Читатель ОДИН на оба хинта (`_profile_file_doc`): вторая копия чтения жила
+    # рядом и разошлась с первой — она не знала про чужую кодировку и роняла
+    # палитру трейсбеком на одном наведении курсора, пока первую уже чинили.
+    # Битый или нечитаемый файл (человек правит руками) даёт пустой документ:
+    # предупреждение о MCP просто не покажется.
+    raw = _profile_file_doc(app, value)
+    # Во ВХОДНОМ документе секция называется `mcp: servers:` — плоский `mcp-servers`
+    # существует только в снимке flatten_app_config (config.py), а литеральный
+    # верхнеуровневый `mcp-servers:` схема профиля отвергает (docs/configuration.md).
+    mcp = raw.get("mcp") if isinstance(raw, dict) else None
+    servers = mcp.get("servers") if isinstance(mcp, dict) else None
+    if not servers:
+        return ""
+    return f"переключение пересоберёт MCP: {len(servers)} серверов"
+
+
+def profile_value_hint(app: Any, value: str) -> str:
+    """Динамический hint `/profiles` (спека §12.1): состав слотов + источник
+    (проектный/глобальный) +, если целевой профиль переопределяет `mcp.servers`,
+    предупреждение цены переключения. Пустое состояние — текст спеки дословно."""
+    if not value:
+        # Критерий пустого состояния — СУЩЕСТВОВАНИЕ профилей, не «не выбран»
+        # (ревизия 2026-07-28: хинт «не настроены» при живом smoke.yml — баг смока).
+        names = sorted(_discovered_profiles(app))
+        if not names:
+            return _PROFILE_EMPTY_HINT
+        return f"не выбран · доступно: {', '.join(names)} · Enter — открыть список"
+    cfg = _effective_cfg(app)
+    ref = _discovered_profiles(app).get(value)
+    parts = []
+    summary = _profile_slots_summary(cfg)
+    if summary:
+        parts.append(summary)
+    if ref is not None:
+        parts.append("проектный" if ref.root_kind == "project" else "глобальный")
+    note = _profile_mcp_rebuild_note(app, value)
+    if note:
+        parts.append(note)
+    parts.append("Enter — открыть список")
+    return " · ".join(parts)
+
+
+PROFILE_NONE_VALUE = "без профиля"
+_PROFILE_NONE_HINT = "настройки берутся только из config.yml — файл профиля не подмешивается"
+# Тот же литерал, что и активный маркер секции «Профили» /settings
+# (`_profile_row_text`/`_none_row_text` в tui/screens/settings.py) — статус
+# пикера красится тем же цветом (OK), правая колонка ArgPicker (задача 10,
+# решение смока 2026-08-10).
+_PROFILE_ACTIVE_STATUS = "● активен"
+# Тот же вердикт, что у гейта выбора (`TuiApp.probe_profile_assembly`), но ДО
+# нажатия: отказ после Enter — половина дела, человек уже успел выбрать
+# (решение владельца по живому смоку).
+_PROFILE_BROKEN_STATUS = "✗ не применится"
+
+
+def _profile_assembly_error(app: Any, name: str) -> str:
+    """Причина, по которой конфиг с профилем `name` не собирается («» — собирается).
+
+    Судья ОДИН на витрину и на гейт выбора: вторая редакция правила «годен ли
+    профиль» разошлась бы с первой, и пикер звал бы Enter туда, где Enter
+    отказывает. Метод достаётся ДО try: его отсутствие — поломка сборки, а не
+    вердикт о профиле, и молча красить им все строки нельзя."""
+    probe = app.probe_profile_assembly
+    try:
+        probe(name)
+    except Exception as exc:
+        # Любое исключение = не соберётся. Сужать до ValueError нечем: причина
+        # приходит из всей цепочки загрузки конфига, и незнакомый тип означал бы
+        # краш палитры на одном лишь открытии списка.
+        return str(exc)
+    return ""
+
+
+def _profile_verdict_key(app: Any, name: str) -> Optional[tuple]:
+    """Снимок мтаймов файлов сборки профиля `name` (`config.profile_mtime_set`,
+    голый `stat()`, без парсинга) — ключ кэша `_cached_assembly_error`. Не
+    удалось выяснить состав (`OSError`) — `None`: кэш такой пробы не хранит,
+    решение то же, что у `_config_stack_texts`/`_models_verdict`
+    (`settings.py`) для вердикта секции «Модели»."""
+    from gc_core.config import profile_mtime_set
+    try:
+        mtimes = profile_mtime_set(getattr(app, "_config_path", None), name)
+    except OSError:
+        return None
+    return tuple(sorted(mtimes.items()))
+
+
+def _cached_assembly_error(app: Any, name: str) -> str:
+    """`_profile_assembly_error(app, name)`, посчитанная не чаще, чем меняется
+    хоть один файл сборки этого профиля — общий кэш для витрины списка
+    (`profile_picker_options`, один проход на открытие) И хинта подвала
+    (`profile_picker_hint`): какая из них первой спросила про имя, та и платит
+    единственную полную сборку (`probe_profile_assembly` → `load_config_ex`,
+    ~6 мс), вторая берёт готовый ответ. Без этого хинт пересобирал конфиг
+    заново на каждый highlight и на каждый тик поллинга главного экрана
+    (`ArgPicker.desired_height`, 0.25 с) — 4 раза в секунду на UI-потоке, пока
+    список просто открыт, никто не нажал ни одной клавиши."""
+    key = _profile_verdict_key(app, name)
+    cache: Dict[str, tuple] = getattr(app, "_profile_assembly_cache", None) or {}
+    cached = cache.get(name)
+    if key is not None and cached is not None and cached[0] == key:
+        return cached[1]
+    reason = _profile_assembly_error(app, name)
+    if key is not None:
+        cache[name] = (key, reason)
+        app._profile_assembly_cache = cache
+    return reason
+
+
+def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
+    """Опции пикера `/profiles` (спека §12.1, ревизия 2026-07-28; статус-колонка —
+    задача 10, решение смока 2026-08-10): первым — «— без профиля» (сессионное
+    снятие, §9.1), затем профили по алфавиту объединённого списка. 3-tuple
+    (value, описание, статус): описание — источник + «(как в конфиге)» у
+    профиля конфиг-указателя; статус — «● активен» ОТДЕЛЬНЫМ элементом (не
+    частью описания) у ровно одной строки — той, что действует сейчас
+    (`ArgPicker` красит его правой колонкой, см. `arg_picker.py`).
+
+    Второй статус — «✗ не применится» у профиля, с которым конфиг не собирается
+    (тот же судья, что у гейта выбора). Действующий профиль его не получает,
+    даже если его файл испортили под ногами: он УЖЕ применён и работает, а
+    «не применится» звало бы чинить выбор, который никуда не переключается —
+    статус описывает текущее состояние, и оно приоритетнее. Два статуса в одной
+    колонке не показываем: колонка одна, и вторая метка вытеснила бы первую.
+
+    Проба стоит ~6 мс на профиль — но не на КАДР: `_cached_assembly_error`
+    делит её с хинтом подвала (`profile_picker_hint`), и за одно открытие
+    списка профиль пробуется не больше раза, кто бы из двух его первым ни
+    спросил. Сам этот провайдер зовётся один раз на открытие (`main.py`,
+    ветка `if self._arg_picker is None`) — стрелки и фильтр идут через
+    `set_filter` по готовым опциям; хинт, в отличие от них, спрашивается на
+    каждый highlight И на каждый тик поллинга (`ArgPicker.desired_height`) —
+    без общего кэша с этим провайдером он звал бы пробу заново 4 раза в
+    секунду, пока список просто открыт."""
+    refs = _discovered_profiles(app)
+    effective = str(_effective_cfg(app).get("profile") or "")
+    base_pointer = str((getattr(app, "_config", None) or {}).get("profile") or "")
+    none_status = _PROFILE_ACTIVE_STATUS if not effective else ""
+    options = [(PROFILE_NONE_VALUE, "работать чистым конфигом", none_status)]
+    for name in sorted(refs):
+        ref = refs[name]
+        desc = "проектный" if ref.root_kind == "project" else "глобальный"
+        if name == base_pointer:
+            desc += " (как в конфиге)"
+        if name == effective:
+            status = _PROFILE_ACTIVE_STATUS   # действующий уже собрался — пробы не надо
+        else:
+            status = _PROFILE_BROKEN_STATUS if _cached_assembly_error(app, name) else ""
+        options.append((name, desc, status))
+    return tuple(options)
+
+
+def _profile_file_doc(app: Any, name: str) -> Dict[str, Any]:
+    """Сырой документ файла профиля (для хинтов ЦЕЛЕВОГО, ещё не применённого
+    профиля — эффективный конфиг тут не годится: выбор применяется только по
+    Enter). Битый файл → {} (хинт без состава, не краш)."""
+    ref = _discovered_profiles(app).get(name)
+    if ref is None:
+        return {}
+    import yaml
+    from gc_core.utils.user_text import read_user_text_or_none
+    # Нечитаемый файл роняет палитру на одном наведении курсора (живой смок):
+    # хинт строится на подсветке пункта, до всякого выбора.
+    try:
+        raw = yaml.safe_load(read_user_text_or_none(ref.path) or "") or {}
+    except yaml.YAMLError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def profile_picker_hint(app: Any, value: Any) -> str:
+    """Хинт подвала пикера для подсвеченного пункта (спека §12.1): состав слотов
+    ЦЕЛЕВОГО профиля из его файла + источник + MCP-предупреждение; для пункта
+    снятия — честное пояснение."""
+    if value in (None, "", PROFILE_NONE_VALUE):
+        return _PROFILE_NONE_HINT
+    name = str(value)
+    ref = _discovered_profiles(app).get(name)
+    doc = _profile_file_doc(app, name)
+    # Модели для подписи слота: из файла профиля, с фоллбэком на эффективный
+    # реестр (профиль может ссылаться на алиасы нижних слоёв).
+    effective_models = _effective_cfg(app).get("models") or {}
+    merged_models = {**effective_models, **(doc.get("models") or {})}
+    parts = []
+    # Статус строки говорит ЧТО («✗ не применится»), подсказка — ПОЧЕМУ. Причина
+    # идёт ПЕРВОЙ и целиком: текст ядра самодостаточен («<путь>: …»), а рядом с
+    # палитрой путь профиля не печатает никто — без него нечего чинить.
+    reason = _cached_assembly_error(app, name)
+    if reason:
+        parts.append(reason)
+    summary = _profile_slots_summary({"slots": doc.get("slots") or {},
+                                      "models": merged_models})
+    if summary:
+        parts.append(summary)
+    if ref is not None:
+        parts.append("проектный" if ref.root_kind == "project" else "глобальный")
+    note = _profile_mcp_rebuild_note(app, name)
+    if note:
+        parts.append(note)
+    return " · ".join(parts) if parts else "—"
+
+
+def group_toggle_names(group: str) -> list:
+    """Имена тогглов данной группы, в порядке реестра `TOGGLES`."""
+    return [n for n, s in TOGGLES.items() if s.group == group]
+
+
+# Состав секции «Режимы работы» — упорядоченный список ГРУПП, а не одна группа.
+# Порядок блоков читается сверху вниз: сначала «как работаем» (строгость,
+# самопроверка, формат ответа), потом «чем» (уровень модели) — решение владельца.
+MODES_SECTION_GROUPS: Tuple[str, ...] = ("rigor", "level")
+
+
+def modes_section_names() -> list:
+    """Имена строк секции «Режимы работы» в порядке показа.
+
+    Секция НЕ равна одной группе: `level` правит глобальный `level:` конфига и
+    стоит здесь же, отдельным блоком под чертой (к профилям он отношения не
+    имеет — там правился чужой ключ). Знание о композиции секции живёт в одном
+    месте: и рендер, и навигация, и запись, и превью меню спрашивают отсюда."""
+    return [n for group in MODES_SECTION_GROUPS for n in group_toggle_names(group)]
+
+
+def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
+    """Набор значений тоггла для текущего состояния: динамический
+    (`values_provider(app)`, `/profiles`) либо статический (`spec.names`)."""
+    spec = TOGGLES[name]
+    if spec.values_provider is not None:
+        return tuple(v.value for v in spec.values_provider(app))
+    return spec.names
+
+
 TOGGLES: Dict[str, ToggleSpec] = {
+    "level": ToggleSpec(
+        dotted="level",
+        values=(
+            ToggleValue("light", "", _pal.INK),
+            ToggleValue("default", "", _pal.RUN_COLOR),
+            ToggleValue("max", "", _pal.ACCENT),
+        ),
+        state=lambda cfg: str(cfg.get("level") or "default"),
+        label="уровень модели",
+        summary="от лёгкой до максимальной сложности задачи",
+        group="level",
+        settings_label="уровень модели по умолчанию",
+        hint_provider=level_value_hint,
+        rebuild_on_apply=False,
+        palette_default=True,
+    ),
+    "profiles": ToggleSpec(
+        dotted="profile",
+        values=(),
+        values_provider=profile_values,
+        state=lambda cfg: str(cfg.get("profile") or ""),
+        label="профили",
+        summary="переключаемые наборы настроек",
+        group="models",
+        show_track=False,
+        empty_value_text=PROFILE_NONE_VALUE,
+        hint_provider=profile_value_hint,
+        session_switch_profile=True,
+        palette_default=True,
+    ),
     "rigor": ToggleSpec(
         values=(
             ToggleValue(
@@ -321,7 +700,14 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
     позиция трека (ревизия 4, custom только отображается), `next_toggle_value`
     её никогда не вернёт; вызов с ней напрямую — ValueError, ничего в сессию
     не пишется. single-key — прежняя запись одного ключа (apply_session_override).
-    Откатывается целиком при OSError; вызывающий показывает «✗ не сохранено»."""
+    Откатывается целиком при OSError; вызывающий показывает «✗ не сохранено».
+
+    `/profiles` (`session_switch_profile`, спека §9.1) — применяет через
+    `app.switch_session_profile` (пересборка + notice + сброс предохранителя —
+    отдельная семантика, не generic single-key путь). `/level`
+    (`rebuild_on_apply=False`, спека §6.4) — пишет сессионный оверрайд, но
+    единственный НЕ зовёт `invalidate_runner`: уровень читается инжектируемым
+    провайдером на старте хода, пересборка executor ему не нужна."""
     spec = TOGGLES[name]
     if spec.preset_keys:
         if value not in PRESETS:
@@ -332,12 +718,17 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
         app.apply_session_overrides(PRESETS[value])
         app.invalidate_runner()
         return toggle_state(app, name)
-    if value not in spec.names:
+    names = effective_toggle_names(app, name)
+    if value not in names:
         raise ValueError(
-            f"invalid value {value!r} for toggle {name!r}, expected one of {spec.names}"
+            f"invalid value {value!r} for toggle {name!r}, expected one of {names}"
         )
+    if spec.session_switch_profile:
+        app.switch_session_profile(value)
+        return toggle_state(app, name)
     app.apply_session_override(spec.dotted, value)
-    app.invalidate_runner()
+    if spec.rebuild_on_apply:
+        app.invalidate_runner()
     return toggle_state(app, name)
 
 
@@ -357,9 +748,16 @@ def next_toggle_value(app: Any, name: str, direction: int) -> str:
     нужен резолв пары через конфиг приложения, single-key — просто текущее
     значение. Custom НЕ позиция трека (ревизия 4) — эффективное значение вне
     `spec.names` (отображаемый custom) трактуется как idx 0, шаг с него по
-    кругу уводит на пресет; custom этой функцией никогда не возвращается."""
-    names = TOGGLES[name].names
+    кругу уводит на пресет; custom этой функцией никогда не возвращается.
+
+    `/profiles` (спека §12.1) — набор значений динамический
+    (`effective_toggle_names`, а не статический `TOGGLES[name].names`); пустой
+    набор (профили не настроены) — цикл no-op, возвращает текущее значение
+    (пустую строку)."""
+    names = effective_toggle_names(app, name)
     current = toggle_state(app, name)
+    if not names:
+        return current
     idx = names.index(current) if current in names else 0
     return names[(idx + direction) % len(names)]
 
@@ -402,3 +800,13 @@ def preset_custom_hint(app: Any, name: str, *, scope: str = "effective") -> str:
                 "шаг на пресет заменит пару · закрепить — в /settings"
             )
     return f"ваш дефолт: самопроверка {x}, формат {y} · менять в /settings"
+
+
+def dynamic_toggle_hint(app: Any, name: str, value: str) -> str:
+    """Инъекция для `CommandPalette(toggle_dynamic_hint=...)` (спека §12.1):
+    зовёт `TOGGLES[name].hint_provider(app, value)`. Пустая строка — тоггл без
+    `hint_provider` (палитра тогда берёт статический `ToggleValue.hint`)."""
+    spec = TOGGLES[name]
+    if spec.hint_provider is None:
+        return ""
+    return spec.hint_provider(app, value)

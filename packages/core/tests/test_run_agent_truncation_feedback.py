@@ -22,7 +22,7 @@ def _run_ctx():
     return type("C", (), {"config_dict": cd, "logger": None})()
 
 
-def _run_with_finish_reason(monkeypatch, finish_reason):
+def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
     """Запускает run_agent: 1-й backend-ответ → function_call → apply_tool падает
     WrongFunctionArgumentsException; 2-й backend-ответ → assistant text (принят).
     Возвращает feedback, переданный в _make_technical_feedback_user_message."""
@@ -50,6 +50,7 @@ def _run_with_finish_reason(monkeypatch, finish_reason):
             received_args='{"path": "/tmp/x.md", "content": "hello"}',
             expected_schema={"parameters": {"properties": {}, "required": []}},
             tool_name="fs_write_file",
+            extra_hint=extra_hint,
         )
 
     def _fake_make_feedback(content, technical_type=None, call_id=None):
@@ -95,3 +96,9 @@ def test_no_truncation_hint_when_finish_reason_none(monkeypatch):
     fb = _run_with_finish_reason(monkeypatch, finish_reason=None)
     assert "truncated" not in fb["content"]
     assert fb["result"] == "готово"
+
+
+def test_truncation_hint_keeps_the_tool_hint(monkeypatch):
+    fb = _run_with_finish_reason(monkeypatch, "length", extra_hint="TOOL HINT: path must be absolute")
+    assert "TOOL HINT: path must be absolute" in fb["content"]
+    assert "truncated" in fb["content"]

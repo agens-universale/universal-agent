@@ -27,7 +27,7 @@ def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
 
 class RunPythonCode(AbstractSimpleTool):
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
             "type": "function",
             "name": "exec_python",
@@ -86,7 +86,7 @@ class RunPythonCode(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = (
             '''Tool name: exec_python
 Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.

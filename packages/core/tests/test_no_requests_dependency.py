@@ -1,8 +1,19 @@
-"""Гейт: ядро не зависит от ``requests``.
+"""Гейт: ядро не расширяет зависимость от ``requests``.
 
 Уход с requests был отдельной целью — не ради асинхронности (у httpx есть
 синхронный ``Client`` и переезд был механическим), а ради одной зависимости
-вместо двух на один и тот же HTTP.
+вместо двух на один и тот же HTTP. Ветка её достигла: не осталось ни одного
+модуля.
+
+При вливании пакетов 08.09.2026 develop принёс обратно три модуля, которые
+сидят на requests: витрину уведомлений и оба клиента нового MCP-порта
+(``execute_on: os_backend``, PR #88). Перевод их на httpx — работа отдельного
+шага, а не мержа: у порта тогда меняется и синхронный контракт.
+
+Поэтому гейт сменил форму: не «нет вовсе», а СПИСОК, который заморожен по
+именам. Новый модуль на requests в него не попадёт и покраснеет; вычеркнуть
+имя из списка можно только вместе с переводом модуля на httpx — и тогда список
+сам заставит это заметить.
 
 Тест сторожит откат с двух сторон: манифест и код. Проверка на импорт
 сделана статически, а не через ``import requests`` в подпроцессе: в dev-окружении
@@ -21,11 +32,31 @@ _SRC = REPO / "packages" / "core" / "src" / "gc_core"
 _MANIFEST = REPO / "packages" / "core" / "pyproject.toml"
 
 
-def test_manifest_does_not_declare_requests():
+#: Модули ядра, которым requests пока законен. Список ЗАМОРОЖЕН: он существует,
+#: чтобы зависимость не расползалась дальше, пока её не сняли совсем.
+_REQUESTS_ALLOWED = {
+    "runtime_notices.py",
+    "tools/connect_mcp/client_port.py",
+    "tools/connect_mcp/os_backend_client.py",
+}
+
+
+def test_manifest_declares_requests_only_while_the_list_is_not_empty():
+    """Зависимость в манифесте и список модулей обязаны сходиться.
+
+    Пустой список означает, что переводить больше нечего — и тогда `requests`
+    обязан уйти из зависимостей, иначе он останется висеть навсегда.
+    """
     manifest = tomllib.loads(_MANIFEST.read_text(encoding="utf-8"))
     deps = manifest["project"]["dependencies"]
-    offenders = [d for d in deps if d.split("[")[0].strip().lower() == "requests"]
-    assert not offenders, f"requests вернулся в зависимости gc-core: {offenders}"
+    declared = [d for d in deps if d.split("[")[0].strip().lower() == "requests"]
+    if _REQUESTS_ALLOWED:
+        assert declared, (
+            "модули из _REQUESTS_ALLOWED импортируют requests, а в зависимостях "
+            "его нет — установка развалится"
+        )
+    else:
+        assert not declared, f"переводить нечего, а requests остался: {declared}"
 
 
 def _modules_importing_requests() -> list[str]:
@@ -49,14 +80,23 @@ def _modules_importing_requests() -> list[str]:
     return sorted(set(offenders))
 
 
-def test_no_module_imports_requests():
-    """Ни один модуль ядра не импортирует requests — даже лениво, внутри функции.
+def test_no_new_module_imports_requests():
+    """Список модулей на requests не растёт — и не протухает.
 
     AST, а не поиск по тексту: слово «requests» законно встречается в
     докстроках, где объяснено, как было раньше и почему уехали.
+
+    Проверка двусторонняя. Лишнее имя — расползание зависимости. Отсутствующее —
+    модуль уже перевели, а имя в списке забыли снять: тогда список перестаёт
+    показывать реальный объём долга.
     """
-    offenders = _modules_importing_requests()
-    assert offenders == [], f"requests импортируется в: {offenders}"
+    offenders = set(_modules_importing_requests())
+    extra = sorted(offenders - _REQUESTS_ALLOWED)
+    stale = sorted(_REQUESTS_ALLOWED - offenders)
+    assert not extra, f"requests импортируется в новых модулях: {extra}"
+    assert not stale, (
+        f"модули уже без requests, снимите их со списка _REQUESTS_ALLOWED: {stale}"
+    )
 
 
 @pytest.mark.parametrize(

@@ -19,6 +19,9 @@ class InstallSpec:
     # Для type=npx: команды post-ensure для прогрева npm-кэша/расширений.
     # Каждая запись — argv-список; вызывается как subprocess.run(cmd, check=True).
     commands: tuple[tuple[str, ...], ...] = tuple()
+    # Вопреки типу — ИМЯ каталога в external/vendor/, а не путь: см. докстринг
+    # `resolve_install_manifest_path` и `install._source_dir_name`. Тип оставлен
+    # `Path` ради дореформенных манифестов, где здесь и правда лежал путь.
     source: Path | None = None
     # Для type=pypi: pip-спецификация, например ddgs-mcp==0.1.0
     package: str | None = None
@@ -65,7 +68,12 @@ def resolve_manifest_path(root: Path, config: Path | str | None) -> Path:
 
     Если `config` не задан — `root/config.yml`.
     Относительные пути считаются от текущей рабочей директории (cwd), не от `root`.
-    Пути внутри манифеста (`path:`, `install.source:`) по-прежнему относительны `root`.
+    `path:` внутри манифеста по-прежнему относителен `root`. А `install.source` —
+    НЕ путь: это ИМЯ каталога в `external/vendor/`, которое ищет
+    `install._vendor_candidates`. Относительная форма (`../external/<имя>`)
+    принимается ради дореформенных манифестов, но с одноразовым `[warn]`: путь
+    резолвился от каталога рецептов, а после их переезда в `packages/mcp/src`
+    стал вести в никуда.
     """
     if config is None:
         return default_manifest_path(root)

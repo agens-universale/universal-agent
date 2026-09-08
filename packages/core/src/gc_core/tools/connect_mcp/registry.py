@@ -19,6 +19,7 @@ from gc_core.tools.connect_mcp.stream_client import (
 )
 from gc_core.tools.connect_mcp.abandonable import run_abandonable
 from gc_core.utils.aio_compat import run_coro_blocking
+from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -200,6 +201,7 @@ async def _adiscover_one(
     server_cfg: Dict[str, Any],
     *,
     timeout: float,
+    os_backend: Any = None,
 ) -> tuple[list, dict]:
     """Дискавери одного сервера, без потока там, где он не нужен.
 
@@ -228,7 +230,7 @@ async def _adiscover_one(
                 server_name, server_cfg, effective_transport=effective, timeout=timeout
             )
     return await run_abandonable(
-        _discover_one, server_name, server_cfg, timeout=timeout
+        _discover_one, server_name, server_cfg, timeout=timeout, os_backend=os_backend
     )
 
 
@@ -289,6 +291,7 @@ def _discover_one(
     server_cfg: Dict[str, Any],
     *,
     timeout: float,
+    os_backend: Any = None,
 ) -> tuple[list, dict]:
     """
     Дискавери тулов одного MCP-сервера (одна попытка, без backoff).
@@ -324,60 +327,8 @@ def _discover_one(
         )
         server_description = server_cfg.get("description") or ""
 
-        # Правила выбора транспорта — общие с call_mcp_tool, см. transport_policy.
-        effective_transport = resolve_effective_transport(
-            server_cfg, server_name=server_name
-        )
-
-        if effective_transport in ("stream_sse", "stream_http", "stream_stdio"):
-            # SDK-транспорты асинхронны насквозь — зовём их без потока.
-            tools_raw = run_coro_blocking(
-                _afetch_tools_sdk(
-                    effective_transport,
-                    url=url,
-                    server_cfg=server_cfg,
-                    token=token,
-                    timeout=timeout,
-                )
-            )
-        elif is_persistent_stdio(server_cfg):
-            session = PersistentStdioRegistry.instance().get_or_create(
-                server_name, server_cfg
-            )
-            resp = session.call("tools/list", {}, timeout)
-            result = resp.get("result") if isinstance(resp, dict) else None
-            tools_raw = (
-                result.get("tools", [])
-                if isinstance(result, dict)
-                else []
-            )
-            if not isinstance(tools_raw, list):
-                tools_raw = []
-        else:
-            session_id = _get_or_init_session_id(
-                server_name, url, server_cfg, token=token
-            )
-            if not session_id:
-                raise RuntimeError(
-                    f"Failed to initialize MCP session for server '{server_name}'"
-                )
-
-            try:
-                tools_raw = _tools_list_request(
-                    url, session_id=session_id, server_cfg=server_cfg, token=token
-                )
-            except httpx.HTTPStatusError:
-                _MCP_SESSIONS.pop(server_name, None)
-                session_id = _get_or_init_session_id(
-                    server_name, url, server_cfg, token=token
-                )
-                if not session_id:
-                    raise RuntimeError(
-                        f"Failed to re-initialize MCP session for server '{server_name}'"
-                    )
-                tools_raw = _tools_list_request(
-                    url, session_id=session_id, server_cfg=server_cfg, token=token
-                )
+        client = resolve_mcp_client(server_name, server_cfg, os_backend=os_backend)
+        tools_raw = client.list_tools(timeout=timeout)
 
         tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
 
@@ -421,6 +372,7 @@ async def _abuild_tools_registry(
     *,
     discovery_timeout_sec: float = 8,
     on_progress=None,
+    os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """
     Построить словарь всех тулов со всех MCP-серверов (без кэширования).
@@ -453,7 +405,9 @@ async def _abuild_tools_registry(
     async def _one(name: str, cfg: Dict[str, Any]) -> None:
         # _adiscover_one сама решает, нужен ли поток: SDK-транспорты она берёт
         # нативно, а легаси и persistent stdio уводит в run_abandonable.
-        result = await _adiscover_one(name, cfg, timeout=discovery_timeout_sec)
+        result = await _adiscover_one(
+            name, cfg, timeout=discovery_timeout_sec, os_backend=os_backend
+        )
         results[name] = result
         if on_progress is not None:
             on_progress(name, result[1])
@@ -532,7 +486,13 @@ class ToolsCache:
     - Ключ кэша привязан к текущему содержимому config_data['mcp-servers'].
     """
 
-    def __init__(self, cfg: Dict[str, Any], ttl_default: int = 3600) -> None:
+    def __init__(
+        self,
+        cfg: Dict[str, Any],
+        ttl_default: int = 3600,
+        *,
+        os_backend: Any = None,
+    ) -> None:
         """
         cfg — словарь с mcp-конфигурацией, ожидаются ключи:
         - "mcp-servers": {...}
@@ -540,6 +500,7 @@ class ToolsCache:
         """
         self._config = cfg
         self._ttl_default = ttl_default
+        self._os_backend = os_backend
         self._data: Optional[Dict[str, Dict[str, Any]]] = None
         self._fetched_at: Optional[float] = None
         self._cache_key: Optional[str] = None
@@ -618,6 +579,7 @@ class ToolsCache:
             servers_cfg,
             discovery_timeout_sec=self._discovery_timeout(),
             on_progress=on_progress,
+            os_backend=self._os_backend,
         )
         self._status = status
 

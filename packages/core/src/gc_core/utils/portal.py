@@ -49,7 +49,21 @@ class Portal:
             def _target() -> None:
                 asyncio.set_event_loop(loop)
                 loop.call_soon(ready.set)
-                loop.run_forever()
+                try:
+                    loop.run_forever()
+                finally:
+                    # SystemExit и KeyboardInterrupt из корутины asyncio
+                    # пробивает наружу: future результат получает (вызывающий
+                    # видит исключение и считает, что всё в порядке), а
+                    # run_forever на этом заканчивается и поток умирает.
+                    # Портал обязан это заметить сам: иначе _loop остаётся
+                    # ссылкой на мёртвый loop, и следующий синхронный вызов
+                    # встаёт в очередь, которую некому разобрать, — процесс
+                    # виснет навсегда, без исключения и без строки в лог.
+                    with self._lock:
+                        if self._loop is loop:
+                            self._loop = None
+                            self._thread = None
 
             thread = threading.Thread(target=_target, name=self._name, daemon=True)
             thread.start()
@@ -78,7 +92,7 @@ class Portal:
                 "или вынесите вызов в asyncio.to_thread()."
             )
         loop = self._ensure_loop()
-        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+        return _unwrap(asyncio.run_coroutine_threadsafe(_carry(coro), loop).result())
 
     def close(self, timeout: float = 5.0) -> None:
         """Остановить loop и дождаться потока. Идемпотентно."""
@@ -91,6 +105,34 @@ class Portal:
         if thread is not None:
             thread.join(timeout=timeout)
         loop.close()
+
+
+async def _carry(coro: Coroutine[Any, Any, Any]) -> tuple[BaseException | None, Any]:
+    """Донести до вызывающего ЛЮБОЙ исход корутины, включая BaseException.
+
+    Без этой обёртки `SystemExit` (и `KeyboardInterrupt`) из корутины вешает
+    процесс намертво. asyncio обрабатывает их особо: `Task.__step` ставит
+    исключение на задачу и пробрасывает его дальше — сквозь `run_forever`,
+    убивая поток портала. Перенос результата в `concurrent.futures.Future`
+    сделан через `call_soon_threadsafe`, то есть должен исполниться на том же
+    loop, — а разбирать очередь уже некому. Вызывающий остаётся на `.result()`
+    навсегда: ни исключения, ни таймаута, ни строки в лог.
+
+    В синхронном ядре `sys.exit()` внутри тула просто разворачивал стек. Здесь
+    исход корутины становится ЗНАЧЕНИЕМ, поэтому портальный loop доживает до
+    следующего вызова, а исключение поднимается у вызывающего — как раньше.
+    """
+    try:
+        return None, await coro
+    except BaseException as exc:  # noqa: BLE001 — переносим как есть, включая SystemExit
+        return exc, None
+
+
+def _unwrap(carried: tuple[BaseException | None, Any]) -> Any:
+    exc, value = carried
+    if exc is not None:
+        raise exc
+    return value
 
 
 _portal: Optional[Portal] = None

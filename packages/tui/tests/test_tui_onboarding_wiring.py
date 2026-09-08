@@ -34,7 +34,11 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
 
     # Patch config functions used in main()
     from gc_core import config as cfg_mod
-    monkeypatch.setattr(cfg_mod, "load_config", lambda path=None: dict(config_dict))
+    from gc_core.config_modules.profiles import ProfileMeta
+    monkeypatch.setattr(
+        cfg_mod, "load_config_ex",
+        lambda path=None, **kw: (dict(config_dict), ProfileMeta(active_name=None, ref=None, mtime_set={})),
+    )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
     monkeypatch.setattr(cfg_mod, "user_config_path", lambda: tmp_path / "config.yml")
     monkeypatch.setattr(cfg_mod, "_bootstrap_user_config", lambda: True)
@@ -109,9 +113,9 @@ def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
     from gc_core import thread_store as ts_mod
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
 
-    # Also suppress mcp_daemon_autostart (imported in main)
-    from gc_core import mcp_daemon_autostart as mcp_da_mod
-    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg: None, raising=False)
+    # Also suppress daemon_autostart (imported in main)
+    from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
+    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 
     # Capture app attributes and intercept run()

@@ -13,7 +13,7 @@ from gc_core.config_modules.env_vars import EnvVars
 
 
 def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monkeypatch):
-    from gc_core.config import _project_local_config_path
+    from gc_core.config_modules.env_vars import project_local_config_path
 
     gc_dir = tmp_path / ".gc"
     gc_dir.mkdir()
@@ -21,26 +21,26 @@ def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monke
     project_cfg.write_text("agent:\n  max_steps: 100\n", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
-    result = _project_local_config_path()
+    result = project_local_config_path()
     assert result is not None
     assert os.path.abspath(result) == str(project_cfg.resolve())
 
 
 def test_project_local_config_path_returns_none_when_missing(tmp_path, monkeypatch):
-    from gc_core.config import _project_local_config_path
+    from gc_core.config_modules.env_vars import project_local_config_path
 
     monkeypatch.chdir(tmp_path)
     # Никакого .gc/config.yml в tmp_path нет.
-    assert _project_local_config_path() is None
+    assert project_local_config_path() is None
 
 
 def test_project_local_config_path_returns_none_when_gc_dir_is_file(tmp_path, monkeypatch):
-    from gc_core.config import _project_local_config_path
+    from gc_core.config_modules.env_vars import project_local_config_path
 
     # Краевой случай: <cwd>/.gc — это файл, а не директория. Нет config.yml внутри.
     (tmp_path / ".gc").write_text("not a dir", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    assert _project_local_config_path() is None
+    assert project_local_config_path() is None
 
 
 # Минимальный валидный глобальный config для всех тестов layered loading.
@@ -278,14 +278,21 @@ def test_cli_extra_overrides_win_over_layered(global_config_file, isolated_cwd):
 
 
 def test_invalid_yaml_in_project_loud_error(global_config_file, isolated_cwd):
-    """Невалидный YAML в project config → yaml.YAMLError, не silent fallback."""
+    """Невалидный YAML в project config → громкая ошибка, не silent fallback.
+
+    Класс — `ValueError` (с путём файла и координатой из парсера), а не сырой
+    `yaml.YAMLError`: чтение слоёв держит тот же контракт, что `_raw_from_text`
+    для текста и `validate_profile_text` для профиля. Не косметика — pre-write
+    валидация стека ловит `(OSError, ValueError)` и откатывается к одному файлу,
+    а `yaml.YAMLError` уходил мимо этого отката и ронял /settings на рендере
+    меню. Предмет стража прежний: молчания здесь быть не должно."""
     from gc_core.config import load_config
 
     _write_project_config(
         isolated_cwd,
         "this is: : : not [valid yaml }\n",
     )
-    with pytest.raises(yaml.YAMLError):
+    with pytest.raises(ValueError, match="невалидный YAML"):
         load_config(str(global_config_file))
 
 
@@ -299,6 +306,11 @@ def test_invalid_schema_in_project_loud_error(global_config_file, isolated_cwd):
     (Полагаться на отказ coerce'ить scalar в int нельзя: Pydantic v2 по умолчанию
     coerce'ит "123" → 123 без ошибки, и тест становится хрупким. Extra-forbid —
     чёткий тест.)
+
+    Ревизия (MR #80, класс L28): отказ схемы приходит завёрнутым — ValueError с
+    текстом из координат и причин, БЕЗ pydantic-дампа (`input_value` нёс токен из
+    файла в хинт пикера); сырой `ValidationError` — в `__cause__`, по нему
+    `explain_broken_config` берёт точные координаты.
     """
     from gc_core.config import load_config
 
@@ -306,8 +318,51 @@ def test_invalid_schema_in_project_loud_error(global_config_file, isolated_cwd):
         isolated_cwd,
         "this_top_level_field_does_not_exist_in_appconfig_schema: 123\n",
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError, match="не проходит схему") as excinfo:
         load_config(str(global_config_file))
+    assert isinstance(excinfo.value.__cause__, ValidationError)
+    assert "input_value" not in str(excinfo.value)
+
+
+def test_invalid_yaml_in_base_loud_error(tmp_path):
+    """Невалидный YAML в БАЗОВОМ config.yml → громкая ValueError с путём файла и
+    причиной — симметрично test_invalid_yaml_in_project_loud_error, но для базы.
+
+    Раньше базу читали голыми open()/yaml.safe_load() (config.py:492-493) без
+    какой-либо защиты: наружу летел сырой yaml.ScannerError, а не ValueError —
+    ни один из входов (cli.py/tui/__init__.py) не смог бы поймать его одним
+    except ValueError."""
+    from gc_core.config import load_config
+
+    base = tmp_path / "base_config.yml"
+    base.write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="невалидный YAML"):
+        load_config(str(base))
+
+
+def test_base_config_not_dict_loud_error(tmp_path):
+    """Список вместо словаря на верхнем уровне БАЗОВОГО config.yml → ValueError,
+    а не AttributeError из глубины мержа/схемы (`'list' object has no attribute
+    'get'`). `_layer_document` уже отвергает такой документ явно — базе того же
+    приёма не хватало."""
+    from gc_core.config import load_config
+
+    base = tmp_path / "base_config.yml"
+    base.write_text("- a\n- b\n", encoding="utf-8")
+    with pytest.raises(ValueError) as exc_info:
+        load_config(str(base))
+    assert not isinstance(exc_info.value, AttributeError)
+
+
+def test_unreadable_base_config_loud_error(tmp_path):
+    """Несуществующий путь БАЗОВОГО config.yml → ValueError с именем файла, а не
+    сырой FileNotFoundError/OSError."""
+    from gc_core.config import load_config
+
+    missing = tmp_path / "does_not_exist.yml"
+    with pytest.raises(ValueError) as exc_info:
+        load_config(str(missing))
+    assert str(missing) in str(exc_info.value)
 
 
 def test_empty_project_config_falls_back_to_global(global_config_file, isolated_cwd):
@@ -336,3 +391,40 @@ def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
     cfg: dict = {"agentsmd_override": False}
     apply_cli_overrides(cfg)
     assert cfg["agentsmd_override"] is False
+
+
+def test_hiding_the_project_layer_works_from_its_home_module(
+        global_config_file, isolated_cwd, monkeypatch):
+    """Проектный слой глушится подменой у ВЛАДЕЛЬЦА пути — и подмена обязана
+    действовать на весь загрузчик.
+
+    Адрес чтения один: и `_merge_layers`, и снимок свежести спрашивают
+    `config_modules.env_vars`. Пока загрузчик звал импортированное к себе имя, а
+    слои — владельца, подмена одного адреса другой не задевала: тесты глушили
+    слой, который всё равно читался. Зелено было лишь потому, что машинный конфиг
+    разработчика совместим — на другой машине сьют проверял бы не то состояние,
+    которое считает своим."""
+    from gc_core import config as config_mod
+    from gc_core.config_modules import env_vars
+
+    _write_project_config(isolated_cwd, "agent:\n  max_steps: 4242\n")
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: None)
+
+    cfg = config_mod.load_config(str(global_config_file))
+
+    assert cfg["max_steps"] == 50          # значение базы, слой скрыт
+
+
+def test_pointing_the_managed_overlay_works_from_its_home_module(
+        global_config_file, isolated_cwd, monkeypatch, tmp_path):
+    """То же для machine-managed оверлея: подмена у владельца
+    (`mcp_runtime.paths`) действует и на слой, и на снимок свежести."""
+    from gc_core import config as config_mod
+
+    managed = tmp_path / "managed.yml"
+    managed.write_text("agent:\n  max_steps: 777\n", encoding="utf-8")
+    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
+
+    cfg = config_mod.load_config(str(global_config_file))
+
+    assert cfg["max_steps"] == 777         # патч действует: оверлей взят отсюда

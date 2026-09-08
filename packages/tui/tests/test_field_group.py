@@ -124,6 +124,42 @@ async def test_form_hints_are_one_dim_colour(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_voice_saved_token_marked_too(tmp_path):
+    """Голосовой endpoint показывает сохранённый токен той же маской — значит и
+    красится он как значение: иначе тот же экран учит одному, а показывает другое
+    (спека §3.4, «одинаковый $deep-dim для обоих запрещён»)."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+    from gc_tui.palette import DEEP_DIM, INK
+    from textual.widgets import Input
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        ed = VoiceEndpointEditor(values={"url": "https://h/v1/audio/transcriptions",
+                                         "token": "", "model": ""},
+                                 autofocus=False,
+                                 placeholders={"token": "sec***"})
+        await pilot.app.screen.mount(ed)
+        await pilot.pause()
+
+        def colour(wid):
+            w = ed.query_one(f"#{wid}", Input)
+            return w.get_component_styles("input--placeholder").color.hex.lower()
+
+        assert ed.query_one("#voice-token", Input).has_class("has-saved")
+        assert colour("voice-token") == INK.lower()
+        assert colour("voice-model") == DEEP_DIM.lower(), "подсказка остаётся подсказкой"
+
+        ed2 = VoiceEndpointEditor(values={"url": "", "token": "", "model": ""},
+                                  autofocus=False)
+        await pilot.app.screen.mount(ed2)
+        await pilot.pause()
+        assert not ed2.query_one("#voice-token", Input).has_class("has-saved"), \
+            "сохранённого токена нет — маркера быть не должно"
+
+
+@pytest.mark.asyncio
 async def test_disabled_field_group_is_dimmed(tmp_path):
     """Поле в группе отключено — приглушается рамка ГРУППЫ (спека §3.3).
 
@@ -139,8 +175,8 @@ async def test_disabled_field_group_is_dimmed(tmp_path):
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        # Поле отключено ещё до монтирования (`PasteInput(disabled=True)` в
-        # конструкторе хоста) — рамка обязана быть приглушённой с первого кадра.
+        # Поле отключено ещё до монтирования (так строит поля-факты голосовой
+        # редактор) — рамка обязана быть приглушённой с первого кадра.
         inp = PasteInput(id="conn-token", classes="group-field", disabled=True)
         group = Vertical(inp, id="conn-token-group", classes="field-group")
         await pilot.app.screen.mount(group)
@@ -188,7 +224,7 @@ async def test_alt_down_on_address_opens_the_collapsed_preset_list(tmp_path):
     Ctrl+Space теперь ВСЕГДА про пробу — см. `test_ctrl_space_probes_regardless_of_the_preset_list_state`.
     """
     pytest.importorskip("textual")
-    from form_helpers import settings_connection
+    from form_harness import settings_connection
 
     async with settings_connection(tmp_path) as (pilot, scr):
         from gc_tui.editors.connection import ConnectionEditor
@@ -207,7 +243,7 @@ async def test_ctrl_space_probes_regardless_of_the_preset_list_state(tmp_path):
     2026-08-06: клавиши не конкурируют, порядок любой) — список свёрнут, раскрыт
     Alt+↓ явно или так и остаётся раскрытым, проба уходит в обоих случаях."""
     pytest.importorskip("textual")
-    from form_helpers import settings_connection, recording_probe
+    from form_harness import recording_probe, settings_connection
 
     calls = []
     async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
@@ -230,7 +266,7 @@ async def test_ctrl_down_on_address_opens_the_list_like_alt_down(tmp_path):
     """Ctrl+↓ — тихий синоним Alt+↓ (спека §2): раскрывает свёрнутый пресет-лист
     точно так же, хотя в текстах эта клавиша нигде не называется."""
     pytest.importorskip("textual")
-    from form_helpers import settings_connection
+    from form_harness import settings_connection
 
     async with settings_connection(tmp_path) as (pilot, scr):
         from gc_tui.editors.connection import ConnectionEditor
@@ -262,7 +298,7 @@ async def test_ctrl_space_on_an_unselected_filter_does_not_probe_the_typed_text(
     pytest.importorskip("textual")
     from textual.widgets import Input, Static
     from gc_testkit.tui_support import wait_until
-    from form_helpers import settings_connection, recording_probe
+    from form_harness import recording_probe, settings_connection
 
     calls = []
     async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
@@ -298,7 +334,7 @@ async def test_ctrl_space_on_an_empty_address_falls_back_like_before(tmp_path):
     `_start_draft_probe` не меняется)."""
     pytest.importorskip("textual")
     from textual.widgets import Input
-    from form_helpers import settings_connection, recording_probe
+    from form_harness import recording_probe, settings_connection
 
     calls = []
     async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
@@ -320,7 +356,7 @@ async def test_ctrl_space_on_an_env_reference_still_probes(tmp_path):
     `_start_draft_probe` — через обработчик клавиши, реальным нажатием."""
     pytest.importorskip("textual")
     from textual.widgets import Static
-    from form_helpers import settings_connection, recording_probe
+    from form_harness import recording_probe, settings_connection
 
     calls = []
     async with settings_connection(tmp_path, probe=recording_probe(calls),
@@ -347,7 +383,7 @@ async def test_preset_list_opens_full_not_filtered_by_the_current_address(tmp_pa
     оно сохранено; добавилась проверка, что заполненный адрес список не поднимает.
     """
     pytest.importorskip("textual")
-    from form_helpers import settings_connection
+    from form_harness import settings_connection
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
 
     async with settings_connection(tmp_path) as (pilot, scr):

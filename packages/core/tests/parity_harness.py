@@ -154,10 +154,18 @@ def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
             )
         return httpx.Response(200, json=turn)
 
-    monkeypatch.setattr(
-        connect_backend, "get_async_client",
-        lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-    )
+    if hasattr(connect_backend, "get_async_client"):
+        monkeypatch.setattr(
+            connect_backend, "get_async_client",
+            lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+    else:
+        # Синхронная ветка (develop) ходит к модели через requests-сессию.
+        # Ветка нужна, чтобы ОДИН харнесс снимал эталон и там, и здесь: иначе
+        # сравнивались бы прогоны, собранные разными установщиками, и гейт
+        # доказывал бы меньше, чем обещает. `ScriptedBackend` держит совместимый
+        # с `requests` `post` ровно для этого случая.
+        monkeypatch.setattr(connect_backend, "_NO_NETRC_SESSION", backend)
     return backend
 
 
@@ -261,12 +269,16 @@ def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> dict:
     воспроизводимость зависела бы от машины.
     """
     from gc_core import config as cfgmod
+    from gc_core.config_modules import env_vars as _env_vars
 
     tmp_path.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
-    # Патчим ИМЯ, связанное в самом config.py: `from ... import managed_config_path`
-    # связывает его на импорте, и подмена в модуле-источнике не подействует.
-    monkeypatch.setattr(cfgmod, "managed_config_path",
+    # Оба слоя адресуются ОДНИМ модулем-владельцем: алиас
+    # `config._project_local_config_path` develop снёс, а `managed_config_path`
+    # эта ветка перенесла из `mcp_runtime.paths` в `config_modules.env_vars`
+    # (путь принадлежит конфигу). `config.py` берёт обе функции через модуль,
+    # а не связанным именем, поэтому подмена у владельца действует.
+    monkeypatch.setattr(_env_vars, "project_local_config_path", lambda: None)
+    monkeypatch.setattr(_env_vars, "managed_config_path",
                         lambda: tmp_path / "absent.local.yml")
 
     prompt = tmp_path / "system_prompt.md"

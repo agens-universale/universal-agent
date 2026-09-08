@@ -11,9 +11,11 @@ from pathlib import Path
 
 import yaml
 
-from gc_core.config import _default_config_path
+from gc_core.config import _default_config_path, flatten_app_config
+from gc_core.config_modules.model_sections_validation import validate_model_sections
 from gc_core.config_modules.root import AppConfig
 from gc_testkit.paths import REPO
+from gc_core.model_router import ModelRouter
 
 # dotted-пути, где шаблон НАМЕРЕННО отличается от кодового дефолта:
 # сентинелы онбординга и preset-значения шаблона. Пополнять только осознанно.
@@ -21,6 +23,7 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     # --- Сентинелы онбординга: placeholder-значения, которые пользователь обязан вписать ---
     "backend.completions_url",                  # "http://your-backend:..." — инструкция вписать URL
     "backend.chat_completion_headers.Authorization",  # "Bearer <ВПИШИТЕ_ТОКЕН>" — инструкция вписать токен
+    "agent.model",                              # "<ВПИШИТЕ_МОДЕЛЬ>" — модель выбирается в мастере первого запуска
 
     # --- Preset-режим шаблона: chat_completions вместо responses (кодового дефолта) ---
     "backend.api_mode",                         # шаблон ориентирован на chat_completions
@@ -30,7 +33,6 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     "backend.use_retry",                        # true: рекомендованная настройка для продакшн
 
     # --- Preset-значения агента: рекомендованные настройки для продакшн-использования ---
-    "agent.model",                              # "gigacode_agent_v1.6_rc" — рекомендованная модель
     "agent.use_local_subagents",               # true: включены subagents в шаблоне
     "agent.subagent_max_steps",                # 500 вместо 100 — больший лимит для продакшн
     "agent.client_name",                       # "gc_ua_agent" — имя клиента для gc-ua
@@ -67,6 +69,8 @@ EXPERT_ONLY_KEYS: set = {
     # лежит закомментированным — как образец формата (сторож этого —
     # test_default_presets_are_not_materialized_into_the_template).
     "endpoint_presets",
+    # Голосовой каталог — тот же класс и то же правило.
+    "voice_endpoint_presets",
     # --- agent: тюнинги finish gate / output storage ---
     # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
     "agent.finish_gate_max_iterations",
@@ -76,6 +80,7 @@ EXPERT_ONLY_KEYS: set = {
     "agent.stored_tool_outputs_max_entries",  # размер стора больших tool-outputs
     "agent.exec_timeout_sec",                # таймаут execute_command / run_python_code
     "agent.exec_output_capture_max_chars",   # RAM-cap stdout/stderr на поток для exec
+    "agent.walk_output_max_chars",           # потолок приватного канала обхода дерева (Harbor)
     "agent.limit_project_metadata",           # скрыть проектные метаданные из системного промпта
     # Per-run лимиты надёжности (по умолчанию выключены); см. docs/configuration.md.
     "agent.session_token_limit",
@@ -121,6 +126,7 @@ EXPERT_ONLY_KEYS: set = {
     "chat_completions.llm.max_tokens",
     "chat_completions.llm.completion_kwargs",
     "chat_completions.llm.judge_max_tokens",  # запас под CoT судей; секции нет в шаблоне
+    "chat_completions.llm.subagent_role_max_tokens",  # лимит генерации роли special_agent
     # --- backend mTLS: корп-сценарий, справочник — demo_config.yml ---
     "backend.cert_path",
     "backend.key_path",
@@ -156,6 +162,18 @@ EXPERT_ONLY_KEYS: set = {
     # Путь к манифесту рекомендованных MCP; управляется gc-mcp.
     "mcp.meta.recommended_mcp_manifest",
 
+    # --- voice: голосовой ввод (опциональная секция) ---
+    # В шаблоне — осознанно закомментированный пример (voice выключен по умолчанию);
+    # заполняется юзером вручную или целиком пишется gc-voice install в config.local.yml.
+    "voice.provider",
+    "voice.url",
+    "voice.token",
+    "voice.model",
+    "voice.language",
+    "voice.max_seconds",
+    "voice.timeout_seconds",
+    "voice.verify_ssl",
+
     # --- paths: кастомные пути к промптам и runtime-данным ---
     # По умолчанию все пути берутся из XDG/GC_HOME; явное задание — только для sandbox.
     "paths.threads_data_path",
@@ -178,6 +196,7 @@ EXPERT_ONLY_KEYS: set = {
     "project_memory.check_interval_messages",
     "project_memory.max_chars",
     "project_memory.max_append_chars",
+    "project_memory.compaction_max_tokens",
 
     # --- quality_gate: лимиты digest для finish gate ---
     # Экспертный тюнинг; дефолты подходят для большинства сценариев.
@@ -217,6 +236,22 @@ EXPERT_ONLY_KEYS: set = {
     "working_memory.max_chars_state",
     "working_memory.max_chars_knowledge",
     "working_memory.total_budget_chars",
+
+    # --- Профили v2 (волна A): секции models/slots/assign ---
+    # Схема готова (Task 1); полный документированный пример в шаблоне — Task 15.
+    # Указатели profile/level уже в шаблоне (совпадают с кодовыми дефолтами).
+    "models",
+    "slots.light",
+    "slots.default",
+    "slots.max",
+    "assign.finish_gate",
+    "assign.text_answer_judge",
+    "assign.command_judge",
+    "assign.summary",
+    "assign.intent_scope",
+    "assign.memory_compaction",
+    "assign.auto_judge",
+    "assign.subagents",
 }
 
 
@@ -251,10 +286,116 @@ def test_default_template_matches_code_defaults():
     )
 
 
+# Якорь — корень репозитория из gc_testkit.paths, а не `parents[1]`: у develop
+# тест лежал в корневом tests/, у нас — в packages/core/tests, и тот же счёт
+# вёл бы в packages/core.
+DEMO_CONFIG_PATH = REPO / "demo_config.yml"
+
+
+def test_default_template_with_live_profile_anchor_stays_legacy():
+    """§14 «Стражи»: шаблон с живым якорем `profile: ""` остаётся ЛЕГАСИ.
+
+    Второй рубеж, а не единственный: ожившую в шаблоне секцию моделей ловят и
+    A1, и A2 выше (`models`, `slots.*`, `assign.*` лежат в `EXPERT_ONLY_KEYS`,
+    и появление их в шаблоне даёт `stale` — проверено раскомментированием).
+    Ценность здесь в другом: те двое падают на бухгалтерии ключей и говорят
+    «whitelist разошёлся с шаблоном», а требование §14 — про ПОВЕДЕНИЕ. Этот
+    формулирует его прямо и спрашивает Router: пакетная поставка обязана
+    резолвиться плоскими ключами, как до профилей, иначе уровни включились бы
+    всем, кто ещё ничего не настраивал.
+    """
+    raw = _template_raw()
+    assert raw["profile"] == ""
+    assert raw["level"] == "default"
+
+    router = ModelRouter(
+        flatten_app_config(AppConfig.model_validate(raw)),
+        level_provider=lambda: raw["level"],
+    )
+    assert router.registry_empty() is True
+    assert router.resolve("main").source == "легаси"
+
+
 def test_demo_config_validates_against_schema():
-    demo = REPO / "demo_config.yml"
-    raw = yaml.safe_load(demo.read_text(encoding="utf-8")) or {}
+    raw = yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")) or {}
     AppConfig.model_validate(raw)
+
+
+def test_demo_config_carries_live_profile_and_level_pointers():
+    """§13: demo_config.yml демонстрирует заполнение указателей `profile`/`level`.
+
+    В отличие от секций моделей (страж ниже) указатели в демо ЖИВЫЕ — это их
+    штатная форма записи, и демо показывает именно её. Стража на них не было:
+    оба ключа удалялись из demo_config, не роняя ни одного теста из 133 —
+    соседний `test_demo_config_validates_against_schema` требует лишь, чтобы
+    файл проходил схему, а схема оба ключа считает опциональными.
+    """
+    raw = yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    assert raw.get("profile") == "", (
+        'demo_config.yml потерял живой указатель `profile: ""` — §13 требует '
+        "демонстрации заполнения указателей"
+    )
+    assert raw.get("level") == "default", (
+        "demo_config.yml потерял живой указатель `level: default`"
+    )
+
+
+def _anchor_line(lines: list[str], anchor: str) -> int:
+    """Индекс строки-якоря блока. Якорь опознаётся по началу строки: у секций есть
+    хвостовой комментарий-пояснение (`# slots:   # уровни — УКАЗАТЕЛИ ...`)."""
+    return next(i for i, line in enumerate(lines) if line.startswith(anchor))
+
+
+def _uncomment_block(text: str, anchor: str) -> str:
+    """Блок закомментированного YAML от строки `anchor` до первой не-комментарной
+    строки, со снятым `# `. Пустая строка-разделитель внутри блока — сам `#`."""
+    lines = text.splitlines()
+    start = _anchor_line(lines, anchor)
+    out = []
+    for line in lines[start:]:
+        if not line.startswith("#"):
+            break
+        out.append(line[2:] if line.startswith("# ") else line[1:])
+    return "\n".join(out)
+
+
+def test_demo_config_carries_commented_model_sections_example():
+    """§13/§14: demo_config.yml несёт ЗАКОММЕНТИРОВАННЫЙ пример секций моделей.
+
+    `test_demo_config_validates_against_schema` рядом этого не ловит: комментарии
+    для `yaml.safe_load` невидимы, и он одинаково зелен, если блок удалить и если
+    его раскомментировать. Здесь проверяется ровно то, чего он не видит:
+    пример на месте, живым он НЕ становится (иначе demo перестал бы показывать
+    легаси-умолчание), а все три секции — из тех, что демонстрирует §13.
+    """
+    text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    for anchor in ("# models:", "# slots:", "# assign:"):
+        assert any(line.startswith(anchor) for line in lines), (
+            f"demo_config.yml потерял закомментированный якорь {anchor!r} — "
+            "§13 требует пример секций моделей как обычных конфиг-секций"
+        )
+    raw = yaml.safe_load(text) or {}
+    for section in ("models", "slots", "assign"):
+        assert section not in raw, (
+            f"секция {section} в demo_config.yml ожила — пример обязан оставаться "
+            "закомментированным (§13: демо показывает и легаси-умолчание тоже)"
+        )
+
+
+def test_demo_config_commented_example_is_valid_when_uncommented():
+    """Пример существует, чтобы его раскомментировали, — значит он обязан
+    грузиться. Проверяется тем же путём, что и правка руками: блок снимается с
+    комментария, кладётся поверх остального demo_config и идёт через обе фазы
+    (схема + ссылочная целостность на merged), а не только через `safe_load`."""
+    text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
+    example = yaml.safe_load(_uncomment_block(text, "# models:")) or {}
+    assert set(example) == {"models", "slots", "assign"}, (
+        f"из блока-примера вынулись не те секции: {sorted(example)}"
+    )
+    merged = (yaml.safe_load(text) or {}) | example
+    cfg = AppConfig.model_validate(merged)
+    assert validate_model_sections(cfg) == []
 
 
 def _leaf_paths(obj, prefix: str = "") -> set:
@@ -308,4 +449,49 @@ def test_schema_keys_present_in_template_or_expert_only():
     assert not phantom, (
         "EXPERT_ONLY_KEYS содержит пути, отсутствующие в схеме (AppConfig) — удали мёртвые записи:\n"
         + "\n".join(sorted(phantom))
+    )
+
+
+# Ключи, которых нет в demo-файлах ещё до появления этого стража. Долг, а не
+# разрешение: список должен только сокращаться. Новый дрейф сюда не дописывать —
+# правило проекта требует синхронной правки demo_config.yml и config.default.yml.
+DEMO_KNOWN_GAPS: set = {
+    "agent.limit_trace_summary",
+    "backend.chat_completion_headers",
+    "pricing.input",
+    "pricing.output",
+    "tui.bang_shell.enabled",
+    "tui.bang_shell.max_output_bytes",
+    "tui.bang_shell.max_output_lines",
+}
+
+
+def test_demo_config_covers_the_same_keys_as_the_template():
+    """demo_config.yml объявлен полным справочником — значит и полнота та же.
+
+    Страж A2 читал только config.default.yml, поэтому 13 ключей
+    fs_tools.find_in_files доехали в шаблон и не доехали в demo: расхождение
+    прошло мимо CI. Правило проекта требует синхронной правки обоих файлов.
+    """
+    schema_paths = _leaf_paths(AppConfig().model_dump())
+    template_paths = _leaf_paths(_template_raw())
+    template_covered = _template_covered(schema_paths, template_paths)
+
+    # Полным справочником объявлен именно demo_config.yml (config.default.yml:5,
+    # docs/configuration.md). demo_config_openai.yml — вариант под провайдера,
+    # полноты с него не требуем.
+    name = "demo_config.yml"
+    demo_file = REPO / name          # demo_config.yml лежит в корне репозитория
+    demo_raw = yaml.safe_load(demo_file.read_text(encoding="utf-8")) or {}
+    demo_covered = _template_covered(schema_paths, _leaf_paths(demo_raw))
+
+    missing = template_covered - demo_covered - DEMO_KNOWN_GAPS
+    assert not missing, (
+        f"{name} отстал от config.default.yml — добавь ключи:\n"
+        + "\n".join(sorted(missing))
+    )
+    closed = DEMO_KNOWN_GAPS & demo_covered
+    assert not closed, (
+        f"{name}: эти ключи уже добавлены — удали их из DEMO_KNOWN_GAPS:\n"
+        + "\n".join(sorted(closed))
     )

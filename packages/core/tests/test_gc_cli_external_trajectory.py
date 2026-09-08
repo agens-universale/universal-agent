@@ -35,6 +35,7 @@ from adapters.gc_cli_external import (  # noqa: E402
     _messages_to_steps,
     _stringify_content,
 )
+from harbor.models.agent.context import AgentContext  # noqa: E402
 
 
 def test_roles_map_to_atif_sources_with_sequential_ids():
@@ -200,3 +201,79 @@ def test_runtime_url_and_model_beat_profile_overrides(monkeypatch):
     cfg = agent._build_config()
     assert cfg["model"] == "real-model"  # openai/ stripped, profile value ignored
     assert cfg["completions_url"] == "http://runtime/v1/chat/completions"
+
+
+def _state_with_usage(**calls):
+    """A State-like object carrying a real UsageAccount, as the run loop leaves it."""
+    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+
+    account = UsageAccount()
+    for _ in range(calls.pop("missing", 0)):
+        account.add_missing(CATEGORY_MAIN)
+    if calls:
+        account.add(CATEGORY_MAIN, **calls)
+    return SimpleNamespace(usage=account)
+
+
+def test_usage_totals_reach_agent_context():
+    context = AgentContext()
+    state = _state_with_usage(input_tokens=14300, output_tokens=250, cached_tokens=1200)
+    _agent()._populate_usage(context, state)
+    # n_input_tokens includes cache, per AgentContext's contract.
+    assert (context.n_input_tokens, context.n_output_tokens, context.n_cache_tokens) == (
+        14300,
+        250,
+        1200,
+    )
+
+
+def test_usage_sums_across_categories():
+    """Summariser, finish gate and subagent calls are part of what the run cost."""
+    from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUBAGENT, CATEGORY_SUMMARY, UsageAccount
+
+    account = UsageAccount()
+    account.add(CATEGORY_MAIN, input_tokens=1000, output_tokens=100)
+    account.add(CATEGORY_SUMMARY, input_tokens=500, output_tokens=50)
+    account.add(CATEGORY_SUBAGENT, input_tokens=200, output_tokens=20)
+    context = AgentContext()
+    _agent()._populate_usage(context, SimpleNamespace(usage=account))
+    assert (context.n_input_tokens, context.n_output_tokens) == (1700, 170)
+
+
+def test_cost_is_left_to_the_downstream_tariff():
+    """vllm returns no price and our rate card is in roubles — a USD figure would be made up."""
+    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+
+    account = UsageAccount()
+    account.add(CATEGORY_MAIN, input_tokens=10, output_tokens=1)
+    context = AgentContext()
+    _agent()._populate_usage(context, SimpleNamespace(usage=account))
+    assert context.n_input_tokens == 10
+    assert context.cost_usd is None
+
+
+def test_no_calls_leaves_counters_unset():
+    """Zero tokens would read as 'the run was free'; a timed-out run counted nothing."""
+    context = AgentContext()
+    assert _agent()._populate_usage(context, None) is None
+    assert context.n_input_tokens is None
+
+    totals = _agent()._populate_usage(context, _state_with_usage())
+    assert totals["calls"] == 0
+    assert context.n_input_tokens is None
+
+
+def test_calls_without_usage_are_reported_not_hidden():
+    state = _state_with_usage(input_tokens=100, output_tokens=10, missing=3)
+    totals = _agent()._populate_usage(AgentContext(), state)
+    assert (totals["calls"], totals["missing_usage_calls"]) == (4, 3)
+
+
+def test_reporting_failure_never_breaks_the_run():
+    """It runs inside a finally that may be unwinding a timeout."""
+    class Exploding:
+        @property
+        def usage(self):
+            raise RuntimeError("state is half-torn-down")
+
+    assert _agent()._populate_usage(AgentContext(), Exploding()) is None

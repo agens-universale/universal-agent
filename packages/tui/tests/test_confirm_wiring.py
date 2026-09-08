@@ -5,12 +5,12 @@
 
 Тест 2 (integration, run_test): полная цепочка
   confirm(…) → call_from_thread → show_confirm_banner → [y] → submit_confirm_reply
-              → confirm() возвращает "once".
+              → confirm() возвращает "allow_remember".
 
 Тест 3 (re-entrancy): два последовательных confirm в одном раннере:
   decline → approve; канал должен быть re-entrant.
 
-Тест 4 (arrow nav): ↓ + Enter выбирает выделенный вариант (session).
+Тест 4 (arrow nav): ↓ + Enter выбирает выделенный вариант (allow_once).
 """
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ async def test_confirm_full_chain_via_run_test():
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 1, f"ожидали 1 ConfirmBanner, получили {len(banners)}"
 
-        # Пользователь нажимает «y» → TraceScreen._answer_confirm → runner.submit_confirm_reply("once").
+        # Пользователь нажимает «y» → TraceScreen._answer_confirm → runner.submit_confirm_reply("allow_remember").
         await pilot.press("y")
         await pilot.pause(0.2)
 
@@ -109,7 +109,7 @@ async def test_confirm_full_chain_via_run_test():
         val = result[0]
         if isinstance(val, BaseException):
             raise val
-        assert val == "once"
+        assert val == "allow_remember"
 
         # Баннер снят.
         banners_after = list(pilot.app.query(ConfirmBanner))
@@ -160,7 +160,7 @@ async def test_confirm_reentrant_decline_then_approve():
         t1.join(timeout=3.0)
         assert not t1.is_alive(), "worker1 не завершился"
         assert len(results) == 1
-        assert results[0] == "deny", f"confirm #1 должен вернуть 'deny', вернул {results[0]}"
+        assert results[0] == "deny_remember", f"confirm #1 должен вернуть 'deny_remember', вернул {results[0]}"
 
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 0, "баннер должен быть снят после confirm #1"
@@ -186,7 +186,7 @@ async def test_confirm_reentrant_decline_then_approve():
         t2.join(timeout=3.0)
         assert not t2.is_alive(), "worker2 не завершился"
         assert len(results) == 2
-        assert results[1] == "once", f"confirm #2 должен вернуть 'once', вернул {results[1]}"
+        assert results[1] == "allow_remember", f"confirm #2 должен вернуть 'allow_remember', вернул {results[1]}"
 
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 0, "баннер должен быть снят после confirm #2"
@@ -195,8 +195,8 @@ async def test_confirm_reentrant_decline_then_approve():
 # ── arrow navigation: ↑/↓ + Enter ────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_confirm_arrow_down_then_enter_selects_session():
-    """↓ сдвигает выделение с Y ([Y]) на [S] (session); Enter выбирает выделенный → "session"."""
+async def test_confirm_arrow_down_then_enter_selects_allow_once():
+    """↓ сдвигает выделение с Y ([Y]) на [O] (allow_once); Enter выбирает выделенный → "allow_once"."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.services.agent_runner import AgentRunner
@@ -227,19 +227,19 @@ async def test_confirm_arrow_down_then_enter_selects_session():
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 1
 
-        # Стрелка вниз — переключает на [S] (selected=1).
+        # Стрелка вниз — переключает на [O] (selected=1).
         await pilot.press("down")
         await pilot.pause(0.05)
         banner = banners[0]
         assert banner.selected == 1, f"ожидали selected=1, получили {banner.selected}"
 
-        # Enter — подтверждает выделенный ([S] → "session").
+        # Enter — подтверждает выделенный ([O] → "allow_once").
         await pilot.press("enter")
         await pilot.pause(0.2)
 
         t.join(timeout=3.0)
         assert not t.is_alive()
-        assert result and result[0] == "session", f"ожидали 'session', получили {result}"
+        assert result and result[0] == "allow_once", f"ожидали 'allow_once', получили {result}"
 
 
 @pytest.mark.asyncio
@@ -282,4 +282,4 @@ async def test_confirm_enter_default_selects_y():
 
         t.join(timeout=3.0)
         assert not t.is_alive()
-        assert result and result[0] == "once", f"ожидали 'once', получили {result}"
+        assert result and result[0] == "allow_remember", f"ожидали 'allow_remember', получили {result}"

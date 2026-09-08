@@ -6,11 +6,13 @@
 """
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
 
 from gc_core.aio import AsyncAgent
+from gc_testkit.paths import package_src_dirs
 
 from parity_harness import (
     ScriptedBackend,
@@ -132,8 +134,23 @@ print(json.dumps(leaked))
         "root": str(tmp_path),
     }
 
+    # PYTHONPATH исходников: без него дочерний процесс берёт УСТАНОВЛЕННУЮ копию
+    # gc_core, а не ту, которую гоняет набор, — и меряет чужое дерево. Здесь это
+    # видно сразу (`No module named 'gc_core.aio'`), но в обратную сторону —
+    # когда установленная копия свежее — тест молча зеленел бы не на том коде.
+    env = dict(os.environ)
+    src_dirs = [str(d) for d in package_src_dirs()]
+    if src_dirs:
+        env["PYTHONPATH"] = os.pathsep.join(
+            src_dirs + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+        )
+
     out = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=180
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=env,
     )
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout.strip().splitlines()[-1]) == []

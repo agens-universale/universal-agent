@@ -14,7 +14,13 @@ from gc_testkit.paths import module_dir
 
 
 def teardown_module(_module) -> None:
-    for mod in ("agent_executor", "run_summary_coordinator"):
+    # Полные имена: после переезда ключи в sys.modules — "gc_core.agent_executor"
+    # и "gc_core.run_summary_coordinator". Кодмод сплита правит узлы import и
+    # одиночные строковые литералы, а строки ВНУТРИ кортежа не тронул — сетка
+    # module_literals их тоже не ловила (оговорено в её докстринге), и pop стал
+    # no-op: модули, загруженные под подменённым gc_core.tools, доживали до конца
+    # сессии и доставались следующим тестам.
+    for mod in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
         sys.modules.pop(mod, None)
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
@@ -47,7 +53,7 @@ def setup_module(_module) -> None:
     if cycle_stop_mod is not None:
         cycle_stop_mod.aapply_tool = tools_pkg.aapply_tool
 
-    for mod in ("agent_executor", "run_summary_coordinator"):
+    for mod in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
         sys.modules.pop(mod, None)
     from gc_core import agent_executor as ae
     from gc_core import run_summary_coordinator as rsc

@@ -1,6 +1,6 @@
 # Bench 2×2 (4/4): summary ON, subagents ON
 # Skill autonomous-benchmark-agent включён (disable_skills: []).
-# Запуск: gc-cli --config bench_configs/04_summary_subagents.yml ...
+# Запуск: gc-cli --config integrations/bench_configs/04_summary_subagents.yml ...
 
 backend:
   api_mode: chat_completions
@@ -58,8 +58,8 @@ agent:
     reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."
 
 paths:
-  agent_md_path: "../prompts/demo_cli_agent.md"
-  chat_completions_system_prompt_path: "../prompts/chat_completions_system_prompt.md"
+  agent_md_path: "../../packages/core/assets/prompts/demo_cli_agent.md"
+  chat_completions_system_prompt_path: "../../packages/core/assets/prompts/chat_completions_system_prompt.md"
 
 logging:
   full_log_backend: false
@@ -86,8 +86,8 @@ project_memory:
   enable_project_memory_notice: false
 
 summary:
-  chat_completions_summary_prompt_path: "../prompts/chat_completions_summary_prompt.md"
-  chat_completions_memory_patch_replace_prompt_path: "../prompts/chat_completions_memory_patch_replace.md"
+  chat_completions_summary_prompt_path: "../../packages/core/assets/prompts/chat_completions_summary_prompt.md"
+  chat_completions_memory_patch_replace_prompt_path: "../../packages/core/assets/prompts/chat_completions_memory_patch_replace.md"
   chat_completions_summary_trigger_chars: 150000
   chat_completions_summary_turn_end_trigger_chars: 90000
   incremental_batch_chars: 210000

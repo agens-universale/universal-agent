@@ -426,26 +426,73 @@ def prompt_user_confirmation_choice(
     fields: list[tuple[str, Any]],
     question: str,
 ) -> str:
-    """CLI-подтверждение с 3 вариантами: y=once, s=session, n/прочее=deny.
-    Auto-deny если stdin не tty (фоновый/CI запуск)."""
+    """Non-TUI fallback confirm (2×2), same key matrix as TUI banner.
+
+    Product UX for interactive ask is TUI; headless CLI is expected to use
+    policy allow|deny without interactive ask. This path remains for tty
+    scripts / legacy callers that still hit request_confirm with is_tui=False.
+
+    Auto-deny_once if stdin is not a tty (CI/background).
+    Keys: Latin/Cyrillic same-key sets from confirm_port (y/н, o/щ, n/т, t/е).
+    EOF (Ctrl+D) → deny_remember; Ctrl+C → deny_once (interrupt ≠ policy seed).
+    """
+    # Nested import: path_policy ↔ confirm_port cycle if top-level.
+    from gc_core.security.confirm_port import (
+        CONFIRM_CHOICE_HINT,
+        CONFIRM_DENY_ONCE,
+        CONFIRM_DENY_REMEMBER,
+        normalize_confirm_key,
+    )
+
     if not sys.stdin or not sys.stdin.isatty():
-        return "deny"
-    lines = [f"\n{title}: confirmation required."]
-    for label, value in fields:
-        lines.append(f"{label}: {value}")
-    lines.append(f"{question} [y=раз / s=сессия / N=нет]: ")
+        return CONFIRM_DENY_ONCE
+    # Payload-first: primary labels (Команда/Код/…) before meta (SPEC §3.5b).
+    _primary = frozenset({
+        "команда", "код", "command", "code", "path", "url", "путь",
+    })
+
+    def _is_primary(label: object) -> bool:
+        return str(label).strip().casefold() in _primary
+
+    # Stable order: keep caller order, but emit primary block first.
+    ordered = sorted(fields, key=lambda item: 0 if _is_primary(item[0]) else 1)
+    lines = [f"\n{title}: confirmation required.", ""]
+    for label, value in ordered:
+        if _is_primary(label):
+            lines.append(f"{label}:\n{value}")
+            lines.append("")
+        else:
+            lines.append(f"{label}: {value}")
+    lines.append(question)
+    # Same mnemonic as TUI; Esc/timeout only exist in TUI runner — omit here.
+    lines.append(f"{CONFIRM_CHOICE_HINT}: ")
     try:
         print("\n".join(lines), file=sys.stderr, end="")
         sys.stderr.flush()
-        answer = input().strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return "deny"
-    if answer in {"y", "yes"}:
-        return "once"
-    if answer in {"s", "session"}:
-        return "session"
-    return "deny"
+        answer = input().strip()
+    except EOFError:
+        return CONFIRM_DENY_REMEMBER
+    except KeyboardInterrupt:
+        return CONFIRM_DENY_ONCE
+    return normalize_confirm_key(answer)
 
+
+def prompt_user_confirmation(
+    *,
+    title: str,
+    fields: list[tuple[str, Any]],
+    question: str,
+) -> bool:
+    """Bool wrapper over 4-way CLI confirm (allow_* → True, else False).
+
+    Prefer request_confirm / prompt_user_confirmation_choice for new code.
+    """
+    from gc_core.security.confirm_port import CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER
+
+    choice = prompt_user_confirmation_choice(
+        title=title, fields=fields, question=question,
+    )
+    return choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
 
 
 def _ask_user_confirmation_for_write(

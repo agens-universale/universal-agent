@@ -15,22 +15,46 @@ from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, get_function_call_output_text
 from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
+# Детектор зацикливания приехал с develop синхронным. Оставлен как есть: его
+# наблюдатели — работа с памятью на микросекундах, нативной async-формы у них нет
+# (правило ветки: «есть нативная форма — идём через неё; формы нет, работа
+# короткая — инлайн на loop»).
+from gc_core.loop_detector.detector import flush as flush_loop_detector
+from gc_core.loop_detector.detector import observe as observe_loop_detector
+from gc_core.loop_detector.detector import clear as clear_loop_detector
 from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
 from gc_core.message_policy.cycle_stop import aappend_cycle_stop_tool_outputs_for_batch
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.request_backend_policy import arequest_chat_completions_with_policy
-from gc_core.tools import aapply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
+from gc_core.tools import (
+    aapply_tool,
+    WrongFunctionArgumentsException,
+    is_internal_tool_error_output,
+    is_unknown_tool_output,
+    tool_arguments_valid,
+)
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from gc_core.tools.subagents.progress import brief_args_summary, emit_progress, extract_intermediate_prose, parse_tool_result_status, todo_items_from_arguments
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
-from gc_core.utils.connect_backend import create_call_headers
+from gc_core.model_router import AliasCircuitOpenError
+from gc_core.runtime_notices import maybe_push_llm_failure_notice
+from gc_core.utils.connect_backend import (
+    NO_BACKEND_OVERRIDE,
+    backend_override_value,
+    create_call_headers,
+    resolve_network_params,
+)
 from gc_core.utils.connect_backend import arequest_backend_responses as arequest_backend
 from gc_core.utils.ssl_config import get_backend_client_cert
 from gc_core.utils.logging_module import human_console_enabled
 from gc_core.utils.aio_compat import await_callback
-from gc_core.utils.backend_errors import is_auth_error, is_context_overflow_error
+from gc_core.utils.backend_errors import (
+    is_auth_error,
+    is_context_overflow_error,
+    is_model_unavailable_error,
+)
 
 # Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
 # когда даже после сжатия история всё ещё не влезает (единичное огромное сообщение).
@@ -42,6 +66,7 @@ from gc_core.utils.format_messages import format_message_responses
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from gc_core.states import State
+from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
@@ -225,6 +250,101 @@ def _mode_requires_backend_call(mode: str) -> bool:
     return mode in {"user_ask", "function_call_output"}
 
 
+def _raise_honest_main_unavailable(
+    ctx: Any, resolved: Any, reason: str, source_exc: BaseException
+) -> None:
+    """Класс 2 фоллбэков недоступности (спека §8): исчерпаны существующие ретраи
+    (transport/adaptive max_tokens/401-refresh) для активной модели main-трейса.
+    Никаких тихих подмен — честная ошибка хода с моделью/endpoint/причиной и
+    подсказкой спасения; ставит per-alias предохранитель + notice."""
+    router = getattr(ctx, "model_router", None)
+    if router is not None and resolved.alias is not None:
+        router.breaker.trip(resolved.alias, reason)
+    maybe_push_llm_failure_notice(
+        source_exc,
+        request_label="main_agent",
+        url=resolved.url,
+        enabled=bool(getattr(ctx, "is_tui", False)),
+    )
+    message = (
+        f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
+        f"{resolved.url}: {reason}. Переключите уровень /level или профиль /profiles."
+    )
+    logger = getattr(ctx, "logger", None) or _fallback_logger
+    logger.error(message)
+    raise RuntimeError(message) from source_exc
+
+
+def _resolve_main_for_turn(state: State, ctx: Any) -> Optional[Any]:
+    """Резолв `main` по уровню, ЗАФИКСИРОВАННОМУ на ход (`turn_boundary.begin_turn`).
+
+    Контракт §6.4 — «внутри хода модель не перечитывается» — держится не на
+    `state.default_model` (воронка берёт модель из `ResolvedModel`, а не оттуда), а
+    на пине уровня: `/level` меняется без пересборки executor, и живой резолв уводил
+    бы url/токен/модель на другой слот прямо посреди цикла tool-call'ов.
+
+    Предохранитель проверяется КАЖДЫЙ раз (алиас мог открыться посреди хода) —
+    `resolve_level` идёт тем же путём `_resolve_alias`, что и `resolve("main")`.
+    Пина нет (ход не начинали через `begin_turn` — легаси/тестовые двойники) или
+    Router дочерний (у субагента уровень уже заморожен в самом Router'е) — обычный
+    резолв. Без `ctx.model_router` — `None`, воронки читают cfg напрямую как раньше."""
+    router = getattr(ctx, "model_router", None)
+    if router is None:
+        return None
+    level = getattr(state, "turn_level", None)
+    if not level or router.is_subagent_child:
+        return router.resolve("main")
+    return router.resolve_level(level)
+
+
+def _maybe_trip_and_raise_main_unavailable(state: State, ctx: Any, exc: Exception) -> None:
+    """Классифицирует `exc` (спека §8) и, если это подтверждённая недоступность
+    активной модели main-трейса, поднимает честную ошибку (см. выше). Иначе —
+    no-op, вызывающий код должен `raise` исходное исключение без изменений.
+
+    Резолв — по модели ХОДА (`_resolve_main_for_turn`), не по живому уровню: и
+    предохранитель, и текст ошибки обязаны назвать тот алиас, которым запрос
+    реально шёл, иначе `/level` посреди хода закрыл бы живую модель вместо мёртвой.
+
+    Пропускает ЛЮБОГО ребёнка-субагента (`router.is_subagent_child`, пинованного
+    или нет): его class-1 рестарт/деградацию ведёт `SubagentRunner`, а не главный
+    трейс — осознанно, не только для явно пинованных."""
+    if is_context_overflow_error(exc):
+        return
+    if not is_model_unavailable_error(exc):
+        return
+    router = getattr(ctx, "model_router", None)
+    if router is None or getattr(router, "is_subagent_child", False):
+        return
+    try:
+        resolved = _resolve_main_for_turn(state, ctx)
+    except AliasCircuitOpenError as open_exc:
+        resolved = open_exc.resolved
+    if resolved.alias is None:
+        return  # легаси — предохранитель не ведётся
+    reason = str(exc).strip()[:300] or exc.__class__.__name__
+    _raise_honest_main_unavailable(ctx, resolved, reason, exc)
+
+
+def begin_turn_main_trace(state: State, ctx: Any) -> None:
+    """Начало хода ГЛАВНОГО трейса (спека §6.4/§8): фиксирует модель хода
+    (`turn_boundary.begin_turn`) и, если активный алиас уже в предохранителе
+    (trip прошлого хода / персистированный breaker при attach), поднимает честную
+    ошибку класса 2 ДО похода в транспорт — с той же моделью/endpoint/причиной и
+    подсказкой /level //profiles, что и `_request_backend_canonical`.
+
+    `begin_turn` резолвит `main` без `check_breaker=False`, поэтому открытый алиас
+    прилетает сюда сырым `AliasCircuitOpenError`; переводим его в тот же честный
+    класс 2 через `_maybe_trip_and_raise_main_unavailable` (единый текст, без
+    дублирования). Субагентские `begin_turn` идут мимо — их class-1 ведёт
+    `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы."""
+    try:
+        begin_turn(state, ctx)
+    except AliasCircuitOpenError as exc:
+        _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
+        raise
+
+
 async def _arequest_backend_canonical(
     messages: List[Dict],
     state: State,
@@ -235,23 +355,39 @@ async def _arequest_backend_canonical(
     """Обёртка над одиночной попыткой: на 401 (истёкший токен доступа) пере-выпускает
     токен (`auth_connector.get_token(force=True)`) и повторяет запрос РОВНО один раз.
     Повторный 401 после свежего токена — настоящий auth-fail, уходит наверх внятно.
-    Прочие ошибки — наверх без изменений. Все call-site получают это единообразно."""
+    Прочие ошибки — наверх без изменений. Все call-site получают это единообразно.
+
+    Класс 2 фоллбэков недоступности (спека §8): открытый алиас активной модели —
+    мгновенный отказ до похода в транспорт; подтверждённая недоступность после
+    исчерпания ретраев — честная ошибка + предохранитель (см. `_raise_honest_main_unavailable`)."""
     auth_connector = getattr(ctx, "auth_connector", None)
+    router = getattr(ctx, "model_router", None)
+    if router is not None and not getattr(router, "is_subagent_child", False):
+        try:
+            _resolve_main_for_turn(state, ctx)
+        except AliasCircuitOpenError as exc:
+            _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
+
     try:
         return await _arequest_backend_canonical_once(
             messages, state, ctx, set_previous_response_id=set_previous_response_id
         )
     except Exception as exc:
-        if auth_connector is None or not is_auth_error(exc):
+            if auth_connector is not None and is_auth_error(exc):
+                run_logger = getattr(ctx, "logger", None) or _fallback_logger
+                run_logger.warning(
+                    "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
+                )
+                auth_connector.get_token(force=True)
+                try:
+                    return await _arequest_backend_canonical_once(
+                        messages, state, ctx, set_previous_response_id=set_previous_response_id
+                    )
+                except Exception as retry_exc:
+                    _maybe_trip_and_raise_main_unavailable(state, ctx, retry_exc)
+                    raise
+            _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
             raise
-        run_logger = getattr(ctx, "logger", None) or _fallback_logger
-        run_logger.warning(
-            "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
-        )
-        auth_connector.get_token(force=True)
-        return await _arequest_backend_canonical_once(
-            messages, state, ctx, set_previous_response_id=set_previous_response_id
-        )
 
 
 async def _arequest_backend_canonical_once(
@@ -269,20 +405,30 @@ async def _arequest_backend_canonical_once(
     - backend response id,
     - backend response headers (может быть пустым dict).
     """
-    call_headers = create_call_headers(state, ctx)
+    # Main-трейс: воронка получает весь ResolvedModel (url/authorization/
+    # backend_overrides), не только id модели (спека §6/§7) — поэтому и резолв идёт
+    # по уровню, зафиксированному на ход (`_resolve_main_for_turn`), а не по живому:
+    # иначе /level посреди хода уводил бы запрос на другой слот. Без ctx.model_router
+    # (легаси/тестовые двойники) — resolved=None, воронки читают cfg напрямую как раньше.
+    resolved = _resolve_main_for_turn(state, ctx)
+    call_headers = create_call_headers(state, ctx, resolved=resolved)
     cfg = getattr(ctx, "config_dict", {}) or {}
-    verify = cfg.get("use_ssl", True)
-    cert = get_backend_client_cert(cfg)
-    use_retry = cfg.get("use_retry", False)
-    request_timeout_sec = float(cfg["backend_request_timeout_sec"])
     backend_mode = _get_backend_api_mode(ctx)
+    # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
+    # из ResolvedModel действует только id модели, сетевые параметры — легаси cfg.
+    resolved_for_network = resolved if backend_mode == "chat_completions" else None
+    (verify, cert, use_retry, request_timeout_sec, config_proxy,
+     retry_embedded_choice_errors) = resolve_network_params(cfg, resolved_for_network)
 
     if backend_mode == "responses":
+        # Responses-режим: из ResolvedModel действует только id модели (спека §4) —
+        # url остаётся легаси-ключом agent_url.
         url = cfg["agent_url"]
         call_data = create_call_data(
             messages,
             state,
             set_previous_response_id=set_previous_response_id,
+            resolved=resolved,
         )
         with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
             res, res_headers = await arequest_backend(
@@ -294,13 +440,13 @@ async def _arequest_backend_canonical_once(
                 use_retry=use_retry,
                 logger=getattr(ctx, "logger", None),
                 timeout=request_timeout_sec,
-                config_proxy=cfg.get("proxy"),
+                config_proxy=config_proxy,
             )
         resp_messages = res["output"]
         response_id = str(res["id"])
         return resp_messages, response_id, res_headers
 
-    url = cfg["completions_url"]
+    url = resolved.url if resolved is not None else cfg["completions_url"]
     sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
         invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
@@ -314,11 +460,26 @@ async def _arequest_backend_canonical_once(
         tools=getattr(state, "tools", []),
         default_model=getattr(state, "default_model", None),
     )
+    # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
+    # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
+    # долбил бы её от чужого потолка к чужому полу. Тот же приём, что в служебной
+    # воронке (`utils/llm_chat_client._send_chat_completion_text`).
+    _max_tokens_override = backend_override_value(
+        resolved_for_network, "chat_completions_max_tokens"
+    )
     completions_max_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_max_tokens", 8096), default=8096
+        cfg.get("chat_completions_max_tokens", 8096)
+        if _max_tokens_override is NO_BACKEND_OVERRIDE
+        else _max_tokens_override,
+        default=8096,
+    )
+    _min_tokens_override = backend_override_value(
+        resolved_for_network, "chat_completions_min_response_tokens"
     )
     min_response_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_min_response_tokens", 1024),
+        cfg.get("chat_completions_min_response_tokens", 1024)
+        if _min_tokens_override is NO_BACKEND_OVERRIDE
+        else _min_tokens_override,
         default=1024,
     )
 
@@ -327,6 +488,8 @@ async def _arequest_backend_canonical_once(
             sanitized_messages,
             chat_state,
             max_tokens=max_tokens,
+            config_dict=cfg,
+            resolved=resolved,
         )
 
     _stream_on = resolve_tui_stream_enabled(cfg)
@@ -342,14 +505,14 @@ async def _arequest_backend_canonical_once(
             verify=verify,
             cert=cert,
             use_retry=use_retry,
-            retry_embedded_choice_errors=cfg.get("retry_embedded_choice_errors", True),
+            retry_embedded_choice_errors=retry_embedded_choice_errors,
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,
             request_label="main_agent",
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
             notice_url=url,
             timeout=request_timeout_sec,
-            config_proxy=cfg.get("proxy"),
+            config_proxy=config_proxy,
         )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")
@@ -465,14 +628,52 @@ async def aprocess_user_ask(messages, state: State, ctx: Any):
     return resp_messages, response_id
 
 
-def split_at_first_finalizer(tool_calls: List[Dict]) -> tuple[List[Dict], List[Dict]]:
+def split_at_first_finalizer(
+    tool_calls: List[Dict], *, finalizes: Optional[Callable[[Dict], bool]] = None
+) -> tuple[List[Dict], List[Dict]]:
     """Разбивает tool_calls на (executed, skipped): всё до и включая первый
     turn-финализирующий тул исполняется; остальное в этом ответе — пропускается
-    (ход уже завершён). intermediate_reply финализатором не считается."""
+    (ход уже завершён). intermediate_reply финализатором не считается.
+
+    ``finalizes`` уточняет, завершит ли кандидат ход на самом деле (например,
+    валидны ли его аргументы); отвергнутый кандидат исполняется как обычный вызов."""
     for i, m in enumerate(tool_calls):
-        if str(m.get("name") or "") in TURN_FINALIZING_TOOLS:
-            return tool_calls[: i + 1], tool_calls[i + 1:]
+        if str(m.get("name") or "") not in TURN_FINALIZING_TOOLS:
+            continue
+        if finalizes is not None and not finalizes(m):
+            continue
+        return tool_calls[: i + 1], tool_calls[i + 1:]
     return tool_calls, []
+
+
+def _finalizer_arguments_valid(call: Dict, ctx: Any) -> bool:
+    """Финализатор с невалидными аргументами ход не завершает, поэтому и соседей
+    по батчу пропускать нельзя. Судим теми же правилами, что и apply_tool; без
+    tools_data (тест-дублёры) судить нечем — считаем валидным."""
+    tools_data = getattr(ctx, "tools_data", None)
+    if not tools_data:
+        return True
+    return tool_arguments_valid(
+        str(call.get("name") or ""), call.get("arguments"), tools_data
+    )
+
+
+# finish_reason == "length": JSON вызова усечён потолком max_tokens — объясняем
+# модели причину и советуем компактный вариант / разбиение на вызовы.
+_TRUNCATED_ARGUMENTS_HINT = (
+    "⚠ Output was truncated: output token limit reached "
+    "(finish_reason == \"length\"). Shorten the response "
+    "or split it into multiple calls with smaller payloads."
+)
+
+
+def _attach_truncation_hint(exc: WrongFunctionArgumentsException, state: Any) -> None:
+    """Дописать объяснение про усечение к фидбэку, не затирая подсказку самого
+    тула (wrong_arguments_feedback_hint), которую положило место возбуждения."""
+    if getattr(state, "last_finish_reason", None) != "length":
+        return
+    hints = [h for h in (getattr(exc, "extra_hint", None), _TRUNCATED_ARGUMENTS_HINT) if h]
+    exc.extra_hint = "\n\n".join(hints)
 
 
 async def aprocess_tool_calls(
@@ -497,7 +698,9 @@ async def aprocess_tool_calls(
 
     До цикла по batch:
       - после первого turn-финализатора (finish / ask_human) остальные call'ы
-        не исполняем — сразу synthetic skip-output;
+        не исполняем — сразу synthetic skip-output; финализатор с невалидными
+        аргументами ход не завершает — исполняется как обычный вызов (получит
+        invalid_arguments), соседей не пропускаем;
       - skip готовим заранее, чтобы успеть записать их до ask_human вместе
         с уже выполненными тулами.
 
@@ -522,7 +725,11 @@ async def aprocess_tool_calls(
     tools_outputs = []
     # Один turn-финализатор на ход: executed исполняем, skipped — только synthetic output.
     unknown_in_batch = 0
-    executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
+    invalid_in_batch = 0
+    executed, skipped = split_at_first_finalizer(
+        grouped_messages["tool_calls"],
+        finalizes=lambda call: _finalizer_arguments_valid(call, ctx),
+    )
     # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
     # executed-output'ами до блокирующего turn_ask_human (иначе пропущенный тул
     # тоже висит "running" до ответа юзера).
@@ -620,32 +827,14 @@ async def aprocess_tool_calls(
                 call_id=tool_call_id,
             )
         except WrongFunctionArgumentsException as exc:
+            # Отказ одного вызова — не отказ хода: невалидные аргументы становятся
+            # output этого вызова (как unknown_tool), остальные вызовы батча
+            # исполняются. Дальше общий путь: tool_end, sidecar, function_call_output.
             if getattr(exc, "call_id", None) is None:
                 exc.call_id = tool_call_id
-            # Даже при ошибке аргументов закрыть «бегущую» строку в TUI.
-            elapsed_ms = int((time.monotonic() - started_at) * 1000)
-            if emit_tool_row:
-                emit_progress(
-                    ctx,
-                    state,
-                    "tool_end",
-                    elapsed_ms=elapsed_ms,
-                    tool_name=tool_name,
-                    tool_call_id=call_id_str,
-                    ok=False,
-                    error_brief=str(exc),
-                )
-            if persist_tool_trace:
-                await apersist_subagent_trace(
-                    ctx,
-                    kind="error",
-                    payload={
-                        "type": "function_call_output",
-                        "call_id": tool_call_id,
-                        "output": str(exc),
-                    },
-                )
-            raise
+            _attach_truncation_hint(exc, state)
+            invalid_in_batch += 1
+            tool_res_raw = exc.to_tool_output()
         # Live-прогресс: тул закончил — или текст intermediate_reply.
         # В историю треда это не пишется.
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
@@ -710,6 +899,18 @@ async def aprocess_tool_calls(
             state.last_unknown_tool_name = None
             state.unknown_tool_repeat_count = 0
 
+        if is_internal_tool_error_output(tool_res_raw):
+            if tool_name == getattr(state, "last_internal_error_tool_name", None):
+                state.internal_error_repeat_count = (
+                    int(getattr(state, "internal_error_repeat_count", 0) or 0) + 1
+                )
+            else:
+                state.last_internal_error_tool_name = tool_name
+                state.internal_error_repeat_count = 1
+        else:
+            state.last_internal_error_tool_name = None
+            state.internal_error_repeat_count = 0
+
         # Длинный output ужимаем в stored-envelope; остальное оставляем как есть.
         tool_res = maybe_store_and_wrap_tool_output(
             tool_res_raw,
@@ -719,6 +920,7 @@ async def aprocess_tool_calls(
             config=getattr(ctx, "config_dict", {}) or {},
             logger=getattr(ctx, "logger", None),
         )
+        observe_loop_detector(state, ctx, tool_name, tool_arguments)
         if tool_name != FINISH_TOOL_NAME:
             await _acall_blocking_hook(amaybe_update_intent_scope_from_tool,
                 tool_name=tool_name,
@@ -753,12 +955,16 @@ async def aprocess_tool_calls(
     # Skip-output'ы уже посчитаны выше и сфлашены перед блокировкой — добавляем в
     # возврат (тред/state дедупят повторный персист по make_message_key).
     state.last_batch_unknown_tool_count = unknown_in_batch
+    state.last_batch_invalid_arguments_count = invalid_in_batch
     tools_outputs.extend(skip_outputs)
 
     if aborted_by_user_stop:
         # run_agent после stop часто выходит на check_stop до обычного persist —
         # закрывающие A/B пишем сразу (исключение discard_writes).
-        await _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
+            await _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
+            # Прогон остановлен: notice агенту не нужен, окно прошлого батча
+            # не должно всплыть при продолжении сессии.
+            clear_loop_detector(state)
 
     # Если внутри batch сработал session_compact — вместо сырых output'ов
     # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
@@ -779,6 +985,15 @@ async def aprocess_tool_calls(
             technical_type=TECHNICAL_TYPE_TECHNICAL,
         )
         tools_outputs = [*preserved, resume]
+
+    notice = flush_loop_detector(state)
+    if notice:
+        tools_outputs.append(
+            _make_technical_feedback_user_message(
+                notice,
+                technical_type=TECHNICAL_TYPE_TECHNICAL,
+            )
+        )
 
     # C3: один collect на границе «батч тулов → LLM-шаг» — подбираем циклический
     # мусор между шагами. Default on для CLI/TUI, off для server; явный
@@ -801,6 +1016,39 @@ async def aprocess_tool_outputs(messages, state: State, ctx: Any):
     )
     state.set_resp_headers_metadata(res_headers or {})
     return resp_messages, response_id
+
+
+def _pickup_pending_as_new_turn(
+    get_pending_messages: Optional[Callable[[], List[Dict]]],
+    state: State,
+    ctx: Any,
+) -> Optional[List[Dict]]:
+    """Ход закончен (finish-gate accept / text-response accept, спека §6.4): очередь
+    непуста → фиксируем модель нового хода (``begin_turn``) и возвращаем сообщения,
+    которыми продолжится цикл вместо возврата из ``run_agent``. ``None`` — очередь
+    пуста, ход завершается как обычно."""
+    if get_pending_messages is None:
+        return None
+    pending = get_pending_messages()
+    if not pending:
+        return None
+    # Новый пользовательский ход: окно прошлого хода не должно давать
+    # ложный повтор на первом же чтении с теми же аргументами.
+    clear_loop_detector(state)
+    try:
+        begin_turn_main_trace(state, ctx)
+    except Exception as exc:
+        # Очередь УЖЕ слита (`get_pending_messages` — drain, не peek): уронив ход
+        # здесь, мы потеряли бы набранное пользователем сообщение бесследно —
+        # вернуть его в очередь некуда. Поэтому ход продолжаем на модели прошлого
+        # хода: тот же честный отказ придёт из `_request_backend_canonical` (единая
+        # точка текста), но сообщение к тому моменту уже в трейсе и в логе.
+        logger = getattr(ctx, "logger", None) or _fallback_logger
+        logger.warning(
+            "фиксация модели нового хода не удалась (%s) — подхваченное сообщение "
+            "не теряем, ход продолжается на прежней модели", exc,
+        )
+    return pending
 
 
 async def arun_agent(
@@ -831,8 +1079,10 @@ async def arun_agent(
     state.last_unknown_tool_name = None
     state.unknown_tool_repeat_count = 0
     state.last_batch_unknown_tool_count = 0
+    state.last_batch_invalid_arguments_count = 0
     while True:
         if check_stop is not None and check_stop():
+            clear_loop_detector(state)
             return None
         if get_pending_messages is not None:
             pending = get_pending_messages()
@@ -1119,19 +1369,22 @@ async def arun_agent(
                                 # все завершают ход одинаково.
                                 state.steps += 1
                                 state.flush_current_user_intent()
+                                clear_loop_detector(state)
                                 if turn_end_compaction_hook is not None:
                                     await _acall_blocking_hook(turn_end_compaction_hook)
                                 # Сообщение, пришедшее во время (блокирующей) компакции, не
                                 # теряем: продолжаем новым ходом на уже сжатом контексте.
-                                if get_pending_messages is not None:
-                                    pending = get_pending_messages()
-                                    if pending:
-                                        messages = pending
-                                        continue
+                                new_turn_messages = _pickup_pending_as_new_turn(
+                                    get_pending_messages, state, ctx
+                                )
+                                if new_turn_messages is not None:
+                                    messages = new_turn_messages
+                                    continue
                                 return finish_arguments
                         else:
                             state.current_user_intent = []
                             state.steps += 1
+                            clear_loop_detector(state)
                             return finish_arguments
                     else:
                         messages = await aprocess_tool_calls(
@@ -1141,8 +1394,14 @@ async def arun_agent(
                         n_unknown = int(
                             getattr(state, "last_batch_unknown_tool_count", 0) or 0
                         )
-                        if n_unknown > 0:
-                            tool_error_cnt += n_unknown
+                        n_invalid = int(
+                            getattr(state, "last_batch_invalid_arguments_count", 0) or 0
+                        )
+                        if n_unknown + n_invalid > 0:
+                            # Бюджет считаем по ходам без нормального вызова, а не
+                            # по вызовам: один кривой батч стоит одну единицу, иначе
+                            # он гасит прогон раньше, чем модель увидит фидбэк.
+                            tool_error_cnt += 1
                         else:
                             tool_error_cnt = 0
                         if (
@@ -1155,6 +1414,19 @@ async def arun_agent(
                             state.terminal_outcome = "tool_errors"
                             return (
                                 f"Agent stopped: repeated unknown tool '{unknown_name}'."
+                            )
+                        if (
+                            int(getattr(state, "internal_error_repeat_count", 0) or 0)
+                            >= max_unknown_tool_repeats
+                        ):
+                            broken_name = (
+                                getattr(state, "last_internal_error_tool_name", None)
+                                or "unknown"
+                            )
+                            state.terminal_outcome = "tool_errors"
+                            return (
+                                f"Agent stopped: tool '{broken_name}' keeps failing "
+                                "with the same client-side error."
                             )
                         # Полный ход: LLM уже вернул tools, batch исполнен.
                         count_completed_step = True
@@ -1186,16 +1458,18 @@ async def arun_agent(
                                 assistant_text=assistant_text, state=state, ctx=ctx
                             )
                             state.flush_current_user_intent()
+                            clear_loop_detector(state)
                         finally:
                             if mark_finalizing is not None:
                                 await await_callback(mark_finalizing(False))
                         if turn_end_compaction_hook is not None:
                             await _acall_blocking_hook(turn_end_compaction_hook)
-                        if get_pending_messages is not None:
-                            pending = get_pending_messages()
-                            if pending:
-                                messages = pending
-                                continue
+                        new_turn_messages = _pickup_pending_as_new_turn(
+                            get_pending_messages, state, ctx
+                        )
+                        if new_turn_messages is not None:
+                            messages = new_turn_messages
+                            continue
                         return assistant_text
                     # === reject ===
                     tool_error_cnt += 1
@@ -1218,15 +1492,9 @@ async def arun_agent(
             except WrongFunctionArgumentsException as e:
                 run_logger.error(e, exc_info=True)
                 tool_error_cnt += 1
-                # Если finish_reason=="length" — JSON был усечён потолком
-                # max_tokens. Объясняем модели причину и советуем компактный
-                # вариант/разбиение на вызовы; иначе — feedback как есть.
-                if getattr(state, "last_finish_reason", None) == "length":
-                    e.extra_hint = (
-                        "⚠ Output was truncated: output token limit reached "
-                        "(finish_reason == \"length\"). Shorten the response "
-                        "or split it into multiple calls with smaller payloads."
-                    )
+                # Страховка для путей вне батча (finish-аргументы и т.п.): батч
+                # свои невалидные вызовы закрывает сам в process_tool_calls.
+                _attach_truncation_hint(e, state)
                 messages = [
                     _make_technical_feedback_user_message(
                         e.to_llm_feedback(),

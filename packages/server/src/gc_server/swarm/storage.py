@@ -42,7 +42,8 @@ def load_swarm_meta(threads_dir: str, swarm_id: str) -> Dict[str, Any]:
 def load_completion_info(threads_dir: str, swarm_id: str) -> Dict[str, Any]:
     """Прочитать completion.json из threads_dir/<swarm_id>/, если он есть.
 
-    Файл пишется wrapper'ом (scripts/run-cli-in-sandbox.sh) после завершения CLI.
+    Файл пишется обёрткой песочницы (gc_server/swarm/run-cli-in-sandbox.sh)
+    после завершения CLI.
     Содержит exit_code, finished_at, error_type, error_message.
 
     Возвращает {} если файл отсутствует или содержит невалидный JSON.
@@ -188,15 +189,21 @@ def load_swarm_stdout_stderr(
     _, _, stdout_path, stderr_path = _swarm_paths(threads_dir, swarm_id)
 
     def _read_lines(path: str) -> List[str]:
+        # `errors="replace"`, а не отказ: байты сюда пишет ПРОИЗВОЛЬНЫЙ CLI в
+        # песочнице, и один невалидный ронял чтение целиком — вместе с ответом
+        # эндпоинта диагностики, куда человек и пришёл за этими логами. Конфиг с
+        # битым байтом использовать нельзя, а лог — можно прочитать, пометив
+        # нечитаемое: тот же приём, что у вывода команд (`bang_shell`).
         if not os.path.exists(path):
             return []
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             return [line.rstrip("\n") for line in f]
 
     return _read_lines(stdout_path), _read_lines(stderr_path)
 
 
 __all__ = [
+    "delete_swarm_meta",
     "load_swarm_meta",
     "save_swarm_meta",
     "load_completion_info",
@@ -205,3 +212,19 @@ __all__ = [
     "load_swarm_stdout_stderr",
 ]
 
+
+
+def delete_swarm_meta(threads_dir: str, swarm_id: str) -> None:
+    """Убрать meta свёрнутого запуска. Отсутствие файла — не ошибка.
+
+    Нужна ровно одному вызывающему: `runner.start_swarm_process` пишет meta со
+    статусом ``queued`` ДО ``Popen``, чтобы живой процесс не остался без учёта,
+    если запись после запуска не удастся. Если же сам запуск провалился, след
+    надо убрать — иначе повтор с тем же ``task_id`` упрётся в 409
+    ``swarm_id_already_active`` до истечения ``ttl_seconds`` (по умолчанию сутки).
+    """
+    _, meta_path, _, _ = _swarm_paths(threads_dir, swarm_id)
+    try:
+        os.remove(meta_path)
+    except FileNotFoundError:
+        pass

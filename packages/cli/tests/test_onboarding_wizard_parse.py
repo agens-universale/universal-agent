@@ -28,3 +28,14 @@ def test_parse_multi_rejects_bad_token():
         wz.parse_multi("1,9", 3)
     with pytest.raises(wz.InvalidChoice):
         wz.parse_multi("1,abc", 3)
+
+
+def test_superscript_digit_is_an_invalid_choice_not_a_crash():
+    """Та же дыра, что у фильтра шага «Модель»: `²` проходит `isdigit()`, а
+    `int("²")` падает голым `ValueError`, которого меню не ловит, — мастер
+    ронялся на ответе в меню авторизации или MCP. Это невалидный ввод с
+    подсказкой, как любая другая не-цифра."""
+    with pytest.raises(wz.InvalidChoice):
+        wz.parse_single("²", 3)
+    with pytest.raises(wz.InvalidChoice):
+        wz.parse_multi("1,²", 3)

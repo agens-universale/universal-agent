@@ -7,8 +7,6 @@ Space — отметить, Enter — выполнить отмеченное, E
 ИЛИ Esc — `on_unmount`), не раньше: крэш до закрытия должен повторить показ."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -16,6 +14,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
+from gc_tui.form_frame import cap_frame_height
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
 
 _FOOTER = "Space — отметить · Enter — выполнить отмеченное · Esc — позже (доступно в /settings)"
@@ -46,7 +45,14 @@ class PostUpdateScreen(Screen):
         # обновить (версия в рецепте новой версии агента ≠ установленной). Опрос версий —
         # subprocess на сервер, поэтому в фоновом воркере (on_mount), а не в __init__.
         self._mcp_outdated: list[str] = []
+        # Голосовой движок — такой же «поставленный рядом» компонент, как MCP: версия
+        # приколота в коде агента, и после апгрейда на диске остаётся прежняя. Проверка
+        # дешёвая (чтение state.json), поэтому без воркера — в отличие от MCP, где опрос
+        # версий это subprocess на сервер.
+        self._voice_update = self._compute_voice_update()
         self._items: list[str] = []
+        if self._voice_update is not None:
+            self._items.append("voice")
         if self._needs_sync:
             self._items.append("config")
         self._marked = set(self._items)   # default-ON
@@ -54,8 +60,13 @@ class PostUpdateScreen(Screen):
         self._stamped = False
 
     def on_mount(self) -> None:
+        self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
         if self._wired:
             self.run_worker(self._scan_mcp_updates, thread=True, name="post-update-mcp-scan")
+
+    def on_resize(self, event: events.Resize) -> None:
+        # Потолок рамки зависит только от высоты окна и хрома (см. form_frame).
+        cap_frame_height(self, "#pu-scroll")
 
     def _scan_mcp_updates(self) -> None:
         """Фоновый воркер: у кого из подключённых версия отстала от рецепта."""
@@ -79,16 +90,25 @@ class PostUpdateScreen(Screen):
 
     # --- расчёт состояния ---
 
+    def _compute_voice_update(self):
+        """(стоит, нужно) — если локальный голосовой движок отстал от пина новой версии
+        агента; None — обновлять нечего.
+
+        Правило сверки одно на весь продукт и живёт в фасаде (`voice_setup`): его же
+        читают строка режима и клавиша обновления в /settings."""
+        try:
+            from gc_tui.services.voice_setup import engine_update
+        except Exception:
+            return None
+        return engine_update()
+
     def _compute_needs_sync(self) -> bool:
         from gc_core.config import _default_config_path
-        try:
-            user_text = Path(self._config_path).read_text(encoding="utf-8")
-        except OSError:
-            user_text = ""
-        try:
-            template_text = Path(_default_config_path()).read_text(encoding="utf-8")
-        except OSError:
-            template_text = ""
+        from gc_core.utils.user_text import read_user_text_or_none
+        # Экран показывается СРАЗУ после апгрейда, до первой сессии: отказ здесь —
+        # это «агент не открылся после обновления», а не «одним пунктом меньше».
+        user_text = read_user_text_or_none(self._config_path) or ""
+        template_text = read_user_text_or_none(_default_config_path()) or ""
         try:
             return bool(self._config_sync.needs_sync(user_text, template_text))
         except ValueError:
@@ -136,6 +156,11 @@ class PostUpdateScreen(Screen):
             t.append("Обновить подключённые MCP")
             t.append("   ")
             t.append(", ".join(self._mcp_outdated), style=DIM)
+        elif key == "voice":
+            have, want = self._voice_update
+            t.append("Обновить голосовой движок")
+            t.append("   ")
+            t.append(f"{have} → {want}", style=DIM)
         else:
             t.append("Обновить config.yml до текущей версии")
         return t
@@ -191,6 +216,15 @@ class PostUpdateScreen(Screen):
                         print(f"[{'ok' if rc == 0 else 'fail'}] {name}")
                     except Exception as exc:
                         print(f"[fail] {name}: {exc}")
+            if "voice" in self._marked and self._voice_update is not None:
+                have, want = self._voice_update
+                print(f"\nОбновляю голосовой движок: {have} -> {want} ...\n")
+                from gc_tui.services import voice_setup
+                try:
+                    ok = voice_setup.update_local(self._config, echo=print)
+                    print(f"[{'ok' if ok else 'fail'}] голосовой движок")
+                except Exception as exc:
+                    print(f"[fail] голосовой движок: {exc}")
             if "config" in self._marked and self._needs_sync:
                 try:
                     report = self._config_sync.sync_config(self._config_path)

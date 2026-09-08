@@ -11,6 +11,7 @@ from urllib.parse import urljoin
 
 import httpx
 
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
@@ -31,6 +32,7 @@ class _RedirectBlocked(Exception):
         super().__init__(decision.reason or "redirect blocked")
         self.decision = decision
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class SimpleFetchUrl(AbstractSimpleTool):
     timeout_seconds = 20
     max_content_chars = 20_000
@@ -54,7 +56,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         self._state = state
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {
             "type": "function",
             "name": "exec_fetch_url",
@@ -71,6 +73,14 @@ class SimpleFetchUrl(AbstractSimpleTool):
                     "max_preview_chars": {"type": "integer", "description": "Maximum number of characters for preview. Default 1200."},
                     "offset": {"type": "integer", "description": "Character offset for paginated reads from cached full content. Default 0."},
                     "limit": {"type": "integer", "description": f"Maximum number of characters to return in content. Default {cls.max_content_chars}."},
+                    "proxy": {
+                        "type": "string",
+                        "description": (
+                            "Optional proxy URL for this request "
+                            "(http://, https://, socks5://, socks5h://, socks4://). "
+                            "Empty string or omit = no proxy."
+                        ),
+                    },
                 },
                 "required": ["url"],
                 "additionalProperties": False,
@@ -79,8 +89,12 @@ class SimpleFetchUrl(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls):
-        return "Tool name: exec_fetch_url\nTool description: Downloads a URL and extracts readable text using a lightweight HTML cleaner."
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        return (
+            "Tool name: exec_fetch_url\n"
+            "Tool description: Downloads a URL and extracts readable text using a lightweight HTML cleaner. "
+            "Optional proxy (http/https/socks5/socks5h/socks4); empty string or omit = no proxy."
+        )
 
     @staticmethod
     def _result(
@@ -155,36 +169,74 @@ class SimpleFetchUrl(AbstractSimpleTool):
             setattr(shared, "fetch_url_cache", cache)
         return cache
 
-    def _get_from_cache(
-        self, url: str
-    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
-        """Возвращает (content, meta) для закэшированного URL или None.
+    @staticmethod
+    def _cache_key(url: str, proxy: Optional[str] = None) -> str:
+        """Ключ кэша: URL, при наличии proxy — URL+proxy (разные маршруты не смешиваются)."""
+        if proxy:
+            return f"{url}||proxy={proxy}"
+        return url
 
-        При cache-hit обновляет LRU-порядок: только что читанный URL становится
+    _PROXY_SCHEMES = ("http://", "https://", "socks5://", "socks5h://", "socks4://", "socks4a://")
+
+    @classmethod
+    def _normalize_proxy(cls, proxy: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Возвращает (normalized_proxy | None, error | None)."""
+        if proxy is None:
+            return None, None
+        if not isinstance(proxy, str):
+            return None, {"type": "invalid_argument", "field": "proxy"}
+        normalized = proxy.strip()
+        if not normalized:
+            # Пустая / whitespace-only строка = прокси не задан.
+            return None, None
+        lower = normalized.lower()
+        if not lower.startswith(cls._PROXY_SCHEMES):
+            return None, {
+                "type": "invalid_argument",
+                "field": "proxy",
+                "message": (
+                    "proxy must start with http://, https://, socks5://, "
+                    "socks5h://, socks4://, or socks4a://."
+                ),
+            }
+        return normalized, None
+
+    @staticmethod
+    def _proxies_dict(proxy: Optional[str]) -> Optional[Dict[str, str]]:
+        if not proxy:
+            return None
+        return {"http": proxy, "https": proxy}
+
+    def _get_from_cache(
+        self, cache_key: str
+    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
+        """Возвращает (content, meta) для закэшированного ключа или None.
+
+        При cache-hit обновляет LRU-порядок: только что читанный ключ становится
         самым свежим и не вытесняется следующими записями.
         """
         cache = self._get_cache()
-        if cache is None or url not in cache:
+        if cache is None or cache_key not in cache:
             return None
-        cached = cache[url]
+        cached = cache[cache_key]
         if isinstance(cached, dict):
             content = cached.get("content", "")
             meta = self._normalize_meta(cached.get("meta"))
         else:
             content = cached if isinstance(cached, str) else ""
             meta = self._normalize_meta(None)
-        cache.move_to_end(url)
+        cache.move_to_end(cache_key)
         return content, meta
 
     def _put_to_cache(
-        self, url: str, content: str, meta: Dict[str, Optional[str]]
+        self, cache_key: str, content: str, meta: Dict[str, Optional[str]]
     ) -> None:
         """Записывает страницу в кэш и эвиктирует самые старые при превышении лимита."""
         cache = self._get_cache()
         if cache is None:
             return
-        cache[url] = {"content": content, "meta": meta}
-        cache.move_to_end(url, last=True)
+        cache[cache_key] = {"content": content, "meta": meta}
+        cache.move_to_end(cache_key, last=True)
         while len(cache) > self.fetch_url_cache_max_size:
             cache.popitem(last=False)
 
@@ -404,6 +456,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         max_preview_chars: int = 1200,
         offset: int = 0,
         limit: Optional[int] = None,
+        proxy: Optional[str] = None,
         **kwargs: Any,
     ) -> str:
         if not isinstance(url, str):
@@ -422,6 +475,10 @@ class SimpleFetchUrl(AbstractSimpleTool):
         if not isinstance(limit, int) or limit <= 0:
             return _result(ok=False, error={"type": "invalid_argument", "field": "limit"})
 
+        normalized_proxy, proxy_error = self._normalize_proxy(proxy)
+        if proxy_error is not None:
+            return _result(ok=False, error=proxy_error)
+
         normalized_url = url.strip()
         if not normalized_url:
             return _result(ok=False, error={"type": "invalid_argument", "field": "url", "message": "URL cannot be empty."})
@@ -435,7 +492,10 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 error={"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."},
             )
 
-        cached = self._get_from_cache(normalized_url)
+        cache_key = self._cache_key(normalized_url, normalized_proxy)
+        proxies = self._proxies_dict(normalized_proxy)
+
+        cached = self._get_from_cache(cache_key)
         if cached is not None:
             cached_content, cached_meta = cached
             sliced = self._slice_content(cached_content, offset, limit)
@@ -526,7 +586,9 @@ class SimpleFetchUrl(AbstractSimpleTool):
         # Клиент общий и переиспользуемый (пул соединений), закрывать его здесь
         # нельзя — он принадлежит loop, а не одному вызову.
         session = get_async_client(
-            proxies=resolve_proxies(None, os.environ, normalized_url)
+            # Явный `proxy` тула — первым аргументом, иначе он молча
+            # игнорируется (тот же промах, что был в fetch_url).
+            proxies=resolve_proxies(normalized_proxy, os.environ, normalized_url)
         )
         if True:
             for attempt in range(1, attempts + 1):
@@ -605,7 +667,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         page_meta = self._extract_meta(text)
         extracted = self._extract_simple_html_text(text)
         if extracted:
-            self._put_to_cache(normalized_url, extracted, page_meta)
+            self._put_to_cache(cache_key, extracted, page_meta)
             sliced = self._slice_content(extracted, offset, limit)
             return _result(
                 ok=True,

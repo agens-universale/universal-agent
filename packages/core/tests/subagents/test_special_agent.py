@@ -1,9 +1,9 @@
-"""Tests for SpecialAgent create_instance and integration with SubagentRunner."""
+"""Tests for SpecialAgent create_instance/finalize_role and integration with SubagentRunner."""
 
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
@@ -59,51 +59,48 @@ def _make_ctx(cfg=None):
         tools_data={},
         tools_spec=[],
         tools_description=[],
+        model_router=None,
+        is_tui=False,
     )
 
 
-def _mock_llm_response(content="You are an expert Python developer."):
-    return {"choices": [{"message": {"content": content}}]}
-
-
-def _mock_llm_policy_response(content="You are an expert Python developer."):
-    return _mock_llm_response(content), {"max_tokens": 4096}
+def _make_state(model="test-model"):
+    return SimpleNamespace(default_model=model, usage=None, state_id="s1", x_target=None)
 
 
 class TestSpecialAgentCreateInstance:
-    def test_create_instance_calls_generate_role(self):
-        """create_instance generates agent_role via LLM call."""
-        with patch.object(
-            special_agent_module, "arequest_chat_completions_with_policy",
-            return_value=_mock_llm_policy_response("Generated role prompt"),
-        ):
-            instance = asyncio.run(
-                SpecialAgent.create_instance(
-                    role="Python Dev",
-                    role_description="Expert in Python",
-                    task="Write a function",
-                    model="test-model",
-                    config_dict=_make_config(),
-                )
+    def test_create_instance_does_not_generate_role(self):
+        """create_instance больше не делает LLM-вызов — agent_role резолвится позже,
+        через finalize_role (см. TestFinalizeRole)."""
+        instance = asyncio.run(
+            SpecialAgent.create_instance(
+                role="Python Dev",
+                role_description="Expert in Python",
+                task="Write a function",
+                model="test-model",
+                config_dict=_make_config(),
             )
-
-        assert instance.agent_role == "Generated role prompt"
+        )
+        assert instance.agent_role is None
         assert instance.task == "Write a function"
 
-    def test_get_initial_data_returns_generated_role_and_task(self):
-        with patch.object(
-            special_agent_module, "arequest_chat_completions_with_policy",
-            return_value=_mock_llm_policy_response("Custom role"),
-        ):
-            instance = asyncio.run(
-                SpecialAgent.create_instance(
-                    role="Analyst",
-                    role_description="Data analyst",
-                    task="Analyze data",
-                    model="test-model",
-                    config_dict=_make_config(),
-                )
+
+class TestFinalizeRole:
+    def test_finalize_role_generates_agent_role(self):
+        instance = asyncio.run(
+            SpecialAgent.create_instance(
+                role="Analyst",
+                role_description="Data analyst",
+                task="Analyze data",
+                model="test-model",
+                config_dict=_make_config(),
             )
+        )
+        with patch.object(
+            special_agent_module, "request_chat_completion_text",
+            return_value="Custom role",
+        ):
+            instance.finalize_role(_make_ctx(), _make_state())
 
         agent_role, task = instance.get_initial_data()
         assert agent_role.startswith("Custom role")
@@ -111,132 +108,84 @@ class TestSpecialAgentCreateInstance:
 
     def test_llm_receives_role_in_prompt(self):
         """The LLM prompt should contain role name and description."""
-        with patch.object(
-            special_agent_module, "arequest_chat_completions_with_policy",
-            return_value=_mock_llm_policy_response(),
-        ) as mock_llm:
-            asyncio.run(
-                SpecialAgent.create_instance(
-                    role="Security Expert",
-                    role_description="Specializes in web security",
-                    task="Audit the app",
-                    model="test-model",
-                    config_dict=_make_config(),
-                )
+        instance = asyncio.run(
+            SpecialAgent.create_instance(
+                role="Security Expert",
+                role_description="Specializes in web security",
+                task="Audit the app",
+                model="test-model",
+                config_dict=_make_config(),
             )
+        )
+        with patch.object(
+            special_agent_module, "request_chat_completion_text",
+            return_value="ok",
+        ) as mock_call:
+            instance.finalize_role(_make_ctx(), _make_state())
 
-        call_data = mock_llm.call_args.kwargs["payload_factory"](4096)
-        user_msg = call_data["messages"][1]["content"]
+        user_msg = mock_call.call_args.kwargs["messages"][1]["content"]
         assert "Security Expert" in user_msg
         assert "Specializes in web security" in user_msg
 
-    def test_model_passed_to_llm_call(self):
-        """The model used for role generation should be the orchestrator's model."""
-        with patch.object(
-            special_agent_module, "arequest_chat_completions_with_policy",
-            return_value=_mock_llm_policy_response(),
-        ) as mock_llm:
-            asyncio.run(
-                SpecialAgent.create_instance(
-                    role="Dev",
-                    role_description="desc",
-                    task="task",
-                    model="gpt-4o-mini",
-                    config_dict=_make_config(),
-                )
+    def test_declares_own_consumer(self):
+        """Bearer-регресс (спека Task 7): генерация роли идёт через общую воронку
+        с consumer=subagent:subagent_special_agent — резолв авторизации/роутера
+        общий для всех вспомогательных LLM-вызовов."""
+        instance = asyncio.run(
+            SpecialAgent.create_instance(
+                role="Dev", role_description="desc", task="task",
+                model="test-model", config_dict=_make_config(),
             )
+        )
+        ctx = _make_ctx()
+        state = _make_state()
+        with patch.object(
+            special_agent_module, "request_chat_completion_text",
+            return_value="ok",
+        ) as mock_call:
+            instance.finalize_role(ctx, state)
 
-        call_data = mock_llm.call_args.kwargs["payload_factory"](4096)
-        assert call_data["model"] == "gpt-4o-mini"
+        kwargs = mock_call.call_args.kwargs
+        assert kwargs["consumer"] == "subagent:subagent_special_agent"
+        assert kwargs["ctx"] is ctx
+        assert kwargs["state"] is state
+        assert kwargs["request_label"] == "subagent_special_agent"
 
-    def test_chat_completion_kwargs_merged_into_role_generation(self):
-        """Role generation must respect backend chat_completion_kwargs (e.g. OpenAI temperature=1)."""
-        cfg = _make_config(
-            chat_completion_kwargs={"temperature": 1.0, "top_p": 1.0},
+    def test_uses_configured_max_tokens_default(self):
+        instance = asyncio.run(
+            SpecialAgent.create_instance(
+                role="Dev", role_description="desc", task="task",
+                model="test-model", config_dict=_make_config(),
+            )
         )
         with patch.object(
-            special_agent_module, "arequest_chat_completions_with_policy",
-            return_value=_mock_llm_policy_response(),
-        ) as mock_llm:
-            asyncio.run(
-                SpecialAgent.create_instance(
-                    role="Dev",
-                    role_description="desc",
-                    task="task",
-                    model="gpt-5.5",
-                    config_dict=cfg,
-                )
-            )
+            special_agent_module, "request_chat_completion_text",
+            return_value="ok",
+        ) as mock_call:
+            instance.finalize_role(_make_ctx(), _make_state())
 
-        call_data = mock_llm.call_args.kwargs["payload_factory"](4096)
-        assert call_data["temperature"] == 1.0
-        assert call_data["top_p"] == 1.0
-
-    def test_config_dict_used_for_url_and_auth(self):
-        """URL and Authorization header from config_dict should be passed to the LLM call."""
-        cfg = _make_config(
-            completions_url="http://custom-url/v1/chat/completions",
-            chat_completion_headers={"Authorization": "Bearer my-secret-token"},
-            use_ssl=False,
-        )
-        with patch.object(
-            special_agent_module, "arequest_chat_completions_with_policy",
-            return_value=_mock_llm_policy_response(),
-        ) as mock_llm:
-            asyncio.run(
-                SpecialAgent.create_instance(
-                    role="Dev",
-                    role_description="desc",
-                    task="task",
-                    model="m",
-                    config_dict=cfg,
-                )
-            )
-
-        kwargs = mock_llm.call_args.kwargs
-        assert kwargs["headers"].get("Authorization") == "Bearer my-secret-token"
-        assert kwargs.get("url") == "http://custom-url/v1/chat/completions"
-        assert kwargs.get("request_label") == "subagent_special_agent"
-
-    def test_runtime_notices_enabled_when_requested(self):
-        with patch.object(
-            special_agent_module, "arequest_chat_completions_with_policy",
-            return_value=_mock_llm_policy_response(),
-        ) as mock_llm:
-            asyncio.run(
-                SpecialAgent.create_instance(
-                    role="Dev",
-                    role_description="desc",
-                    task="task",
-                    model="m",
-                    config_dict=_make_config(),
-                    runtime_notices_enabled=True,
-                )
-            )
-
-        assert mock_llm.call_args.kwargs["runtime_notices_enabled"] is True
+        assert mock_call.call_args.kwargs["max_tokens"] == 4096
 
     def test_generate_role_failure_propagates(self):
-        """If LLM call fails, create_instance should raise."""
+        """If LLM call fails, finalize_role should raise."""
+        instance = asyncio.run(
+            SpecialAgent.create_instance(
+                role="Dev", role_description="desc", task="task",
+                model="m", config_dict=_make_config(),
+            )
+        )
         with patch.object(
-            special_agent_module, "arequest_chat_completions_with_policy",
+            special_agent_module, "request_chat_completion_text",
             side_effect=ConnectionError("Network error"),
         ):
             with pytest.raises(ConnectionError):
-                asyncio.run(
-                    SpecialAgent.create_instance(
-                        role="Dev",
-                        role_description="desc",
-                        task="task",
-                        model="m",
-                        config_dict=_make_config(),
-                    )
-                )
+                instance.finalize_role(_make_ctx(), _make_state())
 
 
 class TestSpecialAgentWithRunner:
     def test_runner_calls_special_agent_end_to_end(self):
-        """SubagentRunner.run integrates with SpecialAgent correctly."""
+        """SubagentRunner.run integrates with SpecialAgent correctly: role generation
+        now happens after child ctx is built, via finalize_role."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
@@ -244,12 +193,20 @@ class TestSpecialAgentWithRunner:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
+        # Оба шва корутинные: генерация роли идёт нативной `a`-формой, сборка
+        # дочернего контекста — тоже. Синхронные двойники здесь не подойдут:
+        # runner их awaits.
         with (
             patch.object(
-                special_agent_module, "arequest_chat_completions_with_policy",
-                return_value=_mock_llm_policy_response("You are a security auditor."),
+                special_agent_module, "arequest_chat_completion_text",
+                new=AsyncMock(return_value="You are a security auditor."),
             ),
-            patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
+            patch.object(
+                runner, "_build_child_ctx",
+                new=AsyncMock(
+                    return_value=SimpleNamespace(logger=None, run_id="cr", is_tui=False)
+                ),
+            ),
         ):
             result = runner.run(
                 "subagent_special_agent",
@@ -274,3 +231,4 @@ class TestSpecialAgentWithRunner:
         user_msgs = [m for m in messages if m["role"] == "user"]
         assert any("Audit the authentication module" in m["content"] for m in user_msgs)
         assert child_state.parent_state_id == orch.state_id
+        assert child_state.specific_role.startswith("You are a security auditor.")

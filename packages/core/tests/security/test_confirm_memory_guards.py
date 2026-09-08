@@ -250,10 +250,14 @@ def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
     assert json.loads(res2)["ok"] is False
     assert calls["n"] == n_after_first, "Second identical command must use cache"
 
-    # Instructive message check: command_moderation carries it in "reason" (via make_block_error)
+    # Запрет на обход едет отдельным полем guidance (make_block_error), а reason
+    # остаётся причиной отказа: раньше одна и та же формулировка лежала в одном
+    # словаре дважды — и в reason, и в guidance.
     err = captured.get("err", {})
-    reason = err.get("reason", "")
-    assert "Do NOT retry" in reason, f"Expected 'Do NOT retry' in reason: {reason!r}"
+    assert err.get("reason") == "User declined the command."
+    guidance = err.get("guidance", "")
+    assert "Do NOT retry" in guidance, f"Expected 'Do NOT retry' in guidance: {guidance!r}"
+    assert "Do NOT retry" not in err.get("reason", ""), "дубль в reason вернулся"
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 обнаруживается пользователем, а не нами.
 """
 import ast
+from gc_testkit import as_coro
 import re
 from pathlib import Path
 
@@ -47,7 +48,7 @@ def test_mapping_table_matches_reality():
         ("gc_core.utils.connect_backend",
          "request_backend_chat_completions", "arequest_backend_chat_completions"),
         ("gc_core.request_backend_policy",
-         "request_chat_completions_with_policy", "arequest_chat_completions_with_policy"),
+         "arequest_chat_completions_with_policy", "arequest_chat_completions_with_policy"),
         ("gc_core.utils.llm_chat_client",
          "request_chat_completion_text", "arequest_chat_completion_text"),
         ("gc_core.summarize.llm", "request_summary_text", "arequest_summary_text"),

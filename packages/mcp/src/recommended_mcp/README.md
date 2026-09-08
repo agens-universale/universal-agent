@@ -81,14 +81,14 @@ gc-mcp remove science --keep-package
 
 ```bash
 # gc-mcp-install — алиас gc-mcp install; ДЕЛАЕТ авто-wire в config.local.yml
-gc-mcp-install --config recommended_mcp/config.local.yml
+gc-mcp-install --config <gc-config>/recommended_mcp/config.local.yml
 
 # скрипт напрямую — авто-wire НЕ делает (только установка пакетов)
 cp recommended_mcp/config.local.example.yml recommended_mcp/config.local.yml   # первый раз
-python3 recommended_mcp/install.py --config recommended_mcp/config.local.yml
+python3 -m recommended_mcp.install --config <gc-config>/recommended_mcp/config.local.yml
 ```
 
-При запуске `python3 recommended_mcp/install.py` (скрипт напрямую) авто-wire не выполняется —
+При запуске `python3 -m recommended_mcp.install` (скрипт напрямую) авто-wire не выполняется —
 нужно вручную скопировать `<mcp>/agent_config.snippet.yml`
 в секцию `mcp-servers:` своего `config.yml` — см. раздел «4. Подключить MCP к агенту» ниже.
 
@@ -96,7 +96,7 @@ python3 recommended_mcp/install.py --config recommended_mcp/config.local.yml
 
 | `install.type` | Что делает |
 |---|---|
-| `source` | при наличии локальных исходников `external/<name>/` (клон) — `pip install <path>`; иначе (method-2, без клона) — `pip install "git+<repo_url>[@repo_ref]#subdirectory=external/<name>"` из git-подкаталога репо (нужен `git` в PATH + сеть). |
+| `source` | при наличии локальных исходников `external/vendor/<name>-mcp/` (клон) — `pip install <path>`; иначе (method-2, без клона) — `pip install "git+<repo_url>[@repo_ref]#subdirectory=external/vendor/<name>-mcp"` из git-подкаталога репо (нужен `git` в PATH + сеть). |
 | `wheel` | `pip install` локального wheel из `<name>/dist/*.whl` |
 | `pypi` | `pip install <package>` из PyPI (пин версии в `install.package`) |
 | `docker` | `docker compose -f <name>/docker-compose.yml build` (локальный билд образа) |
@@ -105,10 +105,10 @@ python3 recommended_mcp/install.py --config recommended_mcp/config.local.yml
 Для итеративной разработки наших MCP (`source`-тип) при наличии локального клона:
 
 ```bash
-python recommended_mcp/install.py --editable
+python -m recommended_mcp.install --editable
 ```
 
-В этом режиме `pip install -e <path>` — изменения в `external/<name>/`
+В этом режиме `pip install -e <path>` — изменения в `external/vendor/<name>-mcp/`
 подхватываются на следующем запуске MCP без переустановки. Для `wheel/pypi/docker/npx`
 флаг игнорируется.
 
@@ -152,7 +152,7 @@ gc-cli -a -q "найди статьи про ..."
 Ручной запуск (отдельный терминал, Ctrl+C гасит поднятое в этом сеансе):
 
 ```bash
-python recommended_mcp/run.py
+python -m recommended_mcp.run
 ```
 
 | `run.type` | Поведение |
@@ -163,8 +163,8 @@ python recommended_mcp/run.py
 Остановить daemon'ы из манифеста вручную:
 
 ```bash
-python recommended_mcp/run.py --stop
-python recommended_mcp/run.py --config recommended_mcp/config.local.yml --stop
+python -m recommended_mcp.run --stop
+python -m recommended_mcp.run --config <gc-config>/recommended_mcp/config.local.yml --stop
 ```
 
 MCP без блока `run:` пропускаются — агент спавнит их по stdio сам.
@@ -174,7 +174,7 @@ MCP без блока `run:` пропускаются — агент спавн�
 > При использовании `gc-mcp install` этот шаг **не нужен** — авто-wire делает его автоматически
 > через `~/.gc/config.local.yml`.
 
-Если ты использовал скрипт напрямую (`python3 recommended_mcp/install.py`):
+Если ты использовал скрипт напрямую (`python3 -m recommended_mcp.install`):
 скопируй содержимое `<mcp>/agent_config.snippet.yml` в секцию `mcp-servers:`
 своего `config.yml` агента. `install.py` **не редактирует** `config.yml` агента
 автоматически — чтобы не повредить твои кастомные правки.
@@ -183,7 +183,7 @@ MCP без блока `run:` пропускаются — агент спавн�
 ## Как пропустить MCP
 
 - **Предпочтительно:** скопируй `config.local.example.yml` → `config.local.yml`,
-  оставь только нужные блоки, ставь через `--config recommended_mcp/config.local.yml`.
+  оставь только нужные блоки, ставь через `--config <gc-config>/recommended_mcp/config.local.yml`.
 - **Или:** закомментируй лишние блоки в `config.yml`.
 
 `computer` на Linux и так пропускается (`platforms: [win32]`).
@@ -199,7 +199,7 @@ gc-cli -a -q "..."
 Дальше:
 
 1. Подключение в `~/.gc/config.local.yml` выполнено автоматически шагом выше.
-2. **science** — HTTP-daemon: поднимает `gc-cli -a` (или вручную `python recommended_mcp/run.py`).
+2. **science** — HTTP-daemon: поднимает `gc-cli -a` (или вручную `python -m recommended_mcp.run`).
 3. **duckduckgo_search** и **office** — stdio, агент спавнит сам после install.
 
 ## Как добавить новый MCP

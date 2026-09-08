@@ -9,7 +9,10 @@ from gc_core.agent_executor import AgentExecutor
 from gc_core.config import (
     apply_cli_overrides,
     build_auth_connector,
+    cli_forces_legacy_model,
     load_config,
+    load_config_ex,
+    resolve_config_path,
     user_config_path,
     _bootstrap_user_config,
 )
@@ -18,7 +21,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.run_context import RunContext, acreate_run_context
-from gc_core.mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
+from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
@@ -121,27 +124,64 @@ def _run_init() -> int:
     """`gc-cli --init-config`: настроить конфиг (интерактивно на TTY) и выйти."""
     path = user_config_path()
     just_created = _bootstrap_user_config()
-    config_dict = load_config(None)
+    # «Чинилка» обязана работать именно тогда, когда конфиг сломан: лестница
+    # ступеней и текст деградации — общие с gc-ua (onboarding, один дом).
+    try:
+        loaded = onboarding.load_config_for_repair()
+    except onboarding.RepairRefused as exc:
+        # M10: ступень шаблона при живом указателе профиля — запись мастера
+        # обречена (гейт судит стек следующего старта), и вести человека через
+        # все вопросы с вводом токена к отказу записи нечестно. Текст готов у
+        # лестницы — печатаем как есть.
+        print(str(exc), file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        # Лестница исчерпана: не собирается и шаблон — сломан слой, в который
+        # мастер не пишет (оверлей). Чинить его мастером нечем: то же объяснение,
+        # что на обычном старте, и код 1 — не трейсбек.
+        print(onboarding.explain_broken_config(str(path), exc), file=sys.stderr)
+        return 1
+    config_dict = loaded.config
+    if loaded.message:
+        # Мастер gc-cli плоский, экран не занимает — stderr человек видит.
+        print(f"[gc] {loaded.message}", file=sys.stderr)
     if _interactive():
         from gc_cli import onboarding_wizard
-        onboarding_wizard.run(config_dict, path, review_all=True,
-                              io=onboarding_wizard.default_io())   # без mcp — gc-cli не ставит MCP
+        configured = onboarding_wizard.run(
+            config_dict, path, review_all=True,
+            io=onboarding_wizard.default_io(),   # без mcp — gc-cli не ставит MCP
+            # Ступень «без профиля» значит, что конфиг собрался только со снятым
+            # профилем: финал обязан снять и указатель, иначе записать починку
+            # некуда. Но снять его мастер может не всегда (указатель в managed-слое),
+            # и судит об этом лестница: своя редакция признака обещала бы человеку
+            # деактивацию, которую писатель не сделает, — а пустой якорь в базу
+            # уже уехал бы (ревью D3).
+            deactivate_profile=loaded.deactivate_profile)
+        # run() отдаёт False не только на трейсбеке, но и когда человек прошёл
+        # мастер, а конфиг всё равно остался ненастроенным (пропущенные поля,
+        # отказ записи, файл, который не удалось перечитать) — код возврата
+        # обязан отражать это, а не рапортовать успех при честном stderr рядом.
+        return 0 if configured else 1
     else:
-        print(onboarding.setup_guide(str(path), config_dict, just_created=just_created), file=sys.stderr)
+        # Гайд знает ступень лестницы: на деградировавшей «настроен — можно
+        # запускать» врало бы человеку, чей следующий старт падает.
+        print(onboarding.setup_guide(str(path), config_dict, just_created=just_created,
+                                     repair=loaded), file=sys.stderr)
     return 0
 
 
 def _run_sync_config() -> int:
     """`gc-cli --sync-config`: обновить config.yml по свежему шаблону и выйти."""
     from pathlib import Path
-    from gc_core.config import _default_config_path, _project_local_config_path
+    from gc_core.config import _default_config_path
+    from gc_core.config_modules.env_vars import project_local_config_path
 
     config_arg = arg_parser.run_args.config
     target = Path(config_arg) if config_arg else user_config_path()
     bundled = Path(_default_config_path()).resolve()
 
     # I5: project-local overlay — частичный файл, sync его не трогает
-    project_local = _project_local_config_path()
+    project_local = project_local_config_path()
     if project_local and Path(project_local).resolve() == target.resolve():
         print(
             "[gc] project-local .gc/config.yml — частичный overlay, sync его не обновляет\n"
@@ -182,6 +222,74 @@ def _run_sync_config() -> int:
     lines.append(f"     бэкап: {report.backup_path}")
     lines.append("     личные комментарии из старого файла не переносятся — они в бэкапе.")
     print("\n".join(lines), file=sys.stderr)
+    return 0
+
+
+def _run_reset_config() -> int:
+    """`gc-cli --reset-config`: подменить config.yml пакетным умолчанием (спека §11).
+
+    Файлы профилей (`~/.gc/profiles/*`) и сессионные оверрайды не трогает — заменяет
+    ровно тот файл, что был бы базой запуска (вместе с его указателем `profile:`:
+    выбранный профиль после сброса деактивирован). Интерактивное y/N-подтверждение;
+    без TTY — честный отказ (не молчаливое да и не молчаливый отказ)."""
+    from pathlib import Path
+    from gc_core.config import _default_config_path
+    from gc_core.config_modules.env_vars import project_local_config_path
+
+    config_arg = arg_parser.run_args.config
+    target = Path(config_arg) if config_arg else user_config_path()
+    bundled = Path(_default_config_path()).resolve()
+
+    project_local = project_local_config_path()
+    if project_local and Path(project_local).resolve() == target.resolve():
+        print(
+            "[gc] project-local .gc/config.yml — частичный overlay, сброс к пакетному "
+            "умолчанию к нему неприменим (сбрасывайте глобальный config.yml).",
+            file=sys.stderr,
+        )
+        return 1
+    if not target.is_file():
+        print(
+            f"[gc] config.yml не найден (ещё не создан) — {target}.\n"
+            f"     Сначала настройте агента: gc-cli --init-config",
+            file=sys.stderr,
+        )
+        return 1
+    if target.resolve() == bundled:
+        print(
+            "[gc] нечего сбрасывать: target — пакетный шаблон config.default.yml, его не правим.",
+            file=sys.stderr,
+        )
+        return 1
+    if not _interactive():
+        print(
+            "[gc] --reset-config требует интерактивного подтверждения (TTY) — "
+            "запустите в терминале и подтвердите y/N.",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"[gc] Сбросить {target} к пакетному умолчанию? Текущий файл уйдёт в бэкап. [y/N]: ",
+        file=sys.stderr, end="",
+    )
+    sys.stderr.flush()
+    try:
+        answer = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = "n"
+    if answer not in ("y", "yes"):
+        print("[gc] отменено", file=sys.stderr)
+        return 0
+    try:
+        report = config_sync.reset_config(target)
+    except (ValueError, OSError) as exc:
+        print(f"[gc] config.yml НЕ сброшен: {exc}", file=sys.stderr)
+        return 1
+    print(
+        f"[gc] ✓ config.yml сброшен к пакетному умолчанию: {target}\n"
+        f"     бэкап: {report.backup_path}",
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -278,6 +386,9 @@ async def amain() -> int:
     if getattr(arg_parser.run_args, "sync_config", False):
         return _run_sync_config()
 
+    if getattr(arg_parser.run_args, "reset_config", False):
+        return _run_reset_config()
+
     if getattr(arg_parser.run_args, "check_update", False):
         return _run_check_update()
 
@@ -288,8 +399,19 @@ async def amain() -> int:
         return await _run_init_agents_md()
 
     config_arg = arg_parser.run_args.config
+    profile_arg = getattr(arg_parser.run_args, "profile", None)
     just_created = _bootstrap_user_config() if config_arg is None else False
-    config_dict = load_config(config_arg)
+    try:
+        config_dict, _profile_meta = load_config_ex(config_arg, profile_override=profile_arg)
+    except ValueError as exc:
+        # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый traceback
+        # из глубины загрузки (см. onboarding.explain_broken_config). Профиль —
+        # тот же, что грузили: по указателю из файла объяснение описывало бы
+        # чужой стек.
+        print(onboarding.explain_broken_config(
+            resolve_config_path(config_arg), exc, profile_override=profile_arg),
+            file=sys.stderr)
+        return 1
 
     # Единая точка применения CLI-override поверх config.yml.
     apply_cli_overrides(
@@ -304,6 +426,13 @@ async def amain() -> int:
         agentsmd_override=getattr(arg_parser.run_args, "agentsmd_override", False),
         trace_id=getattr(arg_parser.run_args, "trace_id", None),
     )
+    # Легаси-форс (спека §2): --model/--completions_url поверх непустого реестра
+    # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
+    force_legacy = cli_forces_legacy_model(config_dict)
+    if force_legacy:
+        config_dict.setdefault("compat_notices", []).append(
+            "--model: уровни отключены на этот запуск (легаси-форс)"
+        )
     from gc_core import upgrade_gate
     _upgrade_info = upgrade_gate.detect_upgrade()
 
@@ -323,11 +452,17 @@ async def amain() -> int:
     auth_connector = build_auth_connector(config_dict)
     auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
     if auto_mcp:
-        ensure_mcp_daemons(config_dict)
+        # У gc-cli автозапуск opt-in: выключается тем, что `-a` не передан.
+        # Флага `--no-auto-mcp` здесь нет — он живёт только у gc-ua.
+        ensure_mcp_daemons(
+            config_dict, disable_hint="отключить автозапуск: запустите без `-a`"
+        )
     # Асинхронная сборка: мы внутри asyncio.run(amain()), и синхронный
     # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
-    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
+    ctx = await acreate_run_context(
+        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+    )
 
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
     from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli

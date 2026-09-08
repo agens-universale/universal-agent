@@ -6,6 +6,7 @@ from gc_core.intent_guard.trace_digest import FinishGateTraceDigest, build_finis
 from gc_core.intent_guard.validation_result import ValidationResult, fail_open_validation_result, parse_validator_response
 from gc_core.summarize.llm import arequest_auxiliary_completion_text, auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
 from gc_core.bundled_assets import bundled_root
+from gc_core.utils.user_text import read_user_text
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = str(bundled_root())
@@ -73,8 +74,8 @@ def _load_guard_prompt(prompt_path: str | None = None) -> str:
         raise FileNotFoundError(
             f"Intent guard prompt file not found: {path}"
         )
-    with open(path, "r", encoding="utf-8") as fd:
-        prompt = fd.read().strip()
+    # Путь задаёт конфиг (`chat_completions_intent_guard_prompt_path`).
+    prompt = read_user_text(path).strip()
     if not prompt:
         raise ValueError(
             f"Intent guard prompt file is empty: {path}"
@@ -142,6 +143,7 @@ async def _arequest_finish_gate_once(
     system_prompt: str,
     user_prompt: str,
     request_label: str,
+    consumer: str,
 ) -> str:
     request_messages = [
         {"role": "system", "content": system_prompt},
@@ -153,6 +155,7 @@ async def _arequest_finish_gate_once(
         messages=request_messages,
         max_tokens=auxiliary_llm_judge_max_tokens(ctx),
         request_label=request_label,
+        consumer=consumer,
         payload_overrides=auxiliary_llm_completion_kwargs(ctx),
     )
 
@@ -165,6 +168,7 @@ async def avalidate_final_report_vs_user_intent(
     context_user_messages: List[str] | None = None,
     finish_handoff_arguments: Any,
     trace_digest: FinishGateTraceDigest | None = None,
+    consumer: str = "finish_gate",
 ) -> ValidationResult:
     """Run finish gate LLM validator.
 
@@ -173,6 +177,9 @@ async def avalidate_final_report_vs_user_intent(
 
     On unparseable / truncated first reply, retries once with a stricter JSON-only
     prompt that includes the previous incomplete output. Still fail-open if retry fails.
+
+    ``consumer`` — canonical id этого судейского вызова (спека §5.1). По умолчанию
+    ``"finish_gate"``; ``text_answer_judge`` переиспользует эту же воронку под своим id.
     """
     args = _normalize_handoff_in_finish_args(
         _parse_finish_handoff_args(finish_handoff_arguments)
@@ -209,6 +216,7 @@ async def avalidate_final_report_vs_user_intent(
         system_prompt=system_prompt,
         user_prompt=_build_finish_gate_user_prompt(payload),
         request_label="intent_guard_finish_gate",
+        consumer=consumer,
     )
     parsed = parse_validator_response(raw)
     if parsed is not None:
@@ -231,6 +239,7 @@ async def avalidate_final_report_vs_user_intent(
             previous_raw=raw,
         ),
         request_label="intent_guard_finish_gate_retry",
+        consumer=consumer,
     )
     parsed_retry = parse_validator_response(raw_retry)
     if parsed_retry is not None:

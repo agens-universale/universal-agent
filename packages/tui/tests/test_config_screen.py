@@ -1,6 +1,48 @@
 import pytest
 
 
+def test_profile_header_hides_unset_model_sentinel():
+    """Task 14: шаблонный сентинел `agent.model` — не имя модели, шапка /config
+    не должна показывать его как значение (см. onboarding.MODEL_SENTINEL)."""
+    from gc_core import onboarding
+    from gc_tui.screens.config import _profile_header_text
+    cfg = {"model": onboarding.MODEL_SENTINEL}
+    text = _profile_header_text(cfg, profile_source=None).plain
+    assert onboarding.MODEL_SENTINEL not in text
+
+
+def test_profile_header_shows_registry_model_not_flat_key():
+    """Шапка называет ДЕЙСТВУЮЩУЮ модель — резолв Router'а (§6/§7), как футер и
+    /status. С волны B мастер плоский ключ не пишет вовсе, и чтение `cfg["model"]`
+    показывало бы прочерк рядом с полностью настроенным реестром."""
+    from gc_core import onboarding
+    from gc_tui.screens.config import _profile_header_text
+    cfg = {"model": onboarding.MODEL_SENTINEL, "level": "default",
+           "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+           "slots": {"default": "flash"}}
+    text = _profile_header_text(cfg, profile_source=None).plain
+    assert "модель: flash" in text
+
+
+def test_profile_header_prefers_resolved_model_over_stale_flat_key():
+    """Худший случай плоского чтения: `agent.model` заполнен руками и устарел —
+    шапка называла бы моделью то, чем работа не идёт."""
+    from gc_tui.screens.config import _profile_header_text
+    cfg = {"model": "stale-legacy-model", "level": "default",
+           "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+           "slots": {"default": "flash"}}
+    text = _profile_header_text(cfg, profile_source=None).plain
+    assert "stale-legacy-model" not in text
+    assert "модель: flash" in text
+
+
+def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
+    """Пустой реестр — легаси-резолв, плоский ключ остаётся именем модели."""
+    from gc_tui.screens.config import _profile_header_text
+    text = _profile_header_text({"model": "qwen3-coder"}, profile_source=None).plain
+    assert "модель: qwen3-coder" in text
+
+
 @pytest.mark.asyncio
 async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
     pytest.importorskip("textual")
@@ -111,7 +153,8 @@ async def test_config_screen_fieldset_panels(tmp_path):
 
 @pytest.mark.asyncio
 async def test_config_screen_snapshot_hint_caption(tmp_path):
-    # Подсказка-снимок: первая строка трейса и начало rendered_text().
+    # Подсказка-снимок: вторая строка трейса (первая — шапка профиль/уровень/модель,
+    # спека §12.3a) и присутствует в rendered_text().
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import ConfigScreen, _SNAPSHOT_HINT
@@ -121,10 +164,11 @@ async def test_config_screen_snapshot_hint_caption(tmp_path):
         scr = ConfigScreen(config=app._config, config_path=app._config_path)
         await app.push_screen(scr); await pilot.pause()
         trace = scr.query_one("#trace")
-        first = trace.children[0]
+        first, second = trace.children[0], trace.children[1]
         assert first.has_class("config-caption")
+        assert second.has_class("config-caption")
         assert "после перезапуска" in _SNAPSHOT_HINT
-        assert scr.rendered_text().startswith(_SNAPSHOT_HINT)
+        assert _SNAPSHOT_HINT in scr.rendered_text()
 
 
 @pytest.mark.asyncio

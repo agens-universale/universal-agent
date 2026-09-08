@@ -54,6 +54,7 @@ async def arequest_auxiliary_completion_text(
     messages: List[Dict[str, str]],
     max_tokens: int,
     request_label: str,
+    consumer: str,
     payload_overrides: Optional[Dict[str, Any]] = None,
     logger: Any | None = None,
     log_prompt: bool = True,
@@ -61,6 +62,8 @@ async def arequest_auxiliary_completion_text(
     """Aux LLM: log dirty response, return ``for_model``-projected text.
 
     Main agent ``request_chat_completion_text`` stays dirty (canonical persist).
+    ``consumer`` — canonical id из ``ModelRouter.CONSUMERS`` (спека §5.1); маппинг на
+    существующие ``request_label`` не меняется (usage-учёт как был).
     """
     raw = await arequest_chat_completion_text(
         ctx=ctx,
@@ -68,6 +71,7 @@ async def arequest_auxiliary_completion_text(
         messages=messages,
         max_tokens=max_tokens,
         request_label=request_label,
+        consumer=consumer,
         payload_overrides=payload_overrides,
     )
     if log_prompt:
@@ -87,6 +91,7 @@ async def arequest_summary_text(
     state: Any,
     messages: List[Dict[str, str]],
     request_label: str,
+    consumer: str,
     max_tokens: int | None = None,
     payload_overrides: Optional[Dict[str, Any]] = None,
     logger: Any | None = None,
@@ -108,6 +113,7 @@ async def arequest_summary_text(
         messages=messages,
         max_tokens=max_tokens if max_tokens is not None else default_max_tokens,
         request_label=request_label,
+        consumer=consumer,
         payload_overrides=effective_overrides,
         logger=logger,
     )

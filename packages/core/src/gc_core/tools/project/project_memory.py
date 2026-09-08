@@ -17,6 +17,7 @@ from gc_core.project_memory.status import fill_percent
 from gc_core.project_memory.storage import ProjectMemoryError
 from gc_core.message_policy.project_memory_notice.policy import touch_project_memory_baseline
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _BACKUP_FILE_NAME = "GIGACODE_memory_backup.md"
@@ -49,6 +50,7 @@ _HIGH_FILL_HINT = (
 )
 
 
+@loop_warn_on_repeat(**GENERIC_PROFILE)
 class ProjectMemory(AbstractSimpleTool):
     tool_name = PROJECT_MEMORY_TOOL_NAME
 
@@ -72,7 +74,7 @@ class ProjectMemory(AbstractSimpleTool):
         self._max_append_chars = limits["max_append_chars"]
 
     @classmethod
-    def tool_description(cls) -> Dict[str, Any]:
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "project_memory",
@@ -113,7 +115,7 @@ class ProjectMemory(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls) -> str:
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return '''Tool name: project_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
 Use read when Project Info reports long memory and conventions or durable facts may matter.

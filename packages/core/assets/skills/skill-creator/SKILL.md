@@ -82,7 +82,9 @@ The chosen skill has a `source` field. Behaviour depends on it:
 **`source: user`** (skill at user-data dir, e.g., `~/.local/share/gc/skills/<id>/`)
 - Edit in-place. The skill is in user-controlled personal storage.
 
-**`source: system`** (skill bundled with the agent at `<repo>/skills/<id>/`)
+**`source: system`** (skill bundled with the agent, in the distribution's own
+`skills/` root: `packages/core/assets/skills/<id>/` in the working copy,
+`gc_core/assets/skills/<id>/` in an installed wheel)
 - DO NOT edit in-place. The system layer is bundled with the agent and may
   be read-only in production installs. Create an override on a higher layer
   instead:
@@ -174,8 +176,8 @@ If the user picks "все проекты" → target = user-skills-path/<id>/.
 Create the directory tree at the target path, then proceed to draft SKILL.md
 inside it.
 
-**Note:** the System layer (`<repo>/skills/`) is NEVER a destination for
-new skills created by skill-creator in the default flow. It's reserved for
+**Note:** the System layer (the bundled `skills/` root above) is NEVER a
+destination for new skills created by skill-creator in the default flow. It's reserved for
 skills bundled with the agent itself.
 
 ### Workspace for development artifacts
@@ -622,12 +624,13 @@ available or you want to invoke manually):
 python -m scripts.package_skill <abs-path-to-skill-folder> --source-layer project --output-dir <abs-path>
 ```
 
-with `cwd: <absolute path to the repo root>/skills/skill-creator`. On
+with `cwd` = this skill's own folder — the `root_path` that `skills_load`
+reports for `skill-creator` (the directory holding this SKILL.md). On
 Windows, if you see UnicodeEncodeError on emoji in the output — prefix
 the command with `set PYTHONIOENCODING=utf-8 && `, or just use the
 `skills_run_script` route above.
 
-**Do NOT use** `python <abs>/skills/skill-creator/scripts/package_skill.py
+**Do NOT use** `python <abs-path-to-this-skill>/scripts/package_skill.py
 <args>` — the `skill-creator` package name contains a dash, `-m` won't
 resolve it as a Python identifier, and direct file invocation creates
 sys.path problems.
@@ -654,9 +657,9 @@ plain `mv` without re-running the script.
 This skill runs inside the `gc-cli` agent. Notable differences from upstream:
 
 - **Subagents:** only the delegated subagent tool is available (reason +
-  task parameters; see `src/tools/subagents/worker.py`). Use it whenever you
-  need an independent
-  LLM session (e.g., the self-check above). Do NOT simulate subagents by
+  task parameters; see
+  `packages/core/src/gc_core/tools/subagents/worker.py`). Use it whenever you
+  need an independent LLM session (e.g., the self-check above). Do NOT simulate subagents by
   writing a single Python script that runs both with-skill and baseline in
   the same LLM session — that's the same model evaluating its own output,
   which defeats the purpose.

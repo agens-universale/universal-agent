@@ -1,4 +1,4 @@
-"""Выбор пути доставки текста в буфер: нативный или OSC 52, но не оба сразу.
+"""Выбор пути доставки текста в буфер: нативный и/или OSC 52.
 
 Живой замер (2026-08-04, Windows Terminal): отправка OSC 52 заставляет терминал
 самому лезть в системный буфер Windows. Буфер эксклюзивный, захват занимает у
@@ -6,10 +6,10 @@
 интерфейс выглядит зависшим, а наша параллельная нативная запись получает отказ
 (в логах было от 10% до 80% отказов).
 
-Отключение OSC 52 на локальной машине убрало и подвисания, и отказы: 19 записей,
-0 отказов. Поэтому OSC 52 остаётся только там, где он единственный способ
-доставить текст: SSH (нативная запись положила бы текст в буфер сервера) и
-случай, когда нативная запись не удалась.
+Отключение OSC 52 на локальной Windows/macOS убрало и подвисания, и отказы.
+OSC 52 остаётся: всегда в SSH (нативная запись легла бы в буфер сервера),
+всегда на Linux (страховка от одноразовости xclip) и как запасной путь,
+когда нативная запись не удалась.
 """
 from __future__ import annotations
 
@@ -37,7 +37,9 @@ def local_machine(monkeypatch):
 
 
 def test_native_success_does_not_send_osc52(local_machine, monkeypatch):
-    """Главный случай: нативная запись удалась — терминал не трогаем."""
+    """Windows: нативная запись удалась — терминал не трогаем.
+    Linux — наоборот, см. test_linux_keeps_osc52_alongside_native."""
+    monkeypatch.setattr(clipboard_ops.sys, "platform", "win32")
     monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda text: True)
     app = FakeApp()
 
@@ -76,7 +78,8 @@ def test_ssh_session_uses_osc52(monkeypatch):
 
 
 def test_worker_path_also_skips_osc52_on_success(local_machine, monkeypatch):
-    """Асинхронный путь (Ctrl+C в живом TUI) ведёт себя так же, как синхронный."""
+    """Windows async (Ctrl+C в живом TUI) — как sync: native ok, OSC нет."""
+    monkeypatch.setattr(clipboard_ops.sys, "platform", "win32")
     monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda text: True)
 
     class WorkerApp(FakeApp):
@@ -89,6 +92,24 @@ def test_worker_path_also_skips_osc52_on_success(local_machine, monkeypatch):
     app = WorkerApp()
     clipboard_ops.copy_out(app, "код", toast=True, blocking=False)
     assert app.osc_calls == []
+    assert app._clipboard == "код"
+
+
+def test_worker_path_linux_keeps_osc52_on_success(local_machine, monkeypatch):
+    """Linux async: OSC сразу, native в worker — та же политика, что sync."""
+    monkeypatch.setattr(clipboard_ops.sys, "platform", "linux")
+    monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda text: True)
+
+    class WorkerApp(FakeApp):
+        def run_worker(self, work, **kwargs):
+            work()
+
+        def call_from_thread(self, fn, *args, **kwargs):
+            fn(*args, **kwargs)
+
+    app = WorkerApp()
+    clipboard_ops.copy_out(app, "код", toast=True, blocking=False)
+    assert app.osc_calls == ["код"]
     assert app._clipboard == "код"
 
 

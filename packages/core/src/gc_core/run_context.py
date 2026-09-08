@@ -16,6 +16,7 @@ from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
 from gc_core.trace_id import trace_id_from_config, trace_header_name
+from gc_core.model_router import CircuitBreaker, ModelRouter
 
 
 @dataclass
@@ -33,7 +34,9 @@ class RunContext:
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/);
     - os_backend — физический I/O порт (local FS или Harbor container);
-    - workspace — root + backend в координатах среды исполнения.
+    - workspace — root + backend в координатах среды исполнения;
+    - model_router — резолвит consumer -> ResolvedModel (спека §6); фиксация на ход —
+      см. turn_boundary.begin_turn.
     """
 
     config_dict: Dict[str, Any]
@@ -50,6 +53,7 @@ class RunContext:
     os_backend: FsBackend
     skills_registry: SkillsRegistry
     workspace: ExecutionWorkspace
+    model_router: ModelRouter
     # Внешний trace_id этого рана; "" = отсутствует. Производное чтение
     # config_dict["trace_id"] — источник правды один, вычисление в одном месте
     # (create_run_context), чтобы значения не разъехались.
@@ -94,6 +98,9 @@ def create_run_context(
     tools_cache: Any = None,
     log_handlers: Any = None,
     thread_store: Any = None,
+    level_provider: Optional[Callable[[], str]] = None,
+    circuit_breaker: Optional[CircuitBreaker] = None,
+    force_legacy: bool = False,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -106,7 +113,16 @@ def create_run_context(
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
-    - ``is_tui=True`` + LocalFsBackend → ``TrackingFsBackend`` (Diff journal/snapshot).
+    - ``is_tui=True`` только помечает контекст; diff-журнал включает сам TUI
+      (``gc_tui.diff_tui.tracking.attach_to_context``) — ядро о нём не знает.
+    - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
+      CLI/server не передают его → константный провайдер из ключа ``config_dict["level"]``.
+      TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
+      инверсия зависимости через этот параметр.
+    - ``circuit_breaker`` — предохранитель модели (спека §8); по умолчанию свежий.
+    - ``force_legacy`` — легаси-форс (спека §2): CLI `--model`/`--completions_url`
+      поверх непустого реестра моделей отключает резолв уровней/алиасов на этот
+      запуск (детект — ``config.cli_forces_legacy_model``).
     """
     prep = _prepare_run_context(
         config_dict, run_id=run_id, environment=environment, loop=loop,
@@ -126,6 +142,8 @@ def create_run_context(
         auth_connector=auth_connector, environment=environment,
         on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
         is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
+        level_provider=level_provider, circuit_breaker=circuit_breaker,
+        force_legacy=force_legacy,
     )
 
 
@@ -144,6 +162,9 @@ async def _acreate_run_context_impl(
     tools_cache: Any = None,
     log_handlers: Any = None,
     thread_store: Any = None,
+    level_provider: Optional[Callable[[], str]] = None,
+    circuit_breaker: Optional[CircuitBreaker] = None,
+    force_legacy: bool = False,
 ) -> RunContext:
     """Тело асинхронной сборки: то же, что синхронное, но дискавери — await."""
     from gc_core.tools import abuild_tools_data
@@ -166,6 +187,8 @@ async def _acreate_run_context_impl(
         auth_connector=auth_connector, environment=environment,
         on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
         is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
+        level_provider=level_provider, circuit_breaker=circuit_breaker,
+        force_legacy=force_legacy,
     )
 
 
@@ -249,6 +272,9 @@ def _finish_run_context(
     is_tui: bool,
     tools_cache: Any,
     thread_store: Any = None,
+    level_provider: Optional[Callable[[], str]] = None,
+    circuit_breaker: Optional[CircuitBreaker] = None,
+    force_legacy: bool = False,
 ) -> RunContext:
     """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
     # Хранилище встраивающего проверяем ЗДЕСЬ — это и есть точка проводки.
@@ -312,6 +338,16 @@ def _finish_run_context(
     chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
     workspace = build_execution_workspace(backend, config_dict)
 
+    effective_level_provider = level_provider or (
+        lambda: config_dict.get("level") or "default"
+    )
+    model_router = ModelRouter(
+        config_dict,
+        level_provider=effective_level_provider,
+        breaker=circuit_breaker,
+        force_legacy=force_legacy,
+    )
+
     ctx = RunContext(
         config_dict=config_dict,
         run_id=effective_run_id,
@@ -331,6 +367,7 @@ def _finish_run_context(
         os_backend=backend,
         skills_registry=skills_registry,
         workspace=workspace,
+        model_router=model_router,
         on_stream_delta=on_stream_delta,
         on_messages_evicted=on_messages_evicted,
         mcp_session_owner=mcp_session_owner,

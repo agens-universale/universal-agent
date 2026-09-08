@@ -1,7 +1,22 @@
 import httpx
+import requests
 
 from gc_core.utils.backend_errors import EmbeddedChoiceError, is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
 from gc_core.utils.chat_completions_stream import BackendStreamError
+
+
+def _http_error(status: int) -> httpx.HTTPStatusError:
+    """HTTP-отказ в форме ДЕЙСТВУЮЩЕГО транспорта.
+
+    Часть этих проверок приехала с develop, где путь к модели шёл через
+    `requests`. Здесь он httpx, и предикаты модуля спрашивают про
+    `httpx.HTTPStatusError` — на requests-исключении они просто не срабатывали
+    бы, и тест зеленел бы, ничего не проверив.
+    """
+    request = httpx.Request("POST", "http://backend.local/v1/chat/completions")
+    return httpx.HTTPStatusError(
+        "http error", request=request, response=httpx.Response(status, request=request)
+    )
 
 
 def _resp(*, content="", tool_calls=None, finish_reason=None, error=None, top_error=None):
@@ -15,14 +30,6 @@ def _resp(*, content="", tool_calls=None, finish_reason=None, error=None, top_er
     if top_error is not None:
         dct["error"] = top_error
     return dct
-
-
-
-def _http_status_error(status: int) -> httpx.HTTPStatusError:
-    """HTTP-ошибка в форме httpx: requests ушёл из зависимостей ядра."""
-    request = httpx.Request("POST", "http://backend.invalid/v1")
-    response = httpx.Response(status, request=request)
-    return httpx.HTTPStatusError("http error", request=request, response=response)
 
 
 def test_empty_completion_true_when_nothing():
@@ -87,7 +94,7 @@ def test_retriable_stream_nonnumeric_false():
     assert is_retriable_backend_error(BackendStreamError("x", status_code="content_filter")) is False
 
 def test_retriable_http_500():
-    assert is_retriable_backend_error(_http_status_error(500)) is True
+        assert is_retriable_backend_error(_http_error(500)) is True
 
 def test_retriable_unrelated_false():
     assert is_retriable_backend_error(ValueError("boom")) is False
@@ -114,14 +121,14 @@ def test_retriable_embedded_no_code_true():
 
 
 def test_auth_error_http_401_true():
-    assert is_auth_error(_http_status_error(401)) is True
+        assert is_auth_error(_http_error(401)) is True
 
 def test_auth_error_stream_401_true():
     assert is_auth_error(BackendStreamError("unauthorized", status_code=401)) is True
 
 def test_auth_error_403_and_500_false():
     for code in (403, 404, 500):
-        assert is_auth_error(_http_status_error(code)) is False
+                assert is_auth_error(_http_error(code)) is False
 
 def test_auth_error_unrelated_false():
     assert is_auth_error(ValueError("boom")) is False
@@ -133,6 +140,100 @@ def test_auth_error_embedded_401_true():
 
 def test_auth_error_embedded_504_false():
     assert is_auth_error(EmbeddedChoiceError("x", status_code=504, raw_code=504)) is False
+
+
+def test_model_unavailable_covers_network_errors():
+    from gc_core.utils.backend_errors import is_model_unavailable_error
+    assert is_model_unavailable_error(httpx.ConnectTimeout("timeout")) is True
+    assert is_model_unavailable_error(httpx.ConnectError("tls")) is True
+    assert is_model_unavailable_error(httpx.ProxyError("proxy")) is True
+
+
+def test_model_unavailable_covers_4xx_of_a_renamed_or_revoked_model():
+    """§14 «404-переименование тем же путём»: провайдер снял или переименовал
+    модель — это недоступность алиаса, а не ошибка запроса, и лечится она сменой
+    уровня или профиля, как и 5xx. 401/403 здесь же: ключ отозвали именно у этой
+    записи реестра (у каждой свой token), поэтому гаснет алиас, а не весь агент.
+
+    Ветка `status_code in (401, 403, 404)` до этого теста не исполнялась ни разу:
+    фоллбэк-сценарии гоняются на 500/503, а соседние тесты подают только сетевые
+    и не-сетевые `RequestException` — её удаление не роняло ничего.
+    """
+    from gc_core.utils.backend_errors import is_model_unavailable_error
+    for code in (401, 403, 404):
+        assert is_model_unavailable_error(_http_error(code)) is True, (
+            f"HTTPError {code} не признан недоступностью модели"
+        )
+        assert is_model_unavailable_error(
+            BackendStreamError("model not found", status_code=code)
+        ) is True, f"BackendStreamError {code} не признан недоступностью модели"
+
+    # 400 — ошибка запроса, а не модели: смена уровня её не исправит.
+    assert is_model_unavailable_error(_http_error(400)) is False
+
+
+def test_model_unavailable_ignores_non_network_request_exceptions():
+    """Предохранитель гасит алиас на ВСЮ сессию, поэтому «недоступность» — только
+    сетевые ошибки и 5xx/401/403/404. Битое тело ответа живого провайдера и кривой
+    url/прокси — тоже `RequestException`, но моделью не лечатся: смена уровня или
+    профиля их не исправит, а алиас остался бы закрытым до правки конфига."""
+    from gc_core.utils.backend_errors import is_model_unavailable_error
+    assert is_model_unavailable_error(requests.exceptions.MissingSchema("no scheme")) is False
+    assert is_model_unavailable_error(requests.exceptions.InvalidURL("bad url")) is False
+    assert is_model_unavailable_error(requests.exceptions.TooManyRedirects("loop")) is False
+    assert is_model_unavailable_error(
+        requests.exceptions.JSONDecodeError("Expecting value", "<html>", 0)
+    ) is False
+
+
+def _embedded_exc(response):
+    """Исключение строит ПРОД (`_raise_on_embedded_choice_error`) из реального
+    тела ответа — руками не собираем: иначе тест проверял бы наши догадки о
+    форме, а не то, что действительно присылает прокси."""
+    from gc_core.request_backend_policy import _raise_on_embedded_choice_error
+    try:
+        _raise_on_embedded_choice_error(response)
+    except EmbeddedChoiceError as exc:
+        return exc
+    raise AssertionError("ожидали EmbeddedChoiceError")
+
+
+def test_model_unavailable_covers_embedded_choice_errors():
+    """Прокси заворачивает отказ в HTTP-200 (choices[0].error), поэтому такой же
+    отказ модели приходит другим типом исключения. Без этой ветки предохранитель
+    и фоллбэк «привязка недоступна → активная модель» слепы ровно к тем
+    провайдерам, ради которых develop и завёл EmbeddedChoiceError."""
+    from gc_core.utils.backend_errors import is_model_unavailable_error
+    upstream_timeout = {"choices": [{"error": {
+        "code": 504, "message": "Upstream idle timeout",
+        "metadata": {"error_type": "timeout"}}}]}
+    assert is_model_unavailable_error(_embedded_exc(upstream_timeout)) is True
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {"code": 401, "message": "bad key"}}]})
+    ) is True
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {"code": 404, "message": "no such model"}}]})
+    ) is True
+    # Вторая типовая форма — ошибка верхнего уровня, без choices.
+    assert is_model_unavailable_error(
+        _embedded_exc({"error": {"code": 503, "message": "service unavailable"}})
+    ) is True
+
+
+def test_model_unavailable_ignores_embedded_without_http_status():
+    """Нечисловой код (insufficient_quota/invalid_api_key) и полное отсутствие
+    кода (finish_reason="error" с пустым выбором) дают status_code=None. Гасить
+    по ним алиас на всю сессию нельзя: первое — деньги и ключи, повтором другой
+    моделью не лечится, второе — неизвестно что. Та же осторожность, что у
+    BackendStreamError без статуса."""
+    from gc_core.utils.backend_errors import is_model_unavailable_error
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"error": {
+            "code": "insufficient_quota", "message": "quota exceeded"}}]})
+    ) is False
+    assert is_model_unavailable_error(
+        _embedded_exc({"choices": [{"finish_reason": "error", "message": {}}]})
+    ) is False
 
 
 def test_finish_known_accept():

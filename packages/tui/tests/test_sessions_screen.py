@@ -9,7 +9,7 @@ from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def _seed(threads_dir, tid, prompt, *, branch=None, title=None, last_actual=None,
-          updated_at="2026-05-30T10:00:00+00:00", msgs=1, token_usage=None):
+          task=None, updated_at="2026-05-30T10:00:00+00:00", msgs=1, token_usage=None):
     """Сессия = data-файл (реальный writer) + meta с messages_count/updated_at
     (как пишет thread_store), плюс tui.branch/title/last_actual при необходимости."""
     append_new_thread_messages(str(threads_dir), "cli", tid,
@@ -23,6 +23,8 @@ def _seed(threads_dir, tid, prompt, *, branch=None, title=None, last_actual=None
         tui["title"] = title
     if last_actual is not None:
         tui["last_actual"] = last_actual
+    if task is not None:
+        tui["task"] = task
     if tui:
         meta["tui"] = tui
     if token_usage is not None:
@@ -80,6 +82,29 @@ async def test_long_prompt_card_stays_two_lines(tmp_path):
         card = list(pilot.app.screen.query_one(
             "#sessions-list", VerticalScroll).query(".card"))[0]
         assert card.size.height == 2
+
+
+@pytest.mark.asyncio
+async def test_card_shows_task_title_and_last_actual_subtitle(tmp_path):
+    """При наличии task карточка 3-строчная: task + last_actual + мета."""
+    pytest.importorskip("textual")
+    from textual.containers import VerticalScroll
+    _seed(
+        tmp_path, "bbbbbbbb", "посмотри логи",
+        task="Добавить поле task", last_actual="посмотри логи",
+    )
+    from gc_tui.screens.sessions import SessionsScreen
+    from gc_tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli")
+    async with app.run_test(size=(90, 40)) as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "Добавить поле task" in text
+        assert "посмотри логи" in text
+        card = list(pilot.app.screen.query_one(
+            "#sessions-list", VerticalScroll).query(".card"))[0]
+        assert card.size.height == 3
 
 
 @pytest.mark.asyncio
@@ -458,7 +483,7 @@ async def test_r7_title_uses_last_actual(tmp_path):
 
 @pytest.mark.asyncio
 async def test_r7_manual_title_over_last_actual(tmp_path):
-    """R7: title приоритетнее last_actual в пикере (как в OSC)."""
+    """R7: title — заголовок; last_actual (без task) — подзаголовок карточки."""
     pytest.importorskip("textual")
     _seed(tmp_path, "prio0001", "лог-промпт", title="parser bugfix",
           last_actual="реализуй спеку")
@@ -468,8 +493,8 @@ async def test_r7_manual_title_over_last_actual(tmp_path):
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
         text = _rows_text(pilot)
-        assert "parser bugfix" in text
-        assert "реализуй спеку" not in text
+        assert text.startswith("parser bugfix")
+        assert "реализуй спеку" in text
 
 
 @pytest.mark.asyncio
@@ -519,3 +544,23 @@ async def test_r10_ctrl_cyrillic_k_upper_renames(tmp_path):
         scr._rename_selected = lambda: called.append(1)  # type: ignore[assignment]
         await pilot.press("ctrl+К")
         assert called == [1], called
+
+
+@pytest.mark.asyncio
+async def test_search_matches_subtitle(tmp_path):
+    """Поиск в пикере ищет и по подзаголовку (last_actual под агентским task)."""
+    pytest.importorskip("textual")
+    _seed(tmp_path, "sub11111", "уникальный маркер бета",
+          task="Написать тесты", last_actual="уникальный маркер бета")
+    _seed(tmp_path, "sub22222", "совсем другое", task="Починить парсер", last_actual="совсем другое")
+    from gc_tui.screens.sessions import SessionsScreen
+    from textual.widgets import Input
+    from gc_tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        pilot.app.screen.query_one("#sessions-filter", Input).value = "бета"
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "Написать тесты" in text
+        assert "Починить парсер" not in text

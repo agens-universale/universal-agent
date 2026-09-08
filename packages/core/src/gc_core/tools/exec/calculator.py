@@ -1,8 +1,9 @@
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 import ast
 import json
 import operator
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 # --- AST whitelist walker (C1, C5, C6) ---
@@ -93,6 +94,7 @@ def _eval_node(node: ast.AST) -> Any:
     raise _DisallowedSyntax(f"Node {type(node).__name__} is not allowed")
 
 
+@loop_warn_on_repeat(**READ_PROFILE)
 class Calculator(AbstractSimpleTool):
     max_expression_chars = 2000
 
@@ -118,7 +120,7 @@ class Calculator(AbstractSimpleTool):
         )
 
     @classmethod
-    def tool_description(cls):
+    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
             "type": "function",
             "name": "exec_calculator",
@@ -149,7 +151,7 @@ class Calculator(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls):
+    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = f'''Tool name: exec_calculator
 Tool description: Evaluates an arithmetic expression (int/float literals + operators) and returns a JSON string. This is NOT Python — no sandbox, no builtins, no function calls, no names, no attribute access, no subscripts, no containers.
 Input schema: {{"type": "object", "properties": {{"expression": {{"type": "string", "description": "Arithmetic expression (int/float literals and operators only)."}}}}, "required": ["expression"], "additionalProperties": false}}
