@@ -6,7 +6,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import asyncio
 import json
-import subprocess
 import queue
 import threading
 import time
@@ -388,23 +387,6 @@ def _stdio_command(server_cfg: Dict[str, Any]) -> Tuple[List[str], Any, Dict[str
     for k, v in (server_cfg.get("env") or {}).items():
         env[str(k)] = str(v)
     return cmd, cwd, env
-
-
-def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
-    """Запустить процесс MCP-сервера по конфигу (command, args, cwd, env)."""
-    cmd, cwd, env = _stdio_command(server_cfg)
-    return subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        cwd=cwd,
-        env=env,
-        text=True,
-        bufsize=1,
-        encoding="utf-8",
-        errors="replace",
-    )
 
 
 async def _aspawn_stdio_process(server_cfg: Dict[str, Any]):

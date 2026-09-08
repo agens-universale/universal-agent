@@ -30,7 +30,6 @@ sync- и async-копией, — это дыра, которую никто не
 """
 from __future__ import annotations
 
-import asyncio
 import functools
 import inspect
 from typing import Any, Callable, Generator

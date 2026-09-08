@@ -4,7 +4,6 @@ import asyncio
 import json
 import time
 
-import httpx
 
 import logging
 

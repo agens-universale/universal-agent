@@ -4,7 +4,6 @@ import html as html_lib
 import json
 import os
 import re
-import time
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urljoin
@@ -590,50 +589,49 @@ class SimpleFetchUrl(AbstractSimpleTool):
             # игнорируется (тот же промах, что был в fetch_url).
             proxies=resolve_proxies(normalized_proxy, os.environ, normalized_url)
         )
-        if True:
-            for attempt in range(1, attempts + 1):
-                try:
-                    response = await _fetch_with_redirect_validation(
-                        session, normalized_url, headers, effective_timeout
-                    )
-                    response.raise_for_status()
-                    break
-                except _RedirectBlocked as redirect_exc:
-                    _decision = redirect_exc.decision
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await _fetch_with_redirect_validation(
+                    session, normalized_url, headers, effective_timeout
+                )
+                response.raise_for_status()
+                break
+            except _RedirectBlocked as redirect_exc:
+                _decision = redirect_exc.decision
+                return _result(
+                    ok=False,
+                    final_url=_decision.url,
+                    status_code=None,
+                    content_type=None,
+                    result_type="error",
+                    error={
+                        "type": _decision.error_type or "url_blocked_by_policy",
+                        "reason": _decision.reason,
+                        "matched_rule": _decision.matched_rule,
+                        "blocked_on_redirect": True,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                retryable = status is None or status in (429,) or status >= 500
+                if (not retryable) or attempt == attempts:
                     return _result(
                         ok=False,
-                        final_url=_decision.url,
-                        status_code=None,
-                        content_type=None,
+                        final_url=_response_url(exc),
+                        status_code=status,
+                        content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
+                        if getattr(exc, "response", None) is not None
+                        else None,
                         result_type="error",
                         error={
-                            "type": _decision.error_type or "url_blocked_by_policy",
-                            "reason": _decision.reason,
-                            "matched_rule": _decision.matched_rule,
-                            "blocked_on_redirect": True,
+                            "type": "request_failed",
+                            "message": str(exc),
+                            "attempt": attempt,
+                            "attempts_total": attempts,
+                            "retryable": retryable,
                         },
                     )
-                except httpx.HTTPError as exc:
-                    status = getattr(getattr(exc, "response", None), "status_code", None)
-                    retryable = status is None or status in (429,) or status >= 500
-                    if (not retryable) or attempt == attempts:
-                        return _result(
-                            ok=False,
-                            final_url=_response_url(exc),
-                            status_code=status,
-                            content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
-                            if getattr(exc, "response", None) is not None
-                            else None,
-                            result_type="error",
-                            error={
-                                "type": "request_failed",
-                                "message": str(exc),
-                                "attempt": attempt,
-                                "attempts_total": attempts,
-                                "retryable": retryable,
-                            },
-                        )
-                    await asyncio.sleep(self.retry_backoff_seconds * attempt)
+                await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
         if response is None:
             return _result(ok=False, result_type="error", error={"type": "request_failed", "message": "Unknown request failure."})

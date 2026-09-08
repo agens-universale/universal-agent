@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator
 
 from gc_core.agent_executor import AgentExecutor
 from gc_core.run_context import acreate_run_context

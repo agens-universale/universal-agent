@@ -5,7 +5,6 @@ import codecs
 import hashlib
 import os
 import stat as stat_module
-import subprocess
 import time
 import sys
 import threading

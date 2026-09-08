@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import fnmatch
-import functools
 import inspect
 import json
 from dataclasses import dataclass, field

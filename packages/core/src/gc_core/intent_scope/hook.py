@@ -93,14 +93,6 @@ async def _aappend_aggregated_tool_intent(
         )
 
 
-@functools.wraps(_aappend_aggregated_tool_intent)
-def _append_aggregated_tool_intent(*args: Any, **kwargs: Any) -> None:
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(_aappend_aggregated_tool_intent(*args, **kwargs))
-
-
 def _append_raw_tool_intent(
     *,
     tool_name: str,

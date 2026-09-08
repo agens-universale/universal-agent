@@ -4,8 +4,15 @@
 ``run_context`` под ``if is_tui`` звал ``gc_tui.diff_tui.tracking``. Обёртку
 diff-журнала с тех пор ставит сам TUI (``attach_to_context``, зовёт ``TuiApp``).
 
-Сторож появился потому, что вливание веток эту зависимость ВЕРНУЛО, и весь
-набор из десяти тысяч тестов её не заметил:
+Зависимость не «появилась заново» — она ПЕРЕЖИЛА вливание. ``feat/async-core``
+отбранчевалась 20.08, удаление приехало на develop 27.08 (`9a1b396b`, «Вынести
+из ядра чужое»), и async-ветка его не видела: она несла код до разделения.
+Обе стороны крупно правили ``run_context``, разрешение оставило async-сторону —
+вместе со старым блоком. Тем же путём выжил мёртвый шим ``cli_entry.py``:
+у develop нет ни одного из трёх (``gc-core`` — библиотека, команд не
+объявляет), поэтому исключений в этом стороже нет.
+
+Набор из десяти тысяч тестов зависимость не заметил:
 
 - импорт был ленивый (внутри функции, под ``try/except ImportError``), поэтому
   ни один статический линтер и ни один импорт-тест до него не доходил;
@@ -29,13 +36,6 @@ from gc_testkit.paths import REPO
 
 FRONTENDS = {"gc_cli", "gc_tui", "gc_server"}
 
-#: Единственное законное исключение: шимы точек входа. ``gc-cli`` и ``gc-ua``
-#: объявлены ядром, чтобы битая установка получала строку «поставьте профиль»
-#: вместо трейсбека; импорт живёт под ``except ImportError`` и ровно это и
-#: обслуживает. Список закрытый и по ИМЕНИ ФАЙЛА: «любой модуль с
-#: ``entry`` в имени» пропустил бы новый файл, к точкам входа не относящийся.
-ENTRY_SHIMS = {"cli_entry.py", "tui_entry.py", "serve_entry.py"}
-
 
 def _frontend_imports(path: pathlib.Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -55,8 +55,6 @@ def test_core_sources_do_not_import_frontends():
     core_src = REPO / "packages" / "core" / "src"
     offenders: list[str] = []
     for path in sorted(core_src.rglob("*.py")):
-        if path.name in ENTRY_SHIMS:
-            continue
         offenders.extend(_frontend_imports(path))
 
     assert offenders == [], (
@@ -65,21 +63,4 @@ def test_core_sources_do_not_import_frontends():
         + "\nЯдро — самостоятельный пакет: в headless-установке этих модулей нет. "
         "Действие, которому нужен фронтенд, обязано жить на стороне фронтенда "
         "(как diff-журнал в gc_tui.diff_tui.tracking.attach_to_context)."
-    )
-
-
-def test_entry_shims_exception_list_does_not_go_stale():
-    """В списке исключений нет файлов, которые уже не импортируют фронтенд.
-
-    Обратная сторона закрытого списка: разрешение, переставшее быть нужным,
-    молча прикрывало бы новый импорт в том же файле.
-    """
-    core_src = REPO / "packages" / "core" / "src" / "gc_core"
-    stale = [
-        name
-        for name in sorted(ENTRY_SHIMS)
-        if (core_src / name).is_file() and not _frontend_imports(core_src / name)
-    ]
-    assert stale == [], (
-        f"эти файлы больше не импортируют фронтенд — уберите их из ENTRY_SHIMS: {stale}"
     )

@@ -11,7 +11,6 @@ path-policy). Контур 2 (sensitivity scan) и Контур 3 (anti-exfiltra
 from __future__ import annotations
 
 import fnmatch
-import functools
 import json
 import os
 from dataclasses import dataclass, field

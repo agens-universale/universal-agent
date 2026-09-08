@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 from gc_core.summarize.compaction import (
     arun_summary_compaction,
     history_exceeds_summary_trigger,
-    run_summary_compaction,
 )
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,

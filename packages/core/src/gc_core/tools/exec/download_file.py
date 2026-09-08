@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import time
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
@@ -299,39 +298,38 @@ class DownloadFile(AbstractSimpleTool):
         session = get_async_client(
             proxies=resolve_proxies(None, os.environ, url)
         )
-        if True:
-            for attempt in range(1, attempts + 1):
-                try:
-                    response = await self._fetch_with_redirect_validation(
-                        session,
-                        url,
-                        headers,
-                        self.timeout_seconds,
-                        allowed_schemes=context.url_allowed_schemes,
-                        url_blacklist=context.url_blacklist,
-                    )
-                    response.raise_for_status()
-                    break
-                except _RedirectBlocked as redirect_exc:
-                    decision = redirect_exc.decision
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await self._fetch_with_redirect_validation(
+                    session,
+                    url,
+                    headers,
+                    self.timeout_seconds,
+                    allowed_schemes=context.url_allowed_schemes,
+                    url_blacklist=context.url_blacklist,
+                )
+                response.raise_for_status()
+                break
+            except _RedirectBlocked as redirect_exc:
+                decision = redirect_exc.decision
+                return b"", {
+                    "type": decision.error_type or "url_blocked_by_policy",
+                    "reason": decision.reason,
+                    "matched_rule": decision.matched_rule,
+                    "blocked_on_redirect": True,
+                }
+            except httpx.HTTPError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                retryable = status is None or status in (429,) or status >= 500
+                if (not retryable) or attempt == attempts:
                     return b"", {
-                        "type": decision.error_type or "url_blocked_by_policy",
-                        "reason": decision.reason,
-                        "matched_rule": decision.matched_rule,
-                        "blocked_on_redirect": True,
+                        "type": "request_failed",
+                        "message": str(exc),
+                        "attempt": attempt,
+                        "attempts_total": attempts,
+                        "retryable": retryable,
                     }
-                except httpx.HTTPError as exc:
-                    status = getattr(getattr(exc, "response", None), "status_code", None)
-                    retryable = status is None or status in (429,) or status >= 500
-                    if (not retryable) or attempt == attempts:
-                        return b"", {
-                            "type": "request_failed",
-                            "message": str(exc),
-                            "attempt": attempt,
-                            "attempts_total": attempts,
-                            "retryable": retryable,
-                        }
-                    await asyncio.sleep(self.retry_backoff_seconds * attempt)
+                await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
         if response is None:
             return b"", {"type": "request_failed", "message": "Unknown request failure."}

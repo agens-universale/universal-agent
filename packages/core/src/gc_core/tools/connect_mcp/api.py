@@ -8,7 +8,6 @@ import os
 import time
 import uuid
 
-import httpx
 
 from gc_core.config import load_config
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client

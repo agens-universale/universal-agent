@@ -47,7 +47,6 @@ from gc_core.utils.connect_backend import (
     resolve_network_params,
 )
 from gc_core.utils.connect_backend import arequest_backend_responses as arequest_backend
-from gc_core.utils.ssl_config import get_backend_client_cert
 from gc_core.utils.logging_module import human_console_enabled
 from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.backend_errors import (

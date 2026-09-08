@@ -7,7 +7,6 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import functools
-import asyncio
 import gc
 import threading
 from copy import copy as _shallow_copy_msg
@@ -27,9 +26,6 @@ from gc_core.run_summary_coordinator import (
     areset_stale_summarizing_flag,
     aset_tui_finalizing,
     aset_tui_finish_gate_checking,
-    reset_stale_summarizing_flag,
-    set_tui_finalizing,
-    set_tui_finish_gate_checking,
 )
 from gc_core.summarize.config import parse_summary_trigger_chars, parse_summary_turn_end_trigger_chars
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
