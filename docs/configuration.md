@@ -25,6 +25,7 @@
   тогда клиент отправит `Authorization: Bearer <token>` в запрос к `completions_url`.
   Опционально для OpenRouter поддерживаются заголовки `openrouter_http_referer`
   и `openrouter_x_title` (в запросе это `HTTP-Referer` и `X-OpenRouter-Title`).
+- `strip_tags_projection.strip_think` (по умолчанию `true`) удаляет reasoning из канонических `messages`; при `false` поле `reasoning_content` сохраняется и передаётся в следующий основной запрос, но по-прежнему исключается из summary, intent, judges, digest и memory.
 - Для хранения истории тредов:
   - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
   - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения; если не задан — используется кросс-платформенный дефолт `<state>/projects/<project-slug>/threads/` (на Linux/macOS — `~/.local/state/gc/...`, на Windows — `~/.gc/...`);
