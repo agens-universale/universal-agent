@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-import requests
+import httpx
 
 from gc_core import request_backend_policy as policy
 from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices, notice_from_llm_failure, push_runtime_notice
@@ -14,12 +14,11 @@ from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import EmbeddedChoiceError
 
 
-def _http_error(status: int, body: dict) -> requests.exceptions.HTTPError:
-    resp = requests.Response()
-    resp.status_code = status
-    resp._content = json.dumps(body).encode("utf-8")
-    err = requests.exceptions.HTTPError(response=resp)
-    return err
+def _http_error(status: int, body: dict) -> httpx.HTTPStatusError:
+    """Ошибка ровно того типа, который летит из ядра: оно ходит через httpx."""
+    request = httpx.Request("POST", "http://backend.invalid/v1/chat/completions")
+    resp = httpx.Response(status, json=body, request=request)
+    return httpx.HTTPStatusError("http error", request=request, response=resp)
 
 
 def setup_function():
@@ -70,7 +69,7 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
 
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
 
-    with pytest.raises(requests.exceptions.HTTPError):
+    with pytest.raises(httpx.HTTPStatusError):
         policy.request_chat_completions_with_policy(
             payload_factory=lambda mt: {"model": "m", "messages": []},
             initial_max_tokens=1400,
@@ -97,7 +96,7 @@ def test_policy_skips_notice_when_disabled(monkeypatch):
 
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
 
-    with pytest.raises(requests.exceptions.HTTPError):
+    with pytest.raises(httpx.HTTPStatusError):
         policy.request_chat_completions_with_policy(
             payload_factory=lambda mt: {"model": "m", "messages": []},
             initial_max_tokens=1400,

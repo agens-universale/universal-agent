@@ -21,14 +21,13 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
 
 from gc_core.tools.connect_mcp.client import (
     MCP_INIT_PARAMS,
     _merge_mcp_headers,
     _normalize_url,
 )
-from gc_core.tools.connect_mcp.abandonable import run_abandonable
+from gc_core.backends.async_protocol import aexec_port
 from gc_core.tools.connect_mcp.client_port import McpClientPort
 from gc_core.utils.ssl_config import get_verify_ssl
 
@@ -70,8 +69,30 @@ def _split_share(share: float) -> tuple[float, int]:
 _CARRIER_CACHE_ATTR = "_gc_mcp_has_python3"
 
 
+
+def _tools_from_body(body: Any, server_name: str) -> List[Dict[str, Any]]:
+    """Тело tools/list → список тулов. Общее для синхронной и асинхронной форм."""
+    result = body.get("result") if isinstance(body, dict) else None
+    tools = result.get("tools", []) if isinstance(result, dict) else []
+    return tools if isinstance(tools, list) else []
+
+
 class McpExecCarrierError(RuntimeError):
     """The exec carrier could not deliver a usable answer."""
+
+
+class McpCarrierHttpError(McpExecCarrierError):
+    """Сервер MCP ответил HTTP 4xx/5xx — статус привёз носитель.
+
+    Свой класс, а не ``requests.HTTPError``: здесь ядро в сеть не ходит вовсе.
+    HTTP случился ВНУТРИ носителя, запущенного в бэкенде задачи, и к нам
+    вернулся числом в JSON. Тянуть ради одного имени зависимость от
+    ``requests`` — единственное, что держало её в этом модуле.
+    """
+
+    def __init__(self, message: str, *, status: int) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 # The container-side script. Doubled braces are literal — this goes through
@@ -222,35 +243,56 @@ class OsBackendStatelessClient(McpClientPort):
         super().__init__(server_name, server_cfg)
         self.os_backend = os_backend
 
+    _PROBE_COMMAND = "command -v python3 2>/dev/null || true"
+
+    def _probe_timeout(self, timeout: float) -> int:
+        return min(_PROBE_TIMEOUT_SEC, max(1, int(timeout)))
+
+    def _remember_probe(self, probe: Any) -> bool:
+        """Запомнить исход пробы на бэкенде. Общее для обеих форм."""
+        cached = bool((getattr(probe, "stdout", "") or "").strip())
+        try:
+            setattr(self.os_backend, _CARRIER_CACHE_ATTR, cached)
+        except Exception:
+            # Backend forbids attributes; probing again is only a lost cache.
+            pass
+        return cached
+
+    async def _arequire_python3(self, *, timeout: float) -> None:
+        """Асинхронный двойник :meth:`_require_python3`."""
+        cached = getattr(self.os_backend, _CARRIER_CACHE_ATTR, None)
+        if cached is None:
+            probe = await aexec_port(self.os_backend).aexec(
+                self._PROBE_COMMAND, timeout=self._probe_timeout(timeout)
+            )
+            cached = self._remember_probe(probe)
+        if not cached:
+            raise McpExecCarrierError(self._no_python3_message())
+
     def _require_python3(self, *, timeout: float) -> None:
         """Probe once per backend: the carrier is an environment property."""
         cached = getattr(self.os_backend, _CARRIER_CACHE_ATTR, None)
         if cached is None:
             probe = self.os_backend.exec(
-                "command -v python3 2>/dev/null || true",
-                timeout=min(_PROBE_TIMEOUT_SEC, max(1, int(timeout))),
+                self._PROBE_COMMAND, timeout=self._probe_timeout(timeout)
             )
-            cached = bool((getattr(probe, "stdout", "") or "").strip())
-            try:
-                setattr(self.os_backend, _CARRIER_CACHE_ATTR, cached)
-            except Exception:
-                # Backend forbids attributes; probing again is only a lost cache.
-                pass
+            cached = self._remember_probe(probe)
         if not cached:
-            raise McpExecCarrierError(
-                f"MCP server '{self.server_name}': the environment has no python3 on "
-                f"PATH, so an MCP request cannot be carried there. Nothing will be "
-                f"installed into the task image; set execute_on: agent for this "
-                f"server if it is reachable from the agent."
-            )
+            raise McpExecCarrierError(self._no_python3_message())
+
+    def _no_python3_message(self) -> str:
+        return (
+            f"MCP server '{self.server_name}': the environment has no python3 on "
+            f"PATH, so an MCP request cannot be carried there. Nothing will be "
+            f"installed into the task image; set execute_on: agent for this "
+            f"server if it is reachable from the agent."
+        )
 
     # --- public port ---
 
     def list_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
         body = self._operation("tools/list", {}, timeout=timeout)
-        result = body.get("result") if isinstance(body, dict) else None
-        tools = result.get("tools", []) if isinstance(result, dict) else []
-        return tools if isinstance(tools, list) else []
+        return _tools_from_body(body, self.server_name)
 
     def call_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
@@ -261,25 +303,24 @@ class OsBackendStatelessClient(McpClientPort):
 
     # --- асинхронные двойники -------------------------------------------------
     #
-    # Весь обмен здесь идёт одним экзеком в бэкенде задачи (`_operation` →
-    # `exec_argv`/`run_python`), нативной async-формы у самой сборки нет. Уводим
-    # её в `run_abandonable`: поток-демон переживает отмену по таймауту, а
-    # прервать уже запущенный подпроцесс всё равно нечем. Главное здесь не
-    # выигрыш в самой операции, а то, что loop не стоит на ней всё это время —
-    # у stateless-обмена бюджет секундный, и на нём вставали бы все соседние
-    # прогоны.
+    # Весь обмен идёт одним экзеком в бэкенде задачи (`run_python` для HTTP,
+    # `exec_argv` для stdio), и у обоих есть асинхронная форма: своя у
+    # `local.py`, адаптер `aexec_port` для чужих бэкендов. Поэтому здесь прямой
+    # await, а не поток: раньше стоял `run_abandonable`, потому что сквозного
+    # `aexec_argv`-пути ещё не было.
     #
-    # Когда у бэкенда появится сквозной `aexec_argv`-путь (`local.py` его уже
-    # умеет), это место заменяется прямым await без изменения контракта порта.
+    # Отмена работает лучше, чем с потоком: asyncio-подпроцесс по отмене
+    # снимается, тогда как брошенный поток-демон дочитывал свой pipe в никуда.
 
     async def alist_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
-        return await run_abandonable(self.list_tools, timeout=timeout)
+        body = await self._aoperation("tools/list", {}, timeout=timeout)
+        return _tools_from_body(body, self.server_name)
 
     async def acall_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
     ) -> Dict[str, Any]:
-        return await run_abandonable(
-            self.call_tool, tool_name, arguments, timeout=timeout
+        return await self._aoperation(
+            "tools/call", {"name": tool_name, "arguments": arguments}, timeout=timeout
         )
 
     # --- one stateless operation ---
@@ -303,6 +344,39 @@ class OsBackendStatelessClient(McpClientPort):
         )
         return body
 
+    async def _aoperation(
+        self, method: str, params: Dict[str, Any], *, timeout: float
+    ) -> Dict[str, Any]:
+        """Асинхронный двойник :meth:`_operation`: порядок шагов общий."""
+        if str(self.server_cfg.get("transport") or "") == "stdio":
+            return await self._astdio_operation(method, params, timeout=timeout)
+        per_request = max(1.0, float(timeout) / _REQUESTS_PER_OPERATION)
+        await self._arequire_python3(timeout=per_request)
+        session_id = await self._ahandshake(timeout=per_request)
+        _headers, body = await self._arequest(
+            {"jsonrpc": "2.0", "id": f"gc-{method}", "method": method,
+             "params": params},
+            session_id=session_id,
+            timeout=per_request,
+            close_session=True,
+        )
+        return body
+
+    async def _ahandshake(self, *, timeout: float) -> Optional[str]:
+        headers, _body = await self._arequest(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": MCP_INIT_PARAMS},
+            session_id=None,
+            timeout=timeout,
+        )
+        session_id = headers.get("mcp-session-id")
+        await self._arequest(
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            session_id=session_id,
+            timeout=timeout,
+        )
+        return session_id
+
     def _handshake(self, *, timeout: float) -> Optional[str]:
         headers, _body = self._request(
             {"jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -318,14 +392,19 @@ class OsBackendStatelessClient(McpClientPort):
         )
         return session_id
 
-    def _request(
+    def _carrier_code(
         self,
         payload: Dict[str, Any],
         *,
         session_id: Optional[str],
         timeout: float,
-        close_session: bool = False,
-    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        close_session: bool,
+    ) -> Tuple[str, int]:
+        """Собрать python-носитель одного запроса. Общее для обеих форм.
+
+        Возвращает ``(код, дедлайн)``: сокетный таймаут внутри носителя и
+        дедлайн процесса — разные величины, и делит их ``_split_share``.
+        """
         headers: Dict[str, str] = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
@@ -357,17 +436,46 @@ class OsBackendStatelessClient(McpClientPort):
         code = _HTTP_CARRIER.format(
             payload_b64=payload_b64, marker=EXEC_RESULT_MARKER
         )
-        result = self.os_backend.run_python(code, timeout=deadline)
+        return code, deadline
+
+    def _request(
+        self,
+        payload: Dict[str, Any],
+        *,
+        session_id: Optional[str],
+        timeout: float,
+        close_session: bool = False,
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        code, deadline = self._carrier_code(
+            payload, session_id=session_id, timeout=timeout,
+            close_session=close_session,
+        )
+        return self._interpret(self.os_backend.run_python(code, timeout=deadline))
+
+    async def _arequest(
+        self,
+        payload: Dict[str, Any],
+        *,
+        session_id: Optional[str],
+        timeout: float,
+        close_session: bool = False,
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """Асинхронный двойник: сборка носителя и разбор ответа общие."""
+        code, deadline = self._carrier_code(
+            payload, session_id=session_id, timeout=timeout,
+            close_session=close_session,
+        )
+        result = await aexec_port(self.os_backend).arun_python(code, timeout=deadline)
         return self._interpret(result)
 
-    def _stdio_operation(
-        self, method: str, params: Dict[str, Any], *, timeout: float
-    ) -> Dict[str, Any]:
-        """One process, one exchange: handshake and the method share the pipe.
+    def _stdio_call_parts(
+        self, method: str, params: Dict[str, Any]
+    ) -> Tuple[list, str, str]:
+        """``(argv, stdin, rpc_id)`` одного stdio-обмена. Общее для обеих форм.
 
-        MCP stdio servers read newline-delimited JSON-RPC, so all three messages
-        can be written at once; closing stdin then ends the process. The reply is
-        matched by id because servers may interleave notifications.
+        MCP stdio-серверы читают JSON-RPC построчно, поэтому все три сообщения
+        пишутся сразу; закрытие stdin завершает процесс. Ответ ищется по id —
+        сервер вправе вперемешку слать уведомления.
         """
         command = self.server_cfg.get("command")
         if not command:
@@ -391,13 +499,11 @@ class OsBackendStatelessClient(McpClientPort):
             {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params},
         ]
         stdin = "".join(json.dumps(m) + "\n" for m in messages)
-        # One exchange carries the whole operation, so it gets the whole budget.
-        result = self.os_backend.exec_argv(
-            argv,
-            stdin=stdin,
-            cwd=self.server_cfg.get("cwd"),
-            timeout=max(1, int(timeout)),
-        )
+        stdin = "".join(json.dumps(m) + "\n" for m in messages)
+        return argv, stdin, rpc_id
+
+    def _stdio_reply(self, result: Any, rpc_id: str) -> Dict[str, Any]:
+        """Разбор вывода stdio-обмена. Общее для обеих форм."""
         if getattr(result, "stdout_hit_capture_cap", False):
             raise McpExecCarrierError(
                 f"MCP server '{self.server_name}': response truncated by the exec "
@@ -420,6 +526,29 @@ class OsBackendStatelessClient(McpClientPort):
             f"stderr={stderr})"
         )
 
+
+    def _stdio_operation(
+        self, method: str, params: Dict[str, Any], *, timeout: float
+    ) -> Dict[str, Any]:
+        argv, stdin, rpc_id = self._stdio_call_parts(method, params)
+        # One exchange carries the whole operation, so it gets the whole budget.
+        result = self.os_backend.exec_argv(
+            argv, stdin=stdin, cwd=self.server_cfg.get("cwd"),
+            timeout=max(1, int(timeout)),
+        )
+        return self._stdio_reply(result, rpc_id)
+
+    async def _astdio_operation(
+        self, method: str, params: Dict[str, Any], *, timeout: float
+    ) -> Dict[str, Any]:
+        """Асинхронный двойник: сборка и разбор общие, отличается запуск."""
+        argv, stdin, rpc_id = self._stdio_call_parts(method, params)
+        result = await aexec_port(self.os_backend).aexec_argv(
+            argv, stdin=stdin, cwd=self.server_cfg.get("cwd"),
+            timeout=max(1, int(timeout)),
+        )
+        return self._stdio_reply(result, rpc_id)
+
     def _interpret(self, result: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
         if getattr(result, "stdout_hit_capture_cap", False):
             raise McpExecCarrierError(
@@ -439,9 +568,10 @@ class OsBackendStatelessClient(McpClientPort):
             )
         status = int(parsed.get("status") or 0)
         if status >= 400:
-            raise requests.HTTPError(
+            raise McpCarrierHttpError(
                 f"MCP server '{self.server_name}': HTTP {status} from "
-                f"{self.server_cfg.get('url')}"
+                f"{self.server_cfg.get('url')}",
+                status=status,
             )
         headers = {
             str(k).lower(): str(v) for k, v in (parsed.get("headers") or {}).items()

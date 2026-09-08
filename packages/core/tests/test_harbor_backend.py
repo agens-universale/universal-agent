@@ -449,16 +449,28 @@ async def test_aexec_runs_without_taking_a_thread(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
 
-    before = threading.active_count()
-    results = await asyncio.gather(
-        *(backend.aexec(f"echo {i}") for i in range(5))
-    )
-    after = threading.active_count()
+    # Считаем СОЗДАНИЕ потоков, а не живые: короткий поток успевает умереть до
+    # замера, и `active_count()` возвращается к базе — такой зонд регрессию
+    # пропускает (проверено подменой на соседнем тесте).
+    spawned: list = []
+    real_start = threading.Thread.start
+
+    def _counting_start(self):
+        spawned.append(self.name)
+        return real_start(self)
+
+    threading.Thread.start = _counting_start
+    try:
+        results = await asyncio.gather(
+            *(backend.aexec(f"echo {i}") for i in range(5))
+        )
+    finally:
+        threading.Thread.start = real_start
 
     assert [r.stdout for r in results] == [f"ran:echo {i}" for i in range(5)]
-    assert after == before, (
-        f"пять асинхронных запусков завели {after - before} поток(ов) — "
-        "путь снова идёт через пул"
+    assert spawned == [], (
+        f"пять асинхронных запусков завели потоки {spawned} — путь снова идёт "
+        "через пул"
     )
 
 

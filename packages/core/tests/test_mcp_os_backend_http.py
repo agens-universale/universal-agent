@@ -423,3 +423,119 @@ def test_no_scratch_file_is_written_in_the_container():
     except Exception:
         pass
     assert "/tmp/" not in backend.codes[0]
+
+
+# --- асинхронный путь ---------------------------------------------------------
+#
+# Обмен идёт одним экзеком в бэкенде задачи, и у экзека есть асинхронная форма:
+# своя у `local.py`, адаптер `aexec_port` для чужих бэкендов. Раньше здесь
+# стоял `run_abandonable` — поток-демон на каждый вызов тула.
+
+
+class _AsyncSandbox(_RecordingSandbox):
+    """Бэкенд, объявивший асинхронный порт — как `local.py` и `HarborBackend`."""
+
+    async def arun_python(self, code, *, cwd=None, timeout=None, env=None):
+        return self.run_python(code, cwd=cwd, timeout=timeout, env=env)
+
+    async def aexec(self, command, *, cwd=None, timeout=None, env=None,
+                    capture_max_chars=None):
+        return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+
+    async def aexec_argv(self, argv, *, stdin=None, cwd=None, timeout=None,
+                         env=None, capture_max_chars=None):
+        raise AssertionError("HTTP-транспорт не должен ходить через exec_argv")
+
+
+async def test_async_operation_takes_no_thread():
+    """У бэкенда с асинхронным портом обмен идёт прямым await, без потоков.
+
+    Раньше здесь стоял `run_abandonable` — поток-демон на КАЖДЫЙ вызов тула,
+    независимо от того, умеет бэкенд асинхронно или нет.
+    """
+    import threading
+
+    backend = _AsyncSandbox([
+        _ok({"result": {"protocolVersion": "2024-11-05"}},
+            {"mcp-session-id": "sid-1"}),
+        _ok({}),
+        _ok({"result": {"tools": [{"name": "ask_user"}]}}),
+    ])
+    client = OsBackendStatelessClient(
+        "user_server",
+        {"transport": "stream_http", "url": "http://user-server:8000/mcp"},
+        os_backend=backend,
+    )
+
+    # Считаем СОЗДАНИЕ потоков, а не живые: поток-демон `run_abandonable`
+    # успевает умереть до замера, и `active_count()` возвращается к базе —
+    # проверено подменой, такой зонд регрессию пропускал.
+    spawned: list = []
+    real_start = threading.Thread.start
+
+    def _counting_start(self):
+        spawned.append(self.name)
+        return real_start(self)
+
+    threading.Thread.start = _counting_start
+    try:
+        tools = await client.alist_tools(timeout=30)
+    finally:
+        threading.Thread.start = real_start
+
+    assert [t["name"] for t in tools] == ["ask_user"]
+    assert spawned == [], (
+        f"асинхронный обмен завёл потоки {spawned} — путь снова через "
+        "run_abandonable или пул"
+    )
+
+
+async def test_sync_backend_still_works_through_the_adapter():
+    """Бэкенд БЕЗ асинхронной формы продолжает работать — через `SyncExecAdapter`.
+
+    Это обещание встраивающим: свой `FsBackend` переезда на asyncio не заметил.
+    Поток здесь законен и является ценой совместимости, а не недоделкой.
+    """
+    backend = _RecordingSandbox([
+        _ok({"result": {"protocolVersion": "2024-11-05"}},
+            {"mcp-session-id": "sid-1"}),
+        _ok({}),
+        _ok({"result": {"tools": [{"name": "ask_user"}]}}),
+    ])
+    client = OsBackendStatelessClient(
+        "user_server",
+        {"transport": "stream_http", "url": "http://user-server:8000/mcp"},
+        os_backend=backend,
+    )
+
+    tools = await client.alist_tools(timeout=30)
+    assert [t["name"] for t in tools] == ["ask_user"]
+
+
+async def test_async_and_sync_forms_send_the_same_requests():
+    """Обе формы шлют одну и ту же тройку запросов.
+
+    Носитель собирается общим `_carrier_code`; расхождение означало бы, что
+    синхронный и асинхронный вызовы говорят с сервером ПО-РАЗНОМУ.
+    """
+    def _fresh():
+        return _RecordingSandbox([
+            _ok({"result": {"protocolVersion": "2024-11-05"}},
+                {"mcp-session-id": "sid-1"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ])
+
+    cfg = {"transport": "stream_http", "url": "http://user-server:8000/mcp"}
+
+    sync_backend = _fresh()
+    OsBackendStatelessClient("srv", cfg, os_backend=sync_backend).list_tools(timeout=30)
+
+    async_backend = _fresh()
+    await OsBackendStatelessClient("srv", cfg, os_backend=async_backend).alist_tools(
+        timeout=30
+    )
+
+    assert [_sent(c) for c in sync_backend.codes] == [
+        _sent(c) for c in async_backend.codes
+    ]
