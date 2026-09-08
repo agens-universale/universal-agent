@@ -1,10 +1,12 @@
 import json
 
+from gc_testkit.helpers.tool_ctx import CallableTool
+
 from gc_core.tools.session.think import Think
 
 
 def test_think_success_single_field():
-    data = json.loads(Think()(thoughts="Analyzing the problem..."))
+    data = json.loads(CallableTool(Think())(thoughts="Analyzing the problem..."))
     assert data["ok"] is True
     assert "Thinking added" in (data.get("message") or "")
     msg = (data.get("message") or "").lower()
@@ -18,7 +20,7 @@ def test_think_success_single_field():
 
 def test_think_success_multiple_fields():
     data = json.loads(
-        Think()(
+        CallableTool(Think())(
             thoughts="Plan: do X",
             critics="X might fail if Y",
             doubts="Uncertain about Z",
@@ -37,7 +39,7 @@ def test_think_success_multiple_fields():
 
 
 def test_think_invalid_all_empty():
-    data = json.loads(Think()(thoughts="", critics="", doubts="", reflection=""))
+    data = json.loads(CallableTool(Think())(thoughts="", critics="", doubts="", reflection=""))
     assert data["ok"] is False
     assert data.get("message") is None
     assert data.get("error") is not None
@@ -56,7 +58,7 @@ def test_think_descriptions_are_tool_agnostic():
 
 
 def test_think_invalid_argument_type():
-    bad = json.loads(Think()(thoughts=123))  # type: ignore[arg-type]
+    bad = json.loads(CallableTool(Think())(thoughts=123))  # type: ignore[arg-type]
     assert bad["ok"] is False
     assert bad.get("error") is not None
     assert bad["error"].get("field") == "thoughts"

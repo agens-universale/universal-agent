@@ -34,7 +34,7 @@ class _RaisingWalkBackend(FakeBackend):
 
 def _run(exc):
     tool = FindInFiles.__new__(FindInFiles)
-    bind_os_backend(tool, _RaisingWalkBackend(_FILES, exc))
+    tool = bind_os_backend(tool, _RaisingWalkBackend(_FILES, exc))
     return json.loads(tool(path="/work", pattern="needle", query_mode="text"))
 
 
@@ -69,7 +69,7 @@ def test_missing_root_maps_to_a_domain_envelope():
 def test_worker_failure_maps_to_a_domain_envelope(monkeypatch):
     """Исключение из воркера пробрасывается наружу через `raise exc` в фан-ине."""
     tool = FindInFiles.__new__(FindInFiles)
-    bind_os_backend(tool, FakeBackend(_FILES))
+    tool = bind_os_backend(tool, FakeBackend(_FILES))
 
     def boom(*args, **kwargs):
         raise RuntimeError("worker exploded")

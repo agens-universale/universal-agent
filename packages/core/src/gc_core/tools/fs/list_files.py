@@ -173,12 +173,9 @@ Examples:
         extra_allowed = [skills_root] if skills_root else None
         return cfg, context.launch_root, extra_allowed
 
-    async def acall(self, *args, **kwargs) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
-        return self(*args, **kwargs)
 
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         glob: Optional[str] = None,

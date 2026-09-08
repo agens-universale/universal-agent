@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from gc_core.states import State
-from gc_core.tools import apply_tool, is_unknown_tool_output
+from gc_core.tools import aapply_tool, is_unknown_tool_output
 
 
 def _async_noop(fn):
@@ -49,8 +49,8 @@ def _registry(*names: str):
 # --- A: apply_tool unknown JSON -------------------------------------------------
 
 
-def test_apply_tool_unknown_returns_json_with_suggestions():
-    raw = apply_tool(
+async def test_apply_tool_unknown_returns_json_with_suggestions():
+    raw = await aapply_tool(
         tool_name="read_file",
         arguments="{}",
         tools_data_=_registry("fs_read_file", "fs_read_file_range", "session_think"),
@@ -65,8 +65,8 @@ def test_apply_tool_unknown_returns_json_with_suggestions():
     assert is_unknown_tool_output(raw) is True
 
 
-def test_apply_tool_unknown_empty_suggestions_for_distant_name():
-    raw = apply_tool(
+async def test_apply_tool_unknown_empty_suggestions_for_distant_name():
+    raw = await aapply_tool(
         tool_name="zzzz_totally_unrelated_name_999",
         arguments="{}",
         tools_data_=_registry("session_think"),

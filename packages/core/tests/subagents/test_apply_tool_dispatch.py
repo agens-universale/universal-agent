@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from gc_core.states import State, SharedStateData
-from gc_core.tools import apply_tool, WrongFunctionArgumentsException
+from gc_core.tools import aapply_tool, WrongFunctionArgumentsException
 
 
 def _make_state():
@@ -56,7 +56,7 @@ def _subagent_tools_data():
 
 
 class TestSubagentDispatch:
-    def test_subagent_call_reaches_runner(self):
+    async def test_subagent_call_reaches_runner(self):
         """apply_tool delegates subagent_worker to SubagentRunner.run."""
         sub_data = _subagent_tools_data()
         ctx = _make_ctx(sub_data, use_local=True)
@@ -65,9 +65,14 @@ class TestSubagentDispatch:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
-            instance.run.return_value = "subagent result"
+            # `arun` корутинный: обычный return_value отдал бы MagicMock, и
+            # `await` над ним падал бы, а не отдавал результат.
+            async def _arun(*_a, **_kw):
+                return "subagent result"
 
-            result = apply_tool(
+            instance.arun.side_effect = _arun
+
+            result = await aapply_tool(
                 tool_name="subagent_worker",
                 arguments=json.dumps({"task": "do something", "reason": "test"}),
                 ctx=ctx,
@@ -76,7 +81,7 @@ class TestSubagentDispatch:
             )
 
         MockRunner.assert_called_once_with(ctx, state, ctx.config_dict)
-        instance.run.assert_called_once_with(
+        instance.arun.assert_called_once_with(
             "subagent_worker",
             {"task": "do something", "reason": "test"},
             run_agent_func,
@@ -84,7 +89,7 @@ class TestSubagentDispatch:
         )
         assert result == "subagent result"
 
-    def test_subagent_call_with_dict_arguments(self):
+    async def test_subagent_call_with_dict_arguments(self):
         """apply_tool handles dict arguments for subagent calls."""
         sub_data = _subagent_tools_data()
         ctx = _make_ctx(sub_data, use_local=True)
@@ -93,9 +98,12 @@ class TestSubagentDispatch:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
-            instance.run.return_value = "ok"
+            async def _arun(*_a, **_kw):
+                return "ok"
 
-            apply_tool(
+            instance.arun.side_effect = _arun
+
+            await aapply_tool(
                 tool_name="subagent_worker",
                 arguments={"task": "hello", "reason": "test"},
                 ctx=ctx,
@@ -103,14 +111,14 @@ class TestSubagentDispatch:
                 run_agent_func=run_agent_func,
             )
 
-        instance.run.assert_called_once_with(
+        instance.arun.assert_called_once_with(
             "subagent_worker",
             {"task": "hello", "reason": "test"},
             run_agent_func,
             parent_call_id=None,
         )
 
-    def test_regular_tool_not_affected(self):
+    async def test_regular_tool_not_affected(self):
         """Non-subagent tools go through normal tool_fabric path."""
         called = {}
 
@@ -118,7 +126,7 @@ class TestSubagentDispatch:
             def __init__(self, **kw):
                 called["kwargs"] = kw
 
-            def __call__(self, path=""):
+            async def acall(self, path=""):
                 return f"read: {path}"
 
         tools_data = {
@@ -138,7 +146,7 @@ class TestSubagentDispatch:
         ctx = _make_ctx(tools_data, use_local=True)
         state = _make_state()
 
-        result = apply_tool(
+        result = await aapply_tool(
             tool_name="fs_read_file",
             arguments=json.dumps({"path": "/tmp/test.txt"}),
             ctx=ctx,
@@ -146,7 +154,7 @@ class TestSubagentDispatch:
         )
         assert result == "read: /tmp/test.txt"
 
-    def test_regular_tool_receives_ctx_and_config_dict(self):
+    async def test_regular_tool_receives_ctx_and_config_dict(self):
         """
         Regression: apply_tool must propagate ctx and config_dict to tool_fabric
         kwargs so that security decorators (read_guard, root_box, url_policy,
@@ -161,7 +169,7 @@ class TestSubagentDispatch:
             def __init__(self, **kw):
                 captured["kwargs"] = kw
 
-            def __call__(self, path=""):
+            async def acall(self, path=""):
                 return "ok"
 
         tools_data = {
@@ -181,7 +189,7 @@ class TestSubagentDispatch:
         ctx = _make_ctx(tools_data, use_local=False)
         state = _make_state()
 
-        apply_tool(
+        await aapply_tool(
             tool_name="read_file",
             arguments=json.dumps({"path": "/tmp/x"}),
             ctx=ctx,
@@ -191,13 +199,13 @@ class TestSubagentDispatch:
         assert captured["kwargs"].get("ctx") is ctx
         assert captured["kwargs"].get("config_dict") is ctx.config_dict
 
-    def test_subagent_with_local_disabled_gives_no_such_tool(self):
+    async def test_subagent_with_local_disabled_gives_no_such_tool(self):
         """When use_local_subagents=False, subagent tool_name is unknown."""
         tools_data = {}
         ctx = _make_ctx(tools_data, use_local=False)
         state = _make_state()
 
-        result = apply_tool(
+        result = await aapply_tool(
             tool_name="subagent_worker",
             arguments=json.dumps({"task": "test"}),
             ctx=ctx,
@@ -205,25 +213,25 @@ class TestSubagentDispatch:
         )
         assert "not such tool" in result or "no" in result.lower()
 
-    def test_missing_state_returns_error(self):
+    async def test_missing_state_returns_error(self):
         """Subagent dispatch without state kwarg returns error string."""
         sub_data = _subagent_tools_data()
         ctx = _make_ctx(sub_data, use_local=True)
 
-        result = apply_tool(
+        result = await aapply_tool(
             tool_name="subagent_worker",
             arguments=json.dumps({"task": "test"}),
             ctx=ctx,
         )
         assert "missing" in result.lower() or "state" in result.lower()
 
-    def test_missing_run_agent_func_returns_error(self):
+    async def test_missing_run_agent_func_returns_error(self):
         """Subagent dispatch without run_agent_func returns error string."""
         sub_data = _subagent_tools_data()
         ctx = _make_ctx(sub_data, use_local=True)
         state = _make_state()
 
-        result = apply_tool(
+        result = await aapply_tool(
             tool_name="subagent_worker",
             arguments=json.dumps({"task": "test"}),
             ctx=ctx,
@@ -231,7 +239,7 @@ class TestSubagentDispatch:
         )
         assert "missing" in result.lower() or "run_agent" in result.lower()
 
-    def test_invalid_subagent_arguments_raise_validation_error(self):
+    async def test_invalid_subagent_arguments_raise_validation_error(self):
         """Subagent args are schema-validated before runner execution."""
         sub_data = _subagent_tools_data()
         ctx = _make_ctx(sub_data, use_local=True)
@@ -241,7 +249,7 @@ class TestSubagentDispatch:
         # Для subagent_worker обязательны reason и task.
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             with pytest.raises(WrongFunctionArgumentsException):
-                apply_tool(
+                await aapply_tool(
                     tool_name="subagent_worker",
                     arguments=json.dumps({"task": "only task"}),
                     ctx=ctx,

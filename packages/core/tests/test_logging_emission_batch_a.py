@@ -6,6 +6,7 @@
 Each test drives the real code path with a jsonl-mode per-run logger and
 asserts the expected event line was written.
 """
+from gc_testkit.helpers.tool_ctx import CallableTool
 import builtins
 import json
 
@@ -48,7 +49,7 @@ def test_ask_human_question_and_response_events(tmp_path, monkeypatch):
     answers = iter(["hello", ""])
     monkeypatch.setattr(builtins, "input", lambda: next(answers))
 
-    tool = AskHuman(ctx=_FakeCtx(logger))
+    tool = CallableTool(AskHuman(ctx=_FakeCtx(logger)))
     out = json.loads(tool(question="Q?"))
     assert out["ok"] is True
 
@@ -67,7 +68,7 @@ def test_ask_human_interrupted_event(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builtins, "input", _raise)
 
-    tool = AskHuman(ctx=_FakeCtx(logger))
+    tool = CallableTool(AskHuman(ctx=_FakeCtx(logger)))
     out = json.loads(tool(question="Q?"))
     assert out["ok"] is False
 
@@ -85,7 +86,7 @@ def test_ask_human_error_event(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builtins, "input", _raise)
 
-    tool = AskHuman(ctx=_FakeCtx(logger))
+    tool = CallableTool(AskHuman(ctx=_FakeCtx(logger)))
     out = json.loads(tool(question="Q?"))
     assert out["ok"] is False
 
@@ -102,7 +103,7 @@ def test_ask_human_error_event(tmp_path, monkeypatch):
 def test_intermediate_reply_event(tmp_path):
     logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ir1", agent_kind="main")
 
-    tool = IntermediateReply(ctx=_FakeCtx(logger))
+    tool = CallableTool(IntermediateReply(ctx=_FakeCtx(logger)))
     out = json.loads(tool(answer="status update", artifact_path="report.md"))
     assert out["ok"] is True
 

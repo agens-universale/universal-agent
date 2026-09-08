@@ -246,11 +246,6 @@ Do not implement until they confirm.
 '''
         return description
 
-    def __call__(self, question: str, **kwargs) -> str:
-        """Синхронный вход: читает ответ здесь же, блокируя вызывающего."""
-        return self._ask_with(
-            question, lambda: _read_human_response(self._ctx, question)
-        )
 
     async def acall(self, question: str, **kwargs) -> str:
         """Асинхронный вход: ожидание человека не занимает поток из пула.

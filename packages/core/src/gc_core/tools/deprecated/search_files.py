@@ -360,12 +360,9 @@ Search for error logs in Rust source files:
 
         return True, None, start_0, lim_eff, off_eff
 
-    async def acall(self, *args, **kwargs) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
-        return self(*args, **kwargs)
 
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         regex: str,

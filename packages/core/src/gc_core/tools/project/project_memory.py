@@ -228,13 +228,6 @@ Return format (JSON string):
             return await self._ahandle_append(content)
         return self._dispatch_sync(action, content)
 
-    def __call__(self, action: str, content: str = "", **kwargs: Any) -> str:
-        early = self._reject_unusable(action)
-        if early is not None:
-            return early
-        if action == "append":
-            return self._handle_append(content)
-        return self._dispatch_sync(action, content)
 
     def _reject_unusable(self, action: str) -> Optional[str]:
         """Отказ, если тулу негде работать. Общий для обоих входов."""

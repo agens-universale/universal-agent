@@ -75,12 +75,6 @@ Return format (JSON string):
         await asyncio.sleep(seconds)
         return self._result(ok=True, seconds=seconds, slept_seconds=seconds, error=None)
 
-    def __call__(self, seconds: float | int | None = None, **kwargs) -> str:
-        rejection = self._reject_bad_seconds(seconds)
-        if rejection is not None:
-            return rejection
-        time.sleep(seconds)
-        return self._result(ok=True, seconds=seconds, slept_seconds=seconds, error=None)
 
     def _reject_bad_seconds(self, seconds: float | int | None) -> "str | None":
         """Готовый отказ, если аргумент негоден. Общий для обоих входов.

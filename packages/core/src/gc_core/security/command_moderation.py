@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from gc_core.security.dual_wrapper import dual_wrap
+
 from gc_core.config_modules.security import validate_command_moderation_mode
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.confirm_port import confirm_available, request_confirm
@@ -339,8 +341,14 @@ def moderate_command_execution(
     blocked_result_factory: Callable[[dict[str, Any]], str] | None = None,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
+        # Тело — ГЕНЕРАТОР: `dual_wrap` строит по нему обе обёртки. Обычный
+        # декоратор на `async def acall` ломался молча — в ветке отказа отдавал
+        # строку вместо корутины. `return (yield)` — точка вызова самого тула.
+        #
+        # `body_may_block=True`: тело зовёт LLM-судью, и этот вызов идёт через
+        # портал, а портал из-под живого loop сознательно отказывает. Поэтому
+        # телу нужен поток, где живого loop нет.
+        def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
             # Если в config_dict отсутствует блок command_moderation вообще —
             # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
@@ -352,17 +360,17 @@ def moderate_command_execution(
             )
             cm_cfg = _cfg.get("command_moderation")
             if not isinstance(cm_cfg, dict):
-                return func(*args, **kwargs)
+                return (yield)
             # Runtime-fallback при отсутствии enabled — OFF (судья не вызывается).
             # На нормальном пути load_config кладёт command_moderation из pydantic
             # (secure-by-default enabled=True), поэтому fallback достижим лишь в
             # обход load_config (bespoke/тест-конфиги), а не в проде.
             if not bool(cm_cfg.get("enabled", False)):
-                return func(*args, **kwargs)
+                return (yield)
             try:
                 payload = _extract_payload(func, args, kwargs, payload_arg, payload_extractor)
             except ValueError:
-                return func(*args, **kwargs)
+                return (yield)
             moderation_context = _build_context(tool_name or func.__name__, context, kwargs)
             if moderation_context.mode == "allow":
                 audit_policy_decision(
@@ -371,7 +379,7 @@ def moderate_command_execution(
                     decision="executed",
                     reason_code="policy_allow",
                 )
-                return func(*args, **kwargs)
+                return (yield)
 
             judge_result = None
             judge_available = True
@@ -432,7 +440,7 @@ def moderate_command_execution(
                     risk_flags=decision.risk_flags,
                     error_type=decision.error_type,
                 )
-                return func(*args, **kwargs)
+                return (yield)
             error = make_block_error(decision, moderation_context.mode)
             audit_policy_decision(
                 context,
@@ -456,7 +464,7 @@ def moderate_command_execution(
                 ensure_ascii=False,
             )
 
-        return wrapper
+        return dual_wrap(func, _flow, body_may_block=True)
 
     return decorator
 

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_testkit.helpers.tool_ctx import CallableTool, with_local_ctx
 from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.list_files import ListFiles
@@ -283,7 +283,7 @@ def test_skills_list_empty_pack_same_as_default(tmp_path):
         user_root=str(tmp_path / "u"),
         project_root=str(tmp_path / "p"),
     )
-    tool = SkillsListTool(reg)
+    tool = CallableTool(SkillsListTool(reg))
     default_payload = json.loads(tool())
     empty_pack_payload = json.loads(tool(pack=""))
     assert empty_pack_payload["ok"] is True

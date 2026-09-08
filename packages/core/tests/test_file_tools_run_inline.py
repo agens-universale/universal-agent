@@ -110,20 +110,65 @@ FILE_TOOLS = [
 @pytest.mark.parametrize(
     "tool_cls,build", FILE_TOOLS, ids=lambda v: v.__name__ if isinstance(v, type) else ""
 )
-async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build):
-    """``acall`` зовёт тело тула инлайн, не отдавая его в пул."""
-    seen = {}
+async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, tmp_path):
+    """``acall`` исполняет тело инлайн, не отдавая его в пул.
 
-    class _Probe(tool_cls):  # type: ignore[misc, valid-type]
-        def __call__(self, *args, **kwargs):
-            seen["thread"] = threading.get_ident()
-            return "ok"
+    Зонд следит за ПУЛОМ, а не за телом. Прежний наследовал тул и подменял
+    ``__call__``, но формы ``__call__`` у тулов больше нет — она была второй,
+    синхронной, и её убрали. Слежка за пулом вдобавок проверяет свойство
+    НАПРЯМУЮ («в пул не ходили»), а не через посредника («тело исполнилось на
+    том же потоке»), и переживёт следующую перестройку так же, как эту.
 
-    probe = build(_Probe)
-    assert await probe.acall() == "ok"
-    assert seen["thread"] == threading.get_ident(), (
-        f"{tool_cls.__name__}.acall увёл тело в другой поток — "
-        "файловая операция должна идти на loop"
+    Аргументы подставляются по сигнатуре, и это несущая деталь. Первая
+    редакция звала ``acall()`` без них — и падала на сигнатуре, НЕ ДОЙДЯ до
+    тела: тест был пустым для каждого тула с обязательными параметрами и
+    зеленел бы при любом уходе в пул (проверено подменой).
+
+    Исход тела по-прежнему не важен — важен маршрут: ушла ли работа в пул.
+    """
+    import asyncio
+    import inspect
+
+    tool = build(tool_cls)
+    args = {}
+    for name, param in inspect.signature(tool.acall).parameters.items():
+        if param.default is not inspect.Parameter.empty:
+            continue
+        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+            continue
+        low = name.lower()
+        if "path" in low or "dir" in low or "file" in low:
+            args[name] = str(tmp_path / "probe.txt")
+        elif "content" in low or "text" in low or "data" in low:
+            args[name] = "x"
+        else:
+            args[name] = "x"
+    assert args or not [
+        p for p in inspect.signature(tool.acall).parameters.values()
+        if p.default is inspect.Parameter.empty
+        and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+    ], f"{tool_cls.__name__}: не удалось собрать аргументы — тест стал бы пустым"
+
+    went_to_pool = []
+    real_to_thread = asyncio.to_thread
+
+    async def _spy(fn, /, *a, **kw):
+        went_to_pool.append(getattr(fn, "__name__", repr(fn)))
+        return await real_to_thread(fn, *a, **kw)
+
+    asyncio.to_thread = _spy
+    try:
+        try:
+            await tool.acall(**args)
+        except Exception:
+            pass          # исход тела не важен — важен маршрут
+    finally:
+        asyncio.to_thread = real_to_thread
+
+    assert went_to_pool == [], (
+        f"{tool_cls.__name__}.acall увёл работу в пул ({went_to_pool}) — "
+        "у файловой операции нет нативной асинхронной формы, и поход в пул "
+        "стоит дороже самой работы"
     )
 
 
@@ -165,14 +210,16 @@ async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
     target = tmp_path / "a.txt"
     target.write_text("привет\n", encoding="utf-8")
 
-    seen = {}
-    original = ReadFile.__call__
+    import asyncio
 
-    def _probe(self, *args, **kwargs):
-        seen["thread"] = threading.get_ident()
-        return original(self, *args, **kwargs)
+    went_to_pool = []
+    real_to_thread = asyncio.to_thread
 
-    monkeypatch.setattr(ReadFile, "__call__", _probe)
+    async def _spy(fn, /, *a, **kw):
+        went_to_pool.append(getattr(fn, "__name__", repr(fn)))
+        return await real_to_thread(fn, *a, **kw)
+
+    monkeypatch.setattr(asyncio, "to_thread", _spy)
 
     out = await aapply_tool(
         ReadFile.registered_tool_name(),
@@ -183,6 +230,7 @@ async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
     )
 
     assert json.loads(out)["ok"] is True
-    assert seen["thread"] == threading.get_ident(), (
-        "fs_read_file уехал в поток из пула — диспетчер не увидел acall"
+    assert went_to_pool == [], (
+        f"fs_read_file уехал в пул ({went_to_pool}) — диспетчер снова уводит "
+        "тул в поток вместо того, чтобы звать acall"
     )

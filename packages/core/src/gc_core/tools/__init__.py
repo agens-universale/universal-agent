@@ -401,11 +401,6 @@ class _SubagentTool:
         self._run_agent_func = run_agent_func
         self._parent_call_id = parent_call_id
 
-    def __call__(self) -> str:
-        return self._runner.run(
-            self._tool_name, self._arguments, self._run_agent_func,
-            parent_call_id=self._parent_call_id,
-        )
 
     async def acall(self) -> str:
         return await self._runner.arun(
@@ -621,43 +616,6 @@ def _tool_result_to_text(res: Any) -> str:
     return str(res)
 
 
-def apply_tool(
-    tool_name: str,
-    arguments: str | Dict[str, Any],
-    tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
-    ctx: Optional[Any] = None,
-    **kwargs: Any,
-) -> str:
-    """
-    Вызвать тул по имени (синхронно).
-
-    Контракт не менялся: та же сигнатура, тот же строковый результат, портала
-    на пути нет. Асинхронный тул синхронным путём позвать нельзя — об этом
-    говорится прямо, а не возвращается корутина, приведённая к строке.
-    """
-    prepared = _prepare_tool_call(tool_name, arguments, tools_data_, ctx, **kwargs)
-    if isinstance(prepared, str):
-        return prepared
-    tool, args = prepared
-    if inspect.iscoroutinefunction(tool.__call__):
-        return (
-            f"Tool {tool_name} is async; call it through aapply_tool() "
-            f"(sync apply_tool cannot await)."
-        )
-    # log.debug(
-    #    "apply_tool log:\nkwargs:\n%s\narguments:\n %s\ntool_fabric:\n%s\ntool:\n%s",
-    #    kwargs,
-    #    arguments,
-    #    tool_fabric,
-    #    tool,
-    #)
-    try:
-        res = tool(**args)
-    except Exception as e:  # noqa: BLE001
-        return _tool_failure_output(
-            e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
-        )
-    return _tool_result_to_text(res)
 
 
 async def aapply_tool(
@@ -668,26 +626,33 @@ async def aapply_tool(
     **kwargs: Any,
 ) -> str:
     """
-    Вызвать тул по имени (асинхронно), приняв и синхронный, и асинхронный тул.
+    Вызвать тул по имени. Форма у тула ОДНА — ``acall``.
 
-    Корутину ждём, обычную функцию уводим в поток. Смешение легально навсегда:
-    у встраивающих SDK свои тулы, и переезд ядра на asyncio не имеет права
-    требовать от них переписывания — синхронный ``__call__`` продолжает
-    работать, просто не блокируя loop.
+    Раньше здесь было три ступени: ``acall``, корутинный ``__call__`` и, как
+    запасной путь, ``asyncio.to_thread`` для синхронного тула. Третья ступень
+    существовала «ради встраивающих», но зарегистрировать свой Python-класс-тул
+    извне нельзя вовсе: ``build_tools_data`` собирает набор из ``config_dict``,
+    параметра для чужих тулов у ``create_run_context`` нет, механизма плагинов
+    нет. Точка расширения — MCP, и она асинхронна насквозь.
+
+    Асинхронность формы не означает, что тело что-то ждёт: файловые и короткие
+    тулы исполняют его инлайн на loop (см. ``test_file_tools_run_inline``).
     """
     prepared = _prepare_tool_call(tool_name, arguments, tools_data_, ctx, **kwargs)
     if isinstance(prepared, str):
         return prepared
     tool, args = prepared
     acall = getattr(tool, "acall", None)
+    if not callable(acall):
+        # Жёстко, а не тихим уходом в поток: тул без `acall` — это ошибка
+        # проводки, и она обязана быть видна сразу, а не размазаться по
+        # прогону лишним слотом пула.
+        raise TypeError(
+            f"Tool {tool_name!r} ({type(tool).__name__}) has no acall(); "
+            f"the tool contract is async-only"
+        )
     try:
-        if callable(acall):
-            # Тул объявил асинхронный вход: зовём его, не занимая поток.
-            res = await acall(**args)
-        elif inspect.iscoroutinefunction(tool.__call__):
-            res = await tool(**args)
-        else:
-            res = await asyncio.to_thread(lambda: tool(**args))
+        res = await acall(**args)
     except Exception as e:  # noqa: BLE001
         return _tool_failure_output(
             e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
@@ -699,7 +664,6 @@ __all__ = [
     "WrongFunctionArgumentsException",
     "INTERNAL_TOOL_ERROR",
     "build_tools_data",
-    "apply_tool",
     "aapply_tool",
     "tool_arguments_valid",
     "format_internal_tool_error_output",

@@ -67,11 +67,8 @@ class SkillsListTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    async def acall(self, *args: Any, **kwargs: Any) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
-        return self(*args, **kwargs)
 
-    def __call__(self, pack: Optional[str] = None, **kwargs: Any) -> str:
+    async def acall(self, pack: Optional[str] = None, **kwargs: Any) -> str:
         pack = coalesce_optional_string(pack)
         try:
             skills = self._registry.list_skills(pack=pack)
@@ -91,11 +88,8 @@ class LoadSkillTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    async def acall(self, *args: Any, **kwargs: Any) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
-        return self(*args, **kwargs)
 
-    def __call__(self, skill_id: str, **kwargs: Any) -> str:
+    async def acall(self, skill_id: str, **kwargs: Any) -> str:
         try:
             detail = self._registry.load_skill_detail(skill_id)
             return _wrap(
@@ -141,13 +135,6 @@ class RunSkillScriptTool:
         self._ctx = kwargs.get("ctx")
         self._config_dict = kwargs.get("config_dict") or {}
 
-    def __call__(self, *args: Any, **kwargs: Any) -> str:
-        """Синхронный вход: прямые вызовы ``apply_tool`` и тесты.
-
-        Форма из docs/async.md: реализация одна — ``acall``; здесь только
-        способ её дождаться.
-        """
-        return run_coro_blocking(self.acall(*args, **kwargs))
 
     @parse_json_object_argument(
         source_arg="args",
@@ -264,11 +251,8 @@ class LoadReferenceTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    async def acall(self, *args: Any, **kwargs: Any) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
-        return self(*args, **kwargs)
 
-    def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> str:
+    async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
             res = self._registry.load_reference(skill_id=skill_id, slug=slug)
             return _wrap(
@@ -317,11 +301,8 @@ class LoadAssetTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    async def acall(self, *args: Any, **kwargs: Any) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
-        return self(*args, **kwargs)
 
-    def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> str:
+    async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
             res = self._registry.load_asset(skill_id=skill_id, slug=slug)
             return _wrap(

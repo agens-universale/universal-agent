@@ -290,11 +290,8 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             error={"type": error_type, "message": message},
         )
 
-    async def acall(self, *args: Any, **kwargs: Any) -> str:
-        """Инлайн на loop: работы микросекунды, поток дороже (docs/async.md)."""
-        return self(*args, **kwargs)
 
-    def __call__(
+    async def acall(
         self,
         action: str,
         register: str = "",

@@ -130,12 +130,17 @@ async def test_both_entries_share_preparation(monkeypatch):
         await api.acall_mcp_tool("mcp_srv_missing", {}, _SDK_CFG, _REGISTRY)
 
 
-def test_tool_wrapper_exposes_both_entries():
-    """Диспетчер тулов смотрит на acall — без него MCP шёл бы в поток."""
+def test_tool_wrapper_exposes_only_the_async_entry():
+    """У тула форма ОДНА — `acall`; синхронного входа больше нет.
+
+    Раньше здесь проверялось наличие обоих, потому что диспетчер выбирал между
+    ними. Выбора нет: тул без `acall` — жёсткая ошибка проводки.
+    """
     tool = MCPToolWrapper("mcp_srv_echo", _SDK_CFG, _REGISTRY, 5.0, False)
 
     assert inspect.iscoroutinefunction(tool.acall)
-    assert not inspect.iscoroutinefunction(tool.__call__)
+    assert not callable(tool), "у MCP-обёртки снова появился синхронный вход"
+
 
 
 async def test_dispatcher_prefers_acall(monkeypatch):
@@ -149,7 +154,7 @@ async def test_dispatcher_prefers_acall(monkeypatch):
             used["path"] = "acall"
             return "быстрый путь"
 
-        def __call__(self, **kw):
+        async def acall(self, **kw):
             used["path"] = "__call__"
             return "поток"
 

@@ -359,15 +359,6 @@ class DownloadFile(AbstractSimpleTool):
             return {"type": "write_failed", "message": str(exc)}
         return None
 
-    def __call__(self, *args: Any, **kwargs: Any) -> str:
-        """Синхронный вход: прямые вызовы ``apply_tool`` и тесты.
-
-        Форма из docs/async.md: реализация одна — ``acall``; здесь только
-        способ её дождаться. Без этого ``apply_tool`` возвращал бы строку
-        «tool is async», то есть три встроенных тула молча переставали
-        работать через публичную синхронную точку SDK.
-        """
-        return run_coro_blocking(self.acall(*args, **kwargs))
 
     @enforce_url_policy(url_arg="url")
     async def acall(self, url: str, filename: str, **kwargs: Any) -> str:

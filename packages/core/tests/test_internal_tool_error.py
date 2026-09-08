@@ -12,7 +12,6 @@ from gc_core.tools import (
     INTERNAL_TOOL_ERROR,
     WrongFunctionArgumentsException,
     aapply_tool,
-    apply_tool,
     format_internal_tool_error_output,
     is_internal_tool_error_output,
     is_unknown_tool_output,
@@ -124,12 +123,12 @@ class TestIsInternalToolErrorOutput:
 
 
 class TestApplyToolInternalError:
-    def test_exception_becomes_slim_json_no_traceback(self, caplog):
+    async def test_exception_becomes_slim_json_no_traceback(self, caplog):
         class BoomTool:
             def __init__(self, **_kw):
                 pass
 
-            def __call__(self, **_kw):
+            async def acall(self, **_kw):
                 raise TypeError("got an unexpected keyword argument 'reason'")
 
         tools = _tools_data(
@@ -149,7 +148,7 @@ class TestApplyToolInternalError:
         )
 
         with caplog.at_level(logging.ERROR, logger=logger.name):
-            raw = apply_tool(
+            raw = await aapply_tool(
                 tool_name="fs_find_in_files",
                 arguments=json.dumps(
                     {"path": "/tmp/x", "pattern": "def test_"}
@@ -189,7 +188,7 @@ class TestApplyToolInternalError:
             def __init__(self, **_kw):
                 pass
 
-            def __call__(self, **_kw):
+            async def acall(self, **_kw):
                 raise TypeError("got an unexpected keyword argument 'reason'")
 
         tools = _tools_data(
@@ -228,7 +227,7 @@ class TestApplyToolInternalError:
             for rec in caplog.records
         )
 
-    def test_domain_ok_false_return_not_rewrapped(self):
+    async def test_domain_ok_false_return_not_rewrapped(self):
         domain = {
             "tool": "fs_find_in_files",
             "ok": False,
@@ -245,11 +244,11 @@ class TestApplyToolInternalError:
             def __init__(self, **_kw):
                 pass
 
-            def __call__(self, **_kw):
+            async def acall(self, **_kw):
                 return domain
 
         tools = _tools_data("fs_find_in_files", DomainTool, properties={})
-        raw = apply_tool(
+        raw = await aapply_tool(
             tool_name="fs_find_in_files",
             arguments="{}",
             tools_data_=tools,
@@ -257,12 +256,12 @@ class TestApplyToolInternalError:
         assert json.loads(raw) == domain
         assert is_internal_tool_error_output(raw) is False
 
-    def test_wrong_arguments_still_raises(self):
+    async def test_wrong_arguments_still_raises(self):
         class NeverCalled:
             def __init__(self, **_kw):
                 raise AssertionError("fabric must not run on bad args")
 
-            def __call__(self, **_kw):
+            async def acall(self, **_kw):
                 raise AssertionError("call must not run on bad args")
 
         tools = _tools_data(
@@ -275,14 +274,14 @@ class TestApplyToolInternalError:
             required=["path", "content"],
         )
         with pytest.raises(WrongFunctionArgumentsException):
-            apply_tool(
+            await aapply_tool(
                 tool_name="fs_write_file",
                 arguments=json.dumps({"path": "/tmp/x"}),
                 tools_data_=tools,
             )
 
-    def test_unknown_tool_detector_unaffected(self):
-        raw = apply_tool(
+    async def test_unknown_tool_detector_unaffected(self):
+        raw = await aapply_tool(
             tool_name="no_such_tool_zzz",
             arguments="{}",
             tools_data_=_tools_data(

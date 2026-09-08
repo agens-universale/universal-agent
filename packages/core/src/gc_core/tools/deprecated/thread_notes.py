@@ -131,7 +131,7 @@ Return format (JSON string):
             ensure_ascii=False,
         )
 
-    def __call__(self, action: str, content: str = "", **kwargs: Any) -> str:
+    async def acall(self, action: str, content: str = "", **kwargs: Any) -> str:
         state = self._state
         if state is None:
             return self._result(

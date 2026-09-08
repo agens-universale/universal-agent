@@ -235,7 +235,14 @@ def bind_os_backend(tool, backend, *, config_dict=None):
     if not hasattr(tool, "_call_id"):
         tool._call_id = None
     tool._config_dict = cfg
-    return tool
+    # Тем же адаптером, что и `with_local_ctx`: у тулов форма одна — `acall`,
+    # а десятки диффовых тестов зовут привязанный тул как функцию. Обёртка
+    # гоняет `acall` своим `asyncio.run` и проксирует всё остальное, поэтому
+    # `shim._ctx`, `shim._backend` и `await shim.acall(...)` работают как
+    # раньше. Прод при этом остаётся строгим — синхронного `__call__` нет.
+    from gc_testkit.helpers.tool_ctx import CallableTool
+
+    return CallableTool(tool)
 
 
 def strip_path_fields(env, *keys):

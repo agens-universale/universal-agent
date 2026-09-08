@@ -1,3 +1,4 @@
+from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -25,7 +26,7 @@ def _make_tool(tmp_path) -> ProjectMemory:
         logger=None,
     )
     state = SimpleNamespace()
-    return ProjectMemory(ctx=ctx, state=state)
+    return CallableTool(ProjectMemory(ctx=ctx, state=state))
 
 
 def test_tool_description_has_three_actions_only():
@@ -295,7 +296,7 @@ def _make_tool_with_limits(tmp_path, *, max_chars: int) -> ProjectMemory:
         auth_connector=None,
         logger=None,
     )
-    return ProjectMemory(ctx=ctx, state=SimpleNamespace())
+    return CallableTool(ProjectMemory(ctx=ctx, state=SimpleNamespace()))
 
 
 def test_tool_read_high_fill_includes_reorganize_hint(tmp_path):
@@ -340,7 +341,7 @@ def test_tool_uses_custom_limits_from_config(tmp_path):
         auth_connector=None,
         logger=None,
     )
-    tool = ProjectMemory(ctx=ctx, state=SimpleNamespace())
+    tool = CallableTool(ProjectMemory(ctx=ctx, state=SimpleNamespace()))
 
     res = json.loads(tool(action="append", content="x" * 41))
     assert res["ok"] is False

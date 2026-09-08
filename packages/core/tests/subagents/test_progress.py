@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from gc_core.states import SharedStateData, State
-from gc_core.tools import apply_tool
+from gc_core.tools import aapply_tool
 from gc_core.tools.subagents.progress import NOOP_SUBAGENT_PROGRESS_SINK, QueueSubagentProgressSink, SubagentProgressEvent, resolve_progress_sink
 from gc_core.tools.subagents.runner import SubagentRunner
 
@@ -142,7 +142,7 @@ def _make_ctx(tools_data, *, sink=None):
 
 
 class TestApplyToolPassesCallId:
-    def test_call_id_forwarded_as_parent_call_id(self):
+    async def test_call_id_forwarded_as_parent_call_id(self):
         from gc_core.tools.subagents.registry import get_subagents_tools_data
 
         sub_data = get_subagents_tools_data()
@@ -152,8 +152,12 @@ class TestApplyToolPassesCallId:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
-            instance.run.return_value = "ok"
-            apply_tool(
+            # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
+            async def _arun(*_a, **_kw):
+                return "ok"
+
+            instance.arun.side_effect = _arun
+            await aapply_tool(
                 tool_name="subagent_worker",
                 arguments=json.dumps({"task": "do", "reason": "r"}),
                 ctx=ctx,
@@ -162,14 +166,14 @@ class TestApplyToolPassesCallId:
                 call_id="fc_abc",
             )
 
-        instance.run.assert_called_once_with(
+        instance.arun.assert_called_once_with(
             "subagent_worker",
             {"task": "do", "reason": "r"},
             run_agent_func,
             parent_call_id="fc_abc",
         )
 
-    def test_missing_call_id_forwards_none(self):
+    async def test_missing_call_id_forwards_none(self):
         from gc_core.tools.subagents.registry import get_subagents_tools_data
 
         sub_data = get_subagents_tools_data()
@@ -179,8 +183,12 @@ class TestApplyToolPassesCallId:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
-            instance.run.return_value = "ok"
-            apply_tool(
+            # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
+            async def _arun(*_a, **_kw):
+                return "ok"
+
+            instance.arun.side_effect = _arun
+            await aapply_tool(
                 tool_name="subagent_worker",
                 arguments=json.dumps({"task": "do", "reason": "r"}),
                 ctx=ctx,
@@ -188,7 +196,7 @@ class TestApplyToolPassesCallId:
                 run_agent_func=run_agent_func,
             )
 
-        kwargs = instance.run.call_args.kwargs
+        kwargs = instance.arun.call_args.kwargs
         assert kwargs.get("parent_call_id") is None
 
 

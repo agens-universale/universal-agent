@@ -101,12 +101,16 @@ def test_local_ctx_applies_capture_max_from_config():
 def test_execute_command_uses_config_default(monkeypatch):
     seen = {}
 
-    def _fake_exec(self, command, *, cwd=None, timeout=None, env=None):
+    # Подменяем АСИНХРОННУЮ форму: запуск процесса нативно асинхронный, и
+    # `acall` зовёт именно её. Подмена синхронной оставляла бы тест зелёным на
+    # настоящей команде, ничего не проверяя.
+    async def _fake_exec(self, command, *, cwd=None, timeout=None, env=None,
+                         capture_max_chars=None):
         seen["timeout"] = timeout
         return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
 
     monkeypatch.setattr(
-        "gc_core.backends.local.LocalFsBackend.exec",
+        "gc_core.backends.local.LocalFsBackend.aexec",
         _fake_exec,
     )
     tool = with_local_ctx(ExecuteCommand, config_dict={"exec_timeout_sec": 600})
@@ -118,12 +122,12 @@ def test_execute_command_uses_config_default(monkeypatch):
 def test_run_python_uses_config_default(monkeypatch):
     seen = {}
 
-    def _fake_run_python(self, code, *, cwd=None, timeout=None, env=None):
+    async def _fake_run_python(self, code, *, cwd=None, timeout=None, env=None):
         seen["timeout"] = timeout
         return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
 
     monkeypatch.setattr(
-        "gc_core.backends.local.LocalFsBackend.run_python",
+        "gc_core.backends.local.LocalFsBackend.arun_python",
         _fake_run_python,
     )
     tool = with_local_ctx(RunPythonCode, config_dict={"exec_timeout_sec": 600})

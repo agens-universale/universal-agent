@@ -44,7 +44,8 @@ def test_mapping_table_matches_reality():
     pairs = [
         ("gc_core.run_context", "create_run_context", "acreate_run_context"),
         ("gc_core.processing_responses", "run_agent", "arun_agent"),
-        ("gc_core.tools", "apply_tool", "aapply_tool"),
+        # `apply_tool` больше нет: у тулов форма одна, и синхронный
+        # диспетчер стал мёртвым по построению — звать было некого.
         ("gc_core.utils.connect_backend",
          "request_backend_chat_completions", "arequest_backend_chat_completions"),
         ("gc_core.request_backend_policy",

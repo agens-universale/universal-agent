@@ -200,31 +200,6 @@ Important Usage Rules:
             error=error,
         )
 
-    @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
-    @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
-    def __call__(
-        self,
-        command: str,
-        timeout_seconds: int | None = None,
-        max_output_chars: int | None = None,
-        cwd: str | None = None,
-        env_vars: list[dict] | None = None,
-        **kwargs,
-    ) -> str:
-        """Синхронный вход: процесс запускается блокирующим ``exec``."""
-        early, plan = self._plan(
-            command, timeout_seconds, max_output_chars, cwd, env_vars
-        )
-        if early is not None:
-            return early
-        try:
-            res = self._backend.exec(
-                plan["command"], cwd=plan["cwd"], timeout=plan["timeout"],
-                env=plan["env"],
-            )
-        except Exception as e:
-            return self._exec_failed(plan, e)
-        return self._finish(res, plan)
 
     @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
     @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)

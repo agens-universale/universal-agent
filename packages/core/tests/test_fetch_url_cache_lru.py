@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+from gc_testkit.helpers.tool_ctx import CallableTool
+
 import json
 from collections import OrderedDict
 
@@ -28,11 +30,11 @@ class _State:
 
 
 def _make_fetch() -> FetchUrl:
-    return FetchUrl(state=_State())
+    return CallableTool(FetchUrl(state=_State()))
 
 
 def _make_simple_fetch() -> SimpleFetchUrl:
-    return SimpleFetchUrl(state=_State())
+    return CallableTool(SimpleFetchUrl(state=_State()))
 
 
 # ── Нормализация dict→OrderedDict ─────────────────────────────────────────────
@@ -56,7 +58,7 @@ def test_get_cache_creates_empty_ordereddict_when_missing():
 
 
 def test_get_cache_returns_none_when_no_shared():
-    f = FetchUrl(state=None)
+    f = CallableTool(FetchUrl(state=None))
     assert f._get_cache() is None
 
 
@@ -176,12 +178,12 @@ def test_get_from_cache_returns_none_for_missing_url():
 
 
 def test_get_from_cache_returns_none_when_no_state():
-    f = FetchUrl(state=None)
+    f = CallableTool(FetchUrl(state=None))
     assert f._get_from_cache("https://x.com") is None
 
 
 def test_put_to_cache_noop_when_no_state():
-    f = FetchUrl(state=None)
+    f = CallableTool(FetchUrl(state=None))
     # Не должен падать — просто no-op.
     f._put_to_cache("https://x.com", "body", {"title": None, "description": None, "lang": None})
 
@@ -255,8 +257,8 @@ def test_simple_and_full_fetch_share_lru_cache():
     shared = _Shared()
     state = _State()
     state.shared = shared
-    full = FetchUrl(state=state)
-    simple = SimpleFetchUrl(state=state)
+    full = CallableTool(FetchUrl(state=state))
+    simple = CallableTool(SimpleFetchUrl(state=state))
     for i in range(8):
         full._put_to_cache(
             f"https://example.com/{i}",

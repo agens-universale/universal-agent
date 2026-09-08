@@ -85,15 +85,6 @@ Return format (JSON string):
 {"tool":"session_compact","ok":true,"error":null|{"type":"...","message":"..."},"message":"...","compacted":true}
 """
 
-    def __call__(self, *args: Any, **kwargs: Any) -> str:
-        """Синхронный двойник: прямые вызовы ``apply_tool`` и тесты.
-
-        Реализация одна — ``acall``; здесь только способ её дождаться.
-        Без этого синхронный ``apply_tool`` вернул бы строку «tool is async»,
-        и агентское сжатие молча перестало бы работать через публичную
-        синхронную точку SDK.
-        """
-        return run_coro_blocking(self.acall(*args, **kwargs))
 
     async def acall(self, reason: str, **kwargs: Any) -> str:
         """Основная реализация: сжать трассу текущего хода по просьбе агента.

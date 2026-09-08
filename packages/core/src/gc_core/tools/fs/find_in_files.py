@@ -254,23 +254,6 @@ class FindInFiles(AbstractSimpleTool):
             "every candidate was read from the host — narrow path/file_pattern.\n"
         )
 
-    def __call__(self, *args: Any, **kwargs: Any) -> str:
-        """Синхронный вход — шим над :meth:`acall` через портал.
-
-        Реализация ОДНА, асинхронная. Вторая, синхронная копия здесь означала
-        бы дубль всей цепочки поиска (``_dispatch`` → ``_search_directory`` →
-        нативный grep) — почти тысяча строк, которые разъехались бы первой же
-        правкой правил исключений.
-
-        Инлайн этот тул не годится: у него внутри subprocess-grep с бюджетом
-        120 секунд и префильтр с бюджетом 60. Пул тоже плох — слот держится всё
-        это время. У запуска процесса нативная асинхронная форма есть, значит
-        идём через неё (docs/async.md).
-        """
-        from gc_core.utils.portal import get_portal
-
-        return get_portal().run(self.acall(*args, **kwargs))
-
     @enforce_read_guard(path_arg="path")
     async def acall(
         self,

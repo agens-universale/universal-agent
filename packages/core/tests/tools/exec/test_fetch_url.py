@@ -16,7 +16,7 @@ from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
 from gc_core.utils import async_http
 
 
-from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_testkit.helpers.tool_ctx import CallableTool, with_local_ctx
 
 
 def _resp(text="", content_type="text/html", status_code=200, content=None):
@@ -164,7 +164,7 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
     monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
-    tool = FetchUrl(state=state)
+    tool = CallableTool(FetchUrl(state=state))
 
     first = json.loads(_call(tool, url="https://example.com", offset=5, limit=10))
     assert first["ok"] is True
@@ -191,7 +191,7 @@ def test_fetch_url_offset_beyond_end_returns_empty_from_cache(monkeypatch):
     _install(monkeypatch, _resp("<html></html>"))
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
-    tool = FetchUrl(state=state)
+    tool = CallableTool(FetchUrl(state=state))
     _ = json.loads(_call(tool, url="https://example.com", offset=0, limit=5))
 
     data = json.loads(_call(tool, url="https://example.com", offset=99, limit=5))
@@ -207,7 +207,7 @@ def test_fetch_url_does_not_cache_binary(monkeypatch):
     _install(monkeypatch, _resp("", content_type="application/pdf"))
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
-    data = json.loads(_call(FetchUrl(state=state), url="https://example.com/a.pdf"))
+    data = json.loads(_call(CallableTool(FetchUrl(state=state)), url="https://example.com/a.pdf"))
     assert data["ok"] is True
     assert data["is_binary"] is True
     assert state.shared.fetch_url_cache == {}
@@ -233,7 +233,7 @@ def test_simple_fetch_url_extracts_html_and_supports_pagination(monkeypatch):
                 content_type="text/html",
             ))
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
-    tool = SimpleFetchUrl(state=state)
+    tool = CallableTool(SimpleFetchUrl(state=state))
     first = json.loads(_call(tool, url="https://example.com", offset=0, limit=7))
     second = json.loads(_call(tool, url="https://example.com", offset=7, limit=50))
 

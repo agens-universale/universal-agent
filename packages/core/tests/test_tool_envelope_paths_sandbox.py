@@ -1,3 +1,4 @@
+from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 
 from gc_testkit.harbor_fakes import bind_os_backend
@@ -121,7 +122,7 @@ def test_write_to_file_envelope_reports_container_path(monkeypatch, tmp_path):
     """In sandbox mode the reported path must not be rewritten against the host cwd."""
     monkeypatch.chdir(tmp_path)                      # host cwd differs from container cwd
     backend = RecordingSandboxBackend()
-    tool = bind_os_backend(WriteToFile(), backend)
+    tool = bind_os_backend(CallableTool(WriteToFile()), backend)
 
     out = tool(path="/testbed/mod.py", content="x")   # tools are callables (__call__)
     envelope = json.loads(out) if isinstance(out, str) else out

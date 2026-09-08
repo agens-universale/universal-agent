@@ -416,13 +416,14 @@ def _prefilter_ready(tool, monkeypatch, paths, failure=None):
 
 def _track_opens(tool, monkeypatch):
     opened = []
-    original = type(tool)._open_decode_text
+    # `tool` обёрнут тест-адаптером: класс берём у настоящего тула.
+    original = FindInFiles._open_decode_text
 
     def counting(self, abs_path, file_size=None):
         opened.append(abs_path)
         return original(self, abs_path, file_size)
 
-    monkeypatch.setattr(type(tool), "_open_decode_text", counting)
+    monkeypatch.setattr(FindInFiles, "_open_decode_text", counting)
     return opened
 
 
@@ -509,7 +510,7 @@ def test_walk_sizes_spare_the_per_file_stat():
 
     backend = _Counting({"/work/a.py": "needle here\n", "/work/b.py": "needle there\n"})
     tool = FindInFiles.__new__(FindInFiles)
-    bind_os_backend(tool, backend)
+    tool = bind_os_backend(tool, backend)
 
     data = json.loads(tool(path="/work", pattern="needle", query_mode="text"))
 

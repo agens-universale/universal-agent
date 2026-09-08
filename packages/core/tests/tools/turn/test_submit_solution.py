@@ -1,5 +1,7 @@
 import json
 
+from gc_testkit.helpers.tool_ctx import CallableTool
+
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
 VALID_TYPES = (
@@ -13,7 +15,7 @@ VALID_TYPES = (
 
 
 def test_turn_finish_success_full_solution():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     res = json.loads(
         tool(
             solution_type="full_solution",
@@ -31,7 +33,7 @@ def test_turn_finish_success_full_solution():
 
 
 def test_turn_finish_success_with_comment():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     res = json.loads(
         tool(
             solution_type="partial_solution",
@@ -48,7 +50,7 @@ def test_turn_finish_success_with_comment():
 
 
 def test_turn_finish_normalize():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     res = json.loads(
         tool(
             solution_type="full_solution",
@@ -63,7 +65,7 @@ def test_turn_finish_normalize():
 
 
 def test_turn_finish_all_types():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     for st in VALID_TYPES:
         res = json.loads(
             tool(
@@ -78,7 +80,7 @@ def test_turn_finish_all_types():
 
 
 def test_turn_finish_invalid_solution_type():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     bad = json.loads(
         tool(
             solution_type="invalid",
@@ -92,7 +94,7 @@ def test_turn_finish_invalid_solution_type():
 
 
 def test_turn_finish_invalid_task_report_type():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     bad = json.loads(
         tool(
             solution_type="full_solution",
@@ -106,7 +108,7 @@ def test_turn_finish_invalid_task_report_type():
 
 
 def test_turn_finish_empty_task_report():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     bad = json.loads(
         tool(
             solution_type="full_solution",
@@ -120,7 +122,7 @@ def test_turn_finish_empty_task_report():
 
 
 def test_turn_finish_task_report_too_long():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     bad = json.loads(
         tool(
             solution_type="full_solution",
@@ -134,7 +136,7 @@ def test_turn_finish_task_report_too_long():
 
 
 def test_turn_finish_invalid_comment_type():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     bad = json.loads(
         tool(
             solution_type="full_solution",
@@ -165,7 +167,7 @@ def test_turn_finish_schema_declares_task():
 
 def test_turn_finish_task_is_optional_passthrough():
     """task — подсказка модели: отсутствие/пустота не отклоняют ход."""
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     out = json.loads(
         tool(solution_type="full_solution", task_report="Done", handoff='{"x":1}')
     )
@@ -190,7 +192,7 @@ def test_cycle_stop_output_preserves_task():
 
 
 def test_turn_finish_rejects_invalid_handoff_json():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     bad = json.loads(
         tool(
             solution_type="full_solution",
@@ -204,7 +206,7 @@ def test_turn_finish_rejects_invalid_handoff_json():
 
 
 def test_turn_finish_rejects_non_object_handoff_json():
-    tool = SubmitSolution()
+    tool = CallableTool(SubmitSolution())
     bad = json.loads(
         tool(
             solution_type="full_solution",

@@ -293,11 +293,8 @@ Choosing solution_type (for current turn):
 Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","task":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
 '''
 
-    async def acall(self, *args: Any, **kwargs: Any) -> str:
-        """Инлайн на loop: работы микросекунды, поток дороже (docs/async.md)."""
-        return self(*args, **kwargs)
 
-    def __call__(
+    async def acall(
         self,
         solution_type: str,
         task_report: str,

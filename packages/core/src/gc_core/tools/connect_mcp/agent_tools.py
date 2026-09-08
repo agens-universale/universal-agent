@@ -55,17 +55,6 @@ class MCPToolWrapper:
             default_use_retry=self._default_use_retry,
         )
 
-    def __call__(self, **arguments: Any) -> Any:
-        """Синхронный вход: прямые вызовы apply_tool, gc-mcp и тесты."""
-        return call_mcp_tool(
-            full_tool_name=self._full_tool_name,
-            arguments=arguments,
-            servers_cfg=self._servers_cfg,
-            tools_registry=self._tools_registry,
-            timeout=self._timeout,
-            default_use_retry=self._default_use_retry,
-            os_backend=self._os_backend,
-        )
 
 
 def _collect_schema_refs(node: Any) -> set[str]:

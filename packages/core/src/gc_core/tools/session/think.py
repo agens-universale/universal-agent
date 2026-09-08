@@ -99,11 +99,8 @@ Return format (JSON string):
 '''
         return description
 
-    async def acall(self, *args: Any, **kwargs: Any) -> str:
-        """Инлайн на loop: работы микросекунды, поток дороже (docs/async.md)."""
-        return self(*args, **kwargs)
 
-    def __call__(self, thoughts: str | None = None, critics: str | None = None, doubts: str | None = None, reflection: str | None = None, **kwargs) -> str:
+    async def acall(self, thoughts: str | None = None, critics: str | None = None, doubts: str | None = None, reflection: str | None = None, **kwargs) -> str:
         vals = [thoughts, critics, doubts, reflection]
         for name, val in zip(_THINK_FIELDS, vals):
             if val is not None and not isinstance(val, str):

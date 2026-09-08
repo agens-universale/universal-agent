@@ -6,6 +6,7 @@ from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
 
 
+from gc_testkit import run_coro
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 def _config(tmp_path, mode):
@@ -112,7 +113,8 @@ def test_exec_command_ask_mode_executes_when_user_confirms(tmp_path):
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
     tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
-    original_call = tool.__call__.__wrapped__.__wrapped__
+    # Форма у тула одна — `acall`; декораторы гвардов теперь на ней.
+    original_call = tool.acall.__wrapped__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
@@ -123,7 +125,7 @@ def test_exec_command_ask_mode_executes_when_user_confirms(tmp_path):
         user_confirmation_extractor=lambda *_args, **_kwargs: True,
     )(original_call)
 
-    result = json.loads(guarded_call(tool, command=command))
+    result = json.loads(run_coro(guarded_call(tool, command=command)))
 
     assert result["ok"] is True
     assert marker.read_text(encoding="utf-8") == "ok"
@@ -134,7 +136,7 @@ def test_exec_command_ask_mode_cancels_when_user_rejects(tmp_path):
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'bad\')"'
 
     tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
-    original_call = tool.__call__.__wrapped__
+    original_call = tool.acall.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
@@ -145,7 +147,7 @@ def test_exec_command_ask_mode_cancels_when_user_rejects(tmp_path):
         user_confirmation_extractor=lambda *_args, **_kwargs: False,
     )(original_call)
 
-    result = json.loads(guarded_call(tool, command=command))
+    result = json.loads(run_coro(guarded_call(tool, command=command)))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_cancelled_by_user"
@@ -172,14 +174,15 @@ def test_command_moderation_asks_when_judge_unavailable_in_ask(tmp_path, monkeyp
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
     tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
-    original_call = tool.__call__.__wrapped__.__wrapped__
+    # Форма у тула одна — `acall`; декораторы гвардов теперь на ней.
+    original_call = tool.acall.__wrapped__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
         user_confirmation_extractor=lambda *_args, **_kwargs: True,
     )(original_call)
 
-    result = json.loads(guarded_call(tool, command=command))
+    result = json.loads(run_coro(guarded_call(tool, command=command)))
 
     assert result["ok"] is True
     assert marker.read_text(encoding="utf-8") == "ok"

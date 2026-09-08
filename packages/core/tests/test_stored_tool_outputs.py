@@ -1,3 +1,4 @@
+from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 import sys
 import types
@@ -207,7 +208,7 @@ def test_session_read_stored_tool_output_pagination_and_unicode():
             text="A😀BC",
         )
     )
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 2})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 2}))
     page1 = json.loads(tool(output_ref="ref-1", offset=0, limit=10))
     assert page1["ok"] is True
     assert page1["limit"] == 2
@@ -247,7 +248,7 @@ def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
     )
 
     # Read r1 through the tool: this must move r1 to MRU.
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     page = json.loads(tool(output_ref="r1", offset=0, limit=2))
     assert page["ok"] is True
     assert page["output_ref"] == "r1"
@@ -271,7 +272,7 @@ def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
 
 def test_session_read_stored_tool_output_invalid_and_not_found():
     state = _make_state()
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     bad = json.loads(tool(output_ref="", offset=0, limit=1))
     assert bad["ok"] is False
     assert bad["error"]["type"] == "invalid_argument"
@@ -286,7 +287,7 @@ def test_session_read_stored_tool_output_invalid_and_not_found():
 def test_session_read_stored_tool_output_not_found_when_store_missing_has_recover_by():
     # Simulate a "state without store" (store is None in the tool).
     state = SimpleNamespace()
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     payload = json.loads(tool(output_ref="missing", offset=0, limit=1))
     assert payload["ok"] is False
     assert payload["stored"] is False
@@ -298,7 +299,7 @@ def test_session_read_stored_tool_output_not_found_when_store_missing_has_recove
 
 def test_session_read_stored_tool_output_error_paths_have_zero_next_offset():
     state = _make_state()
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
 
     not_int_limit = json.loads(tool(output_ref="ref", offset=1, limit="x"))  # type: ignore[arg-type]
     assert not_int_limit["ok"] is False
@@ -339,7 +340,7 @@ def test_not_found_after_real_lru_eviction_has_expected_error_envelope():
         )
     )
 
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     payload = json.loads(tool(output_ref="evicted_ref", offset=0, limit=5))
 
     assert payload["tool"] == "session_read_stored_tool_output"
@@ -453,7 +454,7 @@ def test_feature_off_k_zero_clears_store_and_disables_read():
     assert len(state.tool_call_outputs_store) == 0
     assert state.tool_call_outputs_store.is_disabled() is True
 
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     payload = json.loads(tool(output_ref="ref-1", offset=0, limit=1))
     assert payload["ok"] is False
     assert payload["stored"] is False

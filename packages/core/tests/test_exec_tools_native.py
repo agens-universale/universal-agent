@@ -138,12 +138,18 @@ async def test_command_does_not_hold_a_pool_slot_for_its_whole_duration():
     )
 
 
-async def test_command_validation_matches_the_sync_path():
-    """Проверки аргументов не разъехались между двумя входами."""
+async def test_command_validation_rejects_bad_arguments():
+    """Проверки аргументов на месте.
+
+    Раньше тест сверял два входа между собой. Вход теперь один — сверять не с
+    чем, поэтому проверяем сам отказ.
+    """
     tool = _cmd()
 
-    assert json.loads(await tool.acall(command="")) == json.loads(tool(command=""))
-    assert json.loads(await tool.acall(command=123)) == json.loads(tool(command=123))
+    for bad in ("", 123):
+        out = json.loads(await tool.acall(command=bad))
+        assert out["ok"] is False, out
+        assert out["error"]["type"] == "invalid_argument", out
 
 
 async def test_command_reports_a_timeout_the_same_way():
@@ -159,12 +165,13 @@ async def test_command_reports_a_timeout_the_same_way():
     assert out["error"]["type"] == "timeout", out
 
 
-def test_command_sync_entry_still_works():
-    """Синхронный вход сохранён — его зовут apply_tool и тесты."""
-    out = json.loads(_cmd()(command="echo синхронно"))
+async def test_command_has_no_sync_entry():
+    """Синхронного входа у тула больше НЕТ — форма одна.
 
-    assert out["ok"] is True, out
-    assert "синхронно" in out["stdout"]
+    Он был вторым способом позвать то же самое и держался ради `apply_tool`,
+    которого тоже не стало: звать через него было некого.
+    """
+    assert not callable(_cmd()), "у exec_command снова появился синхронный вход"
 
 
 # --- exec_python -----------------------------------------------------------
@@ -185,11 +192,9 @@ async def test_python_does_not_hold_the_loop():
     assert gap < NAP / 2, f"loop залипал на {gap:.3f}с — запуск не асинхронный"
 
 
-def test_python_sync_entry_still_works():
-    out = json.loads(_py()(code="print('синхронно')"))
-
-    assert out["return_code"] == 0, out
-    assert "синхронно" in out["stdout"]
+async def test_python_has_no_sync_entry():
+    """См. соседний тест: у формы вызова один вход."""
+    assert not callable(_py()), "у exec_python снова появился синхронный вход"
 
 
 # --- гвард с блокирующим телом --------------------------------------------

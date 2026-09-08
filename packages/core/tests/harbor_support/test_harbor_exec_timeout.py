@@ -210,7 +210,7 @@ def test_execute_command_timeout_envelope_carries_partial_output(loop_in_thread)
     env = StreamingEnv(TIMEOUT, chunks=[("Length: 162M\n", "stdout"), ("Saving to: cifar.tar.gz\n", "stdout")])
     tool = ExecuteCommand.__new__(ExecuteCommand)
     tool._config_dict = None
-    bind_os_backend(tool, HarborBackend(env, loop_in_thread), config_dict={})
+    tool = bind_os_backend(tool, HarborBackend(env, loop_in_thread), config_dict={})
 
     envelope = json.loads(tool(command="wget …", timeout_seconds=10))
 
@@ -228,7 +228,7 @@ def test_execute_command_maps_harbor_timeout_envelope(loop_in_thread):
     )
     tool = ExecuteCommand.__new__(ExecuteCommand)
     tool._config_dict = None
-    bind_os_backend(tool, backend, config_dict={})
+    tool = bind_os_backend(tool, backend, config_dict={})
 
     env = json.loads(tool(command="sleep 999", timeout_seconds=300))
 
@@ -244,7 +244,7 @@ def test_execute_command_non_timeout_runtime_error_stays_execution_failed(loop_i
     backend = _backend(RuntimeError("Failed to build Docker image"), loop_in_thread)
     tool = ExecuteCommand.__new__(ExecuteCommand)
     tool._config_dict = None
-    bind_os_backend(tool, backend, config_dict={})
+    tool = bind_os_backend(tool, backend, config_dict={})
 
     env = json.loads(tool(command="true", timeout_seconds=30))
 

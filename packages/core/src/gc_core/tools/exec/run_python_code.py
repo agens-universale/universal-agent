@@ -190,30 +190,6 @@ Return format (JSON string):
             error=error,
         )
 
-    @enforce_command_guard(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
-    @moderate_command_execution(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
-    def __call__(
-        self,
-        code: str,
-        timeout_seconds: Optional[int] = None,
-        max_output_chars: int = 4000,
-        cwd: Optional[str] = None,
-        env_vars: Optional[list[dict]] = None,
-        **kwargs,
-    ) -> str:
-        """Синхронный вход: процесс запускается блокирующим ``run_python``."""
-        early, plan = self._plan(
-            code, timeout_seconds, max_output_chars, cwd, env_vars, **kwargs
-        )
-        if early is not None:
-            return early
-        try:
-            res = self._backend.run_python(
-                plan["code"], cwd=plan["cwd"], timeout=plan["timeout"], env=plan["env"]
-            )
-        except Exception as e:
-            return self._exec_failed(e)
-        return self._finish(res, plan)
 
     @enforce_command_guard(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
     @moderate_command_execution(payload_arg="code", tool_name=EXEC_PYTHON_NAME)

@@ -1,3 +1,4 @@
+from gc_testkit.helpers.tool_ctx import CallableTool
 import os
 import stat as stat_module
 import sys
@@ -130,7 +131,7 @@ def test_tool_backend_resolution():
 
     cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
     ctx = create_run_context(cfg)
-    t = ReadFile(ctx=ctx)
+    t = CallableTool(ReadFile(ctx=ctx))
     assert isinstance(t._backend, LocalFsBackend)
     assert t._backend is ctx.os_backend
 

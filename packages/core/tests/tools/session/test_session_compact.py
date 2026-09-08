@@ -1,4 +1,6 @@
 import json
+
+from gc_testkit.helpers.tool_ctx import CallableTool
 import types
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -51,7 +53,7 @@ def test_session_compact_calls_arun_summary_compaction(monkeypatch):
 
     monkeypatch.setattr(session_compact_module, "arun_summary_compaction", fake_compact)
 
-    tool = SessionCompact(ctx=ctx, state=state)
+    tool = CallableTool(SessionCompact(ctx=ctx, state=state))
     res = json.loads(tool(reason="phase done"))
 
     assert res["ok"] is True
@@ -65,7 +67,7 @@ def test_session_compact_calls_arun_summary_compaction(monkeypatch):
 
 
 def test_session_compact_rejects_empty_reason():
-    res = json.loads(SessionCompact(state=_state())(reason="  "))
+    res = json.loads(CallableTool(SessionCompact(state=_state()))(reason="  "))
     assert res["ok"] is False
     assert res["error"]["type"] == "invalid_argument"
     assert res["error"]["field"] == "reason"
@@ -73,7 +75,7 @@ def test_session_compact_rejects_empty_reason():
 
 def test_session_compact_rejects_responses_backend():
     res = json.loads(
-        SessionCompact(state=_state(backend_api_mode="responses"))(reason="phase done")
+        CallableTool(SessionCompact(state=_state(backend_api_mode="responses")))(reason="phase done")
     )
     assert res["ok"] is False
     assert res["error"]["type"] == "unsupported_backend"
@@ -81,7 +83,7 @@ def test_session_compact_rejects_responses_backend():
 
 def test_session_compact_rejects_empty_dialog():
     state = _state(messages=[{"role": "system", "content": "only sys"}])
-    res = json.loads(SessionCompact(state=state)(reason="cleanup"))
+    res = json.loads(CallableTool(SessionCompact(state=state))(reason="cleanup"))
     assert res["ok"] is False
     assert res["error"]["type"] == "nothing_to_compact"
 
@@ -95,7 +97,7 @@ def test_session_compact_reports_compaction_failure(monkeypatch):
 
     monkeypatch.setattr(session_compact_module, "arun_summary_compaction", boom)
 
-    res = json.loads(SessionCompact(ctx=ctx, state=state)(reason="retry"))
+    res = json.loads(CallableTool(SessionCompact(ctx=ctx, state=state))(reason="retry"))
     assert res["ok"] is False
     assert res["error"]["type"] == "compaction_failed"
     assert "llm down" in res["error"]["message"]

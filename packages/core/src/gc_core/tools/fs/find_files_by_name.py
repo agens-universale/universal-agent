@@ -324,17 +324,9 @@ class FindFilesByName(AbstractSimpleTool):
             entry.update(self._probe_file_meta(filepath, size))
         return entry
 
-    async def acall(self, *args, **kwargs) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md).
-
-        Тул ходит только в ФС — обход через ``backend.iter_walk_entries``,
-        никаких процессов. Тем и отличается от соседнего ``find_in_files``,
-        который зовёт grep и потому идёт через ``aexec``.
-        """
-        return self(*args, **kwargs)
 
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         query: str,

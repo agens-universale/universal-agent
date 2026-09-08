@@ -1,3 +1,4 @@
+from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 from types import SimpleNamespace
 
@@ -50,7 +51,7 @@ def _make_state(*, log=None, current=None):
 
 def _call(state, **kwargs):
     ctx = SimpleNamespace(config_dict={"backend_api_mode": "chat_completions"})
-    tool = ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
+    tool = CallableTool(ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict))
     return json.loads(tool(**kwargs))
 
 
@@ -99,7 +100,7 @@ def test_read_default_limit_from_config():
             "intent_scope_params": {"read_page_record_limit": 123},
         }
     )
-    tool = ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
+    tool = CallableTool(ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict))
     res = json.loads(tool(action="read", offset=0))
 
     assert res["ok"] is True
@@ -137,7 +138,7 @@ def test_invalid_action_and_missing_state():
     assert res["ok"] is False
     assert res["error"]["type"] == "invalid_action"
 
-    tool = ReadUserIntentLog(state=None)
+    tool = CallableTool(ReadUserIntentLog(state=None))
     res = json.loads(tool(action="info"))
     assert res["ok"] is False
     assert res["error"]["type"] == "no_state"

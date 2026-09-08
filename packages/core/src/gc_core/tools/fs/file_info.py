@@ -94,12 +94,9 @@ class FileInfo(AbstractSimpleTool):
             message=str(error.get("message") or "Read operation is outside allowed read_guard perimeter."),
         )
 
-    async def acall(self, *args, **kwargs) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md)."""
-        return self(*args, **kwargs)
 
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         include_hash: bool = False,

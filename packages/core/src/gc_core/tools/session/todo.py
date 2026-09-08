@@ -133,11 +133,8 @@ Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"t
         raw = getattr(self._state, "session_todo", None)
         return raw if isinstance(raw, list) else []
 
-    async def acall(self, *args: Any, **kwargs: Any) -> str:
-        """Инлайн на loop: работы микросекунды, поток дороже (docs/async.md)."""
-        return self(*args, **kwargs)
 
-    def __call__(self, todos: Any = None, **kwargs: Any) -> str:
+    async def acall(self, todos: Any = None, **kwargs: Any) -> str:
         if self._state is None or getattr(self._state, "shared", None) is None:
             return json.dumps({
                 "tool": SESSION_TODO_TOOL_NAME,

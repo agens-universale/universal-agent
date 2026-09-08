@@ -29,7 +29,7 @@ class _OverflowingBackend(FakeBackend):
 
 def _tool(cls):
     tool = cls.__new__(cls)
-    bind_os_backend(tool, _OverflowingBackend(_FILES))
+    tool = bind_os_backend(tool, _OverflowingBackend(_FILES))
     return tool
 
 

@@ -136,10 +136,15 @@ class TestExecuteCommandPreview:
         """D4: if hit_capture_cap=True, ref is created even when preview fits."""
         state = _make_state()
         tool = _make_tool(ExecuteCommand, state=state)
-        # Monkeypatch backend.exec to return hit_capture_cap=True with short output
+        # Подменяем ОБЕ формы запуска. У `exec_command` есть нативная
+        # асинхронная (`backend.aexec`, шаг перевода запуска процессов), и
+        # именно её зовёт `acall`; подмена только синхронной оставляла бы тест
+        # зелёным на настоящем `echo`, ничего не проверяя.
         original_exec = tool._backend.exec
+        original_aexec = tool._backend.aexec
 
-        def fake_exec(command, *, cwd=None, timeout=None, env=None):
+        def fake_exec(command, *, cwd=None, timeout=None, env=None,
+                      capture_max_chars=None):
             from gc_core.backends.protocol import ExecResult
             return ExecResult(
                 stdout="short",
@@ -150,11 +155,16 @@ class TestExecuteCommandPreview:
                 stderr_hit_capture_cap=False,
             )
 
+        async def fake_aexec(command, **kwargs):
+            return fake_exec(command)
+
         tool._backend.exec = fake_exec
+        tool._backend.aexec = fake_aexec
         try:
             r = json.loads(tool(command="echo test", max_output_chars=4000))
         finally:
             tool._backend.exec = original_exec
+            tool._backend.aexec = original_aexec
 
         # Output fits in preview but hit_capture_cap → ref needed for page
         assert r["stdout_hit_capture_cap"] is True

@@ -2,6 +2,8 @@
 from __future__ import annotations
 import pytest
 
+from gc_testkit.helpers.tool_ctx import CallableTool
+
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -85,7 +87,7 @@ class TestAskHumanEmit:
         sink = QueueSubagentProgressSink()
         ctx = _child_ctx(sink)
         state = SimpleNamespace(steps=3, max_steps=50)
-        tool = AskHuman(ctx=ctx, state=state)
+        tool = CallableTool(AskHuman(ctx=ctx, state=state))
 
         answers = iter(["yes", ""])
         monkeypatch.setattr("builtins.input", lambda: next(answers))
@@ -111,7 +113,7 @@ class TestAskHumanEmit:
             logger=None,
         )
         assert not child_progress_enabled(ctx)
-        tool = AskHuman(ctx=ctx, state=SimpleNamespace(steps=1, max_steps=10))
+        tool = CallableTool(AskHuman(ctx=ctx, state=SimpleNamespace(steps=1, max_steps=10)))
         answers = iter(["a", ""])
         monkeypatch.setattr("builtins.input", lambda: next(answers))
         tool(question="Parent ask?")

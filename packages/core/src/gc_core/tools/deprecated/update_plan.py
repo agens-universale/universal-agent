@@ -70,7 +70,7 @@ You also can run `update_plan` after finishing some steps and decomposing next s
 '''
         return description
 
-    def __call__(self, current_plan: str, **kwargs) -> str:
+    async def acall(self, current_plan: str, **kwargs) -> str:
         if not isinstance(current_plan, str):
             raise ValueError(f"Argument 'current_plan' must be a string. Got: {type(current_plan)} ({current_plan})")
 
