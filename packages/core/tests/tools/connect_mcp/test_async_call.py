@@ -58,27 +58,66 @@ async def test_sdk_transport_runs_without_spawning_a_thread(monkeypatch):
     assert spawned == [], f"SDK-путь завёл потоки: {spawned}"
 
 
-async def test_legacy_transport_goes_to_an_abandonable_thread(monkeypatch):
-    """Легаси блокирующий — уходит в поток, но результат тот же."""
-    seen = {}
+async def test_legacy_http_runs_natively_without_a_thread(monkeypatch):
+    """Легаси-HTTP идёт нативно: под ним ``httpx``, а у него есть AsyncClient.
 
-    def _fake_sync(self, tool_name, arguments, *, timeout):
-        seen["thread"] = threading.current_thread().name
-        return {"tool": "mcp_srv_echo", "ok": True}
+    Раньше этот путь уходил в ``run_abandonable`` как «не имеющий асинхронной
+    формы». Форма была всё это время — не использовалась, и каждый вызов тула
+    по транспорту ``http``/``sse`` стоил отдельного ОС-потока.
+    """
+    from gc_core.tools.connect_mcp import client as legacy_client
 
-    # Легаси-путь порта — `run_abandonable(self.call_tool, ...)`; подменяем
-    # именно блокирующий метод клиента, чтобы поток выбирался настоящим кодом.
-    monkeypatch.setattr(
-        client_port.AgentRuntimeClient, "call_tool", _fake_sync, raising=True
-    )
+    spawned = []
+    real_thread = threading.Thread
+
+    class _Counting(real_thread):
+        def start(self):
+            spawned.append(self.name)
+            return super().start()
+
+    async def _fake_session(*_a, **_k):
+        return "sid-1"
+
+    async def _fake_call(**kwargs):
+        return {"content": [{"type": "text", "text": "ответ легаси"}]}
+
+    monkeypatch.setattr(client_port, "_aget_or_init_session_id", _fake_session)
+    monkeypatch.setattr(client_port, "_acall_mcp_tool", _fake_call)
+    monkeypatch.setattr(legacy_client, "_acall_mcp_tool", _fake_call)
+    monkeypatch.setattr(threading, "Thread", _Counting)
 
     out = await api.acall_mcp_tool(
         "mcp_srv_echo", {}, _LEGACY_CFG, _REGISTRY, timeout=5
     )
 
+    assert "ответ легаси" in out
+    assert spawned == [], f"легаси-HTTP снова завёл потоки: {spawned}"
+
+
+async def test_persistent_stdio_still_goes_to_an_abandonable_thread(monkeypatch):
+    """А вот долгоживущая stdio-сессия — по-прежнему в поток, и это осознанно.
+
+    Asyncio-подпроцесс привязан к создавшему его loop (проверено прямым
+    запуском: на втором ``asyncio.run`` он отдаёт «Future attached to a
+    different loop»), а эту сессию заводит дискавери, зовут тулы и закрывает
+    ``arun`` — три разных loop. Поэтому ``subprocess.Popen`` и поток-демон.
+    """
+    seen = {}
+    cfg = {"srv": {"transport": "stdio", "command": "x", "persistent_session": True}}
+
+    def _fake_sync(self, tool_name, arguments, *, timeout):
+        seen["thread"] = threading.current_thread().name
+        return {"tool": "mcp_srv_echo", "ok": True}
+
+    monkeypatch.setattr(
+        client_port.AgentRuntimeClient, "call_tool", _fake_sync, raising=True
+    )
+
+    out = await api.acall_mcp_tool("mcp_srv_echo", {}, cfg, _REGISTRY, timeout=5)
+
     assert '"ok": true' in out
     assert seen["thread"] != threading.main_thread().name, (
-        "легаси-вызов должен был уйти с основного потока"
+        "персистентная сессия должна была уйти с основного потока"
     )
 
 

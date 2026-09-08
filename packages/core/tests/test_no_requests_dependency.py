@@ -36,7 +36,6 @@ _MANIFEST = REPO / "packages" / "core" / "pyproject.toml"
 #: чтобы зависимость не расползалась дальше, пока её не сняли совсем.
 _REQUESTS_ALLOWED = {
     "runtime_notices.py",
-    "tools/connect_mcp/client_port.py",
     "tools/connect_mcp/os_backend_client.py",
 }
 

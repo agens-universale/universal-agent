@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from gc_core.tools.connect_mcp.transport import get_transport
+from gc_core.tools.connect_mcp.transport import aget_transport, get_transport
 
 
 # Параметры `initialize`, общие для всех локусов: один источник, иначе при подъёме
@@ -55,6 +55,88 @@ def _normalize_url(url: str) -> str:
     return url
 
 
+
+#: Спека streamable HTTP требует готовности принять ОБА типа: сервер вправе
+#: ответить и JSON, и SSE. Только "application/json" даёт 406 Not Acceptable у
+#: совместимой реализации (проверено на FastMCP).
+_ACCEPT_BOTH = "application/json, text/event-stream"
+
+
+def _mcp_headers(
+    server_cfg: Dict[str, Any],
+    token: Optional[str],
+    *,
+    session_id: Optional[str] = None,
+    content_type: bool = True,
+) -> Dict[str, str]:
+    """Заголовки одного вызова MCP. Один источник для всех методов и обеих форм.
+
+    Раньше эти пять строк были скопированы в каждую функцию модуля, и правка
+    ``Accept`` (тот самый 406) чинилась в них по одной.
+    """
+    headers: Dict[str, str] = {"Accept": _ACCEPT_BOTH}
+    if content_type:
+        headers["Content-Type"] = "application/json"
+    if session_id is not None:
+        headers["mcp-session-id"] = session_id
+    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
+    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
+    return headers
+
+
+def _session_id_from(resp_headers: Dict[str, str]) -> Optional[str]:
+    return resp_headers.get("mcp-session-id") or resp_headers.get("MCP-Session-Id")
+
+
+def _tools_from(data: Any) -> List[Dict[str, Any]]:
+    """Тело tools/list → список тулов.
+
+    Ожидаемый формат JSON-RPC 2.0:
+    ``{"jsonrpc": "2.0", "id": "...", "result": {"tools": [...]}}``
+    """
+    if isinstance(data, dict):
+        if isinstance(data.get("result"), dict):
+            tools = data["result"].get("tools", [])
+        else:
+            tools = data.get("tools", [])
+    else:
+        tools = []
+    return tools if isinstance(tools, list) else []
+
+
+_NOTIFICATION_PAYLOAD: Dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized",
+}
+
+
+def _initialize_payload() -> Dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": MCP_INIT_PARAMS,
+    }
+
+
+def _tools_list_payload() -> Dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": "tools-list-1",
+        "method": "tools/list",
+        "params": {},
+    }
+
+
+def _tools_call_payload(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": "tools-call-1",
+        "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments},
+    }
+
+
 def _send_initialized_notification(
     url: str,
     session_id: str,
@@ -62,27 +144,21 @@ def _send_initialized_notification(
     token: Optional[str] = None,
     timeout: float = 10.0,
 ) -> None:
-    """
-    Отправить notifications/initialized после успешного initialize.
-    """
-    payload: Dict[str, Any] = {
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized",
-    }
+    """Отправить notifications/initialized после успешного initialize."""
+    headers = _mcp_headers(server_cfg, token, session_id=session_id)
+    get_transport(server_cfg)(url, headers, _NOTIFICATION_PAYLOAD, timeout)
 
-    headers: Dict[str, str] = {
-        "Content-Type": "application/json",
-        # Спека streamable HTTP требует готовности принять ОБА типа: сервер
-        # вправе ответить и JSON, и SSE. Только "application/json" даёт
-        # 406 Not Acceptable у совместимой реализации (проверено на FastMCP).
-        "Accept": "application/json, text/event-stream",
-        "mcp-session-id": session_id,
-    }
-    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
-    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
 
-    request_fn = get_transport(server_cfg)
-    _headers, _body = request_fn(url, headers, payload, timeout)
+async def _asend_initialized_notification(
+    url: str,
+    session_id: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str] = None,
+    timeout: float = 10.0,
+) -> None:
+    """Асинхронный двойник: отличается ровно транспортом."""
+    headers = _mcp_headers(server_cfg, token, session_id=session_id)
+    await aget_transport(server_cfg)(url, headers, _NOTIFICATION_PAYLOAD, timeout)
 
 
 def _init_mcp_session(
@@ -98,34 +174,36 @@ def _init_mcp_session(
     - отправить notifications/initialized;
     - вернуть session_id.
     """
-    payload: Dict[str, Any] = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": MCP_INIT_PARAMS,
-    }
-
-    headers: Dict[str, str] = {
-        "Content-Type": "application/json",
-        # Спека streamable HTTP требует готовности принять ОБА типа: сервер
-        # вправе ответить и JSON, и SSE. Только "application/json" даёт
-        # 406 Not Acceptable у совместимой реализации (проверено на FastMCP).
-        "Accept": "application/json, text/event-stream",
-    }
-    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
-    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
-
-    request_fn = get_transport(server_cfg)
-    resp_headers, _body = request_fn(url, headers, payload, timeout)
-
-    session_id = resp_headers.get("mcp-session-id") or resp_headers.get("MCP-Session-Id")
+    headers = _mcp_headers(server_cfg, token, session_id=None)
+    resp_headers, _body = get_transport(server_cfg)(
+        url, headers, _initialize_payload(), timeout
+    )
+    session_id = _session_id_from(resp_headers)
     if not session_id:
         return None
-
     _send_initialized_notification(
         url, session_id, server_cfg, token=token, timeout=timeout
     )
+    return session_id
 
+
+async def _ainit_mcp_session(
+    url: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Optional[str]:
+    """Асинхронный двойник :func:`_init_mcp_session`; порядок шагов общий."""
+    headers = _mcp_headers(server_cfg, token, session_id=None)
+    resp_headers, _body = await aget_transport(server_cfg)(
+        url, headers, _initialize_payload(), timeout
+    )
+    session_id = _session_id_from(resp_headers)
+    if not session_id:
+        return None
+    await _asend_initialized_notification(
+        url, session_id, server_cfg, token=token, timeout=timeout
+    )
     return session_id
 
 
@@ -136,44 +214,36 @@ def _tools_list_request(
     token: Optional[str] = None,
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
-    """
-    Вызвать MCP-метод tools/list и вернуть список tools.
-    """
-    headers: Dict[str, str] = {
-        # Спека streamable HTTP требует готовности принять ОБА типа: сервер
-        # вправе ответить и JSON, и SSE. Только "application/json" даёт
-        # 406 Not Acceptable у совместимой реализации (проверено на FastMCP).
-        "Accept": "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        "mcp-session-id": session_id,
-    }
-    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
-    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
+    """Вызвать MCP-метод tools/list и вернуть список tools."""
+    headers = _mcp_headers(server_cfg, token, session_id=session_id)
+    _resp_headers, data = get_transport(server_cfg)(
+        url, headers, _tools_list_payload(), timeout
+    )
+    return _tools_from(data)
 
-    payload: Dict[str, Any] = {
-        "jsonrpc": "2.0",
-        "id": "tools-list-1",
-        "method": "tools/list",
-        "params": {},
-    }
 
-    request_fn = get_transport(server_cfg)
-    _resp_headers, data = request_fn(url, headers, payload, timeout)
+async def _atools_list_request(
+    url: str,
+    session_id: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str] = None,
+    timeout: float = 10.0,
+) -> List[Dict[str, Any]]:
+    """Асинхронный двойник :func:`_tools_list_request`; разбор общий."""
+    headers = _mcp_headers(server_cfg, token, session_id=session_id)
+    _resp_headers, data = await aget_transport(server_cfg)(
+        url, headers, _tools_list_payload(), timeout
+    )
+    return _tools_from(data)
 
-    # Ожидаемый формат JSON-RPC 2.0:
-    # { "jsonrpc": "2.0", "id": "...", "result": { "tools": [...] } }
-    if isinstance(data, dict):
-        if isinstance(data.get("result"), dict):
-            tools = data["result"].get("tools", [])
-        else:
-            tools = data.get("tools", [])
-    else:
-        tools = []
 
-    if not isinstance(tools, list):
-        return []
-
-    return tools
+def _remember_session(resp_headers: Dict[str, str], server_key: Optional[str]) -> None:
+    """Сервер прислал новый mcp-session-id — запомнить его для этого владельца."""
+    if not server_key:
+        return
+    new_sid = _session_id_from(resp_headers)
+    if new_sid:
+        _MCP_SESSIONS[(current_owner(), server_key)] = new_sid
 
 
 def _call_mcp_tool(
@@ -190,33 +260,30 @@ def _call_mcp_tool(
     Вызвать MCP-метод tools/call для конкретного инструмента.
     Если server_key передан и в ответе есть mcp-session-id — обновляем кэш сессии.
     """
-    headers: Dict[str, str] = {
-        # Спека streamable HTTP требует готовности принять ОБА типа: сервер
-        # вправе ответить и JSON, и SSE. Только "application/json" даёт
-        # 406 Not Acceptable у совместимой реализации (проверено на FastMCP).
-        "Accept": "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        "mcp-session-id": session_id,
-    }
-    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
-    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
+    headers = _mcp_headers(server_cfg, token, session_id=session_id)
+    resp_headers, body = get_transport(server_cfg)(
+        url, headers, _tools_call_payload(tool_name, arguments), timeout
+    )
+    _remember_session(resp_headers, server_key)
+    return body
 
-    payload: Dict[str, Any] = {
-        "jsonrpc": "2.0",
-        "id": "tools-call-1",
-        "method": "tools/call",
-        "params": {
-            "name": tool_name,
-            "arguments": arguments,
-        },
-    }
 
-    request_fn = get_transport(server_cfg)
-    resp_headers, body = request_fn(url, headers, payload, timeout)
-    if server_key:
-        new_sid = resp_headers.get("mcp-session-id") or resp_headers.get("MCP-Session-Id")
-        if new_sid:
-            _MCP_SESSIONS[(current_owner(), server_key)] = new_sid
+async def _acall_mcp_tool(
+    url: str,
+    session_id: str,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    server_cfg: Dict[str, Any],
+    token: Optional[str] = None,
+    timeout: float = 10.0,
+    server_key: Optional[str] = None,
+) -> Any:
+    """Асинхронный двойник :func:`_call_mcp_tool`; обновление кэша сессии общее."""
+    headers = _mcp_headers(server_cfg, token, session_id=session_id)
+    resp_headers, body = await aget_transport(server_cfg)(
+        url, headers, _tools_call_payload(tool_name, arguments), timeout
+    )
+    _remember_session(resp_headers, server_key)
     return body
 
 
@@ -244,6 +311,27 @@ def _get_or_init_session_id(
     return session_id
 
 
+async def _aget_or_init_session_id(
+    server_key: str,
+    url: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Optional[str]:
+    """Асинхронный двойник: кэш сессий общий, отличается только инициализация."""
+    session_id = _MCP_SESSIONS.get((current_owner(), server_key))
+    if session_id:
+        return session_id
+
+    session_id = await _ainit_mcp_session(
+        url, server_cfg, token=token, timeout=timeout
+    )
+    if session_id:
+        _MCP_SESSIONS[(current_owner(), server_key)] = session_id
+
+    return session_id
+
+
 __all__ = [
     "MCP_INIT_PARAMS",
     "_MCP_SESSIONS",
@@ -251,6 +339,9 @@ __all__ = [
     "_send_initialized_notification",
     "_init_mcp_session",
     "_tools_list_request",
+    "_atools_list_request",
     "_call_mcp_tool",
+    "_acall_mcp_tool",
     "_get_or_init_session_id",
+    "_aget_or_init_session_id",
 ]

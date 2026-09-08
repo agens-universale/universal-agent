@@ -41,16 +41,8 @@ def _sync_client(
     )
 
 
-def _request_http(
-    url: str,
-    headers: Dict[str, str],
-    json_payload: Dict[str, Any],
-    timeout: float,
-    verify: Union[bool, str] = True,
-    cert: Optional[tuple] = None,
-) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """
-    Обычный HTTP: один POST, тело — JSON. Ответ — один JSON-объект.
+def _http_headers_for(headers: Dict[str, str]) -> Dict[str, str]:
+    """Заголовки одного обмена. Общее для обеих форм.
 
     ``Accept`` обязателен: спека streamable HTTP требует, чтобы клиент был
     готов принять и JSON, и SSE — сервер вправе ответить любым из двух.
@@ -58,23 +50,26 @@ def _request_http(
     (проверено на FastMCP). Соседний ``_request_sse`` его ставил, а этот —
     нет, и транспорт ``http`` не работал ни с одним спек-совместимым сервером.
     """
-    url = _normalize_url(url)
     headers = dict(headers)
     headers.setdefault("Accept", "application/json, text/event-stream")
-    with _sync_client(verify, cert) as client:
-        resp = client.post(url, json=json_payload, headers=headers, timeout=timeout)
-    resp.raise_for_status()
+    return headers
+
+
+def _parse_http_response(resp: "httpx.Response") -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """Ответ обычного HTTP → ``(заголовки, тело)``. Общее для обеих форм.
+
+    Тело может прийти В ДВУХ ФОРМАХ, и это не прихоть сервера: раз клиент
+    заявил, что принимает и JSON, и SSE, спека streamable HTTP разрешает
+    ответить любой. FastMCP на tools/list отвечает именно SSE-обёрткой
+    (`event: message` / `data: {…}`), и голый ``resp.json()`` на ней падает —
+    транспорт молча возвращал пустоту и «0 тулов» при успешном коннекте.
+    """
     # Headers httpx -> обычный dict для единообразия
     out_headers = {k.lower(): v for k, v in resp.headers.items()}
     # Пустое тело (например, на notifications/initialized) — не парсить как JSON
     if not resp.content or not resp.content.strip():
         return out_headers, {}
 
-    # Ответ может прийти В ДВУХ ФОРМАХ, и это не прихоть сервера: раз клиент
-    # заявил, что принимает и JSON, и SSE, спека streamable HTTP разрешает
-    # ответить любой. FastMCP на tools/list отвечает именно SSE-обёрткой
-    # (`event: message` / `data: {…}`), и голый resp.json() на ней падает —
-    # транспорт молча возвращал пустоту и «0 тулов» при успешном коннекте.
     content_type = (out_headers.get("content-type") or "").lower()
     if "text/event-stream" in content_type:
         if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):
@@ -94,6 +89,49 @@ def _request_http(
         return out_headers, {}
 
 
+def _request_http(
+    url: str,
+    headers: Dict[str, str],
+    json_payload: Dict[str, Any],
+    timeout: float,
+    verify: Union[bool, str] = True,
+    cert: Optional[tuple] = None,
+) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """Обычный HTTP: один POST, тело — JSON. Ответ — один JSON-объект."""
+    with _sync_client(verify, cert) as client:
+        resp = client.post(
+            _normalize_url(url), json=json_payload,
+            headers=_http_headers_for(headers), timeout=timeout,
+        )
+    resp.raise_for_status()
+    return _parse_http_response(resp)
+
+
+async def _arequest_http(
+    url: str,
+    headers: Dict[str, str],
+    json_payload: Dict[str, Any],
+    timeout: float,
+    verify: Union[bool, str] = True,
+    cert: Optional[tuple] = None,
+) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """Асинхронный двойник :func:`_request_http`.
+
+    Отличается ровно клиентом и ожиданием: заголовки и разбор ответа общие.
+    Клиент берётся из пер-loop реестра (``get_async_client``) — там уже решены
+    привязка пула соединений к loop и ключевание по ``verify``/``cert``.
+    """
+    from gc_core.utils.async_http import get_async_client
+
+    client = get_async_client(verify=verify, cert=cert)
+    resp = await client.post(
+        _normalize_url(url), json=json_payload,
+        headers=_http_headers_for(headers), timeout=timeout,
+    )
+    resp.raise_for_status()
+    return _parse_http_response(resp)
+
+
 def _try_parse_json_rpc(s: str) -> Dict[str, Any] | None:
     """Распарсить JSON; вернуть объект, если это JSON-RPC ответ с result/error, иначе None."""
     if not s or not s.strip():
@@ -107,62 +145,101 @@ def _try_parse_json_rpc(s: str) -> Dict[str, Any] | None:
     return None
 
 
-def _read_sse_first_json(resp: "httpx.Response", timeout: float) -> Dict[str, Any]:
-    """
-    Читать стрим SSE построчно; вернуть первый JSON-RPC ответ (с result или error).
-    Поддерживается многострочное событие: после "data:" следующие строки до пустой
-    склеиваются. Парсим после каждой строки — сервер может не слать пустую строку после события.
-    """
-    buffer: list[str] = []
-    in_data = False
+class _SseFirstJson:
+    """Накопитель события SSE: строки → первый JSON-RPC ответ (result или error).
 
+    Push-парсер: состояние в объекте, источник строк — не его забота. Ровно
+    поэтому одна реализация обслуживает и синхронный ``iter_lines``, и
+    асинхронный ``aiter_lines``; второй копии этого разбора быть не должно.
+
+    Поддерживается многострочное событие: после ``data:`` следующие строки до
+    пустой склеиваются. Парсим после КАЖДОЙ строки — сервер может не слать
+    пустую строку после события.
+    """
+
+    def __init__(self, debug: bool = False) -> None:
+        self._buffer: list[str] = []
+        self._in_data = False
+        self._debug = debug
+
+    def feed(self, line: "str | None") -> "Dict[str, Any] | None":
+        if line is None:
+            return None
+        if self._debug:
+            print(f"[MCP_DEBUG SSE] {line[:200]!r}" + ("..." if len(line) > 200 else ""))
+        stripped = line.strip()
+
+        if not stripped:
+            if self._in_data and self._buffer:
+                parsed = _try_parse_json_rpc("\n".join(self._buffer))
+                if parsed is not None:
+                    return parsed
+                self._buffer = []
+            self._in_data = False
+            return None
+
+        if stripped.lower().startswith("data:"):
+            part = stripped[len("data:"):].strip()
+            if part:
+                self._buffer.append(part)
+                self._in_data = True
+                return _try_parse_json_rpc("\n".join(self._buffer))
+            if not self._in_data:
+                self._buffer = []
+            self._in_data = True
+            return None
+
+        if self._in_data and self._buffer:
+            self._buffer.append(stripped)
+            return _try_parse_json_rpc("\n".join(self._buffer))
+        return None
+
+    def flush(self) -> "Dict[str, Any] | None":
+        """Стрим кончился: последняя попытка разобрать накопленное."""
+        if self._in_data and self._buffer:
+            return _try_parse_json_rpc("\n".join(self._buffer))
+        return None
+
+
+def _sse_debug() -> bool:
     from gc_core.config_modules import env_vars
-    debug = env_vars.env.mcp_debug
+
+    return bool(env_vars.env.mcp_debug)
+
+
+def _fix_sse_encoding(resp: "httpx.Response") -> None:
+    """SSE почти всегда UTF-8; без явного указания httpx может взять заявленную
+    сервером кодировку и сломать JSON с кириллицей."""
+    if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):
+        resp.encoding = "utf-8"
+
+
+def _sse_headers_for(headers: Dict[str, str]) -> Dict[str, str]:
+    headers = dict(headers)
+    headers["Accept"] = "application/json, text/event-stream"
+    return headers
+
+
+def _read_sse_first_json(resp: "httpx.Response", timeout: float) -> Dict[str, Any]:
+    """Читать стрим SSE построчно; вернуть первый JSON-RPC ответ."""
+    reader = _SseFirstJson(_sse_debug())
     # httpx.iter_lines отдаёт уже декодированные str — параметра decode_unicode
     # у него нет (это имя из requests).
     for line in resp.iter_lines():
-        if line is None:
-            continue
-        if debug:
-            print(f"[MCP_DEBUG SSE] {line[:200]!r}" + ("..." if len(line) > 200 else ""))
-        stripped = line.strip()
-        if not stripped:
-            if in_data and buffer:
-                data_str = "\n".join(buffer)
-                parsed = _try_parse_json_rpc(data_str)
-                if parsed is not None:
-                    return parsed
-                buffer = []
-            in_data = False
-            continue
-
-        if stripped.lower().startswith("data:"):
-            prefix_len = 5  # len("data:")
-            part = stripped[prefix_len:].strip()
-            if part:
-                buffer.append(part)
-                in_data = True
-                data_str = "\n".join(buffer)
-                parsed = _try_parse_json_rpc(data_str)
-                if parsed is not None:
-                    return parsed
-            else:
-                # empty "data:" line — reset only if not already accumulating
-                if not in_data:
-                    buffer = []
-                in_data = True
-        elif in_data and buffer:
-            buffer.append(stripped)
-            data_str = "\n".join(buffer)
-            parsed = _try_parse_json_rpc(data_str)
-            if parsed is not None:
-                return parsed
-
-    if in_data and buffer:
-        parsed = _try_parse_json_rpc("\n".join(buffer))
+        parsed = reader.feed(line)
         if parsed is not None:
             return parsed
-    return {}
+    return reader.flush() or {}
+
+
+async def _aread_sse_first_json(resp: "httpx.Response", timeout: float) -> Dict[str, Any]:
+    """Асинхронный двойник :func:`_read_sse_first_json`; разбор общий."""
+    reader = _SseFirstJson(_sse_debug())
+    async for line in resp.aiter_lines():
+        parsed = reader.feed(line)
+        if parsed is not None:
+            return parsed
+    return reader.flush() or {}
 
 
 def _request_sse(
@@ -173,30 +250,43 @@ def _request_sse(
     verify: Union[bool, str] = True,
     cert: Optional[tuple] = None,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """
-    SSE: POST с stream=True, Accept: text/event-stream.
-    Читаем первое событие data: {...}, парсим JSON, возвращаем и закрываем соединение.
-    """
-    url = _normalize_url(url)
-    headers = dict(headers)
-    headers["Accept"] = "application/json, text/event-stream"
-
+    """SSE: POST со стримом, читаем первое событие ``data: {…}`` и закрываемся."""
     # Стрим у httpx — контекстный менеджер: тело читается ВНУТРИ блока, за его
     # пределами соединение уже закрыто. Поэтому и разбор идёт внутри.
     with _sync_client(verify, cert) as client:
         with client.stream(
-            "POST", url, json=json_payload, headers=headers, timeout=timeout
+            "POST", _normalize_url(url), json=json_payload,
+            headers=_sse_headers_for(headers), timeout=timeout,
         ) as resp:
             resp.raise_for_status()
-            # SSE почти всегда UTF-8; без явного указания httpx может взять
-            # заявленную сервером кодировку и сломать JSON с кириллицей.
-            if resp.encoding is None or resp.encoding.lower() in (
-                "iso-8859-1", "ascii",
-            ):
-                resp.encoding = "utf-8"
+            _fix_sse_encoding(resp)
             out_headers = {k.lower(): v for k, v in resp.headers.items()}
             body = _read_sse_first_json(resp, timeout)
     return out_headers, body
+
+
+async def _arequest_sse(
+    url: str,
+    headers: Dict[str, str],
+    json_payload: Dict[str, Any],
+    timeout: float,
+    verify: Union[bool, str] = True,
+    cert: Optional[tuple] = None,
+) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """Асинхронный двойник :func:`_request_sse`; заголовки и разбор общие."""
+    from gc_core.utils.async_http import get_async_client
+
+    client = get_async_client(verify=verify, cert=cert)
+    async with client.stream(
+        "POST", _normalize_url(url), json=json_payload,
+        headers=_sse_headers_for(headers), timeout=timeout,
+    ) as resp:
+        resp.raise_for_status()
+        _fix_sse_encoding(resp)
+        out_headers = {k.lower(): v for k, v in resp.headers.items()}
+        body = await _aread_sse_first_json(resp, timeout)
+    return out_headers, body
+
 
 
 # --------- stdio transport: процесс на один обмен, без долгоживущих процессов ---------
@@ -593,8 +683,86 @@ def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, s
     )
 
 
+def _arequest_stdio(
+    server_cfg: Dict[str, Any],
+) -> Callable[..., Any]:
+    """Асинхронный двойник :func:`_request_stdio`.
+
+    Обмен по stdio уже асинхронный (``_astdio_exchange``), синхронная форма —
+    шим над ним. Здесь вызывается async-форма напрямую: правила шагов
+    (когда handshake, какой ответ брать) общие с синхронной, потому что это
+    одни и те же три ветки по ``method``.
+    """
+    cfg = server_cfg
+
+    async def arequest_fn(
+        url: str,
+        headers: Dict[str, str],
+        json_payload: Dict[str, Any],
+        timeout: float,
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        method = (json_payload or {}).get("method")
+        if method == "initialize":
+            responses = await _astdio_exchange(cfg, timeout, [(json_payload, True)])
+            return ({"mcp-session-id": "stdio"}, responses[0] if responses else {})
+        if method == "notifications/initialized":
+            await _astdio_exchange(
+                cfg, timeout, [(_INIT_PAYLOAD, True), (json_payload, False)]
+            )
+            return ({}, {})
+        responses = await _astdio_exchange(
+            cfg, timeout,
+            [(_INIT_PAYLOAD, True), (_INITIALIZED_PAYLOAD, False), (json_payload, True)],
+        )
+        return ({}, responses[2] if len(responses) > 2 else {})
+
+    return arequest_fn
+
+
+def aget_transport(server_cfg: Dict[str, Any]) -> Callable[..., Any]:
+    """Асинхронный двойник :func:`get_transport`.
+
+    Та же единая сигнатура, только корутинная::
+
+        await request(url, headers, json_payload, timeout) -> (headers, body)
+
+    Легаси-транспорты (``http``/``sse``) ходят через ``httpx``, а у него есть
+    ``AsyncClient`` — то есть нативная форма у них была всё это время, просто
+    не использовалась, и порт клиента уводил их в поток.
+    """
+    transport = (server_cfg or {}).get("transport")
+
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
+
+    if transport == "http":
+        async def arequest_http(url, headers, json_payload, timeout):
+            return await _arequest_http(
+                url, headers, json_payload, timeout, verify=verify, cert=cert
+            )
+
+        return arequest_http
+
+    if transport == "sse":
+        async def arequest_sse(url, headers, json_payload, timeout):
+            return await _arequest_sse(
+                url, headers, json_payload, timeout, verify=verify, cert=cert
+            )
+
+        return arequest_sse
+
+    if transport == "stdio":
+        return _arequest_stdio(server_cfg)
+
+    raise ValueError(
+        f"Invalid or missing 'transport' in MCP server config. "
+        f"Expected 'http', 'sse' or 'stdio', got: {transport!r}"
+    )
+
+
 __all__ = [
     "get_transport",
+    "aget_transport",
     "_request_http",
     "_request_sse",
     "_request_stdio",

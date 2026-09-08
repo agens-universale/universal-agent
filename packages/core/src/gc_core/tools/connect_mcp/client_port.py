@@ -7,10 +7,13 @@ second locus can exist beside it without either knowing about the other.
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-import requests
+import httpx
 
 from gc_core.tools.connect_mcp.client import (
     _MCP_SESSIONS,
+    _acall_mcp_tool,
+    _aget_or_init_session_id,
+    _atools_list_request,
     _call_mcp_tool,
     _get_or_init_session_id,
     _tools_list_request,
@@ -156,7 +159,7 @@ class AgentRuntimeClient(McpClientPort):
             return _tools_list_request(
                 url, session_id=session_id, server_cfg=self.server_cfg, token=token
             )
-        except requests.HTTPError:
+        except httpx.HTTPStatusError:
             _MCP_SESSIONS.pop(self.server_name, None)
             session_id = _get_or_init_session_id(
                 self.server_name, url, self.server_cfg, token=token
@@ -233,7 +236,7 @@ class AgentRuntimeClient(McpClientPort):
 
         try:
             data = do_call(session_id)
-        except requests.HTTPError:
+        except httpx.HTTPStatusError:
             _MCP_SESSIONS.pop(self.server_name, None)
             session_id = _get_or_init_session_id(
                 self.server_name, url, self.server_cfg, token=token, timeout=timeout
@@ -280,7 +283,37 @@ class AgentRuntimeClient(McpClientPort):
             return await alist_tools_stream_stdio(
                 server_cfg=self.server_cfg, timeout=timeout
             )
-        return await run_abandonable(self.list_tools, timeout=timeout)
+        if is_persistent_stdio(self.server_cfg):
+            # Долгоживущая сессия сидит на `subprocess.Popen` СОЗНАТЕЛЬНО:
+            # asyncio-подпроцесс привязан к создавшему его loop, а эту сессию
+            # заводит дискавери, зовут тулы и закрывает `arun` — три разных
+            # loop. Прервать блокирующий обмен нечем, поэтому поток-демон.
+            return await run_abandonable(self.list_tools, timeout=timeout)
+
+        session_id = await _aget_or_init_session_id(
+            self.server_name, url, self.server_cfg, token=token
+        )
+        if not session_id:
+            raise RuntimeError(
+                f"Failed to initialize MCP session for server '{self.server_name}'"
+            )
+        try:
+            return await _atools_list_request(
+                url, session_id=session_id, server_cfg=self.server_cfg, token=token
+            )
+        except httpx.HTTPStatusError:
+            _MCP_SESSIONS.pop(self.server_name, None)
+            session_id = await _aget_or_init_session_id(
+                self.server_name, url, self.server_cfg, token=token
+            )
+            if not session_id:
+                raise RuntimeError(
+                    f"Failed to re-initialize MCP session for server "
+                    f"'{self.server_name}'"
+                )
+            return await _atools_list_request(
+                url, session_id=session_id, server_cfg=self.server_cfg, token=token
+            )
 
     async def acall_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
@@ -315,9 +348,54 @@ class AgentRuntimeClient(McpClientPort):
                 tool_name=tool_name,
                 arguments=arguments,
             )
-        return await run_abandonable(
-            self.call_tool, tool_name, arguments, timeout=timeout
+        if is_persistent_stdio(self.server_cfg):
+            # См. `alist_tools`: сессия на `Popen` — сознательное ограничение.
+            return await run_abandonable(
+                self.call_tool, tool_name, arguments, timeout=timeout
+            )
+
+        session_id = await _aget_or_init_session_id(
+            self.server_name, url, self.server_cfg, token=token, timeout=timeout
         )
+        if not session_id:
+            raise RuntimeError(
+                f"Failed to initialize MCP session for server '{self.server_name}'"
+            )
+
+        async def ado_call(sid: str) -> Any:
+            return await _acall_mcp_tool(
+                url=url,
+                session_id=sid,
+                tool_name=tool_name,
+                arguments=arguments,
+                server_cfg=self.server_cfg,
+                token=token,
+                timeout=timeout,
+                server_key=self.server_name,
+            )
+
+        try:
+            data = await ado_call(session_id)
+        except httpx.HTTPStatusError:
+            _MCP_SESSIONS.pop(self.server_name, None)
+            session_id = await _aget_or_init_session_id(
+                self.server_name, url, self.server_cfg, token=token, timeout=timeout
+            )
+            if not session_id:
+                raise RuntimeError(
+                    f"Failed to re-initialize MCP session for server "
+                    f"'{self.server_name}'"
+                )
+            data = await ado_call(session_id)
+
+        if data == {} and transport == "sse":
+            _MCP_SESSIONS.pop(self.server_name, None)
+            session_id = await _aget_or_init_session_id(
+                self.server_name, url, self.server_cfg, token=token, timeout=timeout
+            )
+            if session_id:
+                data = await ado_call(session_id)
+        return data
 
 
 __all__ = ["McpClientPort", "AgentRuntimeClient"]
