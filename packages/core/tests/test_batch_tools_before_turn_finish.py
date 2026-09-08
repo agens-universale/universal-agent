@@ -9,7 +9,12 @@ from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core import processing_responses as pr
 import pytest
 from gc_core.intent_guard.validation_result import ValidationResult
-from gc_core.processing_responses import run_agent, partition_work_then_finish
+from gc_core.loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE
+from gc_core.processing_responses import (
+    run_agent,
+    partition_work_then_finish,
+    _split_batch_new_around_finish,
+)
 from gc_core.states import State
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
@@ -111,6 +116,28 @@ def _is_cycle_stop_stub(output: str) -> bool:
 
 
 # --- split: позиция finish не режет work ------------------------------------
+
+
+def test_split_batch_new_keeps_notice_and_compact_after_finish():
+    work = {"type": "function_call_output", "call_id": "c_work", "output": "{}"}
+    finish = {"type": "function_call_output", "call_id": "c_fin", "output": "{}"}
+    notice = {"role": "user", "content": "Loop detector: repeated"}
+    resume = {"role": "user", "content": "session_compact finished."}
+    prefix, fin, tail = _split_batch_new_around_finish(
+        [work, finish, notice, resume], "c_fin"
+    )
+    assert prefix == [work]
+    assert fin == [finish]
+    assert tail == [notice, resume]
+
+
+def test_split_batch_new_without_finish_is_all_prefix():
+    work = {"type": "function_call_output", "call_id": "c_work"}
+    notice = {"role": "user", "content": "Loop detector: repeated"}
+    prefix, fin, tail = _split_batch_new_around_finish([work, notice], "c_fin")
+    assert prefix == [work, notice]
+    assert fin == []
+    assert tail == []
 
 
 def test_split_finish_does_not_drop_work():
@@ -354,6 +381,69 @@ def _patch_run_agent_apply(monkeypatch, applied, *, finish_output=None):
         return json.dumps({"tool": name, "ok": True}, ensure_ascii=False)
 
     monkeypatch.setattr(pr, "apply_tool", fake_apply)
+
+
+def test_run_agent_loop_notice_stays_after_finish_output(monkeypatch):
+    """D2: notice loop-detector'а не вклинивается между work и finish-выводом."""
+    applied: list[str] = []
+    _patch_run_agent_apply(monkeypatch, applied)
+    state = _agent_state()
+    ctx = _agent_ctx()
+    ctx.tools_data = {
+        "fs_read_file": {
+            LOOP_WARN_KEY: READ_PROFILE,
+            "tool_fabric": None,
+            "injected_fields": [],
+        },
+        "turn_finish": {"tool_fabric": None, "injected_fields": []},
+    }
+    persisted: list[dict] = []
+
+    def persist(msgs):
+        persisted.extend(msgs)
+
+    args = '{"path":"a.py"}'
+    finish = _fc("turn_finish", "call_finish", _finish_args())
+    result = run_agent(
+        [
+            _fc("fs_read_file", "c1", args),
+            _fc("fs_read_file", "c2", args),
+            finish,
+        ],
+        state,
+        ctx,
+        persist_messages_callback=persist,
+    )
+    assert result == finish["arguments"]
+
+    fco_idx = [
+        i
+        for i, m in enumerate(state.messages)
+        if m.get("type") == "function_call_output"
+    ]
+    notice_idx = [
+        i
+        for i, m in enumerate(state.messages)
+        if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))
+    ]
+    assert fco_idx and notice_idx
+    assert max(fco_idx) < notice_idx[0]
+    by_call = _outputs_by_call(state.messages)
+    assert by_call["c1"]["call_id"] == "c1"
+    assert "call_finish" in by_call
+
+    persist_fco_idx = [
+        i
+        for i, m in enumerate(persisted)
+        if m.get("type") == "function_call_output"
+    ]
+    persist_notice_idx = [
+        i
+        for i, m in enumerate(persisted)
+        if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))
+    ]
+    assert persist_fco_idx and persist_notice_idx
+    assert max(persist_fco_idx) < persist_notice_idx[0]
 
 
 def test_run_agent_memory_then_finish_writes_memory_and_closes(monkeypatch):

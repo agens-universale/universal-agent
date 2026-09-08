@@ -638,6 +638,34 @@ def _closing_finish_after_batch(
     return finish
 
 
+def _split_batch_new_around_finish(
+    batch_new: List[Dict],
+    finish_call_id: Any,
+) -> tuple[List[Dict], List[Dict], List[Dict]]:
+    """Префикс (work), finish-вывод, хвост (notice/compact) — без перестановки.
+
+    Разрез по позиции первого ``function_call_output`` с ``finish_call_id``.
+    Technical user (loop-detector, session_compact resume) остаются после
+    finish, иначе в трейсе получается tool → user → tool и strict-бэкенд
+    отвечает 400. Если finish-вывода нет — весь батч считается префиксом.
+    """
+    finish_idx = None
+    for i, msg in enumerate(batch_new):
+        if (
+            msg.get("type") == "function_call_output"
+            and msg.get("call_id") == finish_call_id
+        ):
+            finish_idx = i
+            break
+    if finish_idx is None:
+        return list(batch_new), [], []
+    return (
+        batch_new[:finish_idx],
+        batch_new[finish_idx : finish_idx + 1],
+        batch_new[finish_idx + 1 :],
+    )
+
+
 # finish_reason == "length": JSON вызова усечён потолком max_tokens — объясняем
 # модели причину и советуем компактный вариант / разбиение на вызовы.
 _TRUNCATED_ARGUMENTS_HINT = (
@@ -1304,17 +1332,14 @@ def run_agent(
                             list(getattr(state, "messages", []) or []),
                             messages,
                         )
-                        work_new: List[Dict] = []
-                        finish_new: List[Dict] = []
-                        for msg in batch_new:
-                            if (
-                                msg.get("type") == "function_call_output"
-                                and msg.get("call_id") == finish_call_id
-                            ):
-                                finish_new.append(msg)
-                            else:
-                                work_new.append(msg)
-                        # Work (и notice/compact из возврата) в трейсе до gate.
+                        work_new, finish_new, tail_new = (
+                            _split_batch_new_around_finish(
+                                batch_new, finish_call_id
+                            )
+                        )
+                        # Work до гейта; finish в state до гейта (I3: persist после
+                        # apply); хвост (notice/compact) после finish — порядок
+                        # ролей из process_tool_calls не переставляем.
                         if work_new:
                             state.messages += work_new
                             _maybe_persist(
@@ -1323,6 +1348,8 @@ def run_agent(
                         if finish_new:
                             # I3: finish output в state до gate; persist — после apply.
                             state.messages += finish_new
+                        if tail_new:
+                            state.messages += tail_new
                         finish_arguments = closing_finish.get("arguments")
                         if backend_mode == "chat_completions":
                             gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
@@ -1349,6 +1376,10 @@ def run_agent(
                                 logger=run_logger,
                                 persist_messages_callback=persist_messages_callback,
                             )
+                            if tail_new:
+                                _maybe_persist(
+                                    persist_messages_callback, tail_new, state
+                                )
                             final_submit_output = get_function_call_output_text(
                                 state.messages, finish_call_id
                             )
@@ -1397,6 +1428,10 @@ def run_agent(
                             if finish_new:
                                 _maybe_persist(
                                     persist_messages_callback, finish_new, state
+                                )
+                            if tail_new:
+                                _maybe_persist(
+                                    persist_messages_callback, tail_new, state
                                 )
                             state.current_user_intent = []
                             state.steps += 1
