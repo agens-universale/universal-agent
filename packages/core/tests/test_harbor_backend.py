@@ -415,3 +415,72 @@ def test_normpath_collapses_dot_and_double_slash(loop_in_thread):
     assert backend.normpath("/w//x/./y/") == "/w/x/y"
     assert backend.normpath("/w/a/../b") == "/w/b"
     assert backend.normpath("/") == "/"
+
+
+# --- асинхронный порт запуска -------------------------------------------------
+#
+# Под Harbor уже нативный async: `env.exec` — корутина. Пока бэкенд объявлял
+# только синхронные имена, `aexec_port` заворачивал его в `SyncExecAdapter`, и
+# КАЖДЫЙ запуск команды уходил в поток из общего пула — при том, что ждать
+# было нечего, кроме чужого loop.
+
+
+def test_harbor_declares_the_async_port_and_skips_the_adapter(loop_in_thread):
+    """`aexec_port` отдаёт сам бэкенд, а не обёртку с потоком."""
+    from gc_core.backends.async_protocol import SyncExecAdapter, aexec_port
+
+    backend = HarborBackend(FakeEnv(), loop_in_thread)
+    port = aexec_port(backend)
+
+    assert port is backend, (
+        "Harbor снова заворачивается в SyncExecAdapter — значит запуск команды "
+        "опять уходит в поток из общего пула"
+    )
+    assert not isinstance(port, SyncExecAdapter)
+
+
+async def test_aexec_runs_without_taking_a_thread(loop_in_thread):
+    """Асинхронный запуск идёт на loop владельца, не занимая ни одного потока.
+
+    Проверяется именно ЭТО свойство, а не «результат совпал»: результат
+    совпадал и через `SyncExecAdapter`, только ценой слота в пуле на каждый
+    запуск.
+    """
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+
+    before = threading.active_count()
+    results = await asyncio.gather(
+        *(backend.aexec(f"echo {i}") for i in range(5))
+    )
+    after = threading.active_count()
+
+    assert [r.stdout for r in results] == [f"ran:echo {i}" for i in range(5)]
+    assert after == before, (
+        f"пять асинхронных запусков завели {after - before} поток(ов) — "
+        "путь снова идёт через пул"
+    )
+
+
+async def test_async_and_sync_forms_run_the_same_command(loop_in_thread):
+    """Сборка команды общая: env-префикс, cd и argv → шелл.
+
+    Расхождение здесь означало бы, что синхронный и асинхронный вызовы
+    запускают РАЗНЫЕ команды, а это худший вид расхождения: оба «работают».
+    """
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+
+    backend.exec("ls", cwd="/work", env={"A": "1"})
+    await backend.aexec("ls", cwd="/work", env={"A": "1"})
+    assert env.calls[0] == env.calls[1]
+
+    env.calls.clear()
+    backend.exec_argv(["grep", "-n", "TOKEN", "/work/a b.py"])
+    await backend.aexec_argv(["grep", "-n", "TOKEN", "/work/a b.py"])
+    assert env.calls[0] == env.calls[1]
+
+    env.calls.clear()
+    backend.run_python("print(1)")
+    await backend.arun_python("print(1)")
+    assert env.calls[0] == env.calls[1]

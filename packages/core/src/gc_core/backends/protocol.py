@@ -77,6 +77,21 @@ def bound_exec_result(result: ExecResult, max_chars: int) -> ExecResult:
     )
 
 
+
+def argv_to_posix_command(argv: list, *, stdin: Optional[str] = None) -> str:
+    """``argv`` (плюс необязательный ``stdin``) → строка для POSIX-шелла.
+
+    Отдельной функцией, а не телом ``exec_argv``: ту же сборку обязаны
+    использовать асинхронные реализации бэкендов. Копия неизбежно разъехалась
+    бы с оригиналом — а расхождение здесь означало бы, что синхронный и
+    асинхронный вызовы запускают РАЗНЫЕ команды.
+    """
+    command = " ".join(shlex.quote(str(a)) for a in argv)
+    if stdin is not None:
+        command = f"printf '%s' {shlex.quote(stdin)} | {command}"
+    return command
+
+
 class FsBackend(ABC):
     # Self-isolated sandbox (task container); tools use it to skip host-only
     # affordances. Security guards do NOT read this flag.
@@ -342,9 +357,7 @@ class FsBackend(ABC):
         trace, ~60k). Internal post-processed calls (native grep, walk) pass
         the walk ceiling (~50M).
         """
-        command = " ".join(shlex.quote(str(a)) for a in argv)
-        if stdin is not None:
-            command = f"printf '%s' {shlex.quote(stdin)} | {command}"
+        command = argv_to_posix_command(argv, stdin=stdin)
         if capture_max_chars is None:
             return self.exec(command, cwd=cwd, timeout=timeout, env=env)
         return self.exec(

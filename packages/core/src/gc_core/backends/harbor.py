@@ -18,6 +18,7 @@ from typing import Any, Callable, ContextManager, Iterable, Optional, Sequence
 
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    argv_to_posix_command,
     FIND_PRINTF_FORMAT,
     WALK_OUTPUT_MAX_CHARS,
     ExecResult,
@@ -73,7 +74,28 @@ class HarborBackend(FsBackend):
         self.walk_output_max_chars = walk_output_max_chars
 
     def _await(self, coro):
+        """Дождаться корутины Harbor из СИНХРОННОГО кода: поток блокируется."""
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+
+    async def _aawait(self, coro):
+        """То же из асинхронного кода — не занимая ни поток, ни event loop.
+
+        ``self._env`` привязан к loop Harbor, и прямой ``await`` верен только
+        если мы на нём же. Мы можем быть на другом (агент со своим
+        ``asyncio.run``), поэтому корутина ставится на loop владельца, а
+        результат ждётся через ``wrap_future``: у вызывающего это обычный
+        ``await``, потока не появляется. Замерено — 5 параллельных вызовов,
+        ноль новых потоков, худший разрыв loop 11 мс при шаге пульса 10.
+        """
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is self._loop:
+            return await coro
+        return await asyncio.wrap_future(
+            asyncio.run_coroutine_threadsafe(coro, self._loop)
+        )
 
     def _capture_cap(self, max_chars: Optional[int]) -> int:
         """``None`` → tool-trace cap (~60k), else the per-call ceiling."""
@@ -121,6 +143,47 @@ class HarborBackend(FsBackend):
         return scope(on_output), buffers
 
     # --- shell ---
+    def _full_command(
+        self, command: str, *, cwd: Optional[str], env: Optional[dict]
+    ) -> str:
+        """Команда с env-префиксом и cd. Общая для обеих форм exec."""
+        # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
+        if env:
+            prefix = "env " + " ".join(
+                f"{k}={shlex.quote(str(v))}" for k, v in env.items()
+            )
+            command = f"{prefix} {command}"
+        return f"cd {shlex.quote(cwd)} && {command}" if cwd else command
+
+    @staticmethod
+    def _timed_out_result(streamed: dict, cap: int) -> ExecResult:
+        """Таймаут = частичное выполнение: то, что команда успела напечатать.
+
+        Идёт тем же потоком вывода, которым Harbor пишет логи прогона: само
+        исключение таймаута вывода не несёт.
+        """
+        return bound_exec_result(
+            ExecResult(
+                stdout="".join(streamed["stdout"]),
+                stderr="".join(streamed["stderr"]),
+                return_code=None,
+                timed_out=True,
+            ),
+            cap,
+        )
+
+    @staticmethod
+    def _completed_result(res: Any, cap: int) -> ExecResult:
+        return bound_exec_result(
+            ExecResult(
+                stdout=res.stdout or "",
+                stderr=res.stderr or "",
+                return_code=res.return_code,
+                timed_out=bool(getattr(res, "timed_out", False)),
+            ),
+            cap,
+        )
+
     def _exec(
         self,
         command: str,
@@ -131,13 +194,7 @@ class HarborBackend(FsBackend):
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
         """Internal exec. ``capture_max_chars=None`` → tool-trace cap (~60k)."""
-        # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
-        if env:
-            prefix = "env " + " ".join(
-                f"{k}={shlex.quote(str(v))}" for k, v in env.items()
-            )
-            command = f"{prefix} {command}"
-        full = f"cd {shlex.quote(cwd)} && {command}" if cwd else command
+        full = self._full_command(command, cwd=cwd, env=env)
         cap = self._capture_cap(capture_max_chars)
         scope, streamed = self._output_capture(cap)
         try:
@@ -146,27 +203,36 @@ class HarborBackend(FsBackend):
         except Exception as exc:
             if not self._is_exec_timeout(exc):
                 raise
-            # Timeout = partial completion: what the command printed before the
-            # kill, via the same stream Harbor uses for trial logs. Harbor's
-            # timeout exception carries no output itself.
-            return bound_exec_result(
-                ExecResult(
-                    stdout="".join(streamed["stdout"]),
-                    stderr="".join(streamed["stderr"]),
-                    return_code=None,
-                    timed_out=True,
-                ),
-                cap,
-            )
-        return bound_exec_result(
-            ExecResult(
-                stdout=res.stdout or "",
-                stderr=res.stderr or "",
-                return_code=res.return_code,
-                timed_out=bool(getattr(res, "timed_out", False)),
-            ),
-            cap,
-        )
+            return self._timed_out_result(streamed, cap)
+        return self._completed_result(res, cap)
+
+    async def _aexec_impl(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        """Асинхронный двойник :meth:`_exec`.
+
+        Отличается ровно ожиданием: сборка команды, захват вывода и разбор
+        результата общие. Второй копии этих правил быть не должно — иначе
+        синхронный и асинхронный вызовы начали бы запускать разные команды и
+        по-разному читать таймаут.
+        """
+        full = self._full_command(command, cwd=cwd, env=env)
+        cap = self._capture_cap(capture_max_chars)
+        scope, streamed = self._output_capture(cap)
+        try:
+            with scope:
+                res = await self._aawait(self._env.exec(full, timeout_sec=timeout))
+        except Exception as exc:
+            if not self._is_exec_timeout(exc):
+                raise
+            return self._timed_out_result(streamed, cap)
+        return self._completed_result(res, cap)
 
     def exec(
         self,
@@ -193,8 +259,64 @@ class HarborBackend(FsBackend):
                     env: Optional[dict] = None) -> ExecResult:
         # Quoted heredoc → code body taken literally. Tool-trace 60k: this is
         # the model-facing python tool, not an internal FS helper.
-        command = f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
-        return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+        return self.exec(self._python_command(code), cwd=cwd, timeout=timeout, env=env)
+
+    @staticmethod
+    def _python_command(code: str) -> str:
+        """Quoted heredoc → тело кода берётся буквально. Общее для обеих форм."""
+        return f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
+
+    # --- асинхронный порт запуска (backends.async_protocol.AsyncExecPort) ---
+    #
+    # Под Harbor УЖЕ нативный async: `self._env.exec` — корутина. Синхронные
+    # имена выше блокируют поток на `run_coroutine_threadsafe(...).result()`,
+    # и из-за этого `aexec_port` заворачивал бэкенд в `SyncExecAdapter`, а тот
+    # уводил каждый запуск в поток из общего пула. Порт объявлен — обёртки
+    # больше нет, запуск идёт на loop вызывающего.
+
+    async def aexec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        return await self._aexec_impl(
+            command, cwd=cwd, timeout=timeout, env=env,
+            capture_max_chars=capture_max_chars,
+        )
+
+    async def aexec_argv(
+        self,
+        argv: list,
+        *,
+        stdin: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        # Та же сборка argv → строка шелла, что у синхронного `exec_argv`
+        # (общий `argv_to_posix_command`): у песочницы exec идёт через POSIX-шелл.
+        return await self._aexec_impl(
+            argv_to_posix_command(argv, stdin=stdin),
+            cwd=cwd, timeout=timeout, env=env,
+            capture_max_chars=capture_max_chars,
+        )
+
+    async def arun_python(
+        self,
+        code: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+    ) -> ExecResult:
+        return await self._aexec_impl(
+            self._python_command(code), cwd=cwd, timeout=timeout, env=env
+        )
 
     # --- file read (shell / download) ---
     def read(self, path: str) -> str:
