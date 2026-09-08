@@ -6,6 +6,7 @@
 .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-6-brief.md.
 """
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -366,12 +367,16 @@ def _router_ctx(**cfg_overrides):
     return ctx, router
 
 
-def _patch_llm_transport(monkeypatch, response_text: str):
+def _patch_llm_transport(monkeypatch, response_text: str) -> list:
+    captured: list = []
+
     def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
         payload = payload_factory(initial_max_tokens)
+        captured.append(payload)
         return {"choices": [{"message": {"content": response_text}}]}, payload
 
     monkeypatch.setattr(llm_chat_client, "request_chat_completions_with_policy", _fake_policy)
+    return captured
 
 
 def test_command_judge_declares_own_consumer(monkeypatch):
@@ -937,6 +942,7 @@ _HONORED_PER_MODEL = {
     "chat_completions_max_tokens",                  # потолок адаптивного цикла
     "chat_completions_min_response_tokens",         # пол адаптивного цикла
     "completions_url",                              # model_router: адрес модели
+    "claude_prompt_cache",                                 # разметка prompt cache: create_call_data_completions
     "proxy", "request_timeout_sec", "use_retry", "use_ssl",   # resolve_network_params
     "retry_embedded_choice_errors",                 # там же
     "use_max_tokens_param",                         # выбор max_tokens/max_completion_tokens
@@ -982,3 +988,153 @@ def test_fields_declared_per_model_are_actually_read_by_the_funnels():
     text = "\n".join(p.read_text(encoding="utf-8") for p in readers)
     missing = sorted(f for f in _HONORED_PER_MODEL if f'"{f}"' not in text)
     assert not missing, f"заявлены per-model, но не читаются ни одной воронкой: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Prompt cache: разметка только для claude-моделей (спека prompt-cache §4.2)
+# ---------------------------------------------------------------------------
+
+_HISTORY = [
+    {"role": "system", "content": "system prompt text"},
+    {"role": "user", "content": "hi"},
+]
+
+
+def _strip_prompt_cache(data: dict) -> dict:
+    plain = dict(data)
+    plain["messages"] = [
+        {**m, "content": m["content"][0]["text"]}
+        if isinstance(m.get("content"), list) and "cache_control" in m["content"][0]
+        else m
+        for m in plain["messages"]
+    ]
+    return plain
+
+
+def _marked_indexes(data: dict) -> list[int]:
+    return [i for i, m in enumerate(data["messages"])
+            if isinstance(m.get("content"), list) and "cache_control" in m["content"][0]]
+
+
+def test_create_call_data_completions_marks_claude_model_system_and_tail():
+    data = create_call_data_completions(
+        _HISTORY, _state(), resolved=_resolved(model="anthropic/claude-opus-5")
+    )
+    assert "cache_control" not in data
+    assert _marked_indexes(data) == [0, 1]
+    assert data["messages"][1]["content"] == [
+        {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}
+    ]
+    assert data["tool_choice"] == "auto"
+
+
+def test_create_call_data_completions_leaves_non_claude_payload_untouched():
+    data = create_call_data_completions(
+        _HISTORY, _state(), resolved=_resolved(model="google/gemini-2.5-flash")
+    )
+    assert "cache_control" not in json.dumps(data)
+    assert all(isinstance(m["content"], str) for m in data["messages"])
+
+
+def test_create_call_data_completions_claude_payload_equals_plain_after_strip():
+    claude = create_call_data_completions(
+        _HISTORY, _state(), resolved=_resolved(model="anthropic/claude-opus-5")
+    )
+    gemini = create_call_data_completions(
+        _HISTORY, _state(), resolved=_resolved(model="google/gemini-2.5-flash")
+    )
+    stripped = _strip_prompt_cache(claude)
+    stripped["model"] = "google/gemini-2.5-flash"
+    assert stripped == gemini
+
+
+def test_create_call_data_completions_legacy_path_marks_by_effective_model():
+    data = create_call_data_completions(_HISTORY, _state(default_model="anthropic/claude-sonnet-5"))
+    assert _marked_indexes(data) == [0, 1]
+    data = create_call_data_completions(_HISTORY, _state(default_model="deepseek/deepseek-v4"))
+    assert _marked_indexes(data) == []
+
+
+def test_create_call_data_completions_marks_same_for_any_max_tokens():
+    first = create_call_data_completions(
+        _HISTORY, _state(), max_tokens=100, resolved=_resolved(model="anthropic/claude-opus-5")
+    )
+    second = create_call_data_completions(
+        _HISTORY, _state(), max_tokens=50, resolved=_resolved(model="anthropic/claude-opus-5")
+    )
+    assert first["messages"] == second["messages"]
+
+
+def test_prompt_cache_per_model_false_disables_marks_for_claude():
+    data = create_call_data_completions(
+        _HISTORY, _state(),
+        resolved=_resolved(model="anthropic/claude-opus-5", backend_overrides={"claude_prompt_cache": False}),
+    )
+    assert _marked_indexes(data) == []
+
+
+def test_prompt_cache_per_model_true_enables_marks_for_renamed_model():
+    data = create_call_data_completions(
+        _HISTORY, _state(),
+        resolved=_resolved(model="sonnet-prod", backend_overrides={"claude_prompt_cache": True}),
+    )
+    assert _marked_indexes(data) == [0, 1]
+
+
+def test_prompt_cache_global_false_disables_and_per_model_true_overrides():
+    off = create_call_data_completions(
+        _HISTORY, _state(), config_dict={"claude_prompt_cache": False},
+        resolved=_resolved(model="anthropic/claude-opus-5"),
+    )
+    assert _marked_indexes(off) == []
+    on = create_call_data_completions(
+        _HISTORY, _state(), config_dict={"claude_prompt_cache": False},
+        resolved=_resolved(model="anthropic/claude-opus-5", backend_overrides={"claude_prompt_cache": True}),
+    )
+    assert _marked_indexes(on) == [0, 1]
+
+
+def test_chat_completion_kwargs_cannot_inject_top_level_cache_control(caplog):
+    caplog.set_level(logging.DEBUG, logger="gc_core.utils.connect_backend")
+    data = create_call_data_completions(
+        _HISTORY, _state(),
+        config_dict={"chat_completion_kwargs": {"cache_control": {"type": "ephemeral", "ttl": "1h"}}},
+        resolved=_resolved(model="anthropic/claude-opus-5"),
+    )
+    assert "cache_control" not in data
+    assert _marked_indexes(data) == [0, 1]
+    assert "cache_control" in caplog.text
+
+
+def test_chat_completion_kwargs_cache_control_passes_when_marks_are_off():
+    """Пока разметка не наша, поле верхнего уровня — рабочая настройка пользователя."""
+    kwargs = {"chat_completion_kwargs": {"cache_control": {"type": "ephemeral"}}}
+    gemini = create_call_data_completions(
+        _HISTORY, _state(), config_dict=kwargs, resolved=_resolved(model="google/gemini-2.5-flash")
+    )
+    assert gemini["cache_control"] == {"type": "ephemeral"}
+    assert _marked_indexes(gemini) == []
+    claude_off = create_call_data_completions(
+        _HISTORY, _state(), config_dict=kwargs,
+        resolved=_resolved(model="anthropic/claude-opus-5", backend_overrides={"claude_prompt_cache": False}),
+    )
+    assert claude_off["cache_control"] == {"type": "ephemeral"}
+    assert _marked_indexes(claude_off) == []
+
+
+def test_service_funnel_never_marks_prompt_cache(monkeypatch):
+    """Док обещает: служебные вызовы (судьи, суммаризация) не размечаются —
+    даже если консьюмер привязан к claude-модели."""
+    captured = _patch_llm_transport(monkeypatch, "ok")
+    ctx, router = _router_ctx()
+    router.resolve = Mock(return_value=_resolved(model="anthropic/claude-opus-5"))
+    text = llm_chat_client.request_chat_completion_text(
+        ctx=ctx,
+        state=_state(),
+        messages=[{"role": "system", "content": "judge"}, {"role": "user", "content": "x"}],
+        max_tokens=50,
+        consumer="finish_gate",
+    )
+    assert text == "ok"
+    assert captured[0]["model"] == "anthropic/claude-opus-5"
+    assert "cache_control" not in json.dumps(captured[0])
