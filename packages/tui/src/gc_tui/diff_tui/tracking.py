@@ -295,9 +295,16 @@ class TrackingFsBackend:
         cwd: Optional[str] = None,
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
     ) -> Any:
         return self._track_shell_delta(
-            lambda: self._inner.run_python(code, cwd=cwd, timeout=timeout, env=env)
+            lambda: self._inner.run_python(
+                code,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
+            )
         )
 
     def default_cwd(self) -> Optional[str]:

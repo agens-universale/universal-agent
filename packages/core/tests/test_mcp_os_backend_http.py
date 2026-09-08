@@ -33,10 +33,13 @@ class _RecordingSandbox:
         self.answers = list(answers)
         self.codes = []
         self.timeouts = []
+        self.capture_caps = []
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None,
+                   capture_max_chars=None):
         self.codes.append(code)
         self.timeouts.append(timeout)
+        self.capture_caps.append(capture_max_chars)
         payload = self.answers.pop(0)
         if isinstance(payload, _ExecResult):
             return payload
@@ -423,3 +426,35 @@ def test_no_scratch_file_is_written_in_the_container():
     except Exception:
         pass
     assert "/tmp/" not in backend.codes[0]
+
+
+def test_carrier_uses_internal_channel_ceiling_not_tool_trace_cap():
+    """The MCP answer is transport, not a model-facing trace: it must ride the
+    backend's walk ceiling (50M) instead of inheriting the 60k shell cap."""
+    backend = _RecordingSandbox([
+        _ok({"jsonrpc": "2.0", "id": 1, "result": {}}),
+        {"status": 202, "headers": {}, "body": ""},
+        _ok({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
+    ])
+    backend.walk_output_max_chars = 12_345_678
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=10.0)
+    assert backend.capture_caps
+    assert all(cap == 12_345_678 for cap in backend.capture_caps)
+
+
+def test_carrier_falls_back_to_walk_ceiling_when_backend_has_no_attribute():
+    from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
+
+    backend = _RecordingSandbox([
+        _ok({"jsonrpc": "2.0", "id": 1, "result": {}}),
+        {"status": 202, "headers": {}, "body": ""},
+        _ok({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
+    ])
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=10.0)
+    assert all(cap == WALK_OUTPUT_MAX_CHARS for cap in backend.capture_caps)

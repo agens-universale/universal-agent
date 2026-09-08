@@ -307,7 +307,8 @@ class LocalFsBackend(FsBackend):
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
-                   env: Optional[dict] = None) -> ExecResult:
+                   env: Optional[dict] = None,
+                   capture_max_chars: Optional[int] = None) -> ExecResult:
         return _run_bounded_process(
             [sys.executable, "-u", "-"],
             shell=False,
@@ -315,7 +316,7 @@ class LocalFsBackend(FsBackend):
             timeout=timeout,
             env=_sanitize_env(env),
             stdin_text=code,
-            capture_max_chars=self.exec_output_capture_max_chars,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     def default_cwd(self) -> Optional[str]:

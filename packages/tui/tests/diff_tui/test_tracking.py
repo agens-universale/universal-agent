@@ -328,3 +328,13 @@ def test_capability_flags_false_stay_false_through_wrapper():
     assert wrapper.has_grep is False
     assert wrapper.grep_exclude_dir is False
     assert wrapper.grep_include is False
+
+
+def test_tracking_run_python_forwards_capture_max_chars():
+    """MCP carrier passes its own ceiling through run_python; the TUI wrapper
+    must forward it to the inner backend, like exec_argv already does."""
+    inner = LocalFsBackend()
+    inner.exec_output_capture_max_chars = 50
+    wrapped = TrackingFsBackend(inner, local_ctx())
+    res = wrapped.run_python("print('A' * 5000)", timeout=15, capture_max_chars=400)
+    assert 50 < len(res.stdout) <= 400

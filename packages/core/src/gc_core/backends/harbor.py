@@ -190,11 +190,14 @@ class HarborBackend(FsBackend):
         return self._exec(command, capture_max_chars=self.walk_output_max_chars)
 
     def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
-                    env: Optional[dict] = None) -> ExecResult:
-        # Quoted heredoc → code body taken literally. Tool-trace 60k: this is
-        # the model-facing python tool, not an internal FS helper.
+                    env: Optional[dict] = None,
+                    capture_max_chars: Optional[int] = None) -> ExecResult:
+        # Quoted heredoc → code body taken literally. Default cap is the
+        # tool-trace 60k (model-facing python tool); internal channels such as
+        # the MCP carrier pass their own ceiling.
         command = f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
-        return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+        return self.exec(command, cwd=cwd, timeout=timeout, env=env,
+                         capture_max_chars=capture_max_chars)
 
     # --- file read (shell / download) ---
     def read(self, path: str) -> str:
