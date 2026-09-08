@@ -127,13 +127,5 @@ async def arequest_summary_text(
 # судей проглотил бы такую ошибку и молча выключил проверку.
 
 
-def request_auxiliary_completion_text(**kwargs: Any) -> str:
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(arequest_auxiliary_completion_text(**kwargs))
 
 
-def request_summary_text(**kwargs: Any) -> str:
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(arequest_summary_text(**kwargs))

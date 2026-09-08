@@ -4,9 +4,10 @@ from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
 from gc_core.message_format.dialog_history import build_history_text, group_into_turns, message_text_limited, split_turns_into_char_batches, trim_history_to_max_dialogue_chars, trim_original_user_messages_to_max_chars
 from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
-from gc_core.summarize.thread_summarizer import summarize_dialog_via_chat_completions
+from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -81,11 +82,11 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
     _patch_chat_completion(monkeypatch, _never_call)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(),
         state=_state(),
         full_history_messages=[],
-    )
+    ))
     assert result["raw_summary"] == ""
     assert result["last_dialog_steps"] == ""
     assert result["num_batches"] == 0
@@ -104,11 +105,11 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert "single-batch" in result["raw_summary"]
     assert result["num_batches"] == 1
     assert len(calls) == 1
@@ -145,11 +146,11 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
         dialog_steps_offset=0,
         previous_response_id=None,
     )
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=state,
         full_history_messages=history,
-    )
+    ))
     content = apply_summary_state_patch(
         state=state,
         raw_summary=result["raw_summary"],
@@ -204,11 +205,11 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
         user_intent_log=[],
         current_user_intent=[],
     )
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=state,
         full_history_messages=history,
-    )
+    ))
     assert result["num_batches"] == 1
     assert result["trace"]["memory_patch"]["executed"] is True
 
@@ -243,13 +244,13 @@ def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    summarize_dialog_via_chat_completions(
+    run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
         user_intent_log=user_ask_records("closed intent", turn=1),
         current_user_intent=user_ask_records("open intent", turn=2),
-    )
+    ))
 
 
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
@@ -278,11 +279,11 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=4500),
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert result["num_batches"] == 2
     assert "batch-2" in result["raw_summary"]
     assert len(seen_user_prompts) == 2
@@ -469,11 +470,11 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
 
     ctx = _ctx(trigger_chars=4500)
     ctx.config_dict["summary_params"]["max_accumulated_summary_chars"] = 50
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=ctx,
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert "final-summary" in result["raw_summary"]
     assert calls["n"] >= 3
     assert any("compressed-summary" in prompt for prompt in seen_user_prompts)
@@ -546,11 +547,11 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
         {"role": "user", "content": "u1"},
         {"role": "assistant", "content": "a1"},
     ]
-    summarize_dialog_via_chat_completions(
+    run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=types.SimpleNamespace(default_model="m"),
         full_history_messages=history,
-    )
+    ))
     assert captured
     assert all(k.get("max_chars") == 0 for k in captured)
 
@@ -565,12 +566,12 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
         user_intent_log=user_ask_records("older user request", "new user request", turn=1),
-    )
+    ))
     assert result["user_intent_log"] == meta_intent_log(
         "older user request",
         "new user request",
@@ -607,7 +608,7 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
@@ -618,7 +619,7 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
             "fourth user request",
             turn=1,
         ),
-    )
+    ))
 
     assert result["user_intent_log"] == meta_intent_log(
         "first user request",
@@ -638,12 +639,12 @@ def test_summarize_filters_technical_messages_from_user_intent_log(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
         user_intent_log=user_ask_records("real request", turn=1),
-    )
+    ))
     assert result["user_intent_log"] == meta_intent_log("real request")
 
 
@@ -661,11 +662,11 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert "repaired" in result["raw_summary"]
     assert calls["n"] == 2
 
@@ -696,11 +697,11 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(m
         _fake_repair,
     )
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert result["memory_replace_deltas"].goal == "repaired memory body"
     assert result["trace"]["memory_patch"]["replace"]["format_repair_attempted"] is True
     assert result["trace"]["memory_patch"]["replace"]["format_repair_success"] is True

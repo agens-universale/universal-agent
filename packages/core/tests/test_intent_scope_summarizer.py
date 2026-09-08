@@ -4,6 +4,7 @@ import pytest
 
 from gc_core.intent_scope import summarizer
 from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
+from gc_testkit import run_coro
 
 
 def test_auxiliary_llm_completion_kwargs_from_chat_completions_llm():
@@ -54,13 +55,13 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
         current_user_intent=append_user_ask([], "prior line", user_turn_seq=0)
     )
 
-    line = summarizer.summarize_tool_intent_line(
+    line = run_coro(summarizer.asummarize_tool_intent_line(
         ctx=ctx,
         state=state,
         tool_name="turn_ask_human",
         tool_arguments='{"question":"q"}',
         tool_output_raw='{"response":"yes"}',
-    )
+    ))
 
     assert line == "User wants a README section on install."
     assert captured["label"] == "intent_scope:turn_ask_human"
@@ -95,12 +96,12 @@ def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
     state = SimpleNamespace(current_user_intent=[])
 
     assert (
-        summarizer.summarize_tool_intent_line(
+        run_coro(summarizer.asummarize_tool_intent_line(
             ctx=ctx,
             state=state,
             tool_name="turn_ask_human",
             tool_arguments="",
             tool_output_raw='{"ok":true}',
-        )
+        ))
         == ""
     )

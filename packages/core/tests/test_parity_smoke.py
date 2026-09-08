@@ -27,6 +27,7 @@ from parity_harness import (
     parity_config,
     run_thread_dump,
 )
+from gc_testkit import run_coro
 
 #: Сценарий: модель зовёт калькулятор, затем закрывает ход финализатором.
 #: Ход завершается ТОЛЬКО через turn_finish: голый текст ассистента цикл
@@ -65,7 +66,7 @@ def _run_once(tmp_path, monkeypatch, *, mode: str = "sync"):
     if mode == "async":
         answer = asyncio.run(executor.arun([PROMPT], thread_id="t1"))
     else:
-        answer = executor.run([PROMPT], thread_id="t1")
+        answer = run_coro(executor.arun([PROMPT], thread_id="t1"))
     return answer, run_thread_dump(cfg, "cli", "t1"), backend
 
 

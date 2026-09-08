@@ -3,6 +3,7 @@
 чтение — FinishGateGuard.enabled. CLI/server ключ finish_gate_smart не ставят."""
 import pytest
 from types import SimpleNamespace
+from gc_testkit import run_coro
 
 
 def _async_noop(fn):
@@ -222,12 +223,12 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
         auth_connector=None,
     )
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [{"role": "user", "content": "сделай X", "id": "m0"}],
         state,
         ctx,
         get_pending_messages=get_pending,
-    )
+    ))
 
     assert pending_sent["done"] is True
     assert counter_when_pending == [1]          # mid-turn не сбросил счётчик

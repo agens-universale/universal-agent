@@ -256,8 +256,29 @@ Do not implement until they confirm.
         так у двух входов остаётся ровно одна разница — способ чтения, — и
         печать, логи и обработка ошибок не раздваиваются.
         """
-        answer = await _aread_human_response(self._ctx, question)
-        return self._ask_with(question, lambda: answer)
+        # Читаем ВНУТРИ колбэка, а не заранее. Разница несущая: `_ask_with`
+        # ловит `KeyboardInterrupt` и превращает его в конверт «прервано», а
+        # чтение до тела выносило Ctrl+C наружу — прогон падал вместо ответа.
+        # Ответ уже получен к моменту вызова колбэка (`await` выше по стеку
+        # невозможен внутри синхронного тела), поэтому читаем его отложенно
+        # через futures-обёртку: корутина ждётся здесь, а исключение всплывает
+        # в колбэке, то есть внутри try.
+        pending: dict = {}
+
+        try:
+            pending["answer"] = await _aread_human_response(self._ctx, question)
+        except BaseException as exc:          # noqa: BLE001 — переносим ЛЮБОЙ
+            # Любой, а не только KeyboardInterrupt: тело разбирает и EOFError,
+            # и ошибки порта встраивающего, и каждый исход у него свой конверт.
+            # Перехват здесь только ПЕРЕНОСИТ исключение внутрь try тела.
+            pending["error"] = exc
+
+        def _read() -> str:
+            if "error" in pending:
+                raise pending["error"]
+            return pending["answer"]
+
+        return self._ask_with(question, _read)
 
     def _ask_with(self, question: str, read_response: "Any") -> str:
         """Общее тело: проверки, печать, логи, прогресс и разбор ответа.

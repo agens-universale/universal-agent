@@ -1,4 +1,3 @@
-import functools
 import asyncio
 import inspect
 import gc
@@ -75,7 +74,6 @@ from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_noti
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
 
 import logging
-from gc_core.utils.portal import get_portal
 
 _fallback_logger = logging.getLogger(__name__)
 
@@ -1543,31 +1541,11 @@ async def arun_agent(
 # agent_executor, тесты и встраивающий код правок не требуют.
 
 
-@functools.wraps(_arequest_backend_canonical)
-def _request_backend_canonical(*args: Any, **kwargs: Any):
-    return get_portal().run(_arequest_backend_canonical(*args, **kwargs))
 
 
-@functools.wraps(aprocess_user_ask)
-def process_user_ask(*args: Any, **kwargs: Any):
-    return get_portal().run(aprocess_user_ask(*args, **kwargs))
 
 
-@functools.wraps(aprocess_tool_calls)
-def process_tool_calls(*args: Any, **kwargs: Any):
-    return get_portal().run(aprocess_tool_calls(*args, **kwargs))
 
 
-@functools.wraps(aprocess_tool_outputs)
-def process_tool_outputs(*args: Any, **kwargs: Any):
-    return get_portal().run(aprocess_tool_outputs(*args, **kwargs))
 
 
-@functools.wraps(arun_agent)
-def run_agent(*args: Any, **kwargs: Any) -> Union[str, None]:
-    """Синхронный прогон цикла агента.
-
-    Контракт не изменился: вызов блокирует поток до конца хода и возвращает то
-    же, что раньше.
-    """
-    return get_portal().run(arun_agent(*args, **kwargs))

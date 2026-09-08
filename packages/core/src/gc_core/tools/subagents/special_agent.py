@@ -3,10 +3,7 @@ from typing import Any, Dict
 from gc_core.config_modules.chat_completions import subagent_role_max_tokens_from_ctx
 from gc_core.model_router import SUBAGENT_CONSUMER_PREFIX
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
-from gc_core.utils.llm_chat_client import (
-    arequest_chat_completion_text,
-    request_chat_completion_text,
-)
+from gc_core.utils.llm_chat_client import arequest_chat_completion_text
 
 
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
@@ -177,11 +174,6 @@ class SpecialAgent(AbstractSubagent):
         # SubagentRunner._run_internal (тот же create_instance(**extra) для всех субагентов).
         return cls(role, role_description, task, reason, model)
 
-    def finalize_role(self, ctx: Any, state: Any) -> None:
-        """Генерирует системный промпт роли через общую воронку chat/completions
-        (``request_chat_completion_text``) — вызывается runner'ом после сборки
-        child-контекста (нужны ``ctx.model_router``/сетевые параметры для Bearer)."""
-        self.agent_role = self._generate_role(ctx, state)
 
     async def afinalize_role(self, ctx: Any, state: Any) -> None:
         """Нативная форма: LLM-вызов идёт на loop вызывающего, без потока.
@@ -210,9 +202,6 @@ class SpecialAgent(AbstractSubagent):
             "request_label": "subagent_special_agent",
         }
 
-    def _generate_role(self, ctx: Any, state: Any) -> str:
-        """Генерирует системный промпт для роли через LLM-вызов chat/completions."""
-        return request_chat_completion_text(**self._role_request_kwargs(ctx, state))
 
     async def _agenerate_role(self, ctx: Any, state: Any) -> str:
         """Асинхронный двойник :meth:`_generate_role`."""

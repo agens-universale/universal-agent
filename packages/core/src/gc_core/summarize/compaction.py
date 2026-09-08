@@ -390,15 +390,5 @@ async def amaybe_run_summary_compaction(
 # SyncApiInsideEventLoopError и укажет на асинхронный двойник.
 
 
-def run_summary_compaction(*args: Any, **kwargs: Any) -> None:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(arun_summary_compaction(*args, **kwargs))
 
 
-def maybe_run_summary_compaction(*args: Any, **kwargs: Any) -> bool:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(amaybe_run_summary_compaction(*args, **kwargs))

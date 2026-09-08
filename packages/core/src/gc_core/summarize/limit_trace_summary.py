@@ -190,12 +190,3 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     return json.dumps(envelope, ensure_ascii=False)
 
 
-def build_limit_envelope(*args: Any, **kwargs: Any) -> str:
-    """Синхронный двойник. Реализация одна — асинхронная.
-
-    Портал переиспользует общий loop (а с ним и пул соединений httpx), так что
-    поведение совпадает с прямым await из цикла.
-    """
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(abuild_limit_envelope(*args, **kwargs))

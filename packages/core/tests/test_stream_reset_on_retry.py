@@ -1,5 +1,6 @@
 from gc_core import request_backend_policy as policy
 from gc_core.utils.chat_completions_stream import BackendStreamError
+from gc_testkit import run_coro
 
 
 def test_on_delta_reset_between_retried_attempts(monkeypatch):
@@ -24,12 +25,12 @@ def test_on_delta_reset_between_retried_attempts(monkeypatch):
         events.append((kind, text))
 
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", _fake_request)
-    res, _ = policy.request_chat_completions_with_policy(
+    res, _ = run_coro(policy.arequest_chat_completions_with_policy(
         payload_factory=lambda mt: {"max_tokens": mt},
         initial_max_tokens=8192, min_response_tokens=1024,
         headers={}, url="http://x", verify=True, use_retry=False,
         on_delta=_on_delta,
-    )
+    ))
     assert res["choices"][0]["message"]["content"] == "готово"
     # перед финальным контентом был reset второй попытки → «частично» не «слипается»
     assert ("reset", "") in events

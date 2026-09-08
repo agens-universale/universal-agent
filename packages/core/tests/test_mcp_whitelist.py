@@ -152,6 +152,8 @@ def test_cache_invalidated_by_whitelist_change():
 
 def test_apply_tool_blocks_tool_outside_tools_data(monkeypatch):
     """Enforcement: вызов не-whitelisted имени не доходит до MCP-транспорта."""
+    from gc_testkit import run_coro
+
     from gc_core import tools as tools_pkg
     from gc_core.tools.connect_mcp import api as mcp_api
 
@@ -159,6 +161,6 @@ def test_apply_tool_blocks_tool_outside_tools_data(monkeypatch):
     monkeypatch.setattr(
         mcp_api, "call_mcp_tool", lambda *a, **kw: calls.append(a) or "never"
     )
-    out = tools_pkg.apply_tool("mcp_srv_delete", "{}", tools_data_={})
+    out = run_coro(tools_pkg.aapply_tool("mcp_srv_delete", "{}", tools_data_={}))
     assert "mcp_srv_delete" in out
     assert calls == []

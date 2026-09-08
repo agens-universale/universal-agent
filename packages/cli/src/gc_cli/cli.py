@@ -51,7 +51,7 @@ def _ensure_user_skills_dir() -> None:
         pass
 
 
-def run(
+async def arun(
     messages: list[str],
     ctx: RunContext,
     *,
@@ -66,7 +66,7 @@ def run(
     messages: непустой список строк — каждая уходит отдельным user-сообщением
     (один запрос передавайте как ``[текст]``).
     """
-    return AgentExecutor(ctx).run(
+    return await AgentExecutor(ctx).arun(
         messages,
         thread_id=thread_id,
         start_new_thread=start_new_thread,

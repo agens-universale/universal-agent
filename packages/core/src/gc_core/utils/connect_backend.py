@@ -1,4 +1,3 @@
-import functools
 import logging
 import os
 import httpx
@@ -15,15 +14,12 @@ from gc_core.model_router import ResolvedModel
 from gc_core.utils.schema_markers import schema_without_internal_markers
 from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
 from gc_core.utils.http_proxy import resolve_proxies
-from gc_core.utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.async_http import get_async_client
-from gc_core.utils.portal import get_portal
-from gc_core.utils.retry import retry_with_backoff
 from gc_core.utils.stream_assembler import StreamAssembler
 from gc_core.utils.ssl_config import get_backend_client_cert
 from gc_core.usage.context import record_usage
-from gc_core.utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
+from gc_core.utils.chat_completions_stream import OnDelta, BackendStreamError
 from gc_core.utils.backend_errors import HTTP_STATUS_ERRORS, HTTP_TRANSPORT_ERRORS, http_status_code, is_empty_completion
 from gc_core.trace_id import (
     trace_id_from_config,
@@ -369,10 +365,6 @@ async def arequest_backend_responses(
     return response_obj, r_headers
 
 
-@functools.wraps(arequest_backend_responses)
-def request_backend_responses(*args: Any, **kwargs: Any) -> Tuple[Dict, Dict]:
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    return get_portal().run(arequest_backend_responses(*args, **kwargs))
 
 
 @retry_with_backoff_async(
@@ -472,13 +464,6 @@ async def arequest_backend_chat_completions(
     return payload
 
 
-@functools.wraps(arequest_backend_chat_completions)
-def request_backend_chat_completions(*args: Any, **kwargs: Any):
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал.
-
-    Контракт не изменился: та же сигнатура, тот же результат, блокирующий вызов.
-    """
-    return get_portal().run(arequest_backend_chat_completions(*args, **kwargs))
 
 
 def create_call_headers(state, ctx, resolved: Optional[ResolvedModel] = None) -> Dict[str, str]:

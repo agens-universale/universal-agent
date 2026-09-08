@@ -9,6 +9,7 @@ from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, MONEY_FIELD, 
 from gc_core.usage.context import usage_scope
 
 from transport_fakes import install_transport, json_response, sse_body, stream_response
+from gc_testkit import run_coro
 
 
 def _patch_post(monkeypatch, payload: dict):
@@ -26,7 +27,7 @@ def test_chat_completions_capture_with_usage(monkeypatch):
     )
     acc = UsageAccount()
     with usage_scope(acc, CATEGORY_MAIN, "chat_completions"):
-        cb.request_backend_chat_completions({}, {}, url="http://x", use_retry=False)
+        run_coro(cb.arequest_backend_chat_completions({}, {}, url="http://x", use_retry=False))
     assert acc.by_category[CATEGORY_MAIN]["input"] == 120
     assert acc.by_category[CATEGORY_MAIN]["output"] == 30
     assert acc.by_category[CATEGORY_MAIN]["calls"] == 1
@@ -36,7 +37,7 @@ def test_chat_completions_capture_without_usage(monkeypatch):
     _patch_post(monkeypatch, {"choices": [{"message": {"content": "ok"}}]})
     acc = UsageAccount()
     with usage_scope(acc, CATEGORY_SUMMARY, "chat_completions"):
-        cb.request_backend_chat_completions({}, {}, url="http://x", use_retry=False)
+        run_coro(cb.arequest_backend_chat_completions({}, {}, url="http://x", use_retry=False))
     assert acc.by_category[CATEGORY_SUMMARY]["missing_usage_calls"] == 1
     assert acc.by_category[CATEGORY_SUMMARY]["input"] == 0
 
@@ -51,7 +52,7 @@ def test_chat_completions_uncategorized_when_no_scope(monkeypatch, caplog):
     )
     # Вне usage_scope — не падаем, фиксируем предупреждение (детектор дыр).
     with caplog.at_level("WARNING"):
-        cb.request_backend_chat_completions({}, {}, url="http://x", use_retry=False)
+        run_coro(cb.arequest_backend_chat_completions({}, {}, url="http://x", use_retry=False))
     assert any("usage_scope" in r.message for r in caplog.records)
 
 
@@ -89,10 +90,10 @@ def test_streaming_capture_with_usage(monkeypatch):
     install_transport(monkeypatch, stream_response(_STREAM_BODY))
     acc = UsageAccount()
     with usage_scope(acc, CATEGORY_MAIN, "chat_completions"):
-        cb.request_backend_chat_completions(
+        run_coro(cb.arequest_backend_chat_completions(
             {"model": "m", "messages": []}, {}, url="http://x",
             on_delta=lambda k, t: None,
-        )
+        ))
     assert acc.by_category[CATEGORY_MAIN]["input"] == 200
     assert acc.by_category[CATEGORY_MAIN]["output"] == 50
     assert acc.by_category[CATEGORY_MAIN]["calls"] == 1
@@ -103,10 +104,10 @@ def test_streaming_requests_usage_via_stream_options(monkeypatch):
     payload должен его запрашивать, иначе финального usage-чанка не будет."""
     spy = install_transport(monkeypatch, stream_response(_STREAM_BODY))
 
-    cb.request_backend_chat_completions(
+    run_coro(cb.arequest_backend_chat_completions(
         {"model": "m", "messages": []}, {}, url="http://x",
         on_delta=lambda k, t: None,
-    )
+    ))
     assert spy.last_payload.get("stream") is True
     assert spy.last_payload.get("stream_options") == {"include_usage": True}
 

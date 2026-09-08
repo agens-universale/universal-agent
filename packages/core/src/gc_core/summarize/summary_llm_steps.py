@@ -123,15 +123,5 @@ async def arepair_summary_text(
 # SyncApiInsideEventLoopError).
 
 
-def compress_summary_text(*args, **kwargs):
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(acompress_summary_text(*args, **kwargs))
 
 
-def repair_summary_text(*args, **kwargs):
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(arepair_summary_text(*args, **kwargs))

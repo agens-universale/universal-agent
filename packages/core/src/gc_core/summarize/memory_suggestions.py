@@ -150,22 +150,7 @@ async def arequest_memory_deltas_format_repair(
 # эти имена нельзя: портал поднимет SyncApiInsideEventLoopError.
 
 
-def _request_patch(*args: Any, **kwargs: Any) -> MemoryPatchLlmResult:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(_arequest_patch(*args, **kwargs))
 
 
-def request_patch_replace(*args: Any, **kwargs: Any) -> MemoryPatchLlmResult:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(arequest_patch_replace(*args, **kwargs))
 
 
-def request_memory_deltas_format_repair(*args: Any, **kwargs: Any) -> str:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(arequest_memory_deltas_format_repair(*args, **kwargs))

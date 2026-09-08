@@ -3,8 +3,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from gc_core.intent_guard.final_report_consistency import validate_final_report_vs_user_intent
+from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
+from gc_testkit import run_coro
 
 
 def _validator_json(**overrides: object) -> str:
@@ -40,14 +41,14 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_payload_includes_trace_digest_and_no_user_intent_log(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["спроси меня"],
             context_user_messages=["старый"],
             finish_handoff_arguments={"solution_type": "full_solution"},
             trace_digest=self.digest,
-        )
+        ))
         user_content = mock_llm.call_args.kwargs["messages"][1]["content"]
         self.assertIn("trace_digest_text", user_content)
         self.assertIn("<dialog_history>", user_content)
@@ -61,13 +62,13 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             report_ok=False,
             report_mismatches=["solution_type mismatch"],
         )
-        result = validate_final_report_vs_user_intent(
+        result = run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["спроси меня"],
             finish_handoff_arguments={"solution_type": "full_solution"},
             trace_digest=self.digest,
-        )
+        ))
         self.assertFalse(result.ok)
         self.assertEqual(result.action, "fix_report")
         self.assertTrue(result.trace_ok)
@@ -76,13 +77,13 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_broken_llm_json_retries_then_fails_open(self, mock_llm) -> None:
         mock_llm.return_value = "not json"
-        result = validate_final_report_vs_user_intent(
+        result = run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
             finish_handoff_arguments={},
             trace_digest=self.digest,
-        )
+        ))
         self.assertTrue(result.ok)
         self.assertEqual(result.action, "accept")
         self.assertEqual(mock_llm.call_count, 2)
@@ -110,13 +111,13 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
                 trace_gaps=["missing fs_write_file"],
             ),
         ]
-        result = validate_final_report_vs_user_intent(
+        result = run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
             finish_handoff_arguments={},
             trace_digest=self.digest,
-        )
+        ))
         self.assertEqual(mock_llm.call_count, 2)
         self.assertFalse(result.ok)
         self.assertEqual(result.action, "continue_work")
@@ -140,13 +141,13 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_first_prompt_forbids_reasoning_out_loud(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
             finish_handoff_arguments={},
             trace_digest=self.digest,
-        )
+        ))
         user_content = mock_llm.call_args.kwargs["messages"][1]["content"]
         self.assertIn("Do NOT reason out loud", user_content)
         self.assertIn("Return ONLY a single raw JSON object", user_content)
@@ -154,13 +155,13 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_uses_chat_completions_llm_completion_kwargs(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
             finish_handoff_arguments={},
             trace_digest=self.digest,
-        )
+        ))
         self.assertEqual(
             mock_llm.call_args.kwargs["payload_overrides"],
             {"reasoning_effort": "none"},
@@ -169,13 +170,13 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_request_label_finish_gate(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
             finish_handoff_arguments={},
             trace_digest=self.digest,
-        )
+        ))
         self.assertEqual(mock_llm.call_count, 1)
         self.assertEqual(
             mock_llm.call_args.kwargs["request_label"],
@@ -185,25 +186,25 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_payload_agent_kind_main_and_subagent(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=SimpleNamespace(messages=[], parent_state_id=None),
             current_user_requests=["x"],
             finish_handoff_arguments={},
             trace_digest=self.digest,
-        )
+        ))
         main_content = mock_llm.call_args.kwargs["messages"][1]["content"]
         self.assertIn('"agent_kind": "main"', main_content)
 
         mock_llm.reset_mock()
         mock_llm.return_value = _validator_json()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=SimpleNamespace(messages=[], parent_state_id="parent-uuid"),
             current_user_requests=["x"],
             finish_handoff_arguments={},
             trace_digest=self.digest,
-        )
+        ))
         sub_content = mock_llm.call_args.kwargs["messages"][1]["content"]
         self.assertIn('"agent_kind": "subagent"', sub_content)
 
@@ -212,12 +213,12 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
     def test_builds_digest_when_not_passed(self, mock_llm, mock_digest) -> None:
         mock_llm.return_value = _validator_json()
         mock_digest.return_value = self.digest
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
             finish_handoff_arguments={},
-        )
+        ))
         mock_digest.assert_called_once()
 
 

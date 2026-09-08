@@ -9,6 +9,7 @@ import gc_core.agent_executor as ae
 import gc_core.manual_compaction as mc
 from gc_core.thread_store import load_thread_meta
 from gc_core.usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
+from gc_testkit import run_coro
 
 
 def test_cost_survives_meta_write_and_read():
@@ -97,7 +98,7 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     ex._state = None
     ex._stop_pending = False
 
-    assert ex.compact_thread("t1", system="cli") is True
+    assert run_coro(ex.acompact_thread("t1", system="cli")) is True
 
     saved = load_thread_meta(str(tmp_path), "cli", "t1") or {}
     persisted = UsageAccount.from_meta(saved.get("token_usage"))

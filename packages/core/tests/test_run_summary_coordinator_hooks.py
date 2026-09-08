@@ -9,6 +9,7 @@ import pytest
 
 from gc_core import run_summary_coordinator as rsc
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_testkit import run_coro
 
 
 def _minimal_state(*, messages: list):
@@ -75,7 +76,7 @@ def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub)
         pre_backend_trigger_reason="pre_backend",
     )
     current = [u1, u2]
-    coord.pre_backend_compaction_hook(current, "user_ask")
+    run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
 
     assert captured.get("non_system") == [u1, u2]
 
@@ -102,7 +103,7 @@ def test_suffix_mismatch_returns_without_changing_state(monkeypatch, ctx_stub):
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     current = [{"role": "user", "content": "other", "id": "diff"}]
-    coord.pre_backend_compaction_hook(current, "user_ask")
+    run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
 
     assert state.messages == [sys_m, stale]
 
@@ -130,7 +131,7 @@ def test_suffix_match_runs_and_restores_even_if_compaction_raises(monkeypatch, c
 
     current = [u1, u2]
     with pytest.raises(RuntimeError, match="simulated"):
-        coord.pre_backend_compaction_hook(current, "user_ask")
+        run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
 
     assert state.messages == [sys_m, u1, u2]
 
@@ -156,7 +157,7 @@ def test_current_messages_inplace_replaced_after_hook(monkeypatch, ctx_stub):
         pre_backend_trigger_reason="pre_backend",
     )
     current = [u1]
-    coord.pre_backend_compaction_hook(current, "user_ask")
+    run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
     assert current == [u1]
 
 
@@ -184,7 +185,7 @@ def test_no_orphan_outputs_in_current_after_function_call_output(monkeypatch, ct
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    coord.pre_backend_compaction_hook(batch, "function_call_output")
+    run_coro(coord.apre_backend_compaction_hook(batch, "function_call_output"))
 
     out_ids = [m.get("call_id") for m in batch if m.get("type") == "function_call_output"]
     assert out_ids == ["ok"]
@@ -216,7 +217,7 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
         pre_backend_trigger_reason="pre_backend",
     )
     current = [u1]
-    coord.pre_backend_compaction_hook(current, "user_ask")
+    run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
 
     thread.apersist_batch.assert_awaited_once()
     assert thread.apersist_batch.await_args[0][0]
@@ -242,7 +243,7 @@ def test_persist_skipped_when_preserved_batch_empty(monkeypatch, ctx_stub):
     )
     orphan = {"type": "function_call_output", "call_id": "nope", "output": "", "id": "o"}
 
-    coord.pre_backend_compaction_hook([orphan], "function_call_output")
+    run_coro(coord.apre_backend_compaction_hook([orphan], "function_call_output"))
 
     thread.apersist_batch.assert_not_awaited()
 
@@ -268,6 +269,6 @@ def test_function_call_output_clears_current_when_preservation_empty(monkeypatch
         pre_backend_trigger_reason="pre_backend",
     )
     current = [orphan]
-    coord.pre_backend_compaction_hook(current, "function_call_output")
+    run_coro(coord.apre_backend_compaction_hook(current, "function_call_output"))
 
     assert current == []

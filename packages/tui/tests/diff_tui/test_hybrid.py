@@ -19,6 +19,7 @@ from gc_core.execution_workspace import build_execution_workspace
 from gc_core.runtime_notices import clear_runtime_notices
 from gc_testkit.helpers.tool_ctx import local_ctx
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _has_git() -> bool:
@@ -76,7 +77,7 @@ def _cfg(launch_root: Path) -> dict:
     }
 
 
-def _write_tool(launch_root: Path, threads: Path, *, thread_id: str = "t1") -> WriteToFile:
+def _write_tool(launch_root: Path, threads: Path, *, thread_id: str = "t1") :
     cfg = _cfg(launch_root)
     ctx = local_ctx(cfg)
     ctx.is_tui = True
@@ -86,7 +87,7 @@ def _write_tool(launch_root: Path, threads: Path, *, thread_id: str = "t1") -> W
     wrapped = wrap_local_for_tui(ctx.os_backend, ctx)
     ctx.os_backend = wrapped
     ctx.workspace = build_execution_workspace(wrapped, cfg)
-    return WriteToFile(ctx=ctx)
+    return CallableTool(WriteToFile(ctx=ctx))
 
 
 def _svc(root: Path, threads: Path, *, thread_id: str = "t1") -> DiffService:

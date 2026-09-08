@@ -4,10 +4,11 @@ import types
 import unittest
 from unittest.mock import patch
 
-from gc_core.summarize.compaction import run_summary_compaction
+from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.summary_spec import agent_summary_slice_mode, hint_section_tags, slice_summary
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 
 
 class CompactionSummarySliceTest(unittest.TestCase):
@@ -78,12 +79,12 @@ class CompactionSummarySliceTest(unittest.TestCase):
             "gc_core.summarize.compaction.apply_summary_state_patch",
             fake_apply,
         ):
-            run_summary_compaction(
+            run_coro(arun_summary_compaction(
                 ctx=ctx,
                 state=state,
                 trigger_reason="test",
                 is_cli_mode=False,
-            )
+            ))
 
         short = slice_summary(full_xml, "short")
         self.assertEqual(seen["raw_summary"], short)
@@ -155,12 +156,12 @@ class CompactionSummarySliceTest(unittest.TestCase):
             "gc_core.summarize.compaction.apply_summary_state_patch",
             fake_apply,
         ):
-            run_summary_compaction(
+            run_coro(arun_summary_compaction(
                 ctx=ctx,
                 state=state,
                 trigger_reason="test",
                 is_cli_mode=False,
-            )
+            ))
 
         full_slice = slice_summary(full_xml, "full")
         self.assertEqual(seen["raw_summary"], full_slice)

@@ -11,6 +11,7 @@ import pytest
 from gc_core import run_summary_coordinator as rsc
 from gc_core.summarize import summary_logging as summary_logging
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_testkit import run_coro
 
 
 @pytest.fixture()
@@ -88,7 +89,7 @@ def test_pre_run_compact_swallows_exceptions(monkeypatch, coordinator_ctx):
         lambda **_k: (_ for _ in ()).throw(RuntimeError("summary boom")),
     )
 
-    coord.pre_run_compact_if_needed(trigger_reason="pre_run")
+    run_coro(coord.apre_run_compact_if_needed(trigger_reason="pre_run"))
 
 
 async def test_archive_called_on_summary_applied(monkeypatch, coordinator_ctx):

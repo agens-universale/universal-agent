@@ -116,12 +116,11 @@ async def test_no_helper_thread_is_spawned(skill_with_script):
     )
 
 
-def test_sync_entry_still_works(skill_with_script):
-    """Синхронный ``__call__`` сохранён: его зовут apply_tool и тесты."""
-    out = json.loads(_tool(skill_with_script)(skill_id="sleeper", script_name="nap.py"))
+def test_no_sync_entry(skill_with_script):
+    """Синхронного входа у тула нет: форма одна — ``acall``."""
+    tool = _tool(skill_with_script)
 
-    assert out["ok"] is True, out
-    assert "проснулся" in out["result"]["stdout"]
+    assert not callable(tool), "у тула скиллов снова появился синхронный вход"
 
 
 async def test_bad_json_args_return_an_error_not_a_broken_await(skill_with_script):

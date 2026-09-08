@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.utils.logging_module import create_run_logger
+from gc_testkit import run_coro
 
 
 def _make_logger(tmp_path, level="debug"):
@@ -166,7 +167,7 @@ def test_log_path_event_emitted_at_end_of_run(tmp_path):
 
         with patch.object(agent_executor_module, "arun_agent", return_value="ok"):
             executor = agent_executor_module.AgentExecutor(ctx)
-            result = executor.run(["hello"], thread_id="thr1", system="cli", verbose=False)
+            result = run_coro(executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False))
             assert result == "ok"
 
     _flush(logger)

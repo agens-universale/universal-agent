@@ -115,26 +115,20 @@ async def test_sleep_actually_waits():
     "seconds,field",
     [(None, "seconds"), ("нет", "seconds"), (-1, None), (10_000, None)],
 )
-async def test_sleep_validation_matches_the_sync_path(seconds, field):
-    """Проверки аргументов не разъехались между двумя входами."""
+async def test_sleep_validation_rejects_bad_arguments(seconds, field):
+    """Проверки аргументов живут в единственной форме — `acall`."""
     tool = Sleep(ctx=None)
 
-    via_async = json.loads(await tool.acall(seconds=seconds))
-    via_sync = json.loads(tool(seconds=seconds))
+    out = json.loads(await tool.acall(seconds=seconds))
 
-    assert via_async == via_sync
-    assert via_async["ok"] is False
+    assert out["ok"] is False
 
 
-def test_sleep_sync_entry_still_blocks():
-    """Синхронный вход остаётся блокирующим — его зовут apply_tool и тесты."""
+def test_sleep_has_no_sync_entry():
+    """Синхронного входа у тула нет: форма одна, звать его нечем."""
     tool = Sleep(ctx=None)
 
-    started = time.perf_counter()
-    out = json.loads(tool(seconds=0.05))
-
-    assert out["ok"] is True
-    assert time.perf_counter() - started >= 0.04
+    assert not callable(tool), "у Sleep снова появился синхронный вход"
 
 
 # --- turn_ask_human --------------------------------------------------------

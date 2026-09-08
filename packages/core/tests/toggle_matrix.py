@@ -46,6 +46,7 @@ from parity_harness import (  # noqa: E402
     run_thread_dump,
     strip_volatile,
 )
+from gc_testkit import run_coro
 
 #: Сценарий прогона. Тул, финализатор, вердикт судьи — те же три хода, что в
 #: приёмке: короче нельзя (не будет тул-колла), длиннее незачем.
@@ -588,7 +589,7 @@ def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, Any]:
         # СПИСОК сообщений, а не строка: arun принимает messages, и строка
         # разошлась бы на символы — user_intent_log записал бы каждую букву
         # отдельной записью. Так же оборачивает SDK-фасад (AsyncAgent.run).
-        answer = executor.run(["сделай что-нибудь"], thread_id=TID, system=SYS)
+        answer = run_coro(executor.arun(["сделай что-нибудь"], thread_id=TID, system=SYS))
         result["answer"] = strip_volatile(answer) if isinstance(answer, (dict, list)) else answer
         result["error"] = None
     except Exception as exc:                    # noqa: BLE001 — фиксируем ЛЮБОЙ отказ

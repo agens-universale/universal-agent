@@ -27,12 +27,13 @@ def _stub_optional_web_parsers() -> None:
 
 _stub_optional_web_parsers()
 
-from gc_core.processing_responses import process_tool_calls
+from gc_core.processing_responses import aprocess_tool_calls
 from gc_core.persistence.state_repository import StateRepository
 from gc_core.states import State
 from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord, ToolCallOutputsStore
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from gc_testkit import run_coro
 
 
 def _assert_pagination_metadata(payload: dict, *, expect_truncated: bool) -> None:
@@ -369,7 +370,7 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
         return "abcdefghij"
 
     monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
-    out = process_tool_calls(
+    out = run_coro(aprocess_tool_calls(
         messages=[
             {
                 "id": "fc_1",
@@ -382,7 +383,7 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
         state=state,
         ctx=ctx,
         run_agent_func=lambda *_args, **_kwargs: None,
-    )
+    ))
     assert len(out) == 1
     payload = json.loads(out[0]["output"])
     assert payload["type"] == "stored_tool_output"

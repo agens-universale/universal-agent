@@ -3,9 +3,10 @@ import types
 
 from gc_testkit.intent_fixtures import intent_user_ask_texts, meta_intent_log, user_ask_records
 from gc_core.intent_log import append_user_ask, serialize_for_meta
-from gc_core.summarize.compaction import maybe_run_summary_compaction
+from gc_core.summarize.compaction import amaybe_run_summary_compaction
 from gc_core.thread_store import ThreadSession, append_new_thread_messages, save_thread_meta
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 
 TS = "2026-05-30T11:35:08Z"
 
@@ -132,7 +133,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         state.messages = session.get_full_history_messages()
         state.user_intent_log = user_ask_records("first request", "second request", turn=1)
         state.user_turn_seq = 1
-        ran_1 = maybe_run_summary_compaction(
+        ran_1 = run_coro(amaybe_run_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
             summary_trigger_chars=1,
@@ -141,7 +142,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        )
+        ))
         assert ran_1 is True
         assert "<original_user_messages>" not in session.history_messages[0]["content"]
 
@@ -159,7 +160,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             previous_response_id=None,
         )
         state.messages = session.get_full_history_messages()
-        ran_2 = maybe_run_summary_compaction(
+        ran_2 = run_coro(amaybe_run_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
             summary_trigger_chars=1,
@@ -168,7 +169,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        )
+        ))
         assert ran_2 is True
         assert intent_user_ask_texts(state.user_intent_log) == [
             "first request",
@@ -233,13 +234,13 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     ]
     state.user_intent_log = user_ask_records("first request", "second request", turn=1)
     state.user_turn_seq = 1
-    ran = maybe_run_summary_compaction(
+    ran = run_coro(amaybe_run_summary_compaction(
         ctx=_ctx(trigger_chars=1),
         state=state,
         summary_trigger_chars=1,
         trigger_reason="post_step",
         is_cli_mode=False,
-    )
+    ))
     assert ran is True
     assert len(state.messages) == 1
     assert "Summarized context from previous dialogue." in state.messages[0]["content"]
@@ -276,13 +277,13 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     initial_project_data_before = dict(state.initial_project_data)
     call_metadata_before = dict(state.call_metadata)
 
-    ran = maybe_run_summary_compaction(
+    ran = run_coro(amaybe_run_summary_compaction(
         ctx=_ctx(trigger_chars=1),
         state=state,
         summary_trigger_chars=1,
         trigger_reason="post_step",
         is_cli_mode=False,
-    )
+    ))
 
     assert ran is True
     assert len(state.messages) == 2

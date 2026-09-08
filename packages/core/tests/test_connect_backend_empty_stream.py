@@ -10,16 +10,17 @@ from gc_core.utils import connect_backend as cb
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 from transport_fakes import install_transport, sse_body, stream_response
+from gc_testkit import run_coro
 
 
 def test_empty_stream_raises_retriable(monkeypatch):
     install_transport(monkeypatch, stream_response(sse_body()))
 
     with pytest.raises(BackendStreamError) as ei:
-        cb.request_backend_chat_completions(
+        run_coro(cb.arequest_backend_chat_completions(
             {"model": "m", "messages": []}, {}, url="http://x",
             on_delta=lambda kind, text: None,
-        )
+        ))
 
     assert ei.value.status_code is None          # None → is_retriable_backend_error True
     assert "empty" in str(ei.value).lower()
@@ -32,8 +33,8 @@ def test_nonempty_stream_returns_normally(monkeypatch):
         {"choices": [{"index": 0, "delta": {"content": "!"}, "finish_reason": "stop"}]},
     )))
 
-    res = cb.request_backend_chat_completions(
+    res = run_coro(cb.arequest_backend_chat_completions(
         {"model": "m", "messages": []}, {}, url="http://x",
         on_delta=lambda kind, text: None,
-    )
+    ))
     assert res["choices"][0]["message"]["content"] == "hi!"

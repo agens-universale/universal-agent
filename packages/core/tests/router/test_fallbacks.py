@@ -104,13 +104,13 @@ def test_service_consumer_trips_breaker_after_pinned_model_fails(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    out = llm_chat_client.request_chat_completion_text(
+    out = run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_service_state(),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="finish_gate",
-    )
+    ))
 
     assert out == "active answer"
     assert router.breaker.is_open("flash") is True
@@ -140,13 +140,13 @@ def test_service_consumer_open_alias_skips_wasted_transport_call(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    out = llm_chat_client.request_chat_completion_text(
+    out = run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_service_state(),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="finish_gate",
-    )
+    ))
 
     assert out == "active answer"
     assert calls["n"] == 1  # ровно один вызов — активной моделью, пин не трогали
@@ -173,13 +173,13 @@ def test_service_consumer_degrades_and_pushes_fallback_notice(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_service_state(),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="finish_gate",
-    )
+    ))
 
     notices = collect_runtime_notices()
     assert len(notices) == 1
@@ -208,13 +208,13 @@ def test_double_failure_service_consumer_propagates_for_per_consumer_fail_semant
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
     with pytest.raises(httpx.HTTPStatusError):
-        llm_chat_client.request_chat_completion_text(
+        run_coro(llm_chat_client.arequest_chat_completion_text(
             ctx=ctx,
             state=_service_state(),
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=10,
             consumer="finish_gate",
-        )
+        ))
 
     assert router.breaker.is_open("flash") is True
     assert router.breaker.is_open("glm-local") is True
@@ -237,13 +237,13 @@ def test_no_binding_no_degradation_attempt_when_already_active(monkeypatch):
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
     with pytest.raises(httpx.HTTPStatusError):
-        llm_chat_client.request_chat_completion_text(
+        run_coro(llm_chat_client.arequest_chat_completion_text(
             ctx=ctx,
             state=_service_state(),
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=10,
             consumer="summary",
-        )
+        ))
 
     assert calls["n"] == 1  # ни одной лишней (идентичной) попытки
 
@@ -292,9 +292,9 @@ def test_finish_gate_guard_double_failure_is_fail_open_error(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    decision = FinishGateGuard(ctx=ctx, state=state).evaluate_turn_finish(
+    decision = run_coro(FinishGateGuard(ctx=ctx, state=state).aevaluate_turn_finish(
         finish_handoff_arguments="done"
-    )
+    ))
 
     assert decision.outcome == "fail_open_error"
 
@@ -372,7 +372,7 @@ def test_main_trace_trips_breaker_and_raises_honest_error_with_hint(monkeypatch)
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(RuntimeError) as excinfo:
-        pr._request_backend_canonical([], object(), ctx)
+        run_coro(pr._arequest_backend_canonical([], object(), ctx))
 
     message = str(excinfo.value)
     assert "/level" in message
@@ -502,7 +502,7 @@ def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(RuntimeError):
-        pr._request_backend_canonical([], object(), ctx)
+        run_coro(pr._arequest_backend_canonical([], object(), ctx))
 
     assert calls["n"] == 0
 
@@ -527,7 +527,7 @@ def test_main_trace_legacy_breaker_not_tracked_error_unchanged(monkeypatch):
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(httpx.HTTPStatusError):
-        pr._request_backend_canonical([], object(), ctx)
+        run_coro(pr._arequest_backend_canonical([], object(), ctx))
 
     assert router.breaker.snapshot() == {}
 
@@ -555,7 +555,7 @@ def test_main_trace_context_overflow_not_treated_as_unavailable(monkeypatch):
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(ValueError, match="maximum context length"):
-        pr._request_backend_canonical([], object(), ctx)
+        run_coro(pr._arequest_backend_canonical([], object(), ctx))
 
     assert router.breaker.snapshot() == {}
 
@@ -804,7 +804,7 @@ def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(tmp_path
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
     with pytest.raises(RuntimeError):
-        pr._request_backend_canonical([], object(), parent_ctx)
+        run_coro(pr._arequest_backend_canonical([], object(), parent_ctx))
     assert once_calls["n"] == 0
 
 

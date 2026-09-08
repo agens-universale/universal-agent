@@ -10,6 +10,7 @@ import pytest
 
 from gc_core.states import State
 from gc_testkit.paths import module_dir
+from gc_testkit import run_coro
 
 
 def _make_state(max_steps=2):
@@ -44,16 +45,16 @@ def teardown_module(_module) -> None:
 
 
 processing_module = None
-run_agent = None
+arun_agent = None
 
 
 def setup_module(_module) -> None:
-    global processing_module, run_agent
+    global processing_module, arun_agent
     _stub_tools_modules()
     from gc_core import processing_responses as pm
-    from gc_core.processing_responses import run_agent as ra
+    from gc_core.processing_responses import arun_agent as ra
     processing_module = pm
-    run_agent = ra
+    arun_agent = ra
     pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
 
 
@@ -122,11 +123,11 @@ def test_step_limit_sets_terminal_outcome(monkeypatch):
     monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
 
     state = _make_state(max_steps=1)
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(),
-    )
+    ))
 
     _env = json.loads(result)
     assert _env["ok"] is False
@@ -184,7 +185,7 @@ def test_step_limit_still_executes_pending_function_calls(monkeypatch):
         },
     ]
 
-    result = run_agent(pending_batch, state, _make_ctx())
+    result = run_coro(arun_agent(pending_batch, state, _make_ctx()))
 
     assert len(applied) == 2, f"both pending tools must run, got {applied!r}"
     assert applied[0][0] == "session_think"
@@ -237,11 +238,11 @@ def test_step_counts_completed_model_turn_not_half_turn(monkeypatch):
     monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=2)
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(),
-    )
+    ))
 
     _env = json.loads(result)
     assert _env["status"] == "step_limit"
@@ -279,11 +280,11 @@ def test_tool_call_limit_sets_terminal_outcome(monkeypatch):
     monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=10)
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(max_tool_calls=2),
-    )
+    ))
     _env = json.loads(result)
     assert _env["ok"] is False
     assert _env["status"] == "tool_call_limit"
@@ -313,11 +314,11 @@ def test_tool_calls_counter_counts_batch_none_limit(monkeypatch):
     monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=2)
-    run_agent(
+    run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(),
-    )
+    ))
     assert state.tool_calls == 3
     assert state.terminal_outcome == "step_limit"  # лимит вызовов не сработал
 
@@ -331,11 +332,11 @@ def test_token_limit_sets_terminal_outcome_aux_category(monkeypatch):
     monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
 
     state = _make_state(max_steps=5)
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(session_token_limit=10),
-    )
+    ))
     _env = json.loads(result)
     assert _env["ok"] is False
     assert _env["status"] == "token_limit"
@@ -354,11 +355,11 @@ def test_token_limit_ignores_thread_cumulative(monkeypatch):
     state = _make_state(max_steps=1)
     state.usage.add("main", input_tokens=900, output_tokens=100)  # «прошлые» раны треда
     state.run_start_usage_meta = state.usage.to_meta()  # как делает agent_executor
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(session_token_limit=500),
-    )
+    ))
     # ран ничего не потратил → до token_limit не дошли, упёрлись в шаги
     _env = json.loads(result)
     assert _env["status"] == "step_limit"

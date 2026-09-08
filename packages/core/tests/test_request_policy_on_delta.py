@@ -1,4 +1,5 @@
 from gc_core import request_backend_policy as policy
+from gc_testkit import run_coro
 
 
 def test_policy_forwards_on_delta(monkeypatch):
@@ -12,7 +13,7 @@ def test_policy_forwards_on_delta(monkeypatch):
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", fake_req)
 
     sentinel = lambda k, t: None
-    res, payload = policy.request_chat_completions_with_policy(
+    res, payload = run_coro(policy.arequest_chat_completions_with_policy(
         payload_factory=lambda mt: {"model": "m", "max_tokens": mt, "messages": []},
         initial_max_tokens=100,
         min_response_tokens=10,
@@ -21,6 +22,6 @@ def test_policy_forwards_on_delta(monkeypatch):
         verify=True,
         use_retry=False,
         on_delta=sentinel,
-    )
+    ))
     assert seen["on_delta"] is sentinel
     assert res["choices"][0]["message"]["content"] == "ok"

@@ -17,6 +17,7 @@ from gc_core.utils.connect_backend import (
     create_call_data_responses,
     create_call_headers,
 )
+from gc_testkit import run_coro
 
 
 def _canonical_once(processing_module, *args, **kwargs):
@@ -243,13 +244,13 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
         model_router=router,
         logger=None,
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_state(),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="summary",
-    )
+    ))
     assert captured["url"] == "http://alias.local/v1/chat/completions"
     assert captured["payload"]["model"] == "light-model"
     router.resolve.assert_called_once_with("summary")
@@ -330,13 +331,13 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
         model_router=router,
         logger=None,
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_state(),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="summary",
-    )
+    ))
     assert captured["verify"] is False
     assert captured["timeout"] == 42.0
 
@@ -405,25 +406,25 @@ def test_memory_compaction_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "compressed text")
     ctx, router = _router_ctx()
-    res = compaction.compact_text("long text", ctx, _state())
+    res = run_coro(compaction.acompact_text("long text", ctx, _state()))
     assert res.ok is True
     router.resolve.assert_called_once_with("memory_compaction")
 
 
 def test_finish_gate_declares_own_consumer(monkeypatch):
-    from gc_core.intent_guard.final_report_consistency import validate_final_report_vs_user_intent
+    from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
     from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 
     _patch_llm_transport(monkeypatch, _FINISH_GATE_JSON)
     ctx, router = _router_ctx()
     digest = FinishGateTraceDigest(trace_digest_text="<message>...</message>", digest_chars=20)
-    result = validate_final_report_vs_user_intent(
+    result = run_coro(avalidate_final_report_vs_user_intent(
         ctx=ctx,
         state=_state(),
         current_user_requests=["do x"],
         finish_handoff_arguments="done",
         trace_digest=digest,
-    )
+    ))
     assert result.action == "accept"
     router.resolve.assert_called_once_with("finish_gate")
 
@@ -431,12 +432,12 @@ def test_finish_gate_declares_own_consumer(monkeypatch):
 def test_text_answer_judge_declares_own_consumer_not_finish_gate(monkeypatch):
     # спека §5.1: text_answer_judge переиспользует воронку finish_gate, но
     # объявляется СВОИМ id — не должен резолвиться как "finish_gate".
-    from gc_core.intent_guard.text_answer_judge import judge_text_answer
+    from gc_core.intent_guard.text_answer_judge import ajudge_text_answer
 
     _patch_llm_transport(monkeypatch, _FINISH_GATE_JSON)
     ctx, router = _router_ctx()
     state = _state(current_user_intent=[], user_intent_log=[], parent_state_id=None)
-    result = judge_text_answer(ctx, state, "the final answer text")
+    result = run_coro(ajudge_text_answer(ctx, state, "the final answer text"))
     assert result is not None
     assert result.action == "accept"
     router.resolve.assert_called_once_with("text_answer_judge")
@@ -447,13 +448,13 @@ def test_intent_scope_tool_summary_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "a summary line")
     ctx, router = _router_ctx()
-    line = summarizer.summarize_tool_intent_line(
+    line = run_coro(summarizer.asummarize_tool_intent_line(
         ctx=ctx,
         state=_state(current_user_intent=[]),
         tool_name="turn_ask_human",
         tool_arguments="{}",
         tool_output_raw="raw tool output",
-    )
+    ))
     assert line == "a summary line"
     router.resolve.assert_called_once_with("intent_scope")
 
@@ -463,33 +464,33 @@ def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "final answer summary")
     ctx, router = _router_ctx()
-    line = summarizer.summarize_final_answer_line(
+    line = run_coro(summarizer.asummarize_final_answer_line(
         ctx=ctx,
         state=_state(current_user_intent=[]),
         assistant_text="a very long final answer" * 5,
-    )
+    ))
     assert line == "final answer summary"
     router.resolve.assert_called_once_with("intent_scope")
 
 
 def test_summary_compress_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.summary_llm_steps import compress_summary_text
+    from gc_core.summarize.summary_llm_steps import acompress_summary_text
 
     _patch_llm_transport(monkeypatch, "short")
     ctx, router = _router_ctx()
-    out = compress_summary_text(
+    out = run_coro(acompress_summary_text(
         ctx=ctx, state=_state(), summary_text="x" * 100, max_chars=10, max_tokens=50
-    )
+    ))
     assert out == "short"
     router.resolve.assert_called_once_with("summary")
 
 
 def test_summary_repair_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.summary_llm_steps import repair_summary_text
+    from gc_core.summarize.summary_llm_steps import arepair_summary_text
 
     _patch_llm_transport(monkeypatch, "<summary>fixed</summary>")
     ctx, router = _router_ctx()
-    out = repair_summary_text(
+    out = run_coro(arepair_summary_text(
         ctx=ctx,
         state=_state(),
         history_text="history",
@@ -497,29 +498,29 @@ def test_summary_repair_declares_own_consumer(monkeypatch):
         invalid_summary="broken",
         reason="missing tags",
         max_tokens=50,
-    )
+    ))
     assert out == "<summary>fixed</summary>"
     router.resolve.assert_called_once_with("summary")
 
 
 def test_memory_patch_replace_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.memory_suggestions import request_patch_replace
+    from gc_core.summarize.memory_suggestions import arequest_patch_replace
 
     _patch_llm_transport(monkeypatch, "<goal>x</goal>")
     ctx, router = _router_ctx()
-    result = request_patch_replace(
+    result = run_coro(arequest_patch_replace(
         ctx=ctx, state=_state(), history_text="hist", summary_text="sum"
-    )
+    ))
     assert result.raw_response == "<goal>x</goal>"
     router.resolve.assert_called_once_with("summary")
 
 
 def test_memory_deltas_format_repair_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.memory_suggestions import request_memory_deltas_format_repair
+    from gc_core.summarize.memory_suggestions import arequest_memory_deltas_format_repair
 
     _patch_llm_transport(monkeypatch, "<goal>repaired</goal>")
     ctx, router = _router_ctx()
-    out = request_memory_deltas_format_repair(ctx=ctx, state=_state(), raw_output="broken")
+    out = run_coro(arequest_memory_deltas_format_repair(ctx=ctx, state=_state(), raw_output="broken"))
     assert out == "<goal>repaired</goal>"
     router.resolve.assert_called_once_with("summary")
 
@@ -529,7 +530,7 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
     объявления consumer="summary" напрямую на вызове request_summary_text (тот же
     паттерн монкипатча, что и в tests/test_thread_summarizer_incremental.py), не
     поднимая весь LLM-транспорт по-настоящему."""
-    from gc_core.summarize.thread_summarizer import summarize_dialog_via_chat_completions
+    from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
     from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
     captured = {}
@@ -577,11 +578,11 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
         {"type": "message", "role": "assistant", "content": "first assistant"},
     ]
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=ctx,
         state=state,
         full_history_messages=history,
-    )
+    ))
     assert captured["consumer"] == "summary"
     assert "batch summary" in result["raw_summary"]
 
@@ -842,13 +843,13 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
         },
         logger=None,
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_state(default_model="legacy-model"),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="summary",
-    )
+    ))
     assert captured["url"] == "http://legacy.local/v1/chat/completions"
     assert captured["payload"]["model"] == "legacy-model"
 
@@ -930,9 +931,9 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
         model_router=router,
         logger=None,
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx, state=_state(), messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10, consumer="summary")
+        max_tokens=10, consumer="summary"))
 
     assert captured["retry_embedded_choice_errors"] is False
 

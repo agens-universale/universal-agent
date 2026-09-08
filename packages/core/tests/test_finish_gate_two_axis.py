@@ -24,13 +24,14 @@ from gc_core.intent_guard.feedback import build_finish_gate_feedback
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_testkit.paths import module_dir
+from gc_testkit import run_coro
 
 _trace_digest_tests = importlib.import_module("test_intent_guard_trace_digest")
 _ask_human_scenario_messages = _trace_digest_tests._ask_human_scenario_messages
 
 
 processing_module = None
-run_agent = None
+arun_agent = None
 State = None
 
 
@@ -88,14 +89,14 @@ def _stub_tools_modules() -> None:
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_processing_responses():
-    global processing_module, run_agent, State
+    global processing_module, arun_agent, State
     _stub_tools_modules()
     from gc_core import processing_responses as pm
-    from gc_core.processing_responses import run_agent as ra
+    from gc_core.processing_responses import arun_agent as ra
     from gc_core.states import State as St
 
     processing_module = pm
-    run_agent = ra
+    arun_agent = ra
     State = St
     # Заглушка ставится ПРЯМЫМ присваиванием (не monkeypatch), поэтому снимать
     # её обязаны мы сами. Раньше teardown выбрасывал только модули из
@@ -208,9 +209,9 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
         log="спроси меня что нибудь",
     )
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
-    decision = guard.evaluate_turn_finish(
+    decision = run_coro(guard.aevaluate_turn_finish(
         finish_handoff_arguments={"solution_type": "full_solution"},
-    )
+    ))
     assert decision.outcome == "reject"
     lowered = decision.feedback_text.lower()
     assert "задай вопрос" not in lowered
@@ -249,11 +250,11 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
         log="спроси меня что нибудь",
     )
 
-    run_agent(
+    run_coro(arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-    )
+    ))
 
     tool_output = next(
         m
@@ -297,11 +298,11 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
         log="subagent task",
     )
 
-    result = run_agent(
+    result = run_coro(arun_agent(
         [_submit_solution_call(solution_type="direct_answer")],
         state,
         _make_ctx(),
-    )
+    ))
 
     assert result is not None
     assert state.current_user_intent == []
@@ -374,11 +375,11 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
         log="создай report.md",
     )
 
-    run_agent(
+    run_coro(arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-    )
+    ))
 
     tool_output = next(
         m
@@ -428,11 +429,11 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
         log="предыдущий запрос в треде",
     )
 
-    result = run_agent(
+    result = run_coro(arun_agent(
         [_submit_solution_call(solution_type="direct_answer")],
         state,
         _make_ctx(),
-    )
+    ))
 
     assert result is not None
     assert state.current_user_intent == []
@@ -473,7 +474,7 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
         log="спроси меня что нибудь",
     )
 
-    run_agent(
+    run_coro(arun_agent(
         [
             _submit_solution_call(
                 handoff={"artifacts": ["phantom_plan.md"]},
@@ -481,7 +482,7 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
         ],
         state,
         _make_ctx(),
-    )
+    ))
 
     tool_output = next(
         m
@@ -528,7 +529,7 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     )
 
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
-    guard.evaluate_turn_finish(finish_handoff_arguments={"solution_type": "full_solution"})
+    run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={"solution_type": "full_solution"}))
 
     assert intent_user_ask_texts_from_jsonl(captured["current_user_requests"]) == [
         "open task",
@@ -591,7 +592,7 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
         log="предыдущий ход",
     )
 
-    result = run_agent([_submit_solution_call()], state, _make_ctx())
+    result = run_coro(arun_agent([_submit_solution_call()], state, _make_ctx()))
 
     assert validate_calls["n"] == 2
     assert result is not None

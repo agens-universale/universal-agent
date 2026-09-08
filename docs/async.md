@@ -63,23 +63,28 @@ ctx = await acreate_run_context(config, on_stream_delta=my_sink)
 answer = await AgentExecutor(ctx).arun(["привет"], thread_id="t1", system="sdk")
 ```
 
-## Таблица соответствия
+## Как называются точки входа
 
-| Синхронно | Асинхронно |
+Приставка `a` — не «асинхронный вариант», а единственное имя операции.
+Синхронных двойников у них нет: то, что раньше стояло без приставки, снято
+вместе с порталом.
+
+Единственное исключение — `create_run_context`. Это не шим поверх корутины, а
+вторая нативная сборка, и держит её TUI: он строит контекст и гоняет ход
+разными `asyncio.run`, а MCP-сессии привязаны к тому loop'у, на котором
+заведены. Пока это так, разделить сборку нельзя.
+
+| Операция | Имя |
 |---|---|
-| `create_run_context` | `acreate_run_context` |
-| `AgentExecutor.run` | `AgentExecutor.arun` |
-| `processing_responses.run_agent` | `arun_agent` |
-| `tools.apply_tool` | `tools.aapply_tool` |
-| `connect_backend.request_backend_chat_completions` | `arequest_backend_chat_completions` |
-| `request_backend_policy.request_chat_completions_with_policy` | `arequest_chat_completions_with_policy` |
-| `utils.llm_chat_client.request_chat_completion_text` | `arequest_chat_completion_text` |
-| `summarize.llm.request_summary_text` | `arequest_summary_text` |
-| `backends.local.LocalFsBackend.exec` | `aexec` (и `aexec_argv`, `arun_python`) |
-
-Синхронные имена — тонкие обёртки: они гоняют ту же реализацию на приватном
-event loop в фоновом потоке (`gc_core.utils.portal`). Второй реализации нет
-нигде — это и есть причина, по которой поведение двух API совпадает.
+| собрать контекст | `acreate_run_context` |
+| прогнать ход | `AgentExecutor.arun` |
+| цикл шагов | `processing_responses.arun_agent` |
+| позвать тул | `tools.aapply_tool` |
+| запрос к бэкенду | `connect_backend.arequest_backend_chat_completions` |
+| запрос с политикой ретраев | `request_backend_policy.arequest_chat_completions_with_policy` |
+| одиночный chat/completions | `utils.llm_chat_client.arequest_chat_completion_text` |
+| суммаризация | `summarize.llm.arequest_summary_text` |
+| запуск процесса в бэкенде | `aexec`, `aexec_argv`, `arun_python` |
 
 ## Свои тулы и свои бэкенды
 
@@ -137,19 +142,18 @@ Python-класс-тул извне нельзя — `build_tools_data` соби
 Два тула из этого списка не сводятся к «позвать `__call__` инлайн», и оба
 случая стоит знать, прежде чем добавлять `acall` новому туду:
 
-* **`project_memory`** на переполнении ужимает содержимое через LLM, а
-  синхронный `compact_text` — шим через портал. Портал из-под живого loop
-  поднимает `SyncApiInsideEventLoopError`; пока тул уезжал в поток, живого
-  loop под ним не было, и ветка работала. Его `acall` ждёт `acompact_text`
-  нативно.
+* **`project_memory`** на переполнении ужимает содержимое через LLM. Это
+  единственное место в его `append`, которое ходит по сети, и `acall` ждёт
+  `acompact_text` нативно — остальное (чтение, атомарная запись, откат из
+  бэкапа) идёт инлайн.
 * **`skills_run_script`** файлов почти не трогает — он запускает subprocess на
   весь таймаут. У запуска процесса нативная асинхронная форма ЕСТЬ, и его
   `acall` ждёт `backend.aexec_argv` (`asyncio.create_subprocess_exec`). Поток
   с этого пути ушёл совсем, а не переехал на loop.
 
 Общее правило: инлайн уместен там, где операция короткая и нативной
-асинхронной формы у неё нет. Если по пути есть портал или долгое ожидание —
-нужен настоящий async-двойник, а не проброс.
+асинхронной формы у неё нет. Если по пути есть сеть, subprocess или другое
+долгое ожидание — нужен настоящий `await`, а не проброс.
 
 ### Где поток остаётся — и почему
 
@@ -161,23 +165,15 @@ Python-класс-тул извне нельзя — `build_tools_data` соби
 `await ctx.ask_human`.
 
 У `exec_command` и `exec_python` есть тонкость. Оба обёрнуты
-`moderate_command_execution`, а его тело зовёт LLM-судью через портал —
-на живом loop это `SyncApiInsideEventLoopError`, причём на конфиге по
-умолчанию (`enabled=True, mode="ask"`). Поэтому у `dual_wrap` есть флаг
-`body_may_block`: тело этого одного гварда исполняется вне loop, на
+`moderate_command_execution`, а его тело синхронное и зовёт LLM-судью
+(на конфиге по умолчанию — `enabled=True, mode="ask"`). Поэтому у `dual_wrap`
+есть флаг `body_may_block`: тело этого одного гварда исполняется вне loop, на
 собственном потоке через `run_abandonable` (не в общем пуле — иначе оно
-вставало бы в очередь за чужой работой). Сам запуск процесса при этом
-асинхронный: гвард ждёт тул через `await`.
+вставало бы в очередь за чужой работой), а судью ждёт `run_coro_blocking`.
+Сам запуск процесса при этом асинхронный: гвард ждёт тул через `await`.
 
 Оставшиеся в ядре `asyncio.to_thread` — не недоделка, каждый замерен:
 
-* **`tools/__init__.py`, диспетчер** — теперь только чужие синхронные тулы:
-  все двадцать пять встроенных мимо него. Позвать
-  чужую синхронную функцию «нативно асинхронно» нельзя в принципе:
-  `to_thread` — это и есть `loop.run_in_executor(None, …)`, у `anyio` внутри
-  тот же поток, процессы ломают семантику (порт приложения не пиклится),
-  greenlet-патч процессный и запрещён. Выбор двоичный — поток или заморозка
-  loop, и обещание встраивающим выше остаётся в силе.
 * **`backends/async_protocol.SyncExecAdapter`** — не «для гипотетического
   чужого бэкенда»: через него ходит `TrackingFsBackend` (TUI), инлайн там даёт
   1037 мс лага. `HarborBackend` из этого списка **вышел**: под ним всегда был
@@ -217,9 +213,6 @@ Python-класс-тул извне нельзя — `build_tools_data` соби
 они ждут подтверждения человека. Приложению с живым loop это заметно, если
 оно включает `ask` и одновременно обслуживает других — тогда либо `ask` не
 включают, либо агента держат в отдельном процессе.
-
-**Чужих синхронных тулов это не касается.** У них `acall` нет, диспетчер
-по-прежнему уводит их в поток, и обещание выше остаётся в силе.
 
 ## Порты приложения
 
@@ -499,28 +492,22 @@ cd packages/core && python -m examples.async_embed ~/.gc/config.yml \
     "посчитай 2+2" "назови столицу Франции"
 ```
 
-## Что осталось синхронным намеренно
+## Что осталось за пределами loop
 
-- **Компакция контекста и intent-scope.** Подсистема большая, срабатывает раз
-  в N шагов. Из цикла зовётся через `asyncio.to_thread`: loop свободен, а её
-  собственные LLM-вызовы всё равно уходят на портальный loop асинхронно.
-- **TUI** работает через синхронный `run` в своём daemon-потоке. Перевод на
-  нативный asyncio возможен (Textual и так асинхронный), но 324 теста пакета
-  завязаны на потоковую модель раннера — отдельная задача. Спрашивает
-  пользователя TUI через порт `ctx.ask_human`, а не через `input()`: диспетчер
-  уводит синхронные тулы в поток, где потоко-локальная подмена stdin не
-  действует.
+- **TUI** держит агента в своём daemon-потоке и запускает там собственный
+  `asyncio.run`. Поток нужен не ядру, а интерфейсу: не делить loop с Textual.
+  Пользователя TUI спрашивает через порт `ctx.ask_human`, а не через `input()`.
+- **Тело `moderate_command_execution`** — единственный синхронный гвард,
+  исполняется на своём потоке (`run_abandonable`), см. выше.
 
-## HTTP-тулы: две точки входа
+## HTTP-тулы
 
 `exec_fetch_url`, `exec_simple_fetch_url` и `exec_download_file` переведены на
-`httpx` и имеют обе точки входа — ровно ту форму, которую этот документ
-предписывает сторонним тулам выше:
+`httpx`:
 
-- `acall` — сеть через `await`, разбор HTML через `asyncio.to_thread`
-  (trafilatura/lxml — чистый CPU, на большой странице это секунды);
-- `__call__` — синхронный шим поверх `acall`, чтобы `apply_tool` и прямые
-  вызовы из тестов продолжали работать.
+- сеть — через `await`;
+- разбор HTML — через `asyncio.to_thread` (trafilatura/lxml — чистый CPU, на
+  большой странице это секунды).
 
 Прокси эти тулы берут из окружения (`HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`)
 через `resolve_proxies`, а не через `trust_env`: включать `trust_env` нельзя —

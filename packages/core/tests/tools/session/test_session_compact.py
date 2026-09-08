@@ -11,6 +11,7 @@ from gc_core.states import State
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.session import session_compact as session_compact_module
 from gc_core.tools.session.session_compact import SessionCompact, TRIGGER_REASON
+from gc_testkit import run_coro
 
 
 def _state(*, backend_api_mode="chat_completions", messages=None):
@@ -106,7 +107,7 @@ def test_session_compact_reports_compaction_failure(monkeypatch):
 def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
     monkeypatch,
 ):
-    from gc_core.processing_responses import process_tool_calls
+    from gc_core.processing_responses import aprocess_tool_calls
 
     sys_m = {"role": "system", "content": "s", "id": "sys"}
     call = {
@@ -144,12 +145,12 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
         lambda tool_res, **_kw: tool_res,
     )
 
-    out = process_tool_calls(
+    out = run_coro(aprocess_tool_calls(
         batch,
         state,
         ctx=SimpleNamespace(config_dict={}),
         run_agent_func=lambda *_a, **_k: None,
-    )
+    ))
 
     assert len(out) == 1
     assert out[0]["role"] == "user"
@@ -159,7 +160,7 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
 
 
 def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
-    from gc_core.processing_responses import process_tool_calls
+    from gc_core.processing_responses import aprocess_tool_calls
 
     sys_m = {"role": "system", "content": "s", "id": "sys"}
     compact_call = {
@@ -204,12 +205,12 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
         lambda tool_res, **_kw: tool_res,
     )
 
-    out = process_tool_calls(
+    out = run_coro(aprocess_tool_calls(
         batch,
         state,
         ctx=SimpleNamespace(config_dict={}),
         run_agent_func=lambda *_a, **_k: None,
-    )
+    ))
 
     call_ids = [
         m.get("call_id")

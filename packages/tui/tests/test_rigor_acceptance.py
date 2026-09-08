@@ -2,6 +2,7 @@
 позиция, smart-гейт, сессионность пары. Живые UI-гейты — в смоуке (см. план §смоук)."""
 import pytest
 from gc_testkit.paths import REPO
+from gc_testkit import run_coro
 
 
 def _app(tmp_path, yaml_text):
@@ -292,7 +293,7 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
         {"type": "function_call", "name": "run_subagent", "call_id": "c1", "arguments": "{}"},
     ]
     # Ошибка аргументов — output этого вызова, батч не прерывается.
-    outs = pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert [o["call_id"] for o in outs] == ["c1"]
 
     assert state.turn_tool_calls == 1

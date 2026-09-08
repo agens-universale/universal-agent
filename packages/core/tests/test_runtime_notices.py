@@ -12,6 +12,7 @@ from gc_core import request_backend_policy as policy
 from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices, notice_from_llm_failure, push_runtime_notice
 from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import EmbeddedChoiceError
+from gc_testkit import run_coro
 
 
 def _http_error(status: int, body: dict) -> httpx.HTTPStatusError:
@@ -70,7 +71,7 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
 
     with pytest.raises(httpx.HTTPStatusError):
-        policy.request_chat_completions_with_policy(
+        run_coro(policy.arequest_chat_completions_with_policy(
             payload_factory=lambda mt: {"model": "m", "messages": []},
             initial_max_tokens=1400,
             min_response_tokens=1024,
@@ -81,7 +82,7 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
             request_label="intent_guard_finish_gate",
             runtime_notices_enabled=True,
             notice_url="http://test/v1/chat/completions",
-        )
+        ))
 
     notices = collect_runtime_notices()
     assert len(notices) == 1
@@ -97,7 +98,7 @@ def test_policy_skips_notice_when_disabled(monkeypatch):
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
 
     with pytest.raises(httpx.HTTPStatusError):
-        policy.request_chat_completions_with_policy(
+        run_coro(policy.arequest_chat_completions_with_policy(
             payload_factory=lambda mt: {"model": "m", "messages": []},
             initial_max_tokens=1400,
             min_response_tokens=1024,
@@ -106,7 +107,7 @@ def test_policy_skips_notice_when_disabled(monkeypatch):
             verify=False,
             use_retry=False,
             runtime_notices_enabled=False,
-        )
+        ))
 
     assert collect_runtime_notices() == []
 

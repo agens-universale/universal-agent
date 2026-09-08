@@ -107,8 +107,14 @@ def test_coordinator_hooks_are_coroutines():
     assert not not_async, f"объявлены, но не корутинные: {not_async}"
 
 
-def test_sync_twins_survive():
-    """Синхронные имена остаются: на них сидят прямые вызовы и встраивающие."""
+def test_no_sync_twins_left():
+    """Синхронных двойников у координатора НЕТ — форма одна, асинхронная.
+
+    Раньше здесь стоял обратный сторож: двойники держали синхронный публичный
+    API, а тот шёл через портал. Портала нет, обещания синхронного входа нет —
+    и двойник, вернувшись, снова уведёт компакцию в поток на всё время
+    LLM-вызова.
+    """
     from gc_core.run_summary_coordinator import RunSummaryCoordinator
 
     for name in (
@@ -117,10 +123,10 @@ def test_sync_twins_survive():
         "pre_backend_compaction_hook",
         "turn_end_compact_if_needed",
     ):
-        assert hasattr(RunSummaryCoordinator, name), f"пропал синхронный {name}"
-        assert not inspect.iscoroutinefunction(
-            getattr(RunSummaryCoordinator, name)
-        ), f"{name} стал корутинным — сломает синхронных вызывающих"
+        assert not hasattr(RunSummaryCoordinator, name), f"вернулся синхронный {name}"
+        assert inspect.iscoroutinefunction(
+            getattr(RunSummaryCoordinator, "a" + name)
+        ), f"a{name} перестал быть корутинным"
 
 
 def test_loop_receives_coroutine_hooks():

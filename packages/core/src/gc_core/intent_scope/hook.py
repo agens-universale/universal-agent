@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import json
 import logging
 from typing import Any
@@ -201,9 +200,3 @@ async def amaybe_update_intent_scope_from_tool(
     )
 
 
-@functools.wraps(amaybe_update_intent_scope_from_tool)
-def maybe_update_intent_scope_from_tool(*args: Any, **kwargs: Any) -> None:
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(amaybe_update_intent_scope_from_tool(*args, **kwargs))

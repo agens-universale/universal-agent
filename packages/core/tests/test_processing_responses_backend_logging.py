@@ -5,6 +5,7 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 from gc_testkit.paths import module_dir
+from gc_testkit import run_coro
 
 
 def teardown_module(_module) -> None:
@@ -109,11 +110,11 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
 
     with caplog.at_level(logging.ERROR):
         try:
-            processing_module._request_backend_canonical(
+            run_coro(processing_module._arequest_backend_canonical(
                 [{"role": "user", "content": "hello", "id": "m_1"}],
                 state,
                 ctx,
-            )
+            ))
             assert False, "Expected KeyError('choices')"
         except KeyError as exc:
             assert str(exc) == "'choices'"

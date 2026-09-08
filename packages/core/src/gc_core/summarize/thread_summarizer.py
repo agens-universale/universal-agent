@@ -510,8 +510,3 @@ async def asummarize_dialog_via_chat_completions(
 # портал поднимет SyncApiInsideEventLoopError.
 
 
-def summarize_dialog_via_chat_completions(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(asummarize_dialog_via_chat_completions(*args, **kwargs))

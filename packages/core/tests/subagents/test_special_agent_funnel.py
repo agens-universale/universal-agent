@@ -30,6 +30,7 @@ from gc_core.tools.subagents.special_agent import SpecialAgent
 from gc_core.usage.account import CATEGORY_SUBAGENT, UsageAccount
 from gc_core.usage.context import current_usage_context
 from gc_core.utils import llm_chat_client
+from gc_testkit import run_coro
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -101,7 +102,7 @@ def test_special_agent_role_generation_attaches_bearer_header(monkeypatch):
     )
 
     instance = _create_instance()
-    instance.finalize_role(ctx, _state())
+    run_coro(instance.afinalize_role(ctx, _state()))
 
     assert captured["headers"].get("Authorization") == "Bearer secret-token"
     assert instance.agent_role.startswith("generated role")
@@ -142,7 +143,7 @@ def test_special_agent_role_generation_uses_subagent_usage_category(monkeypatch)
     state.usage = UsageAccount()
 
     instance = _create_instance()
-    instance.finalize_role(ctx, state)
+    run_coro(instance.afinalize_role(ctx, state))
 
     assert captured["category"] == CATEGORY_SUBAGENT
 
@@ -170,7 +171,7 @@ def test_special_agent_role_generation_declares_own_consumer(monkeypatch):
     )
 
     instance = _create_instance()
-    instance.finalize_role(ctx, _state())
+    run_coro(instance.afinalize_role(ctx, _state()))
 
     router.resolve.assert_called_once_with("subagent:subagent_special_agent")
 
@@ -200,7 +201,7 @@ def test_special_agent_role_generation_uses_configured_max_tokens_default(monkey
     )
 
     instance = _create_instance()
-    instance.finalize_role(ctx, _state())
+    run_coro(instance.afinalize_role(ctx, _state()))
 
     assert captured["initial_max_tokens"] == DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
 
@@ -231,7 +232,7 @@ def test_special_agent_role_generation_respects_configured_max_tokens_override(m
     )
 
     instance = _create_instance()
-    instance.finalize_role(ctx, _state())
+    run_coro(instance.afinalize_role(ctx, _state()))
 
     assert captured["initial_max_tokens"] == 222
 
@@ -252,7 +253,7 @@ def test_project_memory_compaction_uses_configured_max_tokens_default(monkeypatc
         config_dict={"backend_api_mode": "chat_completions", "model": "test-model"},
         logger=None,
     )
-    res = compaction.compact_text("text", ctx)
+    res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is True
     assert captured["max_tokens"] == DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
 
@@ -277,6 +278,6 @@ def test_project_memory_compaction_respects_configured_max_tokens_override(monke
         },
         logger=None,
     )
-    res = compaction.compact_text("text", ctx)
+    res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is True
     assert captured["max_tokens"] == 111

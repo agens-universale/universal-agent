@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 from typing import Any
 
@@ -67,9 +66,3 @@ async def amaybe_record_final_answer_intent(*, assistant_text: str, state: Any, 
     log_intent_scope_skipped(log, tool_name=_LABEL, reason="empty_summary")
 
 
-@functools.wraps(amaybe_record_final_answer_intent)
-def maybe_record_final_answer_intent(*args: Any, **kwargs: Any) -> None:
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(amaybe_record_final_answer_intent(*args, **kwargs))

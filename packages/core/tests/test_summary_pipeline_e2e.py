@@ -5,9 +5,10 @@ import types
 
 from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_core.intent_log import deserialize_list
-from gc_core.summarize.compaction import maybe_run_summary_compaction
+from gc_core.summarize.compaction import amaybe_run_summary_compaction
 from gc_core.thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -108,7 +109,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             _fake_patch_replace,
         )
 
-        assert maybe_run_summary_compaction(
+        assert run_coro(amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
@@ -117,7 +118,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        )
+        ))
 
         rows_after_first = _read_current_data_rows(tmp_dir, thread_id)
         assert len(rows_after_first) == 1
@@ -139,7 +140,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         )
         prev_offset = int(state.dialog_steps_offset)
         state.messages = session.get_full_history_messages()
-        assert maybe_run_summary_compaction(
+        assert run_coro(amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
@@ -148,7 +149,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        )
+        ))
         assert int(state.dialog_steps_offset) > prev_offset
 
         assert intent_user_ask_texts(state.user_intent_log) == [
@@ -237,7 +238,7 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             _fake_patch_replace,
         )
 
-        assert maybe_run_summary_compaction(
+        assert run_coro(amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
@@ -246,7 +247,7 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        )
+        ))
         # После compaction user log в state не перезаписывается: source of truth
         # для него формируется инкрементально в runtime и здесь сохраняется как есть.
         assert intent_user_ask_texts(state.user_intent_log) == [

@@ -15,6 +15,7 @@ from gc_core.config_modules.backend import BackendConfig
 from gc_core.utils import connect_backend
 
 from transport_fakes import install_transport
+from gc_testkit import run_coro
 
 
 def test_backend_config_proxy_default_none():
@@ -67,13 +68,13 @@ def test_chat_completions_passes_resolved_proxies(monkeypatch):
     monkeypatch.delenv("no_proxy", raising=False)
 
     spy = install_transport(monkeypatch)
-    connect_backend.request_backend_chat_completions(
+    run_coro(connect_backend.arequest_backend_chat_completions(
         {"messages": []},
         {},
         url="https://api.example/v1/chat",
         use_retry=False,
         config_proxy="socks5h://proxy.example:1080",
-    )
+    ))
     assert spy.last_client_kwargs["proxies"] == {
         "http": "socks5h://proxy.example:1080",
         "https": "socks5h://proxy.example:1080",
@@ -90,13 +91,13 @@ def test_chat_completions_falls_back_to_env_proxy(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://env-proxy:8080")
 
     spy = install_transport(monkeypatch)
-    connect_backend.request_backend_chat_completions(
+    run_coro(connect_backend.arequest_backend_chat_completions(
         {"messages": []},
         {},
         url="https://api.example/v1/chat",
         use_retry=False,
         config_proxy=None,
-    )
+    ))
     assert spy.last_client_kwargs["proxies"] == {
         "http": "http://env-proxy:8080",
         "https": "http://env-proxy:8080",
@@ -109,13 +110,13 @@ def test_chat_completions_no_proxy_bypasses_config(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "api.example")
 
     spy = install_transport(monkeypatch)
-    connect_backend.request_backend_chat_completions(
+    run_coro(connect_backend.arequest_backend_chat_completions(
         {"messages": []},
         {},
         url="https://api.example/v1/chat",
         use_retry=False,
         config_proxy="http://proxy.example:8080",
-    )
+    ))
     assert spy.last_client_kwargs["proxies"] is None
 
 

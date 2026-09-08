@@ -166,7 +166,7 @@ def test_tool_append_overflow_triggers_compaction(tmp_path):
         captured["input"] = text
         return CompactionResult(ok=True, text="COMPACTED", error_type=None, error_message=None)
 
-    with patch("gc_core.project_memory.compaction.compact_text", side_effect=fake_compact):
+    with patch("gc_core.project_memory.compaction.acompact_text", side_effect=fake_compact):
         res = json.loads(tool(action="append", content=delta))
 
     # Combined text fed to compaction was existing + \n\n + delta, both stripped.
@@ -189,7 +189,7 @@ def test_tool_append_overflow_compaction_failed(tmp_path):
     failed = CompactionResult(
         ok=False, text="", error_type="backend_error", error_message="boom"
     )
-    with patch("gc_core.project_memory.compaction.compact_text", return_value=failed):
+    with patch("gc_core.project_memory.compaction.acompact_text", return_value=failed):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
@@ -206,7 +206,7 @@ def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
     over = CompactionResult(
         ok=True, text="z" * 10_001, error_type=None, error_message=None
     )
-    with patch("gc_core.project_memory.compaction.compact_text", return_value=over):
+    with patch("gc_core.project_memory.compaction.acompact_text", return_value=over):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
@@ -216,7 +216,7 @@ def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
 
 def test_tool_append_fast_path_does_not_call_compaction(tmp_path):
     tool = _make_tool(tmp_path)
-    with patch("gc_core.project_memory.compaction.compact_text") as mocked:
+    with patch("gc_core.project_memory.compaction.acompact_text") as mocked:
         json.loads(tool(action="append", content="small"))
     assert not mocked.called
 
@@ -240,7 +240,7 @@ def test_tool_write_over_max_chars_refuses_no_compaction(tmp_path):
     tool = _make_tool(tmp_path)
     huge = "x" * (10_001)
 
-    with patch("gc_core.project_memory.compaction.compact_text") as mocked:
+    with patch("gc_core.project_memory.compaction.acompact_text") as mocked:
         res = json.loads(tool(action="write", content=huge))
 
     assert res["ok"] is False

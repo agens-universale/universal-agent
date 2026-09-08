@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from gc_core.utils import llm_chat_client
+from gc_testkit import run_coro
 
 
 def _cfg(**overrides):
@@ -47,14 +48,14 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
         config_dict=_cfg(),
         logger=_Log(),
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx_no_raw,
         state=state,
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         request_label="summary_batch_1",
         consumer="summary",
-    )
+    ))
 
     raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
     assert len(raw_entries) == 0
@@ -63,14 +64,14 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
         config_dict=_cfg(logging_params={"full_log_backend": True}),
         logger=_Log(),
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx_raw,
         state=state,
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         request_label="summary_batch_2",
         consumer="summary",
-    )
+    ))
 
     raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
     assert len(raw_entries) == 1
@@ -94,13 +95,13 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
     )
     state = SimpleNamespace(default_model="test-model")
 
-    result = llm_chat_client.request_chat_completion_text(
+    result = run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=[{"role": "user", "content": "hello"}],
         max_tokens=321,
         consumer="summary",
-    )
+    ))
 
     assert result == "ok"
     assert captured["initial_max_tokens"] == 321
@@ -119,13 +120,13 @@ def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(monkeypa
     )
     state = SimpleNamespace(default_model="test-model")
 
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=[{"role": "user", "content": "hello"}],
         max_tokens=444,
         consumer="summary",
-    )
+    ))
 
     assert captured["payload"]["max_tokens"] == 444
     assert "max_completion_tokens" not in captured["payload"]
@@ -142,12 +143,12 @@ def test_request_chat_completion_text_omits_empty_tools(monkeypatch):
     )
     state = SimpleNamespace(default_model="test-model")
 
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="summary",
-    )
+    ))
 
     assert "tools" not in captured["payload"]

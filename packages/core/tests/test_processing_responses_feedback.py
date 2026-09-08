@@ -9,6 +9,7 @@ from gc_core.states import State
 from types import SimpleNamespace
 from gc_core.utils.convertations import sanitize_messages_for_chat_completions
 from gc_testkit.paths import module_dir
+from gc_testkit import run_coro
 
 
 def teardown_module(_module) -> None:
@@ -158,11 +159,11 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         logger=None,
     )
 
-    processing_module._request_backend_canonical(
+    run_coro(processing_module._arequest_backend_canonical(
         [{"role": "user", "content": "next", "id": "m_1"}],
         state,
         ctx,
-    )
+    ))
 
     payload_messages = captured["messages"]
     assert len(payload_messages) == 2

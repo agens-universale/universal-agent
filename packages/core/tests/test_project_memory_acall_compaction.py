@@ -3,16 +3,11 @@
 Тул ходит в файлы, поэтому он в наборе «инлайн»
 (``test_file_tools_run_inline.py``). Но у него есть вторая, редкая ветка: когда
 запись не влезает в ``max_chars``, содержимое ужимает LLM
-(``project_memory.py``, overflow path → ``compaction.compact_text``).
+(``project_memory.py``, overflow path → ``compaction.acompact_text``).
 
-Синхронный ``compact_text`` — шим через портал
-(``project_memory/compaction.py:100-104``: ``get_portal().run(...)``), а портал
-из-под живого event loop поднимает ``SyncApiInsideEventLoopError``
-(``utils/portal.py``) — намеренно, чтобы не блокировать чужой loop молча.
-
-Пока тул уезжал в поток из пула, живого loop под ним не было и портал работал.
-Инлайн на loop эта же ветка падает. Поэтому ``acall`` не может быть просто
-``self(**kwargs)``: компакцию он обязан ждать НАТИВНО, через ``acompact_text``.
+Эта ветка — единственная в ``append``, которая ходит по сети, и ждать её надо
+``await``'ом. Пока тул уезжал в поток из пула, разница не была видна: там можно
+было крутить свой ``asyncio.run``. Инлайн на loop вызывающего так уже нельзя.
 
 Тест дорог тем, что его отсутствие ничего не подсветило: полный набор ядра
 проходит зелёным и с дефектом — ветку переполнения через ``acall`` не трогает
@@ -52,39 +47,34 @@ def fake_compaction(monkeypatch):
             ok=True, text="ужато", error_type=None, error_message=None
         )
 
-    def _compact(*args, **kwargs):
-        # Настоящий синхронный двойник уходит в портал; здесь важно лишь
-        # зафиксировать, что тул выбрал ЕГО, а не корутину.
-        seen["called"] = "sync-portal"
-        return compaction.CompactionResult(
-            ok=True, text="ужато", error_type=None, error_message=None
-        )
-
     monkeypatch.setattr(compaction, "acompact_text", _acompact)
-    monkeypatch.setattr(compaction, "compact_text", _compact)
     return seen
 
 
 async def test_acall_awaits_compaction_natively(memory_tool, fake_compaction):
-    """Главная проверка: инлайн-вход берёт корутинную компакцию, не портал."""
+    """Главная проверка: инлайн-вход ждёт корутинную компакцию."""
     out = json.loads(
         await memory_tool.acall(action="append", content="ещё один длинный кусок текста")
     )
 
     assert out["ok"] is True, out
-    assert fake_compaction["called"] == "async", (
-        "acall ушёл в синхронный compact_text — это портал, и из-под живого "
-        "loop он поднимет SyncApiInsideEventLoopError"
-    )
+    assert fake_compaction["called"] == "async"
 
 
-async def test_acall_compaction_does_not_raise_on_a_live_loop(memory_tool, monkeypatch):
-    """То же самое, но с НАСТОЯЩИМ порталом на пути — без подмен.
+async def test_acall_compaction_does_not_start_a_nested_loop(memory_tool, monkeypatch):
+    """Компакция не поднимает свой event loop поверх живого.
 
     Именно так дефект выглядит у пользователя: не «выбран не тот двойник», а
-    исключение из середины тула. Сетевой лист заглушаем на уровне
-    ``acompact_text``, чтобы тест не ходил в модель.
+    исключение из середины тула. Зонд — по ``asyncio.run``: он из-под живого
+    loop падает, и если ветка снова начнёт его звать, тест это увидит.
     """
+    import asyncio
+
+    def _forbidden(*_a, **_kw):
+        raise AssertionError("компакция подняла вложенный asyncio.run")
+
+    monkeypatch.setattr(asyncio, "run", _forbidden)
+
     async def _acompact(text, ctx, state=None):
         return compaction.CompactionResult(
             ok=True, text="ужато", error_type=None, error_message=None
@@ -98,14 +88,9 @@ async def test_acall_compaction_does_not_raise_on_a_live_loop(memory_tool, monke
     assert out["ok"] is True, out
 
 
-def test_sync_call_still_uses_the_portal_shim(memory_tool, fake_compaction):
-    """Синхронный вход не тронут: вне loop портал — правильный путь."""
-    out = json.loads(
-        memory_tool(action="append", content="ещё один длинный кусок текста")
-    )
-
-    assert out["ok"] is True, out
-    assert fake_compaction["called"] == "sync-portal"
+def test_tool_has_no_sync_entry(memory_tool):
+    """Синхронного входа нет: форма одна, звать компакцию мимо ``await`` нечем."""
+    assert not callable(memory_tool), "у project_memory вернулся синхронный вход"
 
 
 async def test_acall_read_path_needs_no_compaction(memory_tool, fake_compaction):

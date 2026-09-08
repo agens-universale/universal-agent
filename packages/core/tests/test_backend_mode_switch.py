@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from gc_testkit.paths import module_dir
+from gc_testkit import run_coro
 
 
 def _restore_tools_and_dependents() -> None:
@@ -221,21 +222,21 @@ class BackendModeSwitchTest(unittest.TestCase):
                     executor = agent_executor_module.AgentExecutor(ctx)
                     thread_id = "switch_mode_1"
 
-                    result_step_1 = executor.run(
+                    result_step_1 = run_coro(executor.arun(
                         ["step one"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,
-                    )
+                    ))
                     self.assertIn("step limit", result_step_1)
 
                     config_dict["backend_api_mode"] = "chat_completions"
-                    result_step_2 = executor.run(
+                    result_step_2 = run_coro(executor.arun(
                         ["step two"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,
-                    )
+                    ))
                     self.assertIn("step limit", result_step_2)
 
                     threads_dir = resolve_threads_dir(config_dict)
@@ -249,12 +250,12 @@ class BackendModeSwitchTest(unittest.TestCase):
                     )
 
                     config_dict["backend_api_mode"] = "responses"
-                    result_step_3 = executor.run(
+                    result_step_3 = run_coro(executor.arun(
                         ["step three"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,
-                    )
+                    ))
                     self.assertIn("step limit", result_step_3)
 
                     self.assertEqual(len(responses_calls), 2)

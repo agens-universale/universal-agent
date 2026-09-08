@@ -133,8 +133,3 @@ async def aappend_cycle_stop_tool_outputs_for_batch(
         await await_callback(persist_messages_callback(immediate_persist))
 
 
-def append_cycle_stop_tool_outputs_for_batch(*args, **kwargs):
-    """Синхронный двойник — для вызывающих вне цикла агента и тестов."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(aappend_cycle_stop_tool_outputs_for_batch(*args, **kwargs))

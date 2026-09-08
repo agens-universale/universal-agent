@@ -375,8 +375,3 @@ async def arequest_chat_completion_text(
         raise
 
 
-def request_chat_completion_text(**kwargs: Any) -> str:
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(arequest_chat_completion_text(**kwargs))

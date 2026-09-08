@@ -242,13 +242,3 @@ class FinishGateGuard:
             feedback_preview=feedback_text,
         )
         return decision
-
-
-def _evaluate_turn_finish_sync(self, *args: Any, **kwargs: Any):
-    """Синхронный двойник судьи — для вызывающих вне цикла агента и тестов."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(self.aevaluate_turn_finish(*args, **kwargs))
-
-
-FinishGateGuard.evaluate_turn_finish = _evaluate_turn_finish_sync

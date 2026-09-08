@@ -1,6 +1,7 @@
 """force_compact_once: один безусловный проход сжатия (без проверки порога)."""
 import importlib
 import types
+from gc_testkit import run_coro
 
 
 def _coord(monkeypatch, calls, backend="chat_completions"):
@@ -26,7 +27,7 @@ def _coord(monkeypatch, calls, backend="chat_completions"):
 def test_force_compacts_once_ignoring_threshold(monkeypatch):
     calls = []
     coord = _coord(monkeypatch, calls)
-    coord.force_compact_once()
+    run_coro(coord.aforce_compact_once())
     assert len(calls) == 1
     assert calls[0]["trigger_reason"] == "manual"
     # порог НЕ проверяется — сжали несмотря на пустую/малую историю
@@ -36,5 +37,5 @@ def test_force_compacts_once_ignoring_threshold(monkeypatch):
 def test_force_noop_in_responses_mode(monkeypatch):
     calls = []
     coord = _coord(monkeypatch, calls, backend="responses")
-    coord.force_compact_once()
+    run_coro(coord.aforce_compact_once())
     assert calls == []

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import logging
 import os
 from typing import Any, List
@@ -172,12 +171,6 @@ async def asummarize_tool_intent_line(
     return line
 
 
-@functools.wraps(asummarize_tool_intent_line)
-def summarize_tool_intent_line(*args: Any, **kwargs: Any) -> str:
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(asummarize_tool_intent_line(*args, **kwargs))
 
 
 def build_fallback_aggregated_content(
@@ -257,9 +250,3 @@ async def asummarize_final_answer_line(
     return line
 
 
-@functools.wraps(asummarize_final_answer_line)
-def summarize_final_answer_line(*args: Any, **kwargs: Any) -> str:
-    """Синхронный двойник. Реализация одна — асинхронная; здесь только портал."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(asummarize_final_answer_line(*args, **kwargs))

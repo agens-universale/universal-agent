@@ -3,7 +3,8 @@
 хук живёт только в ветке mode == text_response. judge активен, только если доступна
 машинерия судейства (backend_api_mode == chat_completions) — от тоггла /gate
 (strict_turn_finish_validation, finish-gate) НЕ зависит."""
-from gc_core.intent_guard.text_answer_judge import should_return_text_answer
+from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
+from gc_testkit import run_coro
 
 
 class _S:
@@ -27,7 +28,7 @@ def test_allow_returns_true_without_judge(monkeypatch):
         judged["n"] += 1
         return True
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("allow"), _S(), "привет").accept is True
+    assert run_coro(ashould_return_text_answer(_ctx("allow"), _S(), "привет")).accept is True
     assert judged["n"] == 0                              # allow → судья не зван
 
 
@@ -37,7 +38,7 @@ def test_judge_accept_returns_true(monkeypatch):
     async def _judge(ctx, state, text):
         return SimpleNamespace(action="accept")
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("judge"), _S(), "привет").accept is True
+    assert run_coro(ashould_return_text_answer(_ctx("judge"), _S(), "привет")).accept is True
 
 
 def test_judge_reject_returns_false(monkeypatch):
@@ -49,7 +50,7 @@ def test_judge_reject_returns_false(monkeypatch):
     async def _judge(ctx, state, text):
         return _rej
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("judge"), _S(), "сделай отчёт").accept is False
+    assert run_coro(ashould_return_text_answer(_ctx("judge"), _S(), "сделай отчёт")).accept is False
 
 
 def test_deny_returns_false_without_judge(monkeypatch):
@@ -59,7 +60,7 @@ def test_deny_returns_false_without_judge(monkeypatch):
         judged["n"] += 1
         return True
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("deny"), _S(), "привет").accept is False
+    assert run_coro(ashould_return_text_answer(_ctx("deny"), _S(), "привет")).accept is False
     assert judged["n"] == 0
 
 
@@ -71,7 +72,7 @@ def test_no_key_returns_false_without_judge(monkeypatch):
         judged["n"] += 1
         return True
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx(None), _S(), "привет").accept is False
+    assert run_coro(ashould_return_text_answer(_ctx(None), _S(), "привет")).accept is False
     assert judged["n"] == 0
 
 
@@ -87,7 +88,7 @@ def test_judge_gate_on_calls_judge(monkeypatch):
         judged["n"] += 1
         return SimpleNamespace(action="accept")
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = should_return_text_answer(_ctx("judge", strict=True), _S(), "привет")
+    d = run_coro(ashould_return_text_answer(_ctx("judge", strict=True), _S(), "привет"))
     assert judged["n"] == 1 and d.accept is True
 
 
@@ -102,7 +103,7 @@ def test_judge_gate_off_still_calls_judge(monkeypatch):
         judged["n"] += 1
         return SimpleNamespace(action="accept")
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = should_return_text_answer(_ctx("judge", strict=False), _S(), "привет")
+    d = run_coro(ashould_return_text_answer(_ctx("judge", strict=False), _S(), "привет"))
     assert judged["n"] == 1 and d.accept is True
 
 
@@ -114,7 +115,7 @@ def test_judge_without_chat_completions_is_strict(monkeypatch):
         judged["n"] += 1
         return True
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("judge", backend="responses", strict=True), _S(), "привет").accept is False
+    assert run_coro(ashould_return_text_answer(_ctx("judge", backend="responses", strict=True), _S(), "привет")).accept is False
     assert judged["n"] == 0
 
 
@@ -127,7 +128,7 @@ def test_judge_without_chat_completions_is_strict_even_with_gate_off(monkeypatch
         judged["n"] += 1
         return True
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("judge", backend="responses", strict=False), _S(), "привет").accept is False
+    assert run_coro(ashould_return_text_answer(_ctx("judge", backend="responses", strict=False), _S(), "привет")).accept is False
     assert judged["n"] == 0
 
 
@@ -139,8 +140,8 @@ def test_allow_accepts_without_judge_regardless_of_gate(monkeypatch):
         judged["n"] += 1
         return True
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("allow", strict=True), _S(), "привет").accept is True
-    assert should_return_text_answer(_ctx("allow", strict=False), _S(), "привет").accept is True
+    assert run_coro(ashould_return_text_answer(_ctx("allow", strict=True), _S(), "привет")).accept is True
+    assert run_coro(ashould_return_text_answer(_ctx("allow", strict=False), _S(), "привет")).accept is True
     assert judged["n"] == 0
 
 
@@ -152,10 +153,10 @@ def test_deny_rejects_regardless_of_gate(monkeypatch):
         judged["n"] += 1
         return True
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("deny", strict=True), _S(), "привет").accept is False
-    assert should_return_text_answer(_ctx("deny", strict=False), _S(), "привет").accept is False
-    assert should_return_text_answer(_ctx(None, strict=True), _S(), "привет").accept is False
-    assert should_return_text_answer(_ctx(None, strict=False), _S(), "привет").accept is False
+    assert run_coro(ashould_return_text_answer(_ctx("deny", strict=True), _S(), "привет")).accept is False
+    assert run_coro(ashould_return_text_answer(_ctx("deny", strict=False), _S(), "привет")).accept is False
+    assert run_coro(ashould_return_text_answer(_ctx(None, strict=True), _S(), "привет")).accept is False
+    assert run_coro(ashould_return_text_answer(_ctx(None, strict=False), _S(), "привет")).accept is False
     assert judged["n"] == 0
 
 
@@ -167,8 +168,8 @@ def test_empty_text_bounces_in_all_modes(monkeypatch):
         judged["n"] += 1
         return True
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert should_return_text_answer(_ctx("allow"), _S(), "   ").accept is False
-    assert should_return_text_answer(_ctx("judge"), _S(), "").accept is False
+    assert run_coro(ashould_return_text_answer(_ctx("allow"), _S(), "   ")).accept is False
+    assert run_coro(ashould_return_text_answer(_ctx("judge"), _S(), "")).accept is False
     assert judged["n"] == 0
 
 
@@ -200,7 +201,7 @@ def _text_msgs():
 def test_run_agent_allow_returns_text():
     """allow: текст-ответ становится ответом хода (реальное решение, без мока)."""
     from gc_core import processing_responses as pr
-    result = pr.run_agent(_text_msgs(), _state(), _run_ctx("allow"))
+    result = run_coro(pr.arun_agent(_text_msgs(), _state(), _run_ctx("allow")))
     assert result == "Привет! Чем помочь?"
 
 
@@ -212,5 +213,5 @@ def test_run_agent_judge_accept_returns_text(monkeypatch):
     async def _judge(ctx, state, text):
         return SimpleNamespace(action="accept")
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    result = pr.run_agent(_text_msgs(), _state(), _run_ctx("judge"))
+    result = run_coro(pr.arun_agent(_text_msgs(), _state(), _run_ctx("judge")))
     assert result == "Привет! Чем помочь?"

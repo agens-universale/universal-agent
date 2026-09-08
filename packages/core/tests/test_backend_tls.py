@@ -42,16 +42,17 @@ def test_get_backend_client_cert():
 
 
 from transport_fakes import install_transport, sse_body, stream_response
+from gc_testkit import run_coro
 
 
 def test_chat_completions_passes_verify_and_cert(monkeypatch):
     from gc_core.utils import connect_backend
     spy = install_transport(monkeypatch)
     if True:
-        connect_backend.request_backend_chat_completions(
+        run_coro(connect_backend.arequest_backend_chat_completions(
             {"messages": []}, {}, url="https://b/v1/chat",
             verify="/ca.pem", cert=("/c.crt", "/k.key"), use_retry=False,
-        )
+        ))
     kwargs = spy.last_client_kwargs
     assert kwargs["verify"] == "/ca.pem"
     assert kwargs["cert"] == ("/c.crt", "/k.key")
@@ -65,10 +66,10 @@ def test_responses_passes_verify_and_cert(monkeypatch):
         {"type": "response.completed", "response": {"id": "r1", "output": []}},
         done=False,
     )))
-    connect_backend.request_backend_responses(
+    run_coro(connect_backend.arequest_backend_responses(
         {"messages": []}, {}, url="https://b/v1/responses",
         verify="/ca.pem", cert=("/c.crt", "/k.key"), use_retry=False,
-    )
+    ))
 
     kwargs = spy.last_client_kwargs
     assert kwargs["verify"] == "/ca.pem"
@@ -79,9 +80,9 @@ def test_backend_cert_defaults_none_backward_compat(monkeypatch):
     from gc_core.utils import connect_backend
     spy = install_transport(monkeypatch)
     if True:
-        connect_backend.request_backend_chat_completions(
+        run_coro(connect_backend.arequest_backend_chat_completions(
             {"messages": []}, {}, url="https://b/v1/chat", verify=True, use_retry=False,
-        )
+        ))
     assert spy.last_client_kwargs["cert"] is None
     assert spy.last_client_kwargs["verify"] is True
 

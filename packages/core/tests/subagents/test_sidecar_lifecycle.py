@@ -9,6 +9,7 @@ from unittest.mock import patch
 from gc_core.states import SharedStateData, State
 from gc_core.thread_store import read_subagent_trace
 from gc_core.tools.subagents.sidecar import persist_subagent_trace
+from gc_testkit import run_coro
 
 
 def _async_noop(fn):
@@ -113,7 +114,7 @@ class TestSidecarIntermediateReply:
                 {"tool": "turn_intermediate_reply", "ok": True, "answer": answer}
             ),
         )
-        pr.process_tool_calls(
+        run_coro(pr.aprocess_tool_calls(
             messages=[
                 _fc(
                     "turn_intermediate_reply",
@@ -124,7 +125,7 @@ class TestSidecarIntermediateReply:
             state=_state(),
             ctx=_child_ctx(tmp_path),
             run_agent_func=None,
-        )
+        ))
         rows = read_subagent_trace(str(tmp_path), "cli", "task-1")
         assert [r["kind"] for r in rows] == ["intermediate_reply"]
         assert rows[0]["payload"]["prose"] == answer

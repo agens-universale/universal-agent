@@ -10,6 +10,7 @@ from gc_core.states import SharedStateData, State
 from gc_core.tools import aapply_tool
 from gc_core.tools.subagents.progress import NOOP_SUBAGENT_PROGRESS_SINK, QueueSubagentProgressSink, SubagentProgressEvent, resolve_progress_sink
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit import run_coro
 
 
 def _make_event(**overrides) -> SubagentProgressEvent:
@@ -220,7 +221,7 @@ def _make_runner_config(tmp_path):
 
 class TestProcessToolCallsForwardsCallId:
     def test_apply_tool_receives_call_id(self, monkeypatch):
-        from gc_core.processing_responses import process_tool_calls
+        from gc_core.processing_responses import aprocess_tool_calls
 
         state = _make_state()
         ctx = SimpleNamespace(config_dict={})
@@ -231,7 +232,7 @@ class TestProcessToolCallsForwardsCallId:
             return '{"ok": true}'
 
         monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
-        process_tool_calls(
+        run_coro(aprocess_tool_calls(
             messages=[
                 {
                     "id": "fc_1",
@@ -244,7 +245,7 @@ class TestProcessToolCallsForwardsCallId:
             state=state,
             ctx=ctx,
             run_agent_func=lambda *_a, **_k: None,
-        )
+        ))
         assert seen.get("call_id") == "call_xyz"
 
 

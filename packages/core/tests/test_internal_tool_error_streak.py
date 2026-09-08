@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 from gc_core.states import State
 from gc_core.tools import is_internal_tool_error_output
+from gc_testkit import run_coro
 
 
 def _make_state(**overrides):
@@ -61,7 +62,7 @@ def _call(pr, state, name="fs_read_file"):
     messages = [
         {"type": "function_call", "name": name, "call_id": "c1", "arguments": "{}"},
     ]
-    return pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    return run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
 
 
 def test_detector_recognises_the_envelope():

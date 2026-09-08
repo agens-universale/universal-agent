@@ -100,8 +100,3 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
     )
 
 
-def compact_text(*args: Any, **kwargs: Any) -> CompactionResult:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(acompact_text(*args, **kwargs))

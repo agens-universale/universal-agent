@@ -4,6 +4,7 @@ import pytest
 
 from gc_core.summarize import llm as summary_llm
 from gc_core.utils import llm_chat_client
+from gc_testkit import run_coro
 
 
 def test_auxiliary_llm_completion_kwargs_matches_chat_completions_llm():
@@ -49,13 +50,13 @@ def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
         config_dict={},
         logger=None,
     )
-    out = summary_llm.request_summary_text(
+    out = run_coro(summary_llm.arequest_summary_text(
         ctx=ctx,
         state=SimpleNamespace(default_model="m"),
         messages=[{"role": "user", "content": "hi"}],
         request_label="summary_batch_1",
         consumer="summary",
-    )
+    ))
 
     assert out == "summary ok"
     assert captured["max_tokens"] == 7777
@@ -78,14 +79,14 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
         ),
         config_dict={},
     )
-    summary_llm.request_summary_text(
+    run_coro(summary_llm.arequest_summary_text(
         ctx=ctx,
         state=SimpleNamespace(default_model="m"),
         messages=[{"role": "user", "content": "hi"}],
         request_label="summary_batch_1",
         consumer="summary",
         payload_overrides={"temperature": 0.2},
-    )
+    ))
     assert captured["payload_overrides"] == {
         "reasoning_effort": "none",
         "temperature": 0.2,
@@ -94,13 +95,13 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
 
 def test_request_summary_text_requires_chat_completions_llm_on_ctx():
     with pytest.raises(RuntimeError, match="chat_completions_llm"):
-        summary_llm.request_summary_text(
+        run_coro(summary_llm.arequest_summary_text(
             ctx=SimpleNamespace(config_dict={}),
             state=SimpleNamespace(default_model="m"),
             messages=[{"role": "user", "content": "hi"}],
             request_label="summary_batch_1",
             consumer="summary",
-        )
+        ))
 
 
 def test_apply_payload_overrides_deep_merges_nested_dicts():
@@ -154,7 +155,7 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
         logger=None,
     )
 
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=SimpleNamespace(default_model="test-model"),
         messages=[{"role": "user", "content": "hello"}],
@@ -165,7 +166,7 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
             "separate_reasoning": False,
             "chat_template_kwargs": {"enable_thinking": False},
         },
-    )
+    ))
 
     payload = captured["payload"]
     assert payload["reasoning_effort"] == "none"

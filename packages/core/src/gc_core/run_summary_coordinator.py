@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextlib
 import gc
-import inspect
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
@@ -23,7 +22,7 @@ from gc_core.summarize.summary_logging import (
     log_pre_run_max_rounds,
 )
 from gc_core.message_policy.user_message_policy import extract_real_user_message_text
-from gc_core.thread_store import load_thread_meta, make_message_key, patch_runtime_flag
+from gc_core.thread_store import make_message_key
 
 if TYPE_CHECKING:
     from gc_core.run_context import RunContext
@@ -414,11 +413,6 @@ class RunSummaryCoordinator:
                 summarize_exc,
             )
 
-    def pre_run_compact_if_needed(self, *args: Any, **kwargs: Any) -> None:
-        """Синхронный двойник. Реализация одна — асинхронная."""
-        from gc_core.utils.portal import get_portal
-
-        return get_portal().run(self.apre_run_compact_if_needed(*args, **kwargs))
 
     async def aforce_compact_once(self, *, trigger_reason: str = "manual") -> None:
         """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
@@ -441,11 +435,6 @@ class RunSummaryCoordinator:
         # C1: старая история отцеплена компакцией — собираем циклический мусор.
         gc.collect()
 
-    def force_compact_once(self, *args: Any, **kwargs: Any) -> None:
-        """Синхронный двойник. Реализация одна — асинхронная."""
-        from gc_core.utils.portal import get_portal
-
-        return get_portal().run(self.aforce_compact_once(*args, **kwargs))
 
     async def apre_backend_compaction_hook(
         self,
@@ -514,11 +503,6 @@ class RunSummaryCoordinator:
         # C1: старый хвост current_messages отцеплен — собираем циклический мусор.
         gc.collect()
 
-    def pre_backend_compaction_hook(self, *args: Any, **kwargs: Any) -> None:
-        """Синхронный двойник. Реализация одна — асинхронная."""
-        from gc_core.utils.portal import get_portal
-
-        return get_portal().run(self.apre_backend_compaction_hook(*args, **kwargs))
 
     async def aturn_end_compact_if_needed(self) -> None:
         """Compaction после accept ``turn_finish`` (turn-end trigger).
@@ -563,8 +547,3 @@ class RunSummaryCoordinator:
                 summarize_exc,
             )
 
-    def turn_end_compact_if_needed(self, *args: Any, **kwargs: Any) -> None:
-        """Синхронный двойник. Реализация одна — асинхронная."""
-        from gc_core.utils.portal import get_portal
-
-        return get_portal().run(self.aturn_end_compact_if_needed(*args, **kwargs))

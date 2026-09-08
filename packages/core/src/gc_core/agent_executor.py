@@ -6,7 +6,6 @@ State создаётся заново при каждом run(). Возвращ�
 нельзя мутировать снаружи; изменения — только через add_message() или под get_lock().
 """
 
-import functools
 import gc
 import threading
 from copy import copy as _shallow_copy_msg
@@ -34,7 +33,7 @@ from gc_core.message_policy.user_message_policy import extract_real_user_message
 from gc_core.states import State, SharedStateData
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_report, build_run_usage_dict
-from gc_core.thread_store import ThreadSession, make_message_key, reset_thread_files, resolve_threads_dir, update_runtime_meta
+from gc_core.thread_store import ThreadSession, make_message_key, resolve_threads_dir
 from gc_core.trace_id import trace_id_from_config
 from gc_core.tools.subagents.active_scope import try_enqueue_user_message
 from gc_core.tools.subagents.selection import subagents_enabled
@@ -682,17 +681,6 @@ class AgentExecutor:
             )
         return response
 
-    @functools.wraps(arun)
-    def run(self, *args: Any, **kwargs: Any) -> Any:
-        """Синхронный прогон агента.
-
-        Контракт не изменился: вызов блокирует поток до конца хода и
-        возвращает то же, что раньше. Реализация одна — ``arun``; здесь только
-        портал.
-        """
-        from gc_core.utils.portal import get_portal
-
-        return get_portal().run(self.arun(*args, **kwargs))
 
     def add_message(self, message: dict) -> None:
         """Потокобезопасно добавляет сообщение в очередь активного скоупа.
@@ -808,11 +796,11 @@ class AgentExecutor:
             system=system
         )
 
-    def compact_thread(self, thread_id: str, system: str | None = None) -> bool:
+    async def acompact_thread(self, thread_id: str, system: str | None = None) -> bool:
         """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
         (оркестрация суммаризации, вне run-loop)."""
-        from gc_core.manual_compaction import compact_thread as _compact_thread
-        return _compact_thread(
+        from gc_core.manual_compaction import acompact_thread as _acompact_thread
+        return await _acompact_thread(
             ctx=self._ctx,
             _lock=self._lock,
             self_state=self._state,

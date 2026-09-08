@@ -1,8 +1,9 @@
 """TUI adaptive bounce: судья текст-ответа переиспользует finish-gate-судью."""
 from types import SimpleNamespace
 from gc_core.intent_guard import text_answer_judge as taj
-from gc_core.intent_guard.text_answer_judge import should_return_text_answer, TextAnswerDecision
+from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer, TextAnswerDecision
 from gc_core.intent_guard.validation_result import ValidationResult
+from gc_testkit import run_coro
 
 
 def _ctx(mode=None, backend="chat_completions"):
@@ -20,17 +21,17 @@ class _S:
 # ── новые тесты (Step 1) ──────────────────────────────────────────────────────
 
 def test_empty_text_rejects_any_mode():
-    d = should_return_text_answer(_ctx("allow"), object(), "   ")
+    d = run_coro(ashould_return_text_answer(_ctx("allow"), object(), "   "))
     assert d == TextAnswerDecision(False, None)
 
 
 def test_allow_accepts_without_judge():
-    d = should_return_text_answer(_ctx("allow"), object(), "hi")
+    d = run_coro(ashould_return_text_answer(_ctx("allow"), object(), "hi"))
     assert d.accept is True and d.reject_feedback is None
 
 
 def test_deny_rejects_generic():
-    d = should_return_text_answer(_ctx("deny"), object(), "hi")
+    d = run_coro(ashould_return_text_answer(_ctx("deny"), object(), "hi"))
     assert d.accept is False and d.reject_feedback is None
 
 
@@ -38,7 +39,7 @@ def test_judge_accept(monkeypatch):
     async def _judge(*a, **k):
         return SimpleNamespace(action="accept")
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = should_return_text_answer(_ctx("judge"), object(), "answer")
+    d = run_coro(ashould_return_text_answer(_ctx("judge"), object(), "answer"))
     assert d.accept is True and d.reject_feedback is None
 
 
@@ -50,7 +51,7 @@ def test_judge_reject_carries_feedback(monkeypatch):
     async def _judge(*a, **k):
         return res
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = should_return_text_answer(_ctx("judge"), object(), "answer")
+    d = run_coro(ashould_return_text_answer(_ctx("judge"), object(), "answer"))
     assert d.accept is False
     assert d.reject_feedback is not None
     assert "need to run tests" in d.reject_feedback         # причина судьи присутствует
@@ -66,7 +67,7 @@ def test_judge_reject_is_question_omits_tool_hint(monkeypatch):
     async def _judge(*a, **k):
         return res
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = should_return_text_answer(_ctx("judge"), object(), "1 или 2?")
+    d = run_coro(ashould_return_text_answer(_ctx("judge"), object(), "1 или 2?"))
     assert d.accept is False
     assert d.reject_feedback is not None
     assert "need user choice" in d.reject_feedback
@@ -78,7 +79,7 @@ def test_judge_error_falls_back_to_generic(monkeypatch):
     async def _judge(*a, **k):
         return None
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = should_return_text_answer(_ctx("judge"), object(), "answer")
+    d = run_coro(ashould_return_text_answer(_ctx("judge"), object(), "answer"))
     assert d.accept is False and d.reject_feedback is None
 
 
@@ -88,7 +89,7 @@ def test_judge_not_available_without_chat_completions_backend(monkeypatch):
     async def _judge(*a, **k):
         called["n"] += 1
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = should_return_text_answer(_ctx("judge", backend="responses"), object(), "answer")
+    d = run_coro(ashould_return_text_answer(_ctx("judge", backend="responses"), object(), "answer"))
     assert d.accept is False and called["n"] == 0
 
 
@@ -98,7 +99,7 @@ def test_judge_accepts_when_action_accept(monkeypatch):
     async def _validate(**kw):
         return type("R", (), {"action": "accept"})()
     monkeypatch.setattr(taj, "avalidate_final_report_vs_user_intent", _validate)
-    result = taj.judge_text_answer(_ctx(), _S(), "Привет! Чем помочь?")
+    result = run_coro(taj.ajudge_text_answer(_ctx(), _S(), "Привет! Чем помочь?"))
     assert getattr(result, "action", None) == "accept"
 
 
@@ -106,7 +107,7 @@ def test_judge_bounces_when_action_continue(monkeypatch):
     async def _validate(**kw):
         return type("R", (), {"action": "continue_work"})()
     monkeypatch.setattr(taj, "avalidate_final_report_vs_user_intent", _validate)
-    result = taj.judge_text_answer(_ctx(), _S(), "Сейчас сделаю...")
+    result = run_coro(taj.ajudge_text_answer(_ctx(), _S(), "Сейчас сделаю..."))
     assert getattr(result, "action", None) == "continue_work"
 
 
@@ -114,7 +115,7 @@ def test_judge_bounces_on_validator_error(monkeypatch):
     async def boom(**kw):
         raise RuntimeError("validator down")
     monkeypatch.setattr(taj, "avalidate_final_report_vs_user_intent", boom)
-    result = taj.judge_text_answer(_ctx(), _S(), "что-то")
+    result = run_coro(taj.ajudge_text_answer(_ctx(), _S(), "что-то"))
     assert result is None   # строгий fallback → None
 
 
@@ -125,5 +126,5 @@ def test_judge_passes_text_as_finish_arguments(monkeypatch):
         seen.update(kw)
         return type("R", (), {"action": "accept"})()
     monkeypatch.setattr(taj, "avalidate_final_report_vs_user_intent", cap)
-    taj.judge_text_answer(_ctx(), _S(), "мой текст-ответ")
+    run_coro(taj.ajudge_text_answer(_ctx(), _S(), "мой текст-ответ"))
     assert seen["finish_handoff_arguments"] == "мой текст-ответ"

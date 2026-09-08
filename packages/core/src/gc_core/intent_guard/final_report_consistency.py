@@ -247,14 +247,3 @@ async def avalidate_final_report_vs_user_intent(
     return fail_open_validation_result()
 
 
-def validate_final_report_vs_user_intent(**kwargs: Any) -> ValidationResult:
-    """Синхронный двойник судьи finish-gate.
-
-    Внутри асинхронного цикла звать нельзя — портал поднимет
-    SyncApiInsideEventLoopError. И это правильно: fail-open вокруг судьи
-    проглотил бы такую ошибку и молча выключил проверку (поймано гейтом
-    паритета при переезде цикла).
-    """
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(avalidate_final_report_vs_user_intent(**kwargs))

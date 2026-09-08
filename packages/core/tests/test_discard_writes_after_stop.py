@@ -1,5 +1,6 @@
 """State.discard_writes_after_stop — флаг для guard перед persist после стопа."""
 from gc_core.states import State
+from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -107,9 +108,9 @@ def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
     monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
     ctx = create_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    ex.run([{"role": "user", "content": "x"}],
+    run_coro(ex.arun([{"role": "user", "content": "x"}],
            thread_id="t", start_new_thread=True, system="cli",
-           discard_writes_after_stop=True)
+           discard_writes_after_stop=True))
     assert ex._state.discard_writes_after_stop is True
 
 
@@ -126,6 +127,6 @@ def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
     ctx = create_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    ex.run([{"role": "user", "content": "x"}],
-           thread_id="t", start_new_thread=True, system="cli")
+    run_coro(ex.arun([{"role": "user", "content": "x"}],
+           thread_id="t", start_new_thread=True, system="cli"))
     assert ex._state.discard_writes_after_stop is False

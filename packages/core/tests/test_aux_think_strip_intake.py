@@ -16,6 +16,7 @@ from gc_core.security import command_moderation
 from gc_core.summarize import llm as summary_llm
 from gc_core.summarize.summary_validation import merge_repaired_summary
 from gc_core.summarize.working_memory_gateway import parse_memory_deltas
+from gc_testkit import run_coro
 
 _DIRTY_EXTRA = (
     "<think>t</think><redacted_thinking>r</redacted_thinking>"
@@ -50,13 +51,13 @@ def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
             completion_kwargs={},
         ),
     )
-    out = summary_llm.request_summary_text(
+    out = run_coro(summary_llm.arequest_summary_text(
         ctx=ctx,
         state=SimpleNamespace(),
         messages=[{"role": "user", "content": "hi"}],
         request_label="intent_scope:exec_command",
         consumer="intent_scope",
-    )
+    ))
     assert out == "one-line summary"
     assert logged["output_text"] == "<think>r</think>one-line summary"
     assert logged["label"] == "intent_scope:exec_command"
@@ -131,13 +132,13 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
 
     monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_summary)
     assert (
-        summary_llm.request_summary_text(
+        run_coro(summary_llm.arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=[{"role": "user", "content": "hi"}],
             request_label="intent_scope:exec_command",
             consumer="intent_scope",
-        )
+        ))
         == "one-line summary"
     )
 
@@ -145,7 +146,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         return _DIRTY_EXTRA + "compressed"
 
     monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_compressed)
-    compact_res = compaction.compact_text("long memory", ctx, state)
+    compact_res = run_coro(compaction.acompact_text("long memory", ctx, state))
     assert compact_res.ok is True
     assert compact_res.text == "compressed"
 
@@ -163,7 +164,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         return _DIRTY_EXTRA + json.dumps(finish_payload)
 
     monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_finish)
-    projected_finish = summary_llm.request_auxiliary_completion_text(
+    projected_finish = run_coro(summary_llm.arequest_auxiliary_completion_text(
         ctx=ctx,
         state=state,
         messages=[{"role": "user", "content": "validate"}],
@@ -171,7 +172,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         request_label="intent_guard_finish_gate",
         consumer="finish_gate",
         log_prompt=False,
-    )
+    ))
     assert projected_finish == json.dumps(finish_payload)
     parsed_finish = parse_validator_response(projected_finish)
     assert parsed_finish is not None

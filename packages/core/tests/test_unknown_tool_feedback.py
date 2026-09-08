@@ -8,6 +8,7 @@ import pytest
 
 from gc_core.states import State
 from gc_core.tools import aapply_tool, is_unknown_tool_output
+from gc_testkit import run_coro
 
 
 def _async_noop(fn):
@@ -114,16 +115,16 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
     messages = [
         {"type": "function_call", "name": "phase1", "call_id": "c1", "arguments": "{}"},
     ]
-    outs = pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert len(outs) == 1
     assert state.last_unknown_tool_name == "phase1"
     assert state.unknown_tool_repeat_count == 1
     assert state.last_batch_unknown_tool_count == 1
 
-    pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert state.unknown_tool_repeat_count == 2
 
-    pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert state.unknown_tool_repeat_count == 3
 
 
@@ -159,7 +160,7 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
         {"type": "function_call", "name": "phase1", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "session_think", "call_id": "c2", "arguments": "{}"},
     ]
-    pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert state.last_unknown_tool_name is None
     assert state.unknown_tool_repeat_count == 0
     assert state.last_batch_unknown_tool_count == 1
@@ -228,7 +229,7 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
             "arguments": "{}",
         }
     ]
-    result = pr.run_agent(messages, state, ctx)
+    result = run_coro(pr.arun_agent(messages, state, ctx))
     assert state.terminal_outcome == "tool_errors"
     assert "phase1" in result
     assert "repeated unknown tool" in result.lower()
@@ -296,7 +297,7 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
             "arguments": "{}",
         }
     ]
-    result = pr.run_agent(messages, state, ctx)
+    result = run_coro(pr.arun_agent(messages, state, ctx))
     assert state.terminal_outcome == "tool_errors"
     assert "tool" in result.lower()
     # Если бы сбрасывали cnt в 0 после каждого unknown-батча — дошли бы до max_steps.

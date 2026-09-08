@@ -1,5 +1,6 @@
 """run_agent при переполнении контекста: force-компакция + повтор, не краш."""
 from gc_core import processing_responses as pr
+from gc_testkit import run_coro
 
 
 def _state():
@@ -34,12 +35,12 @@ def test_context_overflow_triggers_compaction_and_retries(monkeypatch):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [{"role": "user", "content": "сделай", "id": "u1"}],
         _state(),
         _run_ctx(),
         force_compact_hook=lambda: calls.__setitem__("compact", calls["compact"] + 1),
-    )
+    ))
 
     assert result == "готово"          # прогон восстановился, не краш
     assert calls["backend"] == 2        # 1-й overflow, 2-й успех
@@ -55,9 +56,9 @@ def test_non_overflow_error_still_propagates(monkeypatch):
     monkeypatch.setattr(pr, "aprocess_user_ask", _boom)
 
     with pytest.raises(ValueError, match="some other backend failure"):
-        pr.run_agent(
+        run_coro(pr.arun_agent(
             [{"role": "user", "content": "x", "id": "u1"}],
             _state(),
             _run_ctx(),
             force_compact_hook=lambda: None,   # не должен вызваться
-        )
+        ))

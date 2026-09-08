@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from gc_core.utils import connect_backend
+from gc_testkit import run_coro
 
 
 def _install(monkeypatch, handler):
@@ -48,10 +49,10 @@ def test_streaming_path_used_when_on_delta_given(monkeypatch):
 
     _install(monkeypatch, handler)
     deltas = []
-    res = connect_backend.request_backend_chat_completions(
+    res = run_coro(connect_backend.arequest_backend_chat_completions(
         {"model": "m", "messages": []}, {}, url="http://x", verify=True,
         on_delta=lambda k, t: deltas.append((k, t)),
-    )
+    ))
 
     assert captured["stream"] is True
     # usage в стриме приходит только по явному запросу — иначе токены основного
@@ -69,9 +70,9 @@ def test_blocking_path_when_no_on_delta(monkeypatch):
         return httpx.Response(200, json={"choices": [{"message": {"content": "blk"}}]})
 
     _install(monkeypatch, handler)
-    res = connect_backend.request_backend_chat_completions(
+    res = run_coro(connect_backend.arequest_backend_chat_completions(
         {"model": "m", "messages": []}, {}, url="http://x", verify=True,
-    )
+    ))
     assert res["choices"][0]["message"]["content"] == "blk"
 
 
@@ -81,10 +82,10 @@ def test_streaming_emits_reset_before_content(monkeypatch):
         200, text=_STREAM_BODY, headers={"content-type": "text/event-stream"}))
 
     deltas = []
-    connect_backend.request_backend_chat_completions(
+    run_coro(connect_backend.arequest_backend_chat_completions(
         {"model": "m", "messages": []}, {}, url="http://x", verify=True,
         on_delta=lambda k, t: deltas.append((k, t)),
-    )
+    ))
     assert deltas[0] == ("reset", ""), f"Expected reset first, got: {deltas[0]}"
     assert ("answer", "hi") in deltas
 
@@ -98,11 +99,11 @@ def test_streaming_http_error_reraises(monkeypatch):
     _install(monkeypatch, lambda request: httpx.Response(500, text="Internal Server Error"))
 
     with pytest.raises(httpx.HTTPStatusError):
-        connect_backend.request_backend_chat_completions(
+        run_coro(connect_backend.arequest_backend_chat_completions(
             {"model": "m", "messages": []}, {}, url="http://x", verify=True,
             use_retry=False,
             on_delta=lambda k, t: None,
-        )
+        ))
 
 
 def test_non_stream_http_error_reraises_with_body(monkeypatch, capsys):
@@ -110,10 +111,10 @@ def test_non_stream_http_error_reraises_with_body(monkeypatch, capsys):
     _install(monkeypatch, lambda request: httpx.Response(422, text="messages[0].content"))
 
     with pytest.raises(httpx.HTTPStatusError):
-        connect_backend.request_backend_chat_completions(
+        run_coro(connect_backend.arequest_backend_chat_completions(
             {"model": "m", "messages": [{"role": "user"}]}, {},
             url="http://x", verify=True, use_retry=False,
-        )
+        ))
     assert "messages[0].content" in capsys.readouterr().out
 
 
@@ -141,9 +142,9 @@ def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(monkeypat
         )
 
     _install(monkeypatch, handler)
-    res = connect_backend.request_backend_chat_completions(
+    res = run_coro(connect_backend.arequest_backend_chat_completions(
         {"model": "m", "messages": []}, {}, url="http://x",
         on_delta=lambda kind, text: None, use_retry=False,
-    )
+    ))
 
     assert res["choices"][0]["message"]["content"] == "Привет, мир"

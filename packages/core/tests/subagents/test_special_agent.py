@@ -12,6 +12,7 @@ from gc_core.tools.subagents import special_agent as special_agent_module
 from gc_core.tools.subagents.special_agent import SpecialAgent
 from gc_core.tools.subagents import runner as runner_module
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit import run_coro
 
 
 def _make_orchestrator_state():
@@ -97,10 +98,10 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "arequest_chat_completion_text",
             return_value="Custom role",
         ):
-            instance.finalize_role(_make_ctx(), _make_state())
+            run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
         agent_role, task = instance.get_initial_data()
         assert agent_role.startswith("Custom role")
@@ -118,10 +119,10 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "arequest_chat_completion_text",
             return_value="ok",
         ) as mock_call:
-            instance.finalize_role(_make_ctx(), _make_state())
+            run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
         user_msg = mock_call.call_args.kwargs["messages"][1]["content"]
         assert "Security Expert" in user_msg
@@ -140,10 +141,10 @@ class TestFinalizeRole:
         ctx = _make_ctx()
         state = _make_state()
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "arequest_chat_completion_text",
             return_value="ok",
         ) as mock_call:
-            instance.finalize_role(ctx, state)
+            run_coro(instance.afinalize_role(ctx, state))
 
         kwargs = mock_call.call_args.kwargs
         assert kwargs["consumer"] == "subagent:subagent_special_agent"
@@ -159,10 +160,10 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "arequest_chat_completion_text",
             return_value="ok",
         ) as mock_call:
-            instance.finalize_role(_make_ctx(), _make_state())
+            run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
         assert mock_call.call_args.kwargs["max_tokens"] == 4096
 
@@ -175,11 +176,11 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "arequest_chat_completion_text",
             side_effect=ConnectionError("Network error"),
         ):
             with pytest.raises(ConnectionError):
-                instance.finalize_role(_make_ctx(), _make_state())
+                run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
 
 class TestSpecialAgentWithRunner:

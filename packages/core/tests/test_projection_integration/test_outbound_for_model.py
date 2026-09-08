@@ -17,6 +17,7 @@ from .conftest import (
     dirty_canonical_history,
     make_ctx_state,
 )
+from gc_testkit import run_coro
 
 
 def _assistant_contents(outbound_messages: list[dict]) -> list[str]:
@@ -31,11 +32,11 @@ def test_outbound_strips_think_keeps_prose(capture_outbound):
     ctx, state = make_ctx_state()
     before = copy.deepcopy(state.messages)
 
-    pr._request_backend_canonical(
+    run_coro(pr._arequest_backend_canonical(
         [{"id": "u2", "type": "message", "role": "user", "content": "продолжай"}],
         state,
         ctx,
-    )
+    ))
 
     outbound = capture_outbound["messages"]
     assert outbound is not None
@@ -110,7 +111,7 @@ def test_only_think_assistant_becomes_empty_content_in_outbound(capture_outbound
     ]
     ctx, state = make_ctx_state(history=history)
 
-    pr._request_backend_canonical([], state, ctx)
+    run_coro(pr._arequest_backend_canonical([], state, ctx))
 
     assistant_texts = _assistant_contents(capture_outbound["messages"])
     assert assistant_texts == [""]

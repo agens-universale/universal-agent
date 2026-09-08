@@ -1,6 +1,7 @@
 """C3: run_agent при WrongFunctionArgumentsException добавляет truncation-hint,
 если finish_reason последнего backend-ответа == "length", и не добавляет иначе."""
 from gc_core import processing_responses as pr
+from gc_testkit import run_coro
 
 
 def _state():
@@ -70,11 +71,11 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
 
     state = _state()
     state.last_finish_reason = finish_reason
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [{"role": "user", "content": "сделай", "id": "u1"}],
         state,
         _run_ctx(),
-    )
+    ))
     captured_feedback["result"] = result
     return captured_feedback
 

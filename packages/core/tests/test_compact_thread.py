@@ -6,6 +6,7 @@ from gc_core.thread_store_file import FileThreadStore
 
 from gc_core import agent_executor as ae
 from gc_core import manual_compaction as mc
+from gc_testkit import run_coro
 
 
 def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
@@ -59,7 +60,7 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     ex._state = None
     ex._stop_pending = False
 
-    ok = ex.compact_thread("t1", system="cli")
+    ok = run_coro(ex.acompact_thread("t1", system="cli"))
     assert ok is True
     assert captured.get("forced") is True
     # история треда загружена в state, по которому идёт сжатие
@@ -141,7 +142,7 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
         baseline_meta={"token_usage": baseline.to_meta()},
         coord_cls=_Coord, state_cls=_UsageState,
     )
-    assert ex.compact_thread("t1", system="cli") is True
+    assert run_coro(ex.acompact_thread("t1", system="cli")) is True
 
     # Читаем РЕАЛЬНО сохранённую meta и проверяем TOP-LEVEL token_usage — именно
     # его гидрирует run() (регресс: писали в meta["tui"], run() его не видит).
@@ -170,7 +171,7 @@ def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
     live = _UsageState(thread_id="t1")
     ex._state = live
 
-    ex.compact_thread("t1", system="cli")
+    run_coro(ex.acompact_thread("t1", system="cli"))
     assert ex._state.usage.by_category["summary"]["input"] == 30000
 
 
@@ -183,4 +184,4 @@ def test_compact_thread_noop_in_responses(monkeypatch, tmp_path):
     )
     ex._lock = __import__("threading").Lock()
     ex._state = None
-    assert ex.compact_thread("t1", system="cli") is False
+    assert run_coro(ex.acompact_thread("t1", system="cli")) is False

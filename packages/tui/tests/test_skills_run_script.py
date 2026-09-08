@@ -8,6 +8,7 @@ from gc_core.backends.protocol import ExecResult, FsBackend
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.tools.skills.skills_tools import RunSkillScriptTool
 from gc_testkit.helpers.tool_ctx import local_ctx
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _write_skill_with_script(root, skill_id: str, script_body: str) -> None:
@@ -38,7 +39,7 @@ def test_skills_run_script_sets_script_ok_false_on_nonzero_exit(reg_with_scripts
         "exit-one",
         "import sys\nsys.exit(1)\n",
     )
-    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx())
+    tool = CallableTool(RunSkillScriptTool(reg_with_scripts, ctx=local_ctx()))
     payload = json.loads(tool(skill_id="exit-one", script_name="main.py"))
     assert payload["ok"] is True
     assert payload["script_ok"] is False
@@ -51,7 +52,7 @@ def test_skills_run_script_sets_script_ok_true_on_zero_exit(reg_with_scripts, tm
         "exit-zero",
         "import sys\nprint('done')\nsys.exit(0)\n",
     )
-    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx())
+    tool = CallableTool(RunSkillScriptTool(reg_with_scripts, ctx=local_ctx()))
     payload = json.loads(tool(skill_id="exit-zero", script_name="main.py"))
     assert payload["ok"] is True
     assert payload["script_ok"] is True
@@ -69,7 +70,7 @@ def test_skills_run_script_passes_args_as_stdin_json(reg_with_scripts, tmp_path)
             "print(payload.get('skill_path', ''))\n"
         ),
     )
-    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx())
+    tool = CallableTool(RunSkillScriptTool(reg_with_scripts, ctx=local_ctx()))
     payload = json.loads(
         tool(
             skill_id="stdin-echo",
@@ -88,7 +89,7 @@ def test_skills_run_script_passes_argv(reg_with_scripts, tmp_path):
         "argv-echo",
         "import sys\nprint('|'.join(sys.argv[1:]))\n",
     )
-    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx())
+    tool = CallableTool(RunSkillScriptTool(reg_with_scripts, ctx=local_ctx()))
     payload = json.loads(
         tool(skill_id="argv-echo", script_name="main.py", argv='--format json "two words"')
     )

@@ -113,8 +113,3 @@ async def acompact_thread(
     return True
 
 
-def compact_thread(*args: Any, **kwargs: Any) -> bool:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    from gc_core.utils.portal import get_portal
-
-    return get_portal().run(acompact_thread(*args, **kwargs))

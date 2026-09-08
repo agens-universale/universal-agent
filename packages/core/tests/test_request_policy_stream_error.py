@@ -2,6 +2,7 @@
 ту же адаптивную политику ретраев, что и HTTP-ошибка того же кода."""
 from gc_core import request_backend_policy as policy
 from gc_core.utils.chat_completions_stream import BackendStreamError
+from gc_testkit import run_coro
 
 
 async def _anoop(*_a, **_k):
@@ -23,7 +24,7 @@ def test_policy_retries_stream_error_then_succeeds(monkeypatch):
 
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", _fake_request)
 
-    res, _payload = policy.request_chat_completions_with_policy(
+    res, _payload = run_coro(policy.arequest_chat_completions_with_policy(
         payload_factory=lambda mt: {"max_tokens": mt},
         initial_max_tokens=8192,
         min_response_tokens=1024,
@@ -31,7 +32,7 @@ def test_policy_retries_stream_error_then_succeeds(monkeypatch):
         url="http://x",
         verify=True,
         use_retry=False,
-    )
+    ))
 
     assert res["choices"][0]["message"]["content"] == "ok"
     assert calls["n"] == 2   # 1-й BackendStreamError(400) → адаптивный ретрай → успех

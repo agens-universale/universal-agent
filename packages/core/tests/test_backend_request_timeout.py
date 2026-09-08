@@ -8,6 +8,7 @@ import yaml
 from gc_core.config import load_config
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC, BackendConfig
 from gc_core.utils import connect_backend
+from gc_testkit import run_coro
 
 
 def test_backend_config_timeout_default():
@@ -78,18 +79,18 @@ def _install_capturing_transport(monkeypatch, seen):
 def test_chat_completions_passes_timeout(monkeypatch):
     seen = {}
     _install_capturing_transport(monkeypatch, seen)
-    connect_backend.request_backend_chat_completions(
+    run_coro(connect_backend.arequest_backend_chat_completions(
         {"messages": []}, {}, url="https://b/v1/chat", use_retry=False, timeout=120,
-    )
+    ))
     assert seen["timeout"] == 120
 
 
 def test_chat_completions_default_timeout(monkeypatch):
     seen = {}
     _install_capturing_transport(monkeypatch, seen)
-    connect_backend.request_backend_chat_completions(
+    run_coro(connect_backend.arequest_backend_chat_completions(
         {"messages": []}, {}, url="https://b/v1/chat", use_retry=False,
-    )
+    ))
     assert seen["timeout"] == DEFAULT_REQUEST_TIMEOUT_SEC
 
 
@@ -103,7 +104,7 @@ def test_policy_forwards_timeout(monkeypatch):
         return {"choices": [{"message": {"content": "ok"}}]}
 
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", fake_req)
-    policy.request_chat_completions_with_policy(
+    run_coro(policy.arequest_chat_completions_with_policy(
         payload_factory=lambda mt: {"max_tokens": mt},
         initial_max_tokens=100,
         min_response_tokens=10,
@@ -112,5 +113,5 @@ def test_policy_forwards_timeout(monkeypatch):
         verify=True,
         use_retry=False,
         timeout=90,
-    )
+    ))
     assert seen["timeout"] == 90

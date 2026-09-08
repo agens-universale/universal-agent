@@ -143,23 +143,48 @@ def test_tool_wrapper_exposes_only_the_async_entry():
 
 
 
-async def test_dispatcher_prefers_acall(monkeypatch):
-    """aapply_tool обязан взять быстрый путь, а не уводить тул в поток."""
+async def test_dispatcher_awaits_acall_without_a_thread(monkeypatch):
+    """Диспетчер ждёт `acall` прямо на loop — ступени с пулом больше нет.
+
+    Зонд — по ПУЛУ, а не по выбору формы: выбирать не из чего, и сторож,
+    сравнивающий `acall` с `__call__`, проверял бы несуществующую развилку.
+    Подменяем `asyncio.to_thread`: если диспетчер снова заведёт подстраховку,
+    счётчик щёлкнет.
+    """
+    import asyncio
+
     from gc_core.tools import aapply_tool
 
-    used = {}
+    pooled = {"n": 0}
+    real_to_thread = asyncio.to_thread
+
+    async def _counting(fn, *a, **kw):
+        pooled["n"] += 1
+        return await real_to_thread(fn, *a, **kw)
+
+    monkeypatch.setattr(asyncio, "to_thread", _counting)
 
     class _Tool:
         async def acall(self, **kw):
-            used["path"] = "acall"
-            return "быстрый путь"
-
-        async def acall(self, **kw):
-            used["path"] = "__call__"
-            return "поток"
+            return "прямо на loop"
 
     data = {"t": {"tool_fabric": lambda **kw: _Tool()}}
     out = await aapply_tool("t", {}, data, ctx=None, config_dict={})
 
-    assert used["path"] == "acall"
-    assert out == "быстрый путь"
+    assert out == "прямо на loop"
+    assert pooled["n"] == 0, "тул снова уехал в поток из пула"
+
+
+async def test_dispatcher_refuses_a_tool_without_acall():
+    """Тул без `acall` — жёсткая ошибка проводки, а не тихий синхронный вызов."""
+    import pytest
+
+    from gc_core.tools import aapply_tool
+
+    class _Legacy:
+        def __call__(self, **kw):
+            return "синхронный вход"
+
+    data = {"t": {"tool_fabric": lambda **kw: _Legacy()}}
+    with pytest.raises(TypeError, match="acall"):
+        await aapply_tool("t", {}, data, ctx=None, config_dict={})

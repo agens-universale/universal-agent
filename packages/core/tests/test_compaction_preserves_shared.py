@@ -13,8 +13,9 @@ import types
 import unittest
 from unittest.mock import patch
 
-from gc_core.summarize.compaction import run_summary_compaction
+from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
+from gc_testkit import run_coro
 
 
 def _state_with_full_shared():
@@ -64,13 +65,13 @@ class CompactionPreservesSharedTest(unittest.TestCase):
             "gc_core.summarize.compaction.apply_summary_state_patch",
             lambda **_kw: "dialog-body",
         ):
-            run_summary_compaction(
+            run_coro(arun_summary_compaction(
                 ctx=ctx,
                 state=state,
                 trigger_reason="test",
                 is_cli_mode=False,
                 on_summary_applied=lambda event: captured.update(event),
-            )
+            ))
 
         shared = captured["summary_payload"]["shared"]
         # Поля, которые молча терялись: они есть в SharedStateData и должны доехать.

@@ -268,24 +268,12 @@ Return format (JSON string):
             hint=_READ_EMPTY_HINT if is_empty else None,
         )
 
-    def _handle_append(self, content: str) -> str:
-        """Синхронный путь: компакция уходит в портал, как и раньше."""
-        early, combined = self._append_prepare(content)
-        if early is not None:
-            return early
-        return self._append_finish(
-            combined, compaction.compact_text(combined, self._ctx, self._state)
-        )
 
     async def _ahandle_append(self, content: str) -> str:
-        """Асинхронный путь: компакцию ждём НАТИВНО.
+        """Дописать в long memory; компакцию ждём НАТИВНО.
 
-        Разница с синхронным двойником ровно в одной строке, и она несущая.
-        ``compact_text`` — шим через ``get_portal().run(...)``
-        (``project_memory/compaction.py``), а портал из-под живого event loop
-        поднимает ``SyncApiInsideEventLoopError`` вместо тихой блокировки. Пока
-        тул уезжал в поток из пула, живого loop под ним не было и портал
-        работал; инлайн на loop эта же ветка падала бы посреди записи.
+        Сжатие — LLM-вызов, и он единственное место в append'е, которое ходит
+        по сети: остальное — чтение и запись файла, они инлайновые.
         """
         early, combined = self._append_prepare(content)
         if early is not None:

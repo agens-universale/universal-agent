@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import queue
 import threading
@@ -216,7 +217,7 @@ class AgentRunner:
             def _target() -> None:
                 try:
                     executor = self._ensure_executor()
-                    executor.compact_thread(thread_id, system=system)
+                    asyncio.run(executor.acompact_thread(thread_id, system=system))
                 except Exception as exc:
                     self._emit_error(exc)
 

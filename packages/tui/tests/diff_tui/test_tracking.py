@@ -23,6 +23,7 @@ from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _has_git() -> bool:
@@ -77,8 +78,8 @@ def _tool_ctx(
     return ctx
 
 
-def _write_tool(launch_root: Path, threads: Path, **kw) -> WriteToFile:
-    return WriteToFile(ctx=_tool_ctx(launch_root, threads, **kw))
+def _write_tool(launch_root: Path, threads: Path, **kw):
+    return CallableTool(WriteToFile(ctx=_tool_ctx(launch_root, threads, **kw)))
 
 
 def _orig(launch_root: Path, key: str) -> Path:
@@ -140,7 +141,7 @@ def test_append_existing_snapshots_orig(launch_root):
     root, threads = launch_root
     target = root / "src" / "a.py"
     target.write_text("head\n", encoding="utf-8")
-    tool = AppendToFile(ctx=_tool_ctx(root, threads))
+    tool = CallableTool(AppendToFile(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(tool(path=str(target), content="tail", separator="\n"))
     assert res["ok"] is True
@@ -151,7 +152,7 @@ def test_search_and_replace_snapshots_orig(launch_root):
     root, threads = launch_root
     target = root / "src" / "b.py"
     target.write_text("foo = 1\n", encoding="utf-8")
-    tool = SearchAndReplace(ctx=_tool_ctx(root, threads))
+    tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(
         tool(path=str(target), search="foo = 1", replace="foo = 2")
@@ -164,7 +165,7 @@ def test_search_and_replace_dry_run_does_not_track(launch_root):
     root, threads = launch_root
     target = root / "src" / "b.py"
     target.write_text("foo = 1\n", encoding="utf-8")
-    tool = SearchAndReplace(ctx=_tool_ctx(root, threads))
+    tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(
         tool(path=str(target), search="foo = 1", replace="foo = 2", dry_run=True)
@@ -178,7 +179,7 @@ def test_apply_file_edits_snapshots_orig(launch_root):
     root, threads = launch_root
     target = root / "src" / "c.py"
     target.write_text("alpha\n", encoding="utf-8")
-    tool = ApplyFileEdits(ctx=_tool_ctx(root, threads))
+    tool = CallableTool(ApplyFileEdits(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(
         tool(

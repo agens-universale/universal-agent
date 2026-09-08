@@ -6,6 +6,7 @@ import pytest
 
 from gc_core import request_backend_policy as policy
 from gc_core.utils.backend_errors import EmbeddedChoiceError
+from gc_testkit import run_coro
 
 
 def _embedded_504_response():
@@ -59,7 +60,7 @@ def _run_policy(**overrides):
         use_retry=False,
     )
     kwargs.update(overrides)
-    return policy.request_chat_completions_with_policy(**kwargs)
+    return run_coro(policy.arequest_chat_completions_with_policy(**kwargs))
 
 
 def test_embedded_504_retried_then_succeeds(monkeypatch):

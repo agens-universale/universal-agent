@@ -6,6 +6,7 @@ import pytest
 import httpx
 
 from gc_core import processing_responses as pr
+from gc_testkit import run_coro
 
 
 class _FakeAuth:
@@ -40,7 +41,7 @@ def test_retry_once_on_401_refreshes_and_succeeds(monkeypatch):
         return (["msg"], "rid", {})
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
-    out = pr._request_backend_canonical([], object(), _ctx(auth))
+    out = run_coro(pr._arequest_backend_canonical([], object(), _ctx(auth)))
     assert out == (["msg"], "rid", {})
     assert calls["n"] == 2 and auth.force_calls == 1
 
@@ -55,7 +56,7 @@ def test_no_retry_when_not_auth_error(monkeypatch):
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
     with pytest.raises(ValueError):
-        pr._request_backend_canonical([], object(), _ctx(auth))
+        run_coro(pr._arequest_backend_canonical([], object(), _ctx(auth)))
     assert calls["n"] == 1 and auth.force_calls == 0
 
 
@@ -69,7 +70,7 @@ def test_second_401_after_refresh_propagates(monkeypatch):
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
     with pytest.raises(httpx.HTTPStatusError):
-        pr._request_backend_canonical([], object(), _ctx(auth))
+        run_coro(pr._arequest_backend_canonical([], object(), _ctx(auth)))
     assert calls["n"] == 2 and auth.force_calls == 1  # ровно 1 refresh, потом наверх
 
 
@@ -82,5 +83,5 @@ def test_no_auth_connector_no_retry(monkeypatch):
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
     with pytest.raises(httpx.HTTPStatusError):
-        pr._request_backend_canonical([], object(), _ctx(None))
+        run_coro(pr._arequest_backend_canonical([], object(), _ctx(None)))
     assert calls["n"] == 1

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from gc_core import agent_executor as agent_executor_module
 from gc_core.run_context import create_run_context
+from gc_testkit import run_coro
 
 
 def _config(tmp_path, log_format):
@@ -51,7 +52,7 @@ def _run(tmp_path, log_format, **run_kwargs):
         agent_executor_module, "arun_agent", side_effect=_fake_run_agent
     ):
         executor = agent_executor_module.AgentExecutor(ctx)
-        result = executor.run(["привет"], verbose=False, **run_kwargs)
+        result = run_coro(executor.arun(["привет"], verbose=False, **run_kwargs))
 
     assert result == "ok"
     for handler in ctx.logger.handlers:
@@ -128,4 +129,4 @@ def test_no_crash_when_logger_is_absent(tmp_path):
         agent_executor_module, "arun_agent", side_effect=_fake_run_agent
     ):
         executor = agent_executor_module.AgentExecutor(ctx)
-        assert executor.run(["привет"], thread_id="thr-1", system="cli") == "ok"
+        assert run_coro(executor.arun(["привет"], thread_id="thr-1", system="cli")) == "ok"

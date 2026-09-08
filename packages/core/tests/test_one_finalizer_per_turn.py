@@ -1,6 +1,7 @@
 """S1: один turn-финализатор на ход — лишние tool_calls после первого финализатора
 не исполняются (получают synthetic skip-output)."""
 from gc_core.processing_responses import split_at_first_finalizer
+from gc_testkit import run_coro
 
 
 def _async_noop(fn):
@@ -66,7 +67,7 @@ def test_process_tool_calls_skips_second_finalizer(monkeypatch):
         {"type": "function_call", "name": "turn_ask_human", "call_id": "c2", "arguments": "{}"},
     ]
     ctx = type("C", (), {"config_dict": {}, "logger": None})()
-    outs = pr.process_tool_calls(messages, _State(), ctx, run_agent_func=None)
+    outs = run_coro(pr.aprocess_tool_calls(messages, _State(), ctx, run_agent_func=None))
     assert calls == ["turn_ask_human"]                 # apply_tool — только для 1-го
     assert len(outs) == 2
     assert "skipped" in outs[1]["output"] and outs[1]["call_id"] == "c2"
@@ -107,10 +108,10 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
         {"type": "function_call", "name": "turn_ask_human", "call_id": "c2", "arguments": "{}"},
     ]
     ctx = type("C", (), {"config_dict": {}, "logger": None})()
-    outs = pr.process_tool_calls(
+    outs = run_coro(pr.aprocess_tool_calls(
         messages, _State(), ctx, run_agent_func=None,
         persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
-    )
+    ))
     assert order == ["session_memory", "turn_ask_human"]
     assert any(m.get("call_id") == "c1" for m in outs)   # output не потерян в возврате
 
@@ -148,8 +149,8 @@ def test_flush_skipped_outputs_before_ask_human(monkeypatch):
         {"type": "function_call", "name": "session_memory", "call_id": "c3", "arguments": "{}"},  # skipped
     ]
     ctx = type("C", (), {"config_dict": {}, "logger": None})()
-    outs = pr.process_tool_calls(
+    outs = run_coro(pr.aprocess_tool_calls(
         messages, _State(), ctx, run_agent_func=None,
         persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
-    )
+    ))
     assert any(m.get("call_id") == "c3" and "skipped" in m["output"] for m in outs)

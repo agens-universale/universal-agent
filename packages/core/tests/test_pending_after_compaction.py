@@ -9,6 +9,7 @@ from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core import processing_responses as pr
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
+from gc_testkit import run_coro
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -97,13 +98,13 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(),
         turn_end_compaction_hook=_hook,
         get_pending_messages=_pending_once(compacted),
-    )
+    ))
 
     assert result == _expected_finish_return()
     assert compacted["done"] is True
@@ -129,13 +130,13 @@ def test_no_pending_finishes_normally(monkeypatch):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(),
         turn_end_compaction_hook=_hook,
         get_pending_messages=lambda: [],
-    )
+    ))
 
     assert result == _expected_finish_return()
     assert hook_calls == [1]
@@ -162,14 +163,14 @@ def test_stop_after_compaction_does_not_continue(monkeypatch):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(),
         turn_end_compaction_hook=_hook,
         get_pending_messages=_pending_once(compacted),
         check_stop=lambda: stopped["flag"],
-    )
+    ))
 
     assert result is None
     assert ua_calls == []
@@ -198,13 +199,13 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
         intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture
     )
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(strict_turn_finish_validation=True),
         turn_end_compaction_hook=_hook,
         get_pending_messages=_pending_once(compacted),
-    )
+    ))
 
     assert result == _expected_finish_return()
     # finish-gate отработал дважды: первый ход + продолженный (после компакции)

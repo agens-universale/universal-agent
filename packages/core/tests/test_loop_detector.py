@@ -23,6 +23,7 @@ from gc_core.loop_detector.detector import (
     observe,
     resolve_thresholds,
 )
+from gc_testkit import run_coro
 
 
 def _state(**extra):
@@ -511,12 +512,12 @@ def test_process_tool_calls_second_read_executes_and_emits_technical(monkeypatch
 
     tools_data = {"fs_read_file": _entry(**READ_PROFILE)}
     args = json.dumps({"path": "a.py", "reason": "look"})
-    outs = pr.process_tool_calls(
+    outs = run_coro(pr.aprocess_tool_calls(
         messages=[_fc("fs_read_file", "c1", args), _fc("fs_read_file", "c2", args)],
         state=_ptc_state(),
         ctx=_ptc_ctx(tools_data),
         run_agent_func=None,
-    )
+    ))
     assert calls == ["fs_read_file", "fs_read_file"]
     assert [o["call_id"] for o in outs if o.get("type") == "function_call_output"] == [
         "c1",
@@ -544,19 +545,19 @@ def test_process_tool_calls_user_stop_clears_window(monkeypatch):
 
     tools_data = {"fs_read_file": _entry(**READ_PROFILE)}
     args = json.dumps({"path": "a.py"})
-    outs = pr.process_tool_calls(
+    outs = run_coro(pr.aprocess_tool_calls(
         messages=[_fc("fs_read_file", "c1", args), _fc("fs_read_file", "c2", args)],
         state=state,
         ctx=_ptc_ctx(tools_data),
         run_agent_func=None,
-    )
+    ))
     assert state.loop_detector_window == []
     assert state.loop_detector_pending == []
     assert not any("Loop detector:" in str(o.get("content", "")) for o in outs)
 
 
 def test_run_agent_check_stop_clears_window():
-    from gc_core.processing_responses import run_agent
+    from gc_core.processing_responses import arun_agent
     from gc_core.states import State
 
     state = State(
@@ -571,7 +572,7 @@ def test_run_agent_check_stop_clears_window():
     )
     state.loop_detector_window = ["fp"]
     state.loop_detector_pending = [{"tool": "fs_read_file", "args": {}}]
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "hi"}],
         state,
         SimpleNamespace(
@@ -584,7 +585,7 @@ def test_run_agent_check_stop_clears_window():
             auth_connector=None,
         ),
         check_stop=lambda: True,
-    )
+    ))
     assert result is None
     assert state.loop_detector_window == []
     assert state.loop_detector_pending == []
@@ -602,12 +603,12 @@ def test_process_tool_calls_disabled_has_no_notice(monkeypatch):
 
     tools_data = {"fs_read_file": _entry(**READ_PROFILE)}
     args = json.dumps({"path": "a.py"})
-    outs = pr.process_tool_calls(
+    outs = run_coro(pr.aprocess_tool_calls(
         messages=[_fc("fs_read_file", "c1", args), _fc("fs_read_file", "c2", args)],
         state=_ptc_state(),
         ctx=_ptc_ctx(tools_data, enabled=False),
         run_agent_func=None,
-    )
+    ))
     assert all(o.get("role") != "user" for o in outs)
     assert not any("Loop detector:" in str(o.get("content", "")) for o in outs)
 
@@ -640,13 +641,13 @@ def test_process_tool_calls_unknown_streak_does_not_emit_loop_notice(monkeypatch
     state = _ptc_state()
     ctx = _ptc_ctx({"fs_read_file": _entry(**READ_PROFILE)})
     messages = [_fc("phase1", "c1")]
-    outs = pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert state.unknown_tool_repeat_count == 1
     assert not any("Loop detector:" in str(o.get("content", "")) for o in outs)
 
 
 def test_compaction_clears_loop_window():
-    from gc_core.summarize.compaction import run_summary_compaction
+    from gc_core.summarize.compaction import arun_summary_compaction
     from unittest.mock import patch
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
@@ -696,9 +697,9 @@ def test_compaction_clears_loop_window():
     ), patch(
         "gc_core.summarize.compaction.log_compaction_started"
     ):
-        run_summary_compaction(
+        run_coro(arun_summary_compaction(
             ctx=ctx, state=state, trigger_reason="test", is_cli_mode=False
-        )
+        ))
     assert state.loop_detector_window == []
     assert state.loop_detector_pending == []
 
@@ -706,7 +707,7 @@ def test_compaction_clears_loop_window():
 def test_accepted_turn_finish_clears_window(monkeypatch):
     from gc_core.intent_guard import guard as intent_guard_guard
     from gc_core.intent_guard.validation_result import ValidationResult
-    from gc_core.processing_responses import run_agent
+    from gc_core.processing_responses import arun_agent
     from gc_core.states import State
 
     monkeypatch.setattr(
@@ -743,7 +744,7 @@ def test_accepted_turn_finish_clears_window(monkeypatch):
         "task_report": "done",
         "handoff": json.dumps({}, ensure_ascii=False),
     }
-    result = run_agent(
+    result = run_coro(arun_agent(
         [
             {
                 "type": "function_call",
@@ -763,14 +764,14 @@ def test_accepted_turn_finish_clears_window(monkeypatch):
             logger=None,
             auth_connector=None,
         ),
-    )
+    ))
     assert result is not None
     assert state.loop_detector_window == []
     assert state.loop_detector_pending == []
 
 
 def test_accepted_text_response_clears_window():
-    from gc_core.processing_responses import run_agent
+    from gc_core.processing_responses import arun_agent
     from gc_core.states import State
 
     state = State(
@@ -786,7 +787,7 @@ def test_accepted_text_response_clears_window():
     state.backend_api_mode = "chat_completions"
     state.loop_detector_window = ["fp"]
     state.loop_detector_pending = [{"tool": "fs_read_file", "args": {}}]
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "assistant", "type": "message", "content": "готово"}],
         state,
         SimpleNamespace(
@@ -799,7 +800,7 @@ def test_accepted_text_response_clears_window():
             logger=None,
             auth_connector=None,
         ),
-    )
+    ))
     assert result == "готово"
     assert state.loop_detector_window == []
     assert state.loop_detector_pending == []
@@ -913,7 +914,7 @@ def test_finish_gate_reject_keeps_window(monkeypatch):
         }
     ]
     try:
-        pr.run_agent(messages, state, ctx)
+        run_coro(pr.arun_agent(messages, state, ctx))
     except SystemExit:
         pass
     assert cleared == []

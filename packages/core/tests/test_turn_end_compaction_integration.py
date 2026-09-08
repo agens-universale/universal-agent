@@ -18,6 +18,7 @@ from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.states import State
 from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -155,12 +156,12 @@ def test_turn_end_below_threshold_does_not_compact(monkeypatch):
     monkeypatch.setattr(rsc, "arun_summary_compaction", record)
     coord = _coordinator(state, turn_end_trigger_chars=10_000)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert result == _expected_finish_arguments()
     assert recorded == []
@@ -200,12 +201,12 @@ def test_turn_end_above_threshold_replaces_trace(monkeypatch):
     monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert result == _expected_finish_arguments()
     assert recorded == ["turn_end"]
@@ -246,12 +247,12 @@ def test_turn_end_reject_skips_compaction(monkeypatch):
     monkeypatch.setattr(pr, "aprocess_user_ask", _stub_user_ask)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    pr.run_agent(
+    run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert recorded == []
     assert intent_user_ask_texts(state.current_user_intent) == ["open"]
@@ -278,12 +279,12 @@ def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
     )
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(strict_turn_finish_validation=True),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert result == _expected_finish_arguments()
     assert recorded == ["turn_end"]
@@ -309,12 +310,12 @@ def test_turn_end_flush_moves_intent_before_compact(monkeypatch):
     monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    pr.run_agent(
+    run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
 
 def test_turn_end_compaction_failure_still_returns_submit_payload(monkeypatch):
@@ -329,12 +330,12 @@ def test_turn_end_compaction_failure_still_returns_submit_payload(monkeypatch):
     monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert result == _expected_finish_arguments()
     assert state.current_user_intent == []
@@ -368,12 +369,12 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
     monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    pr.run_agent(
+    run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert state.shared.working_memory.get("knowledge") == "note from patch"
     summary_msgs = [
@@ -450,7 +451,7 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
         skills_registry=_SkillsRegistryStub(),
     )
     executor = ae.AgentExecutor(ctx)
-    result = executor.run(["вопрос"], system="cli", verbose=False)
+    result = run_coro(executor.arun(["вопрос"], system="cli", verbose=False))
 
     assert result == _expected_finish_arguments()
     assert recorded == ["turn_end"]

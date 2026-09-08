@@ -6,6 +6,7 @@ import time
 import types
 
 import pytest
+from gc_testkit import run_coro
 
 
 def _async_noop(fn):
@@ -216,12 +217,12 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
         },
     ]
     ctx = type("C", (), {"config_dict": {}, "logger": None})()
-    outs = pr.process_tool_calls(
+    outs = run_coro(pr.aprocess_tool_calls(
         messages,
         _State(),
         ctx,
         run_agent_func=None,
         persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
-    )
+    ))
     assert order == ["session_memory", "exec_python"]
     assert any(m.get("call_id") == "c1" for m in outs)

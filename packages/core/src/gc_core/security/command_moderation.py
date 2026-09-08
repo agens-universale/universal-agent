@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import inspect
 import json
 import os
@@ -17,7 +16,8 @@ from gc_core.security.confirm_port import confirm_available, request_confirm
 from gc_core.security.path_policy import ToolSecurityContext, _extract_config_dict, audit_policy_decision, resolve_tool_context
 from gc_core.security.protected_paths import protected_paths
 from gc_core.message_projection import project_text_for_model
-from gc_core.summarize.llm import auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens, request_auxiliary_completion_text
+from gc_core.summarize.llm import arequest_auxiliary_completion_text, auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.project_data import os_label
 from gc_core.bundled_assets import bundled_root
 
@@ -579,7 +579,7 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
 
     def judge(judge_payload: dict[str, Any]) -> dict[str, Any]:
         messages = _build_judge_messages(judge_payload)
-        raw_text = request_auxiliary_completion_text(
+        raw_text = run_coro_blocking(arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
             messages=messages,
@@ -587,7 +587,7 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
             request_label="command_moderation_judge",
             consumer="command_judge",
             payload_overrides=auxiliary_llm_completion_kwargs(ctx),
-        )
+        ))
         return _parse_judge_json(
             raw_text,
             logger=getattr(ctx, "logger", None),
