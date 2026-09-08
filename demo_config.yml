@@ -359,10 +359,13 @@ project_memory:
   # Лимит ответа LLM при append-overflow компакции project_memory.md.
   compaction_max_tokens: 4000
 
-# Доп. strip-теги для for_model / aux LLM (summary, intent, judges, compaction).
-# <think> всегда on в коде и выключить нельзя; сюда — только extras.
-# Секция опциональна: без неё стрипается только think (non-greedy).
+# tags — extra-теги, которые режут в derived (саммари, intent, digest…), не в messages.
+# strip_think: true (дефолт) — ризонинг в messages не класть.
+# strip_think: false — сохранить reasoning_content в messages как пришло с бэкенда
+#   и в следующем запросе отдать как есть. DeepSeek / часть strict-бэкендов → 400.
+# Трейс в бэкенд = то, что лежит в messages. Остальной state — без ризонинга всегда.
 strip_tags_projection:
+  strip_think: true
   tags:
     - redacted_thinking
 

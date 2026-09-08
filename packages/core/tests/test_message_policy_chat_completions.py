@@ -131,6 +131,59 @@ def test_coalesce_merges_leading_assistant_text_before_tool_calls():
     assert len(coalesced[0]["tool_calls"]) == 1
 
 
+def test_coalesce_keeps_reasoning_content_from_leading_prose():
+    messages = [
+        {
+            "role": "assistant",
+            "content": "planning",
+            "reasoning_content": "secret",
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "a",
+                    "type": "function",
+                    "function": {"name": "x", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "a", "content": "ok"},
+    ]
+    coalesced = coalesce_consecutive_assistant_tool_calls(messages)
+    assert coalesced[0]["reasoning_content"] == "secret"
+    assert coalesced[0]["content"] == "planning"
+    assert len(coalesced[0]["tool_calls"]) == 1
+
+
+def test_prepare_keeps_reasoning_content_after_coalesce():
+    messages = [
+        {
+            "role": "assistant",
+            "content": "planning",
+            "reasoning_content": "secret",
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "a",
+                    "type": "function",
+                    "function": {"name": "x", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "a", "content": "ok"},
+    ]
+    prepared = prepare_chat_completion_messages_for_api(messages)
+    assistants = [m for m in prepared if m.get("role") == "assistant"]
+    assert len(assistants) == 1
+    assert assistants[0]["reasoning_content"] == "secret"
+    assert assistants[0]["content"] == "planning"
+
+
 def test_prepare_chat_completion_messages_for_api_parallel_planner_shape():
     messages = [
         {"role": "user", "content": "task"},

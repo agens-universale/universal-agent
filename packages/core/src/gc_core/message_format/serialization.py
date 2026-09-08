@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, user_content_to_text
 from gc_core.message_projection import project_assistant_text
@@ -72,7 +72,12 @@ def _message_content_to_text(content: Any) -> str:
     return str(content)
 
 
-def message_text_for_summary(message: Dict[str, Any]) -> str:
+def message_text_for_summary(
+    message: Dict[str, Any],
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> str:
     """
     Строит каноничное текстовое представление одного сообщения для LLM-промптов и метрик размера.
 
@@ -93,13 +98,20 @@ def message_text_for_summary(message: Dict[str, Any]) -> str:
     role = str(message.get("role") or "")
     raw_content = message.get("content")
     if role.strip().lower() == "assistant":
-        content = project_assistant_text(raw_content)
+        content = project_assistant_text(
+            raw_content, tags=tags, strip_think=strip_think
+        )
     else:
         content = _message_content_to_text(raw_content)
     return f"[{role}] {content}".strip()
 
 
-def message_raw_payload_chars_for_trigger(message: Dict[str, Any]) -> int:
+def message_raw_payload_chars_for_trigger(
+    message: Dict[str, Any],
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> int:
     """Оценка длины содержимого сообщения для порога суммаризации: без префиксов ``[role]``."""
     if not isinstance(message, dict):
         return 0
@@ -113,18 +125,31 @@ def message_raw_payload_chars_for_trigger(message: Dict[str, Any]) -> int:
     role = str(message.get("role") or "")
     raw_content = message.get("content")
     if role.strip().lower() == "assistant":
-        return len(project_assistant_text(raw_content))
+        return len(project_assistant_text(raw_content, tags=tags, strip_think=strip_think))
     return len(_message_content_to_text(raw_content))
 
 
-def calc_history_chars_for_trigger(messages: List[Dict[str, Any]]) -> int:
+def calc_history_chars_for_trigger(
+    messages: List[Dict[str, Any]],
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> int:
     """Суммарный объём истории в «сырых» символах для ``chat_completions_summary_trigger_chars``."""
-    return sum(message_raw_payload_chars_for_trigger(m) for m in messages)
+    return sum(
+        message_raw_payload_chars_for_trigger(m, tags=tags, strip_think=strip_think)
+        for m in messages
+    )
 
 
-def calc_messages_chars_total(messages: List[Dict[str, Any]]) -> int:
+def calc_messages_chars_total(
+    messages: List[Dict[str, Any]],
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> int:
     """Суммарная длина сериализованного треда (каноничный вид для промпта LLM)."""
     total = 0
     for message in messages:
-        total += len(message_text_for_summary(message))
+        total += len(message_text_for_summary(message, tags=tags, strip_think=strip_think))
     return total

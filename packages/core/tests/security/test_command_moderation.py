@@ -317,6 +317,16 @@ def test_parse_judge_json_accepts_valid_json():
     assert parsed["confidence"] == 0.9
 
 
+def test_parse_judge_json_strips_think_wrapper():
+    parsed = command_moderation._parse_judge_json(
+        '<think>{"verdict":"dangerous"}</think>'
+        '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}'
+    )
+
+    assert parsed["verdict"] == "safe"
+    assert parsed["confidence"] == 0.9
+
+
 def test_parse_judge_json_regex_fallback_safe_on_malformed_json():
     raw = (
         "Sure! Here's the verdict:\n"

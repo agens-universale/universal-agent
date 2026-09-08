@@ -96,5 +96,75 @@ def test_get_output_list_rejects_unknown_finish_when_empty():
         get_output_list(_dct(None, content=""))   # пусто → внятный raise
 
 
+def _dct_with_reasoning(content="<think>t</think>ok", reasoning="secret"):
+    return {
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    "reasoning_content": reasoning,
+                },
+                "finish_reason": "stop",
+            }
+        ]
+    }
+
+
+def test_get_output_list_default_drops_reasoning_content():
+    out = get_output_list(_dct_with_reasoning())
+    msg = next(o for o in out if o["type"] == "message")
+    assert "reasoning_content" not in msg
+    assert msg["content"][0]["text"] == "<think>t</think>ok"
+
+
+def test_get_output_list_persist_copies_reasoning_content():
+    out = get_output_list(_dct_with_reasoning(), persist_reasoning_content=True)
+    msg = next(o for o in out if o["type"] == "message")
+    assert msg["reasoning_content"] == "secret"
+    assert msg["content"][0]["text"] == "<think>t</think>ok"
+
+
+def test_get_output_list_persist_omits_missing_reasoning():
+    out = get_output_list(_dct("stop", content="ok"), persist_reasoning_content=True)
+    msg = next(o for o in out if o["type"] == "message")
+    assert "reasoning_content" not in msg
+
+
+def _tool_call(call_id="call_1", name="read_file", arguments="{}"):
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
+def test_get_output_list_keeps_reasoning_when_content_null_with_tool_calls():
+    """Non-stream tool-only: content=null + reasoning + tools → message-носитель, не поле на fc."""
+    payload = _dct("tool_calls", content=None, tool_calls=[_tool_call()])
+    payload["choices"][0]["message"]["reasoning_content"] = "why this tool"
+    out = get_output_list(payload, persist_reasoning_content=True)
+    assert [o["type"] for o in out] == ["message", "function_call"]
+    msg = out[0]
+    assert msg["content"][0]["text"] == ""
+    assert msg["reasoning_content"] == "why this tool"
+    assert "reasoning_content" not in out[1]
+
+
+def test_get_output_list_null_content_tool_call_skips_message_without_reasoning():
+    payload = _dct("tool_calls", content=None, tool_calls=[_tool_call()])
+    out = get_output_list(payload, persist_reasoning_content=True)
+    assert [o["type"] for o in out] == ["function_call"]
+
+
+def test_get_output_list_default_drops_reasoning_on_null_content_tool_call():
+    payload = _dct("tool_calls", content=None, tool_calls=[_tool_call()])
+    payload["choices"][0]["message"]["reasoning_content"] = "why this tool"
+    out = get_output_list(payload)
+    assert [o["type"] for o in out] == ["function_call"]
+    assert all("reasoning_content" not in o for o in out)
+
+
 if __name__ == "__main__":
     unittest.main()

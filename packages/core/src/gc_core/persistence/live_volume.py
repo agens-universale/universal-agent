@@ -5,7 +5,7 @@ append / compact / discard; TUI только читает (см. docs_md/tui/met
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from gc_core.message_format import calc_history_chars_for_trigger
 from gc_core.persistence.meta_ownership import merge_runtime_into_meta
@@ -16,10 +16,17 @@ def merge_tui_into_meta(meta: Dict[str, Any], patch: Dict[str, Any]) -> None:
     merge_runtime_into_meta(meta, patch)
 
 
-def live_volume_from_messages(messages: List[Dict[str, Any]]) -> Dict[str, int]:
+def live_volume_from_messages(
+    messages: List[Dict[str, Any]],
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> Dict[str, int]:
     """Полный пересчёт агрегатов объёма live-окна."""
     return {
-        "live_history_chars": calc_history_chars_for_trigger(messages),
+        "live_history_chars": calc_history_chars_for_trigger(
+            messages, tags=tags, strip_think=strip_think
+        ),
         "live_msg_count": len(messages),
     }
 
@@ -43,11 +50,17 @@ def bump_live_volume_in_meta(
 
 
 def bump_live_volume_for_messages(
-    meta: Dict[str, Any], messages: List[Dict[str, Any]]
+    meta: Dict[str, Any],
+    messages: List[Dict[str, Any]],
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> None:
     """Инкремент live_* на объём только что дописанных payload."""
     bump_live_volume_in_meta(
         meta,
-        delta_chars=calc_history_chars_for_trigger(messages),
+        delta_chars=calc_history_chars_for_trigger(
+            messages, tags=tags, strip_think=strip_think
+        ),
         delta_count=len(messages),
     )

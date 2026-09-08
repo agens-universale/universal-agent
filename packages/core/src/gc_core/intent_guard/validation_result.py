@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from gc_core.message_projection import project_text_for_model
 from gc_core.utils.json_text import parse_json_from_text
 
 _logger = logging.getLogger(__name__)
@@ -79,8 +80,10 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
     Парсинг двухосного JSON валидатора (§7.1–7.2).
 
     ``None`` — битый JSON, нет обязательных ключей или невалидный ``action`` (fail-open).
+    ``<think>`` всегда вырезается: парсер не зависит от ``strip_think`` конфига.
     """
-    parsed = parse_json_from_text(raw, default=None)
+    cleaned = project_text_for_model(raw or "", strip_think=True)
+    parsed = parse_json_from_text(cleaned, default=None)
     if not isinstance(parsed, dict):
         return None
 

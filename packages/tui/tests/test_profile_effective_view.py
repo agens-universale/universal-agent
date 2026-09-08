@@ -1163,23 +1163,20 @@ async def test_saving_an_own_entry_reports_a_saved_entry(tmp_path, monkeypatch):
 async def test_opening_a_profile_does_not_rebind_the_projection_pipeline(
         tmp_path, monkeypatch):
     """Открытый профиль показывают, а не активируют: собрать его стек нужно, но
-    рантайм процесса обязан остаться прежним.
+    эффективный конфиг сессии обязан остаться прежним.
 
-    `_open_profile_config` зовёт `load_config_ex`, а тот не свободен от побочек —
-    `configure_for_model_tags` перепривязывает МОДУЛЬНЫЙ конвейер проекций всему
-    процессу, и никто его не возвращает. То есть достаточно заглянуть в чужой
-    профиль со своими `strip_tags_projection.tags`, чтобы работающий агент начал
-    резать другой набор тегов в исходящих сообщениях — до следующего
-    `reload_config`. И это не разовый эффект: `_mount_open_profile` зовёт сбор на
-    каждом ре-рендере подвида."""
-    from gc_core import message_projection
-
-    before = message_projection._DEFAULT_FOR_MODEL
+    `_open_profile_config` зовёт `load_config_ex`. Проекция больше не глобальна,
+    но проба чужого профиля всё равно не должна менять `effective_config` —
+    иначе исходящий трейс и derived-sink'и начали бы читать чужие tags /
+    strip_think до следующего `reload_config`."""
     profile = 'strip_tags_projection:\n  tags: ["scratchpad"]\n'
     async with _profile_view(tmp_path, monkeypatch, profile=profile,
                              base=_BASE_ONE_MODEL) as (_p, scr, _ed):
+        before = dict(scr.app.effective_config().get("strip_tags_projection") or {})
         scr._open_profile_config("work")
-        assert message_projection._DEFAULT_FOR_MODEL is before
+        after = dict(scr.app.effective_config().get("strip_tags_projection") or {})
+        assert after == before
+        assert after.get("tags") != ["scratchpad"]
 
 
 async def test_opening_a_profile_does_not_silence_tls_warnings_process_wide(

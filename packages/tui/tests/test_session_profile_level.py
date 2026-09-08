@@ -801,22 +801,20 @@ def test_sanitize_does_not_apply_the_probed_profile_to_the_process(tmp_path):
     """Санация СПРАШИВАЕТ, собирается ли сессионный профиль, и ответ выбрасывает
     (`load_config_ex` без присваивания) — это проба, а не применение.
 
-    Сбор же не безобиден: `configure_for_model_tags` перепривязывает конвейер
-    проекций всему процессу. Профиль применяет `_profile_remerge` — он и обязан
-    нести побочки; проба, идущая другим поводом (attach треда, перечитка), не
-    должна двигать рантайм ни в какую сторону."""
-    from gc_core import message_projection
-
+    Профиль применяет `_profile_remerge` — он и обязан нести побочки; проба,
+    идущая другим поводом (attach треда, перечитка), не должна менять
+    `effective_config`."""
     app = _app_with_base(tmp_path)
     _write_yaml(tmp_path / "profiles" / "work.yml",
                 {"strip_tags_projection": {"tags": ["scratchpad"]}})
     app.set_session_override("profile", "work")
-    before = message_projection._DEFAULT_FOR_MODEL
+    before = dict(app.effective_config().get("strip_tags_projection") or {})
 
     app.sanitize_session_profile()
 
     assert "profile" in app._session_overrides   # профиль здоров — санация не сняла
-    assert message_projection._DEFAULT_FOR_MODEL is before
+    after = dict(app.effective_config().get("strip_tags_projection") or {})
+    assert after == before
 
 
 # --- 10. Гейт сессионного выбора: несобираемый профиль отклоняется на месте --------
@@ -928,11 +926,8 @@ def test_session_profile_removal_does_not_probe_at_all(tmp_path):
 
 def test_switch_session_profile_gate_probes_without_applying_to_process(tmp_path):
     """Проба гейта не применяет профиль к процессу — иначе сорвавшийся персист
-    (каталог тредов недоступен) оставлял бы процесс перепривязанным к профилю,
-    которого нет ни в сессии, ни в мете: конвейер проекций режет теги по чужому
-    правилу, а витрины показывают прежнее."""
-    from gc_core import message_projection
-
+    (каталог тредов недоступен) оставлял бы процесс с чужим
+    `strip_tags_projection`, которого нет ни в сессии, ни в мете."""
     _write_yaml(tmp_path / "profiles" / "work.yml",
                 {"strip_tags_projection": {"tags": ["scratchpad"]}})
     app = _app_with_base(tmp_path)
@@ -941,13 +936,15 @@ def test_switch_session_profile_gate_probes_without_applying_to_process(tmp_path
         raise OSError("read-only")
 
     app.persist_session_overrides = _no_disk
-    before = message_projection._DEFAULT_FOR_MODEL
+    before = dict(app.effective_config().get("strip_tags_projection") or {})
 
     with pytest.raises(OSError):
         app.switch_session_profile("work")
 
     assert "profile" not in app._session_overrides
-    assert message_projection._DEFAULT_FOR_MODEL is before
+    after = dict(app.effective_config().get("strip_tags_projection") or {})
+    assert after == before
+    assert after.get("tags") != ["scratchpad"]
 
 
 def test_profile_broken_after_the_choice_still_degrades_to_the_base(tmp_path):

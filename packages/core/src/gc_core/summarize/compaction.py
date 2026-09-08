@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from gc_core.intent_log import serialize, serialize_for_meta, tail_preview
 from gc_core.loop_detector.detector import clear as clear_loop_detector
@@ -8,6 +8,7 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total
 from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_completed, log_compaction_precheck, log_compaction_started, log_summary_message_body, log_summary_raw_text, log_summary_slice_fallback, logger_from_ctx
 from gc_core.summarize.summary_message_body import build_dialog_summary_content, resolve_intent_log_preview_chars
@@ -164,11 +165,18 @@ def history_exceeds_summary_trigger(
     *,
     state: Any,
     summary_trigger_chars: int,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> bool:
     if summary_trigger_chars <= 0:
         return False
     full_messages = without_system_messages(getattr(state, "messages", []))
-    return calc_history_chars_for_trigger(full_messages) > summary_trigger_chars
+    return (
+        calc_history_chars_for_trigger(
+            full_messages, tags=tags, strip_think=strip_think
+        )
+        > summary_trigger_chars
+    )
 
 
 def run_summary_compaction(
@@ -182,9 +190,14 @@ def run_summary_compaction(
 ) -> None:
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
+    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
     full_messages = without_system_messages(getattr(state, "messages", []))
-    trigger_volume = calc_history_chars_for_trigger(full_messages)
-    serialized_chars = calc_messages_chars_total(full_messages)
+    trigger_volume = calc_history_chars_for_trigger(
+        full_messages, tags=tags, strip_think=True
+    )
+    serialized_chars = calc_messages_chars_total(
+        full_messages, tags=tags, strip_think=True
+    )
     log_ctx = SummaryCompactionLog(
         trigger_reason=trigger_reason,
         thread_id=thread_id,
@@ -306,7 +319,9 @@ def run_summary_compaction(
         archive_suffix = None
 
     new_serialized = calc_messages_chars_total(
-        without_system_messages(getattr(state, "messages", []))
+        without_system_messages(getattr(state, "messages", [])),
+        tags=tags,
+        strip_think=True,
     )
     ratio = (
         round((new_serialized / serialized_chars), 4) if serialized_chars > 0 else 0.0
@@ -340,9 +355,14 @@ def maybe_run_summary_compaction(
     thread_id = getattr(state, "thread_id", None)
     if summary_trigger_chars <= 0:
         return False
+    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
     full_messages = without_system_messages(getattr(state, "messages", []))
-    trigger_volume = calc_history_chars_for_trigger(full_messages)
-    serialized_chars = calc_messages_chars_total(full_messages)
+    trigger_volume = calc_history_chars_for_trigger(
+        full_messages, tags=tags, strip_think=True
+    )
+    serialized_chars = calc_messages_chars_total(
+        full_messages, tags=tags, strip_think=True
+    )
     log_compaction_precheck(
         logger,
         trigger_reason=trigger_reason,
