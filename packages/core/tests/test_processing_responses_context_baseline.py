@@ -33,9 +33,6 @@ def teardown_module(_module) -> None:
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
-    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
-    if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = real_tools.apply_tool
 
 
 processing_module = None
@@ -72,12 +69,12 @@ def _stub_tools_modules() -> None:
 
     def _apply_tool(*_args, **_kwargs):
         tool_name = _kwargs.get("tool_name")
+        arguments = _kwargs.get("arguments")
+        try:
+            payload = json.loads(arguments) if isinstance(arguments, str) else {}
+        except Exception:
+            payload = {}
         if tool_name == "turn_finish":
-            arguments = _kwargs.get("arguments")
-            try:
-                payload = json.loads(arguments) if isinstance(arguments, str) else {}
-            except Exception:
-                payload = {}
             result = {
                 "tool": "turn_finish",
                 "ok": True,
@@ -90,7 +87,14 @@ def _stub_tools_modules() -> None:
                     if key in payload:
                         result[key] = payload[key]
             return json.dumps(result, ensure_ascii=False)
-        raise AssertionError("apply_tool should not be called in this test")
+        result = {
+            "tool": tool_name,
+            "ok": True,
+            "status": "executed",
+            "message": "ok",
+            "error": None,
+        }
+        return json.dumps(result, ensure_ascii=False)
 
     def _build_tools_data(_config_dict):
         return {}, [], []
@@ -101,10 +105,6 @@ def _stub_tools_modules() -> None:
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
-
-    from gc_core.message_policy import cycle_stop as _cycle_stop_mod
-
-    _cycle_stop_mod.apply_tool = tools_pkg.apply_tool
 
 
 def _make_state(*, max_steps: int = 5):
@@ -426,7 +426,7 @@ def test_turn_finish_validation_failure_fails_open(monkeypatch):
     assert len(synthetic_outputs) == 1
 
 
-def test_cycle_stop_generates_outputs_for_all_pending_tool_calls():
+def test_finish_batch_executes_neighbor_tools_not_cycle_stop_stubs():
     state = _make_state()
     result = run_agent(
         [_submit_solution_call(), _generic_tool_call()],
@@ -442,7 +442,9 @@ def test_cycle_stop_generates_outputs_for_all_pending_tool_calls():
     finish_payload = json.loads(by_call["call_finish"]["output"])
     assert finish_payload["task_report"] == "Сделано по запросу пользователя"
     assert "Dialog turn finished" not in by_call["call_finish"]["output"]
-    assert "skipped_on_cycle_stop" in by_call["call_other"]["output"]
+    other_payload = json.loads(by_call["call_other"]["output"])
+    assert other_payload["ok"] is True
+    assert "skipped_on_cycle_stop" not in by_call["call_other"]["output"]
 
 
 def test_turn_finish_validation_receives_context_and_current_scope(monkeypatch):
@@ -534,11 +536,9 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
     assert call_state is state
 
 
-def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch):
-    """При отклонении quality/finish gate pending tool_calls должны закрываться
-    синтетическими function_call_output (как при успехе), иначе chat/completions
-    получает невалидную цепочку assistant.tool_calls → user."""
-    recorded: list[list[str | None]] = []
+def test_finish_gate_rejection_keeps_batch_outputs_in_trace(monkeypatch):
+    """При отклонении finish-gate у каждого function_call есть output в трейсе
+    (иначе chat/completions получает невалидную цепочку). Work не стирается."""
 
     def _reject_validation(**_kwargs):
         return ValidationResult(
@@ -554,22 +554,10 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
             feedback_for_agent="improve the answer",
         )
 
-    real_append = processing_module.append_cycle_stop_tool_outputs_for_batch
-
-    def _spy_append_cycle_stop(**kwargs):
-        tool_calls = kwargs.get("tool_calls") or []
-        recorded.append([t.get("call_id") for t in tool_calls])
-        return real_append(**kwargs)
-
     monkeypatch.setattr(
         intent_guard_guard,
         "validate_final_report_vs_user_intent",
         _reject_validation,
-    )
-    monkeypatch.setattr(
-        processing_module,
-        "append_cycle_stop_tool_outputs_for_batch",
-        _spy_append_cycle_stop,
     )
 
     def _stub_user_ask(_messages, _state, _ctx):
@@ -591,13 +579,20 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
     seed_state_intent(state, log=["user question"], current=["user question"])
 
     run_agent(
-        [_submit_solution_call()],
+        [_submit_solution_call(), _generic_tool_call()],
         state,
         _make_ctx(strict_turn_finish_validation=True),
     )
 
-    assert recorded == [["call_finish"]]
-    assert any(
-        m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    by_call = {
+        m.get("call_id"): m
         for m in state.messages
+        if m.get("type") == "function_call_output"
+    }
+    assert "call_finish" in by_call
+    assert "call_other" in by_call
+    assert json.loads(by_call["call_other"]["output"])["ok"] is True
+    assert "skipped_on_cycle_stop" not in by_call["call_other"]["output"]
+    assert json.loads(by_call["call_finish"]["output"])["status"] == (
+        "rejected_by_finish_gate"
     )

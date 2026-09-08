@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 
 from gc_core.message_policy.stop_persist import is_persist_discarded
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 def _unique_id_factory():
@@ -370,38 +369,39 @@ def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
     assert len(c2) == 1
 
 
-# --- envelopes distinct from cycle-stop ------------------------------------
+# --- envelope B shape -------------------------------------------------------
 
 
-def test_b_status_differs_from_cycle_stop_fallback():
+def test_envelope_b_marks_not_started_and_synthetic():
     from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
 
-    cycle = json.loads(AbstractSimpleTool.fallback_tool_output_on_cycle_stop("fs_read_file"))
     user = json.loads(not_started_due_to_user_stop_output("fs_read_file"))
-    assert cycle["status"] == "skipped_on_cycle_stop"
+    assert user["tool"] == "fs_read_file"
+    assert user["ok"] is False
     assert user["status"] == "not_started_due_to_user_stop"
-    assert user["status"] != cycle["status"]
+    assert user["synthetic"] is True
+    # Статус обязан отличаться от прочих synthetic-конвертов (исторический
+    # cycle-stop fallback был "skipped_on_cycle_stop"): статус — единственный
+    # признак, по которому трейс различает «не стартовал из-за стопа юзера».
+    assert user["status"] != "skipped_on_cycle_stop"
 
 
 def test_stop_abort_still_appends_finalizer_skip_outputs(monkeypatch):
-    """После abort remaining + skip-output'ы второго finalizer'а в возврате."""
+    """После stop до ask оба неисполненных вызова получают envelope B."""
     from gc_core import processing_responses as pr
 
     state = _state(stop_requested=True)
     _patch_process_tool_calls(monkeypatch, pr)
-    # Первый ask_human — finalizer; второй session_memory skipped; но stop до всего
-    # → B для executed-части (ask_human) + skip для хвоста после finalizer.
+    # Stop до apply: ask не передал ход человеку, поэтому и ask, и finish получают B.
     messages = [
         {"type": "function_call", "name": "turn_ask_human", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "session_memory", "call_id": "c2", "arguments": "{}"},
+        {"type": "function_call", "name": "turn_finish", "call_id": "c2", "arguments": "{}"},
     ]
     outs = pr.process_tool_calls(
         messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
     )
-    # executed=[ask_human], skipped=[session_memory]
-    # stop before ask → B for ask + skip for session_memory
     assert len(outs) == 2
     assert outs[0]["call_id"] == "c1"
     assert json.loads(outs[0]["output"])["status"] == "not_started_due_to_user_stop"
     assert outs[1]["call_id"] == "c2"
-    assert "skipped" in outs[1]["output"]
+    assert json.loads(outs[1]["output"])["status"] == "not_started_due_to_user_stop"

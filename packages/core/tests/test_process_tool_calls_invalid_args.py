@@ -164,12 +164,41 @@ def test_a_finalizer_with_invalid_arguments_does_not_skip_its_siblings(monkeypat
     assert json.loads(outs[1]["output"]) == {"ok": True}
 
 
-def test_a_valid_finalizer_still_skips_its_siblings(monkeypatch):
+def test_a_valid_ask_human_does_not_skip_work_siblings(monkeypatch):
     calls: list[str] = []
     _patch_ask_human(monkeypatch, calls)
     batch = [_fc("turn_ask_human", "c1", '{"question": "which one?"}'), _fc("session_memory", "c2", '{"action": "read"}')]
 
     outs = pr.process_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
 
+    assert calls == ["turn_ask_human", "session_memory"]
+    assert json.loads(outs[1]["output"]) == {"ok": True}
+
+
+def test_a_valid_ask_human_skips_turn_finish(monkeypatch):
+    calls: list[str] = []
+    _patch_ask_human(monkeypatch, calls)
+    batch = [
+        _fc("turn_ask_human", "c1", '{"question": "which one?"}'),
+        _fc("turn_finish", "c2", '{"solution_type": "full_solution"}'),
+    ]
+
+    outs = pr.process_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
+
     assert calls == ["turn_ask_human"]
     assert json.loads(outs[1]["output"])["skipped"] is True
+
+
+def test_an_invalid_ask_human_does_not_skip_turn_finish(monkeypatch):
+    calls: list[str] = []
+    _patch_ask_human(monkeypatch, calls)
+    batch = [
+        _fc("turn_ask_human", "c1", '{"bogus": 1}'),
+        _fc("turn_finish", "c2", '{"solution_type": "full_solution"}'),
+    ]
+
+    outs = pr.process_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
+
+    assert calls == ["turn_ask_human", "turn_finish"]
+    assert json.loads(outs[0]["output"])["error"]["type"] == "invalid_arguments"
+    assert json.loads(outs[1]["output"]) == {"ok": True}

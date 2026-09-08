@@ -16,7 +16,6 @@ from gc_core.loop_detector.detector import flush as flush_loop_detector
 from gc_core.loop_detector.detector import observe as observe_loop_detector
 from gc_core.loop_detector.detector import clear as clear_loop_detector
 from gc_core.intent_scope.final_answer import maybe_record_final_answer_intent
-from gc_core.message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
 from gc_core.summarize.limit_trace_summary import build_limit_envelope
@@ -26,7 +25,6 @@ from gc_core.tools import (
     WrongFunctionArgumentsException,
     is_internal_tool_error_output,
     is_unknown_tool_output,
-    tool_arguments_valid,
 )
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from gc_core.tools.subagents.progress import brief_args_summary, emit_progress, extract_intermediate_prose, parse_tool_result_status, todo_items_from_arguments
@@ -567,18 +565,6 @@ def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
     }
 
 
-def check_trace_finished(messages: List[Dict]) -> Union[Tuple[str, str], None]:
-    if len(messages) == 0:
-        raise ValueError('Empty messages list')
-
-    grouped_messages = group_messages(messages)
-    for m in grouped_messages['tool_calls']:
-        if m['name'] == FINISH_TOOL_NAME:
-            return m['arguments'], m['call_id']
-
-    return None
-
-
 def process_user_ask(messages, state: State, ctx: Any):
     resp_messages, response_id, res_headers = _request_backend_canonical(
         messages,
@@ -589,34 +575,67 @@ def process_user_ask(messages, state: State, ctx: Any):
     return resp_messages, response_id
 
 
-def split_at_first_finalizer(
-    tool_calls: List[Dict], *, finalizes: Optional[Callable[[Dict], bool]] = None
+def partition_work_then_finish(
+    tool_calls: List[Dict],
 ) -> tuple[List[Dict], List[Dict]]:
-    """Разбивает tool_calls на (executed, skipped): всё до и включая первый
-    turn-финализирующий тул исполняется; остальное в этом ответе — пропускается
-    (ход уже завершён). intermediate_reply финализатором не считается.
+    """Work в порядке батча, затем не больше одного ``turn_finish``.
 
-    ``finalizes`` уточняет, завершит ли кандидат ход на самом деле (например,
-    валидны ли его аргументы); отвергнутый кандидат исполняется как обычный вызов."""
-    for i, m in enumerate(tool_calls):
-        if str(m.get("name") or "") not in TURN_FINALIZING_TOOLS:
-            continue
-        if finalizes is not None and not finalizes(m):
-            continue
-        return tool_calls[: i + 1], tool_calls[i + 1:]
-    return tool_calls, []
+    Work — все вызовы кроме ``turn_finish`` (``turn_ask_human`` не режет
+    соседей). Позиция finish work не режет. Первый finish идёт после work,
+    остальные — skip. Успешный ``turn_ask_human`` подавляет finish уже по
+    фактическому output, не здесь.
+    """
+    work: List[Dict] = []
+    finish_calls: List[Dict] = []
+    for call in tool_calls:
+        if str(call.get("name") or "") == FINISH_TOOL_NAME:
+            finish_calls.append(call)
+        else:
+            work.append(call)
+    if not finish_calls:
+        return work, []
+    return work + [finish_calls[0]], finish_calls[1:]
 
 
-def _finalizer_arguments_valid(call: Dict, ctx: Any) -> bool:
-    """Финализатор с невалидными аргументами ход не завершает, поэтому и соседей
-    по батчу пропускать нельзя. Судим теми же правилами, что и apply_tool; без
-    tools_data (тест-дублёры) судить нечем — считаем валидным."""
-    tools_data = getattr(ctx, "tools_data", None)
-    if not tools_data:
-        return True
-    return tool_arguments_valid(
-        str(call.get("name") or ""), call.get("arguments"), tools_data
+def _first_finish_call(tool_calls: List[Dict]) -> Optional[Dict]:
+    for call in tool_calls:
+        if str(call.get("name") or "") == FINISH_TOOL_NAME:
+            return call
+    return None
+
+
+def _output_for_call(messages: List[Dict], call_id: Any) -> Any:
+    for msg in messages:
+        if (
+            msg.get("type") == "function_call_output"
+            and msg.get("call_id") == call_id
+        ):
+            return msg.get("output")
+    return None
+
+
+def _closing_finish_after_batch(
+    tool_calls: List[Dict],
+    batch_outputs: List[Dict],
+    *,
+    stop_requested: bool,
+) -> Optional[Dict]:
+    """Закрывать ход или нет — только после батча, по фактическому output.
+
+    Первый ``turn_finish`` исходного батча. ``ok: false`` (отказ тула / skip
+    после ask) или user-stop — ход не сдаём. Иначе — этот вызов идёт в gate.
+    """
+    if stop_requested:
+        return None
+    finish = _first_finish_call(tool_calls)
+    if finish is None:
+        return None
+    finish_ok, _ = parse_tool_result_status(
+        _output_for_call(batch_outputs, finish.get("call_id"))
     )
+    if finish_ok is False:
+        return None
+    return finish
 
 
 # finish_reason == "length": JSON вызова усечён потолком max_tokens — объясняем
@@ -658,12 +677,13 @@ def process_tool_calls(
          собрать function_call_output.
 
     До цикла по batch:
-      - после первого turn-финализатора (finish / ask_human) остальные call'ы
-        не исполняем — сразу synthetic skip-output; финализатор с невалидными
-        аргументами ход не завершает — исполняется как обычный вызов (получит
-        invalid_arguments), соседей не пропускаем;
-      - skip готовим заранее, чтобы успеть записать их до ask_human вместе
-        с уже выполненными тулами.
+      - work (все кроме turn_finish) в порядке батча; ask_human work не режет
+        и сам не skip'ает соседей-ask;
+      - только первый turn_finish в executed; остальные extra-finish — skip
+        сразу (сообщение «лишний finish», не «ход уже сдан»);
+      - успешный ask в цикле даёт skip-output первому finish (ход у человека);
+      - skip extra-finish готовим заранее, чтобы сфлашить их до ask_human
+        вместе с уже выполненными тулами.
 
     User-stop: если ``state.stop_requested`` до/между тулами — remaining
     не ``apply_tool``, сразу envelope B; active (уже вернул A) + B сразу
@@ -684,19 +704,16 @@ def process_tool_calls(
     state.session_compact_applied = False
 
     tools_outputs = []
-    # Один turn-финализатор на ход: executed исполняем, skipped — только synthetic output.
+    # Work, затем не больше одного finish; skipped — лишние turn_finish.
     unknown_in_batch = 0
     invalid_in_batch = 0
-    executed, skipped = split_at_first_finalizer(
-        grouped_messages["tool_calls"],
-        finalizes=lambda call: _finalizer_arguments_valid(call, ctx),
-    )
+    tool_calls = grouped_messages["tool_calls"]
+    executed, skipped = partition_work_then_finish(tool_calls)
     # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
     # executed-output'ами до блокирующего turn_ask_human (иначе пропущенный тул
     # тоже висит "running" до ответа юзера).
     skip_outputs = []
     if skipped:
-        finalizer = str(executed[-1].get("name") or "the finalizing tool")
         for m in skipped:
             skip_outputs.append({
                 "id": generate_message_id_func("fco"),
@@ -704,11 +721,12 @@ def process_tool_calls(
                 "call_id": m["call_id"],
                 "output": (
                     f'{{"ok": false, "skipped": true, "message": '
-                    f'"Skipped: turn already finalized by {finalizer}; '
-                    f'one finalizer per turn."}}'
+                    f'"Skipped: extra {FINISH_TOOL_NAME} in this batch; '
+                    f'one {FINISH_TOOL_NAME} per batch."}}'
                 ),
             })
     aborted_by_user_stop = False
+    successful_ask_human = False
     # Human-wait (ask_human | confirm-in-tool): до блокировки сфлашить уже
     # посчитанные output'ы предыдущих тулов + skip'ы (I2), чтобы TUI не держал
     # их в running на время wait. Полный батч персистится ещё раз на выходе
@@ -735,9 +753,21 @@ def process_tool_calls(
             break
 
         tool_name = str(m.get("name") or "")
-        # smart-гейт (спека §3): считаем КАЖДЫЙ исполняемый вызов, кроме завершителя
-        # хода. До try — упавший вызов (неверные аргументы) тоже считается. turn_finish
-        # сюда не попадает (его путь — check_trace_finished мимо process_tool_calls).
+        if tool_name == FINISH_TOOL_NAME and successful_ask_human:
+            tools_outputs.append({
+                "id": generate_message_id_func("fco"),
+                "type": "function_call_output",
+                "call_id": m["call_id"],
+                "output": (
+                    f'{{"ok": false, "skipped": true, "message": '
+                    f'"Skipped: the turn was already handed to the user by '
+                    f"{ASK_HUMAN_TOOL_NAME}. Read the user's answer and continue "
+                    f'based on it instead of finalizing the turn."}}'
+                ),
+            })
+            continue
+        # smart-гейт: считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
+        # До try — упавший вызов (неверные аргументы) тоже считается.
         if tool_name not in TURN_FINALIZING_TOOLS:
             state.turn_tool_calls += 1
         prior = list(tools_outputs) + skip_outputs
@@ -800,6 +830,8 @@ def process_tool_calls(
         # В историю треда это не пишется.
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         ok, error_brief = parse_tool_result_status(tool_res_raw)
+        if tool_name == ASK_HUMAN_TOOL_NAME and ok is True:
+            successful_ask_human = True
         if is_intermediate:
             prose = extract_intermediate_prose(tool_arguments, tool_res_raw)
             emit_progress(
@@ -881,8 +913,8 @@ def process_tool_calls(
             config=getattr(ctx, "config_dict", {}) or {},
             logger=getattr(ctx, "logger", None),
         )
-        observe_loop_detector(state, ctx, tool_name, tool_arguments)
         if tool_name != FINISH_TOOL_NAME:
+            observe_loop_detector(state, ctx, tool_name, tool_arguments)
             maybe_update_intent_scope_from_tool(
                 tool_name=tool_name,
                 tool_output_raw=tool_res_raw,
@@ -1050,7 +1082,7 @@ def run_agent(
             if pending:
                 messages = pending
         # Если от backend'а или get_pending_messages пришёл пустой список сообщений,
-        # не передаём его дальше в check_trace_finished / check_mode, чтобы не падать
+        # не передаём его дальше в check_mode, чтобы не падать
         # с ValueError('Empty messages list'). Вместо этого генерируем понятное
         # сообщение‑обратную связь для агента.
         if not messages:
@@ -1252,24 +1284,46 @@ def run_agent(
                     state.last_backend_response_id = response_id
                     # Half-turn: ответ модели обработаем на следующей итерации.
                 elif mode == "function_call":
-                    # Finish-turn handoff closes the CURRENT user turn only when we
-                    # process fresh backend function_calls (mode == "function_call"),
-                    # not when replaying older trace.
-                    finish_response = check_trace_finished(messages)
-                    if finish_response:
-                        finish_arguments, finish_call_id = finish_response
-                        grouped_messages = group_messages(messages)
-                        pending_tool_calls = grouped_messages.get("tool_calls", [])
-                        # Emit synthetic outputs for all pending tool_calls once (incl. finish):
-                        # chat/completions needs tool rows after assistant.tool_calls.
-                        append_cycle_stop_tool_outputs_for_batch(
-                            state=state,
-                            ctx=ctx,
-                            tool_calls=pending_tool_calls,
-                            run_agent_func=run_agent,
-                            persist_messages_callback=persist_messages_callback,
-                            backend_mode=backend_mode,
+                    # Свежий tool-батч: сначала вся work, потом не больше
+                    # одного turn_finish. Close — только после батча, по output.
+                    pending_tool_calls = group_messages(messages).get("tool_calls", [])
+                    messages = process_tool_calls(
+                        messages, state, ctx, run_agent_func=run_agent,
+                        persist_messages_callback=persist_messages_callback,
+                    )
+                    closing_finish = _closing_finish_after_batch(
+                        pending_tool_calls,
+                        messages,
+                        stop_requested=bool(
+                            getattr(state, "stop_requested", False)
+                        ),
+                    )
+                    if closing_finish is not None:
+                        finish_call_id = closing_finish.get("call_id")
+                        batch_new = filter_messages_not_in_state(
+                            list(getattr(state, "messages", []) or []),
+                            messages,
                         )
+                        work_new: List[Dict] = []
+                        finish_new: List[Dict] = []
+                        for msg in batch_new:
+                            if (
+                                msg.get("type") == "function_call_output"
+                                and msg.get("call_id") == finish_call_id
+                            ):
+                                finish_new.append(msg)
+                            else:
+                                work_new.append(msg)
+                        # Work (и notice/compact из возврата) в трейсе до gate.
+                        if work_new:
+                            state.messages += work_new
+                            _maybe_persist(
+                                persist_messages_callback, work_new, state
+                            )
+                        if finish_new:
+                            # I3: finish output в state до gate; persist — после apply.
+                            state.messages += finish_new
+                        finish_arguments = closing_finish.get("arguments")
                         if backend_mode == "chat_completions":
                             gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
                             # Индикатор «сверяюсь…» — только когда судья реально пойдёт
@@ -1320,6 +1374,7 @@ def run_agent(
                                     )
                                 ]
                                 # Finish-reject — завершённый ход (batch + gate).
+                                # Work уже в трейсе, не откатываем.
                                 count_completed_step = True
                             else:
                                 # accept / fail_open_error / fail_open_limit / прочее —
@@ -1339,15 +1394,15 @@ def run_agent(
                                     continue
                                 return finish_arguments
                         else:
+                            if finish_new:
+                                _maybe_persist(
+                                    persist_messages_callback, finish_new, state
+                                )
                             state.current_user_intent = []
                             state.steps += 1
                             clear_loop_detector(state)
                             return finish_arguments
                     else:
-                        messages = process_tool_calls(
-                            messages, state, ctx, run_agent_func=run_agent,
-                            persist_messages_callback=persist_messages_callback,
-                        )
                         n_unknown = int(
                             getattr(state, "last_batch_unknown_tool_count", 0) or 0
                         )
@@ -1386,6 +1441,7 @@ def run_agent(
                                 "with the same client-side error."
                             )
                         # Полный ход: LLM уже вернул tools, batch исполнен.
+                        # Невалидный finish сюда же: отказной output в трейсе, ход открыт.
                         count_completed_step = True
                 elif mode == "function_call_output":
                     messages, response_id = process_tool_outputs(messages, state, ctx)

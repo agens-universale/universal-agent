@@ -178,17 +178,6 @@ def test_turn_finish_task_is_optional_passthrough():
     assert out["task"] is None
 
 
-def test_cycle_stop_output_preserves_task():
-    output = SubmitSolution.output_from_cycle_stop_arguments(json.dumps({
-        "solution_type": "full_solution",
-        "task": "Implement auth",
-        "task_report": "Done",
-        "handoff": "{}",
-    }))
-    assert output is not None
-    assert json.loads(output)["task"] == "Implement auth"
-
-
 def test_turn_finish_rejects_invalid_handoff_json():
     tool = SubmitSolution()
     bad = json.loads(

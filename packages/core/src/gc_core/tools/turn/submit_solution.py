@@ -64,63 +64,6 @@ class SubmitSolution(AbstractSimpleTool):
         except JsonArgParseError:
             return None
 
-    @classmethod
-    def output_from_cycle_stop_arguments(cls, tool_arguments: str) -> Optional[str]:
-        """
-        Build ``function_call_output`` JSON from ``function_call.arguments`` on cycle_stop.
-
-        Best-effort parse without re-running full tool validation (finish gate already ran).
-        """
-        if not isinstance(tool_arguments, str) or not tool_arguments.strip():
-            return None
-        try:
-            payload = json.loads(tool_arguments)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-
-        solution_type = payload.get("solution_type")
-        if solution_type is not None and not isinstance(solution_type, str):
-            solution_type = str(solution_type)
-
-        task_report = payload.get("task_report")
-        if not isinstance(task_report, str):
-            task_report = "" if task_report is None else str(task_report)
-
-        task = payload.get("task")
-        if not isinstance(task, str):
-            task = None if task is None else str(task)
-
-        comment = payload.get("comment")
-        if comment is not None and not isinstance(comment, str):
-            comment = str(comment)
-
-        handoff = cls._parse_handoff_from_arguments(payload)
-
-        return cls._result(
-            ok=True,
-            status="submitted",
-            message="Task outcome submitted.",
-            task=task,
-            task_report=task_report,
-            solution_type=solution_type,
-            comment=comment if isinstance(comment, str) and comment.strip() else None,
-            handoff=handoff,
-            error=None,
-        )
-
-    @classmethod
-    def cycle_stop_output_error(cls, *, detail: str) -> str:
-        return cls._result(
-            ok=False,
-            status="cycle_stop_output_error",
-            message=detail,
-            task=None,
-            task_report="",
-            error={"type": "cycle_stop", "message": detail},
-        )
-
     @staticmethod
     def _finish_gate_block_from_validation(validation: Any) -> Dict[str, Any]:
         return {
@@ -387,7 +330,7 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 error={
                     "type": "limit_exceeded",
                     "field": "task_report",
-                    "message": "task_report is too long. Keep under 10 sentences.",
+                    "message": "task_report is too long. Keep under 10-20 sentences.",
                 },
             )
 

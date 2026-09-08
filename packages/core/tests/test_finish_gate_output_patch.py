@@ -21,17 +21,11 @@ def _make_state() -> State:
 
 
 def test_apply_finish_gate_decision_reject_marks_output_not_ok():
-    base = SubmitSolution.output_from_cycle_stop_arguments(
-        json.dumps(
-            {
-                "solution_type": "full_solution",
-                "task_report": "done",
-                "handoff": "{}",
-            },
-            ensure_ascii=False,
-        )
+    base = SubmitSolution()(
+        solution_type="full_solution",
+        task_report="done",
+        handoff="{}",
     )
-    assert base is not None
     validation = ValidationResult(
         ok=False,
         action="fix_report",
@@ -62,15 +56,10 @@ def test_apply_finish_gate_decision_reject_marks_output_not_ok():
 def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
     state = _make_state()
     call_id = "call_finish"
-    raw = SubmitSolution.output_from_cycle_stop_arguments(
-        json.dumps(
-            {
-                "solution_type": "direct_answer",
-                "task_report": "ответ",
-                "handoff": "{}",
-            },
-            ensure_ascii=False,
-        )
+    raw = SubmitSolution()(
+        solution_type="direct_answer",
+        task_report="ответ",
+        handoff="{}",
     )
     state.messages = [
         {
