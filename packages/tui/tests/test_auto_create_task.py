@@ -10,7 +10,7 @@ async def test_first_message_creates_task(tmp_path):
     captured = {"run": None}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             captured["run"] = {"messages": messages, "thread_id": thread_id}
             from pathlib import Path
             import json
@@ -55,7 +55,7 @@ async def test_message_while_running_calls_add_message(tmp_path):
     class _Fake:
         def __init__(self):
             self._evt = None
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             captured["runs"] += 1
             # симулируем долгий run
             import threading
@@ -95,7 +95,7 @@ async def test_message_after_stopped_restarts_same_thread(tmp_path):
     captured = {"thread_ids": []}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             from pathlib import Path
             import json
             captured["thread_ids"].append(thread_id)
@@ -141,7 +141,7 @@ async def test_no_duplicate_user_reply(tmp_path):
     from gc_tui.widgets.user_reply import UserReplyContainer
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import time
             from pathlib import Path
             import json

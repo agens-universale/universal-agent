@@ -13,6 +13,7 @@ from gc_tui.diff_tui.mode import resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key
 from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
+from gc_core.backends.protocol import AsyncFileOps
 from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 
 _logger = logging.getLogger(__name__)
@@ -104,8 +105,13 @@ def attach_to_context(ctx: Any, config_dict: dict) -> None:
     ctx.workspace = build_execution_workspace(wrapped, config_dict)
 
 
-class TrackingFsBackend:
-    """Декоратор LocalFsBackend: DiffStore snapshot + TouchedJournal."""
+class TrackingFsBackend(AsyncFileOps):
+    """Декоратор LocalFsBackend: DiffStore snapshot + TouchedJournal.
+
+    Наследует ``AsyncFileOps`` ради асинхронных двойников: они зовут
+    ``self.<метод>``, то есть отслеживающий метод обёртки, а не внутренний.
+    Копия двадцати пяти двойников здесь разъехалась бы с портом.
+    """
 
     def __init__(self, inner: Any, ctx: Any) -> None:
         self._inner = inner
@@ -247,6 +253,21 @@ class TrackingFsBackend:
 
     def makedirs(self, path: str) -> None:
         self._inner.makedirs(path)
+
+    @property
+    def bridges_to_loop(self) -> bool:
+        # Обёртка мостит ровно настолько, насколько мостит внутренний бэкенд:
+        # свой флаг здесь означал бы, что журнал diff решает за него.
+        return bool(getattr(self._inner, "bridges_to_loop", False))
+
+    def warm_capabilities(self) -> None:
+        # Пробы — свойство ВНУТРЕННЕГО бэкенда: журналу diff тут отслеживать
+        # нечего, а кэш обязан лечь именно на него, иначе обёртка прогреет
+        # свой и первый поиск снова заплатит за пробы.
+        self._inner.warm_capabilities()
+
+    async def awarm_capabilities(self) -> None:
+        await self._inner.awarm_capabilities()
 
     def exec(
         self,

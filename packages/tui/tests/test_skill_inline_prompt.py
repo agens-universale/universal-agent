@@ -16,7 +16,7 @@ async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
     captured = {}
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
             self._evt = threading.Event()
@@ -53,7 +53,7 @@ async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
     added = []
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)

@@ -11,7 +11,7 @@ async def test_ctrl_c_copies_when_input_has_selection(tmp_path, monkeypatch):
     stop_called = {"flag": False}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
@@ -56,7 +56,7 @@ async def test_ctrl_c_stops_run_when_nothing_selected(tmp_path):
     stop_called = {"flag": False}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)

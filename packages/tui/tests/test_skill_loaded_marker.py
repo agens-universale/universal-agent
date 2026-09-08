@@ -17,7 +17,7 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
     monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: True)
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             import threading
             self._evt = threading.Event(); self._evt.wait(timeout=2.0)
         def stop_run(self):
@@ -76,7 +76,7 @@ async def test_marker_not_found_when_unavailable(tmp_path, monkeypatch):
     monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: False)
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             import threading
             self._evt = threading.Event(); self._evt.wait(timeout=2.0)
         def stop_run(self):

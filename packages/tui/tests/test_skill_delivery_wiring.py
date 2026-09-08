@@ -49,7 +49,7 @@ async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
     added = []
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
@@ -92,7 +92,7 @@ async def test_inline_skill_display_stays_clean(tmp_path, monkeypatch):
     captured = {}
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
             self._evt = threading.Event()

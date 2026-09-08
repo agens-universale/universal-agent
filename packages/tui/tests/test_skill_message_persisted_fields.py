@@ -22,7 +22,7 @@ async def test_skill_prompt_start_gets_display_and_skill(tmp_path, monkeypatch):
     captured_start: dict = {}
 
     class _Fake:
-        def run(self, messages, *, display_contents=None, skills_loaded=None, **kw):
+        async def arun(self, messages, *, display_contents=None, skills_loaded=None, **kw):
             captured_start["display_contents"] = display_contents
             captured_start["skills_loaded"] = skills_loaded
             import threading
@@ -67,7 +67,7 @@ async def test_skill_continuation_start_gets_display_and_skill(tmp_path, monkeyp
     run_calls: list = []
 
     class _Fake:
-        def run(self, messages, *, display_contents=None, skills_loaded=None, **kw):
+        async def arun(self, messages, *, display_contents=None, skills_loaded=None, **kw):
             run_calls.append({
                 "display_contents": display_contents,
                 "skills_loaded": skills_loaded,
@@ -119,7 +119,7 @@ async def test_skill_inline_during_run_add_message_gets_fields(tmp_path, monkeyp
     added: list = []
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)

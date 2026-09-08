@@ -21,6 +21,47 @@ CONFIRM_WAIT_TIMEOUT_SEC = 600.0
 _log = logging.getLogger(__name__)
 
 
+
+def _run_agent(executor, a, *, thread_id, start_new_thread, system) -> None:
+    """Прогон агента: свой ``asyncio.run`` в этом же рабочем потоке.
+
+    Раньше здесь стоял синхронный ``executor.run(...)``, а тот уходил на
+    ПОРТАЛЬНЫЙ loop — то есть на прогон приходились два потока и два loop:
+    рабочий поток TUI и демон-поток портала.
+
+    Поток остаётся: агент не должен делить loop с Textual, иначе любая
+    непокрытая блокировка в ядре морозит UI. Уходит только портал.
+
+    На loop самого приложения агента вести нельзя и по второй причине —
+    файловый API ``FsBackend`` синхронный, и у мостящих бэкендов (Harbor,
+    TrackingFsBackend) он блокирует поток; на своём же loop это дедлок.
+
+    Клиенты httpx закрываются здесь же: ``asyncio.run`` убивает loop, а реестр
+    ключуется по ``id(loop)`` — адреса переиспользуются, и оставленный клиент
+    мёртвого loop мог бы достаться следующему прогону.
+    """
+    import asyncio
+
+    from gc_core.utils.async_http import aclose_clients
+
+    async def _body():
+        try:
+            await executor.arun(
+                a["msgs"],
+                thread_id=thread_id,
+                start_new_thread=start_new_thread,
+                system=system,
+                discard_writes_after_stop=True,
+                message_ids=a["message_ids"],
+                display_contents=a["display_contents"],
+                skills_loaded=a["skills_loaded"],
+            )
+        finally:
+            await aclose_clients()
+
+    asyncio.run(_body())
+
+
 class AgentRunner:
     """Управляет жизненным циклом одного run AgentExecutor."""
 
@@ -242,16 +283,8 @@ class AgentRunner:
                             query=query, technical=technical, message_id=message_id,
                             display_query=display_query, skill_loaded=skill_loaded,
                         )
-                        executor.run(
-                            a["msgs"],
-                            thread_id=thread_id,
-                            start_new_thread=start_new_thread,
-                            system=system,
-                            discard_writes_after_stop=True,
-                            message_ids=a["message_ids"],
-                            display_contents=a["display_contents"],
-                            skills_loaded=a["skills_loaded"],
-                        )
+                        _run_agent(executor, a, thread_id=thread_id,
+                                   start_new_thread=start_new_thread, system=system)
                         outcome = getattr(executor, "last_terminal_outcome", None)
                         if self._on_complete is not None:
                             try:

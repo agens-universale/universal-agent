@@ -85,7 +85,7 @@ async def test_enter_resets_chip_state(tmp_path):
     from gc_tui.app import TuiApp
 
     class _Fake:                                  # no-op executor: Enter не должен
-        def run(self, messages, *, thread_id, **kw):  # строить реальный AgentExecutor
+        async def arun(self, messages, *, thread_id, **kw):  # строить реальный AgentExecutor
             pass
 
     app = TuiApp(threads_dir=str(tmp_path))

@@ -18,7 +18,7 @@ class _FakeExecutor:
         self.system = system
         self.stopped = False
 
-    def run(self, messages, *, thread_id, start_new_thread=False,
+    async def arun(self, messages, *, thread_id, start_new_thread=False,
             system=None, verbose=None, **_):
         data = Path(self.threads_dir) / f"data_{self.system}_{thread_id}.jsonl"
         meta = Path(self.threads_dir) / f"meta_{self.system}_{thread_id}.json"

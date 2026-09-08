@@ -50,7 +50,7 @@ async def test_new_when_running_asks_confirm(tmp_path):
         def __init__(self):
             self._evt = None
 
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
@@ -91,7 +91,7 @@ async def test_new_confirm_has_title_and_wording(tmp_path):
 
     class _Fake:
         def __init__(self): self._evt = None
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import threading
             self._evt = threading.Event(); self._evt.wait(timeout=3.0)
         def stop_run(self):
@@ -123,7 +123,7 @@ async def test_new_confirm_yes_clears_runner_and_indicator(tmp_path):
 
     class _Fake:
         def __init__(self): self._evt = None
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import threading
             self._evt = threading.Event(); self._evt.wait(timeout=3.0)
         def stop_run(self):

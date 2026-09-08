@@ -199,7 +199,7 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
                 json.dumps({"thread_id": thread_id, "messages_count": 0}),
                 encoding="utf-8")
@@ -240,7 +240,7 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path)
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             # Симулируем: user-сообщение в .jsonl, потом agent-реплика, потом блокируем
             # (как будто intent_guard/policy ещё валидирует).
             data_path = Path(tmp_path) / f"data_cli_{thread_id}.jsonl"
@@ -308,7 +308,7 @@ async def test_esc_stops_running_run(tmp_path):
     stopped = {"flag": False}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
                 json.dumps({"thread_id": thread_id, "messages_count": 0}),
                 encoding="utf-8")

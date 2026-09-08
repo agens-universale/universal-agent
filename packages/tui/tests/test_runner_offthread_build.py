@@ -17,7 +17,7 @@ class _FakeExecutor:
         self.messages_added: list[dict] = []
         self._event = threading.Event()
 
-    def run(self, messages, *, thread_id, start_new_thread=False, system=None,
+    async def arun(self, messages, *, thread_id, start_new_thread=False, system=None,
             verbose=None, discard_writes_after_stop=False):
         self._event.wait(timeout=2.0)
 

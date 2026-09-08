@@ -69,7 +69,7 @@ async def test_enter_submits_multiline(tmp_path):
     captured = {"run": None}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             captured["run"] = messages[0]
             import json
             from pathlib import Path

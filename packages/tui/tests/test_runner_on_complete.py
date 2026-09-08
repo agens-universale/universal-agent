@@ -3,7 +3,7 @@ from gc_tui.services.agent_runner import AgentRunner
 class _Exec:
     last_terminal_outcome = "step_limit"
     def add_message(self, m): pass
-    def run(self, *a, **k): return "done"
+    async def arun(self, *a, **k): return "done"
     def stop_run(self): pass
 
 def test_on_complete_receives_outcome():

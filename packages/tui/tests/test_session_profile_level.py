@@ -368,7 +368,7 @@ def test_run_completion_persists_circuit_breaker(tmp_path):
         def add_message(self, m):
             pass
 
-        def run(self, *a, **k):
+        async def arun(self, *a, **k):
             app._circuit_breaker.trip("flash", "недоступна")
             return "done"
 
@@ -398,7 +398,7 @@ def test_run_failure_persists_circuit_breaker(tmp_path):
         def add_message(self, m):
             pass
 
-        def run(self, *a, **k):
+        async def arun(self, *a, **k):
             app._circuit_breaker.trip("flash", "5xx")
             raise RuntimeError("backend down")
 
@@ -428,7 +428,7 @@ def test_run_persists_circuit_breaker_even_after_runner_replaced(tmp_path):
         def add_message(self, m):
             pass
 
-        def run(self, *a, **k):
+        async def arun(self, *a, **k):
             app._circuit_breaker.trip("flash", "недоступна")
             app.active_runner = None          # как _stop_and_replace_runner
             return "done"
@@ -467,7 +467,7 @@ def test_breaker_persist_is_marshalled_to_ui_thread(tmp_path):
         def add_message(self, m):
             pass
 
-        def run(self, *a, **k):
+        async def arun(self, *a, **k):
             app._circuit_breaker.trip("flash", "недоступна")
             return "done"
 

@@ -25,7 +25,7 @@ async def test_branch_captured_on_new_session(tmp_path, monkeypatch):
 
 
 class _NoopExecutor:
-    def run(self, *a, **k):
+    async def arun(self, *a, **k):
         return None
     def stop_run(self):
         pass
