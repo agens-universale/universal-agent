@@ -18,6 +18,7 @@ from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.states import State
 from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -136,6 +137,7 @@ def _seed_long_history(state: State, *, user_chars: int = 80) -> None:
 
 @pytest.fixture(autouse=True)
 def _accept_finish_gate(monkeypatch):
+    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(
         intent_guard_guard,
         "validate_final_report_vs_user_intent",

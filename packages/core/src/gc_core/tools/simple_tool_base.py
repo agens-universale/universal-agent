@@ -92,23 +92,3 @@ class AbstractSimpleTool(ABC):
         Return None if there is nothing tool-specific to add.
         """
         return None
-
-    @classmethod
-    def tool_output_on_cycle_stop(cls) -> Optional[str]:
-        """
-        Optional synthetic tool output for cycle-stop tools in chat/completions mode.
-        Return None for regular tools.
-        """
-        return None
-
-    @staticmethod
-    def fallback_tool_output_on_cycle_stop(tool_name: str) -> str:
-        payload = {
-            "tool": str(tool_name or "unknown_tool"),
-            "ok": False,
-            "status": "skipped_on_cycle_stop",
-            "message": "Tool call was not executed due to cycle stop or interruption.",
-            "error": None,
-            "synthetic": True,
-        }
-        return json.dumps(payload, ensure_ascii=False)

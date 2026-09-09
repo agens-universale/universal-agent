@@ -45,23 +45,29 @@ def _stub_tools_modules() -> None:
             return str(self)
 
     def _apply_tool(*_args, **_kwargs):
+        tool_name = _kwargs.get("tool_name")
         arguments = _kwargs.get("arguments")
         try:
             payload = json.loads(arguments) if isinstance(arguments, str) else {}
         except Exception:
             payload = {}
-        result = {
-            "tool": "turn_finish",
-            "ok": True,
-            "status": "submitted",
-            "message": "Task outcome submitted.",
-            "error": None,
-        }
-        if isinstance(payload, dict):
-            for key in ("solution_type", "comment", "task_report", "handoff"):
-                if key in payload:
-                    result[key] = payload[key]
-        return json.dumps(result, ensure_ascii=False)
+        if tool_name == "turn_finish":
+            result = {
+                "tool": "turn_finish",
+                "ok": True,
+                "status": "submitted",
+                "message": "Task outcome submitted.",
+                "error": None,
+            }
+            if isinstance(payload, dict):
+                for key in ("solution_type", "comment", "task_report", "handoff"):
+                    if key in payload:
+                        result[key] = payload[key]
+            return json.dumps(result, ensure_ascii=False)
+        return json.dumps(
+            {"tool": tool_name, "ok": True, "status": "executed"},
+            ensure_ascii=False,
+        )
 
     def _build_tools_data(_config_dict):
         return {}, [], []
@@ -72,10 +78,6 @@ def _stub_tools_modules() -> None:
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
-
-    from gc_core.message_policy import cycle_stop as cycle_stop_mod
-
-    cycle_stop_mod.apply_tool = tools_pkg.apply_tool
 
 
 @pytest.fixture(scope="module", autouse=True)

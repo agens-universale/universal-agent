@@ -157,8 +157,11 @@ def test_finish_gate_reject_submit_in_current_without_flush():
         },
         ensure_ascii=False,
     )
-    raw_ok = SubmitSolution.output_from_cycle_stop_arguments(args)
-    assert raw_ok is not None
+    raw_ok = SubmitSolution()(
+        solution_type="full_solution",
+        task_report="Сделано по запросу пользователя",
+        handoff="{}",
+    )
     state.messages = [
         {
             "type": "function_call",
