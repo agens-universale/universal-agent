@@ -234,10 +234,13 @@ mcp:
 - `agent.exec_output_capture_max_chars` — потолок RAM-буфера stdout/stderr на поток
   (decoded UTF-8 chars) для exec. По умолчанию `60000`. После cap вывод сливается и
   отбрасывается без kill процесса; page полного captured — через stream refs в ответе тулы.
-- `agent.walk_output_max_chars` — потолок приватного канала обхода дерева в Harbor
-  (`find -printf` для walk/listdir; decoded chars). По умолчанию `50000000`. При
-  переполнении обход не отдаёт частичный список, а завершается ошибкой `walk_too_large`
-  с советом сузить путь.
+- `agent.walk_output_max_chars` — общий потолок внутренних exec-каналов бэкенда
+  (decoded chars), не model-facing вывода: обход дерева в Harbor (`find -printf` для
+  walk/listdir), нативный grep и MCP-carrier под `execute_on: os_backend` (http и
+  stdio). По умолчанию `50000000`. Переполнение везде fail-closed: обход завершается
+  ошибкой `walk_too_large` с советом сузить путь, MCP-вызов — `McpExecCarrierError`
+  («response truncated by the exec output cap»). Понижение ради листингов молча
+  уронит большие ответы MCP-серверов.
 
 ## Слои инструкций (AGENTS.md)
 

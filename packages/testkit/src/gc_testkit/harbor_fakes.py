@@ -210,8 +210,7 @@ class FakeBackend:
     def exec(self, command, *, cwd=None, timeout=None, env=None):
         raise NotImplementedError("exec parity tests use their own recording fake")
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None,
-                   capture_max_chars=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None):
         raise NotImplementedError
 
 

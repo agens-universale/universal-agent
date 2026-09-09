@@ -358,10 +358,6 @@ class FsBackend(ABC):
     @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
-                   env: Optional[dict] = None,
-                   capture_max_chars: Optional[int] = None) -> ExecResult:
-        """Run a python3 script from stdin. ``capture_max_chars`` as in ``exec``:
-        ``None`` → tool-trace cap; internal channels (MCP carrier) pass their own."""
-        ...
+                   env: Optional[dict] = None) -> ExecResult: ...
     @abstractmethod
     def default_cwd(self) -> Optional[str]: ...

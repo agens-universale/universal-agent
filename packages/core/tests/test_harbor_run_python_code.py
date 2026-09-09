@@ -25,8 +25,7 @@ class _RecordingFakeBackend:
         self.calls = []
         self._dirs = set(dirs or [])
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None,
-                   capture_max_chars=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None):
         self.calls.append({"code": code, "cwd": cwd, "timeout": timeout, "env": env})
         return self.res
 
@@ -159,8 +158,7 @@ def test_backend_timed_out_sets_timeout_envelope():
 
 def test_backend_exception_returns_execution_failed():
     class _RaisingBackend(_RecordingFakeBackend):
-        def run_python(self, code, *, cwd=None, timeout=None, env=None,
-                   capture_max_chars=None):
+        def run_python(self, code, *, cwd=None, timeout=None, env=None):
             raise RuntimeError("boom")
 
     env = json.loads(_tool(_RaisingBackend())(code="x"))

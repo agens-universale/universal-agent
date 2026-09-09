@@ -110,8 +110,7 @@ class RecordingSandboxBackend(FsBackend):
     def exec(self, command, *, cwd=None, timeout=None, env=None):
         raise NotImplementedError
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None,
-                   capture_max_chars=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None):
         raise NotImplementedError
 
     def default_cwd(self):

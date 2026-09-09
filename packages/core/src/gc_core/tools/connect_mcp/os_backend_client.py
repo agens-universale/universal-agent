@@ -334,8 +334,13 @@ class OsBackendStatelessClient(McpClientPort):
         code = _HTTP_CARRIER.format(
             payload_b64=payload_b64, marker=EXEC_RESULT_MARKER
         )
-        result = self.os_backend.run_python(
-            code, timeout=deadline, capture_max_chars=self._carrier_output_max_chars()
+        # ``python3 -`` with the script on stdin: the same channel the stdio
+        # transport uses, not the model-facing ``run_python`` tool path.
+        result = self.os_backend.exec_argv(
+            ["python3", "-"],
+            stdin=code,
+            timeout=deadline,
+            capture_max_chars=self._carrier_output_max_chars(),
         )
         return self._interpret(result)
 

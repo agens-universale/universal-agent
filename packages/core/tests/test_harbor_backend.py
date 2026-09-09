@@ -415,18 +415,3 @@ def test_normpath_collapses_dot_and_double_slash(loop_in_thread):
     assert backend.normpath("/w//x/./y/") == "/w/x/y"
     assert backend.normpath("/w/a/../b") == "/w/b"
     assert backend.normpath("/") == "/"
-
-
-def test_run_python_per_call_capture_max_overrides_tool_cap(loop_in_thread):
-    """MCP carrier rides run_python with its own ceiling, like walk does via exec."""
-    env = FakeEnv()
-
-    async def big_exec(command, **kw):
-        return FakeExecResult(stdout="X" * 1000, return_code=0)
-
-    env.exec = big_exec
-    backend = HarborBackend(env, loop_in_thread)
-    backend.exec_output_capture_max_chars = 100
-    result = backend.run_python("print(1)", capture_max_chars=500)
-    assert len(result.stdout) == 500
-    assert result.stdout_hit_capture_cap is True

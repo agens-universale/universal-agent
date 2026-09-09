@@ -36,10 +36,10 @@ class _Sandbox:
         self.codes = []
         self.execs = []
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None,
-                   capture_max_chars=None):
+    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
+                  capture_max_chars=None):
         _, _, obc = _mcp()
-        self.codes.append(code)
+        self.codes.append(stdin)
         return _ExecResult(
             stdout=obc.EXEC_RESULT_MARKER + json.dumps(self.answers.pop(0))
         )
@@ -59,8 +59,7 @@ class _Local:
         self.execs.append(command)
         return _ExecResult()
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None,
-                   capture_max_chars=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None):
         self.execs.append(code)
         return _ExecResult()
 
@@ -189,8 +188,8 @@ def test_missing_carrier_is_an_error_and_installs_nothing():
             self.execs.append(command)
             return _ExecResult(stdout="", return_code=1)
 
-        def run_python(self, code, *, cwd=None, timeout=None, env=None,
-                   capture_max_chars=None):
+        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
+                      capture_max_chars=None):
             raise AssertionError("must not run python3 when it is absent")
 
     backend = _BareSandbox()
@@ -209,8 +208,8 @@ def test_truncated_exec_output_is_an_error():
     class _TruncatingSandbox:
         is_sandbox = True
 
-        def run_python(self, code, *, cwd=None, timeout=None, env=None,
-                   capture_max_chars=None):
+        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
+                      capture_max_chars=None):
             _, _, obc = _mcp()
             return _ExecResult(
                 stdout=obc.EXEC_RESULT_MARKER + '{"status": 200, "bo',
