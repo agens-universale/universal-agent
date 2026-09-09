@@ -100,14 +100,49 @@ class _PersistentSessionManager:
         self._sessions[key] = session
         self._cm_stacks[key] = cm_stack
 
-    def invalidate(self, server_key: str) -> None:
-        """Забыть сессию (после ошибки). Стек НЕ закрываем: loop может быть чужим."""
+    def _take(self, server_key: str) -> Any:
+        """Снять сессию с реестра и вернуть её стек (или ``None``)."""
         try:
             key = self._key(server_key)
         except RuntimeError:
-            return
+            return None
         self._sessions.pop(key, None)
-        self._cm_stacks.pop(key, None)
+        self._loops.pop(key, None)
+        return self._cm_stacks.pop(key, None)
+
+    async def ainvalidate(self, server_key: str) -> None:
+        """Забыть сессию после ошибки и ЗАКРЫТЬ её стек здесь же.
+
+        Раньше стек просто выбрасывался из словарей — «loop может быть
+        чужим». Для ошибочной ветки это неверно и дорого: мы находимся ровно
+        в той задаче и на том loop, где сессию открывали, а брошенный стек
+        закрывать в итоге будет сборщик мусора.
+
+        Чем это плохо. Внутри стека (``stdio_client`` /
+        ``streamable_http_client`` + ``ClientSession``) живёт anyio task
+        group. Когда до асинхронного генератора добирается GC, asyncio ставит
+        его ``aclose()`` ОТДЕЛЬНОЙ задачей, а выход из cancel scope в чужой
+        задаче даёт ``RuntimeError`` и швыряет посторонний ``CancelledError``
+        в ту задачу, которая в этот момент под рукой, — то есть в ход агента.
+        ``aapply_tool`` ловит только ``Exception``, поэтому отмена прошивала
+        ход насквозь. Триггером служила любая ошибка вызова через
+        ``persistent_session: true``: McpError, таймаут, разбор pydantic.
+
+        Закрываем сами и молча: стек всё равно уже негоден, а ошибки закрытия
+        не должны подменять исходную причину, из-за которой сессию сносят.
+        """
+        cms = self._take(server_key)
+        if cms is not None:
+            await self._aclose_stack(cms)
+
+    def invalidate(self, server_key: str) -> None:
+        """Синхронный вход: только забыть, закрыть здесь нечем.
+
+        Оставлен для вызывающих без loop. На асинхронном пути пользуйтесь
+        ``ainvalidate`` — иначе стек уедет к сборщику мусора со всеми
+        последствиями, описанными выше.
+        """
+        self._take(server_key)
 
     async def _aclose_stack(self, cms: Any) -> None:
         # cm_stack — кортеж контекст-менеджеров в порядке открытия;
@@ -434,6 +469,41 @@ async def _call_tool_stream_sse_async(
         }
 
 
+
+async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
+    """Войти в транспорт и ``ClientSession``, откатив всё при ошибке.
+
+    ``initialize()`` падает не в теории: сервер отвечает не тем протоколом,
+    рвётся соединение, приходит таймаут. Без отката транспорт и сессия
+    оставались ВОШЕДШИМИ и ничьими — в реестр они не попадали, потому что
+    ``set_session`` до них не доходил, — и закрывал их потом сборщик мусора
+    в чужой задаче, ровно с тем же эффектом, что описан у ``ainvalidate``.
+
+    Возвращает ``(session, cm_stack)``; стек в порядке открытия.
+    """
+    read_stream, write_stream = await transport_cm.__aenter__()
+    session = ClientSession(read_stream, write_stream)
+    try:
+        await session.__aenter__()
+    except BaseException:
+        await _exit_quietly(transport_cm)
+        raise
+    try:
+        await session.initialize()
+    except BaseException:
+        await _exit_quietly(session)
+        await _exit_quietly(transport_cm)
+        raise
+    return session, (transport_cm, session)
+
+
+async def _exit_quietly(cm: Any) -> None:
+    """Выйти из контекст-менеджера, не подменяя исходную ошибку."""
+    try:
+        await cm.__aexit__(None, None, None)
+    except Exception:
+        pass
+
 async def _call_tool_stream_sse_persistent(
     server_key: str,
     base_url: str,
@@ -465,11 +535,8 @@ async def _call_tool_stream_sse_persistent(
             timeout=timeout,
             httpx_client_factory=httpx_factory,
         )
-        read_stream, write_stream = await transport_cm.__aenter__()
-        new_session = ClientSession(read_stream, write_stream)
-        await new_session.__aenter__()
-        await new_session.initialize()
-        _SESSION_MANAGER.set_session(server_key, new_session, (transport_cm, new_session))
+        new_session, cm_stack = await _enter_session(transport_cm)
+        _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
@@ -486,7 +553,7 @@ async def _call_tool_stream_sse_persistent(
         try:
             return await _call(session)
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
             session = None
 
     session = await _open_session()
@@ -527,7 +594,7 @@ async def acall_tool_stream_sse(
                 cert=cert,
             )
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
 
     return await _call_tool_stream_sse_async(
         base_url=url,
@@ -740,12 +807,25 @@ async def _call_tool_stream_http_persistent(
             cert=cert,
             base_url=base_url,
         )
+        # У stream_http стек на один менеджер длиннее: сначала httpx-клиент.
+        # Откат тот же — всё, во что успели войти, закрываем здесь, а не
+        # оставляем сборщику мусора (см. `_enter_session`).
         await http_client.__aenter__()
         transport = streamable_http_client(endpoint, http_client=http_client)
-        read_stream, write_stream, _ = await transport.__aenter__()
+        try:
+            read_stream, write_stream, _ = await transport.__aenter__()
+        except BaseException:
+            await _exit_quietly(http_client)
+            raise
         new_session = ClientSession(read_stream, write_stream)
-        await new_session.__aenter__()
-        await new_session.initialize()
+        try:
+            await new_session.__aenter__()
+            await new_session.initialize()
+        except BaseException:
+            await _exit_quietly(new_session)
+            await _exit_quietly(transport)
+            await _exit_quietly(http_client)
+            raise
         _SESSION_MANAGER.set_session(server_key, new_session, (http_client, transport, new_session))
         return new_session
 
@@ -766,7 +846,7 @@ async def _call_tool_stream_http_persistent(
         try:
             return await _call(session)
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
             session = None
 
     # Open new persistent session
@@ -777,13 +857,13 @@ async def _call_tool_stream_http_persistent(
             return await _call(session)
         except McpError as exc:
             last_error = exc
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
             if "Session terminated" in str(exc) and endpoint != endpoints[-1]:
                 continue
             raise
         except Exception as exc:
             last_error = exc
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
 
     if last_error is not None:
         raise last_error
@@ -839,7 +919,7 @@ async def acall_tool_stream_http(
         )
     except Exception:
         # Персистентная сессия не задалась — забываем её и идём stateless.
-        _SESSION_MANAGER.invalidate(server_key)
+        await _SESSION_MANAGER.ainvalidate(server_key)
         return await _stateless()
 
 
@@ -987,11 +1067,8 @@ async def _call_tool_stream_stdio_persistent(
             cwd=server_cfg.get("cwd") or None,
         )
         transport_cm = stdio_client(params)
-        read_stream, write_stream = await transport_cm.__aenter__()
-        new_session = ClientSession(read_stream, write_stream)
-        await new_session.__aenter__()
-        await new_session.initialize()
-        _SESSION_MANAGER.set_session(server_key, new_session, (transport_cm, new_session))
+        new_session, cm_stack = await _enter_session(transport_cm)
+        _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
@@ -1008,7 +1085,7 @@ async def _call_tool_stream_stdio_persistent(
         try:
             return await _call(session)
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
             session = None
 
     session = await _open_session()
@@ -1040,7 +1117,7 @@ async def acall_tool_stream_stdio(
                 arguments=arguments,
             )
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
 
     return await _call_tool_stream_stdio_async(
         server_cfg=server_cfg,

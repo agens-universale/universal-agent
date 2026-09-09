@@ -294,6 +294,32 @@ class PersistentStdioSession:
             self._proc = None
         return proc
 
+    def _detach_nowait(self) -> "Optional[subprocess.Popen]":
+        """Снять процесс, НЕ вставая в очередь за локом.
+
+        Асинхронное закрытие нельзя пускать через блокирующий ``acquire``.
+        Лок держит ``call()`` на весь обмен, и обмен идёт в
+        abandonable-потоке, который переживает отмену вызывающего: сняли ход
+        по дедлайну — поток остался в ``readline`` под локом, а ``arun`` в
+        своём ``finally`` зовёт ``aclose_all`` и встаёт на ``with self._lock``
+        прямо на loop. Замерено: закрытие 3.57 с, соседний хартбит успел один
+        тик; в пределе это ``request_timeout_sec``, по умолчанию 600 с.
+
+        Не смогли взять лок — забираем процесс без него. Гонка здесь
+        безобиднее заморозки: держатель лока читает уже ничейный процесс и
+        получит обычную ошибку ввода-вывода, а мы гасим его сами.
+        """
+        if self._lock.acquire(blocking=False):
+            try:
+                proc = self._proc
+                self._proc = None
+                return proc
+            finally:
+                self._lock.release()
+        proc = self._proc
+        self._proc = None
+        return proc
+
     def close(self) -> None:
         proc = self._detach()
         if proc is not None:
@@ -306,7 +332,7 @@ class PersistentStdioSession:
         Пролог (ответ close-тула) и терминация — единственное, что здесь
         долгое, и оба переведены на опрос.
         """
-        proc = self._detach()
+        proc = self._detach_nowait()
         if proc is not None:
             await self._aclose_prologue(proc)
             await _aterminate_process_tree(proc, graceful_timeout=5.0)
