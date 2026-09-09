@@ -23,9 +23,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from gc_core.thread_store_protocol import MessageKey, SubagentTraceRecord, ThreadState
+from gc_core.thread_store_base import ThreadStoreBase
 
 
-class MemoryThreadStore:
+class MemoryThreadStore(ThreadStoreBase):
     """Хранилище тредов в словарях. Диска не касается вовсе."""
 
     def __init__(self) -> None:
@@ -125,34 +126,11 @@ class MemoryThreadStore:
 
     def save_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
         self._hit("save_meta")
-        from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
-
-        # Штамп записи — обязанность ХРАНИЛИЩА, а не вызывающего. Без
-        # ``state_schema_version`` следующий прогон откажется читать тред
-        # (``StateSchemaError``), и проявится это только на ВТОРОМ прогоне:
-        # первый проходит нормально. Файловый слой делает то же самое в
-        # ``save_thread_meta``.
-        stamped = ThreadMetaMapper.ensure_v2_meta(copy.deepcopy(meta))
-        stamped["updated_at"] = datetime.now(timezone.utc).isoformat()
-        if not stamped.get("created_at"):
-            stamped["created_at"] = stamped["updated_at"]
-        self._meta[self._key(system_id, thread_id)] = stamped
-
-    def _stamp(self, meta: Dict[str, Any]) -> Dict[str, Any]:
-        """Штампы записи — обязанность ХРАНИЛИЩА на КАЖДОМ пути записи.
-
-        Не только у ``save_meta``: файловая реализация штампует и патчи
-        рантайма, а здесь их не было — расхождение ровно в том свойстве,
-        которое дока называет «легко нарушить», и конформанс-набор его не
-        видел, потому что проверял штампы только у ``save_meta``.
-        """
-        from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
-
-        stamped = ThreadMetaMapper.ensure_v2_meta(meta)
-        stamped["updated_at"] = datetime.now(timezone.utc).isoformat()
-        if not stamped.get("created_at"):
-            stamped["created_at"] = stamped["updated_at"]
-        return stamped
+        # Штамп записи — обязанность ХРАНИЛИЩА, а не вызывающего, и он один
+        # на все реализации: ``ThreadStoreBase.stamp_meta``.
+        self._meta[self._key(system_id, thread_id)] = self.stamp_meta(
+            copy.deepcopy(meta)
+        )
 
     def patch_runtime_flag(
         self,
@@ -164,33 +142,19 @@ class MemoryThreadStore:
         session_meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._hit("patch_runtime_flag")
-        # Имя флага валидируется так же, как в файловой реализации: иначе
-        # контракт разошёлся бы с фактом, и опечатка в имени прошла бы молча.
-        from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
-
-        flag = resolve_runtime_flag_name(flag)
-        meta = self._meta.setdefault(self._key(system_id, thread_id), {})
-        runtime = meta.setdefault("runtime", {})
-        if active:
-            runtime[flag] = True
-        else:
-            runtime.pop(flag, None)
-        # Пустую секцию убираем целиком — так делает файловая реализация, и
-        # расхождение здесь означало бы, что переезд на БД меняет форму meta.
-        if not runtime:
-            meta.pop("runtime", None)
-        self._meta[self._key(system_id, thread_id)] = self._stamp(meta)
+        key = self._key(system_id, thread_id)
+        meta = self.apply_runtime_flag(
+            self._meta.setdefault(key, {}), flag, active=active
+        )
+        self._meta[key] = self.stamp_meta(meta)
 
     def update_runtime_meta(
         self, system_id: str, thread_id: str, patch: Dict[str, Any]
     ) -> None:
         self._hit("update_runtime_meta")
-        meta = self._meta.setdefault(self._key(system_id, thread_id), {})
-        runtime = meta.setdefault("runtime", {})
-        runtime.update(copy.deepcopy(patch))
-        if not runtime:
-            meta.pop("runtime", None)
-        self._meta[self._key(system_id, thread_id)] = self._stamp(meta)
+        key = self._key(system_id, thread_id)
+        meta = self.merge_runtime_meta(self._meta.setdefault(key, {}), patch)
+        self._meta[key] = self.stamp_meta(meta)
 
     def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
         self._hit("discard_message")

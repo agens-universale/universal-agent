@@ -79,16 +79,67 @@ def test_both_pass_the_conformance_suite(store_factory):
     assert len(passed) == len(STRUCTURE_CHECKS) + len(BEHAVIOUR_CHECKS)
 
 
-def test_implementations_inherit_nothing():
-    """Реализации не наследуют наш базовый класс — иначе чужой пришлось бы.
+def test_our_implementations_share_the_base():
+    """НАШИ реализации наследуют базу — ради общих инвариантов.
 
-    Ровно та беда, из-за которой ``FsBackend`` (ABC с 31 методом) нельзя
-    развивать: новый метод ломает каждую внешнюю реализацию.
+    Прежняя редакция требовала обратного: «никто ничего не наследует, чтобы
+    чужому не пришлось». Половина верна и осталась в силе (см. тест ниже —
+    чужое хранилище по-прежнему принимается без наследования), а вот вторая
+    вышла боком. Инвариантам стало негде жить, и две НАШИ реализации разъехались
+    ровно на них: файловая штамповала meta на каждом пути записи, in-memory —
+    только в ``save_meta``. Обе были зелёными, потому что и конформанс проверял
+    штампы лишь у ``save_meta``.
     """
+    from gc_core.thread_store_base import ThreadStoreBase
+
     for cls in (FileThreadStore, MemoryThreadStore):
-        assert cls.__mro__[1:] == (object,), (
-            f"{cls.__name__} от кого-то наследуется: {cls.__mro__[1:]}"
+        assert issubclass(cls, ThreadStoreBase), (
+            f"{cls.__name__} не наследует ThreadStoreBase — инварианты снова "
+            f"разъедутся по копиям"
         )
+
+
+def test_base_refuses_an_incomplete_implementation():
+    """Неполная реализация не создастся вовсе — в этом и смысл ABC.
+
+    У протокола она обнаруживалась поздно: молчали все, пока агент не доходил
+    до проводки. Здесь отказ приходит из конструктора и называет, чего нет.
+    """
+    from gc_core.thread_store_base import ThreadStoreBase
+
+    class HalfStore(ThreadStoreBase):
+        def load_messages(self, system_id, thread_id):
+            return []
+
+    with pytest.raises(TypeError) as excinfo:
+        HalfStore()
+
+    assert "save_meta" in str(excinfo.value), excinfo.value
+
+
+def test_a_foreign_store_without_our_base_is_still_accepted():
+    """Наследование — короткий путь, а не пропуск на входе.
+
+    Чужой объект (из DI-контейнера, обёртка, реализация, не желающая
+    импортировать наш класс) обязан работать, совпав по именам и сигнатурам.
+    Если однажды кто-то поставит здесь ``isinstance``, этот тест покраснеет.
+    """
+    from gc_core.thread_store_async import athread_store
+    from gc_core.thread_store_base import ThreadStoreBase
+
+    store = MemoryThreadStore()
+
+    class Foreign:
+        """Ничего не наследует, всё делегирует — законное прокси-хранилище."""
+
+        def __getattr__(self, name):
+            return getattr(store, name)
+
+    foreign = Foreign()
+    assert not isinstance(foreign, ThreadStoreBase)
+
+    port = athread_store(foreign)          # не должно бросить
+    assert port is not None
 
 
 def test_isinstance_is_not_a_gate():

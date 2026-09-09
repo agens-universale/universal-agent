@@ -5,14 +5,21 @@
 переезд на контракт превратился бы в переписывание формата хранения, а это
 разные работы с разной ценой ошибки.
 
-Класс НИЧЕГО НЕ НАСЛЕДУЕТ: ``ThreadStore`` — ``Protocol``, структурная
-типизация. Совпал по сигнатурам — подходит. Так же будет и у чужой реализации
-из базы: ей не придётся импортировать наш базовый класс.
+Наследует :class:`ThreadStoreBase` — рекомендуемый путь: ABC отказывает на
+неполной реализации прямо в конструкторе, а общие инварианты (штампы meta,
+правило пустой секции ``runtime``) живут в базе в одном экземпляре, а не по
+копии на реализацию. Копий было две, и они уже разъехались: штампы стояли
+здесь и отсутствовали у ``MemoryThreadStore``.
+
+Наследование при этом НЕ обязательно: ``athread_store`` по-прежнему принимает
+любое хранилище, совпавшее по именам и сигнатурам, — чужой объект из
+DI-контейнера наследовать нас не обязан.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Set
 
+from gc_core.thread_store_base import ThreadStoreBase
 from gc_core.thread_store_protocol import (
     MessageKey,
     SubagentTraceRecord,
@@ -34,7 +41,7 @@ from gc_core.thread_store import (
 )
 
 
-class FileThreadStore:
+class FileThreadStore(ThreadStoreBase):
     """Хранилище треда в каталоге с ``data_*.jsonl`` и ``meta_*.json``."""
 
     def __init__(self, threads_dir: str) -> None:
