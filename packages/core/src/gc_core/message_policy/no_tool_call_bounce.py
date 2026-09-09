@@ -5,7 +5,7 @@ Pure functions — no state, no backend I/O. Callers wrap the returned text with
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from gc_core.message_projection import project_assistant_text
 
@@ -33,11 +33,17 @@ NO_TOOL_CALL_BOUNCE_MESSAGE = (
 )
 
 
-def extract_last_assistant_text(messages: List[Dict[str, Any]]) -> str:
+def extract_last_assistant_text(
+    messages: List[Dict[str, Any]],
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> str:
     """
     Return projected prose from the last assistant `message` in the batch
-    (``for_model``: without ``<think>``). Empty string if missing or empty
-    after projection. Handles string content and list-of-parts.
+    (``for_model``: ``<think>`` stripped when ``strip_think=True``). Empty
+    string if missing or empty after projection. Handles string content
+    and list-of-parts.
     """
     if not messages:
         return ""
@@ -47,7 +53,9 @@ def extract_last_assistant_text(messages: List[Dict[str, Any]]) -> str:
             and message.get("type") == "message"
             and message.get("role") == "assistant"
         ):
-            return project_assistant_text(message.get("content")).strip()
+            return project_assistant_text(
+                message.get("content"), tags=tags, strip_think=strip_think
+            ).strip()
     return ""
 
 

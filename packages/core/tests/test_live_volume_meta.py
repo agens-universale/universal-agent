@@ -1,6 +1,12 @@
 """meta.tui.live_history_chars / live_msg_count — агрегаты объёма live (persist)."""
 from gc_core.message_format import calc_history_chars_for_trigger
-from gc_core.thread_store import ThreadSession, discard_message_by_id, load_thread_messages, load_thread_meta
+from gc_core.thread_store import (
+    ThreadSession,
+    append_new_thread_messages,
+    discard_message_by_id,
+    load_thread_messages,
+    load_thread_meta,
+)
 
 
 def _session(tmp_path, tid="t1"):
@@ -93,6 +99,58 @@ def test_discard_keeps_live_volume_consistent(tmp_path):
     assert [m["id"] for m in live] == ["m_keep"]
     assert tui["live_msg_count"] == 1
     assert tui["live_history_chars"] == calc_history_chars_for_trigger(live)
+
+
+def test_discard_uses_projection_for_live_volume(tmp_path):
+    dirty = "<think>hidden</think>visible"
+    ts = _session(tmp_path)
+    ts.persist_batch(
+        [
+            {"role": "assistant", "content": dirty, "id": "m_keep"},
+            {"role": "assistant", "content": "drop", "id": "m_orphan"},
+        ],
+        previous_response_id=None,
+    )
+    assert (
+        discard_message_by_id(
+            str(tmp_path), "cli", "t1", "m_orphan", strip_think=False
+        )
+        is True
+    )
+    tui = _live_tui(tmp_path)
+    live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
+    assert [m["id"] for m in live] == ["m_keep"]
+    assert tui["live_history_chars"] == calc_history_chars_for_trigger(
+        live, strip_think=False
+    )
+    assert tui["live_history_chars"] > calc_history_chars_for_trigger(live)
+
+
+def test_append_uses_projection_for_live_volume(tmp_path):
+    dirty = "<think>hidden</think>visible"
+    ts = _session(tmp_path)
+    ts.persist_batch(
+        [{"role": "assistant", "content": "keep", "id": "m1"}],
+        previous_response_id=None,
+    )
+    _, keys, max_seq = load_thread_messages(str(tmp_path), "cli", "t1")
+    written = append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        "t1",
+        [{"role": "assistant", "content": dirty, "id": "m2"}],
+        keys,
+        start_seq=max_seq,
+        strip_think=False,
+    )
+    assert written == 1
+    tui = _live_tui(tmp_path)
+    live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
+    assert tui["live_history_chars"] == calc_history_chars_for_trigger(
+        live, strip_think=False
+    )
+    default_chars = calc_history_chars_for_trigger(live)
+    assert tui["live_history_chars"] > default_chars
 
 
 def test_persist_batch_preserves_tui_owned_keys(tmp_path):

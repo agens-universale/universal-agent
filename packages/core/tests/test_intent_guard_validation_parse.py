@@ -131,6 +131,13 @@ class ParseValidatorResponseTest(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.action, "accept")
 
+    def test_think_wrapper_is_stripped_before_json(self) -> None:
+        raw = "<think>ignore {\"action\":\"continue_work\"}</think>" + _raw()
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertTrue(result.ok)
+        self.assertEqual(result.action, "accept")
+
     def test_missing_axes_returns_none(self) -> None:
         self.assertIsNone(parse_validator_response(json.dumps({"action": "accept", "ok": True})))
 

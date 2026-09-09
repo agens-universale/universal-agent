@@ -93,8 +93,13 @@ summary:
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 6000
 
-# Доп. strip-теги для for_model / aux LLM. <think> всегда on; extras — сюда.
+# tags — extra-теги, которые режут в derived (саммари, intent, digest…), не в messages.
+# strip_think: true (дефолт) — ризонинг в messages не класть.
+# strip_think: false — сохранить reasoning_content в messages как пришло с бэкенда
+#   и в следующем запросе отдать как есть. DeepSeek / часть strict-бэкендов → 400.
+# Трейс в бэкенд = то, что лежит в messages. Остальной state — без ризонинга всегда.
 strip_tags_projection:
+  strip_think: true
   tags: []
 
 # Лимиты FS-тулов, которые поднимают файл целиком в память.

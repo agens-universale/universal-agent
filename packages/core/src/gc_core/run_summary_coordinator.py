@@ -11,6 +11,7 @@ import gc
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.summarize.compaction import (
     history_exceeds_summary_trigger,
     run_summary_compaction,
@@ -280,6 +281,9 @@ class RunSummaryCoordinator:
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
+        self._proj_tags = projection_tags_from_config(
+            getattr(ctx, "config_dict", None)
+        )
 
     def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
@@ -308,6 +312,8 @@ class RunSummaryCoordinator:
             while history_exceeds_summary_trigger(
                 state=state,
                 summary_trigger_chars=self._summary_trigger_chars,
+                tags=self._proj_tags,
+                strip_think=True,
             ):
                 rounds += 1
                 if rounds > _PRE_RUN_SUMMARY_MAX_ROUNDS:
@@ -370,6 +376,8 @@ class RunSummaryCoordinator:
         if not history_exceeds_summary_trigger(
             state=state,
             summary_trigger_chars=self._summary_trigger_chars,
+            tags=self._proj_tags,
+            strip_think=True,
         ):
             return
 
@@ -430,6 +438,8 @@ class RunSummaryCoordinator:
         if not history_exceeds_summary_trigger(
             state=state,
             summary_trigger_chars=self._turn_end_trigger_chars,
+            tags=self._proj_tags,
+            strip_think=True,
         ):
             return
 

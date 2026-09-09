@@ -5,6 +5,7 @@ import os
 
 import pytest
 
+from gc_tui.diff_tui import paths
 from gc_tui.diff_tui.paths import canonical_path_key, in_tracking_perimeter, is_trackable_path, orig_key
 
 
@@ -62,7 +63,7 @@ def test_orig_key_is_sha256_hex_of_key():
 def test_orig_key_casefold_on_windows(monkeypatch):
     import hashlib
 
-    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(paths, "_os_name", lambda: "nt")
     key = "Src/Foo.py"
     expected = hashlib.sha256(key.casefold().encode("utf-8")).hexdigest()
     assert orig_key(key) == expected

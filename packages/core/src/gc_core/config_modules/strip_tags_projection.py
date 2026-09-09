@@ -1,4 +1,4 @@
-"""Yaml section ``strip_tags_projection:`` — доп. теги к always-on ``think``."""
+"""Yaml section ``strip_tags_projection:`` — persist ризонинга в messages + extra-теги derived."""
 
 from __future__ import annotations
 
@@ -14,15 +14,21 @@ _TAG_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 
 
 class StripTagsProjectionConfig(BaseModel):
-    """Доп. strip-теги для ``for_model`` / derived intake. ``think`` всегда в коде."""
+    """``tags`` — extra-теги derived-сторов. ``strip_think`` — только канон messages.
+
+    ``strip_think: true`` (дефолт) — не класть ``reasoning_content`` в messages.
+    ``strip_think: false`` — сохранить поле как пришло; исходящий трейс отдаёт
+    канон as-is. Intent / WM / саммари / digest ризонинг режут всегда.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    strip_think: bool = True
     tags: list[str] = Field(default_factory=list)
 
 
 def normalize_strip_tags_projection_config(cfg: StripTagsProjectionConfig) -> None:
-    """warn+drop invalid; снять ``<>``; dedupe case-insensitive; ``think`` — no-op."""
+    """warn+drop invalid; снять ``<>``; dedupe case-insensitive; ``think`` валиден."""
     raw = list(cfg.tags or [])
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -49,11 +55,39 @@ def normalize_strip_tags_projection_config(cfg: StripTagsProjectionConfig) -> No
             )
             continue
         key = name.lower()
-        if key == "think":
-            # Always-on in code; YAML entry is a no-op.
-            continue
         if key in seen:
             continue
         seen.add(key)
         cleaned.append(name)
     cfg.tags = cleaned
+
+
+def _section_from_config(config: object) -> dict | None:
+    if isinstance(config, dict):
+        section = config.get("strip_tags_projection")
+        if isinstance(section, dict):
+            return section
+    return None
+
+
+def projection_tags_from_config(config: object) -> tuple[str, ...]:
+    """Extra-теги прозы. Persist-флаг ``strip_think`` сюда не входит."""
+    section = _section_from_config(config)
+    if section is None:
+        return ()
+    raw_tags = section.get("tags") or ()
+    if isinstance(raw_tags, (list, tuple)):
+        return tuple(str(item) for item in raw_tags)
+    return ()
+
+
+def persist_reasoning_content_from_config(config: object) -> bool:
+    """Класть ли ``reasoning_content`` на канонический item в ``state.messages``.
+
+    Единственный потребитель — ``get_output_list`` / вход в канон.
+    YAML ``strip_think: false`` = persist True.
+    """
+    section = _section_from_config(config)
+    if section is None:
+        return False
+    return not bool(section.get("strip_think", True))

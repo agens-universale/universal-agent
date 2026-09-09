@@ -4,10 +4,11 @@ import os
 import re
 import threading
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Any, Set, Optional
+from typing import Dict, List, Tuple, Any, Set, Optional, Sequence
 
 from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.persistence.live_volume import bump_live_volume_for_messages, live_volume_from_messages, merge_tui_into_meta
 from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
@@ -458,7 +459,13 @@ def patch_runtime_flag(
 
 
 def discard_message_by_id(
-    threads_dir: str, system_id: str, thread_id: str, message_id: str
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    message_id: str,
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> bool:
     """Удалить message-запись с указанным ``payload.id`` из data_*.jsonl.
 
@@ -511,7 +518,10 @@ def discard_message_by_id(
     except (TypeError, ValueError):
         pass
     live_msgs, _, _ = load_thread_messages(threads_dir, sys_norm, thread_id)
-    merge_tui_into_meta(meta, live_volume_from_messages(live_msgs))
+    merge_tui_into_meta(
+        meta,
+        live_volume_from_messages(live_msgs, tags=tags, strip_think=strip_think),
+    )
     save_thread_meta(threads_dir, sys_norm, thread_id, meta)
     return True
 
@@ -524,6 +534,8 @@ def append_new_thread_messages(
     known_message_keys: Set[str],
     *,
     start_seq: int = 0,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> int:
     if len(messages) == 0:
         return 0
@@ -555,7 +567,9 @@ def append_new_thread_messages(
     if wrote:
         sys_norm = sanitize_system_id(system_id)
         meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
-        bump_live_volume_for_messages(meta, written_payloads)
+        bump_live_volume_for_messages(
+            meta, written_payloads, tags=tags, strip_think=strip_think
+        )
         save_thread_meta(threads_dir, sys_norm, thread_id, meta)
     return wrote
 
@@ -573,6 +587,8 @@ class ThreadSession:
         meta: Dict[str, Any],
         previous_response_id: Optional[str],
         backend_api_mode: str,
+        tags: Sequence[str] = (),
+        strip_think: bool = True,
     ):
         self.threads_dir = threads_dir
         self.system_id = sanitize_system_id(system_id)
@@ -583,6 +599,8 @@ class ThreadSession:
         self.meta = meta
         self.previous_response_id = previous_response_id
         self.backend_api_mode = backend_api_mode
+        self._proj_tags = tuple(tags or ())
+        self._proj_strip_think = bool(strip_think)
         self.runtime_messages: List[Dict[str, Any]] = []
         # Снимок known_message_keys до записи последнего step_messages (для compaction user_ask).
         self.known_keys_snapshot_before_last_batch: Optional[frozenset[str]] = None
@@ -607,6 +625,7 @@ class ThreadSession:
         backend_api_mode = str(backend_api_mode_raw).strip().lower()
         if backend_api_mode not in {"responses", "chat_completions"}:
             backend_api_mode = "responses"
+        tags = projection_tags_from_config(config_dict)
 
         return cls(
             threads_dir=threads_dir,
@@ -618,6 +637,8 @@ class ThreadSession:
             meta=meta,
             previous_response_id=previous_response_id,
             backend_api_mode=backend_api_mode,
+            tags=tags,
+            strip_think=True,
         )
 
 
@@ -650,6 +671,8 @@ class ThreadSession:
             step_messages,
             self.known_message_keys,
             start_seq=self.persisted_messages_count,
+            tags=self._proj_tags,
+            strip_think=self._proj_strip_think,
         )
         self.persisted_messages_count += written
         known_seen = set(known_before)
@@ -823,7 +846,13 @@ class ThreadSession:
         new_meta["tui"] = {**session_tui, **disk_tui}
         session_runtime = dict(existing_meta.get("runtime") or {})
         merged_runtime = {**session_runtime, **disk_runtime}
-        merged_runtime.update(live_volume_from_messages(compact_messages))
+        merged_runtime.update(
+            live_volume_from_messages(
+                compact_messages,
+                tags=self._proj_tags,
+                strip_think=self._proj_strip_think,
+            )
+        )
         new_meta["runtime"] = merged_runtime
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, new_meta)
 

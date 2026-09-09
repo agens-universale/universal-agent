@@ -4655,6 +4655,17 @@ class TraceScreen(Screen):
             prefix="", content=text, kind_class="line-meta", focusable=False,
         )
 
+    def _projection_from_app_config(self):
+        """``(tags, strip_think)`` из живого конфига сессии (профиль + overrides)."""
+        from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+
+        effective = getattr(self.app, "effective_config", None)
+        if callable(effective):
+            cfg = effective() or {}
+        else:
+            cfg = getattr(self.app, "_config", None) or {}
+        return projection_tags_from_config(cfg), True
+
     def _append_technical_to_thread(self, msg: dict) -> None:
         tid = self._active_task_id or getattr(
             getattr(self.app, "tui_state", None), "active_task_id", None
@@ -4676,6 +4687,7 @@ class TraceScreen(Screen):
             save_thread_meta,
         )
 
+        tags, strip_think = self._projection_from_app_config()
         _msgs, keys, max_seq = load_thread_messages(threads_dir, system, tid)
         written = append_new_thread_messages(
             threads_dir,
@@ -4684,6 +4696,8 @@ class TraceScreen(Screen):
             [msg],
             keys,
             start_seq=max_seq,
+            tags=tags,
+            strip_think=strip_think,
         )
         if written and self._store is not None:
             meta = load_thread_meta(threads_dir, system, tid) or {}
@@ -4901,7 +4915,10 @@ class TraceScreen(Screen):
         if self._store is None:
             return False
         try:
-            removed = self._store.discard_message_by_id(tid, msg_id)
+            tags, strip_think = self._projection_from_app_config()
+            removed = self._store.discard_message_by_id(
+                tid, msg_id, tags=tags, strip_think=strip_think
+            )
         except Exception:
             return False
         if removed and tid == self._active_task_id and self._cursor is not None:

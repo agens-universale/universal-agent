@@ -1,8 +1,6 @@
 import json
 from copy import deepcopy
 
-from gc_core.message_projection import project_assistant_text
-
 cut_message = 350
 
 
@@ -108,18 +106,19 @@ def _extract_text_from_canonical_message_content(content):
 
 
 def _canonical_to_chat_completions_message(message):
+    """Канон ``state.messages`` → chat/completions item. Проза as-is, без проекции."""
     m_type = message.get("type")
     if m_type == "message":
         role = message.get("role", "assistant")
-        content = message.get("content")
-        if str(role).strip().lower() == "assistant":
-            plain = project_assistant_text(content)
-        else:
-            plain = _extract_text_from_canonical_message_content(content)
-        return {
+        converted = {
             "role": role,
-            "content": plain,
+            "content": _extract_text_from_canonical_message_content(
+                message.get("content")
+            ),
         }
+        if "reasoning_content" in message:
+            converted["reasoning_content"] = message["reasoning_content"]
+        return converted
     if m_type == "function_call":
         return {
             "role": "assistant",
@@ -169,11 +168,14 @@ def _legacy_role_to_chat_completions_message(message):
         }
 
     if m_role == 'assistant':
-        return {
+        converted = {
             'role': 'assistant',
-            'content': project_assistant_text(message.get('content')),
+            'content': message.get('content'),
             'tool_calls': deepcopy(message.get('tool_calls', list()))
         }
+        if "reasoning_content" in message:
+            converted["reasoning_content"] = message["reasoning_content"]
+        return converted
     return None
 
 

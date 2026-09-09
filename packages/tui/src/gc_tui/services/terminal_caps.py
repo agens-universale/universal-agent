@@ -14,6 +14,11 @@ from __future__ import annotations
 import os
 
 
+def _os_name() -> str:
+    """Имя платформы; отдельная точка подмены для кроссплатформенных тестов."""
+    return os.name
+
+
 def supports_font_fallback() -> bool:
     """True, если терминал сам найдёт глиф, которого нет в основном шрифте.
 
@@ -33,7 +38,7 @@ def supports_font_fallback() -> bool:
         return True
     if os.environ.get("TERM_PROGRAM") == "vscode":   # встроенный терминал VS Code
         return True
-    if os.name == "nt":                         # conhost: один шрифт, без подстановки
+    if _os_name() == "nt":                      # conhost: один шрифт, без подстановки
         return False
     if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
         # WSL: платформа posix, но рисует всё равно терминал Windows. Если это
