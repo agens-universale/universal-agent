@@ -5,39 +5,27 @@ Pure functions — no state, no backend I/O. Callers wrap the returned text with
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from gc_core.message_projection import project_assistant_text
 
-# Anti-fabrication: append to every no-tool-call bounce. The agent must never
-# act on a user reply it did not receive (spec 2026-06-24-no-fabricated-approval).
-_NO_FABRICATION_CLAUSE = (
-    "\n\nIf your prose asked the user a question, requested approval, or awaited "
-    "their decision, their reply has NOT arrived — it is not in this conversation. "
-    "Do not assume, invent, or act on a user response that has not actually arrived. "
-    "If you need their input to proceed, wait for it: ask via the user-input tool if "
-    "one is available, otherwise finalize the turn as blocked / needing input. "
-    "A prior user choice is not standing approval for a later action."
-)
-
 NO_TOOL_CALL_BOUNCE_MESSAGE = (
-    "There is no tool call in your response. This runtime's contract is that "
-    "every turn must contain at least one appropriate tool call — satisfy it now:\n"
-    "  - If the work for this turn is done or you are blocked, finalize the turn: "
-    "use the designated user-output/finalization tool (it delivers your reply to "
-    "the user).\n"
-    "  - If you are not finished, call the tool for your next step — the tool that "
-    "asks the user / waits for input (one precise question), or an action tool "
-    "(read, search, write, run, etc.)."
-    + _NO_FABRICATION_CLAUSE
+    "There is no tool call in your response. "
+    "Choose a tool call that brings you closer to solving the task."
 )
 
 
-def extract_last_assistant_text(messages: List[Dict[str, Any]]) -> str:
+def extract_last_assistant_text(
+    messages: List[Dict[str, Any]],
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> str:
     """
     Return projected prose from the last assistant `message` in the batch
-    (``for_model``: without ``<think>``). Empty string if missing or empty
-    after projection. Handles string content and list-of-parts.
+    (``for_model``: ``<think>`` stripped when ``strip_think=True``). Empty
+    string if missing or empty after projection. Handles string content
+    and list-of-parts.
     """
     if not messages:
         return ""
@@ -47,35 +35,17 @@ def extract_last_assistant_text(messages: List[Dict[str, Any]]) -> str:
             and message.get("type") == "message"
             and message.get("role") == "assistant"
         ):
-            return project_assistant_text(message.get("content")).strip()
+            return project_assistant_text(
+                message.get("content"), tags=tags, strip_think=strip_think
+            ).strip()
     return ""
 
 
-def format_no_tool_call_bounce(assistant_text: str) -> str:
+def format_no_tool_call_bounce(assistant_text: str = "") -> str:
+    """Return the static no-tool-call nudge.
+
+    Assistant prose is already in history (committed before the bounce), so
+    it is not inlined here.
     """
-    Build the no-tool-call bounce message. If the assistant's just-emitted
-    text is available, inline it in a copy-paste-ready block so the model
-    doesn't have to recompose from memory. Otherwise fall back to the static
-    NO_TOOL_CALL_BOUNCE_MESSAGE constant.
-    """
-    text = (assistant_text or "").strip()
-    if not text:
-        return NO_TOOL_CALL_BOUNCE_MESSAGE
-    return (
-        "There is no tool call in your response. This runtime's contract is that "
-        "every turn must contain at least one appropriate tool call; the prose you "
-        "just wrote was not a tool call, so it did not reach the user:\n\n"
-        "<<<\n"
-        f"{text}\n"
-        ">>>\n\n"
-        "Satisfy the contract now:\n"
-        "  - If the work for this turn is done or you are blocked, finalize the "
-        "turn: use the designated user-output/finalization tool (it delivers your "
-        "reply to the user).\n"
-        "  - If you are not finished, call the tool for your next step — the tool "
-        "that asks the user / waits for input (one precise question), or an action "
-        "tool (read, search, write, run, etc.).\n"
-        "Reuse the relevant part of the block above VERBATIM where it is the "
-        "content the user must react to — do not paraphrase or summarize it."
-        + _NO_FABRICATION_CLAUSE
-    )
+    del assistant_text
+    return NO_TOOL_CALL_BOUNCE_MESSAGE

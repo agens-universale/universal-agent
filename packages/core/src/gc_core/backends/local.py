@@ -11,6 +11,7 @@ import sys
 import threading
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
+from gc_core.backends.capture import BoundedStreamAccumulator, CapturedStream
 from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
@@ -302,9 +303,11 @@ class LocalFsBackend(FsBackend):
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
-                   env: Optional[dict] = None) -> ExecResult:
+                   env: Optional[dict] = None,
+                   capture_max_chars: Optional[int] = None) -> ExecResult:
         return run_coro_blocking(
-            self.arun_python(code, cwd=cwd, timeout=timeout, env=env)
+            self.arun_python(code, cwd=cwd, timeout=timeout, env=env,
+                             capture_max_chars=capture_max_chars)
         )
 
     # --- exec (async) ---
@@ -333,11 +336,12 @@ class LocalFsBackend(FsBackend):
 
     async def arun_python(self, code: str, *, cwd: Optional[str] = None,
                           timeout: Optional[int] = None,
-                          env: Optional[dict] = None) -> ExecResult:
+                          env: Optional[dict] = None,
+                          capture_max_chars: Optional[int] = None) -> ExecResult:
         return await _arun_bounded_process(
             [sys.executable, "-u", "-"], shell=False, cwd=cwd, timeout=timeout,
             env=_sanitize_env(env), stdin_text=code,
-            capture_max_chars=self.exec_output_capture_max_chars,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     def default_cwd(self) -> Optional[str]:
@@ -378,61 +382,59 @@ class _Capture:
     захваченное терялось. Держим его в объекте, переживающем отмену таски.
     """
 
-    __slots__ = ("text", "hit_cap", "parts")
+    __slots__ = ("stream", "acc")
 
-    def __init__(self) -> None:
-        self.text = ""
-        self.hit_cap = False
-        #: Живой буфер дренажа. Держим ЗДЕСЬ, а не в локальной переменной
+    def __init__(self, capture_max_chars: int) -> None:
+        #: Накопитель с ОГРАНИЧЕННОЙ памятью: настоящая голова, настоящий
+        #: хвост, точный счётчик. Живёт ЗДЕСЬ, а не в локальной переменной
         #: корутины, чтобы вызывающий мог забрать прочитанное, НЕ отменяя
         #: дренаж: отмена оставляла трубу нечитаемой, и фоновый потомок
         #: вставал на write.
-        self.parts: list = []
+        self.acc = BoundedStreamAccumulator(capture_max_chars)
+        self.stream: CapturedStream = self.acc.result()
+
+    @property
+    def text(self) -> str:
+        return self.stream.text
+
+    @property
+    def hit_cap(self) -> bool:
+        return self.stream.truncated
 
     def publish(self) -> None:
-        """Опубликовать прочитанное к этому моменту. Идемпотентно.
+        """Снять снимок прочитанного к этому моменту. Идемпотентно.
 
-        После достижения лимита не трогаем: там уже лежит ровно отрезанное
-        по ``capture_max_chars``, а ``parts`` дальше не растёт.
+        Раньше публикация была одноразовой: по достижении лимита буфер
+        замораживался, потому что хвост всё равно отбрасывался. Теперь хвост
+        НАСТОЯЩИЙ — накопитель держит его кольцом, — поэтому снимок берётся
+        каждый раз заново и с каждым чтением становится точнее.
         """
-        if not self.hit_cap:
-            self.text = "".join(self.parts)
+        self.stream = self.acc.result()
 
 
-async def _adrain_stream(stream, capture_max_chars: int, sink: "_Capture") -> None:
-    """Асинхронный двойник ``_drain_pipe``: то же ограничение, тот же декодер.
+async def _adrain_stream(stream, sink: "_Capture") -> None:
+    """Прочитать поток ДО EOF в ограниченный накопитель ``sink``.
 
-    Пишет в ``sink`` по ходу дела: по достижении лимита — сразу, иначе — на
-    EOF. Отмена таски после этого уже не отнимает захваченное.
+    Чтение не прекращается по заполнении головы, и это не расточительство:
+    хвост нужен настоящий, а счётчик — точный. Раньше после лимита чанки
+    отбрасывались, и вызывающий получал только начало вывода — обрезку
+    приходилось объяснять моделью «дальше что-то было». Кольцевой хвост
+    накопителя стоит O(1) на чанк, так что цена не выросла.
+
+    Не читать нельзя в любом случае: полный pipe заблокирует запись
+    дочернего процесса.
+
+    ``sink`` публикуется по ходу дела, поэтому отмена таски уже не отнимает
+    захваченное — на этом держится освобождение дренажа (см. `_release_drain`).
     """
     decoder = codecs.lookup("utf-8").incrementaldecoder(errors="replace")
-    parts = sink.parts
-    total = 0
-    hit_cap = False
     try:
         while True:
             chunk = await stream.read(_READ_CHUNK)
             if not chunk:
                 break
-            if hit_cap:
-                # drain & discard: не читать нельзя — pipe заблокирует процесс.
-                continue
-            decoded = decoder.decode(chunk)
-            room = capture_max_chars - total
-            if room <= 0:
-                hit_cap = True
-            elif len(decoded) <= room:
-                parts.append(decoded)
-                total += len(decoded)
-            else:
-                parts.append(decoded[:room])
-                total = capture_max_chars
-                hit_cap = True
-            if hit_cap:
-                # Публикуем немедленно: дальше только отбрасывание хвоста, и
-                # ждать его вызывающему незачем.
-                sink.publish()
-                sink.hit_cap = True
+            sink.acc.feed(decoder.decode(chunk))
+            sink.publish()
     except asyncio.CancelledError:
         # Отмена (сняли вызывающего): отдаём то, что уже прочли, и уходим.
         sink.publish()
@@ -440,10 +442,8 @@ async def _adrain_stream(stream, capture_max_chars: int, sink: "_Capture") -> No
     except Exception:
         sink.publish()
         return
-    if not hit_cap:
-        parts.append(decoder.decode(b"", final=True))
-        sink.publish()
-        sink.hit_cap = False
+    sink.acc.feed(decoder.decode(b"", final=True))
+    sink.publish()
 
 
 async def _await_process_exit(proc, timeout: Optional[float]):
@@ -519,12 +519,13 @@ async def _arun_bounded_process(
     # доходит. Достижимо из `skills_run_script` (аргументы уходят JSON'ом через
     # stdin) и `arun_python` с большим кодом. На синхронном пути читатели тоже
     # стартовали до записи — регрессию внёс переезд на asyncio.
-    out_sink, err_sink = _Capture(), _Capture()
+    out_sink = _Capture(capture_max_chars)
+    err_sink = _Capture(capture_max_chars)
     out_task = asyncio.ensure_future(
-        _adrain_stream(proc.stdout, capture_max_chars, out_sink)
+        _adrain_stream(proc.stdout, out_sink)
     )
     err_task = asyncio.ensure_future(
-        _adrain_stream(proc.stderr, capture_max_chars, err_sink)
+        _adrain_stream(proc.stderr, err_sink)
     )
 
     async def _feed_stdin() -> None:
@@ -603,12 +604,10 @@ async def _arun_bounded_process(
     # Читаем из sink, а НЕ из task.result(): отменённая по таймауту дренажа
     # таска результата не отдаст, но захваченное к тому моменту уже там.
     return ExecResult(
-        stdout=out_sink.text,
-        stderr=err_sink.text,
         return_code=return_code,
         timed_out=timed_out,
-        stdout_hit_capture_cap=out_sink.hit_cap,
-        stderr_hit_capture_cap=err_sink.hit_cap,
+        stdout_stream=out_sink.stream,
+        stderr_stream=err_sink.stream,
     )
 
 

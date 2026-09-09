@@ -119,12 +119,16 @@ async def test_async_and_sync_results_agree():
 
 
 async def test_captured_survives_drain_timeout():
-    """Захваченное отдаётся, даже если хвост дочитать не успели.
+    """Захваченное отдаётся, даже если дренаж не успел дойти до EOF.
 
-    Свойство удалённого при переезде test_drain_pipe_publishes_captured_
-    before_discard_finishes: по достижении лимита буфер публикуется сразу, и
-    вызывающий не ждёт конца отбрасывания. Фоновый потомок держит pipe
-    открытым, поэтому дренаж до EOF не дойдёт и будет снят по таймауту.
+    Фоновый потомок держит pipe открытым, поэтому чтение до конца не
+    завершится и дренаж будет отпущен по таймауту. Снимок при этом обязан
+    остаться у вызывающего.
+
+    Утверждение о ФОРМЕ снимка обновлено под голова+хвост, пришедший с
+    develop: раньше отдавался только префикс (`"A" * 1000`), теперь — начало
+    и настоящий конец потока. Это и есть смысл правки: по одному началу
+    нельзя было понять, чем команда кончилась.
     """
     backend = LocalFsBackend(exec_output_capture_max_chars=1000)
     res = await backend.aexec(
@@ -133,7 +137,17 @@ async def test_captured_survives_drain_timeout():
 
     assert res.stdout_hit_capture_cap is True
     assert len(res.stdout) == 1000, "захваченное потеряно вместе с отменой дренажа"
-    assert res.stdout == "A" * 1000
+    assert set(res.stdout) <= {"A", "\n"}, f"в снимок попало лишнее: {res.stdout[:80]!r}"
+    stream = res.stdout_stream
+    assert stream.truncated is True
+    assert stream.head == "A" * 500, "начало потока потеряно"
+    assert stream.tail.endswith("\n"), (
+        "хвост не настоящий: у `print` в конце перевод строки, и он обязан "
+        "доехать — ради этого голова+хвост и делались"
+    )
+    assert stream.total_chars > 200000, (
+        f"счётчик считает только снимок, а не весь поток: {stream.total_chars}"
+    )
 
 
 async def test_background_child_is_not_a_timeout():

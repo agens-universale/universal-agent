@@ -9,7 +9,7 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def test_execute_success_and_non_zero():
     tool = with_local_ctx(ExecuteCommand)
     ok = json.loads(tool(command=f'"{sys.executable}" -c "print(123)"'))
-    assert ok["ok"] is True and "123" in ok["stdout"]
+    assert ok["ok"] is True and "123" in ok["stdout"]["content"]
     bad = json.loads(tool(command=f'"{sys.executable}" -c "import sys; sys.exit(7)"'))
     assert bad["ok"] is False and bad["exit_code"] == 7
 
@@ -22,13 +22,17 @@ def test_execute_env_timeout_and_truncation(tmp_path):
             env_vars=[{"name": "X", "value": "v"}],
         )
     )
-    assert env["ok"] is True and env["stdout"].rstrip("\n") == "v"
+    assert env["ok"] is True and env["stdout"]["content"].rstrip("\n") == "v"
     timeout = json.loads(tool(command=f'"{sys.executable}" -c "import time; time.sleep(2)"', timeout_seconds=1))
     assert timeout["ok"] is False and timeout["timed_out"] is True
-    trunc = json.loads(tool(command=f'"{sys.executable}" -c "print(\'A\'*100)"', max_output_chars=10))
+    trunc_tool = with_local_ctx(
+        ExecuteCommand,
+        config_dict={"exec_output_capture_max_chars": 10, "exec_output_preview_edge_chars": 5},
+    )
+    trunc = json.loads(trunc_tool(command=f'"{sys.executable}" -c "print(\'A\'*100)"'))
     assert trunc["truncated"] is True
-    assert trunc["stdout_kept_head_chars"] + trunc["stdout_kept_tail_chars"] == 10
-    assert "[omitted" in trunc["stdout"]
+    assert trunc["stdout"]["head"] + trunc["stdout"]["tail"] == "A" * 5 + "A" * 4 + "\n"
+    assert trunc["stdout"]["omitted_chars"] == 91
 
 
 def test_execute_validation(tmp_path):
@@ -44,7 +48,7 @@ def test_execute_cwd_and_env_conversion(tmp_path):
     marker.write_text("ok", encoding="utf-8")
     cmd = f'"{sys.executable}" -c "from pathlib import Path; print(Path(\'marker.txt\').exists())"'
     in_cwd = json.loads(tool(command=cmd, cwd=str(tmp_path)))
-    assert in_cwd["ok"] is True and in_cwd["stdout"].rstrip("\n") == "True"
+    assert in_cwd["ok"] is True and in_cwd["stdout"]["content"].rstrip("\n") == "True"
 
     env_casted = json.loads(
         tool(
@@ -53,7 +57,7 @@ def test_execute_cwd_and_env_conversion(tmp_path):
         )
     )
     assert env_casted["ok"] is True
-    assert "123" in env_casted["stdout"]
+    assert "123" in env_casted["stdout"]["content"]
 
 
 def test_execute_env_vars_validation():
@@ -80,4 +84,4 @@ def test_execute_empty_env_vars_list_inherits_parent_environ():
     assert with_vars["ok"] is True
     assert without["ok"] is True
     assert with_vars["stdout"] == without["stdout"]
-    assert with_vars["stdout"].strip() != ""
+    assert with_vars["stdout"]["content"].strip() != ""

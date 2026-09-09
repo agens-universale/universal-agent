@@ -7,6 +7,10 @@ from types import SimpleNamespace
 
 from gc_core.config import parse_chat_completions_max_tokens, resolve_tui_stream_enabled
 from gc_core.config_modules.gc import gc_force_collect_enabled
+from gc_core.config_modules.strip_tags_projection import (
+    persist_reasoning_content_from_config,
+    projection_tags_from_config,
+)
 from gc_core.intent_guard.feedback import build_finish_gate_feedback, build_finish_gate_reject_technical_user_content
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME, FINISH_TOOL_NAME, INTERMEDIATE_REPLY_TOOL_NAME, SESSION_COMPACT_TOOL_NAME, SESSION_TODO_TOOL_NAME, TURN_FINALIZING_TOOLS
 from gc_core.run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
@@ -69,7 +73,7 @@ from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
-from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text, format_no_tool_call_bounce
+from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text
 from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
 
@@ -534,6 +538,7 @@ async def _arequest_backend_canonical_once(
     choices = res.get("choices")
     if isinstance(choices, list) and len(choices) > 0:
         first_choice_payload["choices"] = [choices[0]]
+    persist_reasoning = persist_reasoning_content_from_config(cfg)
     canonical = output_chat_completion_to_response(
         first_choice_payload,
         logger_override=getattr(ctx, "logger", _fallback_logger),
@@ -541,6 +546,7 @@ async def _arequest_backend_canonical_once(
             "url": url,
             "request_summary": _summarize_call_data_for_log(call_data),
         },
+        persist_reasoning_content=persist_reasoning,
     )
     resp_messages = canonical["output"]
     response_id = str(canonical.get("id") or res.get("id") or "")
@@ -1130,6 +1136,7 @@ async def arun_agent(
     context_overflow_retries = 0
     run_logger = getattr(ctx, "logger", None) or _fallback_logger
     cfg = getattr(ctx, "config_dict", {}) or {}
+    _proj_tags = projection_tags_from_config(cfg)
     console_human = human_console_enabled(cfg)
     max_tool_errors = cfg.get("no_tool_call_max_count", 0)
     session_token_limit = cfg.get("session_token_limit")
@@ -1309,11 +1316,9 @@ async def arun_agent(
             # Ошибки до успешного разбора батча (санитайз, check_mode, …) — bounce.
             run_logger.error(e, exc_info=True)
             tool_error_cnt += 1
-            assistant_text = extract_last_assistant_text(messages)
-            bounce_msg = format_no_tool_call_bounce(assistant_text)
             messages = [
                 _make_technical_feedback_user_message(
-                    bounce_msg,
+                    NO_TOOL_CALL_BOUNCE_MESSAGE,
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
@@ -1525,9 +1530,16 @@ async def arun_agent(
                     state.last_backend_response_id = response_id
                     # Half-turn: как user_ask — ждём разбора ответа модели.
                 elif mode == "text_response":
-                    assistant_text = extract_last_assistant_text(messages)
-                    decision = await ashould_return_text_answer(ctx, state, assistant_text)
-                    
+                    # Аргументы проекции — с develop; форма вызова НАША.
+                    # develop зовёт синхронный `should_return_text_answer`: у
+                    # него он такой и есть, а у нас снят вместе с синхронным
+                    # публичным API.
+                    assistant_text = extract_last_assistant_text(
+                        messages, tags=_proj_tags, strip_think=True
+                    )
+                    decision = await ashould_return_text_answer(
+                        ctx, state, assistant_text
+                    )
                     if decision.accept:
                         # Финальная проза принята → TUI-индикатор «✓ завершаю…»
                         # на время записи/саммари/flush (mark_finalizing пишет
@@ -1565,7 +1577,7 @@ async def arun_agent(
                         run_logger.warning(
                             "Agent returned text response without tool call, requesting tool call"
                         )
-                        bounce_msg = format_no_tool_call_bounce(assistant_text)
+                        bounce_msg = NO_TOOL_CALL_BOUNCE_MESSAGE
                     messages = [
                         _make_technical_feedback_user_message(
                             bounce_msg,

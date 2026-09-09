@@ -18,7 +18,6 @@ import asyncio
 
 from gc_core.agent_executor import AgentExecutor
 import pytest
-from gc_core.run_context import acreate_run_context
 
 from parity_harness import (
     ScriptedBackend,
@@ -43,16 +42,33 @@ def _stub_turn_finish(monkeypatch):
     иначе дамп треда, который здесь и сверяется, окажется другим.
     """
     from gc_core import processing_responses as pr
-    from helpers.turn_finish_apply import stub_turn_finish_apply
+    from helpers.turn_finish_apply import (
+        stub_turn_finish_apply,
+        stub_turn_finish_apply_sync,
+    )
 
-    real = pr.aapply_tool
+    # Шов выбираем по тому, какой есть у ЯДРА: эталон снимается тем же файлом
+    # в worktree на develop, где диспетчер синхронный. Патч корутиной там
+    # молча делал финиш «неизвестным тулом» — ход не закрывался, и эталон
+    # оказался бы снимком сломанного прогона.
+    if hasattr(pr, "aapply_tool"):
+        real = pr.aapply_tool
 
-    async def _dispatch(**kwargs):
-        if kwargs.get("tool_name") == "turn_finish":
-            return await stub_turn_finish_apply(**kwargs)
-        return await real(**kwargs)
+        async def _dispatch(**kwargs):
+            if kwargs.get("tool_name") == "turn_finish":
+                return await stub_turn_finish_apply(**kwargs)
+            return await real(**kwargs)
 
-    monkeypatch.setattr(pr, "aapply_tool", _dispatch)
+        monkeypatch.setattr(pr, "aapply_tool", _dispatch)
+    else:
+        real_sync = pr.apply_tool
+
+        def _dispatch_sync(**kwargs):
+            if kwargs.get("tool_name") == "turn_finish":
+                return stub_turn_finish_apply_sync(**kwargs)
+            return real_sync(**kwargs)
+
+        monkeypatch.setattr(pr, "apply_tool", _dispatch_sync)
 
 
 #: Сценарий: модель зовёт калькулятор, затем закрывает ход финализатором.
@@ -86,11 +102,21 @@ async def _run_once(tmp_path, monkeypatch):
     ``mode`` отсюда снят вместе с тавтологией, которую он обслуживал, — см.
     ``test_async_run_matches_pre_migration_reference``.
     """
+    # Гарнис обязан идти на ОБЕИХ ветках: эталон снимается прогоном этого же
+    # файла в worktree на develop, где сборка контекста и прогон синхронные.
+    # Ветку выбираем по наличию имени, а не по вере.
+    from gc_core import run_context as _rc
+
     cfg = parity_config(tmp_path, monkeypatch)
     backend = install(monkeypatch, ScriptedBackend(list(TURNS)))
-    ctx = await acreate_run_context(cfg)
+    _acreate = getattr(_rc, "acreate_run_context", None)
+    ctx = await _acreate(cfg) if _acreate else _rc.create_run_context(cfg)
     executor = AgentExecutor(ctx)
-    answer = await executor.arun([PROMPT], thread_id="t1")
+    _arun = getattr(executor, "arun", None)
+    answer = (
+        await _arun([PROMPT], thread_id="t1") if _arun
+        else executor.run([PROMPT], thread_id="t1")
+    )
     return answer, run_thread_dump(cfg, "cli", "t1"), backend
 
 
@@ -165,7 +191,7 @@ async def test_async_run_matches_pre_migration_reference(tmp_path, monkeypatch):
     from pathlib import Path
 
     reference = json.loads(
-        (Path(__file__).parent / "fixtures" / "parity_reference_956a848a.json")
+        (Path(__file__).parent / "fixtures" / "parity_reference_e66a1e90.json")
         .read_text(encoding="utf-8")
     )
 

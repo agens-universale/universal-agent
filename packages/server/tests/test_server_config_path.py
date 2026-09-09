@@ -66,7 +66,8 @@ def test_load_server_config_reports_the_file_it_read(monkeypatch, tmp_path):
 def test_load_server_config_reports_empty_path_when_nothing_found(monkeypatch, tmp_path):
     """Файла нет — ключ есть, но пустой: «якорь неизвестен», а не «якорь = ассеты»."""
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
-    monkeypatch.setattr("gc_server.rest_api.server_config.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(server_config, "PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(server_config, "repo_root", lambda: None)
     monkeypatch.chdir(tmp_path)
 
     assert load_server_config()["config_path"] == ""

@@ -1,23 +1,20 @@
+from gc_core.backends.async_protocol import aexec_port
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 import json
 from typing import Any, Dict, Optional
 
-from typing import Any
-
-from gc_core.backends.async_protocol import aexec_port
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from gc_core.constants.tool_names import EXEC_COMMAND_NAME, READ_STORED_TOOL_OUTPUT_NAME
+from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
+from gc_core.constants.tool_names import EXEC_COMMAND_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
-from gc_core.tools.exec.stream_preview import apply_stream_meta_to_envelope, clamp_max_output_chars, process_exec_stream
+from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
 
 
 class ExecuteCommand(AbstractSimpleTool):
     """
     Tool to execute a CLI command on the system and return its output.
     """
-    # Preview budget for stdout/stderr (не в tool schema — политика рантайма).
-    cut_n = 4000
     # Fallback when config_dict has no exec_timeout_sec (tests / partial wiring).
     timeout = DEFAULT_EXEC_TIMEOUT_SEC
 
@@ -82,9 +79,6 @@ class ExecuteCommand(AbstractSimpleTool):
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
 Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(DEFAULT_EXEC_TIMEOUT_SEC) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
-Return format (JSON string):
-{"tool":"exec_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"error":null|{"type":"...","message":"..."},"stdout":"...","stderr":"..."}
-
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
 - Always quote arguments properly to avoid shell injection risks (the tool uses safe execution via subprocess).
@@ -110,7 +104,7 @@ Important Usage Rules:
    - After ensuring proper quoting, execute the command.
    - Capture the output of the command.
    - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings
-3. Read and search file contents with the filesystem tools (`fs_read_file`, `fs_find_in_files`, `fs_find_files_by_name`, `fs_list_files`, `fs_search_and_replace`, …): they are permission-checked and return structured results. Do NOT use shell `cat`/`head`/`tail`/`grep`/`rg`/`find` to read or search file contents — use those tools instead. Shell is right for everything else; remember exec stdout is capped (~60k chars) and may truncate.
+3. Read and search file contents with the filesystem tools (`fs_read_file`, `fs_find_in_files`, `fs_find_files_by_name`, `fs_list_files`, `fs_search_and_replace`, …): they are permission-checked and return structured results. Do NOT use shell `cat`/`head`/`tail`/`grep`/`rg`/`find` to read or search file contents — use those tools instead. Shell is right for everything else.
 4. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.
     <good-example>
     pytest /foo/bar/tests
@@ -121,69 +115,36 @@ Important Usage Rules:
 ''')
         return description
 
-    @staticmethod
-    def _process_stream(
-        captured: str,
-        max_output_chars: int,
-        *,
-        hit_capture_cap: bool,
-        state,
-        call_id,
-        tool_name: str,
-    ) -> dict:
-        """D3+D4+D5: head+tail preview + optional store.put + output_ref."""
-        return process_exec_stream(
-            captured,
-            max_output_chars,
-            hit_capture_cap=hit_capture_cap,
-            state=state,
-            call_id=call_id,
-            tool_name=tool_name,
-        )
-
-    @staticmethod
     def _result(
+        self,
         *,
         ok: bool,
         command: str,
         cwd: str,
         exit_code: int | None,
         timed_out: bool,
-        truncated: bool,
-        stdout: str,
-        stderr: str,
+        stdout=None,
+        stderr=None,
         error: dict | None = None,
-        stdout_meta: dict | None = None,
-        stderr_meta: dict | None = None,
     ) -> str:
-        envelope: dict = {
-            "tool": ExecuteCommand.registered_tool_name(),
-            "ok": ok,
-            "command": command,
-            "cwd": cwd,
-            "exit_code": exit_code,
-            "timed_out": timed_out,
-            "truncated": truncated,
-            "error": error,
-            "stdout": stdout,
-            "stderr": stderr,
-        }
-        apply_stream_meta_to_envelope(envelope, "stdout", stdout_meta)
-        apply_stream_meta_to_envelope(envelope, "stderr", stderr_meta)
-        if envelope.get("stdout_output_ref") or envelope.get("stderr_output_ref"):
-            envelope["hint"] = (
-                "stdout/stderr shown as start+end preview. "
-                f"Page full captured stream via {READ_STORED_TOOL_OUTPUT_NAME} "
-                "using stdout_output_ref / stderr_output_ref."
-            )
-        return json.dumps(envelope, ensure_ascii=False)
+        """Envelope с front-loaded preview; ``truncated`` выводится из потоков."""
+        return build_exec_envelope(
+            tool=ExecuteCommand.registered_tool_name(),
+            ok=ok,
+            exit_code=exit_code,
+            timed_out=timed_out,
+            stdout=as_captured_stream(stdout),
+            stderr=as_captured_stream(stderr),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+            error=error,
+            head_fields={"command": command, "cwd": cwd},
+        )
 
     def _command_moderation_blocked_result(
         self,
         error: dict,
         command: str,
         timeout_seconds: int | None = None,
-        max_output_chars: int | None = None,
         cwd: str | None = None,
         env_vars: list[dict] | None = None,
         **kwargs,
@@ -194,81 +155,24 @@ Important Usage Rules:
             cwd=cwd or (self._backend.default_cwd() or ""),
             exit_code=None,
             timed_out=False,
-            truncated=False,
             stdout="",
             stderr="",
             error=error,
         )
 
-
-    @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
-    @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
-    async def acall(
-        self,
-        command: str,
-        timeout_seconds: int | None = None,
-        max_output_chars: int | None = None,
-        cwd: str | None = None,
-        env_vars: list[dict] | None = None,
-        **kwargs,
-    ) -> str:
-        """Нативный вход: процесс через ``asyncio.create_subprocess_shell``.
-
-        Прежде тул целиком уезжал в ``asyncio.to_thread``, и слот общего пула
-        держался ВЕСЬ таймаут — по умолчанию 120 с. На одиночном вызове это
-        почти незаметно, на параллельных — нет: 20 команд шли 4.09 с через пул
-        против 2.10 с нативно.
-
-        Гварды навешены и здесь — иначе асинхронный путь обошёл бы политику
-        безопасности. Тело модерации при этом остаётся в потоке (внутри
-        LLM-судья), а сам запуск ждётся через ``await``.
-
-        ``aexec_port`` вместо прямого ``backend.aexec``: у ``HarborBackend`` и
-        ``TrackingFsBackend`` нативного ``aexec`` нет, и адаптер завернёт их
-        по-старому — совместимость цела.
-        """
-        early, plan = self._plan(
-            command, timeout_seconds, max_output_chars, cwd, env_vars
-        )
-        if early is not None:
-            return early
-        try:
-            res = await aexec_port(self._backend).aexec(
-                plan["command"], cwd=plan["cwd"], timeout=plan["timeout"],
-                env=plan["env"],
-            )
-        except Exception as e:
-            return self._exec_failed(plan, e)
-        return self._finish(res, plan)
-
-    def _exec_failed(self, plan: dict, exc: Exception) -> str:
-        """Отказ запуска — общий для обоих входов."""
-        err = str(exc).replace("\n", " ").strip()
-        return self._result(
-            ok=False,
-            command=plan["command"],
-            cwd=plan["cwd"] or "",
-            exit_code=-1,
-            timed_out=False,
-            truncated=False,
-            stdout="",
-            stderr="",
-            error={"type": "execution_failed", "message": err},
-        )
-
     def _plan(
         self,
         command: str,
-        timeout_seconds: int | None = None,
-        max_output_chars: int | None = None,
-        cwd: str | None = None,
-        env_vars: list[dict] | None = None,
+        timeout_seconds: int | None,
+        cwd: str | None,
+        env_vars: list[dict] | None,
     ) -> "tuple[str | None, dict]":
-        """``(готовый отказ, план запуска)`` — значимо ровно одно из двух.
+        """Разобрать и проверить аргументы. Общее для обоих входов.
 
-        Всё, что не зависит от способа запуска: валидация, дефолты, проверка
-        cwd и разбор env. Вынесено, чтобы у двух входов не разошлись правила —
-        разойдясь, они дали бы одному и тому же туду два разных контракта.
+        Возвращает ``(ранний_ответ, план)``: ранний ответ — готовый JSON отказа
+        по невалидному аргументу, план — то, с чем идти в бэкенд. Вынесено
+        затем, чтобы синхронный и асинхронный входы не могли разойтись в
+        проверках: у них различается ТОЛЬКО строка запуска.
         """
         cwd_used = cwd if cwd is not None else self._backend.default_cwd()
 
@@ -280,7 +184,6 @@ Important Usage Rules:
                 cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "command"},
@@ -293,7 +196,6 @@ Important Usage Rules:
                 cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "command", "message": "Empty command"},
@@ -308,27 +210,11 @@ Important Usage Rules:
                 cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "timeout_seconds"},
             ), {}
 
-        if max_output_chars is None:
-            max_output_chars = self.cut_n
-        if not isinstance(max_output_chars, int) or max_output_chars <= 0:
-            return self._result(
-                ok=False,
-                command=command,
-                cwd=cwd_used or "",
-                exit_code=None,
-                timed_out=False,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "max_output_chars"},
-            ), {}
-        max_output_chars = clamp_max_output_chars(max_output_chars, self._config_dict)
 
         if cwd_used is not None:
             if not isinstance(cwd_used, str) or not cwd_used.strip():
@@ -338,7 +224,6 @@ Important Usage Rules:
                     cwd=str(cwd_used),
                     exit_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={"type": "invalid_argument", "field": "cwd"},
@@ -350,7 +235,6 @@ Important Usage Rules:
                     cwd=cwd_used,
                     exit_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={"type": "invalid_argument", "field": "cwd", "message": "Not a directory"},
@@ -365,7 +249,6 @@ Important Usage Rules:
                     cwd=cwd_used or "",
                     exit_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={
@@ -383,7 +266,6 @@ Important Usage Rules:
                         cwd=cwd_used or "",
                         exit_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={
@@ -400,7 +282,6 @@ Important Usage Rules:
                         cwd=cwd_used or "",
                         exit_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
@@ -413,7 +294,6 @@ Important Usage Rules:
                         cwd=cwd_used or "",
                         exit_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={
@@ -430,33 +310,77 @@ Important Usage Rules:
             "cwd": cwd_used,
             "timeout": timeout_seconds,
             "env": env_sanitized or None,
-            "max_output_chars": max_output_chars,
         }
+
+    @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
+    @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
+    async def acall(
+        self,
+        command: str,
+        timeout_seconds: int | None = None,
+        cwd: str | None = None,
+        env_vars: list[dict] | None = None,
+        **kwargs,
+    ) -> str:
+        """Нативный вход: процесс через ``asyncio.create_subprocess_shell``.
+
+        Прежде тул целиком уезжал в ``asyncio.to_thread``, и слот общего пула
+        держался ВЕСЬ таймаут — по умолчанию 120 с. На одиночном вызове это
+        почти незаметно, на параллельных — нет: 20 команд шли 4.09 с через пул
+        против 2.10 с нативно.
+
+        Гварды навешены и здесь — иначе асинхронный путь обошёл бы политику
+        безопасности.
+
+        ``aexec_port`` вместо прямого ``backend.aexec``: у бэкендов без
+        нативного ``aexec`` адаптер завернёт вызов по-старому — совместимость
+        цела.
+
+        Разбор аргументов общий с синхронным входом: он весь выше по функции
+        ``call``, поэтому здесь мы её и зовём — но в потоке, а не на loop, и
+        только ради разбора. Сам запуск ждётся через ``await``.
+        """
+        early, plan = self._plan(command, timeout_seconds, cwd, env_vars)
+        if early is not None:
+            return early
+        try:
+            res = await aexec_port(self._backend).aexec(
+                plan["command"], cwd=plan["cwd"], timeout=plan["timeout"],
+                env=plan["env"],
+            )
+        except Exception as exc:
+            return self._exec_failed(plan, exc)
+        return self._finish(res, plan)
+
+    def _exec_failed(self, plan: dict, exc: Exception) -> str:
+        """Отказ запуска — общий для обоих входов."""
+        err = str(exc).replace("\n", " ").strip()
+        return self._result(
+            ok=False,
+            command=plan["command"],
+            cwd=plan["cwd"] or "",
+            exit_code=-1,
+            timed_out=False,
+            stdout="",
+            stderr="",
+            error={"type": "execution_failed", "message": err},
+        )
 
     def _finish(self, res: "Any", plan: dict) -> str:
         """Разобрать результат запуска. Общий для обоих входов."""
         command = plan["command"]
         cwd_used = plan["cwd"]
         timeout_seconds = plan["timeout"]
-        max_output_chars = plan["max_output_chars"]
 
-        stdout_meta = self._process_stream(
-            res.stdout or "",
-            max_output_chars,
-            hit_capture_cap=getattr(res, "stdout_hit_capture_cap", False),
-            state=self._state,
-            call_id=self._call_id,
-            tool_name=ExecuteCommand.registered_tool_name(),
+        # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
+        # объект без структуры потока — тогда падаем обратно на плоский текст,
+        # а не роняем тулу AttributeError уже после исполнения команды.
+        stdout_stream = as_captured_stream(
+            getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
         )
-        stderr_meta = self._process_stream(
-            res.stderr or "",
-            max_output_chars,
-            hit_capture_cap=getattr(res, "stderr_hit_capture_cap", False),
-            state=self._state,
-            call_id=self._call_id,
-            tool_name=ExecuteCommand.registered_tool_name(),
+        stderr_stream = as_captured_stream(
+            getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
         )
-        truncated = stdout_meta["truncated"] or stderr_meta["truncated"]
 
         if res.timed_out:
             return self._result(
@@ -465,12 +389,9 @@ Important Usage Rules:
                 cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=True,
-                truncated=truncated,
-                stdout=stdout_meta["text"],
-                stderr=stderr_meta["text"],
+                stdout=stdout_stream,
+                stderr=stderr_stream,
                 error={"type": "timeout", "message": f"Command timed out after {timeout_seconds} seconds"},
-                stdout_meta=stdout_meta,
-                stderr_meta=stderr_meta,
             )
 
         exit_code = res.return_code
@@ -482,10 +403,7 @@ Important Usage Rules:
             cwd=cwd_used or "",
             exit_code=exit_code,
             timed_out=False,
-            truncated=truncated,
-            stdout=stdout_meta["text"],
-            stderr=stderr_meta["text"],
+            stdout=stdout_stream,
+            stderr=stderr_stream,
             error=error,
-            stdout_meta=stdout_meta,
-            stderr_meta=stderr_meta,
         )

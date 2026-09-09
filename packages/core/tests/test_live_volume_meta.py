@@ -1,9 +1,15 @@
 """meta.tui.live_history_chars / live_msg_count — агрегаты объёма live (persist)."""
 from gc_core.message_format import calc_history_chars_for_trigger
-from gc_core.thread_store import ThreadSession, discard_message_by_id, load_thread_messages, load_thread_meta
+from gc_core.thread_store import (
+    ThreadSession,
+    append_new_thread_messages,
+    discard_message_by_id,
+    load_thread_messages,
+    load_thread_meta,
+)
 
 
-def _session(tmp_path, tid="t1"):
+def _session(tmp_path, tid="t1", *, strip_think=True):
     return ThreadSession(
         threads_dir=str(tmp_path),
         system_id="cli",
@@ -14,6 +20,7 @@ def _session(tmp_path, tid="t1"):
         meta={},
         previous_response_id=None,
         backend_api_mode="chat_completions",
+        strip_think=strip_think,
     )
 
 
@@ -93,6 +100,58 @@ def test_discard_keeps_live_volume_consistent(tmp_path):
     assert [m["id"] for m in live] == ["m_keep"]
     assert tui["live_msg_count"] == 1
     assert tui["live_history_chars"] == calc_history_chars_for_trigger(live)
+
+
+def test_discard_uses_projection_for_live_volume(tmp_path):
+    dirty = "<think>hidden</think>visible"
+    ts = _session(tmp_path)
+    ts.persist_batch(
+        [
+            {"role": "assistant", "content": dirty, "id": "m_keep"},
+            {"role": "assistant", "content": "drop", "id": "m_orphan"},
+        ],
+        previous_response_id=None,
+    )
+    assert (
+        discard_message_by_id(
+            str(tmp_path), "cli", "t1", "m_orphan", strip_think=False
+        )
+        is True
+    )
+    tui = _live_tui(tmp_path)
+    live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
+    assert [m["id"] for m in live] == ["m_keep"]
+    assert tui["live_history_chars"] == calc_history_chars_for_trigger(
+        live, strip_think=False
+    )
+    assert tui["live_history_chars"] > calc_history_chars_for_trigger(live)
+
+
+def test_append_uses_projection_for_live_volume(tmp_path):
+    """Счётчик живого объёма считает ПРОЕКЦИЮ, а не сырой текст.
+
+    Пишем через `ThreadSession`, а не через модульный `append_new_thread_messages`:
+    бамп счётчика живёт в сессии, одинаково для любого хранилища. Пока он был в
+    файловом слое, у встраивающего с базой ключей `live_*` не появлялось вовсе,
+    а TUI их читает.
+    """
+    dirty = "<think>hidden</think>visible"
+    ts = _session(tmp_path, strip_think=False)
+    ts.persist_batch(
+        [{"role": "assistant", "content": "keep", "id": "m1"}],
+        previous_response_id=None,
+    )
+    ts.persist_batch(
+        [{"role": "assistant", "content": dirty, "id": "m2"}],
+        previous_response_id=None,
+    )
+    tui = _live_tui(tmp_path)
+    live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
+    assert tui["live_history_chars"] == calc_history_chars_for_trigger(
+        live, strip_think=False
+    )
+    default_chars = calc_history_chars_for_trigger(live)
+    assert tui["live_history_chars"] > default_chars
 
 
 def test_persist_batch_preserves_tui_owned_keys(tmp_path):

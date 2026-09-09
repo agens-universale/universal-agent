@@ -1,6 +1,7 @@
-"""Dirty state → _request_backend_canonical → outbound без <think> у assistant.
+"""Dirty state → _request_backend_canonical → outbound как в ``state.messages``.
 
-Сверяем канон for_model: storage остаётся грязным, в payload перед LLM think снят.
+Основной трейс шлёт канон as-is (включая ``<think>`` / ``reasoning_content``).
+Проекцию без think делают derived-sink'и (саммари, digest, intent), не outbound.
 """
 
 from __future__ import annotations
@@ -8,7 +9,10 @@ from __future__ import annotations
 import copy
 
 from gc_core import processing_responses as pr
-from gc_core.message_format.serialization import calc_history_chars_for_trigger, message_raw_payload_chars_for_trigger
+from gc_core.message_format.serialization import (
+    calc_history_chars_for_trigger,
+    message_raw_payload_chars_for_trigger,
+)
 from gc_core.message_projection import project_assistant_text
 
 from .conftest import (
@@ -28,7 +32,7 @@ def _assistant_contents(outbound_messages: list[dict]) -> list[str]:
     ]
 
 
-def test_outbound_strips_think_keeps_prose(capture_outbound):
+def test_outbound_keeps_think_as_in_messages(capture_outbound):
     ctx, state = make_ctx_state()
     before = copy.deepcopy(state.messages)
 
@@ -45,10 +49,9 @@ def test_outbound_strips_think_keeps_prose(capture_outbound):
     assistant_texts = _assistant_contents(outbound)
     assert assistant_texts, "ожидали assistant в outbound"
     joined = "\n".join(assistant_texts)
-    assert "<think" not in joined
+    assert DIRTY_THINK in joined
     assert "Сделаю tool call." in joined
     assert "Готово." in joined
-    assert "длинное рассуждение" not in joined
 
     user_texts = [
         m["content"]
@@ -57,7 +60,6 @@ def test_outbound_strips_think_keeps_prose(capture_outbound):
     ]
     assert USER_LITERAL_THINK in user_texts
 
-    # Persist / state не чистим при outbound.
     assert state.messages == before
     assert any(DIRTY_THINK in str(m.get("content")) for m in state.messages if isinstance(m, dict))
 
@@ -99,7 +101,7 @@ def test_trigger_volume_on_same_dirty_history_excludes_think():
     )
 
 
-def test_only_think_assistant_becomes_empty_content_in_outbound(capture_outbound):
+def test_only_think_assistant_kept_in_outbound(capture_outbound):
     history = [
         {"id": "u1", "type": "message", "role": "user", "content": "hi"},
         {
@@ -114,5 +116,5 @@ def test_only_think_assistant_becomes_empty_content_in_outbound(capture_outbound
     run_coro(pr._arequest_backend_canonical([], state, ctx))
 
     assistant_texts = _assistant_contents(capture_outbound["messages"])
-    assert assistant_texts == [""]
+    assert assistant_texts == ["<think>only reasoning</think>"]
     assert "<think>only reasoning</think>" in str(state.messages[1]["content"])

@@ -13,7 +13,10 @@ from gc_tui.diff_tui.mode import resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key
 from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
-from gc_core.backends.protocol import AsyncFileOps
+from gc_core.backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    AsyncFileOps,
+)
 from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 
 _logger = logging.getLogger(__name__)
@@ -121,7 +124,13 @@ class TrackingFsBackend(AsyncFileOps):
 
     @property
     def exec_output_capture_max_chars(self) -> int:
-        return int(getattr(self._inner, "exec_output_capture_max_chars", 60_000))
+        return int(
+            getattr(
+                self._inner,
+                "exec_output_capture_max_chars",
+                DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+            )
+        )
 
     @exec_output_capture_max_chars.setter
     def exec_output_capture_max_chars(self, value: int) -> None:
@@ -411,9 +420,15 @@ class TrackingFsBackend(AsyncFileOps):
         cwd: Optional[str] = None,
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
     ) -> Any:
+        # Прокидываем потолок захвата: без него внутренние каналы (MCP-carrier)
+        # молча падают на дефолт exec-тулы вместо своего 50M.
         return self._track_shell_delta(
-            lambda: self._inner.run_python(code, cwd=cwd, timeout=timeout, env=env)
+            lambda: self._inner.run_python(
+                code, cwd=cwd, timeout=timeout, env=env,
+                capture_max_chars=capture_max_chars,
+            )
         )
 
     def default_cwd(self) -> Optional[str]:

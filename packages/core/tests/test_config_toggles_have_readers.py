@@ -100,12 +100,18 @@ def _unread_leaves() -> list[str]:
     ``subagent_role_max_tokens_from_ctx``). Голый ``\b<ключ>\b`` такой вызов не
     видит — за именем идёт ``_``, — и подключённый ключ выглядел бы как
     забытый. Ровно этот ложный крик и получился при вливании веток.
+
+    Суффиксов два, и второй добавлен по такому же ложному крику: у ключей,
+    которые нужны там, где готового профиля нет, а плоский ``config_dict``
+    есть, аксессор называется ``<ключ>_from_config_dict``
+    (``exec_output_preview_edge_chars_from_config_dict``).
     """
     source = _source_text()
     return [
         leaf for leaf in _schema_leaves(AppConfig)
         if not re.search(
-            r"\b" + re.escape(leaf.rsplit(".", 1)[-1]) + r"(_from_ctx)?\b", source
+            r"\b" + re.escape(leaf.rsplit(".", 1)[-1])
+            + r"(_from_ctx|_from_config_dict)?\b", source
         )
     ]
 

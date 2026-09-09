@@ -1,7 +1,7 @@
 """Подготовка истории диалога для LLM-промптов: ходы, батчи, хвост, XML-текст."""
 
 import html
-from typing import Any, Callable, Dict, List, TypeVar
+from typing import Any, Callable, Dict, List, Sequence, TypeVar
 
 from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, is_technical_user_message_text, user_content_to_text
 
@@ -73,8 +73,16 @@ def _wrap_cutted_envelope(text: str, max_chars: int) -> str:
     )
 
 
-def message_text_limited(message: Dict[str, Any], max_message_chars: int) -> str:
-    text = strip_original_user_messages_block(message_text_for_summary(message))
+def message_text_limited(
+    message: Dict[str, Any],
+    max_message_chars: int,
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> str:
+    text = strip_original_user_messages_block(
+        message_text_for_summary(message, tags=tags, strip_think=strip_think)
+    )
     if max_message_chars <= 0:
         return text
     msg_type = str(message.get("type") or "message") if isinstance(message, dict) else "message"
@@ -93,6 +101,9 @@ def build_history_text(
     messages: List[Dict[str, Any]],
     max_chars: int = 200_000,
     max_message_chars: int = 0,
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> str:
     rows: List[str] = []
     for idx, msg in enumerate(messages, start=1):
@@ -100,7 +111,9 @@ def build_history_text(
         per_limit = (
             0 if is_dialog_summary_user_message_text(content_text) else max_message_chars
         )
-        text = message_text_limited(msg, per_limit).strip()
+        text = message_text_limited(
+            msg, per_limit, tags=tags, strip_think=strip_think
+        ).strip()
         if not text:
             continue
         rows.append(f'<message n="{idx}">\n{text}\n</message>')
@@ -118,11 +131,17 @@ def trim_history_to_max_dialogue_chars(
     *,
     max_dialogue_chars: int,
     max_message_chars: int,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> List[Dict[str, Any]]:
     return _tail_by_limit(
         messages,
         max_dialogue_chars,
-        lambda msg: len(message_text_limited(msg, max_message_chars)),
+        lambda msg: len(
+            message_text_limited(
+                msg, max_message_chars, tags=tags, strip_think=strip_think
+            )
+        ),
     )
 
 
@@ -227,6 +246,8 @@ def split_turns_into_char_batches(
     *,
     batch_chars_limit: int,
     max_message_chars: int = 0,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> List[List[List[Dict[str, Any]]]]:
     if batch_chars_limit <= 0 or not turns:
         return [turns] if turns else []
@@ -234,7 +255,14 @@ def split_turns_into_char_batches(
     current: List[List[Dict[str, Any]]] = []
     current_chars = 0
     for turn in turns:
-        turn_chars = sum(len(message_text_limited(msg, max_message_chars)) for msg in turn)
+        turn_chars = sum(
+            len(
+                message_text_limited(
+                    msg, max_message_chars, tags=tags, strip_think=strip_think
+                )
+            )
+            for msg in turn
+        )
         if current and current_chars + turn_chars > batch_chars_limit:
             batches.append(current)
             current = []
@@ -255,6 +283,9 @@ def format_last_dialog_steps(
     max_steps: int = 5,
     message_max_chars: int = 1500,
     steps_offset: int = 0,
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> str:
     turns = group_into_turns(messages)
     tail = turns[-max_steps:] if len(turns) > max_steps else turns
@@ -263,7 +294,9 @@ def format_last_dialog_steps(
     for idx, turn in enumerate(tail, start=start_idx):
         rendered: List[str] = []
         for msg in turn:
-            text = message_text_limited(msg, message_max_chars).strip()
+            text = message_text_limited(
+                msg, message_max_chars, tags=tags, strip_think=strip_think
+            ).strip()
             if text:
                 rendered.append(text)
         text = "\n".join(rendered).strip()

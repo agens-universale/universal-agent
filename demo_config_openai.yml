@@ -51,6 +51,11 @@ agent:
   no_tool_call_max_count: 5
   strict_turn_finish_validation: true
   tool_output_inline_max_chars: 10000
+  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
+  # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
+  exec_output_capture_max_chars: 40000
+  # Каждый край front-loaded preview длинного потока (P ≤ L - floor(L/2)); 0 — без preview.
+  exec_output_preview_edge_chars: 3000
   stored_tool_outputs_max_entries: 50
 
 logging:
@@ -93,8 +98,13 @@ summary:
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 6000
 
-# Доп. strip-теги для for_model / aux LLM. <think> всегда on; extras — сюда.
+# tags — extra-теги, которые режут в derived (саммари, intent, digest…), не в messages.
+# strip_think: true (дефолт) — ризонинг в messages не класть.
+# strip_think: false — сохранить reasoning_content в messages как пришло с бэкенда
+#   и в следующем запросе отдать как есть. DeepSeek / часть strict-бэкендов → 400.
+# Трейс в бэкенд = то, что лежит в messages. Остальной state — без ризонинга всегда.
 strip_tags_projection:
+  strip_think: true
   tags: []
 
 # Лимиты FS-тулов, которые поднимают файл целиком в память.

@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import pytest
 
+from gc_tui.services import terminal_caps
 from gc_tui.services.terminal_caps import supports_font_fallback
 from gc_tui.widgets.block_panel import COPY_GLYPH_RICH, COPY_GLYPH_SAFE, copy_glyph
 
 
 def _windows_console(monkeypatch, **env):
     """Старая консоль Windows: nt-платформа без признаков богатого терминала."""
-    monkeypatch.setattr("os.name", "nt")
+    monkeypatch.setattr(terminal_caps, "_os_name", lambda: "nt")
     monkeypatch.delenv("WT_SESSION", raising=False)
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
     for key, value in env.items():
@@ -32,7 +33,7 @@ def test_vscode_terminal_has_font_fallback(monkeypatch):
 
 
 def _posix(monkeypatch, **env):
-    monkeypatch.setattr("os.name", "posix")
+    monkeypatch.setattr(terminal_caps, "_os_name", lambda: "posix")
     for key in ("WT_SESSION", "TERM_PROGRAM", "WSL_DISTRO_NAME", "WSL_INTEROP"):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():

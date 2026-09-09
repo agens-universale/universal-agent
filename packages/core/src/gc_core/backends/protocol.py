@@ -6,12 +6,17 @@ import shlex
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Optional, Sequence
 
+from gc_core.backends.capture import CapturedStream, captured_stream_from_text
 from gc_core.backends.walk_util import WalkEntry, iter_walk_entries_from_flat, prune_flat_entries
 
-# Потолок captured-буфера на поток (decoded UTF-8 chars). Spec D2 / D8.
-DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS = 60_000
+# Потолок captured-буфера на поток (decoded UTF-8 chars): L = head H + tail T,
+# H = floor(L / 2), T = L - H. По умолчанию 40k на поток = 20k + 20k.
+DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS = 40_000
+
+# Размер каждого края front-loaded preview. Обязано выполняться P <= T.
+DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS = 3_000
 
 # Harbor walk/listdir private channel (B1). Not tool exec; fail-closed on hit.
 WALK_OUTPUT_MAX_CHARS = 50_000_000
@@ -42,38 +47,89 @@ class WalkOutputTooLargeError(OSError):
         super().__init__(msg)
 
 
+class _Missing:
+    """Отличает «не передали return_code» от осознанного ``None`` (timeout)."""
+
+    def __repr__(self) -> str:  # pragma: no cover - только для сообщений об ошибке
+        return "<missing>"
+
+
+_MISSING = _Missing()
+
+
 @dataclass
 class ExecResult:
-    stdout: str
-    stderr: str
-    return_code: Optional[int]
+    """Результат exec: плоский текст для внутренних потребителей + структура потока.
+
+    ``stdout`` / ``stderr`` — наблюдённый текст (при обрезке это ``head + tail``
+    без синтетического маркера). Настоящие края, точные счётчики и признак
+    отброшенной середины живут в ``stdout_stream`` / ``stderr_stream``; их и
+    читает слой exec-тулы. Prefix-only семантики больше нет: хвост настоящий.
+    """
+
+    stdout: str = ""
+    stderr: str = ""
+    return_code: Any = _MISSING
     timed_out: bool = False
-    # True когда соответствующий поток превысил capture-cap (D2): процесс НЕ убит,
-    # лишний вывод слит и отброшен (drain & discard). Preview/refs — слой тулы.
+    # Сохранён для потребителей вне exec (fs-поиск, MCP-обёртка): им
+    # нужен только факт «поток обрезан», а не края. Выводится из потока.
     stdout_hit_capture_cap: bool = False
     stderr_hit_capture_cap: bool = False
+    stdout_stream: Optional[CapturedStream] = None
+    stderr_stream: Optional[CapturedStream] = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.return_code, _Missing):
+            # Молчаливый None превратил бы успешную команду в non_zero_exit
+            # "exited with status None" — падаем на конструировании, как раньше.
+            raise TypeError("ExecResult: return_code обязателен (None означает timeout)")
+        if self.stdout_stream is None:
+            self.stdout_stream = CapturedStream(
+                head=self.stdout or "", total_chars=len(self.stdout or "")
+            )
+        else:
+            self.stdout = self.stdout_stream.text
+        if self.stderr_stream is None:
+            self.stderr_stream = CapturedStream(
+                head=self.stderr or "", total_chars=len(self.stderr or "")
+            )
+        else:
+            self.stderr = self.stderr_stream.text
+        self.stdout_hit_capture_cap = (
+            bool(self.stdout_hit_capture_cap) or self.stdout_stream.truncated
+        )
+        self.stderr_hit_capture_cap = (
+            bool(self.stderr_hit_capture_cap) or self.stderr_stream.truncated
+        )
 
 
 def bound_captured_stream(text: str, max_chars: int) -> tuple[str, bool]:
-    """Обрезать поток до ``max_chars``; вернуть ``(text, hit_capture_cap)``."""
-    if max_chars < 0:
-        max_chars = 0
-    if len(text) <= max_chars:
-        return text, False
-    return text[:max_chars], True
+    """Нормализовать готовый поток head+tail; вернуть ``(text, truncated)``."""
+    cs = captured_stream_from_text(text, max_chars)
+    return cs.text, cs.truncated
+
+
+def _rebound(stream: Optional[CapturedStream], text: str, max_chars: int) -> CapturedStream:
+    # Поток из accumulator с отброшенной серединой пересобирать нельзя: его
+    # плоский текст — уже склейка краёв, total_chars восстановить неоткуда.
+    if stream is not None and stream.truncated:
+        return stream
+    return captured_stream_from_text(text or "", max_chars)
 
 
 def bound_exec_result(result: ExecResult, max_chars: int) -> ExecResult:
-    """D8: captured в ExecResult ≤ cap на агенте (local/harbor один контракт)."""
-    stdout, stdout_hit = bound_captured_stream(result.stdout or "", max_chars)
-    stderr, stderr_hit = bound_captured_stream(result.stderr or "", max_chars)
+    """Один контракт local/harbor: готовый результат — тем же head+tail алгоритмом.
+
+    Внешняя форма совпадает, но bounded RAM end-to-end это не даёт, если чужая
+    реализация уже накопила полный вывод до возврата.
+    """
+    stdout_stream = _rebound(result.stdout_stream, result.stdout, max_chars)
+    stderr_stream = _rebound(result.stderr_stream, result.stderr, max_chars)
     return ExecResult(
-        stdout=stdout,
-        stderr=stderr,
         return_code=result.return_code,
         timed_out=result.timed_out,
-        stdout_hit_capture_cap=bool(result.stdout_hit_capture_cap) or stdout_hit,
-        stderr_hit_capture_cap=bool(result.stderr_hit_capture_cap) or stderr_hit,
+        stdout_stream=stdout_stream,
+        stderr_stream=stderr_stream,
     )
 
 
@@ -544,7 +600,7 @@ class FsBackend(AsyncFileOps, ABC):
         implementation.
 
         ``capture_max_chars=None`` → ``exec_output_capture_max_chars`` (tool
-        trace, ~60k). Internal post-processed calls (native grep, walk) pass
+        trace, 40k/поток). Internal post-processed calls (native grep, walk) pass
         the walk ceiling (~50M).
         """
         command = argv_to_posix_command(argv, stdin=stdin)
@@ -561,6 +617,7 @@ class FsBackend(AsyncFileOps, ABC):
     @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
-                   env: Optional[dict] = None) -> ExecResult: ...
+                   env: Optional[dict] = None,
+                   capture_max_chars: Optional[int] = None) -> ExecResult: ...
     @abstractmethod
     def default_cwd(self) -> Optional[str]: ...

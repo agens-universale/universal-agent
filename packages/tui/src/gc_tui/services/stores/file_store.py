@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, user_content_to_text
 from gc_core.thread_store import delete_thread, discard_message_by_id, read_subagent_trace
@@ -106,11 +106,24 @@ class FileTaskStore:
         delete_thread(str(self._dir), sys_, task_id)
 
     def discard_message_by_id(
-        self, task_id: str, message_id: str, system: Optional[str] = None
+        self,
+        task_id: str,
+        message_id: str,
+        system: Optional[str] = None,
+        *,
+        tags: Sequence[str] = (),
+        strip_think: bool = True,
     ) -> bool:
         """Удалить одно сообщение из треда по id (откат осиротевшей реплики)."""
         sys_ = system or self._system
-        return discard_message_by_id(str(self._dir), sys_, task_id, message_id)
+        return discard_message_by_id(
+            str(self._dir),
+            sys_,
+            task_id,
+            message_id,
+            tags=tags,
+            strip_think=strip_think,
+        )
 
     def read_subagent_trace(
         self, task_id: str, system: Optional[str] = None

@@ -1,12 +1,20 @@
 """TDD: call-sites for_model — format_messages, serialization, extract."""
 
 from gc_core.message_format.dialog_history import build_history_text
-from gc_core.message_format.serialization import calc_history_chars_for_trigger, message_raw_payload_chars_for_trigger, message_text_for_summary
-from gc_core.message_policy.no_tool_call_bounce import extract_last_assistant_text, format_no_tool_call_bounce
+from gc_core.message_format.serialization import (
+    calc_history_chars_for_trigger,
+    message_raw_payload_chars_for_trigger,
+    message_text_for_summary,
+)
+from gc_core.message_policy.no_tool_call_bounce import (
+    NO_TOOL_CALL_BOUNCE_MESSAGE,
+    extract_last_assistant_text,
+    format_no_tool_call_bounce,
+)
 from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
 
 
-def test_format_canonical_assistant_strips_think_keeps_prose():
+def test_format_canonical_assistant_keeps_think_prose_as_in_messages():
     msg = {
         "type": "message",
         "role": "assistant",
@@ -14,28 +22,27 @@ def test_format_canonical_assistant_strips_think_keeps_prose():
     }
     out = format_message_chat_completions_to_send_backend(msg)
     assert out["role"] == "assistant"
-    assert out["content"] == "Ответ"
-    assert "<think" not in out["content"]
+    assert out["content"] == "<think>r</think>Ответ"
 
 
-def test_format_canonical_only_think_empty_content():
+def test_format_canonical_only_think_kept():
     msg = {
         "type": "message",
         "role": "assistant",
         "content": "<think>only reasoning</think>",
     }
     out = format_message_chat_completions_to_send_backend(msg)
-    assert out["content"] == ""
+    assert out["content"] == "<think>only reasoning</think>"
 
 
-def test_format_legacy_assistant_strips_think():
+def test_format_legacy_assistant_keeps_think():
     msg = {
         "role": "assistant",
         "content": "<think>x</think>Y",
         "tool_calls": [],
     }
     out = format_message_chat_completions_to_send_backend(msg)
-    assert out["content"] == "Y"
+    assert out["content"] == "<think>x</think>Y"
 
 
 def test_format_user_with_think_literal_untouched():
@@ -52,6 +59,40 @@ def test_format_prose_only_unchanged():
     msg = {"type": "message", "role": "assistant", "content": "просто ответ"}
     out = format_message_chat_completions_to_send_backend(msg)
     assert out["content"] == "просто ответ"
+
+
+def test_format_sends_reasoning_content_when_present_in_canon():
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "<think>r</think>Ответ",
+        "reasoning_content": "secret",
+    }
+    out = format_message_chat_completions_to_send_backend(msg)
+    assert out["reasoning_content"] == "secret"
+    assert out["content"] == "<think>r</think>Ответ"
+
+
+def test_format_legacy_sends_reasoning_content_when_present_in_canon():
+    msg = {
+        "role": "assistant",
+        "content": "<think>r</think>Ответ",
+        "reasoning_content": "secret",
+        "tool_calls": [],
+    }
+    out = format_message_chat_completions_to_send_backend(msg)
+    assert out["reasoning_content"] == "secret"
+    assert out["content"] == "<think>r</think>Ответ"
+
+
+def test_format_omits_reasoning_content_when_absent_from_canon():
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "Ответ",
+    }
+    out = format_message_chat_completions_to_send_backend(msg)
+    assert "reasoning_content" not in out
 
 
 def test_trigger_volume_excludes_think_span():
@@ -121,4 +162,4 @@ def test_bounce_from_extract_has_no_think():
     text = extract_last_assistant_text(messages)
     bounce = format_no_tool_call_bounce(text)
     assert "<think" not in bounce
-    assert "Need a tool call." in bounce
+    assert bounce == NO_TOOL_CALL_BOUNCE_MESSAGE

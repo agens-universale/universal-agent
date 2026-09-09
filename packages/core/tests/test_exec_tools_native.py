@@ -92,7 +92,7 @@ async def test_command_acall_runs_and_returns_output():
     out = json.loads(await _cmd().acall(command="echo привет"))
 
     assert out["ok"] is True, out
-    assert "привет" in out["stdout"]
+    assert "привет" in out["stdout"]["content"]
     assert out["exit_code"] == 0
 
 
@@ -184,7 +184,7 @@ async def test_python_acall_runs_and_returns_output():
     out = json.loads(await _py().acall(code="print('привет из питона')"))
 
     assert out["return_code"] == 0, out
-    assert "привет из питона" in out["stdout"]
+    assert "привет из питона" in out["stdout"]["content"]
 
 
 async def test_python_does_not_hold_the_loop():

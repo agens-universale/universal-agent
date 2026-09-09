@@ -47,11 +47,26 @@ class YAMLError(Exception):
 
 
 def _bare_python() -> Path:
-    """Интерпретатор без нашего .venv: базовый префикс текущего."""
+    """Поддерживаемый интерпретатор без нашего .venv: базовый префикс текущего."""
+    too_old: list[str] = []
     for name in ("python3", "python", "python3.exe", "python.exe"):
         cand = Path(sys.base_prefix) / ("Scripts" if os.name == "nt" else "bin") / name
         if cand.is_file():
-            return cand
+            version = subprocess.run(
+                [str(cand), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+                capture_output=True,
+                text=True,
+            )
+            if version.returncode == 0:
+                major, minor = (int(part) for part in version.stdout.strip().split(".", 1))
+                if (major, minor) >= (3, 11):
+                    return cand
+                too_old.append(f"{cand} ({major}.{minor})")
+    if too_old:
+        pytest.skip(
+            "базовый интерпретатор не удовлетворяет requires-python >=3.11: "
+            + ", ".join(too_old)
+        )
     pytest.skip(f"базовый интерпретатор не найден в {sys.base_prefix}")
 
 

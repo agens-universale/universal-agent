@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from gc_core.config_modules.quality_gate import digest_limits_from_params
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.message_format import dialog_history
 
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
@@ -67,15 +68,20 @@ def build_finish_gate_trace_digest(
     if isinstance(cfg, dict) and isinstance(cfg.get("quality_gate_params"), dict):
         qg_params = cfg["quality_gate_params"]
     limits = digest_limits_from_params(qg_params)
+    tags = projection_tags_from_config(cfg)
     trimmed = dialog_history.trim_history_to_max_dialogue_chars(
         history_messages,
         max_dialogue_chars=limits["max_dialogue_chars"],
         max_message_chars=limits["max_message_chars"],
+        tags=tags,
+        strip_think=True,
     )
     trace_digest_text = dialog_history.build_history_text(
         trimmed,
         max_chars=0,
         max_message_chars=limits["max_message_chars"],
+        tags=tags,
+        strip_think=True,
     )
     return FinishGateTraceDigest(
         trace_digest_text=trace_digest_text,

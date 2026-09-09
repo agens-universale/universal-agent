@@ -5,11 +5,12 @@ from typing import Any, Dict, Optional
 
 from gc_core.backends.async_protocol import aexec_port
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from gc_core.constants.tool_names import EXEC_PYTHON_NAME, READ_STORED_TOOL_OUTPUT_NAME
+from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
+from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import effective_command_cwd, moderate_command_execution
 from gc_core.security.path_policy import resolve_tool_context
-from gc_core.tools.exec.stream_preview import apply_stream_meta_to_envelope, clamp_max_output_chars, process_exec_stream
+from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
@@ -101,81 +102,38 @@ Usage:
 - If you need to create files and the default directory is read-only or invalid, pass cwd explicitly. If a tool error includes allowed_write_paths, choose one of those directories as cwd.
 - Do NOT use this tool for long-running tasks, interactive input, or accessing external systems in an unsafe way.
 - If execution exceeds the timeout, the process is terminated and an error message is returned.
-
-Return format (JSON string):
-{
-  "tool":"exec_python",
-  "ok": true|false,
-  "return_code": number|null,
-  "timed_out": true|false,
-  "truncated": true|false,
-  "error": null|{"type":"...","message":"..."},
-  "stdout": "...",
-  "stderr": "..."
-}
 '''
         )
         return description
 
-    @staticmethod
-    def _process_stream(
-        captured: str,
-        max_output_chars: int,
-        *,
-        hit_capture_cap: bool,
-        state,
-        call_id,
-        tool_name: str,
-    ) -> dict:
-        """D3+D4+D5: head+tail preview + optional store.put + output_ref."""
-        return process_exec_stream(
-            captured,
-            max_output_chars,
-            hit_capture_cap=hit_capture_cap,
-            state=state,
-            call_id=call_id,
-            tool_name=tool_name,
-        )
-
-    @staticmethod
     def _result(
+        self,
         *,
         ok: bool,
         return_code: Optional[int],
         timed_out: bool,
-        truncated: bool,
-        stdout: str,
-        stderr: str,
+        stdout=None,
+        stderr=None,
         error: Optional[Dict[str, Any]] = None,
-        stdout_meta: Optional[dict] = None,
-        stderr_meta: Optional[dict] = None,
     ) -> str:
-        envelope: dict = {
-            "tool": RunPythonCode.registered_tool_name(),
-            "ok": ok,
-            "return_code": return_code,
-            "timed_out": timed_out,
-            "truncated": truncated,
-            "error": error,
-            "stdout": stdout,
-            "stderr": stderr,
-        }
-        apply_stream_meta_to_envelope(envelope, "stdout", stdout_meta)
-        apply_stream_meta_to_envelope(envelope, "stderr", stderr_meta)
-        if envelope.get("stdout_output_ref") or envelope.get("stderr_output_ref"):
-            envelope["hint"] = (
-                "stdout/stderr shown as start+end preview. "
-                f"Page full captured stream via {READ_STORED_TOOL_OUTPUT_NAME} "
-                "using stdout_output_ref / stderr_output_ref."
-            )
-        return json.dumps(envelope, ensure_ascii=False)
+        """Envelope с front-loaded preview; ``truncated`` выводится из потоков."""
+        return build_exec_envelope(
+            tool=RunPythonCode.registered_tool_name(),
+            ok=ok,
+            exit_code=return_code,
+            exit_code_key="return_code",
+            timed_out=timed_out,
+            stdout=as_captured_stream(stdout),
+            stderr=as_captured_stream(stderr),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+            error=error,
+        )
 
     def _command_moderation_blocked_result(
         self,
         error: Dict[str, Any],
         code: str,
         timeout_seconds: Optional[int] = None,
-        max_output_chars: int = 4000,
         cwd: Optional[str] = None,
         env_vars: Optional[list[dict]] = None,
         **kwargs,
@@ -184,12 +142,10 @@ Return format (JSON string):
             ok=False,
             return_code=None,
             timed_out=False,
-            truncated=False,
             stdout="",
             stderr="",
             error=error,
         )
-
 
     @enforce_command_guard(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
     @moderate_command_execution(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
@@ -197,7 +153,6 @@ Return format (JSON string):
         self,
         code: str,
         timeout_seconds: Optional[int] = None,
-        max_output_chars: int = 4000,
         cwd: Optional[str] = None,
         env_vars: Optional[list[dict]] = None,
         **kwargs,
@@ -209,17 +164,16 @@ Return format (JSON string):
         обошёл бы политику. ``aexec_port`` вместо прямого ``backend.arun_python``
         оставляет рабочими бэкенды без нативного запуска (harbor, TUI).
         """
-        early, plan = self._plan(
-            code, timeout_seconds, max_output_chars, cwd, env_vars, **kwargs
-        )
+        early, plan = self._plan(code, timeout_seconds, cwd, env_vars, **kwargs)
         if early is not None:
             return early
         try:
             res = await aexec_port(self._backend).arun_python(
-                plan["code"], cwd=plan["cwd"], timeout=plan["timeout"], env=plan["env"]
+                plan["code"], cwd=plan["cwd"], timeout=plan["timeout"],
+                env=plan["env"],
             )
-        except Exception as e:
-            return self._exec_failed(e)
+        except Exception as exc:
+            return self._exec_failed(exc)
         return self._finish(res, plan)
 
     def _exec_failed(self, exc: Exception) -> str:
@@ -228,7 +182,6 @@ Return format (JSON string):
             ok=False,
             return_code=None,
             timed_out=False,
-            truncated=False,
             stdout="",
             stderr="",
             error={"type": "execution_failed", "message": str(exc)},
@@ -237,23 +190,17 @@ Return format (JSON string):
     def _plan(
         self,
         code: str,
-        timeout_seconds: Optional[int] = None,
-        max_output_chars: int = 4000,
-        cwd: Optional[str] = None,
-        env_vars: Optional[list[dict]] = None,
+        timeout_seconds: Optional[int],
+        cwd: Optional[str],
+        env_vars: Optional[list[dict]],
         **kwargs,
     ) -> "tuple[str | None, dict]":
-        """``(готовый отказ, план запуска)`` — значимо ровно одно из двух.
-
-        Всё, что не зависит от способа запуска. Вынесено, чтобы у двух входов
-        не разошлись правила проверки аргументов.
-        """
+        """Разобрать и проверить аргументы. Общее для обоих входов."""
         if not isinstance(code, str):
             return self._result(
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "code"},
@@ -264,7 +211,6 @@ Return format (JSON string):
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "code", "message": "Code is empty"},
@@ -280,30 +226,17 @@ Return format (JSON string):
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "timeout_seconds"},
             ), {}
 
-        if not isinstance(max_output_chars, int) or max_output_chars <= 0:
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=False,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "max_output_chars"},
-            ), {}
-        max_output_chars = clamp_max_output_chars(max_output_chars, self._config_dict)
 
         if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
             return self._result(
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "cwd"},
@@ -316,7 +249,6 @@ Return format (JSON string):
                     ok=False,
                     return_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={
@@ -352,7 +284,6 @@ Return format (JSON string):
                     ok=False,
                     return_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={
@@ -374,7 +305,6 @@ Return format (JSON string):
                     ok=False,
                     return_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={
@@ -390,7 +320,6 @@ Return format (JSON string):
                         ok=False,
                         return_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={
@@ -405,7 +334,6 @@ Return format (JSON string):
                         ok=False,
                         return_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
@@ -416,7 +344,6 @@ Return format (JSON string):
                         ok=False,
                         return_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].value"},
@@ -429,61 +356,45 @@ Return format (JSON string):
             "cwd": cwd_used,
             "timeout": effective_timeout,
             "env": env_map,
-            "max_output_chars": max_output_chars,
         }
 
     def _finish(self, res: "Any", plan: dict) -> str:
         """Разобрать результат запуска. Общий для обоих входов."""
         cwd_used = plan["cwd"]
         effective_timeout = plan["timeout"]
-        max_output_chars = plan["max_output_chars"]
 
-        stdout_meta = self._process_stream(
-            res.stdout or "",
-            max_output_chars,
-            hit_capture_cap=getattr(res, "stdout_hit_capture_cap", False),
-            state=self._state,
-            call_id=self._call_id,
-            tool_name=RunPythonCode.registered_tool_name(),
+        # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
+        # объект без структуры потока — тогда падаем обратно на плоский текст,
+        # а не роняем тулу AttributeError уже после исполнения команды.
+        stdout_stream = as_captured_stream(
+            getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
         )
-        stderr_meta = self._process_stream(
-            res.stderr or "",
-            max_output_chars,
-            hit_capture_cap=getattr(res, "stderr_hit_capture_cap", False),
-            state=self._state,
-            call_id=self._call_id,
-            tool_name=RunPythonCode.registered_tool_name(),
+        stderr_stream = as_captured_stream(
+            getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
         )
-        truncated = stdout_meta["truncated"] or stderr_meta["truncated"]
 
         if res.timed_out:
             return self._result(
                 ok=False,
                 return_code=None,
                 timed_out=True,
-                truncated=truncated,
-                stdout=stdout_meta["text"],
-                stderr=stderr_meta["text"],
+                stdout=stdout_stream,
+                stderr=stderr_stream,
                 error={"type": "timeout", "message": f"Execution timed out after {effective_timeout} seconds"},
-                stdout_meta=stdout_meta,
-                stderr_meta=stderr_meta,
             )
 
         return_code = res.return_code
         ok = return_code == 0
-
-        error = None
-        if not ok:
-            error = {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
-
+        error = (
+            None
+            if ok
+            else {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
+        )
         return self._result(
             ok=ok,
             return_code=return_code,
             timed_out=False,
-            truncated=truncated,
-            stdout=stdout_meta["text"],
-            stderr=stderr_meta["text"],
+            stdout=stdout_stream,
+            stderr=stderr_stream,
             error=error,
-            stdout_meta=stdout_meta,
-            stderr_meta=stderr_meta,
         )

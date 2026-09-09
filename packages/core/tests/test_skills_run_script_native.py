@@ -65,7 +65,7 @@ async def test_acall_runs_the_script_and_returns_its_output(skill_with_script):
 
     assert out["ok"] is True, out
     assert out["script_ok"] is True, out
-    assert "проснулся" in out["result"]["stdout"]
+    assert "проснулся" in out["result"]["stdout"]["content"]
     assert out["result"]["exit_code"] == 0
 
 

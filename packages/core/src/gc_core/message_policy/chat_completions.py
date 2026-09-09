@@ -116,6 +116,7 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
             continue
 
         leading_content = ""
+        reasoning_parts: List[str] = []
         if (
             message.get("role") == "assistant"
             and not message.get("tool_calls")
@@ -129,6 +130,8 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
                 and nxt["tool_calls"]
             ):
                 leading_content = _assistant_content_text(message)
+                if "reasoning_content" in message:
+                    reasoning_parts.append(str(message["reasoning_content"]))
                 i += 1
                 message = messages[i]
 
@@ -159,6 +162,8 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
             cur_content = _assistant_content_text(cur)
             if cur_content:
                 content_parts.append(cur_content)
+            if "reasoning_content" in cur:
+                reasoning_parts.append(str(cur["reasoning_content"]))
             j += 1
 
         merged: Dict = {
@@ -167,6 +172,8 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
         }
         if merged_tool_calls:
             merged["tool_calls"] = merged_tool_calls
+        if reasoning_parts:
+            merged["reasoning_content"] = "\n\n".join(reasoning_parts)
         result.append(merged)
         i = j
 

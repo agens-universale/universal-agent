@@ -207,8 +207,8 @@ def test_exec_result_has_capture_cap_flags(be):
     assert res.stderr_hit_capture_cap is False
 
 
-def test_exec_default_capture_cap_is_60k(be):
-    assert be.exec_output_capture_max_chars == 60_000
+def test_exec_default_capture_cap_is_40k(be):
+    assert be.exec_output_capture_max_chars == 40_000
 
 
 
@@ -315,6 +315,15 @@ def test_run_python_bounded_output(be):
     assert res.stdout_hit_capture_cap is True
 
 
+def test_run_python_per_call_capture_max_overrides_default(be):
+    be.exec_output_capture_max_chars = 50
+    res = be.run_python("print('A' * 5000)", timeout=15, capture_max_chars=400)
+    assert res.return_code == 0
+    assert len(res.stdout) <= 400
+    assert len(res.stdout) > 50
+    assert res.stdout_hit_capture_cap is True
+
+
 def test_run_python_small_output_no_cap(be):
     be.exec_output_capture_max_chars = 60_000
     res = be.run_python("print('py-ok')", timeout=10)
@@ -339,3 +348,34 @@ def test_run_python_timeout(be, tmp_path):
     assert "go" in res.stdout
 
 
+async def test_drain_keeps_reading_after_head_is_full():
+    """После заполнения головы чанки продолжают считаться и обновлять хвост.
+
+    Свойство пришло с develop, где дренаж синхронный и живёт в потоке. У нас
+    он корутина (`_adrain_stream`), поэтому проверяем нашу форму: важно, что
+    чтение НЕ прекращается по заполнении головы — иначе ни счётчик, ни хвост
+    не будут настоящими, а труба переполнится и заблокирует процесс.
+    """
+    from gc_core.backends.local import _Capture, _adrain_stream
+
+    class _Stream:
+        def __init__(self):
+            self._chunks = [b"A" * 50, b"B" * 50, b"END"]
+            self._i = 0
+
+        async def read(self, _n):
+            if self._i >= len(self._chunks):
+                return b""
+            chunk = self._chunks[self._i]
+            self._i += 1
+            return chunk
+
+    sink = _Capture(40)
+    await _adrain_stream(_Stream(), sink)
+    cs = sink.stream
+
+    assert cs.total_chars == 103, "счётчик считает только голову — чтение обрывается"
+    assert cs.truncated is True
+    assert cs.head == "A" * 20
+    assert cs.tail.endswith("END"), f"хвост не настоящий: {cs.tail!r}"
+    assert len(cs.tail) == 20

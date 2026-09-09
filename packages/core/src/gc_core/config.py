@@ -55,7 +55,6 @@ from gc_core.config_modules.layers import (  # noqa: F401
     validate_profile_text_with_sections,
 )
 
-from gc_core.message_projection import configure_for_model_tags
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.user_text import unreadable_reason
 
@@ -398,6 +397,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
         "exec_timeout_sec": app_cfg.agent.exec_timeout_sec,
         "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
+        "exec_output_preview_edge_chars": app_cfg.agent.exec_output_preview_edge_chars,
         "walk_output_max_chars": app_cfg.agent.walk_output_max_chars,
         "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "model_steering": app_cfg.agent.model_steering,
@@ -480,12 +480,11 @@ def load_config_ex(
     `load_config` (ниже) — тонкая обёртка для обратной совместимости.
 
     `apply_to_process=False` — собрать конфиг, НЕ применяя его к процессу. Сбор
-    сам по себе не безобиден: он перепривязывает конвейер проекций
-    (`configure_for_model_tags`) и глушит предупреждения TLS — оба эффекта
-    глобальные и необратимые. Тому, кто конфиг ПРИМЕНЯЕТ (старт, reload, выбор
-    профиля в сессии), это и нужно; тому, кто его ПОКАЗЫВАЕТ (витрина чужого
-    профиля в Настройках), — нет: заглянуть в соседний профиль не должно менять
-    того, как работающий агент режет теги и проверяет сертификаты."""
+    сам по себе не безобиден: он глушит предупреждения TLS — эффект глобальный
+    и необратимый. Тому, кто конфиг ПРИМЕНЯЕТ (старт, reload, выбор профиля в
+    сессии), это и нужно; тому, кто его ПОКАЗЫВАЕТ (витрина чужого профиля в
+    Настройках), — нет: заглянуть в соседний профиль не должно менять того, как
+    работающий агент проверяет сертификаты."""
     if config_path is None and _xdg_config_path() is None:
         _bootstrap_user_config()
     path = resolve_config_path(config_path)
@@ -561,9 +560,6 @@ def load_config_ex(
             f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
     _model_section_notices = validate_model_sections(app_cfg)
     resolve_paths(app_cfg, config_dir)
-    # Bootstrap for_model strip tags after validate/normalize (no hot-path yaml reads).
-    if apply_to_process:
-        configure_for_model_tags(app_cfg.strip_tags_projection.tags)
 
     config_dict = flatten_app_config(app_cfg)
     config_dict["level"] = app_cfg.level

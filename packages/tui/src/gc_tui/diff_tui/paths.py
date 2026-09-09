@@ -12,8 +12,13 @@ from gc_core.security.protected_paths import classify_path, protected_paths
 PathLike = Union[str, os.PathLike[str]]
 
 
+def _os_name() -> str:
+    """Имя платформы; отдельная точка подмены для кроссплатформенных тестов."""
+    return os.name
+
+
 def _case_insensitive() -> bool:
-    return os.name == "nt"
+    return _os_name() == "nt"
 
 
 def _normalize_roots(
@@ -113,7 +118,7 @@ def canonical_path_key(
 
 def orig_key(canonical_key: str) -> str:
     """Имя ``.orig`` без суффикса: sha256 от key_bytes (casefold на Windows)."""
-    if os.name == "nt":
+    if _case_insensitive():
         key_bytes = canonical_key.casefold().encode("utf-8")
     else:
         key_bytes = canonical_key.encode("utf-8")

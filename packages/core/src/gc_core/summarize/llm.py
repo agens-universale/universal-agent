@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional
 
 from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.message_projection import project_text_for_model
 from gc_core.utils.llm_chat_client import arequest_chat_completion_text, log_llm_prompt_and_result
 
@@ -64,6 +65,10 @@ async def arequest_auxiliary_completion_text(
     Main agent ``request_chat_completion_text`` stays dirty (canonical persist).
     ``consumer`` — canonical id из ``ModelRouter.CONSUMERS`` (спека §5.1); маппинг на
     существующие ``request_label`` не меняется (usage-учёт как был).
+
+    ``<think>`` на aux всегда вырезается. Persist ``reasoning_content`` —
+    только канон ``state.messages``, не судья / finish-gate / summary.
+    Extra-теги из ``strip_tags_projection.tags`` по-прежнему применяются.
     """
     raw = await arequest_chat_completion_text(
         ctx=ctx,
@@ -82,7 +87,8 @@ async def arequest_auxiliary_completion_text(
             messages=messages,
             output_text=raw,
         )
-    return project_text_for_model(raw)
+    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+    return project_text_for_model(raw, tags=tags, strip_think=True)
 
 
 async def arequest_summary_text(

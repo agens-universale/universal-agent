@@ -6,7 +6,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
 
@@ -15,6 +15,7 @@ from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.confirm_port import confirm_available, request_confirm
 from gc_core.security.path_policy import ToolSecurityContext, _extract_config_dict, audit_policy_decision, resolve_tool_context
 from gc_core.security.protected_paths import protected_paths
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.message_projection import project_text_for_model
 from gc_core.summarize.llm import arequest_auxiliary_completion_text, auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
 from gc_core.utils.project_data import os_label
@@ -637,10 +638,12 @@ def _default_judge_client(
             consumer="command_judge",
             payload_overrides=auxiliary_llm_completion_kwargs(ctx),
         )
+        tags = projection_tags_from_config(cfg)
         return _parse_judge_json(
             raw_text,
             logger=getattr(ctx, "logger", None),
             tool_name=str(judge_payload.get("tool_name") or ""),
+            tags=tags,
         )
 
     return ajudge
@@ -679,9 +682,13 @@ def _load_prompt_file(path: Path) -> str:
     return text
 
 
-def _strip_judge_response_text(raw_text: str) -> str:
-    # Effective strip tags (think + strip_tags_projection) via for_model; fence/JSON поверх.
-    text = project_text_for_model(raw_text)
+def _strip_judge_response_text(
+    raw_text: str,
+    *,
+    tags: Sequence[str] = (),
+) -> str:
+    # Aux-парсер: ``<think>`` всегда, extra-теги из конфига; fence/JSON поверх.
+    text = project_text_for_model(raw_text, tags=tags, strip_think=True)
     fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE)
     if fence_match:
         return fence_match.group(1).strip()
@@ -751,8 +758,9 @@ def _parse_judge_json(
     *,
     logger: Any = None,
     tool_name: str | None = None,
+    tags: Sequence[str] = (),
 ) -> dict[str, Any]:
-    text = _strip_judge_response_text(raw_text)
+    text = _strip_judge_response_text(raw_text, tags=tags)
     if not text:
         raise JudgeUnavailable("judge returned empty content")
     json_candidate = _extract_json_candidate(text)

@@ -1,6 +1,7 @@
 from typing import Any, Dict, List
 
 from gc_core.config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.message_format import dialog_history as dialog_history
 from gc_core.intent_log import IntentRecord, serialize_for_meta
 from gc_core.summarize import memory_suggestions, prompt_loading, summary_llm_steps, summary_message_body
@@ -77,6 +78,10 @@ async def asummarize_dialog_via_chat_completions(
             ``trace`` — структура с шагами, промптами и результатами для отладки.
     """
     cfg = getattr(ctx, "config_dict", {}) or {}
+    tags = projection_tags_from_config(cfg)
+    # История для summarizer / memory patch всегда без ``<think>`` в прозе.
+    # Persist ``reasoning_content`` — только канон ``state.messages``.
+    strip_think = True
     logger = getattr(ctx, "logger", None)
     trace: Dict[str, Any] = {
         "step1_batches": [],
@@ -167,12 +172,16 @@ async def asummarize_dialog_via_chat_completions(
         full_history_messages,
         max_dialogue_chars=max_dialogue_chars,
         max_message_chars=max_message_chars,
+        tags=tags,
+        strip_think=strip_think,
     )
     # Полный текст усечённой истории (для memory patch step при single-batch).
     full_history_text = dialog_history.build_history_text(
         history_for_summary,
         max_chars=0,
         max_message_chars=max_message_chars,
+        tags=tags,
+        strip_think=strip_think,
     )
     closed_records = list(user_intent_log or [])
     open_records = list(current_user_intent or [])
@@ -186,6 +195,8 @@ async def asummarize_dialog_via_chat_completions(
         dialog_history.group_into_turns(history_for_summary),
         batch_chars_limit=batch_chars_limit,
         max_message_chars=max_message_chars,
+        tags=tags,
+        strip_think=strip_think,
     )
     if not batches:
         batches = [dialog_history.group_into_turns(history_for_summary)]
@@ -204,6 +215,8 @@ async def asummarize_dialog_via_chat_completions(
             batch,
             max_chars=0,
             max_message_chars=max_message_chars,
+            tags=tags,
+            strip_think=strip_think,
         )
         if logger is not None:
             logger.info(
@@ -478,6 +491,8 @@ async def asummarize_dialog_via_chat_completions(
         max_steps=last_steps_count,
         message_max_chars=min(last_step_message_max_chars, max_message_chars),
         steps_offset=max(0, int(steps_offset or 0)),
+        tags=tags,
+        strip_think=strip_think,
     )
     trace["final_output"] = {
         "raw_summary": text,

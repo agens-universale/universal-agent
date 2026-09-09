@@ -49,7 +49,15 @@ PR #92 добавил в ответ финализатора поле ``task``, 
     cp packages/core/tests/toggle_matrix.py packages/core/tests/parity_harness.py \
        /tmp/sync-base/packages/core/tests/
     cd /tmp/sync-base/packages/core/tests
-    PYTHONPATH=/tmp/sync-base/packages/testkit/src python toggle_matrix.py <файл>
+    PYTHONPATH=/tmp/sync-base/packages/core/src:/tmp/sync-base/packages/testkit/src \
+        python toggle_matrix.py <файл>
+
+``packages/core/src`` в PYTHONPATH — НЕ лишний, и это дорогая правка рецепта.
+Без него ``gc_core`` берётся из установленного editable-пакета, то есть ИЗ
+НАШЕЙ ВЕТКИ: скрипт исправно отработает, эталон запишется, и он будет
+отражением того, что мы сами и произвели. Проверяется одной строкой::
+
+    python -c "import gc_core; print(gc_core.__file__)"   # должен быть /tmp/sync-base
 
 Установщик транспорта в ``parity_harness.install`` умеет обе ветки: у async это
 фабрика ``get_async_client``, у синхронной — ``_NO_NETRC_SESSION``
@@ -63,7 +71,7 @@ import pytest
 
 from toggle_matrix import ALL_CASES, run_case
 
-#: Эталон снят на origin/develop (956a848a) тем же стендом.
+#: Эталон снят на origin/develop (e66a1e90) тем же стендом.
 #:
 #: Раньше он снимался на merge-base bf1cb021 — «до асинхронности». Это
 #: перестало работать, когда develop сам изменил поведение хода (PR «батч с
@@ -71,7 +79,7 @@ from toggle_matrix import ALL_CASES, run_case
 #: ЧУЖУЮ правку и краснела 144 случаями. Эталон обязан идти с той ветки, с
 #: которой сравниваем, иначе гейт меряет не то, что заявляет.
 REFERENCE = (
-    Path(__file__).parent / "fixtures" / "toggle_matrix_reference_956a848a.json"
+    Path(__file__).parent / "fixtures" / "toggle_matrix_reference_e66a1e90.json"
 )
 
 #: Поля, по которым идёт сверка.

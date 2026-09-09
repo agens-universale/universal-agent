@@ -61,8 +61,11 @@ def get_md5_hash(obj):
     return hashlib.md5(s.encode('utf-8')).hexdigest()
 
 
-def get_output_list(dct, logger_override=None):
-    """Transforms chat completion 'choices' into a standardized response 'output' list."""
+def get_output_list(dct, logger_override=None, *, persist_reasoning_content=False):
+    """Transforms chat completion 'choices' into a standardized response 'output' list.
+
+    ``reasoning_content`` копируется в канон только при ``persist_reasoning_content``.
+    """
     output_list = []
     for dct_choice in dct['choices']:
         choice_error = dct_choice.get("error")
@@ -104,10 +107,16 @@ def get_output_list(dct, logger_override=None):
                 _safe_json_for_log(dct),
             )
 
-        # --- FIX 1: Check for None content before creating a message object ---
-        if dct_choice['message'].get('content') is not None:
+        # Message-item: есть проза, либо persist_reasoning_content и есть
+        # reasoning_content при content=None — носитель CoT на tool-only такте.
+        # Пустой message без ризонинга не плодим.
+        content = msg_obj.get("content")
+        reasoning = None
+        if persist_reasoning_content:
+            reasoning = msg_obj.get("reasoning_content")
+        if content is not None or reasoning is not None:
             id_choice = get_md5_hash(dct_choice)
-            output_list.append({
+            item = {
                 "id": "msg_" + id_choice,
                 "type": "message",
                 "status": "completed",
@@ -115,10 +124,13 @@ def get_output_list(dct, logger_override=None):
                     "type": "output_text",
                     "annotations": [],
                     "logprobs": [],
-                    "text": dct_choice['message']['content']
+                    "text": "" if content is None else content
                 }],
-                "role": dct_choice['message']['role']
-            })
+                "role": msg_obj.get("role")
+            }
+            if reasoning is not None:
+                item["reasoning_content"] = reasoning
+            output_list.append(item)
 
         # --- FIX 2: Generate a unique ID for each tool call ---
 
@@ -142,7 +154,9 @@ def get_output_list(dct, logger_override=None):
     return output_list
 
 
-def output_chat_completion_to_response(dct, logger_override=None, log_context=None):
+def output_chat_completion_to_response(
+    dct, logger_override=None, log_context=None, *, persist_reasoning_content=False
+):
     """Converts a chat completion response dict to a model response format."""
     dct_output = deepcopy(dct)
     dct_output['id'] = dct_output.get('id', get_md5_hash(dct_output))
@@ -156,7 +170,9 @@ def output_chat_completion_to_response(dct, logger_override=None, log_context=No
 
     try:
         dct_output['output'] = get_output_list(
-            dct_output, logger_override=logger_override
+            dct_output,
+            logger_override=logger_override,
+            persist_reasoning_content=persist_reasoning_content,
         )
     except Exception:
         if logger_override is not None:

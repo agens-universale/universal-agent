@@ -47,7 +47,6 @@ from parity_harness import (  # noqa: E402
     run_thread_dump,
     strip_volatile,
 )
-from gc_testkit import run_coro
 
 #: Сценарий прогона. Тул, финализатор, вердикт судьи — те же три хода, что в
 #: приёмке: короче нельзя (не будет тул-колла), длиннее незачем.
@@ -344,6 +343,16 @@ SINGLE += [
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # --- приехало с develop при вливании 09.09.2026 (PR #97, #99, #100) -------
+    #
+    # Оба ключа меняют ФОРМУ вывода, а не путь исполнения: preview-края режут
+    # уже захваченный поток, strip_think выкидывает теги из проекции. Через
+    # место, где async и sync расходятся, они не проходят — случай в матрице
+    # сверял бы фичу develop с самой собой. Её покрытие живёт в наборах
+    # develop: `test_exec_output_preview.py`, `test_strip_tags_projection*`.
+    "agent.exec_output_preview_edge_chars": "форма вывода, не путь исполнения",
+    "strip_tags_projection.strip_think": "форма проекции, не путь исполнения",
+
     # --- приехало с develop при вливании пакетов 08.09.2026 -------------------
     #
     # Матрица сверяет АСИНХРОННОСТЬ: один и тот же сценарий, прогнанный
@@ -579,7 +588,10 @@ ALL_CASES: List[Case] = [BASELINE, *SINGLE, *PAIRS]
 async def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, Any]:
     """Один прогон. Возвращает наблюдаемое: ответ, дамп треда, meta, ошибку."""
     from gc_core.agent_executor import AgentExecutor
-    from gc_core.run_context import acreate_run_context
+    # Гарнис обязан идти на ОБЕИХ ветках: эталон снимается прогоном этого же
+    # файла в worktree на develop, где сборка контекста синхронная. Ветку
+    # выбираем по наличию имени, а не по вере.
+    from gc_core import run_context as _rc
 
     work = tmp_root / case.id.replace("/", "__")
     cfg = parity_config(work, monkeypatch)
@@ -597,12 +609,20 @@ async def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, An
     backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))
     result: Dict[str, Any] = {"id": case.id, "area": case.area, "note": case.note}
     try:
-        ctx = await acreate_run_context(cfg)
+        _acreate = getattr(_rc, "acreate_run_context", None)
+        if _acreate is not None:
+            ctx = await _acreate(cfg)
+        else:
+            ctx = _rc.create_run_context(cfg)
         executor = AgentExecutor(ctx)
         # СПИСОК сообщений, а не строка: arun принимает messages, и строка
         # разошлась бы на символы — user_intent_log записал бы каждую букву
         # отдельной записью. Так же оборачивает SDK-фасад (AsyncAgent.run).
-        answer = await executor.arun(["сделай что-нибудь"], thread_id=TID, system=SYS)
+        _arun = getattr(executor, "arun", None)
+        if _arun is not None:
+            answer = await _arun(["сделай что-нибудь"], thread_id=TID, system=SYS)
+        else:
+            answer = executor.run(["сделай что-нибудь"], thread_id=TID, system=SYS)
         result["answer"] = strip_volatile(answer) if isinstance(answer, (dict, list)) else answer
         result["error"] = None
     except Exception as exc:                    # noqa: BLE001 — фиксируем ЛЮБОЙ отказ

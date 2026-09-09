@@ -4,10 +4,11 @@ import os
 import re
 import threading
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Any, Set, Optional
+from typing import Dict, List, Tuple, Any, Set, Optional, Sequence
 
 from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.persistence.live_volume import bump_live_volume_for_messages, live_volume_from_messages, merge_tui_into_meta
 from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
@@ -490,7 +491,13 @@ def patch_runtime_flag(
 
 
 def discard_message_by_id(
-    threads_dir: str, system_id: str, thread_id: str, message_id: str
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    message_id: str,
+    *,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> bool:
     """Удалить message-запись с указанным ``payload.id`` из data_*.jsonl.
 
@@ -543,7 +550,10 @@ def discard_message_by_id(
     except (TypeError, ValueError):
         pass
     live_msgs, _, _ = load_thread_messages(threads_dir, sys_norm, thread_id)
-    merge_tui_into_meta(meta, live_volume_from_messages(live_msgs))
+    merge_tui_into_meta(
+        meta,
+        live_volume_from_messages(live_msgs, tags=tags, strip_think=strip_think),
+    )
     save_thread_meta(threads_dir, sys_norm, thread_id, meta)
     return True
 
@@ -556,6 +566,8 @@ def append_new_thread_messages(
     known_message_keys: Set[str],
     *,
     start_seq: int = 0,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
 ) -> int:
     if len(messages) == 0:
         return 0
@@ -587,6 +599,11 @@ def append_new_thread_messages(
     # Счётчики живого объёма ЗДЕСЬ НЕ БАМПАЮТСЯ: это делает `ThreadSession`,
     # одинаково для любого хранилища. Пока бампал файловый слой, у хранилища
     # в базе ключей `live_*` не появлялось вовсе, а TUI их читает.
+    #
+    # Параметры `tags` / `strip_think` остаются в сигнатуре ради совместимости
+    # (их передаёт develop и зовут тесты), но здесь не используются: сам бамп,
+    # которому они нужны, переехал в `ThreadSession._persist_batch_meta` — там
+    # он и получает их из конфигурации проекции.
     return wrote
 
 
@@ -666,6 +683,8 @@ class ThreadSession:
         meta: Dict[str, Any],
         previous_response_id: Optional[str],
         backend_api_mode: str,
+        tags: Sequence[str] = (),
+        strip_think: bool = True,
     ):
         self.threads_dir = threads_dir
         # Хранилище сессии. None — файловое по умолчанию: сессию собирают и
@@ -683,6 +702,8 @@ class ThreadSession:
         self.meta = meta
         self.previous_response_id = previous_response_id
         self.backend_api_mode = backend_api_mode
+        self._proj_tags = tuple(tags or ())
+        self._proj_strip_think = bool(strip_think)
         self.runtime_messages: List[Dict[str, Any]] = []
         # Снимок known_message_keys до записи последнего step_messages (для compaction user_ask).
         self.known_keys_snapshot_before_last_batch: Optional[frozenset[str]] = None
@@ -727,6 +748,7 @@ class ThreadSession:
         meta = store.load_meta(sys_norm, normalized_thread_id)
         state = store.load_thread_state(sys_norm, normalized_thread_id)
         return cls._build(
+            config_dict=config_dict,
             threads_dir=threads_dir, store=store, sys_norm=sys_norm,
             thread_id=normalized_thread_id, meta=meta, state=state,
         )
@@ -755,6 +777,7 @@ class ThreadSession:
         meta = await port.aload_meta(sys_norm, normalized_thread_id)
         state = await port.aload_thread_state(sys_norm, normalized_thread_id)
         session = cls._build(
+            config_dict=config_dict,
             threads_dir=threads_dir, store=store, sys_norm=sys_norm,
             thread_id=normalized_thread_id, meta=meta, state=state,
         )
@@ -779,8 +802,8 @@ class ThreadSession:
 
     @classmethod
     def _build(
-        cls, *, threads_dir: str, store: Any, sys_norm: str, thread_id: str,
-        meta: Dict[str, Any], state: Any,
+        cls, *, config_dict: Dict[str, Any], threads_dir: str, store: Any,
+        sys_norm: str, thread_id: str, meta: Dict[str, Any], state: Any,
     ) -> "ThreadSession":
         """Собрать сессию из прочитанного. Чистая часть, общая для sync и async."""
         history_messages, known_message_keys, max_seq = state
@@ -791,6 +814,7 @@ class ThreadSession:
         backend_api_mode = str(backend_api_mode_raw).strip().lower()
         if backend_api_mode not in {"responses", "chat_completions"}:
             backend_api_mode = "responses"
+        tags = projection_tags_from_config(config_dict)
 
         return cls(
             threads_dir=threads_dir,
@@ -803,6 +827,8 @@ class ThreadSession:
             meta=meta,
             previous_response_id=previous_response_id,
             backend_api_mode=backend_api_mode,
+            tags=tags,
+            strip_think=True,
         )
 
 
@@ -870,7 +896,13 @@ class ThreadSession:
                 if make_message_key(m) not in known_before
             ]
             if fresh:
-                bump_live_volume_for_messages(base_meta, fresh)
+                # Параметры проекции — с develop: без них счётчик считал бы
+                # служебные теги и рассуждения, которых модель не видит.
+                bump_live_volume_for_messages(
+                    base_meta, fresh,
+                    tags=self._proj_tags,
+                    strip_think=self._proj_strip_think,
+                )
         base_meta["created_at"] = self.meta.get("created_at") or base_meta.get("created_at")
         base_meta["previous_response_id"] = self.previous_response_id
         base_meta["backend_api_mode"] = self.backend_api_mode
@@ -1044,7 +1076,13 @@ class ThreadSession:
         new_meta["tui"] = {**session_tui, **disk_tui}
         session_runtime = dict(existing_meta.get("runtime") or {})
         merged_runtime = {**session_runtime, **disk_runtime}
-        merged_runtime.update(live_volume_from_messages(compact_messages))
+        merged_runtime.update(
+            live_volume_from_messages(
+                compact_messages,
+                tags=self._proj_tags,
+                strip_think=self._proj_strip_think,
+            )
+        )
         new_meta["runtime"] = merged_runtime
         return new_meta
 
