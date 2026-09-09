@@ -64,7 +64,7 @@ from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
-from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text, format_no_tool_call_bounce
+from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text
 from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
 
@@ -1276,13 +1276,9 @@ def run_agent(
             # Ошибки до успешного разбора батча (санитайз, check_mode, …) — bounce.
             run_logger.error(e, exc_info=True)
             tool_error_cnt += 1
-            assistant_text = extract_last_assistant_text(
-                messages, tags=_proj_tags, strip_think=True
-            )
-            bounce_msg = format_no_tool_call_bounce(assistant_text)
             messages = [
                 _make_technical_feedback_user_message(
-                    bounce_msg,
+                    NO_TOOL_CALL_BOUNCE_MESSAGE,
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
@@ -1528,7 +1524,7 @@ def run_agent(
                         run_logger.warning(
                             "Agent returned text response without tool call, requesting tool call"
                         )
-                        bounce_msg = format_no_tool_call_bounce(assistant_text)
+                        bounce_msg = NO_TOOL_CALL_BOUNCE_MESSAGE
                     messages = [
                         _make_technical_feedback_user_message(
                             bounce_msg,

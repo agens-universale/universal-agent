@@ -7,6 +7,7 @@ from gc_core.message_format.serialization import (
     message_text_for_summary,
 )
 from gc_core.message_policy.no_tool_call_bounce import (
+    NO_TOOL_CALL_BOUNCE_MESSAGE,
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
@@ -161,4 +162,4 @@ def test_bounce_from_extract_has_no_think():
     text = extract_last_assistant_text(messages)
     bounce = format_no_tool_call_bounce(text)
     assert "<think" not in bounce
-    assert "Need a tool call." in bounce
+    assert bounce == NO_TOOL_CALL_BOUNCE_MESSAGE

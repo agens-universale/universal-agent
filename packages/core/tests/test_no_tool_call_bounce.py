@@ -66,47 +66,33 @@ def test_extract_finds_last_assistant_when_mixed():
 # --- format_no_tool_call_bounce ---
 
 
-def test_format_falls_back_to_static_for_empty_text():
+def test_format_is_static_for_empty_text():
     assert format_no_tool_call_bounce("") == NO_TOOL_CALL_BOUNCE_MESSAGE
 
 
-def test_format_falls_back_to_static_for_whitespace_text():
+def test_format_is_static_for_whitespace_text():
     assert format_no_tool_call_bounce("   \n  ") == NO_TOOL_CALL_BOUNCE_MESSAGE
 
 
-def test_format_inlines_text_with_delimiters():
+def test_format_does_not_inline_assistant_prose():
     msg = format_no_tool_call_bounce("Here is my plan.")
-    assert "<<<\nHere is my plan.\n>>>" in msg
+    assert msg == NO_TOOL_CALL_BOUNCE_MESSAGE
+    assert "Here is my plan." not in msg
+    assert "<<<" not in msg
+    assert "VERBATIM" not in msg
 
 
-def test_format_contains_copy_verbatim_instruction():
-    msg = format_no_tool_call_bounce("X")
-    assert "VERBATIM" in msg
-    assert "paraphrase" in msg.lower() or "summarize" in msg.lower()
-
-
-def test_format_frames_runtime_contract_with_both_paths():
-    msg = format_no_tool_call_bounce("X")
-    # Фрейминг — контракт рантайма (зеркалит §5 системного промпта), не «юзер не видит прозы».
-    assert "contract" in msg.lower()
-    assert "action" in msg.lower()
-    assert "ask" in msg.lower() and "user" in msg.lower()
-    # Путь «работа сделана → завершить ход» (наш кейс: модель отвечает прозой).
-    assert "finaliz" in msg.lower()
-
-
-def test_finalize_path_present_in_static_and_inlined():
-    for msg in (NO_TOOL_CALL_BOUNCE_MESSAGE, format_no_tool_call_bounce("X")):
-        assert "contract" in msg.lower()
-        assert "finaliz" in msg.lower()
+def test_bounce_asks_for_a_tool_call():
+    assert "no tool call" in NO_TOOL_CALL_BOUNCE_MESSAGE.lower()
+    assert "tool call" in NO_TOOL_CALL_BOUNCE_MESSAGE.lower()
+    assert "closer to solving the task" in NO_TOOL_CALL_BOUNCE_MESSAGE.lower()
 
 
 def test_bounce_stays_tool_agnostic():
     # Никаких хардкод-имён тулов — согласуется с tool-agnostic промптом master.
-    for msg in (NO_TOOL_CALL_BOUNCE_MESSAGE, format_no_tool_call_bounce("X")):
-        assert "turn_finish" not in msg
-        assert "turn_ask_human" not in msg
-        assert "submit_solution" not in msg
+    assert "turn_finish" not in NO_TOOL_CALL_BOUNCE_MESSAGE
+    assert "turn_ask_human" not in NO_TOOL_CALL_BOUNCE_MESSAGE
+    assert "submit_solution" not in NO_TOOL_CALL_BOUNCE_MESSAGE
 
 
 # --- decoupled from ask_human-cram wording ---
@@ -123,31 +109,3 @@ CRAM_MARKERS = (
 def test_static_bounce_has_no_cram_wording():
     for marker in CRAM_MARKERS:
         assert marker not in NO_TOOL_CALL_BOUNCE_MESSAGE, marker
-
-
-def test_inlined_bounce_has_no_cram_wording():
-    msg = format_no_tool_call_bounce("some assistant prose")
-    for marker in CRAM_MARKERS:
-        assert marker not in msg, marker
-
-
-def test_bounce_keeps_robustness_signal():
-    static = NO_TOOL_CALL_BOUNCE_MESSAGE
-    inlined = format_no_tool_call_bounce("X")
-    for msg in (static, inlined):
-        assert "contract" in msg.lower()
-        assert "ask" in msg.lower() and "user" in msg.lower()
-        assert "finaliz" in msg.lower()
-    assert "<<<\nX\n>>>" in inlined
-    assert "VERBATIM" in inlined
-
-
-def test_bounce_messages_forbid_acting_on_unreceived_reply():
-    """Обе формы bounce запрещают действовать по неполученному ответу пользователя."""
-    for msg in (
-        NO_TOOL_CALL_BOUNCE_MESSAGE,
-        format_no_tool_call_bounce("Одобряешь? Напиши 'ок' — начну делать."),
-    ):
-        assert "their reply has NOT arrived" in msg
-        assert "Do not assume, invent, or act on" in msg
-        assert "not standing approval" in msg
