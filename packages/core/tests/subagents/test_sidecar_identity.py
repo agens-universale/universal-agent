@@ -50,14 +50,28 @@ class TestResolveSidecarIdentityGate:
         )
         assert resolve_sidecar_identity(ctx) is None
 
-    def test_disabled_without_threads_dir(self):
+    def test_enabled_without_threads_dir(self):
+        """Каталога может не быть — у хранилища в базе его нет вовсе.
+
+        Прежняя редакция требовала обратного, и требование было дефектом:
+        у стороннего store ``threads_dir`` — пустая строка, гейт её отвергал,
+        и трасса субагентов не писалась в нефайловое хранилище НИКОГДА. Все
+        семь вызовов записи молча возвращали ``None``. Адрес треда — это
+        ``(system_id, thread_id)``; каталог нужен лишь файловому запасному
+        пути и требуется там.
+        """
         ctx = SimpleNamespace(
             parent_call_id="p1",
             run_id="c1",
             system_id="cli",
             thread_id="t1",
         )
-        assert resolve_sidecar_identity(ctx) is None
+
+        ident = resolve_sidecar_identity(ctx)
+
+        assert ident is not None, "гейт снова требует каталог, которого нет"
+        assert ident.threads_dir == ""
+        assert (ident.system_id, ident.thread_id) == ("cli", "t1")
 
     def test_disabled_without_thread_id(self):
         ctx = SimpleNamespace(
@@ -171,3 +185,39 @@ class TestChildCtxCopiesThreadIdentity:
         assert ident is not None
         assert ident.parent_call_id == "call_sub"
         assert not child_progress_enabled(child)
+
+
+# --- H7: трасса доезжает до нефайлового хранилища --------------------------
+
+
+def test_trace_reaches_a_store_without_files():
+    """Сквозная проверка: запись доходит до стороннего хранилища.
+
+    Гейт требовал непустой `threads_dir`, а у хранилища в базе или в памяти
+    его нет. Identity не собиралась, и все семь вызовов записи молча
+    возвращали `None`: субагенты работали, трасса была пуста. Прежние тесты
+    этого не видели, потому что подставляли `threads_dir=str(tmp_path)`.
+
+    Здесь каталога нет намеренно — как у встраивающего с базой.
+    """
+    from types import SimpleNamespace
+
+    from gc_core.tools.subagents.sidecar import persist_subagent_trace
+    from gc_testkit.memory_thread_store import MemoryThreadStore
+
+    store = MemoryThreadStore()
+    ctx = SimpleNamespace(
+        parent_call_id="call-1",
+        run_id="child-1",
+        system_id="cli",
+        thread_id="t1",
+        thread_store=store,
+        threads_dir=None,          # хранилище без файлов
+    )
+
+    written = persist_subagent_trace(ctx, kind="child_start", payload={"x": 1})
+
+    assert written is not None, "запись не состоялась — гейт снова требует каталог"
+    trace = store.read_subagent_trace("cli", "t1")
+    assert len(trace) == 1, trace
+    assert trace[0]["parent_call_id"] == "call-1", trace[0]

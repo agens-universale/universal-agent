@@ -129,14 +129,12 @@ class AgentRunner:
         except Exception:
             pass
 
-    def _read_stdin_answer(self, _question: str) -> str:
-        """Порт «спросить человека» для ядра: ответ из очереди TUI.
+    def _read_stdin_blocking(self, _question: str) -> str:
+        """Ответ из очереди TUI. БЛОКИРУЕТ поток — звать только вне loop.
 
-        Мост ``redirect_stdin`` потоко-локален, а диспетчер тулов уводит
-        синхронный тул в ``asyncio.to_thread`` — на другом потоке назначения
-        нет, и ``input()`` проваливался на настоящий stdin, занятый Textual:
-        ask_human возвращал пустую строку. Очередь общая на runner, поэтому
-        порт работает с любого потока.
+        Мост ``redirect_stdin`` потоко-локален, и ``input()`` проваливался бы
+        на настоящий stdin, занятый Textual. Очередь общая на runner, поэтому
+        читать её можно с любого потока.
         """
         lines: list[str] = []
         while True:
@@ -145,6 +143,23 @@ class AgentRunner:
                 break
             lines.append(line.rstrip("\n"))
         return "\n".join(lines).strip()
+
+    async def _read_stdin_answer(self, question: str) -> str:
+        """Порт «спросить человека» для ядра. КОРУТИННЫЙ, и это существенно.
+
+        Ядро ждёт порт нативно, если он awaitable, и зовёт инлайн, если нет
+        (``tools/turn/ask_human.py``). Синхронный порт означал, что весь loop
+        агента стоит, пока человек думает: вместе с ним стоят субагенты,
+        keep-alive MCP-сессий и хуки компакции. Ожидание человека ничем не
+        ограничено, так что «стоит» здесь — это минуты.
+
+        Прежний комментарий оправдывал синхронную форму тем, что диспетчер
+        всё равно уводит тул в ``to_thread``. Эта ступень снята вместе с
+        синхронным входом тулов, и оправдание вместе с ней.
+        """
+        import asyncio
+
+        return await asyncio.to_thread(self._read_stdin_blocking, question)
 
     def _ensure_executor(self) -> Any:
         with self._build_lock:
@@ -327,6 +342,12 @@ class AgentRunner:
         if ex is not None:
             ex.stop_run()
         self.cancel_confirm()
+        # И ask_human тоже. Без этого поток оставался в `queue.get()` навсегда,
+        # `arun` не доходил до своего `finally`, и не выполнялись ни закрытие
+        # MCP-сессий, ни закрытие пула httpx — то есть Chromium переживал
+        # агента, а сокеты жили до конца процесса. Симметрия с
+        # `cancel_confirm` здесь не косметика: оба ожидания блокирующие.
+        self.cancel_ask_human()
 
     def add_message(self, message: dict) -> None:
         # executor может ещё строиться — тогда буферизуем; worker-поток дольёт

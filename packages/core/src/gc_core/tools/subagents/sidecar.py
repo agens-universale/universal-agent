@@ -39,16 +39,27 @@ def clear_thread_identity(ctx: Any) -> None:
 
 
 def resolve_sidecar_identity(ctx: Any) -> Optional[SidecarIdentity]:
-    """Gate sidecar: parent_call_id + валидный thread path. Sink не требуется."""
+    """Gate sidecar: parent_call_id + адрес треда. Sink не требуется.
+
+    ``threads_dir`` в гейт НЕ входит, и это правка по факту: у стороннего
+    хранилища (база, память) каталога нет вовсе, там пустая строка. Гейт её
+    отвергал, identity не собиралась, и ВСЕ семь вызовов записи трассы
+    молча возвращали ``None`` — трасса субагентов не писалась в нефайловое
+    хранилище никогда. Тесты этого не видели, потому что передают
+    ``threads_dir=str(tmp_path)`` явно.
+
+    Адрес треда — это ``(system_id, thread_id)``. Каталог нужен только
+    файловому запасному пути, и требуется он там, а не здесь.
+    """
     parent_call_id = getattr(ctx, "parent_call_id", None)
     if not isinstance(parent_call_id, str) or not parent_call_id.strip():
         return None
 
     threads_dir = getattr(ctx, "threads_dir", None)
+    if not isinstance(threads_dir, str):
+        threads_dir = ""
     system_id = getattr(ctx, "system_id", None)
     thread_id = getattr(ctx, "thread_id", None)
-    if not isinstance(threads_dir, str) or not threads_dir.strip():
-        return None
     if not isinstance(system_id, str) or not system_id.strip():
         return None
     if not isinstance(thread_id, str) or not thread_id.strip():
@@ -65,7 +76,7 @@ def resolve_sidecar_identity(ctx: Any) -> Optional[SidecarIdentity]:
         child_run_id = ""
 
     return SidecarIdentity(
-        threads_dir=threads_dir.strip(),
+        threads_dir=threads_dir.strip(),  # "" у хранилища без файлов — законно
         system_id=sys_norm,
         thread_id=tid,
         parent_call_id=parent_call_id.strip(),

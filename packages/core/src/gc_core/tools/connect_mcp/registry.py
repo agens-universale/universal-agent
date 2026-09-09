@@ -222,7 +222,16 @@ async def _adiscover_one(
     дедлайна (см. ``abandonable``).
     """
     transport = server_cfg.get("transport") if isinstance(server_cfg, dict) else None
-    if isinstance(server_cfg, dict) and transport is not None:
+    # Короткое замыкание в SDK — только когда говорим С ХОСТА агента.
+    #
+    # `_adiscover_one_sdk` ходит из нашего процесса и про `os_backend` не
+    # знает. Для сервера с `execute_on: os_backend` это значит «нет
+    # соединения» на дискавери, хотя ВЫЗОВЫ тулов потом пойдут через
+    # `OsBackendStatelessClient` и прекрасно достучатся: сервер виден только
+    # изнутри песочницы. Симптом — сервер молча без тулов.
+    #
+    # С бэкендом отдаём общей ветке ниже: она резолвит клиента правильно.
+    if isinstance(server_cfg, dict) and transport is not None and os_backend is None:
         effective = resolve_effective_transport(server_cfg, server_name=server_name)
         if effective in ("stream_sse", "stream_http", "stream_stdio"):
             return await _adiscover_one_sdk(
