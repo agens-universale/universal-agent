@@ -397,13 +397,14 @@ def _patch_llm_transport(monkeypatch, response_text: str) -> list:
     return captured
 
 
-def test_command_judge_declares_own_consumer(monkeypatch):
+async def test_command_judge_declares_own_consumer(monkeypatch):
+    """Судья теперь корутинный: его ждёт loop вызывающего, а не свой одноразовый."""
     from gc_core.security import command_moderation
 
     _patch_llm_transport(monkeypatch, _JUDGE_JSON)
     ctx, router = _router_ctx()
     judge_client = command_moderation._default_judge_client((), {"ctx": ctx, "state": _state()})
-    result = judge_client({"tool_name": "execute_command"})
+    result = await judge_client({"tool_name": "execute_command"})
     assert result["verdict"] == "safe"
     router.resolve.assert_called_once_with("command_judge")
 

@@ -194,3 +194,107 @@ def test_real_url_guard_verdicts_match_across_sync_and_async(anyio_backend=None)
         sync_verdict = _verdict(fetch_sync(url, config_dict=_URL_CONFIG))
         async_verdict = _verdict(asyncio.run(fetch_async(url, config_dict=_URL_CONFIG)))
         assert sync_verdict == async_verdict, url
+
+
+# --- M9/M10: потоки гварда и отмена -----------------------------------------
+
+
+async def test_guard_uses_one_thread_not_two():
+    """Постобработка идёт инлайн: второй поток-демон на неё не заводится.
+
+    `_start` и `_finish` уходили в РАЗНЫЕ потоки по симметрии, и один
+    `exec_command` стоил двух потоков вместо одного — при том что `_finish`
+    у всех гвардов ядра это `return (yield)`, то есть доли микросекунды.
+    """
+    import threading
+
+    from gc_core.security.dual_wrapper import dual_wrap
+
+    spawned: list = []
+    real_start = threading.Thread.start
+
+    def _counting(self):
+        spawned.append(self.name)
+        return real_start(self)
+
+    def _flow(*_a, **_kw):
+        return (yield)
+
+    async def _tool(**_kw):
+        return "ok"
+
+    guarded = dual_wrap(_tool, _flow, body_may_block=True)
+
+    threading.Thread.start = _counting
+    try:
+        assert await guarded() == "ok"
+    finally:
+        threading.Thread.start = real_start
+
+    guard_threads = [n for n in spawned if "guard" in n or "blocking" in n]
+    assert len(guard_threads) == 1, (
+        f"гвард завёл {len(guard_threads)} потоков вместо одного: {guard_threads}"
+    )
+
+
+async def test_cancelled_guard_closes_its_body():
+    """Отмена вызывающего обязана закрыть генератор тела — и закрыть НАМ.
+
+    Поток мы не остановим: он в блокирующем вызове (LLM-судья, ожидание
+    подтверждения), и прервать его нечем — это заявленное свойство
+    `run_abandonable`. Но брошенное тело всплыло бы предупреждением
+    интерпретатора уже в чужом месте, а баннер подтверждения в TUI остался бы
+    висеть для вызова, которого больше нет.
+
+    Сам вызывающий прибраться не может: в момент отмены тело ещё исполняется,
+    и `close()` на нём даёт `ValueError: generator already executing`. Убирает
+    поток, когда тело вернётся.
+
+    Тест ДЕРЖИТ ссылку на генератор. Без неё проверка была бы пустой: после
+    конца потока брошенный генератор становится недостижим, и его закрывает
+    сборщик — то есть зелёным был бы и код вообще без уборки.
+    """
+    import asyncio
+    import threading
+
+    from gc_core.security.dual_wrapper import dual_wrap
+
+    entered = threading.Event()
+    release = threading.Event()
+    closed: list = []
+    kept: list = []                      # строгая ссылка: см. докстроку
+
+    def _flow(*_a, **_kw):
+        try:
+            entered.set()
+            release.wait(5)              # «человек думает»
+            return (yield)
+        finally:
+            closed.append(True)
+
+    def _keeping_flow(*a, **kw):
+        gen = _flow(*a, **kw)
+        kept.append(gen)
+        return gen
+
+    async def _tool(**_kw):
+        return "ok"
+
+    guarded = dual_wrap(_tool, _keeping_flow, body_may_block=True)
+    task = asyncio.create_task(guarded())
+
+    await asyncio.to_thread(entered.wait, 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not closed, "тело закрыли, пока оно исполнялось — так нельзя"
+    release.set()
+
+    # Закрывает тело тот самый поток, когда вернётся из блокирующего вызова.
+    for _ in range(100):
+        if closed:
+            break
+        await asyncio.sleep(0.05)
+
+    assert kept, "тело гварда не создавалось — проверка пустая"
+    assert closed, "генератор тела остался незакрытым после отмены"

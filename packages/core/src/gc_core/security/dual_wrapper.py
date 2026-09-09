@@ -30,6 +30,7 @@ sync- и async-копией, — это дыра, которую никто не
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
 from typing import Any, Callable, Generator
@@ -64,7 +65,9 @@ def _start(flow: Generator) -> tuple[bool, Any]:
 _GUARD_SLOTS = threading.BoundedSemaphore(32)
 
 
-async def _off_loop(fn: Callable[..., Any], *args: Any) -> Any:
+async def _off_loop(
+    fn: Callable[..., Any], *args: Any, on_abandoned: Callable[[], None] | None = None
+) -> Any:
     """Исполнить блокирующую часть гварда вне loop — на своём потоке.
 
     Не ``asyncio.to_thread``: его пул общий и небольшой, и тело гварда встало
@@ -77,20 +80,156 @@ async def _off_loop(fn: Callable[..., Any], *args: Any) -> Any:
     from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
 
     return await run_abandonable_in(
-        _GUARD_SLOTS, fn, *args, _thread_name="guard-blocking"
+        _GUARD_SLOTS,
+        fn,
+        *args,
+        _thread_name="guard-blocking",
+        _on_abandoned=on_abandoned,
     )
 
 
-def _finish(flow: Generator, result: Any) -> Any:
-    """Вернуть телу результат тула и забрать финальный ответ."""
+# --- Канал запросов тела ------------------------------------------------------
+#
+# Тело гварда — синхронный генератор, но блокирующая работа внутри него бывает
+# двух РАЗНЫХ сортов, и лечатся они по-разному:
+#
+#   * поход в сеть (LLM-судья модерации) — у него есть нативная асинхронная
+#     форма, и правильное место для неё — loop ВЫЗЫВАЮЩЕГО. Раньше тело
+#     целиком уезжало в поток, где живого loop нет, и судья звался через
+#     `run_coro_blocking`: свой `asyncio.run` на каждый вызов, а значит свежий
+#     пул httpx и новое TLS-рукопожатие к LLM на КАЖДЫЙ модерируемый
+#     `exec_command`. Соединение агента при этом простаивало рядом;
+#   * ожидание человека (подтверждение в TUI) — асинхронной формы у него нет,
+#     и его по-прежнему уводим в поток.
+#
+# Поэтому тело не блокируется само, а ОТДАЁТ запрос драйверу и получает ответ
+# обратно через `send`. Отказ доставляется через `throw`, чтобы `try/except`
+# вокруг точки запроса в теле работал ровно так же, как если бы вызов был
+# прямым.
+
+
+class AwaitOnCaller:
+    """Дождаться корутины на loop вызывающего — не заводя своего."""
+
+    __slots__ = ("make_coro",)
+
+    def __init__(self, make_coro: Callable[[], Any]) -> None:
+        self.make_coro = make_coro
+
+
+class OffLoop:
+    """Выполнить блокирующий вызов в отдельном потоке."""
+
+    __slots__ = ("fn", "args")
+
+    def __init__(self, fn: Callable[..., Any], *args: Any) -> None:
+        self.fn = fn
+        self.args = args
+
+
+def _step(flow: Generator, outcome: Any) -> Any:
+    """Отдать телу ответ на его запрос: значение — ``send``, отказ — ``throw``."""
+    if isinstance(outcome, _Failed):
+        return flow.throw(outcome.exc)
+    return flow.send(outcome)
+
+
+class _Failed:
+    """Запрос тела не удался; исключение отдаём в точку запроса."""
+
+    __slots__ = ("exc",)
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+
+_INITIAL = object()
+
+
+async def _drive_async(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
+    """Крутить тело, обслуживая его запросы, до точки вызова тула или конца.
+
+    Возвращает ``(нужен_ли_вызов_тула, результат)``.
+    """
+    outcome: Any = first
+    while True:
+        try:
+            request = next(flow) if outcome is _INITIAL else _step(flow, outcome)
+        except StopIteration as stop:
+            return False, stop.value
+        if isinstance(request, AwaitOnCaller):
+            try:
+                outcome = await request.make_coro()
+            except asyncio.CancelledError:
+                # Отмену в тело НЕ бросаем: его `except Exception` её не
+                # поймает, но проглотить её могло бы чужое `except
+                # BaseException`, и вызов остался бы неотменяемым.
+                _close_quietly(flow)
+                raise
+            except Exception as exc:  # noqa: BLE001 — отдаём в точку запроса
+                outcome = _Failed(exc)
+            continue
+        if isinstance(request, OffLoop):
+            try:
+                outcome = await _off_loop(
+                    request.fn, *request.args, on_abandoned=lambda: _close_quietly(flow)
+                )
+            except asyncio.CancelledError:
+                _close_quietly(flow)
+                raise
+            except Exception as exc:  # noqa: BLE001
+                outcome = _Failed(exc)
+            continue
+        return True, None
+
+
+def _drive_sync(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
+    """То же для синхронной обёртки: живого loop здесь нет, ждать негде."""
+    from gc_core.utils.aio_compat import run_coro_blocking
+
+    outcome: Any = first
+    while True:
+        try:
+            request = next(flow) if outcome is _INITIAL else _step(flow, outcome)
+        except StopIteration as stop:
+            return False, stop.value
+        if isinstance(request, (AwaitOnCaller, OffLoop)):
+            try:
+                if isinstance(request, AwaitOnCaller):
+                    outcome = run_coro_blocking(request.make_coro())
+                else:
+                    outcome = request.fn(*request.args)
+            except Exception as exc:  # noqa: BLE001
+                outcome = _Failed(exc)
+            continue
+        return True, None
+
+
+def _close_quietly(flow: Generator) -> None:
+    """Закрыть тело гварда, если оно не исполняется прямо сейчас.
+
+    В момент отмены тело обычно ещё внутри блокирующего вызова в своём
+    потоке, и `close()` на нём даёт `ValueError: generator already
+    executing`. Тогда закрывать нечего и рано — это сделает `on_abandoned`
+    в том самом потоке, когда тело вернётся.
+    """
     try:
-        flow.send(result)
-    except StopIteration as stop:
-        return stop.value
-    raise RuntimeError(
-        "тело гварда отдало управление дважды: у него должен быть ровно один "
-        "yield на путь исполнения"
-    )
+        flow.close()
+    except ValueError:
+        pass
+
+
+def _forbid_second_call(again: bool) -> None:
+    """У тела должна быть ровно одна точка вызова тула на путь исполнения.
+
+    Запросы (`AwaitOnCaller`, `OffLoop`) сюда не считаются: их драйвер
+    обслуживает сам и телу их отдаёт обратно, не выходя из цикла.
+    """
+    if again:
+        raise RuntimeError(
+            "тело гварда отдало управление дважды: у него должен быть ровно "
+            "один yield на путь исполнения"
+        )
 
 
 def dual_wrap(
@@ -134,17 +273,26 @@ def dual_wrap(
             #   * два похода в пул стоят 88 мкс — дороже переносимой работы;
             #   * пул ОБЩИЙ, и те же тулы уводят туда разбор HTML
             #     (fetch_url): на параллельных фетчах гвард вставал в очередь
-            #     за собственным тулом — 383 мс ожидания на 15 мкс работы;
-            #   * ожидание человека на дефолтном конфиге недостижимо (пустой
-            #     url_blacklist → любой http/https разрешён), а на сервере
-            #     отсекается в confirm_port.confirm_available.
-            # Там, где оно достижимо, инлайн даёт ту же заморозку, что уже
-            # принята для файловых тулов: их `acall` зовёт синхронную ветку
-            # прямо на loop.
+            #     за собственным тулом — 383 мс ожидания на 15 мкс работы.
+            #
+            # Блокирующие куски тела едут не вместе с телом, а поштучно —
+            # через его запросы (`AwaitOnCaller`, `OffLoop`), см. канал выше.
             if body_may_block:
-                needs_call, early = await _off_loop(_start, gen)
+                try:
+                    needs_call, early = await _off_loop(
+                        _start, gen, on_abandoned=lambda: _close_quietly(gen)
+                    )
+                except asyncio.CancelledError:
+                    # Вызывающего сняли, пока тело работало в своём потоке.
+                    # Поток мы не остановим — он в блокирующем вызове, и
+                    # прервать его нечем; это заявленное свойство
+                    # `run_abandonable`. Закрыть тело отсюда тоже нельзя, пока
+                    # оно исполняется, — уборку доделает `on_abandoned` в том
+                    # же потоке, когда тело вернётся.
+                    _close_quietly(gen)
+                    raise
             else:
-                needs_call, early = _start(gen)
+                needs_call, early = await _drive_async(gen)
             if not needs_call:
                 return early
             try:
@@ -155,18 +303,23 @@ def dual_wrap(
                 # интерпретатора уже в чужом месте.
                 gen.close()
                 raise
+            # Постобработка идёт ИНЛАЙН всегда, даже у тел с `body_may_block`.
+            #
             # Постобработки нет ни у одного гварда в ядре: все `yield` — это
-            # `return (yield)`. Поход в пул стоил бы здесь 0.3 мкс работы.
-            if body_may_block:
-                return await _off_loop(_finish, gen, result)
-            return _finish(gen, result)
+            # `return (yield)`, то есть 0.3 мкс работы. Второй поток-демон на
+            # неё заводился по симметрии с `_start`, и это была чистая трата:
+            # у `run_abandonable` каждый вызов — свой поток, значит один
+            # `exec_command` стоил ДВУХ потоков вместо одного.
+            again, value = await _drive_async(gen, result)
+            _forbid_second_call(again)
+            return value
 
         return awrapper
 
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         gen = flow(*args, **kwargs)
-        needs_call, early = _start(gen)
+        needs_call, early = _drive_sync(gen)
         if not needs_call:
             return early
         try:
@@ -174,9 +327,11 @@ def dual_wrap(
         except BaseException:
             gen.close()
             raise
-        return _finish(gen, result)
+        again, value = _drive_sync(gen, result)
+        _forbid_second_call(again)
+        return value
 
     return wrapper
 
 
-__all__ = ["dual_wrap"]
+__all__ = ["AwaitOnCaller", "OffLoop", "dual_wrap"]

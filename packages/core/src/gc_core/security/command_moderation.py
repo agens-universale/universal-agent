@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
 
 from gc_core.config_modules.security import validate_command_moderation_mode
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
@@ -17,7 +17,6 @@ from gc_core.security.path_policy import ToolSecurityContext, _extract_config_di
 from gc_core.security.protected_paths import protected_paths
 from gc_core.message_projection import project_text_for_model
 from gc_core.summarize.llm import arequest_auxiliary_completion_text, auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.project_data import os_label
 from gc_core.bundled_assets import bundled_root
 
@@ -172,6 +171,36 @@ def run_command_judge_with_retry(
     for _ in range(retries + 1):
         try:
             return run_command_judge(judge_client, judge_payload)
+        except Exception as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
+def judge_with_retry_flow(judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1):
+    """То же правило ретраев, но вызов судьи отдан ДРАЙВЕРУ гварда.
+
+    Тело гварда делегирует сюда через `yield from`: `AwaitOnCaller` уводит
+    корутину судьи на loop вызывающего (соединение и пул общие с агентом),
+    `OffLoop` — синхронного судью в поток. Отказ прилетает обратно в точку
+    `yield` через `throw`, поэтому `try/except` здесь работает ровно так же,
+    как вокруг прямого вызова в синхронном близнеце.
+    """
+    if judge_client is None:
+        raise JudgeUnavailable("judge client is not configured")
+    request = (
+        AwaitOnCaller if inspect.iscoroutinefunction(judge_client) else OffLoop
+    )
+    last_exc: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            if request is AwaitOnCaller:
+                raw = yield AwaitOnCaller(lambda: judge_client(judge_payload))
+            else:
+                raw = yield OffLoop(judge_client, judge_payload)
+            if isinstance(raw, JudgeResult):
+                return raw
+            return validate_judge_result(raw)
         except Exception as exc:
             last_exc = exc
     assert last_exc is not None
@@ -345,9 +374,12 @@ def moderate_command_execution(
         # декоратор на `async def acall` ломался молча — в ветке отказа отдавал
         # строку вместо корутины. `return (yield)` — точка вызова самого тула.
         #
-        # `body_may_block=True`: тело зовёт LLM-судью, и этот вызов идёт через
-        # синхронный сетевой вызов, которому не место на loop. Поэтому
-        # телу нужен поток, где живого loop нет.
+        # Тело идёт ИНЛАЙН: блокирующего в нём самом не осталось. Судью оно
+        # просит у драйвера через `AwaitOnCaller` (корутина ждётся на loop
+        # вызывающего, на общем пуле соединений), ожидание человека — через
+        # `OffLoop` (свой поток). Раньше в поток уезжало тело ЦЕЛИКОМ, и
+        # судья звался оттуда через `run_coro_blocking`: свой `asyncio.run`,
+        # свой пул httpx и новое TLS-рукопожатие на каждый `exec_command`.
         def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
             # Если в config_dict отсутствует блок command_moderation вообще —
@@ -389,7 +421,7 @@ def moderate_command_execution(
                     if judge_client_extractor is not None
                     else _default_judge_client(args, kwargs)
                 )
-                judge_result = run_command_judge_with_retry(
+                judge_result = yield from judge_with_retry_flow(
                     judge_client,
                     build_judge_payload(moderation_context.tool_name, payload, moderation_context),
                     retries=1,
@@ -419,11 +451,18 @@ def moderate_command_execution(
                     risk_flags=decision.risk_flags,
                     error_type=decision.error_type,
                 )
-                user_confirmation = (
-                    user_confirmation_extractor(*args, **kwargs)
-                    if user_confirmation_extractor is not None
-                    else _ask_user_confirmation(payload, moderation_context, decision, ctx=tool_ctx)
-                )
+                if user_confirmation_extractor is not None:
+                    user_confirmation = user_confirmation_extractor(*args, **kwargs)
+                else:
+                    # Единственное, что остаётся блокирующим по существу:
+                    # человек думает, и асинхронной формы у этого нет.
+                    user_confirmation = yield OffLoop(
+                        _ask_user_confirmation,
+                        payload,
+                        moderation_context,
+                        decision,
+                        tool_ctx,
+                    )
                 decision = decide_command_execution(
                     moderation_context.mode,
                     judge_result,
@@ -464,7 +503,7 @@ def moderate_command_execution(
                 ensure_ascii=False,
             )
 
-        return dual_wrap(func, _flow, body_may_block=True)
+        return dual_wrap(func, _flow)
 
     return decorator
 
@@ -569,7 +608,18 @@ def _join_reasons(reasons: list[str], *, default: str) -> str:
     return "; ".join(reason for reason in reasons if reason) or default
 
 
-def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+def _default_judge_client(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Callable[[dict[str, Any]], Any]:
+    """Судья модерации: корутина, которую ждёт loop ВЫЗЫВАЮЩЕГО.
+
+    Прежняя редакция была синхронной и поднимала `asyncio.run` на каждый
+    вызов — свежий пул httpx и новое TLS-рукопожатие к LLM на КАЖДЫЙ
+    модерируемый `exec_command`, при том что соединение агента простаивало
+    рядом. Шов остался один и под тем же именем: `judge_with_retry_flow`
+    сама смотрит, корутинный ей отдали судью или обычный, поэтому подмена
+    синхронной заглушкой в тестах работает по-прежнему.
+    """
     self_obj = args[0] if args else None
     ctx = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
     state = kwargs.get("state") or getattr(self_obj, "_state", None)
@@ -577,24 +627,23 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
     if ctx is None or state is None or not cfg.get("completions_url"):
         raise JudgeUnavailable("chat/completions context is not configured")
 
-    def judge(judge_payload: dict[str, Any]) -> dict[str, Any]:
-        messages = _build_judge_messages(judge_payload)
-        raw_text = run_coro_blocking(arequest_auxiliary_completion_text(
+    async def ajudge(judge_payload: dict[str, Any]) -> dict[str, Any]:
+        raw_text = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
-            messages=messages,
+            messages=_build_judge_messages(judge_payload),
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
             consumer="command_judge",
             payload_overrides=auxiliary_llm_completion_kwargs(ctx),
-        ))
+        )
         return _parse_judge_json(
             raw_text,
             logger=getattr(ctx, "logger", None),
             tool_name=str(judge_payload.get("tool_name") or ""),
         )
 
-    return judge
+    return ajudge
 
 
 def _build_judge_messages(judge_payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -727,6 +776,7 @@ def _ask_user_confirmation(
     decision: ExecutionDecision,
     ctx: Any = None,
 ) -> bool:
+    """Ожидание человека. Зовётся драйвером гварда в отдельном потоке."""
     primary_label = _primary_payload_label(context.tool_name)
     # Full payload as-is: TUI banner scrolls body + docks Y/O/N/T.
     return request_confirm(

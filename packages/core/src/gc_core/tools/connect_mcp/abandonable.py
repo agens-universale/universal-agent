@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 
 from gc_core.mcp_session_owner import copy_context_for_thread
@@ -32,12 +33,16 @@ _MAX_WORKERS = 8
 _slots = threading.BoundedSemaphore(_MAX_WORKERS)
 
 
+logger = logging.getLogger(__name__)
+
+
 async def run_abandonable_in(
     slots: "threading.BoundedSemaphore",
     fn: Callable[..., Any],
     /,
     *args: Any,
     _thread_name: str = "mcp-blocking",
+    _on_abandoned: Callable[[], None] | None = None,
     **kwargs: Any,
 ) -> Any:
     """То же, что :func:`run_abandonable`, но с ЯВНЫМ набором слотов.
@@ -75,6 +80,10 @@ async def run_abandonable_in(
     # и её не закрыл бы ни один прогон — Chromium пережил бы агента.
     ctx_snapshot = copy_context_for_thread()
 
+    def _abandoned() -> bool:
+        """Ждать результат уже некому: вызывающего сняли или loop закрыт."""
+        return future.cancelled() or loop.is_closed()
+
     def _target() -> None:
         with slots:
             try:
@@ -83,6 +92,16 @@ async def run_abandonable_in(
                 _deliver(future.set_exception, exc)
             else:
                 _deliver(future.set_result, result)
+            # Уборка за брошенным вызовом. Сам ВЫЗЫВАЮЩИЙ прибраться не может:
+            # в момент отмены `fn` ещё исполняется, и попытка закрыть его
+            # тело даёт `ValueError: generator already executing`. Здесь же
+            # `fn` уже вернулся — значит, закрывать безопасно, и делать это
+            # надо именно тут, в потоке, который один и дожил до конца.
+            if _on_abandoned is not None and _abandoned():
+                try:
+                    _on_abandoned()
+                except BaseException:  # noqa: BLE001 — уборку не роняем
+                    logger.debug("abandoned cleanup failed", exc_info=True)
 
     threading.Thread(target=_target, daemon=True, name=_thread_name).start()
     return await future
