@@ -2,15 +2,16 @@ import json
 from types import SimpleNamespace
 
 from gc_testkit.harbor_fakes import bind_os_backend
-from gc_core.backends.protocol import ExecResult
+from gc_core.backends.protocol import ExecResult, bound_exec_result
 from gc_core.tools.exec.execute_command import ExecuteCommand
 
 
 class _RecordingFakeBackend:
     """Records exec()/is_dir() calls; container semantics (no host cwd default)."""
 
-    def __init__(self, stdout="", stderr="", rc=0, dirs=None, timed_out=False):
-        self.res = ExecResult(stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out)
+    def __init__(self, stdout="", stderr="", rc=0, dirs=None, timed_out=False, capture_max_chars=None):
+        res = ExecResult(stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out)
+        self.res = res if capture_max_chars is None else bound_exec_result(res, capture_max_chars)
         self.calls = []
         self._dirs = set(dirs or [])
 
@@ -60,12 +61,23 @@ def test_explicit_timeout_seconds_forwarded():
     assert b.calls[0]["timeout"] == 90
 
 
-def test_output_truncated_to_max_output_chars():
-    b = _RecordingFakeBackend(stdout="A" * 10000)
-    env = json.loads(_tool(b)(command="x", max_output_chars=100))
+def test_output_truncated_by_capture_cap():
+    b = _RecordingFakeBackend(stdout="A" * 10000, capture_max_chars=100)
+    env = json.loads(
+        _tool(
+            b,
+            config_dict={
+                "exec_output_capture_max_chars": 100,
+                "exec_output_preview_edge_chars": 10,
+            },
+        )(command="x")
+    )
     assert env["truncated"] is True
-    assert env["stdout_kept_head_chars"] + env["stdout_kept_tail_chars"] == 100
-    assert "[omitted" in env["stdout"]
+    assert len(env["stdout"]["head"]) == 50
+    assert len(env["stdout"]["tail"]) == 50
+    assert env["stdout"]["total_chars"] == 10000
+    assert env["stdout"]["omitted_chars"] == 9900
+    assert env["preview"]["stdout"]["head"] == "A" * 10
 
 
 def test_nonzero_exit_sets_error():
@@ -169,14 +181,13 @@ def test_timeout_seconds_negative_returns_invalid_argument():
     assert env["error"]["field"] == "timeout_seconds"
 
 
-def test_max_output_chars_zero_returns_invalid_argument():
-    """max_output_chars=0 must return invalid_argument with field='max_output_chars'."""
-    b = _RecordingFakeBackend()
+def test_max_output_chars_argument_no_longer_exists():
+    """Скрытого второго лимита нет: аргумент игнорируется, команда исполняется."""
+    b = _RecordingFakeBackend(stdout="hi")
     env = json.loads(_tool(b)(command="x", max_output_chars=0))
-    assert env["ok"] is False
-    assert env["error"]["type"] == "invalid_argument"
-    assert env["error"]["field"] == "max_output_chars"
-    assert len(b.calls) == 0
+    assert env["ok"] is True
+    assert env["stdout"]["content"] == "hi"
+    assert len(b.calls) == 1
 
 
 # --- Gap 3: cwd validation via backend.is_dir ---

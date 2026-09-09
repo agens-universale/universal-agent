@@ -51,6 +51,11 @@ agent:
   no_tool_call_max_count: 5
   strict_turn_finish_validation: true
   tool_output_inline_max_chars: 10000
+  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
+  # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
+  exec_output_capture_max_chars: 40000
+  # Каждый край front-loaded preview длинного потока (P ≤ L - floor(L/2)); 0 — без preview.
+  exec_output_preview_edge_chars: 3000
   stored_tool_outputs_max_entries: 50
 
 logging:

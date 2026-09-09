@@ -79,6 +79,11 @@ agent:
     enabled: true
   no_tool_call_max_count: 3
   strict_turn_finish_validation: true
+  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
+  # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
+  exec_output_capture_max_chars: 40000
+  # Каждый край front-loaded preview длинного потока (P ≤ L - floor(L/2)); 0 — без preview.
+  exec_output_preview_edge_chars: 3000
   # Имя HTTP-заголовка для внешнего trace_id (флаг gc-cli --trace-id или поле
   # trace_id в теле вебхука). Не задано — заголовок к модели называется
   # x_trace_id, заголовок к MCP-серверам — trace_id.

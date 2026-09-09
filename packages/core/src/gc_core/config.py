@@ -397,6 +397,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
         "exec_timeout_sec": app_cfg.agent.exec_timeout_sec,
         "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
+        "exec_output_preview_edge_chars": app_cfg.agent.exec_output_preview_edge_chars,
         "walk_output_max_chars": app_cfg.agent.walk_output_max_chars,
         "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "model_steering": app_cfg.agent.model_steering,

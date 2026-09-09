@@ -56,7 +56,9 @@ def test_skills_run_script_sets_script_ok_true_on_zero_exit(reg_with_scripts, tm
     assert payload["ok"] is True
     assert payload["script_ok"] is True
     assert payload["result"]["exit_code"] == 0
-    assert payload["result"]["stdout"].strip() == "done"
+    assert payload["result"]["truncated"] is False
+    assert payload["result"]["stdout"]["content"].strip() == "done"
+    assert "preview" not in payload["result"]
 
 
 def test_skills_run_script_passes_args_as_stdin_json(reg_with_scripts, tmp_path):
@@ -79,7 +81,7 @@ def test_skills_run_script_passes_args_as_stdin_json(reg_with_scripts, tmp_path)
     )
     assert payload["ok"] is True
     assert payload["script_ok"] is True
-    assert payload["result"]["stdout"].strip() == "/tmp/my-skill"
+    assert payload["result"]["stdout"]["content"].strip() == "/tmp/my-skill"
 
 
 def test_skills_run_script_passes_argv(reg_with_scripts, tmp_path):
@@ -94,7 +96,34 @@ def test_skills_run_script_passes_argv(reg_with_scripts, tmp_path):
     )
     assert payload["ok"] is True
     assert payload["script_ok"] is True
-    assert payload["result"]["stdout"].strip() == "--format|json|two words"
+    assert payload["result"]["stdout"]["content"].strip() == "--format|json|two words"
+
+
+def test_skills_run_script_long_stdout_is_head_tail_with_preview(reg_with_scripts, tmp_path):
+    _write_skill_with_script(
+        tmp_path / "system",
+        "long-out",
+        "import sys; sys.stdout.write('A' * 500)\n",
+    )
+    cfg = {"exec_output_capture_max_chars": 100, "exec_output_preview_edge_chars": 10}
+    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx(cfg), config_dict=cfg)
+    payload = json.loads(tool(skill_id="long-out", script_name="main.py"))
+    result = payload["result"]
+    out = result["stdout"]
+
+    assert payload["ok"] is True
+    assert payload["script_ok"] is True
+    assert result["truncated"] is True
+    assert out["truncated"] is True
+    assert "content" not in out
+    assert len(out["head"]) == 50
+    assert len(out["tail"]) == 50
+    assert out["total_chars"] == 500
+    assert out["omitted_chars"] == 400
+    assert result["preview"]["stdout"]["head"] == "A" * 10
+    assert result["preview"]["stdout"]["tail"] == "A" * 10
+    raw = json.dumps(result, ensure_ascii=False)
+    assert raw.index('"preview"') < raw.index('"stdout"')
 
 
 def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_path):

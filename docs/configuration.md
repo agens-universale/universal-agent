@@ -238,9 +238,19 @@ mcp:
 - `agent.exec_timeout_sec` — дефолтный таймаут `execute_command` / `run_python_code`
   (секунды), если модель не передала `timeout_seconds`. По умолчанию `120`. Для длинных
   контейнерных сборок (Harbor) обычно поднимают до `600`.
-- `agent.exec_output_capture_max_chars` — потолок RAM-буфера stdout/stderr на поток
-  (decoded UTF-8 chars) для exec. По умолчанию `60000`. После cap вывод сливается и
-  отбрасывается без kill процесса; page полного captured — через stream refs в ответе тулы.
+- `agent.exec_output_capture_max_chars` — потолок захвата stdout/stderr на поток
+  (decoded UTF-8 chars) для exec. По умолчанию `40000`: первые `floor(L/2)` символов
+  головы и последние `L - floor(L/2)` символов настоящего хвоста, середина необратимо
+  отбрасывается (процесс не убивается; чтение pipe продолжается, но результат снимается
+  после ограниченного ожидания читателей, поэтому у команды, оставившей трубу открытой в
+  потомке, хвост — снимок на момент ожидания). Точные `total_chars` и `omitted_chars`
+  возвращаются в объектах `stdout` / `stderr` ответа тулы.
+- `agent.exec_output_preview_edge_chars` — размер каждого края front-loaded preview
+  длинного потока. По умолчанию `3000`: блок `preview` идёт в ответе раньше расширенных
+  `stdout` / `stderr`, поэтому первая страница `stored_tool_output` показывает начало и
+  настоящий конец обоих потоков. Поток длиной `<= 2P` в preview не дублируется. `0`
+  отключает preview. Значение не должно превышать хвост capture
+  (`exec_output_capture_max_chars - floor(exec_output_capture_max_chars / 2)`).
 - `agent.walk_output_max_chars` — общий потолок внутренних exec-каналов бэкенда
   (decoded chars), не model-facing вывода: обход дерева в Harbor (`find -printf` для
   walk/listdir), нативный grep и MCP-carrier под `execute_on: os_backend` (http и

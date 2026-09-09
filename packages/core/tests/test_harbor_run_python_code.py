@@ -11,7 +11,7 @@ import json
 from types import SimpleNamespace
 
 from gc_testkit.harbor_fakes import bind_os_backend
-from gc_core.backends.protocol import ExecResult
+from gc_core.backends.protocol import ExecResult, bound_exec_result
 from gc_core.tools.exec.run_python_code import RunPythonCode
 
 
@@ -20,12 +20,13 @@ class _RecordingFakeBackend:
 
     is_sandbox = True
 
-    def __init__(self, stdout="", stderr="", rc=0, dirs=None, timed_out=False):
-        self.res = ExecResult(stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out)
+    def __init__(self, stdout="", stderr="", rc=0, dirs=None, timed_out=False, capture_max_chars=None):
+        res = ExecResult(stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out)
+        self.res = res if capture_max_chars is None else bound_exec_result(res, capture_max_chars)
         self.calls = []
         self._dirs = set(dirs or [])
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
         self.calls.append({"code": code, "cwd": cwd, "timeout": timeout, "env": env})
         return self.res
 
@@ -75,10 +76,20 @@ def test_code_forwarded_raw_no_heredoc_wrapping():
 
 
 def test_truncation():
-    env = json.loads(_tool(_RecordingFakeBackend(stdout="A" * 9000))(code="x", max_output_chars=50))
+    env = json.loads(
+        _tool(
+            _RecordingFakeBackend(stdout="A" * 9000, capture_max_chars=50),
+            config_dict={
+                "exec_output_capture_max_chars": 50,
+                "exec_output_preview_edge_chars": 5,
+            },
+        )(code="x")
+    )
     assert env["truncated"] is True
-    assert env["stdout_kept_head_chars"] + env["stdout_kept_tail_chars"] == 50
-    assert "[omitted" in env["stdout"]
+    assert len(env["stdout"]["head"]) == 25
+    assert len(env["stdout"]["tail"]) == 25
+    assert env["stdout"]["omitted_chars"] == 8950
+    assert env["preview"]["stdout"]["head"] == "A" * 5
 
 
 def test_invalid_code_rejected():
@@ -91,9 +102,9 @@ def test_invalid_timeout_rejected():
     assert env["ok"] is False and env["error"]["field"] == "timeout_seconds"
 
 
-def test_invalid_max_output_rejected():
-    env = json.loads(_tool(_RecordingFakeBackend())(code="x", max_output_chars=0))
-    assert env["ok"] is False and env["error"]["field"] == "max_output_chars"
+def test_max_output_chars_argument_no_longer_exists():
+    env = json.loads(_tool(_RecordingFakeBackend(stdout="hi"))(code="x", max_output_chars=0))
+    assert env["ok"] is True and env["stdout"]["content"] == "hi"
 
 
 def test_sandbox_cwd_none_passes_through_untouched():
@@ -158,7 +169,7 @@ def test_backend_timed_out_sets_timeout_envelope():
 
 def test_backend_exception_returns_execution_failed():
     class _RaisingBackend(_RecordingFakeBackend):
-        def run_python(self, code, *, cwd=None, timeout=None, env=None):
+        def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
             raise RuntimeError("boom")
 
     env = json.loads(_tool(_RaisingBackend())(code="x"))

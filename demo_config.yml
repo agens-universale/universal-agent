@@ -273,8 +273,11 @@ agent:
   # Дефолтный таймаут execute_command / run_python_code (сек), если модель
   # не передала timeout_seconds. Harbor/длинные бенчи обычно ставят 600.
   exec_timeout_sec: 120
-  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec.
-  exec_output_capture_max_chars: 60000
+  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
+  # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
+  exec_output_capture_max_chars: 40000
+  # Каждый край front-loaded preview длинного потока (P ≤ L - floor(L/2)); 0 — без preview.
+  exec_output_preview_edge_chars: 3000
   inject_tool_fields:
     reason: "Brief rationale (1–2 sentences): goal, why now, expected outcome."
   # Имя HTTP-заголовка для внешнего trace_id (флаг gc-cli --trace-id или поле
