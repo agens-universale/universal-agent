@@ -301,9 +301,8 @@ class SubagentRunner:
 
             summary.on_summary_applied = _on_summary_applied_with_sidecar
             # Корутинный двойник, как и у родителя (agent_executor).
-            # Синхронное имя здесь — шим через портал, а зовут хук из-под
-            # работающего loop: портал на это отвечает
-            # SyncApiInsideEventLoopError, и компакция субагента молча
+            # Корутинным именем: синхронное fail-open внутри проглотил бы,
+            # и компакция субагента молча
             # переставала срабатывать.
             pre_backend_compaction_hook = summary.apre_backend_compaction_hook
 

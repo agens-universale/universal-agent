@@ -465,8 +465,8 @@ def _build_tools_registry(
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Синхронный двойник. Реализация одна — асинхронная.
 
-    ``run_coro_blocking``, а НЕ портал: портал отказывается работать из-под
-    работающего loop (SyncApiInsideEventLoopError), а сюда законно приходят
+    ``run_coro_blocking``: он умеет и «нет loop», и «loop уже крутится», а
+    сюда законно приходят
     вызывающие, у которых loop уже крутится. До переезда дискавери звалась
     через тот же хелпер — семантику сохраняем.
     """
@@ -571,7 +571,6 @@ class ToolsCache:
     async def aget_tools(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
         """Объединённый словарь тулов с учётом TTL и кэша, без потока.
 
-        Основная реализация; синхронный ``get_tools`` — шим через портал.
         Попадание в кэш вообще не трогает сеть, поэтому дешёвый путь остаётся
         дешёвым в обеих формах.
         """
@@ -601,8 +600,8 @@ class ToolsCache:
     def get_tools(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
         """Синхронный двойник. Реализация одна — асинхронная.
 
-        ``run_coro_blocking``, а не портал: сюда законно приходят
-        вызывающие с уже работающим loop, а портал на это отвечает отказом.
+        ``run_coro_blocking``: он умеет и «нет loop», и «loop уже крутится»,
+        а сюда законно приходят вызывающие с уже работающим loop.
         """
         return run_coro_blocking(self.aget_tools(on_progress=on_progress))
 

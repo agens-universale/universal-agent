@@ -218,8 +218,8 @@ Return format (JSON string):
 
         Файловые ветки исполняются прямо здесь — оборачивать нечего. Отличается
         только ``append``: у него есть редкая ветка переполнения с LLM-компакцией,
-        и её надо ждать нативно, иначе портал внутри синхронного двойника
-        поднимет ``SyncApiInsideEventLoopError``. См. ``_ahandle_append``.
+        и её надо ждать нативно — это единственный сетевой шаг в append'е.
+        См. ``_ahandle_append``.
         """
         early = self._reject_unusable(action)
         if early is not None:

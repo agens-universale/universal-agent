@@ -366,10 +366,9 @@ class RunSummaryCoordinator:
     async def apre_run_compact_if_needed(self, *, trigger_reason: str = "pre_run") -> None:
         """Догнать историю до порога перед стартом run'а.
 
-        Основная и единственная реализация: сетевой шаг внутри
-        ``arun_summary_compaction`` ждётся нативно, поэтому компакция не
-        занимает поток из пула на всё время суммаризации. Синхронное имя
-        ``pre_run_compact_if_needed`` ниже — шим через портал.
+        Единственная форма: сетевой шаг внутри ``arun_summary_compaction``
+        ждётся нативно, поэтому компакция не занимает поток из пула на всё
+        время суммаризации.
         """
         logger = self._logger
         state = self._state
@@ -418,8 +417,7 @@ class RunSummaryCoordinator:
         """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
         Та же машинерия, что и автосжатие; персист через on_summary_applied.
 
-        Основная и единственная реализация; синхронное имя ``force_compact_once``
-        ниже — шим через портал."""
+        Основная и единственная реализация; синхронное имя ``force_compact_once``"""
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
@@ -444,8 +442,7 @@ class RunSummaryCoordinator:
         """Компакция прямо перед вызовом backend'а (основная реализация).
 
         Уезжает в ``arun_agent`` аргументом ``pre_backend_compaction_hook``:
-        корутинную функцию цикл ждёт нативно, без потока из пула. Синхронное имя
-        ``pre_backend_compaction_hook`` ниже — шим через портал.
+        корутинную функцию цикл ждёт нативно, без потока из пула.
         """
         state = self._state
         if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
@@ -508,8 +505,7 @@ class RunSummaryCoordinator:
         """Compaction после accept ``turn_finish`` (turn-end trigger).
 
         Основная и единственная реализация; в ``arun_agent`` уезжает аргументом
-        ``turn_end_compaction_hook`` и ждётся нативно. Синхронное имя
-        ``turn_end_compact_if_needed`` ниже — шим через портал.
+        ``turn_end_compaction_hook`` и ждётся нативно.
         """
         state = self._state
         if state.backend_api_mode != "chat_completions":

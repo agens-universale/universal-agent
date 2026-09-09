@@ -348,9 +348,8 @@ def _run_update() -> int:
 async def _run_init_agents_md() -> int:
     """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md.
 
-    Корутина, потому что зовётся из-под ``asyncio.run(amain())``: синхронный
-    ``run()`` оттуда упирается в портал и падает
-    SyncApiInsideEventLoopError — команда не работала вовсе.
+    Корутина, потому что зовётся из-под ``asyncio.run(amain())``, а
+    синхронного входа у ядра нет вовсе.
     """
     from gc_core.instructions.init_agents_md import build_init_prompt
     from gc_core.security.confirm_port import confirm_available
@@ -531,7 +530,7 @@ def main() -> int:
     """Синхронная точка входа команды ``gc-cli``.
 
     Сам прогон асинхронный (``amain``), поэтому здесь заводится ОДИН loop на
-    процесс — и портал, через который шли бы синхронные шимы, не нужен вовсе.
+    процесс, и ход агента идёт на нём же.
     """
     import asyncio
 

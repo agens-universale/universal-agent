@@ -186,7 +186,7 @@ async def arun_summary_compaction(
     """Сжать историю треда: суммаризация, патч состояния, событие хосту.
 
     Основная и единственная реализация: синхронное имя ``run_summary_compaction``
-    ниже лишь заводит эту корутину на портальном loop. Сетевой шаг один —
+    Сетевой шаг один —
     ``asummarize_dialog_via_chat_completions``; всё остальное здесь — чистые
     вычисления над state и логи, поэтому поток на время суммаризации больше
     не занимается.
@@ -349,7 +349,6 @@ async def amaybe_run_summary_compaction(
 ) -> bool:
     """Проверка порога плюс запуск сжатия. Основная реализация — эта.
 
-    Синхронное имя ``maybe_run_summary_compaction`` ниже — шим через портал.
     """
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
@@ -379,14 +378,3 @@ async def amaybe_run_summary_compaction(
         trigger_threshold_chars=summary_trigger_chars,
     )
     return True
-
-#
-# Имена сохранены для вызывающих вне цикла агента (ручной /compact через
-# session_compact, координатор прогона, тесты). Портал, а не run_coro_blocking:
-# он переиспользует один фоновый loop, а с ним httpx-клиент и его пул
-# соединений. Изнутри работающего loop эти имена звать нельзя — портал поднимет
-# SyncApiInsideEventLoopError и укажет на асинхронный двойник.
-
-
-
-

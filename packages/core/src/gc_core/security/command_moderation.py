@@ -346,7 +346,7 @@ def moderate_command_execution(
         # строку вместо корутины. `return (yield)` — точка вызова самого тула.
         #
         # `body_may_block=True`: тело зовёт LLM-судью, и этот вызов идёт через
-        # портал, а портал из-под живого loop сознательно отказывает. Поэтому
+        # синхронный сетевой вызов, которому не место на loop. Поэтому
         # телу нужен поток, где живого loop нет.
         def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)

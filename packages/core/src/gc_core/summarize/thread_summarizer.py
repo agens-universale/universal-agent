@@ -27,7 +27,6 @@ async def asummarize_dialog_via_chat_completions(
     """Строит структурированную сводку диалога через chat completions (в т.ч. батчами).
 
     Основная (и единственная) реализация оркестрации; синхронный
-    ``summarize_dialog_via_chat_completions`` — шим над ней через портал.
     Все LLM-шаги ждутся нативно, поэтому компакция больше не держит поток
     из пула на всё время суммаризации.
 
@@ -368,8 +367,7 @@ async def asummarize_dialog_via_chat_completions(
         """Починка формата дельт вторым вызовом LLM — колбэк шага разбора.
 
         Асинхронна, потому что зовёт LLM. Синхронного двойника нет: замыкание
-        видно только внутри этой функции, а портал изнутри работающего loop
-        всё равно поднял бы SyncApiInsideEventLoopError.
+        видно только внутри этой функции.
         """
         return await memory_suggestions.arequest_memory_deltas_format_repair(
             ctx=ctx,
@@ -499,14 +497,3 @@ async def asummarize_dialog_via_chat_completions(
         "num_batches": len(batches),
         "trace": trace,
     }
-
-
-# --- синхронный двойник ----------------------------------------------------
-#
-# Имя сохранено для вызывающих вне цикла агента (ручной /compact, тесты,
-# синхронный ``compaction.run_summary_compaction``). Портал (а не
-# run_coro_blocking) — он переиспользует один фоновый loop, а с ним httpx-клиент
-# и его пул соединений; изнутри работающего цикла звать это имя нельзя:
-# портал поднимет SyncApiInsideEventLoopError.
-
-

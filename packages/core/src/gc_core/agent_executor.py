@@ -186,8 +186,9 @@ class AgentExecutor:
         При каждом вызове state создаётся заново. messages — непустой список
         текстов, каждый уходит отдельным user-сообщением.
 
-        Синхронный ``run`` остался: он зовёт эту же реализацию через портал, и
-        его контракт (сигнатура, блокирующая семантика, результат) не менялся.
+        Форма ОДНА. Синхронного ``run`` нет: из синхронного кода агента
+        ведут своим ``asyncio.run`` в рабочем потоке — так делают TUI и
+        harbor-адаптер.
         """
         config_dict = self._ctx.config_dict
         logger = getattr(self._ctx, "logger", None)
@@ -433,10 +434,11 @@ class AgentExecutor:
         setattr(self._ctx, "on_summary_applied", summary.on_summary_applied)
         setattr(self._ctx, "is_cli_mode", is_cli_mode)
 
-        # В поток, как и три остальных хука компакции: внутри — синхронный
-        # aux-LLM, и прямой вызов из корутины упирается в портал
-        # (SyncApiInsideEventLoopError), который собственный fail-open
-        # компакции молча глотает — компакция выключалась целиком.
+        # Хук передаётся КОРУТИННЫМ именем: `_acall_blocking_hook` ждёт
+        # такой нативно и в поток не уводит. Синхронное имя здесь было бы не
+        # просто медленнее — fail-open внутри компакции проглотил бы отказ, и
+        # она выключилась бы целиком, ничего не сказав. Стережёт
+        # `test_loop_hooks_are_native`.
         await _acall_blocking_hook(
             summary.apre_run_compact_if_needed, trigger_reason="pre_run"
         )

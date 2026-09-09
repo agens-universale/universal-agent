@@ -140,15 +140,3 @@ async def arequest_memory_deltas_format_repair(
         consumer="summary",
         max_tokens=max_tokens,
     )
-
-#
-# Портал (а не run_coro_blocking): он переиспользует один фоновый loop, а с ним
-# и httpx-клиент с его пулом соединений — ровно как синхронный
-# ``summarize.llm.request_summary_text``. Внутри работающего цикла агента звать
-# эти имена нельзя: портал поднимет SyncApiInsideEventLoopError.
-
-
-
-
-
-

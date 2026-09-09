@@ -20,7 +20,6 @@ async def acompress_summary_text(
     """Сжимает слишком длинную сводку вторым вызовом LLM с сохранением смысла.
 
     Основная (и единственная) реализация шага: синхронный ``compress_summary_text``
-    — шим над ней через портал. Ждёт aux-LLM без потока из пула.
     """
     if not summary_text or len(summary_text) <= max_chars:
         return summary_text
@@ -70,7 +69,6 @@ async def arepair_summary_text(
     """Перегенерирует сводку, если первичный ответ модели не прошёл `validate_summary_text`.
 
     Основная (и единственная) реализация шага: синхронный ``repair_summary_text``
-    — шим над ней через портал. Ждёт aux-LLM без потока из пула.
     """
     system = (
         "You fix an invalid <summary> XML document. Use the inputs below. "
@@ -113,13 +111,3 @@ async def arepair_summary_text(
         consumer="summary",
         max_tokens=max_tokens,
     )
-
-#
-# Имена сохранены для вызывающих вне цикла агента (ручной /compact, тесты).
-# Портал переиспользует один loop — значит один httpx-клиент и живой пул
-# соединений; изнутри асинхронного цикла звать их нельзя (портал поднимет
-# SyncApiInsideEventLoopError).
-
-
-
-

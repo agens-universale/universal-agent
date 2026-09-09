@@ -582,8 +582,8 @@ async def aget_mcp_tools_data_for_config(
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """MCP-тулы в формате tools_data, без потока на дискавери.
 
-    Основная реализация. Синхронное имя ``get_mcp_tools_data_for_config``
-    сохранено и работает через портал — на нём сидят прямые вызовы и тесты.
+    Основная форма. Синхронное имя ``get_mcp_tools_data_for_config``
+    сохранено для вызывающих без loop и работает через ``run_coro_blocking``.
     """
     prepared = _prepare_mcp_tools_data(
         config_dict, tools_cache=tools_cache, os_backend=os_backend
@@ -611,10 +611,8 @@ def get_mcp_tools_data_for_config(
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Синхронный двойник. Реализация одна — асинхронная.
 
-    ``run_coro_blocking``, а НЕ портал: портал отказывается работать из-под
-    работающего loop (SyncApiInsideEventLoopError), а сюда законно приходят
-    вызывающие, у которых loop уже крутится. До переезда дискавери звалась
-    через тот же хелпер — семантику сохраняем.
+    ``run_coro_blocking``: он умеет и «нет loop», и «loop уже крутится», а
+    сюда законно приходят вызывающие, у которых loop уже крутится.
     """
     from gc_core.utils.aio_compat import run_coro_blocking
 

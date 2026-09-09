@@ -120,3 +120,33 @@ async def test_simple_fetch_url_parses_html_off_the_loop(monkeypatch):
     assert "asyncio.to_thread(self._extract_simple_html_text" in src, (
         "разбор HTML снова исполняется на loop"
     )
+
+
+# --- L2: удалённый механизм не должен описываться как действующий ----------
+
+
+def test_no_portal_left_in_core_sources():
+    """В исходниках не должно остаться упоминаний снятого «портала».
+
+    Ветка строит аргументацию на комментариях, и докстрока, описывающая
+    удалённый механизм как действующий, дороже обычного мусора: следующий
+    читатель будет чинить то, чего нет. Было 61 упоминание в 25 файлах —
+    `arun` обещал «синхронный run остался», `_acall_blocking_hook` объяснял
+    поход в поток тем, что «LLM-вызовы уходят на портальный loop».
+    """
+    import pathlib
+
+    import gc_core
+
+    root = pathlib.Path(gc_core.__file__).parent
+    offenders = []
+    for path in root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for i, line in enumerate(text.splitlines(), 1):
+            low = line.lower()
+            if "syncapiinsideeventloop" in low or "портал" in low:
+                offenders.append(f"{path.relative_to(root)}:{i}")
+
+    assert offenders == [], (
+        "вернулись упоминания снятого портала:\n  " + "\n  ".join(offenders)
+    )
