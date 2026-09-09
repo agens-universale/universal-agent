@@ -1,8 +1,12 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, WALK_OUTPUT_MAX_CHARS
+from gc_core.backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS,
+    WALK_OUTPUT_MAX_CHARS,
+)
 
 DEFAULT_FINISH_GATE_MAX_ITERATIONS = 10
 DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS = 3
@@ -70,8 +74,11 @@ class AgentConfig(BaseModel):
     stored_tool_outputs_max_entries: int = 50
     # Таймаут execute_command / run_python_code, если модель не передала timeout_seconds.
     exec_timeout_sec: int = DEFAULT_EXEC_TIMEOUT_SEC
-    # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec.
+    # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
+    # L = head floor(L/2) + tail (L - floor(L/2)).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    # Размер каждого края front-loaded preview длинного потока (P). 0 — без preview.
+    exec_output_preview_edge_chars: int = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
     # Потолок приватного канала обхода дерева (Harbor: find -printf для walk/listdir),
     # decoded chars. Переполнение — fail-closed (walk_too_large), не частичный список.
     walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS
@@ -140,6 +147,39 @@ class AgentConfig(BaseModel):
             )
         return n
 
+    @field_validator("exec_output_preview_edge_chars", mode="before")
+    @classmethod
+    def normalize_exec_output_preview_edge_chars(cls, value: Any) -> int:
+        if value is None:
+            return DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
+        try:
+            n = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "agent.exec_output_preview_edge_chars должен быть неотрицательным целым числом"
+            ) from exc
+        if n < 0:
+            raise ValueError(
+                "agent.exec_output_preview_edge_chars должен быть неотрицательным целым числом"
+            )
+        return n
+
+    @model_validator(mode="after")
+    def validate_preview_edge_fits_capture_tail(self) -> "AgentConfig":
+        """P ≤ T = L - floor(L / 2): оба края preview обязаны лежать внутри capture.
+
+        Иначе контракт обещал бы полный короткий канал, уже обрезанный меньшим
+        capture-cap.
+        """
+        capture_tail = self.exec_output_capture_max_chars - self.exec_output_capture_max_chars // 2
+        if self.exec_output_preview_edge_chars > capture_tail:
+            raise ValueError(
+                "agent.exec_output_preview_edge_chars не должен превышать хвост capture: "
+                f"{self.exec_output_preview_edge_chars} > {capture_tail} "
+                "(= exec_output_capture_max_chars - floor(exec_output_capture_max_chars / 2))"
+            )
+        return self
+
     @field_validator("model_steering", mode="before")
     @classmethod
     def normalize_model_steering(cls, value: Any) -> str:
@@ -148,6 +188,28 @@ class AgentConfig(BaseModel):
         if not isinstance(value, str):
             raise ValueError("agent.model_steering должен быть строкой")
         return value.strip()
+
+
+def exec_output_preview_edge_chars_from_config_dict(
+    config_dict: dict[str, Any] | None,
+) -> int:
+    """Размер края front-loaded preview из плоского config_dict.
+
+    Плоский dict приходит и мимо ``AgentConfig`` (bench-профили доливают
+    overrides в уже провалидированный дамп), поэтому ``P <= T`` дожимается
+    здесь, а не только в схеме: иначе preview продублировал бы весь capture.
+    """
+    raw = (config_dict or {}).get(
+        "exec_output_preview_edge_chars", DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
+    )
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
+    if n < 0:
+        n = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
+    capture = exec_output_capture_max_chars_from_config_dict(config_dict)
+    return min(n, capture - capture // 2)
 
 
 def exec_timeout_from_config_dict(config_dict: dict[str, Any] | None) -> int:

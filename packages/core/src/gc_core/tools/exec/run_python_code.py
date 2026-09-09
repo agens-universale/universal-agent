@@ -4,11 +4,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from gc_core.constants.tool_names import EXEC_PYTHON_NAME, READ_STORED_TOOL_OUTPUT_NAME
+from gc_core.backends.capture import CapturedStream
+from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
+from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import effective_command_cwd, moderate_command_execution
 from gc_core.security.path_policy import resolve_tool_context
-from gc_core.tools.exec.stream_preview import apply_stream_meta_to_envelope, clamp_max_output_chars, process_exec_stream
+from gc_core.tools.exec.exec_envelope import build_exec_envelope
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
@@ -33,6 +35,7 @@ class RunPythonCode(AbstractSimpleTool):
             "description": (
                 "Run Python code synchronously in a subprocess. "
                 "Returns JSON with ok, return_code, stdout, stderr."
+                + ' Each stream is an object: a whole stream has `content`, a stream whose middle was dropped has `head`, `tail`, `total_chars` and `omitted_chars`. A long stream also gets a `preview` block with its first and last chunk, placed before the full channels. The dropped middle is gone — redirect to a file before the run if you need the whole log.'
             ),
             "parameters": {
                 "type": "object",
@@ -109,72 +112,51 @@ Return format (JSON string):
   "timed_out": true|false,
   "truncated": true|false,
   "error": null|{"type":"...","message":"..."},
-  "stdout": "...",
-  "stderr": "..."
+  "preview": {"stdout": {"head":"...","tail":"...","total_chars":number,"omitted_chars":number}},
+  "stdout": {"truncated": false, "content":"...", "total_chars": number},
+  "stderr": {"truncated": true, "head":"...", "tail":"...", "total_chars": number, "omitted_chars": number}
 }
+`preview` appears only for a stream longer than two preview edges and only lists such
+streams; a stream is `content` when whole and `head`+`tail` when the middle was dropped.
 '''
         )
         return description
 
     @staticmethod
-    def _process_stream(
-        captured: str,
-        max_output_chars: int,
-        *,
-        hit_capture_cap: bool,
-        state,
-        call_id,
-        tool_name: str,
-    ) -> dict:
-        """D3+D4+D5: head+tail preview + optional store.put + output_ref."""
-        return process_exec_stream(
-            captured,
-            max_output_chars,
-            hit_capture_cap=hit_capture_cap,
-            state=state,
-            call_id=call_id,
-            tool_name=tool_name,
-        )
+    def _as_stream(value) -> CapturedStream:
+        if isinstance(value, CapturedStream):
+            return value
+        text = value or ""
+        return CapturedStream(head=text, total_chars=len(text))
 
-    @staticmethod
     def _result(
+        self,
         *,
         ok: bool,
         return_code: Optional[int],
         timed_out: bool,
-        truncated: bool,
-        stdout: str,
-        stderr: str,
+        stdout=None,
+        stderr=None,
         error: Optional[Dict[str, Any]] = None,
-        stdout_meta: Optional[dict] = None,
-        stderr_meta: Optional[dict] = None,
     ) -> str:
-        envelope: dict = {
-            "tool": RunPythonCode.registered_tool_name(),
-            "ok": ok,
-            "return_code": return_code,
-            "timed_out": timed_out,
-            "truncated": truncated,
-            "error": error,
-            "stdout": stdout,
-            "stderr": stderr,
-        }
-        apply_stream_meta_to_envelope(envelope, "stdout", stdout_meta)
-        apply_stream_meta_to_envelope(envelope, "stderr", stderr_meta)
-        if envelope.get("stdout_output_ref") or envelope.get("stderr_output_ref"):
-            envelope["hint"] = (
-                "stdout/stderr shown as start+end preview. "
-                f"Page full captured stream via {READ_STORED_TOOL_OUTPUT_NAME} "
-                "using stdout_output_ref / stderr_output_ref."
-            )
-        return json.dumps(envelope, ensure_ascii=False)
+        """Envelope с front-loaded preview; ``truncated`` выводится из потоков."""
+        return build_exec_envelope(
+            tool=RunPythonCode.registered_tool_name(),
+            ok=ok,
+            exit_code=return_code,
+            exit_code_key="return_code",
+            timed_out=timed_out,
+            stdout=self._as_stream(stdout),
+            stderr=self._as_stream(stderr),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+            error=error,
+        )
 
     def _command_moderation_blocked_result(
         self,
         error: Dict[str, Any],
         code: str,
         timeout_seconds: Optional[int] = None,
-        max_output_chars: int = 4000,
         cwd: Optional[str] = None,
         env_vars: Optional[list[dict]] = None,
         **kwargs,
@@ -183,7 +165,6 @@ Return format (JSON string):
             ok=False,
             return_code=None,
             timed_out=False,
-            truncated=False,
             stdout="",
             stderr="",
             error=error,
@@ -195,7 +176,6 @@ Return format (JSON string):
         self,
         code: str,
         timeout_seconds: Optional[int] = None,
-        max_output_chars: int = 4000,
         cwd: Optional[str] = None,
         env_vars: Optional[list[dict]] = None,
         **kwargs,
@@ -205,7 +185,6 @@ Return format (JSON string):
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "code"},
@@ -216,7 +195,6 @@ Return format (JSON string):
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "code", "message": "Code is empty"},
@@ -232,30 +210,17 @@ Return format (JSON string):
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "timeout_seconds"},
             )
 
-        if not isinstance(max_output_chars, int) or max_output_chars <= 0:
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=False,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "max_output_chars"},
-            )
-        max_output_chars = clamp_max_output_chars(max_output_chars, self._config_dict)
 
         if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
             return self._result(
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "cwd"},
@@ -268,7 +233,6 @@ Return format (JSON string):
                     ok=False,
                     return_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={
@@ -304,7 +268,6 @@ Return format (JSON string):
                     ok=False,
                     return_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={
@@ -326,7 +289,6 @@ Return format (JSON string):
                     ok=False,
                     return_code=None,
                     timed_out=False,
-                    truncated=False,
                     stdout="",
                     stderr="",
                     error={
@@ -342,7 +304,6 @@ Return format (JSON string):
                         ok=False,
                         return_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={
@@ -357,7 +318,6 @@ Return format (JSON string):
                         ok=False,
                         return_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
@@ -368,7 +328,6 @@ Return format (JSON string):
                         ok=False,
                         return_code=None,
                         timed_out=False,
-                        truncated=False,
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].value"},
@@ -385,57 +344,42 @@ Return format (JSON string):
                 ok=False,
                 return_code=None,
                 timed_out=False,
-                truncated=False,
                 stdout="",
                 stderr="",
                 error={"type": "execution_failed", "message": str(e)},
             )
-        stdout_meta = self._process_stream(
-            res.stdout or "",
-            max_output_chars,
-            hit_capture_cap=getattr(res, "stdout_hit_capture_cap", False),
-            state=self._state,
-            call_id=self._call_id,
-            tool_name=RunPythonCode.registered_tool_name(),
+        # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
+        # объект без структуры потока — тогда падаем обратно на плоский текст,
+        # а не роняем тулу AttributeError уже после исполнения команды.
+        stdout_stream = self._as_stream(
+            getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
         )
-        stderr_meta = self._process_stream(
-            res.stderr or "",
-            max_output_chars,
-            hit_capture_cap=getattr(res, "stderr_hit_capture_cap", False),
-            state=self._state,
-            call_id=self._call_id,
-            tool_name=RunPythonCode.registered_tool_name(),
+        stderr_stream = self._as_stream(
+            getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
         )
-        truncated = stdout_meta["truncated"] or stderr_meta["truncated"]
 
         if res.timed_out:
             return self._result(
                 ok=False,
                 return_code=None,
                 timed_out=True,
-                truncated=truncated,
-                stdout=stdout_meta["text"],
-                stderr=stderr_meta["text"],
+                stdout=stdout_stream,
+                stderr=stderr_stream,
                 error={"type": "timeout", "message": f"Execution timed out after {effective_timeout} seconds"},
-                stdout_meta=stdout_meta,
-                stderr_meta=stderr_meta,
             )
 
         return_code = res.return_code
         ok = return_code == 0
-
-        error = None
-        if not ok:
-            error = {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
-
+        error = (
+            None
+            if ok
+            else {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
+        )
         return self._result(
             ok=ok,
             return_code=return_code,
             timed_out=False,
-            truncated=truncated,
-            stdout=stdout_meta["text"],
-            stderr=stderr_meta["text"],
+            stdout=stdout_stream,
+            stderr=stderr_stream,
             error=error,
-            stdout_meta=stdout_meta,
-            stderr_meta=stderr_meta,
         )

@@ -36,7 +36,7 @@ class _Sandbox:
         self.codes = []
         self.execs = []
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
         _, _, obc = _mcp()
         self.codes.append(code)
         return _ExecResult(
@@ -58,7 +58,7 @@ class _Local:
         self.execs.append(command)
         return _ExecResult()
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
         self.execs.append(code)
         return _ExecResult()
 
@@ -105,7 +105,7 @@ def test_stdio_process_starts_in_the_backend_not_on_the_agent_host():
     class _StdioSandbox:
         is_sandbox = True
 
-        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None):
+        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
             calls.append(argv)
             return _ExecResult(stdout="\n".join([
                 json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}),
@@ -186,7 +186,7 @@ def test_missing_carrier_is_an_error_and_installs_nothing():
             self.execs.append(command)
             return _ExecResult(stdout="", return_code=1)
 
-        def run_python(self, code, *, cwd=None, timeout=None, env=None):
+        def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
             raise AssertionError("must not run python3 when it is absent")
 
     backend = _BareSandbox()
@@ -205,7 +205,7 @@ def test_truncated_exec_output_is_an_error():
     class _TruncatingSandbox:
         is_sandbox = True
 
-        def run_python(self, code, *, cwd=None, timeout=None, env=None):
+        def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
             _, _, obc = _mcp()
             return _ExecResult(
                 stdout=obc.EXEC_RESULT_MARKER + '{"status": 200, "bo',

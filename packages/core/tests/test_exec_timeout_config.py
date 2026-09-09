@@ -33,11 +33,38 @@ def test_agent_config_timeout_must_be_positive():
 
 def test_agent_config_capture_max_default():
     assert AgentConfig().exec_output_capture_max_chars == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-    assert DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS == 60_000
+    assert DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS == 40_000
 
 
 def test_agent_config_capture_max_custom():
-    assert AgentConfig(exec_output_capture_max_chars=1000).exec_output_capture_max_chars == 1000
+    cfg = AgentConfig(exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=100)
+    assert cfg.exec_output_capture_max_chars == 1000
+
+
+def test_agent_config_preview_edge_default():
+    assert AgentConfig().exec_output_preview_edge_chars == 3_000
+
+
+def test_agent_config_preview_edge_rejects_negative():
+    with pytest.raises(Exception):
+        AgentConfig(exec_output_preview_edge_chars=-1)
+
+
+def test_agent_config_preview_edge_must_fit_capture_tail():
+    """P <= L - floor(L / 2), иначе край preview не лежит внутри capture."""
+    assert AgentConfig(
+        exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=500
+    ).exec_output_preview_edge_chars == 500
+    with pytest.raises(Exception):
+        AgentConfig(exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=501)
+
+
+def test_agent_config_zero_capture_allows_only_zero_preview():
+    assert AgentConfig(
+        exec_output_capture_max_chars=0, exec_output_preview_edge_chars=0
+    ).exec_output_capture_max_chars == 0
+    with pytest.raises(Exception):
+        AgentConfig(exec_output_capture_max_chars=0, exec_output_preview_edge_chars=1)
 
 
 def test_agent_config_capture_max_rejects_negative():
@@ -141,3 +168,25 @@ def test_tool_descriptions_stay_lean():
         assert "stdout_output_ref" not in text
         assert "session_read_stored_tool_output" not in text
         assert "max_output_chars" not in cls.prompt_description()
+
+
+def test_preview_edge_from_flat_config_is_clamped_to_capture_tail():
+    """Плоский config_dict приходит мимо AgentConfig — P дожимается на чтении."""
+    from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
+
+    cfg = {"exec_output_capture_max_chars": 1000, "exec_output_preview_edge_chars": 3000}
+    assert exec_output_preview_edge_chars_from_config_dict(cfg) == 500
+    assert exec_output_preview_edge_chars_from_config_dict({}) == 3000
+    assert exec_output_preview_edge_chars_from_config_dict(
+        {"exec_output_capture_max_chars": 0}
+    ) == 0
+
+
+def test_exec_result_requires_return_code():
+    """Забытый return_code раньше падал TypeError — не превращаем его в None."""
+    from gc_core.backends.protocol import ExecResult
+
+    with pytest.raises(TypeError):
+        ExecResult(stdout="out", stderr="")
+    assert ExecResult(stdout="out", stderr="", return_code=None).return_code is None
+    assert ExecResult("out", "", 0).return_code == 0

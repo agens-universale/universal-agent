@@ -84,7 +84,7 @@ def test_is_sandbox_and_default_exec_timeout(loop_in_thread):
     assert backend.is_sandbox is True
     # Timeout comes from agent.exec_timeout_sec; backend does not hardcode one.
     assert backend.default_exec_timeout is None
-    assert backend.exec_output_capture_max_chars == 60_000
+    assert backend.exec_output_capture_max_chars == 40_000
 
 
 def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):

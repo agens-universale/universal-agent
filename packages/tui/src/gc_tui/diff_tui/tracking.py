@@ -13,6 +13,7 @@ from gc_tui.diff_tui.mode import resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key
 from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
+from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 
 _logger = logging.getLogger(__name__)
@@ -115,7 +116,13 @@ class TrackingFsBackend:
 
     @property
     def exec_output_capture_max_chars(self) -> int:
-        return int(getattr(self._inner, "exec_output_capture_max_chars", 60_000))
+        return int(
+            getattr(
+                self._inner,
+                "exec_output_capture_max_chars",
+                DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+            )
+        )
 
     @exec_output_capture_max_chars.setter
     def exec_output_capture_max_chars(self, value: int) -> None:

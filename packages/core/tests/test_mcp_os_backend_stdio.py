@@ -26,7 +26,7 @@ class _StdioSandbox:
         self.lines = lines
         self.calls = []
 
-    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None):
+    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
         self.calls.append({"argv": list(argv), "stdin": stdin, "env": env,
                            "timeout": timeout})
         return _ExecResult(stdout="\n".join(self.lines))
@@ -139,7 +139,7 @@ def test_stdio_no_matching_reply_is_an_error():
 
 def test_stdio_truncated_output_is_an_error():
     class _TruncatingSandbox(_StdioSandbox):
-        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None):
+        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
             return _ExecResult(stdout=_frame(1, {}), stdout_hit_capture_cap=True)
 
     client = OsBackendStatelessClient(

@@ -49,6 +49,10 @@ _TIMEOUT_SLACK_SHARE = 0.2
 
 # The python3 probe runs once per backend; it does not need a full share.
 _PROBE_TIMEOUT_SEC = 10
+# Потолок захвата для carrier-обмена: ответ MCP-сервера должен пролезть целиком,
+# иначе _interpret падает fail-closed. Держим отдельно от дефолта exec-тулы —
+# он подобран под читаемость трейса, а тут это транспортный лимит.
+_CARRIER_CAPTURE_MAX_CHARS = 60_000
 
 
 def _split_share(share: float) -> tuple[float, int]:
@@ -333,7 +337,9 @@ class OsBackendStatelessClient(McpClientPort):
         code = _HTTP_CARRIER.format(
             payload_b64=payload_b64, marker=EXEC_RESULT_MARKER
         )
-        result = self.os_backend.run_python(code, timeout=deadline)
+        result = self.os_backend.run_python(
+            code, timeout=deadline, capture_max_chars=_CARRIER_CAPTURE_MAX_CHARS
+        )
         return self._interpret(result)
 
     def _stdio_operation(
@@ -373,6 +379,7 @@ class OsBackendStatelessClient(McpClientPort):
             stdin=stdin,
             cwd=self.server_cfg.get("cwd"),
             timeout=max(1, int(timeout)),
+            capture_max_chars=_CARRIER_CAPTURE_MAX_CHARS,
         )
         if getattr(result, "stdout_hit_capture_cap", False):
             raise McpExecCarrierError(

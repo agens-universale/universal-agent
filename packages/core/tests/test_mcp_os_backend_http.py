@@ -34,7 +34,7 @@ class _RecordingSandbox:
         self.codes = []
         self.timeouts = []
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None):
+    def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
         self.codes.append(code)
         self.timeouts.append(timeout)
         payload = self.answers.pop(0)

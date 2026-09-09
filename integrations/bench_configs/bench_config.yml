@@ -63,6 +63,8 @@ agent_kwargs:
     exec_timeout_sec: 600                # дефолт timeout_seconds для exec_command / exec_python, если модель не передала
     exec_output_capture_max_chars: 60000
     tool_output_inline_max_chars: 10000  # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
+    exec_output_capture_max_chars: 40000  # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
+    exec_output_preview_edge_chars: 3000  # каждый край front-loaded preview длинного потока; 0 — без preview
     stored_tool_outputs_max_entries: 50  # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
     inject_tool_fields:                  # инжект синтетического поля в JSON Schema КАЖДОГО тула
       reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."

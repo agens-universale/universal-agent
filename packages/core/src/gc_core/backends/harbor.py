@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Iterable, Optional, Sequence
 
+from gc_core.backends.capture import BoundedStreamAccumulator
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
     FIND_PRINTF_FORMAT,
@@ -76,7 +77,7 @@ class HarborBackend(FsBackend):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
 
     def _capture_cap(self, max_chars: Optional[int]) -> int:
-        """``None`` → tool-trace cap (~60k), else the per-call ceiling."""
+        """``None`` → tool-trace cap (40k/поток), else the per-call ceiling."""
         return (
             self.exec_output_capture_max_chars if max_chars is None else max_chars
         )
@@ -91,34 +92,33 @@ class HarborBackend(FsBackend):
 
     def _output_capture(
         self, cap: int
-    ) -> tuple[ContextManager[None], dict[str, list[str]]]:
+    ) -> tuple[ContextManager[None], dict[str, "BoundedStreamAccumulator"]]:
         """Scope Harbor's public ``scoped_output_callback`` around one exec and
-        collect the streamed chunks per stream.
+        feed the streamed chunks into a bounded head+tail accumulator per stream.
 
-        Returns ``(context_manager, buffers)``; ``buffers`` maps stream name to a
-        list of chunks. Without the hook (env does not stream) the context is a
-        no-op and the buffers stay empty — empty output on timeout is legal.
+        Returns ``(context_manager, accumulators)``. Without the hook (env does
+        not stream) the context is a no-op and the accumulators stay empty —
+        empty output on timeout is legal.
 
-        With the hook active Harbor uses its streamed reader for successful
-        execs too (line-based, stderr merged into stdout at the subprocess
-        level in both readers), so the successful ``ExecResult`` is unchanged.
-        Accumulation stops at the first chunk that crosses ``cap``: that chunk
-        is kept so ``bound_exec_result`` sees ``len > cap`` and sets the
-        ``hit_capture_cap`` flag, like the local reader does.
+        Chunks keep being consumed after the head is full: they are still needed
+        for ``total_chars`` and for the ring tail. The accumulator
+        runs in the agent's own Python process — nothing is required inside the
+        task container.
         """
-        buffers: dict[str, list[str]] = {"stdout": [], "stderr": []}
-        seen = {"stdout": 0, "stderr": 0}
+        accumulators = {
+            "stdout": BoundedStreamAccumulator(cap),
+            "stderr": BoundedStreamAccumulator(cap),
+        }
         scope = getattr(self._env, "scoped_output_callback", None)
         if scope is None:
-            return contextlib.nullcontext(), buffers
+            return contextlib.nullcontext(), accumulators
 
         async def on_output(text: str, stream: str) -> None:
-            if seen[stream] > cap:
-                return  # drain & discard: already past the cap
-            buffers[stream].append(text)
-            seen[stream] += len(text)
+            acc = accumulators.get(stream)
+            if acc is not None:
+                acc.feed(text)
 
-        return scope(on_output), buffers
+        return scope(on_output), accumulators
 
     # --- shell ---
     def _exec(
@@ -130,7 +130,7 @@ class HarborBackend(FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
-        """Internal exec. ``capture_max_chars=None`` → tool-trace cap (~60k)."""
+        """Internal exec. ``capture_max_chars=None`` → tool-trace cap (40k/поток)."""
         # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
         if env:
             prefix = "env " + " ".join(
@@ -149,15 +149,14 @@ class HarborBackend(FsBackend):
             # Timeout = partial completion: what the command printed before the
             # kill, via the same stream Harbor uses for trial logs. Harbor's
             # timeout exception carries no output itself.
-            return bound_exec_result(
-                ExecResult(
-                    stdout="".join(streamed["stdout"]),
-                    stderr="".join(streamed["stderr"]),
-                    return_code=None,
-                    timed_out=True,
-                ),
-                cap,
+            return ExecResult(
+                return_code=None,
+                timed_out=True,
+                stdout_stream=streamed["stdout"].result(),
+                stderr_stream=streamed["stderr"].result(),
             )
+        # Готовый результат нормализуем тем же head+tail алгоритмом: внешний
+        # контракт совпадает с local, bounded RAM внутри Harbor SDK — нет.
         return bound_exec_result(
             ExecResult(
                 stdout=res.stdout or "",
@@ -186,15 +185,18 @@ class HarborBackend(FsBackend):
         )
 
     def _fs_exec(self, command: str) -> ExecResult:
-        """Internal FS helper (stat/head/mkdir). Walk ceiling, not tool-trace 60k."""
+        """Internal FS helper (stat/head/mkdir). Walk ceiling, not the tool-trace cap."""
         return self._exec(command, capture_max_chars=self.walk_output_max_chars)
 
     def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
-                    env: Optional[dict] = None) -> ExecResult:
-        # Quoted heredoc → code body taken literally. Tool-trace 60k: this is
+                    env: Optional[dict] = None,
+                    capture_max_chars: Optional[int] = None) -> ExecResult:
+        # Quoted heredoc → code body taken literally. Tool-trace cap: this is
         # the model-facing python tool, not an internal FS helper.
         command = f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
-        return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+        return self.exec(
+            command, cwd=cwd, timeout=timeout, env=env, capture_max_chars=capture_max_chars
+        )
 
     # --- file read (shell / download) ---
     def read(self, path: str) -> str:
@@ -230,7 +232,7 @@ class HarborBackend(FsBackend):
         if n == 0:
             return b""
         # GNU coreutils in harbor images (same assumption as ``stat -c`` / ``find -printf``).
-        # Capture at walk ceiling: append samples 100KiB (~137k base64) > tool 60k.
+        # Capture at walk ceiling: append samples 100KiB (~137k base64) > tool cap.
         res = self._fs_exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"head failed: {path}")

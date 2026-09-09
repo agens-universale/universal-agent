@@ -7,8 +7,10 @@ import stat as stat_module
 import subprocess
 import sys
 import threading
+import time
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
+from gc_core.backends.capture import BoundedStreamAccumulator
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
     ExecResult,
@@ -307,7 +309,8 @@ class LocalFsBackend(FsBackend):
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
-                   env: Optional[dict] = None) -> ExecResult:
+                   env: Optional[dict] = None,
+                   capture_max_chars: Optional[int] = None) -> ExecResult:
         return _run_bounded_process(
             [sys.executable, "-u", "-"],
             shell=False,
@@ -324,74 +327,39 @@ class LocalFsBackend(FsBackend):
 
 # --- bounded process runner (spec D1/D2/D6/D9) ---
 # Потоки stdout/stderr читаются параллельно (thread-per-pipe), иначе большой
-# вывод в один pipe заблокирует другой (deadlock). Буфер ≤ capture_max_chars на
-# поток; после cap — drain & discard (НЕ kill). Без записи на диск.
+# вывод в один pipe заблокирует другой (deadlock). На поток — bounded head+tail
+# accumulator ≤ capture_max_chars; середина отбрасывается, pipe дренируется до
+# EOF (НЕ kill). Без записи на диск.
 
 _READ_CHUNK = 8192
-# После proc.wait: ждём только публикацию captured (≤60k). Обычно уже готово
-# (hit_cap по ходу) или EOF по мелкому остатку в pipe — мгновенно.
-_CAPTURED_READY_TIMEOUT_SEC = 30
-# Discard после cap — fire-and-forget: данные уже в sink. Короткий join, чтобы
-# не копить зомби-треды на типичном хвосте; если discard долгий — уходим с
-# captured, reader дочитает в фоне как daemon (не блокирует process exit).
+# Процесс уже мёртв (wait/kill), значит в pipe остался только его буфер — EOF
+# приходит мгновенно. Если reader всё ещё жив после этого срока, pipe держит
+# внук (`cmd &`, D11): дальнейшее ожидание не приблизит конец НАШЕЙ команды, всё
+# новое пишет демон. Берём снимок и уходим, а не висим десятками секунд.
 _DRAIN_JOIN_TIMEOUT_SEC = 2
 
 
-def _drain_pipe(pipe, capture_max_chars: int, on_captured=None) -> tuple[str, bool]:
-    """Прочитать ``pipe`` в строку ≤ ``capture_max_chars``; дальше слить в никуда.
+def _drain_pipe(pipe, accumulator) -> None:
+    """Прочитать ``pipe`` до EOF в bounded head+tail accumulator.
 
-    ``on_captured(text, hit_cap)`` вызывается ровно один раз — сразу после заполнения
-    буфера (в т.ч. при hit_cap, *до* конца discard), чтобы caller не ждал drain.
-
-    Возвращает ``(text, hit_cap)``. Инкрементальный UTF-8 декодер (errors=replace)
-    безопасно обрабатывает многобайтовые границы чанков.
+    Чтение не прекращается после заполнения head: чанки нужны для счётчика
+    ``total_chars`` и кольцевого хвоста, а сам pipe должен дренироваться, иначе
+    дочерний процесс заблокируется на записи. Инкрементальный UTF-8 декодер
+    (errors=replace) безопасно обрабатывает многобайтовые границы чанков.
     """
     decoder = codecs.lookup("utf-8").incrementaldecoder(errors="replace")
-    parts: list[str] = []
-    total = 0
-    hit_cap = False
-    published = False
-
-    def _publish() -> None:
-        nonlocal published
-        if published:
-            return
-        published = True
-        if on_captured is not None:
-            on_captured("".join(parts), hit_cap)
-
     try:
         while True:
             chunk = pipe.read(_READ_CHUNK)
             if not chunk:
                 break
-            if not hit_cap:
-                decoded = decoder.decode(chunk)
-                room = capture_max_chars - total
-                if room <= 0:
-                    hit_cap = True
-                    _publish()
-                elif len(decoded) <= room:
-                    parts.append(decoded)
-                    total += len(decoded)
-                else:
-                    parts.append(decoded[:room])
-                    total = capture_max_chars
-                    hit_cap = True
-                    _publish()
-            # после hit_cap продолжаем читать (drain & discard), чтобы pipe не
-            # заблокировал процесс и не повесил его запись.
+            accumulator.feed(decoder.decode(chunk))
     finally:
         try:
             pipe.close()
         except Exception:
             pass
-        # финализируем декодер (flush возможного неполного остатка — только если
-        # не hit cap; при hit cap хвост отброшен по определению).
-        if not hit_cap:
-            parts.append(decoder.decode(b"", final=True))
-        _publish()
-    return "".join(parts), hit_cap
+        accumulator.feed(decoder.decode(b"", final=True))
 
 
 def _run_bounded_process(
@@ -407,8 +375,8 @@ def _run_bounded_process(
     """Запустить процесс с bounded-буфером на stdout/stderr (thread-per-pipe).
 
     ``stdin_text`` — опциональный ввод (run_python); ``None`` → stdin=DEVNULL.
-    Timeout: kill процесса, ``timed_out=True``, ``return_code=None``, partial-буфер.
-    Captured публикуется сразу по заполнению cap — не ждём конца discard.
+    Timeout: kill процесса, ``timed_out=True``, ``return_code=None``; края и
+    счётчик описывают реально наблюдённую часть потока.
     """
     from gc_core.utils.win_console import preserve_console_mode
 
@@ -425,41 +393,24 @@ def _run_bounded_process(
             bufsize=0,
         )
 
-    stdout_buf: list[str] = []
-    stderr_buf: list[str] = []
-    stdout_hit = [False]
-    stderr_hit = [False]
-    stdout_ready = threading.Event()
-    stderr_ready = threading.Event()
+    stdout_acc = BoundedStreamAccumulator(capture_max_chars)
+    stderr_acc = BoundedStreamAccumulator(capture_max_chars)
 
-    def _reader(
-        pipe,
-        sink: list[str],
-        hit_flag: list[bool],
-        ready: threading.Event,
-    ) -> None:
-        def on_captured(text: str, hit: bool) -> None:
-            if not sink:
-                sink.append(text)
-                hit_flag[0] = hit
-            ready.set()
-
+    def _reader(pipe, accumulator) -> None:
         try:
-            _drain_pipe(pipe, capture_max_chars, on_captured=on_captured)
-        finally:
-            if not sink:
-                sink.append("")
-            ready.set()
+            _drain_pipe(pipe, accumulator)
+        except Exception:
+            pass
 
     t_out = threading.Thread(
         target=_reader,
-        args=(proc.stdout, stdout_buf, stdout_hit, stdout_ready),
+        args=(proc.stdout, stdout_acc),
         daemon=True,
         name="exec-stdout-reader",
     )
     t_err = threading.Thread(
         target=_reader,
-        args=(proc.stderr, stderr_buf, stderr_hit, stderr_ready),
+        args=(proc.stderr, stderr_acc),
         daemon=True,
         name="exec-stderr-reader",
     )
@@ -493,21 +444,18 @@ def _run_bounded_process(
         except Exception:
             pass
 
-    # Captured уже в sink после on_captured — не блокируемся на discard гигабайта.
-    stdout_ready.wait(timeout=_CAPTURED_READY_TIMEOUT_SEC)
-    stderr_ready.wait(timeout=_CAPTURED_READY_TIMEOUT_SEC)
-    # Параллельный короткий join: типичный хвост pipe дочитается; долгий discard
-    # не удерживает tool-call (reader продолжит в фоне).
+    # Ранней публикации prefix больше нет: настоящий хвост известен только после
+    # EOF (или после обработки timeout), поэтому дожидаемся reader-ов. Оба join
+    # отсчитывают срок параллельно — второй ждёт лишь остаток, а не второй срок.
+    deadline = time.monotonic() + _DRAIN_JOIN_TIMEOUT_SEC
     t_out.join(timeout=_DRAIN_JOIN_TIMEOUT_SEC)
-    t_err.join(timeout=_DRAIN_JOIN_TIMEOUT_SEC)
+    t_err.join(timeout=max(0.0, deadline - time.monotonic()))
 
     return ExecResult(
-        stdout=stdout_buf[0] if stdout_buf else "",
-        stderr=stderr_buf[0] if stderr_buf else "",
         return_code=return_code,
         timed_out=timed_out,
-        stdout_hit_capture_cap=stdout_hit[0],
-        stderr_hit_capture_cap=stderr_hit[0],
+        stdout_stream=stdout_acc.result(),
+        stderr_stream=stderr_acc.result(),
     )
 
 

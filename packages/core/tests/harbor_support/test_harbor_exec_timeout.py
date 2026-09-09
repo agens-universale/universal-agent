@@ -149,23 +149,30 @@ def test_harbor_backend_timeout_ignores_exception_attrs(loop_in_thread):
 
 
 def test_harbor_backend_timeout_partial_output_bounded_by_common_cap(loop_in_thread):
-    """Partial output is a prefix bounded by the same capture cap as a normal exec."""
+    """Partial output keeps real head+tail bounded by the same capture cap."""
     env = StreamingEnv(TIMEOUT, chunks=[("x" * 50, "stdout"), ("y" * 50, "stdout")])
 
     result = HarborBackend(env, loop_in_thread, exec_output_capture_max_chars=70).exec("cmd", timeout=10)
 
     assert result.timed_out is True
-    assert result.stdout == "x" * 50 + "y" * 20
-    assert result.stdout_hit_capture_cap is True
+    cs = result.stdout_stream
+    assert cs.truncated is True
+    assert cs.total_chars == 100
+    assert cs.head == "x" * 35
+    assert cs.tail == "y" * 35
+    assert cs.omitted_chars == 30
 
 
-def test_harbor_backend_timeout_output_exactly_at_cap_then_more_sets_flag(loop_in_thread):
-    """Accumulated == cap and the command kept printing → hit flag, like local."""
+def test_harbor_backend_timeout_output_exactly_at_cap_then_more_keeps_real_tail(loop_in_thread):
+    """Chunks after the head is full still count and still update the ring tail."""
     env = StreamingEnv(TIMEOUT, chunks=[("x" * 70, "stdout"), ("y", "stdout")])
 
     result = HarborBackend(env, loop_in_thread, exec_output_capture_max_chars=70).exec("cmd", timeout=10)
 
-    assert result.stdout == "x" * 70
+    cs = result.stdout_stream
+    assert cs.truncated is True
+    assert cs.total_chars == 71
+    assert cs.tail.endswith("y")
     assert result.stdout_hit_capture_cap is True
 
 
@@ -216,8 +223,8 @@ def test_execute_command_timeout_envelope_carries_partial_output(loop_in_thread)
 
     assert envelope["timed_out"] is True
     assert envelope["error"]["type"] == "timeout"
-    assert "Length: 162M" in envelope["stdout"]
-    assert "Saving to: cifar.tar.gz" in envelope["stdout"]
+    assert "Length: 162M" in envelope["stdout"]["content"]
+    assert "Saving to: cifar.tar.gz" in envelope["stdout"]["content"]
 
 
 def test_execute_command_maps_harbor_timeout_envelope(loop_in_thread):

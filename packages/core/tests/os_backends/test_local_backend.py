@@ -205,8 +205,8 @@ def test_exec_result_has_capture_cap_flags(be):
     assert res.stderr_hit_capture_cap is False
 
 
-def test_exec_default_capture_cap_is_60k(be):
-    assert be.exec_output_capture_max_chars == 60_000
+def test_exec_default_capture_cap_is_40k(be):
+    assert be.exec_output_capture_max_chars == 40_000
 
 
 def test_exec_reader_threads_are_daemon(be, monkeypatch):
@@ -325,50 +325,31 @@ def test_run_python_timeout(be, tmp_path):
     assert "go" in res.stdout
 
 
-def test_drain_pipe_publishes_captured_before_discard_finishes():
-    """on_captured fires at hit_cap while remaining bytes are still being drained."""
-    import threading
+def test_drain_pipe_keeps_reading_after_head_is_full():
+    """После заполнения head чанки продолжают считаться и обновлять tail."""
+    from gc_core.backends.capture import BoundedStreamAccumulator
     from gc_core.backends.local import _drain_pipe
 
-    class SlowAfterCapPipe:
+    class Pipe:
         def __init__(self):
-            self._chunks = [b"A" * 50, b"B" * 50]  # first fills cap=40, second drains
+            self._chunks = [b"A" * 50, b"B" * 50, b"END"]
             self._i = 0
-            self.second_started = threading.Event()
-            self.release_second = threading.Event()
 
         def read(self, n):
             if self._i >= len(self._chunks):
                 return b""
             chunk = self._chunks[self._i]
             self._i += 1
-            if self._i == 2:
-                self.second_started.set()
-                self.release_second.wait(timeout=5)
             return chunk
 
         def close(self):
             pass
 
-    pipe = SlowAfterCapPipe()
-    published = threading.Event()
-    seen = {}
-
-    def on_captured(text, hit):
-        seen["text"] = text
-        seen["hit"] = hit
-        published.set()
-
-    def run():
-        _drain_pipe(pipe, 40, on_captured=on_captured)
-
-    t = threading.Thread(target=run)
-    t.start()
-    assert published.wait(timeout=2), "captured must publish before discard completes"
-    assert pipe.second_started.wait(timeout=2)
-    assert seen["hit"] is True
-    assert len(seen["text"]) == 40
-    assert seen["text"] == "A" * 40
-    pipe.release_second.set()
-    t.join(timeout=5)
-    assert not t.is_alive()
+    acc = BoundedStreamAccumulator(40)
+    _drain_pipe(Pipe(), acc)
+    cs = acc.result()
+    assert cs.total_chars == 103
+    assert cs.truncated is True
+    assert cs.head == "A" * 20
+    assert cs.tail.endswith("END")
+    assert len(cs.tail) == 20

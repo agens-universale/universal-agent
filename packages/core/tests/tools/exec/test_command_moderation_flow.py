@@ -42,7 +42,7 @@ def test_exec_command_allow_mode_skips_judge(tmp_path, monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["stdout"].rstrip("\n") == "123"
+    assert result["stdout"]["content"].rstrip("\n") == "123"
 
 
 def test_exec_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
@@ -59,7 +59,7 @@ def test_exec_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["stdout"].rstrip("\n") == "456"
+    assert result["stdout"]["content"].rstrip("\n") == "456"
 
 
 def test_exec_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
@@ -83,7 +83,7 @@ def test_exec_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
     assert result["error"]["type"] == "unsafe_command_blocked"
     assert result["error"]["mode"] == "deny"
     assert result["error"]["risk_flags"] == ["privilege_escalation"]
-    assert result["stdout"] == ""
+    assert result["stdout"]["content"] == ""
 
 
 def test_run_python_code_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
