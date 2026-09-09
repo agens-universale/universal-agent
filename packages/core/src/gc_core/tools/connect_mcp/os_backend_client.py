@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
 from gc_core.tools.connect_mcp.client import (
     MCP_INIT_PARAMS,
     _merge_mcp_headers,
@@ -49,10 +50,6 @@ _TIMEOUT_SLACK_SHARE = 0.2
 
 # The python3 probe runs once per backend; it does not need a full share.
 _PROBE_TIMEOUT_SEC = 10
-# Потолок захвата для carrier-обмена: ответ MCP-сервера должен пролезть целиком,
-# иначе _interpret падает fail-closed. Держим отдельно от дефолта exec-тулы —
-# он подобран под читаемость трейса, а тут это транспортный лимит.
-_CARRIER_CAPTURE_MAX_CHARS = 60_000
 
 
 def _split_share(share: float) -> tuple[float, int]:
@@ -337,8 +334,13 @@ class OsBackendStatelessClient(McpClientPort):
         code = _HTTP_CARRIER.format(
             payload_b64=payload_b64, marker=EXEC_RESULT_MARKER
         )
-        result = self.os_backend.run_python(
-            code, timeout=deadline, capture_max_chars=_CARRIER_CAPTURE_MAX_CHARS
+        # ``python3 -`` with the script on stdin: the same channel the stdio
+        # transport uses, not the model-facing ``run_python`` tool path.
+        result = self.os_backend.exec_argv(
+            ["python3", "-"],
+            stdin=code,
+            timeout=deadline,
+            capture_max_chars=self._carrier_output_max_chars(),
         )
         return self._interpret(result)
 
@@ -379,7 +381,7 @@ class OsBackendStatelessClient(McpClientPort):
             stdin=stdin,
             cwd=self.server_cfg.get("cwd"),
             timeout=max(1, int(timeout)),
-            capture_max_chars=_CARRIER_CAPTURE_MAX_CHARS,
+            capture_max_chars=self._carrier_output_max_chars(),
         )
         if getattr(result, "stdout_hit_capture_cap", False):
             raise McpExecCarrierError(
@@ -402,6 +404,14 @@ class OsBackendStatelessClient(McpClientPort):
             f"stdio output (rc={getattr(result, 'return_code', None)}, "
             f"stderr={stderr})"
         )
+
+    def _carrier_output_max_chars(self) -> int:
+        """The MCP answer is transport, not a model-facing trace: it is parsed and
+        then bounded by ``tool_output_inline_max_chars`` like any tool output. So
+        it rides the backend's internal-channel ceiling (the one walk/listdir
+        use), not the 60k shell cap — a product catalog must not fail the call.
+        Backends without the attribute (local) get the protocol default."""
+        return int(getattr(self.os_backend, "walk_output_max_chars", WALK_OUTPUT_MAX_CHARS))
 
     def _interpret(self, result: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
         if getattr(result, "stdout_hit_capture_cap", False):

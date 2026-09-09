@@ -22,6 +22,7 @@ from gc_core.loop_detector.detector import (
     observe,
     resolve_thresholds,
 )
+from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
 def _state(**extra):
@@ -702,7 +703,9 @@ def test_accepted_turn_finish_clears_window(monkeypatch):
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.processing_responses import run_agent
     from gc_core.states import State
+    from gc_core import processing_responses as pr
 
+    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(
         intent_guard_guard,
         "validate_final_report_vs_user_intent",
@@ -836,6 +839,7 @@ def test_finish_gate_reject_keeps_window(monkeypatch):
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.states import State
 
+    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(
         intent_guard_guard,
         "validate_final_report_vs_user_intent",

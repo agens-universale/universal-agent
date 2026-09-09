@@ -101,8 +101,8 @@ class WrongFunctionArgumentsException(Exception):
         tool_label = f"`{self.tool_name}`" if self.tool_name else "tool"
         feedback = f"❌ Wrong arguments for {tool_label}: {self.message}\n\n"
 
-        args_display = self.received_args if self.received_args else "(empty)"
-        feedback += f"You sent: `{args_display}`\n\n"
+        # Исходные аргументы уже находятся в парном function_call и связаны с
+        # этим output через call_id. Не дублируем проблемный payload в контекст.
 
         if self.extra_hint:
             hint = str(self.extra_hint).strip()

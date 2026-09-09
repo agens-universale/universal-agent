@@ -84,8 +84,8 @@ def _extract_assistant_text(content: Any) -> str:
 
 
 def _output_marked_skipped(output: Any) -> bool:
-    """True, если output тула — synthetic skip штатно пропущенного финализатора
-    (processing_responses.split_at_first_finalizer): верхнеуровневый
+    """True, если output тула — synthetic skip лишнего ``turn_finish``
+    (processing_responses.partition_work_then_finish): верхнеуровневый
     ``"skipped": true`` в JSON-выводе. Единственный источник такого маркера в
     tool-output'ах — skip-путь; логи finish-gate и вложенная метка суммаризатора
     сюда не попадают (не function_call_output / не верхний уровень)."""
@@ -210,11 +210,10 @@ def map_message(
     name = tool_id(name)
     call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
 
-    # SKIPPED финализатор (processing_responses.split_at_first_finalizer): ход уже
-    # закрыт первым финализатором, второй в той же пачке пропущен. Ни его
-    # synthetic skip-output (маркер `skipped: true`), ни парный `function_call`
-    # (call_id в наборе) не рендерим — это служебный статус для модели/логов, не
-    # ошибка и не результат. В data_*.jsonl и raw-payload всё остаётся.
+    # SKIPPED turn_finish (processing_responses.partition_work_then_finish): лишний
+    # finish после первого или все finish после ask_human. Ни synthetic
+    # skip-output (`skipped: true`), ни парный `function_call` не рендерим —
+    # служебный статус, не ошибка. В data_*.jsonl и raw-payload всё остаётся.
     if typ == "function_call_output" and _output_marked_skipped(msg.get("output")):
         return None
     if typ == "function_call" and skipped_call_ids and call_id in skipped_call_ids:
@@ -313,11 +312,10 @@ def map_message(
         ):
             return None
 
-    # SUBMIT_SOLUTION output — глушим в двух случаях:
+    # SUBMIT_SOLUTION / turn_finish output — глушим в двух случаях:
     # 1. backend прислал `name == "submit_solution"` в output-payload (responses-mode).
-    # 2. синтетический output из append_cycle_stop_tool_outputs_for_batch
-    #    (chat_completions-mode): поля `name` нет, но output-JSON содержит
-    #    "tool": "submit_solution".
+    # 2. chat_completions: поля `name` нет, но output-JSON содержит
+    #    "tool": "submit_solution" (живой apply_tool; раньше — cycle-stop stub).
     # Раньше «TraceScreen отфильтрует по call_id» — это убирало виджет, но
     # сам TraceEvent с kind="result" доходил до _render_records и сбрасывал
     # sentinel _last_event_kind = "_finalized" (spec 2026-05-28-thinking-indicator-final-answer)

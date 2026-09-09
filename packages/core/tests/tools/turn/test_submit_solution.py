@@ -22,12 +22,11 @@ def test_turn_finish_success_full_solution():
             handoff='{"result":"ok"}',
         )
     )
-    assert res["ok"] is True
-    assert res["status"] == "submitted"
-    assert res["solution_type"] == "full_solution"
-    assert res["task"] == "Implement auth"
-    assert res["task_report"] == "Implemented auth. Created /login. Tests pass."
-    assert "comment" not in res or res.get("comment") == ""
+    assert res == {
+        "tool": "turn_finish",
+        "ok": True,
+        "status": "submitted",
+    }
 
 
 def test_turn_finish_success_with_comment():
@@ -41,13 +40,14 @@ def test_turn_finish_success_with_comment():
             handoff='{"progress":"partial"}',
         )
     )
-    assert res["ok"] is True
-    assert res["solution_type"] == "partial_solution"
-    assert res["task_report"] == "Fixed X and Y."
-    assert res["comment"] == "Z remains; recommend manual review."
+    assert res == {
+        "tool": "turn_finish",
+        "ok": True,
+        "status": "submitted",
+    }
 
 
-def test_turn_finish_normalize():
+def test_turn_finish_success_does_not_duplicate_normalized_arguments():
     tool = SubmitSolution()
     res = json.loads(
         tool(
@@ -57,9 +57,11 @@ def test_turn_finish_normalize():
             handoff='{"normalized":true}',
         )
     )
-    assert res["ok"] is True
-    assert res["task"] == "Implement auth\nsafely"
-    assert res["task_report"] == "Done.\nNext"
+    assert res == {
+        "tool": "turn_finish",
+        "ok": True,
+        "status": "submitted",
+    }
 
 
 def test_turn_finish_all_types():
@@ -73,8 +75,11 @@ def test_turn_finish_all_types():
                 handoff='{"t":"ok"}',
             )
         )
-        assert res["ok"] is True, f"solution_type={st}"
-        assert res["solution_type"] == st
+        assert res == {
+            "tool": "turn_finish",
+            "ok": True,
+            "status": "submitted",
+        }, f"solution_type={st}"
 
 
 def test_turn_finish_invalid_solution_type():
@@ -131,6 +136,17 @@ def test_turn_finish_task_report_too_long():
     )
     assert bad["ok"] is False
     assert bad["error"]["type"] == "limit_exceeded"
+    assert bad["error"]["message"] == "task_report exceeds 10000 chars, got 10001"
+
+
+def test_turn_finish_task_report_schema_names_char_budget():
+    spec = SubmitSolution.tool_description()
+    desc = spec["parameters"]["properties"]["task_report"]["description"]
+    assert "10000" in desc
+    prompt = SubmitSolution.prompt_description()
+    assert "10000" in prompt
+    required = spec["parameters"]["required"]
+    assert "task" in required
 
 
 def test_turn_finish_invalid_comment_type():
@@ -170,23 +186,12 @@ def test_turn_finish_task_is_optional_passthrough():
         tool(solution_type="full_solution", task_report="Done", handoff='{"x":1}')
     )
     assert out["ok"] is True
-    assert out["task"] is None
+    assert "task" not in out
     out = json.loads(
         tool(solution_type="full_solution", task="  ", task_report="Done", handoff='{"x":1}')
     )
     assert out["ok"] is True
-    assert out["task"] is None
-
-
-def test_cycle_stop_output_preserves_task():
-    output = SubmitSolution.output_from_cycle_stop_arguments(json.dumps({
-        "solution_type": "full_solution",
-        "task": "Implement auth",
-        "task_report": "Done",
-        "handoff": "{}",
-    }))
-    assert output is not None
-    assert json.loads(output)["task"] == "Implement auth"
+    assert "task" not in out
 
 
 def test_turn_finish_rejects_invalid_handoff_json():

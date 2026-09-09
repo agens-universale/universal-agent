@@ -79,8 +79,9 @@ class AgentConfig(BaseModel):
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
     # Размер каждого края front-loaded preview длинного потока (P). 0 — без preview.
     exec_output_preview_edge_chars: int = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
-    # Потолок приватного канала обхода дерева (Harbor: find -printf для walk/listdir),
-    # decoded chars. Переполнение — fail-closed (walk_too_large), не частичный список.
+    # Общий потолок внутренних exec-каналов бэкенда (decoded chars): обход дерева
+    # (Harbor: find -printf для walk/listdir), нативный grep, MCP-carrier под os_backend.
+    # Переполнение — fail-closed: walk_too_large / McpExecCarrierError, не частичный ответ.
     walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS
     # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
     inject_tool_fields: dict[str, str] = Field(default_factory=dict)

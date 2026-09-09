@@ -410,8 +410,8 @@ def test_group_into_turns_empty_and_orphans():
 def test_message_text_limited_truncates_to_max_message_chars():
     msg = {"role": "user", "content": "x" * 60000}
     text = message_text_limited(msg, 50000)
-    assert len(text) <= 50000 + len(" ... [TEXT CUTTED]")
-    assert text.endswith(" ... [TEXT CUTTED]")
+    assert text.startswith('<cutted_envelope truncated="true" shown_chars="50000"')
+    assert "TEXT CUTTED" not in text
 
 
 def test_build_history_text_includes_full_dialog_summary_under_per_message_cap():

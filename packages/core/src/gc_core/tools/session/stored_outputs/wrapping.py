@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from gc_core.config_modules.stored_outputs import get_tool_output_inline_max_chars
-from gc_core.constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME
+from gc_core.constants.tool_names import FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from gc_core.states import State
 from gc_core.tools.session.stored_outputs.envelope import PAGINATION_EOF_MARKER_DOC, dumps_stored_tool_output_payload, utf8_byte_length
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
@@ -27,7 +27,9 @@ def maybe_store_and_wrap_tool_output(
         inline_limit = max(inline_limit, 40000)
     if state.tool_call_outputs_store.is_disabled():
         return tool_res
-    if tool_name == READ_STORED_TOOL_OUTPUT_NAME:
+    # Управляющие ответы нельзя подменять envelope с собственным ok=True:
+    # вызывающий код принимает решение о границе хода по исходному ok.
+    if tool_name in (READ_STORED_TOOL_OUTPUT_NAME, FINISH_TOOL_NAME):
         return tool_res
 
     total_chars = len(tool_res)

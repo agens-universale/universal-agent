@@ -1,5 +1,6 @@
 """Подготовка истории диалога для LLM-промптов: ходы, батчи, хвост, XML-текст."""
 
+import html
 from typing import Any, Callable, Dict, List, TypeVar
 
 from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, is_technical_user_message_text, user_content_to_text
@@ -41,11 +42,51 @@ def truncate_text(text: str, max_chars: int) -> str:
     return text[:max_chars] + " ... [TEXT CUTTED]"
 
 
+_TOOL_BLOB_TYPES = frozenset(
+    {"function_call", "tool_call", "function_call_output", "tool_call_output"}
+)
+
+
+def _xml_escape_body(text: str) -> str:
+    return html.escape(text, quote=False)
+
+
+def _wrap_cutted_preview(dump: str, max_chars: int) -> str:
+    original = len(dump)
+    if max_chars <= 0 or original <= max_chars:
+        return dump
+    shown = dump[:max_chars]
+    return (
+        f'<cutted_preview shown_chars="{len(shown)}" original_chars="{original}">'
+        f"{_xml_escape_body(shown)}</cutted_preview>"
+    )
+
+
+def _wrap_cutted_envelope(text: str, max_chars: int) -> str:
+    original = len(text)
+    if max_chars <= 0 or original <= max_chars:
+        return text
+    shown = text[:max_chars]
+    return (
+        f'<cutted_envelope truncated="true" shown_chars="{len(shown)}" '
+        f'original_chars="{original}">{_xml_escape_body(shown)}</cutted_envelope>'
+    )
+
+
 def message_text_limited(message: Dict[str, Any], max_message_chars: int) -> str:
     text = strip_original_user_messages_block(message_text_for_summary(message))
-    if max_message_chars > 0:
-        return truncate_text(text, max_message_chars)
-    return text
+    if max_message_chars <= 0:
+        return text
+    msg_type = str(message.get("type") or "message") if isinstance(message, dict) else "message"
+    if msg_type in _TOOL_BLOB_TYPES:
+        header, sep, dump = text.partition("\n")
+        if sep:
+            preview = _wrap_cutted_preview(dump, max_message_chars)
+            assembled = f"{header}\n{preview}"
+            if preview == dump:
+                return _wrap_cutted_envelope(assembled, max_message_chars)
+            return assembled
+    return _wrap_cutted_envelope(text, max_message_chars)
 
 
 def build_history_text(

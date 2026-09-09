@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 from gc_core.intent_guard.guard import FinishGateDecision
 from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state
 from gc_core.intent_guard.validation_result import ValidationResult
-from gc_core.message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from gc_core.states import State
 from gc_core.thread_store import make_message_key
 from gc_core.tools.turn.submit_solution import SubmitSolution
@@ -26,17 +24,17 @@ def _make_state() -> State:
     )
 
 
-def test_apply_finish_gate_skipped_sets_runtime_outcome():
-    base = SubmitSolution.output_from_cycle_stop_arguments(
-        json.dumps(
-            {
-                "solution_type": "direct_answer",
-                "task_report": "ответ",
-                "handoff": "{}",
-            },
-            ensure_ascii=False,
-        )
+def _finish_output() -> str:
+    """Живой output тула turn_finish (валидные аргументы, статус submitted)."""
+    return SubmitSolution()(
+        solution_type="direct_answer",
+        task_report="готово",
+        handoff="{}",
     )
+
+
+def test_apply_finish_gate_skipped_sets_runtime_outcome():
+    base = _finish_output()
     patched = SubmitSolution.apply_finish_gate_decision(
         base, FinishGateDecision(outcome="skipped")
     )
@@ -45,16 +43,8 @@ def test_apply_finish_gate_skipped_sets_runtime_outcome():
 
 
 def test_finish_gate_persisted_once_after_apply_not_before():
-    """cycle_stop кладёт output в state без flush; после apply — один persist с gate."""
+    """Finish output кладётся в state без flush; после apply — один persist с gate."""
     state = _make_state()
-    arguments = json.dumps(
-        {
-            "solution_type": "direct_answer",
-            "task_report": "готово",
-            "handoff": "{}",
-        },
-        ensure_ascii=False,
-    )
     call_id = "call_finish"
     persisted: list[list[dict]] = []
     known: set[str] = set()
@@ -70,22 +60,30 @@ def test_finish_gate_persisted_once_after_apply_not_before():
         if batch:
             persisted.append(batch)
 
-    append_cycle_stop_tool_outputs_for_batch(
-        state=state,
-        ctx=SimpleNamespace(config_dict={}, logger=None, tools_data={}),
-        tool_calls=[
-            {
-                "type": "function_call",
-                "name": "turn_finish",
-                "arguments": arguments,
-                "call_id": call_id,
-                "id": "fc_finish",
-            }
-        ],
-        run_agent_func=lambda *_a, **_k: None,
-        persist_messages_callback=persist,
-        backend_mode="chat_completions",
-    )
+    # Живой путь контроллера: тул вернул output, контроллер положил его в state
+    # ДО gate (persist-once I3: без persist — патч и запись одним батчем).
+    state.messages = [
+        {
+            "type": "function_call",
+            "name": "turn_finish",
+            "arguments": json.dumps(
+                {
+                    "solution_type": "direct_answer",
+                    "task_report": "готово",
+                    "handoff": "{}",
+                },
+                ensure_ascii=False,
+            ),
+            "call_id": call_id,
+            "id": "fc_finish",
+        },
+        {
+            "id": "fco_finish",
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": _finish_output(),
+        },
+    ]
     assert persisted == [], "finish output не должен попасть в jsonl до apply gate"
 
     validation = ValidationResult(

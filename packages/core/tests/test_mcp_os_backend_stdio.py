@@ -26,9 +26,10 @@ class _StdioSandbox:
         self.lines = lines
         self.calls = []
 
-    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
+                  capture_max_chars=None):
         self.calls.append({"argv": list(argv), "stdin": stdin, "env": env,
-                           "timeout": timeout})
+                           "timeout": timeout, "capture_max_chars": capture_max_chars})
         return _ExecResult(stdout="\n".join(self.lines))
 
     def exec(self, command, *, cwd=None, timeout=None, env=None):
@@ -139,7 +140,8 @@ def test_stdio_no_matching_reply_is_an_error():
 
 def test_stdio_truncated_output_is_an_error():
     class _TruncatingSandbox(_StdioSandbox):
-        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
+                      capture_max_chars=None):
             return _ExecResult(stdout=_frame(1, {}), stdout_hit_capture_cap=True)
 
     client = OsBackendStatelessClient(
@@ -166,3 +168,16 @@ def test_stdio_never_probes_the_http_carrier():
     )
     client.list_tools(timeout=20.0)
     assert probes == []
+
+
+def test_stdio_carrier_uses_internal_channel_ceiling():
+    backend = _StdioSandbox([
+        _frame(1, {"protocolVersion": "2024-11-05"}),
+        _frame("gc-tools/list", {"tools": []}),
+    ])
+    backend.walk_output_max_chars = 12_345_678
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
+    )
+    client.list_tools(timeout=20.0)
+    assert backend.calls[-1]["capture_max_chars"] == 12_345_678

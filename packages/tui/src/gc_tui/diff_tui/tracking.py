@@ -302,9 +302,15 @@ class TrackingFsBackend:
         cwd: Optional[str] = None,
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
     ) -> Any:
+        # Прокидываем потолок захвата: без него внутренние каналы (MCP-carrier)
+        # молча падают на дефолт exec-тулы вместо своего 50M.
         return self._track_shell_delta(
-            lambda: self._inner.run_python(code, cwd=cwd, timeout=timeout, env=env)
+            lambda: self._inner.run_python(
+                code, cwd=cwd, timeout=timeout, env=env,
+                capture_max_chars=capture_max_chars,
+            )
         )
 
     def default_cwd(self) -> Optional[str]:
