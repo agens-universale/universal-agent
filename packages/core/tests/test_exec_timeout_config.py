@@ -50,21 +50,20 @@ def test_agent_config_preview_edge_rejects_negative():
         AgentConfig(exec_output_preview_edge_chars=-1)
 
 
-def test_agent_config_preview_edge_must_fit_capture_tail():
-    """P <= L - floor(L / 2), иначе край preview не лежит внутри capture."""
+def test_agent_config_preview_edge_is_clamped_to_capture_tail():
+    """P <= L - floor(L / 2); превышение зажимается, как и на плоском пути."""
     assert AgentConfig(
         exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=500
     ).exec_output_preview_edge_chars == 500
-    with pytest.raises(Exception):
-        AgentConfig(exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=501)
-
-
-def test_agent_config_zero_capture_allows_only_zero_preview():
     assert AgentConfig(
-        exec_output_capture_max_chars=0, exec_output_preview_edge_chars=0
-    ).exec_output_capture_max_chars == 0
-    with pytest.raises(Exception):
-        AgentConfig(exec_output_capture_max_chars=0, exec_output_preview_edge_chars=1)
+        exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=501
+    ).exec_output_preview_edge_chars == 500
+
+
+def test_agent_config_zero_capture_clamps_preview_to_zero():
+    assert AgentConfig(
+        exec_output_capture_max_chars=0, exec_output_preview_edge_chars=1
+    ).exec_output_preview_edge_chars == 0
 
 
 def test_agent_config_capture_max_rejects_negative():

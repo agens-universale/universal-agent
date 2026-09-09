@@ -328,8 +328,9 @@ class LocalFsBackend(FsBackend):
 # --- bounded process runner (spec D1/D2/D6/D9) ---
 # Потоки stdout/stderr читаются параллельно (thread-per-pipe), иначе большой
 # вывод в один pipe заблокирует другой (deadlock). На поток — bounded head+tail
-# accumulator ≤ capture_max_chars; середина отбрасывается, pipe дренируется до
-# EOF (НЕ kill). Без записи на диск.
+# accumulator ≤ capture_max_chars; середина отбрасывается, процесс НЕ убивается.
+# Чтение идёт до EOF, но результат снимается после ограниченного ожидания
+# читателей (см. _DRAIN_JOIN_TIMEOUT_SEC). Без записи на диск.
 
 _READ_CHUNK = 8192
 # Процесс уже мёртв (wait/kill), значит в pipe остался только его буфер — EOF

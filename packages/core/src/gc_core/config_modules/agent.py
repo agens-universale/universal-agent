@@ -166,19 +166,16 @@ class AgentConfig(BaseModel):
         return n
 
     @model_validator(mode="after")
-    def validate_preview_edge_fits_capture_tail(self) -> "AgentConfig":
+    def clamp_preview_edge_to_capture_tail(self) -> "AgentConfig":
         """P ≤ T = L - floor(L / 2): оба края preview обязаны лежать внутри capture.
 
         Иначе контракт обещал бы полный короткий канал, уже обрезанный меньшим
-        capture-cap.
+        capture-cap. Зажимаем, а не отвергаем: ту же нормализацию делает плоский
+        путь, где бросок случился бы уже внутри вызова тулы.
         """
         capture_tail = self.exec_output_capture_max_chars - self.exec_output_capture_max_chars // 2
         if self.exec_output_preview_edge_chars > capture_tail:
-            raise ValueError(
-                "agent.exec_output_preview_edge_chars не должен превышать хвост capture: "
-                f"{self.exec_output_preview_edge_chars} > {capture_tail} "
-                "(= exec_output_capture_max_chars - floor(exec_output_capture_max_chars / 2))"
-            )
+            self.exec_output_preview_edge_chars = capture_tail
         return self
 
     @field_validator("model_steering", mode="before")
