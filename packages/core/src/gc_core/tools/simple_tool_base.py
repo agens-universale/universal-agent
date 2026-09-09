@@ -24,7 +24,7 @@ class AbstractSimpleTool(ABC):
         backend = getattr(ctx, "os_backend", None)
         if backend is None:
             raise RuntimeError(
-                f"{type(self).__name__}: ctx.os_backend is missing; use create_run_context()"
+                f"{type(self).__name__}: ctx.os_backend is missing; use acreate_run_context()"
             )
         return backend
 
@@ -41,7 +41,7 @@ class AbstractSimpleTool(ABC):
         if not isinstance(workspace, ExecutionWorkspace):
             raise RuntimeError(
                 f"{type(self).__name__}: ctx.workspace is missing; "
-                f"create_run_context() must assemble ExecutionWorkspace"
+                f"acreate_run_context() must assemble ExecutionWorkspace"
             )
         return workspace
 

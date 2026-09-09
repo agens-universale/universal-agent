@@ -251,7 +251,7 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
     class _Ctx:
         # У настоящего RunContext бэкенд есть всегда; двойнику он нужен, потому что
         # TuiApp включает diff-журнал сам (attach_to_context) — раньше это делало
-        # ядро внутри create_run_context, то есть внутри подменённой функции.
+        # ядро внутри acreate_run_context, то есть внутри подменённой функции.
         os_backend = None
         tools_data = {}
         mcp_status = {}
@@ -265,12 +265,12 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
 
     seen_cfg = {}
 
-    def _fake_create_run_context(cfg, **kw):
+    async def _fake_acreate_run_context(cfg, **kw):
         seen_cfg.update(cfg)
         return _Ctx()
 
     monkeypatch.setattr("gc_core.config.build_auth_connector", lambda cfg: None)
-    monkeypatch.setattr("gc_core.run_context.create_run_context", _fake_create_run_context)
+    monkeypatch.setattr("gc_core.run_context.acreate_run_context", _fake_acreate_run_context)
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", _Ex)
 
     app._build_real_executor()

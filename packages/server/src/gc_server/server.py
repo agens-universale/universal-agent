@@ -9,7 +9,7 @@ import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from gc_core.run_context import acreate_run_context, create_run_context
+from gc_core.run_context import acreate_run_context
 from gc_core.agent_executor import AgentExecutor
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.config import build_auth_connector, cli_forces_legacy_model

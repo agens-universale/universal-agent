@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import copy
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -575,10 +576,10 @@ BASELINE = Case("baseline/default", "baseline", {}, "дефолтный конф
 ALL_CASES: List[Case] = [BASELINE, *SINGLE, *PAIRS]
 
 
-def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, Any]:
+async def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, Any]:
     """Один прогон. Возвращает наблюдаемое: ответ, дамп треда, meta, ошибку."""
     from gc_core.agent_executor import AgentExecutor
-    from gc_core.run_context import create_run_context
+    from gc_core.run_context import acreate_run_context
 
     work = tmp_root / case.id.replace("/", "__")
     cfg = parity_config(work, monkeypatch)
@@ -596,12 +597,12 @@ def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, Any]:
     backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))
     result: Dict[str, Any] = {"id": case.id, "area": case.area, "note": case.note}
     try:
-        ctx = create_run_context(cfg)
+        ctx = await acreate_run_context(cfg)
         executor = AgentExecutor(ctx)
         # СПИСОК сообщений, а не строка: arun принимает messages, и строка
         # разошлась бы на символы — user_intent_log записал бы каждую букву
         # отдельной записью. Так же оборачивает SDK-фасад (AsyncAgent.run).
-        answer = run_coro(executor.arun(["сделай что-нибудь"], thread_id=TID, system=SYS))
+        answer = await executor.arun(["сделай что-нибудь"], thread_id=TID, system=SYS)
         result["answer"] = strip_volatile(answer) if isinstance(answer, (dict, list)) else answer
         result["error"] = None
     except Exception as exc:                    # noqa: BLE001 — фиксируем ЛЮБОЙ отказ
@@ -627,7 +628,7 @@ def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, Any]:
     return result
 
 
-def run_all(tmp_root: Path) -> List[Dict[str, Any]]:
+async def run_all(tmp_root: Path) -> List[Dict[str, Any]]:
     """Прогнать всю матрицу. Каждый случай — со своим ``monkeypatch``."""
     from _pytest.monkeypatch import MonkeyPatch
 
@@ -635,7 +636,7 @@ def run_all(tmp_root: Path) -> List[Dict[str, Any]]:
     for case in ALL_CASES:
         mp = MonkeyPatch()
         try:
-            out.append(run_case(case, tmp_root, mp))
+            out.append(await run_case(case, tmp_root, mp))
         finally:
             mp.undo()
     return out
@@ -652,7 +653,7 @@ def main() -> None:
     if len(sys.argv) < 2:
         raise SystemExit("использование: python toggle_matrix.py <файл-результата>")
     root = Path(tempfile.mkdtemp(prefix="toggle-matrix-"))
-    results = run_all(root)
+    results = asyncio.run(run_all(root))
     Path(sys.argv[1]).write_text(
         json.dumps(results, ensure_ascii=False, indent=1, sort_keys=True),
         encoding="utf-8",

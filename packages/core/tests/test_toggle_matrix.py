@@ -110,10 +110,10 @@ def test_reference_covers_every_case(reference):
 
 
 @pytest.mark.parametrize("case", ALL_CASES, ids=lambda c: c.id)
-def test_toggle_matches_pre_async(case, reference, tmp_path, monkeypatch):
+async def test_toggle_matches_pre_async(case, reference, tmp_path, monkeypatch):
     """Один прогон на положение переключателей — против до-async эталона."""
     expected = reference[case.id]
-    actual = run_case(case, tmp_path, monkeypatch)
+    actual = await run_case(case, tmp_path, monkeypatch)
 
     for field in COMPARED:
         assert _normalize(actual.get(field)) == _normalize(expected.get(field)), (

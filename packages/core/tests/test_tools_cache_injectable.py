@@ -66,11 +66,11 @@ def test_build_tools_data_accepts_a_cache():
     """Контракт: параметр есть и у сборки тулов, и у сборки контекста."""
     import inspect
 
-    from gc_core.run_context import create_run_context
-    from gc_core.tools import build_tools_data
+    from gc_core.run_context import acreate_run_context
+    from gc_core.tools import abuild_tools_data
 
-    assert "tools_cache" in inspect.signature(build_tools_data).parameters
-    assert "tools_cache" in inspect.signature(create_run_context).parameters
+    assert "tools_cache" in inspect.signature(abuild_tools_data).parameters
+    assert "tools_cache" in inspect.signature(acreate_run_context).parameters
 
 
 def test_run_context_carries_the_cache():

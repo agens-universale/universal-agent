@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
-from gc_core.run_context import create_run_context
+from gc_core.run_context import acreate_run_context
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
@@ -20,7 +20,7 @@ async def test_child_ctx_inherits_trace_id(tmp_path):
         "trace_id": "wf-42",
         "use_local_subagents": True,
     }
-    parent_ctx = create_run_context(config)
+    parent_ctx = await acreate_run_context(config)
     # SubagentRunner(ctx, orchestrator_state, config_dict); _build_child_ctx
     # читает только self._ctx и self._config, поэтому state здесь — заглушка.
     runner = SubagentRunner(parent_ctx, SimpleNamespace(), config)

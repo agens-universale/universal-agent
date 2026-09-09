@@ -119,27 +119,43 @@ def test_acreate_is_not_a_thread_wrapper():
     )
 
 
-def test_both_context_forms_share_prepare_and_finish():
-    """Синхронная и асинхронная сборка обязаны делить подготовку и досборку.
+def test_context_assembly_has_exactly_one_form():
+    """Сборка контекста должна быть ОДНА и корутинная.
 
-    Иначе они разъедутся: у одной появится шаг, которого нет у другой, и
-    поведение CLI разойдётся с поведением сервера. Такое уже случалось —
-    см. раздел про расхождения в плане.
+    Раньше форм было две: синхронная `create_run_context` и корутинная. Тест
+    на их месте следил, чтобы они не разъехались — делят ли они
+    `_prepare_run_context` и `_finish_run_context`. Теперь стеречь нечего:
+    синхронная снята, и правильный инвариант сильнее — второй формы быть не
+    должно вовсе.
+
+    Держалась синхронная ради TUI, а docs объясняли её привязкой MCP-сессий к
+    loop'у. Обоснование было неверным: синхронная форма уводила дискавери в
+    `run_coro_blocking`, то есть на такой же одноразовый loop, умиравший до
+    первого хода. Настоящая причина была в том, что фабрика исполнителя в TUI
+    — обычная функция без своего loop; теперь она заводит его сама.
     """
     src = (REPO / "packages/core/src/gc_core/run_context.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
 
-    for name, kind in (
-        ("create_run_context", ast.FunctionDef),
-        ("_acreate_run_context_impl", ast.AsyncFunctionDef),
-    ):
-        fn = next(n for n in ast.walk(tree) if isinstance(n, kind) and n.name == name)
-        calls = {
-            getattr(c.func, "id", None) or getattr(c.func, "attr", None)
-            for c in ast.walk(fn) if isinstance(c, ast.Call)
-        }
-        for helper in ("_prepare_run_context", "_finish_run_context"):
-            assert helper in calls, f"{name} не зовёт {helper}"
+    sync_forms = [
+        n.name for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and "run_context" in n.name
+        and not n.name.startswith("_")
+    ]
+    assert sync_forms == [], f"вернулась синхронная сборка контекста: {sync_forms}"
+
+    build = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context"
+    )
+    calls = {
+        getattr(c.func, "id", None) or getattr(c.func, "attr", None)
+        for c in ast.walk(build) if isinstance(c, ast.Call)
+    }
+    for helper in ("_prepare_run_context", "_finish_run_context"):
+        assert helper in calls, f"acreate_run_context не зовёт {helper}"
+    assert "abuild_tools_data" in calls, "дискавери снова не ждётся"
+    assert "build_tools_data" not in calls
 
 
 def test_subagent_builds_use_the_async_form():

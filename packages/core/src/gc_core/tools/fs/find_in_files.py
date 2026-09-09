@@ -268,6 +268,15 @@ class FindInFiles(AbstractSimpleTool):
         exclude_dirs: Optional[List[str]] = None,
         show_excluded_dirs: bool = False,
     ) -> str:
+        # Пробы возможностей (`has_grep`/`has_find`/…) — СИНХРОННЫЕ свойства, и
+        # ниже по пути они читаются прямо на loop. Под медленной песочницей
+        # это до четырёх запусков процесса подряд (~10 с на пробу): агент
+        # выглядит зависшим на первом же инструменте, а loop всё это время
+        # стоит. Прогрев уводит их в поток один раз на процесс — дальше
+        # свойства отвечают из кэша, и читать их инлайн уже нечем платить.
+        warm = getattr(self._backend, "awarm_capabilities", None)
+        if callable(warm):
+            await warm()
         return await self._dispatch(
             path,
             pattern,

@@ -921,7 +921,7 @@ class SubagentRunner:
         if not isinstance(parent_workspace, ExecutionWorkspace):
             raise RuntimeError(
                 "SubagentRunner: parent ctx.workspace is missing; "
-                "create_run_context() must assemble ExecutionWorkspace"
+                "acreate_run_context() must assemble ExecutionWorkspace"
             )
         parent_backend = getattr(self._ctx, "os_backend", None) or parent_workspace.backend
         child_skills_registry = get_skills_registry(

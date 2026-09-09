@@ -84,7 +84,9 @@ class StepTimings:
     def attach(self) -> None:
         _install_once()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = self._path.open("a", encoding="utf-8")
+        fh = self._path.open("a", encoding="utf-8")
+        with self._lock:
+            self._fh = fh
         self._t0 = time.monotonic()
         _sinks[threading.get_ident()] = self
 
@@ -92,7 +94,8 @@ class StepTimings:
         for tid, sink in list(_sinks.items()):
             if sink is self:
                 del _sinks[tid]
-        fh, self._fh = self._fh, None
+        with self._lock:
+            fh, self._fh = self._fh, None
         if fh is not None:
             fh.close()
 
@@ -199,10 +202,14 @@ class StepTimings:
             )
 
     def _emit(self, record: dict) -> None:
-        fh = self._fh
-        if fh is None:
-            return
+        # Читаем дескриптор ПОД ТЕМ ЖЕ локом, под которым пишем. Снаружи была
+        # гонка на закрытии: `close()` успевал между чтением `self._fh` и
+        # входом в лок, и запись уходила в уже закрытый файл — ValueError из
+        # брошенного рабочего потока, который трайл переживает.
         with self._lock:
+            fh = self._fh
+            if fh is None:
+                return
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
             fh.flush()
 

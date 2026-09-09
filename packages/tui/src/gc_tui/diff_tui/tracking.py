@@ -235,6 +235,101 @@ class TrackingFsBackend(AsyncFileOps):
                 )
         return result
 
+    async def _atrack_shell_delta(self, run: Callable[[], Any]) -> Any:
+        """То же, но команда ждётся, а два `git status` уходят в поток.
+
+        Без этой формы `aexec_port()` не находил у обёртки `aexec` и
+        подставлял `SyncExecAdapter`: `to_thread(TrackingFsBackend.exec)` →
+        `LocalFsBackend.exec` → `run_coro_blocking(self.aexec)` → ЕЩЁ ОДИН
+        loop в потоке пула. Кооперативный стоп до подпроцесса не доходил, а
+        `asyncio.run` хода на выходе ждал `shutdown_default_executor`: после
+        Esc поток жил до таймаута команды.
+
+        `git_status` — это запуск git, то есть блокирующий вызов; на loop его
+        звать нельзя, поэтому обе пробы идут через `to_thread`.
+        """
+        import asyncio
+
+        before: set[str] | None = None
+        launch_root = ""
+        if self._active():
+            try:
+                launch_root, _, _, _ = _perimeter(self._ctx)
+                if launch_root and resolve_mode(launch_root) == "git-mode":
+                    entries = await asyncio.to_thread(git_ops.git_status, launch_root)
+                    before = {e.path for e in entries}
+            except Exception:
+                _logger.warning(
+                    "shell mutation scope: pre-status failed", exc_info=True
+                )
+                before = None
+        result = await run()
+        if before is not None:
+            try:
+                entries = await asyncio.to_thread(git_ops.git_status, launch_root)
+                after = {e.path for e in entries}
+                journal = self._journal()
+                if journal is not None:
+                    for rel in sorted(after - before):
+                        journal.add(rel)
+            except Exception:
+                _logger.warning(
+                    "shell mutation scope: post-status failed", exc_info=True
+                )
+        return result
+
+    async def aexec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> Any:
+        return await self._atrack_shell_delta(
+            lambda: self._inner.aexec(
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
+            )
+        )
+
+    async def aexec_argv(
+        self,
+        argv: list,
+        *,
+        stdin: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> Any:
+        return await self._atrack_shell_delta(
+            lambda: self._inner.aexec_argv(
+                argv,
+                stdin=stdin,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
+            )
+        )
+
+    async def arun_python(
+        self,
+        code: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+    ) -> Any:
+        return await self._atrack_shell_delta(
+            lambda: self._inner.arun_python(code, cwd=cwd, timeout=timeout, env=env)
+        )
+
     def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
         self._track_text_mutation(path)
         self._inner.write(path, content, encoding=encoding)

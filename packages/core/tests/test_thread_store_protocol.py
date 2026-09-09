@@ -219,19 +219,19 @@ def test_trace_record_has_all_six_fields(store):
 
 # --- сквозная проводка -----------------------------------------------------
 
-def test_store_reaches_the_context_and_session(tmp_path):
+async def test_store_reaches_the_context_and_session(tmp_path):
     """Хранилище доезжает от вызывающего до ``ThreadSession``.
 
-    Проверяем всю цепочку разом: ``create_run_context(thread_store=…)`` →
+    Проверяем всю цепочку разом: ``acreate_run_context(thread_store=…)`` →
     ``ctx.thread_store`` → ``ThreadSession.from_config(store=…)``. Разрыв в
     любом звене означал бы, что параметр принят и молча проигнорирован — самый
     неприятный вид поломки, потому что выглядит как работающая фича.
     """
-    from gc_core.run_context import create_run_context
+    from gc_core.run_context import acreate_run_context
     from gc_core.thread_store import ThreadSession
 
     store = MemoryThreadStore()
-    ctx = create_run_context(
+    ctx = await acreate_run_context(
         {"stop_tools": [], "backend_api_mode": "chat_completions", "save_logs": False},
         thread_store=store,
     )

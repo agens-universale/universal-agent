@@ -1075,7 +1075,7 @@ class TuiApp(App):
         """Build the real AgentExecutor from config. Called when no factory injected."""
         from gc_core.agent_executor import AgentExecutor
         from gc_core.config import build_auth_connector, cli_forces_legacy_model
-        from gc_core.run_context import create_run_context
+        from gc_core.run_context import acreate_run_context
         from gc_tui.services.mcp_progress import McpProgress
         cfg = self.effective_config()
         cfg["console_trace"] = False
@@ -1096,7 +1096,20 @@ class TuiApp(App):
             signal=lambda: self.call_from_thread(self._stream_signal),
             throttle_s=STREAM_REFRESH_MS / 1000,
         )
-        ctx = create_run_context(
+        # Своя `asyncio.run` на сборку — как и у хода ниже. Раньше здесь
+        # стояла ВТОРАЯ нативная сборка контекста (синхронная `create_run_context`),
+        # и docs объясняли её привязкой MCP-сессий к loop'у. Обоснование было
+        # неверным: синхронная сборка уводила дискавери в `run_coro_blocking`,
+        # то есть на такой же одноразовый loop, умиравший до первого хода.
+        # Настоящая причина была проще — эта функция синхронная и своего loop
+        # не имеет; фабрика зовётся в рабочем потоке раннера, где живого loop
+        # ещё нет, поэтому `asyncio.run` здесь законен.
+        #
+        # Отложенное решение (не в этой ветке): один долгоживущий loop в
+        # рабочем потоке на всё приложение. Он же убрал бы TLS-рукопожатие,
+        # которое TUI платит на каждое сообщение, закрывая пул после хода.
+        import asyncio
+        ctx = asyncio.run(acreate_run_context(
             cfg, auth_connector=auth, on_progress=progress.update,
             on_stream_delta=self._stream_pump.on_delta,
             is_tui=True,
@@ -1107,7 +1120,7 @@ class TuiApp(App):
             # (config.cli_forces_legacy_model); без него ран резолвил бы через
             # реестр, расходясь с честным хинтом /level (display_router).
             force_legacy=cli_forces_legacy_model(cfg),
-        )
+        ))
         # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
         from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
         _attach_diff(ctx, cfg)

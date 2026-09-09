@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from gc_core.run_context import create_run_context
+from gc_core.run_context import acreate_run_context
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult, FsBackend
 import threading
@@ -124,13 +124,13 @@ def test_default_cwd(be):
     assert be.default_cwd() == os.getcwd()
 
 
-def test_tool_backend_resolution():
+async def test_tool_backend_resolution():
     from types import SimpleNamespace
 
     from gc_core.tools.fs.read_file import ReadFile
 
     cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
-    ctx = create_run_context(cfg)
+    ctx = await acreate_run_context(cfg)
     t = CallableTool(ReadFile(ctx=ctx))
     assert isinstance(t._backend, LocalFsBackend)
     assert t._backend is ctx.os_backend

@@ -102,11 +102,14 @@ executor = AgentExecutor(ctx)      # берёт хранилище из ctx, о�
 ```python
 from gc_core.thread_store import ThreadSession
 
-session = ThreadSession.from_config(
+session = await ThreadSession.afrom_config(
     config_dict=cfg, system_id="cli", thread_id="t1", store=MyStore(),
 )
-session = await ThreadSession.afrom_config(...)   # асинхронный двойник
 ```
+
+Ядро зовёт только эту форму (`agent_executor`, `manual_compaction`).
+Синхронный двойник `from_config` остаётся как удобство для встраивающего без
+своего loop; на пути агента его нет.
 
 ### 5. `system_id` — не забыть
 
@@ -309,8 +312,13 @@ thread_store_blocking_loop store=MyStore slowest_method=append_messages
 ## Необязательная способность: архив перед компакцией
 
 Если у хранилища есть метод `archive_and_replace(system_id, thread_id,
-messages)`, компакция зовёт его. Если нет — история замещается через `reset` +
-`append_messages`, без архива.
+messages)` — или его асинхронная форма `aarchive_and_replace`, — компакция
+зовёт его. Если нет, история замещается через `replace_messages`: отдельная
+операция контракта, а не `reset` + `append_messages`.
+
+Разница существенная: `reset` по контракту сносит и трассу субагентов, а между
+ним и `save_meta` было окно, в котором meta отсутствовала целиком — падение
+процесса там теряло `created_at`, `tui` и `shared`.
 
 Так и задумано: «отложить прежнюю историю рядом» осмысленно для файлов, а у
 базы это либо отдельная таблица, либо не нужно вовсе. В основные одиннадцать

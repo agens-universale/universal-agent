@@ -146,13 +146,13 @@ class TestC2AgentExecutorFinally:
             "system_prompt_id": "v1",
         }
 
-    def test_collect_called_in_finally(self, monkeypatch, tmp_path):
+    async def test_collect_called_in_finally(self, monkeypatch, tmp_path):
         """gc.collect вызывается в finally AgentExecutor.run после close_all.
 
         Честный end-to-end: реальный AgentExecutor.run доходит до finally
         (run_agent замокан на немедленный выход), gc.collect перехвачен.
         """
-        from gc_core.run_context import create_run_context
+        from gc_core.run_context import acreate_run_context
         ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(ae, "gc",
@@ -162,15 +162,15 @@ class TestC2AgentExecutorFinally:
             return {"finished": True}
 
         monkeypatch.setattr(ae, "arun_agent", _arun_agent_stub)
-        ctx = create_run_context(self._make_cfg(tmp_path), auth_connector=None)
+        ctx = await acreate_run_context(self._make_cfg(tmp_path), auth_connector=None)
         ex = ae.AgentExecutor(ctx)
-        run_coro(ex.arun([{"role": "user", "content": "x"}],
-               thread_id="t", start_new_thread=True, system="cli"))
+        await ex.arun([{"role": "user", "content": "x"}],
+                      thread_id="t", start_new_thread=True, system="cli")
         assert len(gc_calls) == 1, "gc.collect должен вызваться в finally после close_all"
 
-    def test_collect_called_even_on_exception_in_run(self, monkeypatch, tmp_path):
+    async def test_collect_called_even_on_exception_in_run(self, monkeypatch, tmp_path):
         """finally срабатывает даже при исключении в теле run → gc.collect вызывается."""
-        from gc_core.run_context import create_run_context
+        from gc_core.run_context import acreate_run_context
         ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(ae, "gc",
@@ -179,11 +179,11 @@ class TestC2AgentExecutorFinally:
             raise RuntimeError("boom")
 
         monkeypatch.setattr(ae, "arun_agent", _arun_agent_boom)
-        ctx = create_run_context(self._make_cfg(tmp_path), auth_connector=None)
+        ctx = await acreate_run_context(self._make_cfg(tmp_path), auth_connector=None)
         ex = ae.AgentExecutor(ctx)
         with pytest.raises(RuntimeError):
-            run_coro(ex.arun([{"role": "user", "content": "x"}],
-                   thread_id="t", start_new_thread=True, system="cli"))
+            await ex.arun([{"role": "user", "content": "x"}],
+                          thread_id="t", start_new_thread=True, system="cli")
         assert len(gc_calls) == 1, "finally должен вызвать gc.collect даже при исключении"
 
 

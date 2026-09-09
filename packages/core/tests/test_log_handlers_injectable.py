@@ -95,9 +95,9 @@ def test_context_accepts_handlers():
     """Контракт: параметр есть и у сборки контекста."""
     import inspect
 
-    from gc_core.run_context import create_run_context
+    from gc_core.run_context import acreate_run_context
 
-    assert "log_handlers" in inspect.signature(create_run_context).parameters
+    assert "log_handlers" in inspect.signature(acreate_run_context).parameters
 
 
 @pytest.mark.asyncio

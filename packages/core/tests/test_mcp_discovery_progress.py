@@ -1,5 +1,6 @@
 import time
 from gc_core.tools.connect_mcp import registry as reg
+from gc_testkit import as_coro
 
 
 def test_on_progress_called_per_server(monkeypatch):
@@ -34,26 +35,31 @@ def test_on_progress_none_is_noop(monkeypatch):
     reg._build_tools_registry({"a": {"transport": "stdio", "command": "a"}}, discovery_timeout_sec=2)
 
 
-def test_on_progress_threads_through_build_tools_data(monkeypatch):
+async def test_on_progress_threads_through_build_tools_data(monkeypatch):
     from gc_core import tools as tools_pkg
+    from gc_core.tools.connect_mcp import agent_tools
+
     captured = {}
 
-    def fake_get_mcp(config_dict, on_progress=None, **_kwargs):
+    async def fake_get_mcp(config_dict, on_progress=None, **_kwargs):
         if on_progress:
             on_progress("srv", {"status": "connected"})
         return ({}, {})
-    monkeypatch.setattr(tools_pkg, "get_mcp_tools_data", fake_get_mcp)
-    tools_pkg.build_tools_data(
+    # Подменять надо КОРУТИННЫЙ шов: синхронного дискавери на этом пути
+    # больше нет, и подмена синхронного имени просто ничего не делала бы —
+    # тест ушёл бы в настоящую дискавери и покраснел «нет такого файла».
+    monkeypatch.setattr(agent_tools, "aget_mcp_tools_data_for_config", fake_get_mcp)
+    await tools_pkg.abuild_tools_data(
         {"mcp-servers": {"srv": {"transport": "stdio", "command": "x"}}},
         on_progress=lambda s, st: captured.__setitem__(s, st["status"]),
     )
     assert captured == {"srv": "connected"}
 
 
-def test_create_run_context_accepts_on_progress(monkeypatch):
+async def test_create_run_context_accepts_on_progress(monkeypatch):
     from gc_core import run_context as rc
     captured = []
-    monkeypatch.setattr(rc, "build_tools_data",
-                        lambda cfg, on_progress=None, **_kwargs: (captured.append(on_progress) or ({}, [], [], {})))
-    rc.create_run_context({"model": "M"}, on_progress=lambda s, st: None)
+    monkeypatch.setattr(rc, "abuild_tools_data", as_coro(
+        lambda cfg, on_progress=None, **_kwargs: (captured.append(on_progress) or ({}, [], [], {}))))
+    await rc.acreate_run_context({"model": "M"}, on_progress=lambda s, st: None)
     assert captured and callable(captured[0])

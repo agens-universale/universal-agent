@@ -94,9 +94,9 @@ def _make_executor_cfg(tmp_path):
     }
 
 
-def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
+async def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
     """executor.run(discard_writes_after_stop=True) выставляет state.discard_writes_after_stop=True."""
-    from gc_core.run_context import create_run_context
+    from gc_core.run_context import acreate_run_context
     from gc_core.agent_executor import AgentExecutor
 
     cfg = _make_executor_cfg(tmp_path)
@@ -106,17 +106,17 @@ def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
         return {"finished": True}
 
     monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
-    ctx = create_run_context(cfg, auth_connector=None)
+    ctx = await acreate_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    run_coro(ex.arun([{"role": "user", "content": "x"}],
-           thread_id="t", start_new_thread=True, system="cli",
-           discard_writes_after_stop=True))
+    await ex.arun([{"role": "user", "content": "x"}],
+                  thread_id="t", start_new_thread=True, system="cli",
+                  discard_writes_after_stop=True)
     assert ex._state.discard_writes_after_stop is True
 
 
-def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
+async def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     """Без kwarg — state.discard_writes_after_stop остаётся False."""
-    from gc_core.run_context import create_run_context
+    from gc_core.run_context import acreate_run_context
     from gc_core.agent_executor import AgentExecutor
 
     cfg = _make_executor_cfg(tmp_path)
@@ -125,8 +125,8 @@ def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
         return {"finished": True}
 
     monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
-    ctx = create_run_context(cfg, auth_connector=None)
+    ctx = await acreate_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    run_coro(ex.arun([{"role": "user", "content": "x"}],
-           thread_id="t", start_new_thread=True, system="cli"))
+    await ex.arun([{"role": "user", "content": "x"}],
+                  thread_id="t", start_new_thread=True, system="cli")
     assert ex._state.discard_writes_after_stop is False

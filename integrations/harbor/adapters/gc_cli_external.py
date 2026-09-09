@@ -16,6 +16,7 @@ Usage:
         --model openai/MiniMaxAI/MiniMax-M2.7
 """
 import asyncio
+import threading
 import json
 import os
 import re
@@ -187,6 +188,12 @@ class GcCliExternal(BaseAgent):
         self._api_base = api_base
         self._session_id = session_id
         self._overrides = dict(gc_cli_config or {})
+        # Отмену трайла могут попросить, пока идёт сборка контекста (дискавери
+        # до 120 с), — то есть ДО того, как появится executor, которому можно
+        # сказать stop_run(). Флаг закрывает это окно; лок нужен потому, что
+        # ставит его loop Harbor, а читает рабочий поток агента.
+        self._cancel_lock = threading.Lock()
+        self._cancelled = False
 
     @staticmethod
     def name() -> str:
@@ -595,16 +602,33 @@ class GcCliExternal(BaseAgent):
 
         async def _agent_run():
             nonlocal executor
-            ctx = await acreate_run_context(
-                config_dict,
-                environment=environment,
-                loop=loop,
-                on_messages_evicted=_on_messages_evicted,
-            )
-            self._write_skills_debug(ctx, skill_sources)
-            executor = AgentExecutor(ctx)
-            await executor.arun([instruction])
-            return executor.get_state()
+            from gc_core.utils.async_http import aclose_clients
+
+            try:
+                ctx = await acreate_run_context(
+                    config_dict,
+                    environment=environment,
+                    loop=loop,
+                    on_messages_evicted=_on_messages_evicted,
+                )
+                self._write_skills_debug(ctx, skill_sources)
+                executor = AgentExecutor(ctx)
+                # Отмену могли попросить, пока шла дискавери (до 120 с): тогда
+                # `stop_run()` звать было НЕ НА ЧЁМ — `executor` ещё не был
+                # присвоен, — и поток спокойно уходил в `arun` уже после того,
+                # как его отменили. Флаг ставится под тем же локом, что и
+                # чтение здесь.
+                with self._cancel_lock:
+                    if self._cancelled:
+                        return executor.get_state()
+                await executor.arun([instruction])
+                return executor.get_state()
+            finally:
+                # Пул httpx этого loop закрываем ЗДЕСЬ: `asyncio.run` ниже
+                # убьёт loop, а реестр клиентов ключуется по нему. Без этого
+                # клиент трайла жил до сборщика и всплывал «Event loop is
+                # closed» в чужом месте.
+                await aclose_clients()
 
         def _run_loop():
             timings.attach()  # sink routing is per thread — bind inside the worker
@@ -632,6 +656,8 @@ class GcCliExternal(BaseAgent):
         try:
             state = await fut
         except asyncio.CancelledError:
+            with self._cancel_lock:
+                self._cancelled = True
             if executor is not None:
                 executor.stop_run()
             try:

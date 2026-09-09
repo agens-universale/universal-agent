@@ -8,7 +8,7 @@ from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, ch
 from gc_core.utils.prod_auth import AuthConnector
 from gc_core.utils.logging_module import create_run_logger
 from gc_core.utils.logging_module import generate_run_id
-from gc_core.tools import build_tools_data
+from gc_core.tools import abuild_tools_data
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
@@ -83,7 +83,7 @@ class RunContext:
     mcp_session_owner: str = ""
 
 
-def create_run_context(
+async def acreate_run_context(
     config_dict: Dict[str, Any],
     *,
     auth_connector: Optional[AuthConnector] = None,
@@ -102,7 +102,31 @@ def create_run_context(
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
 ) -> RunContext:
-    """
+    """Собрать RunContext, не блокируя event loop.
+
+    Настоящая корутина, а не ``to_thread`` над синхронной сборкой. Прежняя
+    форма работала (loop был свободен), но стоила дорого: замер давал 8 event
+    loop'ов и пик в 10 потоков на ОДНУ сборку — воркер пула, внутри него
+    ``asyncio.run``, а под ним по демон-потоку на сервер и ещё по ``asyncio.run``
+    в каждом. Нативный путь даёт ту же латентность при 1 loop и 5 потоках.
+
+    И уходит ловушка: отмена ожидания возвращала управление не сразу, а через
+    сотни миллисекунд — ``asyncio.run`` дожидался брошенного воркера
+    дефолтного пула (``shutdown_default_executor``). Это ровно то, что уровнем
+    ниже запрещает ``abandonable``, а на уровне контекста возвращалось обратно.
+
+    Дорогая часть здесь одна — MCP-дискавери; остальное занимает 2.4–6.9 мс и
+    остаётся синхронным, потому что это словари в памяти и короткий локальный
+    I/O (лог-файл, проба прав на запись в корне проекта).
+
+    Синхронного двойника у сборки БОЛЬШЕ НЕТ. Он держался ради TUI, и docs
+    объясняли его привязкой MCP-сессий к loop'у — обоснование было неверным:
+    синхронная форма уводила дискавери в `run_coro_blocking`, то есть на
+    такой же одноразовый loop. Настоящая причина была в том, что фабрика
+    исполнителя в TUI — обычная функция без своего loop; теперь она заводит
+    его сама (`asyncio.run`), как уже делает на каждый ход.
+
+
     Создать RunContext для одного запуска агента.
 
     - Тулы (tools_data, tools_spec, tools_description) собираются заново на
@@ -124,51 +148,6 @@ def create_run_context(
       поверх непустого реестра моделей отключает резолв уровней/алиасов на этот
       запуск (детект — ``config.cli_forces_legacy_model``).
     """
-    prep = _prepare_run_context(
-        config_dict, run_id=run_id, environment=environment, loop=loop,
-        os_backend=os_backend, log_handlers=log_handlers,
-    )
-    with use_owner(prep.mcp_session_owner):
-        tools = build_tools_data(
-            config_dict,
-            on_progress=on_progress,
-            os_backend=prep.backend,
-            skills_registry=prep.skills_registry,
-            logger=prep.run_logger,
-            tools_cache=tools_cache,
-        )
-    return _finish_run_context(
-        config_dict, prep, tools,
-        auth_connector=auth_connector, environment=environment,
-        on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
-        is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
-        level_provider=level_provider, circuit_breaker=circuit_breaker,
-        force_legacy=force_legacy,
-    )
-
-
-async def _acreate_run_context_impl(
-    config_dict: Dict[str, Any],
-    *,
-    auth_connector: Optional[AuthConnector] = None,
-    run_id: Optional[str] = None,
-    on_progress=None,
-    environment: Optional[Any] = None,
-    loop: Optional[Any] = None,
-    os_backend: Optional[FsBackend] = None,
-    on_stream_delta=None,
-    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
-    is_tui: bool = False,
-    tools_cache: Any = None,
-    log_handlers: Any = None,
-    thread_store: Any = None,
-    level_provider: Optional[Callable[[], str]] = None,
-    circuit_breaker: Optional[CircuitBreaker] = None,
-    force_legacy: bool = False,
-) -> RunContext:
-    """Тело асинхронной сборки: то же, что синхронное, но дискавери — await."""
-    from gc_core.tools import abuild_tools_data
-
     prep = _prepare_run_context(
         config_dict, run_id=run_id, environment=environment, loop=loop,
         os_backend=os_backend, log_handlers=log_handlers,
@@ -408,29 +387,7 @@ def _finish_run_context(
     return ctx
 
 
-async def acreate_run_context(config_dict: Dict[str, Any], **kwargs: Any) -> RunContext:
-    """Собрать RunContext, не блокируя event loop.
-
-    Настоящая корутина, а не ``to_thread`` над синхронной сборкой. Прежняя
-    форма работала (loop был свободен), но стоила дорого: замер давал 8 event
-    loop'ов и пик в 10 потоков на ОДНУ сборку — воркер пула, внутри него
-    ``asyncio.run``, а под ним по демон-потоку на сервер и ещё по ``asyncio.run``
-    в каждом. Нативный путь даёт ту же латентность при 1 loop и 5 потоках.
-
-    И уходит ловушка: отмена ожидания возвращала управление не сразу, а через
-    сотни миллисекунд — ``asyncio.run`` дожидался брошенного воркера
-    дефолтного пула (``shutdown_default_executor``). Это ровно то, что уровнем
-    ниже запрещает ``abandonable``, а на уровне контекста возвращалось обратно.
-
-    Дорогая часть здесь одна — MCP-дискавери; остальное занимает 2.4–6.9 мс и
-    остаётся синхронным, потому что это словари в памяти и короткий локальный
-    I/O (лог-файл, проба прав на запись в корне проекта).
-    """
-    return await _acreate_run_context_impl(config_dict, **kwargs)
-
-
 __all__ = [
     "RunContext",
     "acreate_run_context",
-    "create_run_context",
 ]
