@@ -251,6 +251,10 @@ class PersistentStdioSession:
                 self._proc.wait(timeout=0.1)
             except Exception:
                 pass
+            # И его читателя: реестр ключуется по id трубы, а запись мёртвого
+            # процесса иначе оставалась там навсегда. Сервер, который падает
+            # и перезапускается, копил бы их без предела.
+            forget_stdio_reader(getattr(self._proc, "stdout", None))
             self._proc = None
 
         self._proc = _spawn_detached_stdio_process(self._server_cfg)
@@ -563,6 +567,22 @@ class PersistentStdioRegistry:
             keys = [k for k in self._sessions if k[0] == owner]
             return [self._sessions.pop(k) for k in keys]
 
+    def _take_one_own(self):
+        """Снять ОДНУ сессию текущего владельца. ``None`` — своих больше нет.
+
+        По одной, а не пачкой, ради устойчивости к отмене: ``aclose_all``
+        вынимал все сразу и закрывал последовательно, и ``CancelledError``
+        посреди списка оставлял остаток ВНЕ реестра — то есть незакрытым и
+        уже никому не видимым. Для playwright это значит, что Chromium
+        переживает агента.
+        """
+        owner = current_owner()
+        with self._lock:
+            for key in list(self._sessions):
+                if key[0] == owner:
+                    return self._sessions.pop(key)
+        return None
+
     def close_all(self) -> None:
         """Закрыть сессии текущего владельца. Синхронный вход."""
         for session in self._take_own():
@@ -580,9 +600,18 @@ class PersistentStdioRegistry:
         поток не нужен. Форма та же, что у ``stream_client``: синхронный
         ``close_all`` рядом с ``aclose_all``.
         """
-        for session in self._take_own():
+        while True:
+            session = self._take_one_own()
+            if session is None:
+                break
             try:
-                await session.aclose()
+                # `shield`: закрытие сессии обязано ДОЙТИ до конца, даже если
+                # вызывающего сняли прямо сейчас. Это `finally` цикла агента,
+                # и оборванный на середине teardown оставляет чужой процесс
+                # (браузер) жить дальше.
+                await asyncio.shield(session.aclose())
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 pass
 

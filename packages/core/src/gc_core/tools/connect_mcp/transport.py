@@ -578,6 +578,15 @@ async def _astdio_exchange(
                 await _aread_response(proc, timeout, payload.get("id"))
             )
     finally:
+        # Закрываем stdin ДО терминации: многие серверы по EOF корректно
+        # завершают свой event loop сами, и тогда SIGTERM/SIGKILL не нужны
+        # вовсе. Долгоживущая сессия так и делает (`_close_stdin`), а
+        # одноразовый обмен — нет, хотя процесс тот же.
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except Exception:
+            pass
         await _akill_process(proc)
     return results
 

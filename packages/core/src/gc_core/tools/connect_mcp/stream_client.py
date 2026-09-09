@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import asyncio
+import os
+import logging
 import weakref
 from urllib.parse import urlsplit, urlunsplit
 
@@ -20,6 +22,10 @@ from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.transport import _resolve_command
+
+#: Логгер модуля: сюда уходит предупреждение о нарушенном инварианте
+#: «сессия закрывается в той же задаче, где открыта».
+_LOGGER = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +65,8 @@ class _PersistentSessionManager:
         self._cm_stacks: Dict[tuple, Any] = {}
         # key -> weakref на loop: голого id мало, они переиспользуются.
         self._loops: Dict[tuple, Any] = {}
+        # key -> weakref на задачу, в которой сессию открыли.
+        self._tasks: Dict[tuple, Any] = {}
 
     @staticmethod
     def _loop_id() -> int:
@@ -97,6 +105,12 @@ class _PersistentSessionManager:
     def set_session(self, server_key: str, session: Any, cm_stack: Any) -> None:
         key = self._key(server_key)
         self._loops[key] = weakref.ref(asyncio.get_running_loop())
+        # Задача-владелец: сессию надо закрывать там же, где открыли —
+        # см. `_aclose_stack`. Слабая ссылка, чтобы не держать задачу живой.
+        try:
+            self._tasks[key] = weakref.ref(asyncio.current_task())
+        except (RuntimeError, TypeError):
+            self._tasks.pop(key, None)
         self._sessions[key] = session
         self._cm_stacks[key] = cm_stack
 
@@ -108,6 +122,7 @@ class _PersistentSessionManager:
             return None
         self._sessions.pop(key, None)
         self._loops.pop(key, None)
+        self._tasks.pop(key, None)
         return self._cm_stacks.pop(key, None)
 
     async def ainvalidate(self, server_key: str) -> None:
@@ -131,9 +146,15 @@ class _PersistentSessionManager:
         Закрываем сами и молча: стек всё равно уже негоден, а ошибки закрытия
         не должны подменять исходную причину, из-за которой сессию сносят.
         """
+        try:
+            owner_task = self._tasks.pop(self._key(server_key), None)
+        except RuntimeError:
+            owner_task = None
         cms = self._take(server_key)
         if cms is not None:
-            await self._aclose_stack(cms)
+            await self._aclose_stack(
+                cms, opened_in=owner_task() if owner_task is not None else None
+            )
 
     def invalidate(self, server_key: str) -> None:
         """Синхронный вход: только забыть, закрыть здесь нечем.
@@ -144,9 +165,34 @@ class _PersistentSessionManager:
         """
         self._take(server_key)
 
-    async def _aclose_stack(self, cms: Any) -> None:
-        # cm_stack — кортеж контекст-менеджеров в порядке открытия;
-        # закрываем в обратном, глотая ошибку по каждому.
+    async def _aclose_stack(self, cms: Any, *, opened_in: Any = None) -> None:
+        """Закрыть стек в обратном порядке, глотая ошибку по каждому.
+
+        Про ``opened_in``. У сессии есть НЕВЫСКАЗАННЫЙ инвариант: открывать и
+        закрывать её надо в ОДНОЙ задаче. Внутри стека anyio task group, и
+        выход из cancel scope в чужой задаче даёт ``RuntimeError``, который
+        мы здесь же и глотаем — то есть сессия остаётся незакрытой МОЛЧА.
+
+        Сегодня инвариант держится сам собой: тулы ждутся инлайн, и закрытие
+        приходит из той же задачи. Сломает его первый же параллельный
+        диспетчер или ``asyncio.wait_for`` у встраивающего — и сломает без
+        единой строки в логе. Поэтому сверяем задачу и предупреждаем: молчать
+        о нарушенном инварианте хуже, чем шуметь.
+        """
+        if opened_in is not None:
+            try:
+                here = asyncio.current_task()
+            except RuntimeError:
+                here = None
+            if here is not None and here is not opened_in:
+                _LOGGER.warning(
+                    "MCP-сессия закрывается не в той задаче, где открыта "
+                    "(открыта в %r, закрывается в %r). Внутри стека anyio "
+                    "task group: выход из cancel scope в чужой задаче даёт "
+                    "RuntimeError, и сессия может остаться незакрытой.",
+                    getattr(opened_in, "get_name", lambda: opened_in)(),
+                    getattr(here, "get_name", lambda: here)(),
+                )
         for cm in reversed(cms):
             try:
                 await cm.__aexit__(None, None, None)
@@ -170,8 +216,17 @@ class _PersistentSessionManager:
         for key in keys:
             cms = self._cm_stacks.pop(key, None)
             self._sessions.pop(key, None)
+            self._loops.pop(key, None)
+            owner_ref = self._tasks.pop(key, None)
             if cms is not None:
-                await self._aclose_stack(cms)
+                # `shield` по той же причине, что и у stdio: teardown зовётся
+                # из `finally` цикла агента, и отмена посреди закрытия
+                # оставляет соединение и его anyio task group висеть.
+                await asyncio.shield(
+                    self._aclose_stack(
+                        cms, opened_in=owner_ref() if owner_ref is not None else None
+                    )
+                )
 
     def close_all(self) -> None:
         """Отпустить ВСЕ сессии, включая чужие. Для завершения процесса и тестов.
@@ -243,22 +298,54 @@ def _make_httpx_factory(
     cert: Optional[Tuple[str, str]] = None,
     *,
     trust_env: bool = True,
+    url: str = "",
 ):
     """
     Фабрика httpx-клиентов с управляемой проверкой SSL и клиентским сертификатом.
     Совместима с сигнатурой httpx_client_factory из MCP SDK.
+
+    ``trust_env`` здесь НЕ передаётся в httpx напрямую, и это правка по факту.
+    Флаг включал сразу две вещи: прокси из окружения (что и требовалось) и
+    чтение ``~/.netrc`` (чего не требовалось никогда). Basic-auth из netrc
+    перетирает явный ``Authorization: Bearer``, которым MCP и авторизуется, —
+    ровно та ловушка, ради которой всё остальное ядро живёт с
+    ``trust_env=False``. Плюс расхождение было МОЛЧАЛИВЫМ: одноразовый
+    транспорт ставил ``False``, персистентный ``True``, и переключение
+    ``persistent_session`` меняло поведение прокси и mTLS без единого слова.
+
+    Теперь контракт один: netrc не читаем никогда, прокси резолвим явно тем
+    же ``resolve_proxies``, что и остальное ядро, — то есть с учётом
+    ``NO_PROXY`` и без сюрпризов для loopback-адресов.
     """
+    from gc_core.utils.http_proxy import resolve_proxies
+
+    # Loopback проверяем ЗДЕСЬ, а не только у вызывающего: правило «локальный
+    # MCP-демон мимо прокси» должно жить в одном месте, иначе прямой вызов
+    # фабрики (тест, новый вызывающий) тихо отправит localhost через socks5h.
+    use_env_proxy = bool(trust_env and url and _trust_env_for_url(url))
+    proxies = resolve_proxies(None, dict(os.environ), url) if use_env_proxy else None
 
     def factory(headers: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None, auth: Any = None):
+        ssl_context = httpx.create_ssl_context(verify=verify)
         kwargs: Dict[str, Any] = dict(
             headers=headers,
             timeout=timeout,
             auth=auth,
-            verify=httpx.create_ssl_context(verify=verify),
-            trust_env=trust_env,
+            verify=ssl_context,
+            trust_env=False,
         )
         if cert is not None:
             kwargs["cert"] = cert
+        if proxies:
+            # Тот же ssl-контекст, что и у основного клиента: прокси не повод
+            # ослаблять проверку сертификата.
+            kwargs["mounts"] = {
+                f"{scheme}://": httpx.AsyncHTTPTransport(
+                    proxy=proxy_url, verify=ssl_context, trust_env=False
+                )
+                for scheme, proxy_url in proxies.items()
+                if proxy_url
+            }
         return httpx.AsyncClient(**kwargs)
 
     return factory
@@ -278,16 +365,37 @@ def _make_stream_http_client(
     В этой версии streamable_http_client принимает http_client и
     не принимает headers/timeout/httpx_client_factory напрямую.
     """
+    from gc_core.utils.http_proxy import resolve_proxies
+
     headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
+    ssl_context = httpx.create_ssl_context(verify=verify)
+
+    # Контракт тот же, что у фабрики выше: netrc не читаем никогда
+    # (`trust_env=False`), прокси резолвим явно. Иначе `persistent_session`
+    # молча менял бы поведение прокси и mTLS относительно одноразового
+    # транспорта, у которого `trust_env=False` стоял всегда.
+    proxies = (
+        resolve_proxies(None, dict(os.environ), base_url)
+        if (base_url and _trust_env_for_url(base_url))
+        else None
+    )
 
     kwargs: Dict[str, Any] = dict(
         headers=headers or None,
         timeout=timeout,
-        verify=httpx.create_ssl_context(verify=verify),
-        trust_env=_trust_env_for_url(base_url),
+        verify=ssl_context,
+        trust_env=False,
     )
     if cert is not None:
         kwargs["cert"] = cert
+    if proxies:
+        kwargs["mounts"] = {
+            f"{scheme}://": httpx.AsyncHTTPTransport(
+                proxy=proxy_url, verify=ssl_context, trust_env=False
+            )
+            for scheme, proxy_url in proxies.items()
+            if proxy_url
+        }
 
     return httpx.AsyncClient(**kwargs)
 
@@ -347,6 +455,7 @@ async def _list_tools_stream_sse_async(
         verify,
         cert=cert,
         trust_env=_trust_env_for_url(base_url),
+        url=base_url,
     )
 
     async with (
@@ -438,6 +547,7 @@ async def _call_tool_stream_sse_async(
         verify,
         cert=cert,
         trust_env=_trust_env_for_url(base_url),
+        url=base_url,
     )
 
     async with (
@@ -528,6 +638,7 @@ async def _call_tool_stream_sse_persistent(
             verify,
             cert=cert,
             trust_env=_trust_env_for_url(base_url),
+            url=base_url,
         )
         transport_cm = sse_client(
             endpoint,

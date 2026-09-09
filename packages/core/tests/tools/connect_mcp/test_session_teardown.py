@@ -138,3 +138,123 @@ async def test_aclose_still_takes_the_process_when_the_lock_is_free():
     await session.aclose()
 
     assert session._proc is None
+
+
+# --- M15: teardown устойчив к отмене ---------------------------------------
+
+
+async def test_teardown_finishes_even_when_the_caller_is_cancelled():
+    """Закрытие сессий обязано ДОЙТИ до конца: это `finally` цикла агента.
+
+    Раньше `aclose_all` вынимал сессии пачкой и закрывал последовательно:
+    `CancelledError` посреди списка оставлял остаток ВНЕ реестра — то есть
+    незакрытым и уже никому не видимым. Для playwright это значит, что
+    Chromium переживает агента.
+    """
+    closed: list = []
+
+    class _SlowSession:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def aclose(self) -> None:
+            await asyncio.sleep(0.05)
+            closed.append(self._name)
+
+    registry = ps.PersistentStdioRegistry()
+    from gc_core.mcp_session_owner import current_owner
+
+    owner = current_owner()
+    for name in ("a", "b", "c"):
+        registry._sessions[(owner, name)] = _SlowSession(name)
+
+    task = asyncio.create_task(registry.aclose_all())
+    await asyncio.sleep(0.02)                  # дать начать первую
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # `shield` не задерживает отмену — он лишь не даёт ей прервать закрытие,
+    # и то доигрывает в фоне. Ждём именно этого: смысл не в «успело до
+    # возврата», а в «дошло до конца».
+    for _ in range(50):
+        if closed:
+            break
+        await asyncio.sleep(0.02)
+
+    # Первая закрылась под shield; остальные ОСТАЛИСЬ В РЕЕСТРЕ, а не пропали.
+    assert closed == ["a"], closed
+    left = [k for k in registry._sessions if k[0] == owner]
+    assert len(left) == 2, f"остаток потерян: {registry._sessions}"
+
+
+async def test_teardown_closes_everything_when_not_cancelled():
+    """Обычный путь не изменился: все свои сессии закрыты и сняты с реестра."""
+    closed: list = []
+
+    class _Session:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def aclose(self) -> None:
+            closed.append(self._name)
+
+    registry = ps.PersistentStdioRegistry()
+    from gc_core.mcp_session_owner import current_owner
+
+    owner = current_owner()
+    for name in ("a", "b"):
+        registry._sessions[(owner, name)] = _Session(name)
+
+    await registry.aclose_all()
+
+    assert sorted(closed) == ["a", "b"], closed
+    assert not [k for k in registry._sessions if k[0] == owner]
+
+
+# --- M14: закрытие не в своей задаче не должно проходить молча -------------
+
+
+async def test_closing_from_a_foreign_task_warns(caplog):
+    """Инвариант «открыли и закрыли в одной задаче» обязан быть слышен.
+
+    Внутри стека anyio task group: выход из cancel scope в чужой задаче даёт
+    `RuntimeError`, который `_aclose_stack` глотает, — сессия остаётся
+    незакрытой МОЛЧА. Сегодня инвариант держится сам собой (тулы ждутся
+    инлайн), но сломает его первый же параллельный диспетчер.
+    """
+    import logging
+
+    manager = sc._PersistentSessionManager()
+
+    async def _open() -> None:
+        manager.set_session("srv", object(), (_Stack([], "t"),))
+
+    await asyncio.create_task(_open())         # открыли в ОДНОЙ задаче
+
+    with caplog.at_level(logging.WARNING):
+        await manager.ainvalidate("srv")       # закрываем в ДРУГОЙ
+
+    assert any("не в той задаче" in r.getMessage() for r in caplog.records), [
+        r.getMessage() for r in caplog.records
+    ]
+
+
+async def test_closing_in_the_same_task_is_silent():
+    """Обратная половина: правильный порядок не должен шуметь."""
+    import logging
+
+    manager = sc._PersistentSessionManager()
+    manager.set_session("srv", object(), (_Stack([], "t"),))
+
+    logger = logging.getLogger("gc_core.tools.connect_mcp.stream_client")
+    records: list = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger.addHandler(handler)
+    try:
+        await manager.ainvalidate("srv")
+    finally:
+        logger.removeHandler(handler)
+
+    assert records == [], [r.getMessage() for r in records]
