@@ -26,9 +26,6 @@ def _restore_tools_and_dependents() -> None:
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
-    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
-    if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = real_tools.apply_tool
 
 
 def _stub_tools_modules() -> None:

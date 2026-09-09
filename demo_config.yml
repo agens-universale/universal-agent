@@ -91,6 +91,10 @@ backend:
   # Слать ли провайдеру поле function.strict в схемах тулов.
   # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
   send_tool_strict: true
+  # Разметка prompt cache для claude-моделей в главном цикле: не задано — авто по id
+  # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
+  # отвергает разметку; можно на одну модель: models.<alias>.backend).
+  # claude_prompt_cache: false
   # Vendor-specific параметры. Настраивайте под свой провайдер.
   chat_completion_kwargs:
     temperature: 0.7
@@ -262,8 +266,9 @@ agent:
   # finish_gate_use_rule_hints: false  # rule-layer без LLM — вне v1
   tool_output_inline_max_chars: 10000
   stored_tool_outputs_max_entries: 50
-  # Потолок приватного канала обхода дерева в Harbor (символы вывода find за один
-  # обход); при превышении — walk_too_large, сузить path / exclude_dirs.
+  # Общий потолок внутренних exec-каналов бэкенда (символы): обход дерева в Harbor
+  # (find), нативный grep и MCP-carrier под os_backend. Превышение — fail-closed:
+  # walk_too_large для обхода, McpExecCarrierError для MCP-вызова.
   walk_output_max_chars: 50000000
   # Дефолтный таймаут execute_command / run_python_code (сек), если модель
   # не передала timeout_seconds. Harbor/длинные бенчи обычно ставят 600.

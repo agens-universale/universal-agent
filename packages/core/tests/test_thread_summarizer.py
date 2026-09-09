@@ -39,7 +39,8 @@ class ThreadSummarizerTest(unittest.TestCase):
             max_steps=5,
             message_max_chars=5000,
         )
-        self.assertIn("... [TEXT CUTTED]", steps)
+        self.assertIn("<cutted_envelope truncated=\"true\"", steps)
+        self.assertNotIn("TEXT CUTTED", steps)
 
     def test_format_last_dialog_steps_keeps_tool_call_and_output_in_one_turn(self) -> None:
         steps = format_last_dialog_steps(

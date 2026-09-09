@@ -61,7 +61,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
     ),
     SummarySection(
         tag="last_verified_facts",
-        agent_visible=False,
+        agent_visible=True,
         memory_patch_hint="batch deltas → merge into `<knowledge>`",
         description=(
             "- **This batch only:** new or changed verified outcomes (command → verdict, or path → what was proven).\n"
@@ -82,7 +82,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
     ),
     SummarySection(
         tag="recent_artifacts",
-        agent_visible=False,
+        agent_visible=True,
         memory_patch_hint="path → purpose index (no sha256) → merge into `<knowledge>`",
         description=(
             "- Recent paths, URLs, modules, symbols, drafts, or outputs as `path -> purpose` (index only, not file contents).\n"

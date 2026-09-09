@@ -229,16 +229,25 @@ mcp:
 - `backend.request_timeout_sec` — HTTP-таймаут одного запроса к LLM (секунды), по умолчанию
   `600` (10 минут). Для стрима лимит действует на connect и на паузу между чанками, а не на
   длительность всего ответа. Не путать с `mcp.meta.request_timeout_sec` (таймаут MCP).
+- `backend.claude_prompt_cache` — разметка prompt cache в запросах главного цикла; действует только
+  в режиме `chat_completions` и только для запросов главного цикла (служебные вызовы — судьи,
+  суммаризация — не размечаются). Не задано — автоматически для моделей, в чьём id есть
+  `claude`; `true` — включить принудительно (claude под чужим именем за корп-шлюзом); `false` —
+  выключить (прокси отвергает разметку). Переопределяется на одну модель через
+  `models.<alias>.backend.claude_prompt_cache`.
 - `agent.exec_timeout_sec` — дефолтный таймаут `execute_command` / `run_python_code`
   (секунды), если модель не передала `timeout_seconds`. По умолчанию `120`. Для длинных
   контейнерных сборок (Harbor) обычно поднимают до `600`.
 - `agent.exec_output_capture_max_chars` — потолок RAM-буфера stdout/stderr на поток
   (decoded UTF-8 chars) для exec. По умолчанию `60000`. После cap вывод сливается и
   отбрасывается без kill процесса; page полного captured — через stream refs в ответе тулы.
-- `agent.walk_output_max_chars` — потолок приватного канала обхода дерева в Harbor
-  (`find -printf` для walk/listdir; decoded chars). По умолчанию `50000000`. При
-  переполнении обход не отдаёт частичный список, а завершается ошибкой `walk_too_large`
-  с советом сузить путь.
+- `agent.walk_output_max_chars` — общий потолок внутренних exec-каналов бэкенда
+  (decoded chars), не model-facing вывода: обход дерева в Harbor (`find -printf` для
+  walk/listdir), нативный grep и MCP-carrier под `execute_on: os_backend` (http и
+  stdio). По умолчанию `50000000`. Переполнение везде fail-closed: обход завершается
+  ошибкой `walk_too_large` с советом сузить путь, MCP-вызов — `McpExecCarrierError`
+  («response truncated by the exec output cap»). Понижение ради листингов молча
+  уронит большие ответы MCP-серверов.
 
 ## Слои инструкций (AGENTS.md)
 

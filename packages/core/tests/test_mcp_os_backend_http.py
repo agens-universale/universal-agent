@@ -25,18 +25,28 @@ class _ExecResult:
 
 
 class _RecordingSandbox:
-    """Replays one scripted answer per run_python call, recording the code."""
+    """Replays one scripted answer per carrier exec, recording the script.
+
+    The carrier is ``python3 -`` fed via ``exec_argv`` stdin — the same channel
+    the stdio transport uses — so ``run_python`` (the model-facing python tool)
+    must never be touched.
+    """
 
     is_sandbox = True
 
     def __init__(self, answers):
         self.answers = list(answers)
         self.codes = []
+        self.argvs = []
         self.timeouts = []
+        self.capture_caps = []
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None):
-        self.codes.append(code)
+    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
+                  capture_max_chars=None):
+        self.argvs.append(list(argv))
+        self.codes.append(stdin)
         self.timeouts.append(timeout)
+        self.capture_caps.append(capture_max_chars)
         payload = self.answers.pop(0)
         if isinstance(payload, _ExecResult):
             return payload
@@ -423,3 +433,35 @@ def test_no_scratch_file_is_written_in_the_container():
     except Exception:
         pass
     assert "/tmp/" not in backend.codes[0]
+
+
+def test_carrier_runs_python3_from_stdin_via_exec_argv():
+    backend = _RecordingSandbox([
+        _ok({"jsonrpc": "2.0", "id": 1, "result": {}}),
+        {"status": 202, "headers": {}, "body": ""},
+        _ok({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
+    ])
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=10.0)
+    assert backend.argvs and all(argv == ["python3", "-"] for argv in backend.argvs)
+    assert all(EXEC_RESULT_MARKER in code for code in backend.codes)
+
+
+def test_carrier_uses_internal_channel_ceiling_not_tool_trace_cap():
+    """The MCP answer is transport, not a model-facing trace: it must ride the
+    backend's walk ceiling (50M) instead of inheriting the 60k shell cap."""
+    backend = _RecordingSandbox([
+        _ok({"jsonrpc": "2.0", "id": 1, "result": {}}),
+        {"status": 202, "headers": {}, "body": ""},
+        _ok({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
+    ])
+    backend.walk_output_max_chars = 12_345_678
+    client = OsBackendStatelessClient(
+        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    )
+    client.list_tools(timeout=10.0)
+    assert backend.capture_caps
+    assert all(cap == 12_345_678 for cap in backend.capture_caps)
+

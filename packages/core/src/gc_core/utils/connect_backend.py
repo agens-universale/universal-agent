@@ -14,6 +14,7 @@ from gc_core.model_router import ResolvedModel
 from gc_core.utils.schema_markers import schema_without_internal_markers
 from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
 from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION
 from gc_core.utils.retry import retry_with_backoff
 from gc_core.utils.ssl_config import get_backend_client_cert
@@ -670,6 +671,18 @@ def create_call_data_completions(
     else:
         data["max_completion_tokens"] = effective_max_tokens
 
+    # Prompt cache (спека prompt-cache §4.2): настройка backend.claude_prompt_cache (per-model
+    # поверх глобальной) решает сама; не задана — автодетект по id модели. Резолв — до
+    # наложения kwargs: пока разметка наша, пользовательское поле cache_control верхнего
+    # уровня на провод не идёт (с другим TTL при нашей метке на последнем блоке провайдер
+    # claude-моделей отвечает 400); при выключенной разметке это рабочая настройка
+    # пользователя и уходит как задана. Для остальных моделей payload не трогаем — байт в
+    # байт как раньше.
+    _prompt_cache = backend_override_value(resolved, "claude_prompt_cache")
+    if _prompt_cache is NO_BACKEND_OVERRIDE:
+        _prompt_cache = cfg.get("claude_prompt_cache")
+    prompt_cache_on = prompt_cache_enabled(_prompt_cache, effective_model)
+
     extra = backend_override_value(resolved, "chat_completion_kwargs")
     if extra is NO_BACKEND_OVERRIDE:
         extra = cfg.get("chat_completion_kwargs")
@@ -682,10 +695,20 @@ def create_call_data_completions(
             "max_tokens",
             "max_completion_tokens",
         }
+        if prompt_cache_on:
+            protected.add("cache_control")
         for key, value in extra.items():
             if key in protected:
+                if key == "cache_control":
+                    logger.debug(
+                        "chat_completion_kwargs.cache_control игнорируется: разметка prompt cache "
+                        "включена (backend.claude_prompt_cache)"
+                    )
                 continue
             data[key] = value
+
+    if prompt_cache_on:
+        data = apply_prompt_cache(data)
 
     return data
     

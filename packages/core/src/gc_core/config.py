@@ -275,6 +275,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
         "send_tool_strict": app_cfg.backend.send_tool_strict,
+        "claude_prompt_cache": app_cfg.backend.claude_prompt_cache,
         "use_ssl": app_cfg.backend.use_ssl,
         "cert_path": app_cfg.backend.cert_path,
         "key_path": app_cfg.backend.key_path,

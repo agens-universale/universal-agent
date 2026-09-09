@@ -120,6 +120,8 @@ EXPERT_ONLY_KEYS: set = {
     "backend.retry_embedded_choice_errors",
     # Глобальный флаг стриминга; управляется через tui.stream (в шаблоне есть).
     "backend.stream",
+    # Закомментированный пример; дефолт — авто по id модели.
+    "backend.claude_prompt_cache",
 
     # --- chat_completions: вспомогательный LLM (summary / finish gate / intent scope) ---
     # Тюнинг вспомогательных вызовов; публичный шаблон не нацелен на chat_completions.

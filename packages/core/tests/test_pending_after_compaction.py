@@ -5,10 +5,18 @@ import json
 import logging
 from types import SimpleNamespace
 
+import pytest
+
 from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core import processing_responses as pr
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
+from helpers.turn_finish_apply import stub_turn_finish_apply
+
+
+@pytest.fixture(autouse=True)
+def _stub_apply_tool(monkeypatch):
+    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
 
 
 def _make_state(*, max_steps: int = 5) -> State:

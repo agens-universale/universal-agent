@@ -32,9 +32,6 @@ def teardown_module(_module) -> None:
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
-    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
-    if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = real_tools.apply_tool
 
 
 agent_executor_module = None
@@ -49,9 +46,6 @@ def setup_module(_module) -> None:
 
     pr.apply_tool = tools_pkg.apply_tool
     pr.WrongFunctionArgumentsException = tools_pkg.WrongFunctionArgumentsException
-    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
-    if cycle_stop_mod is not None:
-        cycle_stop_mod.apply_tool = tools_pkg.apply_tool
 
     for mod in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
         sys.modules.pop(mod, None)
