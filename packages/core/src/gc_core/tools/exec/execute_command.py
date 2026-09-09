@@ -19,6 +19,7 @@ class ExecuteCommand(AbstractSimpleTool):
 
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = {
             "type": "function",
             "name": "exec_command",
@@ -35,9 +36,10 @@ class ExecuteCommand(AbstractSimpleTool):
                     "timeout_seconds": {
                         "type": "integer",
                         "description": (
-                            f"Execution timeout in seconds. Default is {DEFAULT_EXEC_TIMEOUT_SEC} "
+                            f"Execution timeout in seconds. Default is {timeout_default} "
                             "(agent.exec_timeout_sec)."
                         ),
+                        "default": timeout_default,
                         "minimum": 1,
                     },
                     "cwd": {
@@ -74,9 +76,10 @@ class ExecuteCommand(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = ('''Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(DEFAULT_EXEC_TIMEOUT_SEC) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(timeout_default) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.

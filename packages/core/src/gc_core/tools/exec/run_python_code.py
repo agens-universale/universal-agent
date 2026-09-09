@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
+from gc_core.config_modules.agent import exec_timeout_from_config_dict
 from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.command_guard import enforce_command_guard
@@ -28,6 +28,7 @@ def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
 class RunPythonCode(AbstractSimpleTool):
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = {
             "type": "function",
             "name": "exec_python",
@@ -49,9 +50,9 @@ class RunPythonCode(AbstractSimpleTool):
                         "type": "integer",
                         "description": (
                             f"Maximum execution time in seconds before the process is terminated. "
-                            f"Default is {DEFAULT_EXEC_TIMEOUT_SEC} (agent.exec_timeout_sec)."
+                            f"Default is {timeout_default} (agent.exec_timeout_sec)."
                         ),
-                        "default": DEFAULT_EXEC_TIMEOUT_SEC,
+                        "default": timeout_default,
                         "minimum": 1,
                     },
                     "cwd": {
@@ -87,11 +88,12 @@ class RunPythonCode(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = (
             '''Tool name: exec_python
 Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.
 Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
-            + str(DEFAULT_EXEC_TIMEOUT_SEC)
+            + str(timeout_default)
             + '''}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
 Usage:

@@ -169,6 +169,25 @@ def test_tool_descriptions_stay_lean():
         assert "max_output_chars" not in cls.prompt_description()
 
 
+def test_tool_description_timeout_default_follows_config():
+    """Схема, которую видит модель, должна совпадать с рабочим exec_timeout_sec."""
+    for cls in (ExecuteCommand, RunPythonCode):
+        lean = cls.tool_description()["parameters"]["properties"]["timeout_seconds"]
+        assert lean["default"] == DEFAULT_EXEC_TIMEOUT_SEC
+        assert f"Default is {DEFAULT_EXEC_TIMEOUT_SEC}" in lean["description"]
+        assert f'"default": {DEFAULT_EXEC_TIMEOUT_SEC}' in cls.prompt_description()
+
+        harbor = cls.tool_description({"exec_timeout_sec": 600})["parameters"]["properties"][
+            "timeout_seconds"
+        ]
+        assert harbor["default"] == 600
+        assert "Default is 600" in harbor["description"]
+        assert "Default is 120" not in harbor["description"]
+        prompt = cls.prompt_description({"exec_timeout_sec": 600})
+        assert '"default": 600' in prompt
+        assert '"default": 120' not in prompt
+
+
 def test_preview_edge_from_flat_config_is_clamped_to_capture_tail():
     """Плоский config_dict приходит мимо AgentConfig — P дожимается на чтении."""
     from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
