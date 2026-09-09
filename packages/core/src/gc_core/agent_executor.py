@@ -6,6 +6,7 @@ State создаётся заново при каждом run(). Возвращ�
 нельзя мутировать снаружи; изменения — только через add_message() или под get_lock().
 """
 
+import asyncio
 import gc
 import threading
 from copy import copy as _shallow_copy_msg
@@ -105,6 +106,46 @@ async def _aappend_trace_id_to_meta(
         return
 
 
+
+
+async def _aclose_mcp_and_release(owner_reset: Any) -> None:
+    """Уборка после прогона: stdio-сессии, stream-сессии, владение.
+
+    Отмену КОПИМ, а не пробрасываем сразу. Раньше `CancelledError` из первого
+    шага уносил управление мимо всего остального: не закрывались
+    stream-сессии, не снималось владение. Отмена приходит ровно тогда, когда
+    прибираться нужнее всего — по стопу пользователя или дедлайну, — и именно
+    тогда браузер оставался жить. `except Exception` её не ловит: она
+    `BaseException`.
+
+    Вынесено из `finally` отдельной функцией не ради красоты: внутри `finally`
+    это свойство проверялось бы только копией блока в тесте, то есть никак.
+    """
+    cancelled: Optional[BaseException] = None
+    try:
+        # Долгоживущие stdio (напр. @playwright/mcp + Chromium): владелец
+        # берётся из contextvar здесь же — закроется только наше, чужой
+        # браузер продолжит работать.
+        await PersistentStdioRegistry.instance().aclose_all()
+    except asyncio.CancelledError as exc:
+        cancelled = exc
+    except Exception:
+        pass
+    try:
+        # НЕ через to_thread: сессии ключуются по id(loop) и живут на ЭТОМ
+        # loop — из чужого потока их не видно и закрыть нечем.
+        await _STREAM_SESSION_MANAGER.aclose_all()
+    except asyncio.CancelledError as exc:
+        cancelled = cancelled or exc
+    except Exception:
+        pass
+    # C2: после закрытия MCP/stdio — подбираем циклический мусор
+    # (pipes, ClientSession, loop buffers).
+    gc.collect()
+    # Владение снимаем последним: всё выше его требует.
+    reset_owner(owner_reset)
+    if cancelled is not None:
+        raise cancelled
 
 
 class AgentExecutor:
@@ -574,28 +615,10 @@ class AgentExecutor:
         finally:
             # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.
-            #
-            # Ждём напрямую, без потока. Закрытие небыстрое (terminate →
-            # таймаут до 5с → killpg), но блокирующим в нём было только
-            # ожидание смерти процесса, и оно переведено на опрос: loop
-            # свободен, поток из пула не занят. Владелец берётся из contextvar
-            # здесь же, на своём стеке, — закроется только наше, чужой браузер
-            # продолжит работать.
-            await PersistentStdioRegistry.instance().aclose_all()
-            # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http).
-            try:
-                # НЕ через to_thread: сессии ключуются по id(loop) и живут на
-                # ЭТОМ loop — из чужого потока их не видно и закрыть нечем.
-                # Закрытие асинхронное и быстрое (сеть + пайпы).
-                await _STREAM_SESSION_MANAGER.aclose_all()
-            except Exception:
-                pass
-            # C2: после закрытия MCP/stdio — подбираем циклический мусор
-            # (pipes, ClientSession, loop buffers). State здесь не трогаем:
-            # ниже usage-отчёт по state.
-            gc.collect()
-            # Владение снимаем последним: всё выше в этом finally его требует.
-            reset_owner(_owner_reset)
+            # Ждём напрямую, без потока: блокирующим в закрытии было только
+            # ожидание смерти процесса, и оно переведено на опрос. Подробности
+            # и разбор отмены — в самой `_aclose_mcp_and_release`.
+            await _aclose_mcp_and_release(_owner_reset)
 
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         try:

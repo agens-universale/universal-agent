@@ -20,15 +20,38 @@ from urllib.parse import urljoin
 from gc_core.security.url_policy import UrlPolicyDecision, validate_url_policy
 
 #: Потолок переходов. Выше — почти наверняка петля, а не навигация.
-DEFAULT_MAX_REDIRECTS = 5
+#:
+#: Двадцать, а не пять, и это не запас «на всякий случай»: столько же брал
+#: httpx, когда переходы разворачивал он сам (``follow_redirects=True``).
+#: Первая редакция общей петли поставила пять, и у ``fetch_url`` — тула,
+#: который регистрируется ПО УМОЛЧАНИЮ, — потолок молча упал вчетверо.
+#: Длинные цепочки на корпоративных SSO-входах (нормализация домена,
+#: языковой редирект) в пять переходов не всегда укладываются, и тул начинал
+#: отказывать там, где раньше работал.
+DEFAULT_MAX_REDIRECTS = 20
 
 
 class RedirectBlocked(Exception):
-    """Переход отвергнут политикой. Несёт решение — его показывают модели."""
+    """Переход отвергнут ПОЛИТИКОЙ. Несёт решение — его показывают модели."""
 
     def __init__(self, decision: UrlPolicyDecision) -> None:
         super().__init__(decision.reason or "redirect blocked by policy")
         self.decision = decision
+
+
+class TooManyRedirects(Exception):
+    """Переходов больше потолка. Это НЕ запрет политики.
+
+    Разведено намеренно: превышение отдавалось модели тем же конвертом, что и
+    блокировка политикой, то есть как «запрещено правилами». Модель делала из
+    этого неверный вывод — что адрес под запретом, — и переставала пробовать
+    вместо того, чтобы сообщить о петле редиректов.
+    """
+
+    def __init__(self, url: str, limit: int) -> None:
+        super().__init__(f"Exceeded {limit} redirects starting at {url}")
+        self.url = url
+        self.limit = limit
 
 
 def _next_hop(response: Any, current: str) -> str | None:
@@ -43,15 +66,8 @@ def _next_hop(response: Any, current: str) -> str | None:
     return urljoin(current, location)
 
 
-def _too_many(current: str, limit: int) -> RedirectBlocked:
-    return RedirectBlocked(
-        UrlPolicyDecision(
-            allowed=False,
-            url=current,
-            error_type="too_many_redirects",
-            reason=f"Exceeded {limit} redirects.",
-        )
-    )
+def _too_many(current: str, limit: int) -> TooManyRedirects:
+    return TooManyRedirects(current, limit)
 
 
 async def fetch_validating_redirects(
@@ -124,6 +140,7 @@ async def stream_validating_redirects(
 __all__ = [
     "DEFAULT_MAX_REDIRECTS",
     "RedirectBlocked",
+    "TooManyRedirects",
     "fetch_validating_redirects",
     "stream_validating_redirects",
 ]

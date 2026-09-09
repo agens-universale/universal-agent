@@ -299,7 +299,7 @@ def test_finish_gate_guard_double_failure_is_fail_open_error(monkeypatch):
     assert decision.outcome == "fail_open_error"
 
 
-def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
+async def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
     from gc_core.security import command_moderation
 
     router = _router(
@@ -330,13 +330,18 @@ def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
+    # Судья КОРУТИННЫЙ: его ждут на loop вызывающего. Здесь стоял синхронный
+    # `run_command_judge_with_retry` — он получал корутину, отдавал её в
+    # `validate_judge_result`, и тест зеленел на «это не словарь» вместо
+    # «бэкенд ответил 500». Сама корутина оставалась неждаемой.
     judge_client = command_moderation._default_judge_client(
         (), {"ctx": ctx, "state": _service_state()}
     )
-    with pytest.raises(Exception):
-        command_moderation.run_command_judge_with_retry(
-            judge_client, {"tool_name": "execute_command"}, retries=0
-        )
+    with pytest.raises(Exception) as judge_failure:
+        await judge_client({"tool_name": "execute_command"})
+    assert "500" in str(judge_failure.value) or "http" in str(judge_failure.value).lower(), (
+        f"судья упал не по той причине: {judge_failure.value!r}"
+    )
 
     # command_judge остаётся fail-closed: судья недоступен → deny-mode блокирует.
     decision = command_moderation.decide_command_execution(

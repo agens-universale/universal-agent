@@ -16,7 +16,12 @@ from gc_core.security.url_policy import enforce_url_policy, validate_url_policy,
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies
 import asyncio
-from gc_core.tools.exec.redirect_policy import RedirectBlocked as _SharedRedirectBlocked, fetch_validating_redirects
+from gc_core.tools.exec.redirect_policy import (
+    DEFAULT_MAX_REDIRECTS,
+    RedirectBlocked as _SharedRedirectBlocked,
+    TooManyRedirects as _TooManyRedirects,
+    fetch_validating_redirects,
+)
 from gc_core.security.path_policy import resolve_tool_context
 
 
@@ -545,7 +550,10 @@ class SimpleFetchUrl(AbstractSimpleTool):
         _policy = resolve_tool_context(self, ctx=self._ctx, state=self._state)
         _allowed_schemes = list(_policy.url_allowed_schemes or ["http", "https"])
         _url_blacklist = list(_policy.url_blacklist or [])
-        _max_redirects = 10
+        # Потолок ОБЩИЙ: три тула не должны расходиться в том, сколько
+        # переходов считается петлёй. Было 5 / 10 / 5 — разноголосица ровно
+        # того сорта, ради устранения которой петлю и свели в одну.
+        _max_redirects = DEFAULT_MAX_REDIRECTS
 
         async def _fetch_with_redirect_validation(session, start_url, headers, timeout):
             """Общая петля из ``redirect_policy``: одно правило на три тула.
@@ -575,6 +583,20 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 )
                 response.raise_for_status()
                 break
+            except _TooManyRedirects as loop_exc:
+                # Петля редиректов — сетевая проблема, а не запрет политики.
+                return _result(
+                    ok=False,
+                    final_url=loop_exc.url,
+                    status_code=None,
+                    content_type=None,
+                    result_type="error",
+                    error={
+                        "type": "too_many_redirects",
+                        "reason": str(loop_exc),
+                        "limit": loop_exc.limit,
+                    },
+                )
             except _RedirectBlocked as redirect_exc:
                 _decision = redirect_exc.decision
                 return _result(

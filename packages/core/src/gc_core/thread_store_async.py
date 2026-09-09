@@ -181,6 +181,16 @@ class SyncThreadStoreAdapter:
         self._warn = warn
         self._samples: list = []
 
+    def set_warn(self, warn: Any) -> None:
+        """Подставить приёмник предупреждений уже выданному адаптеру.
+
+        Адаптер на хранилище один и живёт дольше вызова, а приёмник у первого
+        вызывающего часто пуст: контекст с логгером приходит позже. Без этого
+        предупреждение о медленном хранилище терялось ровно там, где его есть
+        кому показать.
+        """
+        self._warn = warn
+
     @property
     def store(self) -> Any:
         """Обёрнутое синхронное хранилище."""
@@ -359,6 +369,12 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
     except TypeError:
         cached = None                     # не-хешируемое хранилище: без кэша
     if cached is not None:
+        # Кэш отдаёт ТОТ ЖЕ адаптер, но приёмник предупреждений мог смениться:
+        # первый вызов часто идёт без него, а следующий приходит из контекста
+        # с логгером. Молча отдавая старый адаптер, мы теряли бы предупреждение
+        # о медленном хранилище именно там, где его есть кому показать.
+        if warn is not None:
+            cached.set_warn(warn)
         return cached
 
     from gc_core.thread_store_base import CONTRACT_METHODS

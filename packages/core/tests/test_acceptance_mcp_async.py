@@ -282,3 +282,52 @@ def test_missing_transport_is_rejected():
     """Транспорт не указан вовсе — тоже отказ, а не молчаливый дефолт."""
     with pytest.raises(ValueError):
         get_transport({})
+
+
+async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(monkeypatch):
+    """Дискавери без готового реестра не должна морозить loop вызывающего.
+
+    ``acall_mcp_tool(tools_registry=None)`` шёл в синхронный ``get_all_tools``,
+    а тот — в ``run_coro_blocking``: свой ``asyncio.run`` внутри чужого loop
+    невозможен, поэтому обход серверов исполнялся, держа loop. Асинхронная
+    форма у кэша была всё это время.
+
+    Проверяется отзывчивость, а не форма вызова: пока дискавери идёт, соседний
+    хартбит обязан тикать.
+    """
+    import asyncio
+
+    from gc_core.tools.connect_mcp import api as mcp_api
+    from gc_core.tools.connect_mcp import registry as mcp_registry
+
+    async def _slow_discovery(self, *, on_progress=None):
+        await asyncio.sleep(0.3)
+        return {}
+
+    monkeypatch.setattr(mcp_registry.ToolsCache, "aget_tools", _slow_discovery)
+
+    def _sync_trap(*_a, **_kw):
+        raise AssertionError("дискавери ушла в синхронную форму и заморозила loop")
+
+    monkeypatch.setattr(mcp_registry, "get_all_tools", _sync_trap)
+    monkeypatch.setattr(mcp_api, "get_all_tools", _sync_trap, raising=False)
+
+    ticks = 0
+
+    async def _heartbeat():
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    beat = asyncio.create_task(_heartbeat())
+    try:
+        with pytest.raises(ValueError):        # реестр пуст → тул неизвестен
+            await mcp_api.acall_mcp_tool(
+                "mcp_srv_tool", {}, {"srv": {"transport": "stdio", "command": "x"}},
+                tools_registry=None,
+            )
+    finally:
+        beat.cancel()
+
+    assert ticks >= 10, f"loop стоял во время дискавери: тиков {ticks}"

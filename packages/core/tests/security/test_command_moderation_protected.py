@@ -139,7 +139,16 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     monkeypatch.setattr(cm, "confirm_available", fake_confirm_available)
     monkeypatch.setattr(cm, "request_confirm", lambda **k: True)
     # Судья всегда недоступен — кидаем исключение.
-    monkeypatch.setattr(cm, "run_command_judge_with_retry", lambda *a, **k: (_ for _ in ()).throw(cm.JudgeUnavailable("test")))
+    #
+    # Подменять надо ШОВ, через который ходит ТЕЛО гварда. Здесь стояла
+    # подмена `run_command_judge_with_retry` — она перестала что-либо делать,
+    # когда тело перешло на `judge_with_retry_flow` (судья теперь ждётся на
+    # loop вызывающего). Тест остался зелёным по совпадению: судья в этом
+    # конфиге и так недоступен, то есть fail-closed он больше НЕ проверял.
+    async def _judge_is_down(_payload):
+        raise cm.JudgeUnavailable("test")
+
+    monkeypatch.setattr(cm, "_default_judge_client", lambda *a, **k: _judge_is_down)
 
     fake_ctx = SimpleNamespace(
         config_dict={

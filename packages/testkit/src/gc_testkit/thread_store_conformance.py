@@ -419,21 +419,43 @@ def check_replace_messages_keeps_the_trace(store: Any) -> None:
     tid = "t-replace"
     store.save_meta(SYS, tid, {"token_usage": {"total": 5}})
     store.append_messages(SYS, tid, [{"role": "user", "content": "старое", "id": "m1"}])
-    store.append_subagent_trace(
-        SYS, tid, parent_call_id="p1", child_run_id="c1",
-        kind="child_start", payload={"x": 1},
-    )
+    for n in range(2):
+        store.append_subagent_trace(
+            SYS, tid, parent_call_id=f"p{n}", child_run_id=f"c{n}",
+            kind="call", payload={"x": n},
+        )
+    before = store.read_subagent_trace(SYS, tid)
 
     replace(SYS, tid, [{"role": "system", "content": "сводка", "id": "s1"}])
 
     left = store.load_messages(SYS, tid)
     if [m.get("id") for m in left] != ["s1"]:
         _fail("replace_messages не заместил историю", f"осталось {left!r}")
-    if not store.read_subagent_trace(SYS, tid):
+    after = store.read_subagent_trace(SYS, tid)
+    if not after:
         _fail(
             "replace_messages потерял трассу субагентов",
             "замещение истории не повод стирать историю вызовов детей",
         )
+    # Непустоты МАЛО. Первая редакция проверяла только её, и мимо прошло вот
+    # что: трасса восстанавливалась через `append_subagent_trace`, а тот
+    # безусловно ставит свежие `ts` и `seq`. После каждой компакции у всех
+    # записей дата равнялась моменту компакции, нумерация начиналась заново —
+    # трасса переставала быть хронологией, ради которой её и спасали.
+    if len(after) != len(before):
+        _fail(
+            "replace_messages изменил ЧИСЛО записей трассы",
+            f"было {len(before)}, стало {len(after)}",
+        )
+    for was, now in zip(before, after):
+        for field in ("ts", "seq", "parent_call_id", "child_run_id", "kind"):
+            if was.get(field) != now.get(field):
+                _fail(
+                    f"replace_messages переписал поле {field!r} у трассы",
+                    f"было {was.get(field)!r}, стало {now.get(field)!r}; "
+                    "восстанавливать трассу надо записями как есть, а не "
+                    "повторным append — тот проставляет штампы заново",
+                )
     if not store.load_meta(SYS, tid).get("token_usage"):
         _fail("replace_messages потерял meta", "секции meta не относятся к истории")
 

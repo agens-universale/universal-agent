@@ -774,3 +774,82 @@ def test_run_agent_same_order_on_responses_backend(monkeypatch):
     assert json.loads(by_call["call_mem"]["output"])["ok"] is True
     assert not _is_cycle_stop_stub(by_call["call_mem"]["output"])
     assert applied.index("session_memory") < applied.index("turn_finish")
+
+
+# --- R1: батч «work + finish» обязан ДОЕХАТЬ до истории треда ---------------
+
+
+def _persisted_calls(persisted: list) -> set:
+    """call_id всех function_call_output, которые дошли до персиста."""
+    return {
+        m.get("call_id")
+        for m in persisted
+        if isinstance(m, dict) and m.get("type") == "function_call_output"
+    }
+
+
+def test_finish_output_reaches_the_thread_on_responses_backend(monkeypatch):
+    """Вывод ``turn_finish`` обязан доехать до хранилища. Замерено: тут он один.
+
+    Три вызова ``_maybe_persist`` в этом пути пришли с merge develop, где
+    функция была синхронной, и остались без ``await``: корутина создавалась и
+    выбрасывалась. Два из трёх дублировали более ранний персист и потерь не
+    давали — а третий, на ветке responses, оказался ЕДИНСТВЕННЫМ, кто пишет
+    вывод ``turn_finish``. Проверено трассировкой всех вызовов: на этом пути
+    ``call_finish`` персистится ровно здесь и больше нигде.
+
+    Расхождение видно не сразу, а на ВОЗОБНОВЛЕНИИ треда: ``state.messages``
+    наполнен, история — нет, и модель получает не то, что видела в прошлый раз.
+
+    Проверяется наблюдаемое следствие, а не наличие ``await``.
+    """
+    applied: list[str] = []
+    _patch_run_agent_apply(monkeypatch, applied)
+    state = _agent_state()
+    persisted: list = []
+
+    finish = _fc("turn_finish", "call_finish", _finish_args())
+    memory = _fc("session_memory", "call_mem", '{"action":"write"}')
+
+    result = run_coro(arun_agent(
+        [finish, memory],
+        state,
+        _agent_ctx(backend_api_mode="responses"),
+        persist_messages_callback=persisted.extend,
+    ))
+
+    assert result == finish["arguments"]
+    got = _persisted_calls(persisted)
+    assert "call_finish" in got, (
+        f"вывод turn_finish не доехал до хранилища: {sorted(got)}"
+    )
+
+
+def test_nothing_in_state_is_missing_from_the_thread(monkeypatch):
+    """Общее правило: что попало в ``state``, то попало и в хранилище.
+
+    Ловит не конкретную забытую строку, а расхождение как класс — включая
+    ветки, до которых сегодняшние сценарии не доходят.
+    """
+    for kw in ({}, {"backend_api_mode": "responses"}):
+        applied: list[str] = []
+        _patch_run_agent_apply(monkeypatch, applied)
+        state = _agent_state()
+        persisted: list = []
+
+        finish = _fc("turn_finish", "call_finish", _finish_args())
+        memory = _fc("session_memory", "call_mem", '{"action":"write"}')
+
+        run_coro(arun_agent(
+            [memory, finish],
+            state,
+            _agent_ctx(**kw),
+            persist_messages_callback=persisted.extend,
+        ))
+
+        in_state = _persisted_calls(state.messages)
+        in_store = _persisted_calls(persisted)
+        assert in_state <= in_store, (
+            f"{kw or 'chat_completions'}: в хранилище нет того, что уже в state: "
+            f"{sorted(in_state - in_store)}"
+        )

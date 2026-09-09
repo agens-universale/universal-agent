@@ -136,3 +136,76 @@ def test_all_three_share_one_redirect_loop():
         )
     assert hasattr(redirect_policy, "fetch_validating_redirects")
     assert hasattr(redirect_policy, "stream_validating_redirects")
+
+
+# --- R8: один потолок на три тула, и петля — не запрет политики -------------
+
+
+def test_all_three_share_one_redirect_ceiling():
+    """Потолок переходов общий: 5 / 10 / 5 — та же болезнь, что две петли.
+
+    Общая петля пришла с умолчанием 5, и у ``fetch_url`` потолок молча упал
+    вчетверо: до неё он звал ``follow_redirects=True``, а httpx берёт 20.
+    Длинные цепочки на корпоративных порталах (SSO, нормализация домена,
+    языковой редирект) в пять переходов укладываются не всегда — тул начинал
+    отказывать там, где раньше работал.
+    """
+    import inspect
+
+    from gc_core.tools.exec import download_file, fetch_url, simple_fetch_url
+    from gc_core.tools.exec.redirect_policy import DEFAULT_MAX_REDIRECTS
+
+    assert DEFAULT_MAX_REDIRECTS == 20, (
+        "общий потолок разошёлся с тем, что брал httpx до переезда"
+    )
+    # Своих чисел у тулов быть не должно: разъезжаются они молча.
+    for module in (fetch_url, simple_fetch_url, download_file):
+        src = inspect.getsource(module)
+        for literal in ("max_redirects=5", "max_redirects=10", "_MAX_REDIRECTS = "):
+            assert literal not in src, (
+                f"{module.__name__} завёл собственный потолок: {literal}"
+            )
+
+
+def _looping(monkeypatch, module, hops: int):
+    """Сервер, который редиректит по кругу дольше любого разумного потолка."""
+    from gc_core.utils import async_http
+
+    seen = {"n": 0}
+
+    def _dispatch(request: httpx.Request) -> httpx.Response:
+        seen["n"] += 1
+        return httpx.Response(
+            302, headers={"Location": f"https://example.com/hop{seen['n']}"}
+        )
+
+    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
+        transport=httpx.MockTransport(_dispatch)
+    )
+    monkeypatch.setattr(async_http, "get_async_client", factory)
+    monkeypatch.setattr(module, "get_async_client", factory, raising=False)
+    return factory, seen
+
+
+def test_a_redirect_loop_is_not_reported_as_a_policy_block(monkeypatch):
+    """Петля обязана называться петлёй, а не «запрещено правилами».
+
+    Превышение потолка отдавалось моделью тем же конвертом, что и блокировка
+    политикой. Модель делала неверный вывод — что адрес под запретом — и
+    переставала пробовать, вместо того чтобы сообщить о петле.
+    """
+    from gc_core.tools.exec import fetch_url as mod
+
+    factory, seen = _looping(monkeypatch, mod, hops=30)
+    _patch_tool_globals(monkeypatch, factory, FetchUrl.acall)
+
+    tool = CallableTool(with_local_ctx(FetchUrl, config_dict=_policy_config())._tool)
+    out = json.loads(tool(url="https://example.com/start"))
+
+    assert out["ok"] is False, out
+    assert out["error"]["type"] == "too_many_redirects", (
+        f"петля редиректов названа не своим именем: {out['error']}"
+    )
+    assert out["error"].get("blocked_on_redirect") is not True, (
+        "петля всё ещё отдаётся как запрет политики"
+    )

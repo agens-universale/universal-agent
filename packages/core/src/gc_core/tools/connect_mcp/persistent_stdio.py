@@ -298,8 +298,11 @@ class PersistentStdioSession:
             self._proc = None
         return proc
 
-    def _detach_nowait(self) -> "Optional[subprocess.Popen]":
+    def _detach_nowait(self) -> "tuple[Optional[subprocess.Popen], bool]":
         """Снять процесс, НЕ вставая в очередь за локом.
+
+        Возвращает ``(процесс, был_ли_лок_свободен)``. Второе важно: при
+        занятом локе обмен по этому stdin недостоверен — см. вызывающих.
 
         Асинхронное закрытие нельзя пускать через блокирующий ``acquire``.
         Лок держит ``call()`` на весь обмен, и обмен идёт в
@@ -311,23 +314,37 @@ class PersistentStdioSession:
 
         Не смогли взять лок — забираем процесс без него. Гонка здесь
         безобиднее заморозки: держатель лока читает уже ничейный процесс и
-        получит обычную ошибку ввода-вывода, а мы гасим его сами.
+        получит обычную ошибку ввода-вывода, а мы гасим его сами. Но пролог
+        (обмен close-тулом) в этом случае ПРОПУСКАЕТСЯ: держатель сидит в
+        ``_read_matching`` на том же ридере, и ответ close-тула ушёл бы в его
+        очередь. Мы бы прождали таймаут впустую и всё равно перешли к
+        терминации — только на десять секунд позже.
         """
         if self._lock.acquire(blocking=False):
             try:
                 proc = self._proc
                 self._proc = None
-                return proc
+                return proc, True
             finally:
                 self._lock.release()
         proc = self._proc
         self._proc = None
-        return proc
+        return proc, False
 
     def close(self) -> None:
-        proc = self._detach()
+        """Синхронное закрытие. Зовётся в том числе из ``atexit``.
+
+        Лок берётся БЕЗ ожидания. Раньше здесь стоял ``_detach()`` с
+        блокирующим ``with self._lock`` — та самая заморозка, от которой
+        асинхронный близнец уже ушёл, только теперь на выходе из процесса и
+        без таймаута: abandonable-поток остаётся в ``readline`` под локом,
+        и `atexit` ждал бы его до ``request_timeout_sec`` (по умолчанию 600 с).
+        До появления atexit-хука процесс просто выходил.
+        """
+        proc, had_lock = self._detach_nowait()
         if proc is not None:
-            self._close_prologue(proc)
+            if had_lock:
+                self._close_prologue(proc)
             _terminate_process_tree(proc, graceful_timeout=5.0)
 
     async def aclose(self) -> None:
@@ -336,9 +353,10 @@ class PersistentStdioSession:
         Пролог (ответ close-тула) и терминация — единственное, что здесь
         долгое, и оба переведены на опрос.
         """
-        proc = self._detach_nowait()
+        proc, had_lock = self._detach_nowait()
         if proc is not None:
-            await self._aclose_prologue(proc)
+            if had_lock:
+                await self._aclose_prologue(proc)
             await _aterminate_process_tree(proc, graceful_timeout=5.0)
 
     def _close_prologue(self, proc: "subprocess.Popen") -> None:

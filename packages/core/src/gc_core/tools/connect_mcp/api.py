@@ -440,6 +440,17 @@ async def acall_mcp_tool(
       сокете (замерено — 21 мс разрыва на двухсекундном вызове против 2016 мс
       при прямом вызове в корутине).
     """
+    if tools_registry is None:
+        # Реестра нет — значит нужна ДИСКАВЕРИ, а это сеть и запуск процессов.
+        # Синхронный `get_all_tools` внутри `_prepare_mcp_call` уводил её в
+        # `run_coro_blocking`, то есть морозил loop вызывающего на всё время
+        # обхода серверов. Асинхронная форма у кэша есть — берём её здесь, до
+        # разбора, и дальше `_prepare_mcp_call` получает готовый реестр.
+        from gc_core.tools.connect_mcp.registry import ToolsCache
+
+        cache_cfg: Dict[str, Any] = {"mcp-servers": servers_cfg}
+        tools_registry = await ToolsCache(cache_cfg).aget_tools()
+
     target = _prepare_mcp_call(
         full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry,
         os_backend=os_backend,

@@ -181,6 +181,20 @@ class MemoryThreadStore(ThreadStoreBase):
 
     # --- трассы субагентов -------------------------------------------------
 
+    def _restore_subagent_trace(self, system_id, thread_id, records) -> None:
+        """Вернуть трассу СО СВОИМИ штампами: см. ``ThreadStoreBase``.
+
+        Умолчание базы идёт через ``append_subagent_trace``, а тот ставит
+        свежие ``ts`` и ``seq``: после компакции у всей трассы дата равнялась
+        моменту компакции. Здесь кладём записи как есть.
+        """
+        self._hit("_restore_subagent_trace")
+        self._traces[self._key(system_id, thread_id)] = [dict(r) for r in records]
+
+    async def _arestore_subagent_trace(self, system_id, thread_id, records) -> None:
+        """См. синхронный близнец: хранилище в памяти, ждать нечего."""
+        self._restore_subagent_trace(system_id, thread_id, records)
+
     def append_subagent_trace(
         self,
         system_id: str,

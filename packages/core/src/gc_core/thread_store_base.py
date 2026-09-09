@@ -172,7 +172,25 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
         self.append_messages(system_id, thread_id, messages)
         if meta:
             self.save_meta(system_id, thread_id, meta)
-        for record in trace:
+        self._restore_subagent_trace(system_id, thread_id, trace)
+
+    def _restore_subagent_trace(
+        self, system_id: str, thread_id: str, records: Sequence[Dict[str, Any]]
+    ) -> None:
+        """Вернуть трассу на место после ``reset``. НЕ часть контракта.
+
+        Умолчание идёт через ``append_subagent_trace`` и ТЕРЯЕТ ШТАМПЫ:
+        писатель безусловно ставит свежее время и следующий номер. После
+        каждой компакции у всей трассы дата равнялась моменту компакции, а
+        нумерация начиналась заново — трасса переставала быть хронологией,
+        ровно тем, ради чего её и спасали.
+
+        Наши реализации это переопределяют и пишут записи как есть. Чужому
+        хранилищу стоит поступить так же — либо переопределить сам
+        ``replace_messages`` одной операцией (SQL ``DELETE … INSERT`` в
+        транзакции), что и надёжнее, и быстрее.
+        """
+        for record in records:
             self.append_subagent_trace(
                 system_id,
                 thread_id,
@@ -305,7 +323,13 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
         await self.aappend_messages(system_id, thread_id, messages)
         if meta:
             await self.asave_meta(system_id, thread_id, meta)
-        for record in trace:
+        await self._arestore_subagent_trace(system_id, thread_id, trace)
+
+    async def _arestore_subagent_trace(
+        self, system_id: str, thread_id: str, records: Sequence[Dict[str, Any]]
+    ) -> None:
+        """См. :meth:`ThreadStoreBase._restore_subagent_trace`."""
+        for record in records:
             await self.aappend_subagent_trace(
                 system_id,
                 thread_id,

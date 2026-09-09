@@ -141,6 +141,22 @@ class FileThreadStore(ThreadStoreBase):
 
     # --- трассы субагентов -------------------------------------------------
 
+    def _restore_subagent_trace(self, system_id, thread_id, records) -> None:
+        """Вернуть трассу СО СВОИМИ штампами: см. базовый класс.
+
+        Умолчание базы идёт через ``append_subagent_trace``, а тот ставит
+        свежие ``ts`` и ``seq``. Здесь пишем файл целиком записями как есть.
+        """
+        from gc_core.thread_store import restore_subagent_trace_records
+
+        restore_subagent_trace_records(
+            self._dir, system_id, thread_id, list(records)
+        )
+
+    async def _arestore_subagent_trace(self, system_id, thread_id, records) -> None:
+        """См. синхронный близнец: файловый ввод-вывод здесь короткий."""
+        self._restore_subagent_trace(system_id, thread_id, records)
+
     def append_subagent_trace(
         self,
         system_id: str,

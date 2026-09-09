@@ -16,7 +16,9 @@ from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies
 from contextlib import asynccontextmanager
 from gc_core.tools.exec.redirect_policy import (
+    DEFAULT_MAX_REDIRECTS,
     RedirectBlocked as _SharedRedirectBlocked,
+    TooManyRedirects as _TooManyRedirects,
     stream_validating_redirects,
 )
 
@@ -38,7 +40,6 @@ class DownloadFile(AbstractSimpleTool):
         ".pdf", ".docx", ".xls", ".xlsx", ".pptx", ".csv", ".html", ".msg",
         ".txt", ".md", ".json",
     })
-    _MAX_REDIRECTS = 10
     _BOM_PREFIXES = (
         b"\xef\xbb\xbf",
         b"\xff\xfe",
@@ -267,7 +268,7 @@ class DownloadFile(AbstractSimpleTool):
             session, start_url, headers, timeout,
             allowed_schemes=allowed_schemes,
             url_blacklist=url_blacklist,
-            max_redirects=self._MAX_REDIRECTS,
+            max_redirects=DEFAULT_MAX_REDIRECTS,
         )
 
     async def _read_bounded(
@@ -332,6 +333,13 @@ class DownloadFile(AbstractSimpleTool):
                         await response.aread()
                     response.raise_for_status()
                     return await self._read_bounded(response, max_bytes)
+            except _TooManyRedirects as loop_exc:
+                # Петля редиректов — сетевая проблема, а не запрет политики.
+                return b"", {
+                    "type": "too_many_redirects",
+                    "reason": str(loop_exc),
+                    "limit": loop_exc.limit,
+                }
             except _RedirectBlocked as redirect_exc:
                 decision = redirect_exc.decision
                 return b"", {

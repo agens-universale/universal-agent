@@ -289,6 +289,37 @@ def append_subagent_trace_record(
     return record
 
 
+def restore_subagent_trace_records(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    records: List[Dict[str, Any]],
+) -> None:
+    """Записать трассу КАК ЕСТЬ: со своими ``ts`` и ``seq``.
+
+    Нужно ровно одному сценарию — возврату трассы на место после того, как
+    ``reset`` снёс её вместе с историей (см. ``replace_messages``). Обычный
+    ``append_subagent_trace_record`` там не годится: он безусловно ставит
+    свежее время и следующий номер, и после каждой компакции у ВСЕЙ трассы
+    дата равнялась моменту компакции, а нумерация начиналась заново. Трасса
+    переставала быть хронологией — ровно тем, ради чего её и спасали.
+
+    Кэш номеров подводится под максимум записанного: иначе следующий append
+    выдал бы номер, который уже занят.
+    """
+    path = subagent_trace_path(threads_dir, system_id, thread_id)
+    if not records:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with _sidecar_seq_lock:
+        with open(path, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _sidecar_last_seq[path] = max(
+            (int(r.get("seq") or 0) for r in records), default=0
+        )
+
+
 def read_subagent_trace(
     threads_dir: str, system_id: str, thread_id: str
 ) -> List[Dict[str, Any]]:

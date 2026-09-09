@@ -1384,7 +1384,7 @@ async def arun_agent(
                         # увидит устаревший notice как начало нового хода.
                         if work_new:
                             state.messages += work_new
-                            _maybe_persist(
+                            await _maybe_persist(
                                 persist_messages_callback, work_new, state
                             )
                         if finish_new:
@@ -1431,7 +1431,7 @@ async def arun_agent(
                             if decision.outcome == "reject":
                                 if tail_new:
                                     state.messages += tail_new
-                                    _maybe_persist(
+                                    await _maybe_persist(
                                         persist_messages_callback, tail_new, state
                                     )
                                 feedback = (decision.feedback_text or "").strip()
@@ -1469,7 +1469,7 @@ async def arun_agent(
                                 return finish_arguments
                         else:
                             if finish_new:
-                                _maybe_persist(
+                                await _maybe_persist(
                                     persist_messages_callback, finish_new, state
                                 )
                             state.current_user_intent = []

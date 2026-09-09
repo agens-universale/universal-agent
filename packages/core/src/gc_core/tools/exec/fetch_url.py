@@ -16,7 +16,11 @@ from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies
-from gc_core.tools.exec.redirect_policy import RedirectBlocked, fetch_validating_redirects
+from gc_core.tools.exec.redirect_policy import (
+    RedirectBlocked,
+    TooManyRedirects,
+    fetch_validating_redirects,
+)
 from gc_core.security.path_policy import resolve_tool_context
 
 
@@ -620,6 +624,22 @@ Usage:
                 )
                 response.raise_for_status()
                 break
+            except TooManyRedirects as loop_exc:
+                # НЕ политика: это петля редиректов. Раньше превышение
+                # отдавалось тем же конвертом, что и запрет, и модель делала
+                # неверный вывод — что адрес под запретом.
+                return _result(
+                    ok=False,
+                    final_url=loop_exc.url,
+                    status_code=None,
+                    content_type=None,
+                    result_type="error",
+                    error={
+                        "type": "too_many_redirects",
+                        "message": str(loop_exc),
+                        "limit": loop_exc.limit,
+                    },
+                )
             except RedirectBlocked as redirect_exc:
                 decision = redirect_exc.decision
                 return self._url_policy_blocked_result(
