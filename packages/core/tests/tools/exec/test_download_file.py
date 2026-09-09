@@ -118,7 +118,7 @@ def _install(monkeypatch, handler):
     )
     monkeypatch.setattr(async_http, "get_async_client", factory)
     for target in (DownloadFile.__call__, DownloadFile._http_get_bytes,
-                   DownloadFile._fetch_with_redirect_validation):
+                   DownloadFile._stream_with_redirect_validation):
         globals_dict = getattr(inspect.unwrap(target), "__globals__", None)
         if globals_dict is not None and "get_async_client" in globals_dict:
             monkeypatch.setitem(globals_dict, "get_async_client", factory)
@@ -456,3 +456,86 @@ def test_download_file_atomic_write_replace_failure(tmp_path, monkeypatch):
     dest = launch_root / "downloads" / "report.pdf"
     assert not dest.exists()
     assert not dest.with_suffix(dest.suffix + ".tmp").exists()
+
+
+# --- M11: тело не приезжает в память целиком --------------------------------
+
+
+def test_oversized_file_is_rejected_by_content_length_without_downloading(monkeypatch, tmp_path):
+    """Сервер честно сказал размер — качать нечего вовсе.
+
+    Раньше файл скачивался в память ЦЕЛИКОМ и только потом сравнивался с
+    `max_bytes`: пять гигабайт при лимите в пятьдесят мегабайт полностью
+    приезжали в RAM и лишь затем отвергались. Докстрока при этом обещала
+    «пишет тело инлайн» — писать к тому моменту было уже нечего.
+    """
+    launch_root = tmp_path / "root"
+    launch_root.mkdir()
+
+    def _handler(request):
+        # Тело маленькое, но заявленный размер заведомо больше лимита.
+        return httpx.Response(
+            200,
+            content=b"x" * 64,
+            headers={"Content-Length": "999999999",
+                     "Content-Type": "application/octet-stream"},
+        )
+
+    _install(monkeypatch, _handler)
+
+    out = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=1024)),
+        url="https://example.com/big.pdf",
+        filename="big.pdf",
+    ))
+
+    assert out["ok"] is False, out
+    assert out["error"]["type"] == "file_too_large", out
+    assert out["error"].get("declared_bytes") == 999999999, out
+
+
+def test_lying_content_length_is_caught_while_streaming(monkeypatch, tmp_path):
+    """Заявленный размер не обязателен и может врать — считаем фактический."""
+    launch_root = tmp_path / "root"
+    launch_root.mkdir()
+
+    def _handler(request):
+        # Заголовка нет вовсе: единственная защита — счёт прочитанного.
+        return httpx.Response(200, content=b"y" * 20_000,
+                              headers={"Content-Type": "application/octet-stream"})
+
+    _install(monkeypatch, _handler)
+
+    out = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=1024)),
+        url="https://example.com/lying.pdf",
+        filename="lying.pdf",
+    ))
+
+    assert out["ok"] is False, out
+    assert out["error"]["type"] == "file_too_large", out
+
+
+def test_small_file_still_downloads(monkeypatch, tmp_path):
+    """Обратная половина: обычный файл по-прежнему скачивается целиком."""
+    launch_root = tmp_path / "root"
+    launch_root.mkdir()
+
+    # Настоящая сигнатура: у `.pdf` содержимое проверяется по magic-байтам,
+    # и произвольные байты тул отвергнет ещё до записи.
+    body = PDF_BYTES
+
+    def _handler(request):
+        return httpx.Response(200, content=body,
+                              headers={"Content-Type": "application/pdf"})
+
+    _install(monkeypatch, _handler)
+
+    out = json.loads(_call(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=4096)),
+        url="https://example.com/ok.pdf",
+        filename="ok.pdf",
+    ))
+
+    assert out["ok"] is True, out
+    assert (launch_root / "downloads" / "ok.pdf").read_bytes() == body

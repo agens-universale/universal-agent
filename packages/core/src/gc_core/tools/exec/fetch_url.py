@@ -17,6 +17,8 @@ from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.tools.exec.redirect_policy import RedirectBlocked, fetch_validating_redirects
+from gc_core.security.path_policy import resolve_tool_context
 
 
 def _response_url(exc: Exception) -> "str | None":
@@ -583,6 +585,10 @@ Usage:
             "sec-ch-ua-platform": '"Linux"',
         }
 
+        # Контекст политики нужен на КАЖДОМ переходе редиректа, а не только
+        # на стартовом адресе (его проверил гвард `enforce_url_policy`).
+        policy_context = resolve_tool_context(self, ctx=self._ctx, state=self._state)
+
         response = None
         last_exc = None
         attempts = 1 + self.max_retries
@@ -599,14 +605,33 @@ Usage:
                         normalized_proxy, os.environ, normalized_url
                     )
                 )
-                response = await client.get(
+                # Каждый переход проверяется политикой. Раньше здесь стоял
+                # `follow_redirects=True`, то есть проверялся ТОЛЬКО стартовый
+                # адрес — а сервер вправе ответить 302 куда угодно, и запрет
+                # «не ходить во внутреннюю сеть» обходился одним заголовком
+                # `Location`. У двух соседних HTTP-тулов такая петля была, у
+                # этого — регистрируемого по умолчанию — нет.
+                response = await fetch_validating_redirects(
+                    client,
                     normalized_url,
-                    headers=headers,
-                    timeout=effective_timeout,
-                    follow_redirects=True,
+                    headers,
+                    effective_timeout,
+                    allowed_schemes=policy_context.url_allowed_schemes,
+                    url_blacklist=policy_context.url_blacklist,
                 )
                 response.raise_for_status()
                 break
+            except RedirectBlocked as redirect_exc:
+                decision = redirect_exc.decision
+                return self._url_policy_blocked_result(
+                    {
+                        "type": decision.error_type or "url_blocked_by_policy",
+                        "reason": decision.reason,
+                        "matched_rule": decision.matched_rule,
+                        "blocked_on_redirect": True,
+                    },
+                    normalized_url,
+                )
             except httpx.HTTPError as exc:
                 last_exc = exc
                 status = getattr(getattr(exc, "response", None), "status_code", None)
