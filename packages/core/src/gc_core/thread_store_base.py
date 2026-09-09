@@ -141,6 +141,43 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
       без файлов его нет, и ядро на это рассчитывает.
     """
 
+    def replace_messages(
+        self, system_id: str, thread_id: str, messages: Sequence[Dict[str, Any]]
+    ) -> None:
+        """Заместить историю треда, НЕ трогая meta и трассу субагентов.
+
+        Зовётся компакцией у хранилищ, которые не объявляют
+        ``archive_and_replace``. Раньше на этом месте стояла пара
+        ``reset`` + ``append_messages``, и она делала лишнего:
+
+        * ``reset`` по контракту стирает ВЕСЬ тред, включая
+          ``subagent_trace`` — то есть каждая компакция теряла историю
+          вызовов субагентов;
+        * между ``reset`` и последующим ``save_meta`` треда не существовало
+          вовсе: падение процесса в этом окне уносило ``created_at``, секцию
+          ``tui`` и ``shared``.
+
+        Умолчание ниже — то же самое замещение, но без потери трассы: она
+        читается и возвращается на место. Хранилищу, которое умеет заместить
+        историю одной операцией (SQL ``DELETE … INSERT`` в транзакции), стоит
+        переопределить метод — это и надёжнее, и быстрее.
+        """
+        trace = self.read_subagent_trace(system_id, thread_id)
+        meta = self.load_meta(system_id, thread_id)
+        self.reset(system_id, thread_id)
+        self.append_messages(system_id, thread_id, messages)
+        if meta:
+            self.save_meta(system_id, thread_id, meta)
+        for record in trace:
+            self.append_subagent_trace(
+                system_id,
+                thread_id,
+                parent_call_id=record.get("parent_call_id", ""),
+                child_run_id=record.get("child_run_id", ""),
+                kind=record.get("kind", ""),
+                payload=record.get("payload", {}) or {},
+            )
+
     def ensure_ready(self) -> None:
         """Подготовить хранилище к работе. По умолчанию — ничего не делать.
 
@@ -253,6 +290,26 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
     часть потерялась молча, потому что синхронные вызывающие корутину просто
     отбрасывают.
     """
+
+    async def areplace_messages(
+        self, system_id: str, thread_id: str, messages: Sequence[Dict[str, Any]]
+    ) -> None:
+        """См. :meth:`ThreadStoreBase.replace_messages`."""
+        trace = await self.aread_subagent_trace(system_id, thread_id)
+        meta = await self.aload_meta(system_id, thread_id)
+        await self.areset(system_id, thread_id)
+        await self.aappend_messages(system_id, thread_id, messages)
+        if meta:
+            await self.asave_meta(system_id, thread_id, meta)
+        for record in trace:
+            await self.aappend_subagent_trace(
+                system_id,
+                thread_id,
+                parent_call_id=record.get("parent_call_id", ""),
+                child_run_id=record.get("child_run_id", ""),
+                kind=record.get("kind", ""),
+                payload=record.get("payload", {}) or {},
+            )
 
     async def aensure_ready(self) -> None:
         """См. :meth:`ThreadStoreBase.ensure_ready`."""

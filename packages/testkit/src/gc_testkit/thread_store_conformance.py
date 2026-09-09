@@ -371,6 +371,69 @@ def check_every_write_path_stamps_meta(store: Any) -> None:
                 )
 
 
+def check_discard_updates_the_count(store: Any) -> None:
+    """После ``discard_message`` номер последнего seq и счёт расходятся — законно.
+
+    А вот СЧЁТ записей обязан уменьшиться: его читает TUI (список сессий,
+    «N сообщ.»). ``MemoryThreadStore`` его не декрементил, и обе реализации
+    проходили набор — расхождение вылезало у пользователя как «сообщений
+    столько же, а в треде меньше».
+    """
+    tid = "t-discard-count"
+    store.append_messages(SYS, tid, [
+        {"role": "user", "content": "a", "id": "m1"},
+        {"role": "user", "content": "b", "id": "m2"},
+    ])
+    before = len(store.load_messages(SYS, tid))
+
+    removed = store.discard_message(SYS, tid, "m2")
+
+    if not removed:
+        _fail("discard_message не удалил существующее сообщение", f"id=m2")
+    after = len(store.load_messages(SYS, tid))
+    if after != before - 1:
+        _fail(
+            "после discard_message история не стала короче",
+            f"было {before}, стало {after} — TUI покажет неверное число сообщений",
+        )
+
+
+def check_replace_messages_keeps_the_trace(store: Any) -> None:
+    """Замещение истории не должно уносить трассу субагентов и meta.
+
+    Компакция у хранилищ без ``archive_and_replace`` замещает историю. Пока
+    это делалось парой ``reset`` + ``append_messages``, каждая компакция
+    стирала ``subagent_trace`` (``reset`` по контракту сносит ВЕСЬ тред) и
+    открывала окно, в котором треда не существовало вовсе.
+
+    Способность необязательная: у кого её нет, проверка пропускается.
+    """
+    replace = getattr(store, "replace_messages", None)
+    if not callable(replace):
+        return
+
+    tid = "t-replace"
+    store.save_meta(SYS, tid, {"token_usage": {"total": 5}})
+    store.append_messages(SYS, tid, [{"role": "user", "content": "старое", "id": "m1"}])
+    store.append_subagent_trace(
+        SYS, tid, parent_call_id="p1", child_run_id="c1",
+        kind="child_start", payload={"x": 1},
+    )
+
+    replace(SYS, tid, [{"role": "system", "content": "сводка", "id": "s1"}])
+
+    left = store.load_messages(SYS, tid)
+    if [m.get("id") for m in left] != ["s1"]:
+        _fail("replace_messages не заместил историю", f"осталось {left!r}")
+    if not store.read_subagent_trace(SYS, tid):
+        _fail(
+            "replace_messages потерял трассу субагентов",
+            "замещение истории не повод стирать историю вызовов детей",
+        )
+    if not store.load_meta(SYS, tid).get("token_usage"):
+        _fail("replace_messages потерял meta", "секции meta не относятся к истории")
+
+
 def check_discard(store: Any) -> None:
     """Удаление по id, ``False`` на несуществующем."""
     store.append_messages(SYS, "t-disc", [_msg("d1"), _msg("d2")])
@@ -451,6 +514,8 @@ BEHAVIOUR_CHECKS: tuple = (
     check_meta_is_stamped_on_write,
     check_runtime_flag_is_pointwise,
     check_every_write_path_stamps_meta,
+    check_discard_updates_the_count,
+    check_replace_messages_keeps_the_trace,
     check_update_runtime_meta,
     check_discard,
     check_reset,

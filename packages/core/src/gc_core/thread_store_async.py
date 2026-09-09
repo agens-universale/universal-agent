@@ -50,6 +50,7 @@
 from __future__ import annotations
 
 import inspect
+import weakref
 import time
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, runtime_checkable
 
@@ -330,6 +331,19 @@ def is_async_thread_store(store: Any) -> bool:
     )
 
 
+#: Адаптеры, уже выданные на конкретное хранилище.
+#:
+#: Ключ — сам объект store, слабой ссылкой: адаптер не должен продлевать ему
+#: жизнь. Кэш нужен из-за окна проб: адаптер меряет первые
+#: ``SLOW_CALL_PROBE_COUNT`` обращений и один раз предупреждает о медленном
+#: сетевом хранилище. Пока адаптер создавался НА КАЖДЫЙ ``afrom_config`` и на
+#: каждую запись трассы субагента, окно не закрывалось никогда: обещанное
+#: «предупреждение один раз» превращалось в «раз за прогон», а медиана
+#: считалась по write-heavy прологу, где порог в 2 мс перешагивает и локальный
+#: файл.
+_ADAPTERS: "weakref.WeakKeyDictionary[Any, Any]" = weakref.WeakKeyDictionary()
+
+
 def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore:
     """Асинхронный порт для хранилища: свой, если он есть, иначе адаптер.
 
@@ -337,9 +351,18 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
     и адресный — он приходит В МОМЕНТ ПРОВОДКИ, а не на 630-й строке чужого
     файла, куда ведёт нынешний ``TypeError: cannot unpack non-iterable
     coroutine object``.
+
+    Адаптер на одно хранилище ОДИН — см. ``_ADAPTERS``.
     """
     if is_async_thread_store(store):
         return store
+
+    try:
+        cached = _ADAPTERS.get(store)
+    except TypeError:
+        cached = None                     # не-хешируемое хранилище: без кэша
+    if cached is not None:
+        return cached
 
     from gc_core.thread_store_protocol import CONTRACT_METHODS_HINT
 
@@ -361,7 +384,12 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
                 "  Либо все методы синхронные (ThreadStore), либо все "
                 "асинхронные с приставкой a (AsyncThreadStore)."
             )
-        return SyncThreadStoreAdapter(store, warn=warn)
+        adapter = SyncThreadStoreAdapter(store, warn=warn)
+        try:
+            _ADAPTERS[store] = adapter
+        except TypeError:
+            pass                          # без weakref — просто без кэша
+        return adapter
 
     half_async_named = [
         name for name in ASYNC_CONTRACT_METHODS
