@@ -24,6 +24,19 @@ from gc_core.loop_detector.detector import (
     resolve_thresholds,
 )
 from gc_testkit import run_coro
+from helpers.turn_finish_apply import stub_turn_finish_apply
+
+
+def _async_noop(fn):
+    """Корутинная заглушка: ядро зовёт диспетчер и хуки только async-именами.
+
+    Синхронную подмену цикл получил бы как готовый результат вместо awaitable
+    и упал бы на ``await`` — или, хуже, тихо не исполнил бы её вовсе.
+    """
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
 
 
 def _state(**extra):
@@ -709,7 +722,9 @@ def test_accepted_turn_finish_clears_window(monkeypatch):
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.processing_responses import arun_agent
     from gc_core.states import State
+    from gc_core import processing_responses as pr
 
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",
@@ -843,6 +858,7 @@ def test_finish_gate_reject_keeps_window(monkeypatch):
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.states import State
 
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",

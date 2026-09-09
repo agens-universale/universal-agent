@@ -27,10 +27,19 @@ def _is_turn_finish_call(message: dict[str, Any]) -> bool:
 
 
 def _without_last_turn_finish_call(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop the last pending finish-turn tool_call from digest (§5.2)."""
+    """Drop the pending finish call and its output from the judge digest (§5.2)."""
     for idx in range(len(messages) - 1, -1, -1):
         if _is_turn_finish_call(messages[idx]):
-            return messages[:idx] + messages[idx + 1 :]
+            call_id = messages[idx].get("call_id")
+            return [
+                message
+                for pos, message in enumerate(messages)
+                if pos != idx
+                and not (
+                    message.get("type") == "function_call_output"
+                    and message.get("call_id") == call_id
+                )
+            ]
     return list(messages)
 
 

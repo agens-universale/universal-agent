@@ -20,9 +20,6 @@ def teardown_module(_module) -> None:
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
-    cycle_stop_mod = sys.modules.get("gc_core.message_policy.cycle_stop")
-    if cycle_stop_mod is not None:
-        cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
 def _stub_tools_modules() -> None:

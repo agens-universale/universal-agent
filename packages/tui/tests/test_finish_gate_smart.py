@@ -140,6 +140,28 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.states import State
 
+    async def stub_turn_finish_apply(**kwargs):
+        tool_name = kwargs.get("tool_name")
+        arguments = kwargs.get("arguments")
+        if tool_name != "turn_finish":
+            return json.dumps({"tool": tool_name, "ok": True}, ensure_ascii=False)
+        try:
+            payload = json.loads(arguments) if isinstance(arguments, str) else {}
+        except Exception:
+            payload = {}
+        result = {
+            "tool": "turn_finish",
+            "ok": True,
+            "status": "submitted",
+            "message": "Task outcome submitted.",
+            "error": None,
+        }
+        if isinstance(payload, dict):
+            for key in ("solution_type", "comment", "task_report", "handoff"):
+                if key in payload:
+                    result[key] = payload[key]
+        return json.dumps(result, ensure_ascii=False)
+
     gate_calls: list = []
 
     async def _capture(**_kwargs):
@@ -180,12 +202,9 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
         }], "r2"
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
-    # Заглушка обязана быть КОРУТИННОЙ: ядро ждёт aapply_tool нативно, и
-    # синхронная лямбда даёт "object str can't be used in 'await' expression".
-    async def _ok_tool(**_kw):
-        return "ok"
-
-    monkeypatch.setattr(pr, "aapply_tool", _ok_tool)
+    # Заглушка КОРУТИННАЯ: ядро ждёт `aapply_tool` нативно, синхронная даёт
+    # "object str can't be used in 'await' expression".
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
     monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
 

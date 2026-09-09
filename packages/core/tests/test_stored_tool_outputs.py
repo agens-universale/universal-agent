@@ -124,6 +124,29 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
     assert res_self == '{"tool":"session_read_stored_tool_output"}'
 
 
+def test_wrap_never_replaces_turn_finish_status_with_stored_envelope():
+    state = _make_state()
+    cfg = {"tool_output_inline_max_chars": 5, "stored_tool_outputs_max_entries": 10}
+    rejected = json.dumps(
+        {
+            "tool": "turn_finish",
+            "ok": False,
+            "status": "rejected",
+            "message": "x" * 100,
+        }
+    )
+    res = maybe_store_and_wrap_tool_output(
+        rejected,
+        call_id="call_finish",
+        tool_name="turn_finish",
+        state=state,
+        config=cfg,
+    )
+    assert res == rejected
+    assert json.loads(res)["ok"] is False
+    assert len(state.tool_call_outputs_store) == 0
+
+
 def test_wrap_fs_read_file_long_output_goes_to_store():
     state = _make_state()
     cfg = {"tool_output_inline_max_chars": 80, "stored_tool_outputs_max_entries": 10}

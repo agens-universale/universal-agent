@@ -28,6 +28,22 @@ def _scenario(report: str = "готово") -> list[dict]:
     return [_finish(report), judge_accept()]
 
 
+@pytest.fixture(autouse=True)
+def _stub_turn_finish(monkeypatch):
+    """Диспетчер тулов для ``turn_finish``: у стенда нет tools_data.
+
+    Понадобилось после правки develop «батч с turn_finish — сначала вся work,
+    закрытие по output»: ход теперь ИСПОЛНЯЕТ финализатор и закрывается по
+    факту ``ok``, а не по обнаружению вызова в трассе. Без tools_data
+    исполнение даёт unknown tool, ход не закрывается и упирается в
+    ``step_limit``. develop завёл ровно такую же фикстуру у своих тестов.
+    """
+    from gc_core import processing_responses as pr
+    from helpers.turn_finish_apply import stub_turn_finish_apply
+
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
+
+
 async def test_facade_runs_a_turn(tmp_path, monkeypatch):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(_scenario("42")))

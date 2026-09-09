@@ -99,6 +99,26 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         self.assertNotIn("[function_call] turn_finish", text)
         self.assertNotIn("full_solution", text)
 
+    def test_pending_submit_solution_output_excluded_from_digest(self) -> None:
+        messages = _ask_human_scenario_messages()
+        messages.append(
+            {
+                "type": "function_call_output",
+                "call_id": "ss1",
+                "output": {
+                    "tool": "turn_finish",
+                    "ok": True,
+                    "status": "submitted",
+                    "task_report": "duplicate pending report",
+                },
+            }
+        )
+        state = SimpleNamespace(messages=messages)
+        digest = build_finish_gate_trace_digest(state=state)
+        text = digest.trace_digest_text
+        self.assertNotIn("[function_call] turn_finish", text)
+        self.assertNotIn("duplicate pending report", text)
+
     def test_previous_submit_solution_remains_when_not_last(self) -> None:
         messages = _ask_human_scenario_messages(include_pending_submit=False)
         messages.extend(

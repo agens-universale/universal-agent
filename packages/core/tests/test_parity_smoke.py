@@ -17,6 +17,7 @@ docs/reports/2026-08-21-async-core-audit.md.
 import asyncio
 
 from gc_core.agent_executor import AgentExecutor
+import pytest
 from gc_core.run_context import create_run_context
 
 from parity_harness import (
@@ -28,6 +29,32 @@ from parity_harness import (
     run_thread_dump,
 )
 from gc_testkit import run_coro
+
+
+@pytest.fixture(autouse=True)
+def _stub_turn_finish(monkeypatch):
+    """Подменяем ТОЛЬКО ``turn_finish``: у стенда нет tools_data.
+
+    После правки develop «батч с turn_finish — сначала вся work, закрытие по
+    output» ход ИСПОЛНЯЕТ финализатор и закрывается по факту ``ok``. Без
+    tools_data это unknown tool, ход не закрывается и тратит лишний
+    backend-вызов — сценарий переставал сходиться (`assert_clean`).
+
+    Делегирующая: `exec_calculator` в сценарии обязан отработать по-настоящему,
+    иначе дамп треда, который здесь и сверяется, окажется другим.
+    """
+    from gc_core import processing_responses as pr
+    from helpers.turn_finish_apply import stub_turn_finish_apply
+
+    real = pr.aapply_tool
+
+    async def _dispatch(**kwargs):
+        if kwargs.get("tool_name") == "turn_finish":
+            return await stub_turn_finish_apply(**kwargs)
+        return await real(**kwargs)
+
+    monkeypatch.setattr(pr, "aapply_tool", _dispatch)
+
 
 #: Сценарий: модель зовёт калькулятор, затем закрывает ход финализатором.
 #: Ход завершается ТОЛЬКО через turn_finish: голый текст ассистента цикл
@@ -159,12 +186,12 @@ def test_async_run_matches_pre_migration_reference(tmp_path, monkeypatch):
     from pathlib import Path
 
     reference = json.loads(
-        (Path(__file__).parent / "fixtures" / "parity_reference_bf1cb021.json")
+        (Path(__file__).parent / "fixtures" / "parity_reference_956a848a.json")
         .read_text(encoding="utf-8")
     )
 
     answer, dump, backend = _run_once(tmp_path, monkeypatch, mode="async")
 
-    assert answer == reference["answer"], "ответ разошёлся с до-async прогоном"
-    assert dump == reference["dump"], "дамп треда разошёлся с до-async прогоном"
+    assert answer == reference["answer"], "ответ разошёлся с прогоном на develop"
+    assert dump == reference["dump"], "дамп треда разошёлся с прогоном на develop"
     backend.assert_clean()

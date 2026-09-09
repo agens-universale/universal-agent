@@ -31,6 +31,22 @@ from parity_harness import (
     parity_config,
 )
 
+
+@pytest.fixture(autouse=True)
+def _stub_turn_finish(monkeypatch):
+    """Диспетчер тулов для ``turn_finish``: у стенда нет tools_data.
+
+    После правки develop «батч с turn_finish — сначала вся work, закрытие по
+    output» ход ИСПОЛНЯЕТ финализатор и закрывается по факту ``ok``, а не по
+    обнаружению вызова в трассе. Без tools_data это unknown tool, ход не
+    закрывается и упирается в ``step_limit``.
+    """
+    from gc_core import processing_responses as pr
+    from helpers.turn_finish_apply import stub_turn_finish_apply
+
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
+
+
 #: Ход 1 — тул (настоящий subprocess). Ход 2 — финализатор. Ход 3 — судья.
 TURNS = [
     assistant_tool_call("exec_sleep", {"seconds": 0.05}, call_id="c1"),

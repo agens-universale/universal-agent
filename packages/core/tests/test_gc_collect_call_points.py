@@ -4,7 +4,7 @@ docs_md/actual/2026-07-29-gc-collect-placement-spec.md.
 C1 — 4 метода RunSummaryCoordinator (run_summary_coordinator.py) после успешной
       компакции; на no-op (early-return без компакции) collect не вызывается.
 C2 — AgentExecutor.run finally после close_all (agent_executor.py).
-C3 — processing_responses.process_tool_calls перед return tools_outputs;
+C3 — processing_responses.aprocess_tool_calls перед return tools_outputs;
       условный по флагу gc.force_collect (default on CLI/TUI, off server).
 """
 import importlib

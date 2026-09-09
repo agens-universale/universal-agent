@@ -390,7 +390,10 @@ def _patch_llm_transport(monkeypatch, response_text: str) -> list:
         captured.append(payload)
         return {"choices": [{"message": {"content": response_text}}]}, payload
 
-    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
+    # Форма у воронки одна — корутинная; синхронного имени в модуле нет.
+    monkeypatch.setattr(
+        llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy)
+    )
     return captured
 
 

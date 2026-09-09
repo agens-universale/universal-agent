@@ -17,6 +17,8 @@ SOLUTION_TYPES = (
     "abandoned",
 )
 
+TASK_REPORT_MAX_CHARS = 10000
+
 class SubmitSolution(AbstractSimpleTool):
 
     @staticmethod
@@ -36,9 +38,15 @@ class SubmitSolution(AbstractSimpleTool):
             "tool": SubmitSolution.registered_tool_name(),
             "ok": ok,
             "status": status,
-            "message": message,
-            "error": error,
         }
+        # Успешный turn_finish — управляющий ack. Содержательные поля уже есть
+        # в function_call.arguments: их повтор раздувает trace, digest судьи и
+        # intent log. Диагностику сохраняем только для отказного результата.
+        if ok:
+            return json.dumps(out, ensure_ascii=False)
+
+        out["message"] = message
+        out["error"] = error
         if solution_type is not None:
             out["solution_type"] = solution_type
         if comment is not None:
@@ -63,63 +71,6 @@ class SubmitSolution(AbstractSimpleTool):
             return parse_json_object_arg(raw, field="handoff")
         except JsonArgParseError:
             return None
-
-    @classmethod
-    def output_from_cycle_stop_arguments(cls, tool_arguments: str) -> Optional[str]:
-        """
-        Build ``function_call_output`` JSON from ``function_call.arguments`` on cycle_stop.
-
-        Best-effort parse without re-running full tool validation (finish gate already ran).
-        """
-        if not isinstance(tool_arguments, str) or not tool_arguments.strip():
-            return None
-        try:
-            payload = json.loads(tool_arguments)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-
-        solution_type = payload.get("solution_type")
-        if solution_type is not None and not isinstance(solution_type, str):
-            solution_type = str(solution_type)
-
-        task_report = payload.get("task_report")
-        if not isinstance(task_report, str):
-            task_report = "" if task_report is None else str(task_report)
-
-        task = payload.get("task")
-        if not isinstance(task, str):
-            task = None if task is None else str(task)
-
-        comment = payload.get("comment")
-        if comment is not None and not isinstance(comment, str):
-            comment = str(comment)
-
-        handoff = cls._parse_handoff_from_arguments(payload)
-
-        return cls._result(
-            ok=True,
-            status="submitted",
-            message="Task outcome submitted.",
-            task=task,
-            task_report=task_report,
-            solution_type=solution_type,
-            comment=comment if isinstance(comment, str) and comment.strip() else None,
-            handoff=handoff,
-            error=None,
-        )
-
-    @classmethod
-    def cycle_stop_output_error(cls, *, detail: str) -> str:
-        return cls._result(
-            ok=False,
-            status="cycle_stop_output_error",
-            message=detail,
-            task=None,
-            task_report="",
-            error={"type": "cycle_stop", "message": detail},
-        )
 
     @staticmethod
     def _finish_gate_block_from_validation(validation: Any) -> Dict[str, Any]:
@@ -213,7 +164,8 @@ class SubmitSolution(AbstractSimpleTool):
                         "type": "string",
                         "description": (
                             "Final human-facing summary for this turn: what was done, result, assumptions, evidence. "
-                            "Plain text, no markdown. Not for mid-task status updates."
+                            f"Plain text, no markdown. Max {TASK_REPORT_MAX_CHARS} characters. "
+                            "Not for mid-task status updates."
                         ),
                     },
                     "comment": {
@@ -249,7 +201,7 @@ Input schema:
 {
   "solution_type": "full_solution" | "partial_solution" | "direct_answer" | "couldnt_solve" | "need_additional_info" | "abandoned",
   "task": "string (required)",
-  "task_report": "string (required)",
+  "task_report": "string (required, max ''' + str(TASK_REPORT_MAX_CHARS) + ''' chars)",
   "comment": "string (optional)",
   "handoff": "{}" (required; JSON object encoded as a string)
 }
@@ -286,11 +238,12 @@ Choosing solution_type (for current turn):
 - abandoned: stopped by explicit choice/instruction.
 
 - task: What the user asked this turn, in 1–2 phrases, in the user's terms. Not what was done — that is task_report.
-- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief.
+- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief. Max ''' + str(TASK_REPORT_MAX_CHARS) + ''' characters.
 - comment: Optional caveats, risks, unresolved items, or next steps.
 - handoff: Required JSON object string (see Handoff format). Minimal valid value: "{}".
 
-Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","task":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
+Success return format (compact JSON ack): {"tool":"turn_finish","ok":true,"status":"submitted"}
+Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rejected","message":"...","error":{...},"task_report":""}
 '''
 
 
@@ -378,7 +331,8 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                     "message": "task_report cannot be empty or whitespace only.",
                 },
             )
-        if len(task_report.strip()) > 10000:
+        report_len = len(task_report.strip())
+        if report_len > TASK_REPORT_MAX_CHARS:
             return self._result(
                 ok=False,
                 status="rejected",
@@ -388,7 +342,9 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 error={
                     "type": "limit_exceeded",
                     "field": "task_report",
-                    "message": "task_report is too long. Keep under 10 sentences.",
+                    "message": (
+                        f"task_report exceeds {TASK_REPORT_MAX_CHARS} chars, got {report_len}"
+                    ),
                 },
             )
 
@@ -439,30 +395,14 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                     },
                 )
 
-        # task — подсказка модели, не валидируем: turn_finish идёт через
-        # check_trace_finished мимо apply_tool, reject отсюда до модели не дошёл бы.
-        task_norm = self._normalize_text(task) if isinstance(task, str) and task.strip() else None
-        task_report_norm = self._normalize_text(task_report)
-        comment_norm = self._normalize_text(comment) if comment and comment.strip() else None
-
         return self._result(
             ok=True,
             status="submitted",
             message="Task outcome submitted.",
-            task=task_norm,
-            task_report=task_report_norm,
+            task=None,
+            task_report="",
             solution_type=solution_type,
-            comment=comment_norm,
-            handoff=handoff_data,
+            comment=None,
+            handoff=None,
             error=None,
         )
-
-    def _normalize_text(self, text: str) -> str:
-        """Normalize line endings and trim extra whitespace."""
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        lines = [line.rstrip() for line in text.split('\n')]
-        while lines and not lines[0].strip():
-            lines.pop(0)
-        while lines and not lines[-1].strip():
-            lines.pop()
-        return '\n'.join(lines)

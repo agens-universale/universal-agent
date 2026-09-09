@@ -19,6 +19,19 @@ from gc_core.states import State
 from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit import run_coro
+from helpers.turn_finish_apply import stub_turn_finish_apply
+
+
+def _async_noop(fn):
+    """Корутинная заглушка: ядро зовёт диспетчер и хуки только async-именами.
+
+    Синхронную подмену цикл получил бы как готовый результат вместо awaitable
+    и упал бы на ``await`` — или, хуже, тихо не исполнил бы её вовсе.
+    """
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -137,6 +150,7 @@ def _seed_long_history(state: State, *, user_chars: int = 80) -> None:
 
 @pytest.fixture(autouse=True)
 def _accept_finish_gate(monkeypatch):
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(
         intent_guard_guard,
         "avalidate_final_report_vs_user_intent",

@@ -22,6 +22,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 
+from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
 from gc_core.tools.connect_mcp.client import (
     MCP_INIT_PARAMS,
     _merge_mcp_headers,
@@ -438,6 +439,15 @@ class OsBackendStatelessClient(McpClientPort):
         )
         return code, deadline
 
+    def _carrier_argv(self) -> list:
+        """Как запускать носитель. ``python3 -`` со скриптом на stdin.
+
+        Тот же канал, которым пользуется stdio-транспорт, а не модельный путь
+        ``run_python``: у последнего свой потолок вывода, рассчитанный на
+        трассу тула, и крупный ответ MCP он обрезал.
+        """
+        return ["python3", "-"]
+
     def _request(
         self,
         payload: Dict[str, Any],
@@ -450,7 +460,13 @@ class OsBackendStatelessClient(McpClientPort):
             payload, session_id=session_id, timeout=timeout,
             close_session=close_session,
         )
-        return self._interpret(self.os_backend.run_python(code, timeout=deadline))
+        result = self.os_backend.exec_argv(
+            self._carrier_argv(),
+            stdin=code,
+            timeout=deadline,
+            capture_max_chars=self._carrier_output_max_chars(),
+        )
+        return self._interpret(result)
 
     async def _arequest(
         self,
@@ -465,7 +481,12 @@ class OsBackendStatelessClient(McpClientPort):
             payload, session_id=session_id, timeout=timeout,
             close_session=close_session,
         )
-        result = await aexec_port(self.os_backend).arun_python(code, timeout=deadline)
+        result = await aexec_port(self.os_backend).aexec_argv(
+            self._carrier_argv(),
+            stdin=code,
+            timeout=deadline,
+            capture_max_chars=self._carrier_output_max_chars(),
+        )
         return self._interpret(result)
 
     def _stdio_call_parts(
@@ -498,7 +519,6 @@ class OsBackendStatelessClient(McpClientPort):
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params},
         ]
-        stdin = "".join(json.dumps(m) + "\n" for m in messages)
         stdin = "".join(json.dumps(m) + "\n" for m in messages)
         return argv, stdin, rpc_id
 
@@ -535,6 +555,7 @@ class OsBackendStatelessClient(McpClientPort):
         result = self.os_backend.exec_argv(
             argv, stdin=stdin, cwd=self.server_cfg.get("cwd"),
             timeout=max(1, int(timeout)),
+            capture_max_chars=self._carrier_output_max_chars(),
         )
         return self._stdio_reply(result, rpc_id)
 
@@ -546,8 +567,17 @@ class OsBackendStatelessClient(McpClientPort):
         result = await aexec_port(self.os_backend).aexec_argv(
             argv, stdin=stdin, cwd=self.server_cfg.get("cwd"),
             timeout=max(1, int(timeout)),
+            capture_max_chars=self._carrier_output_max_chars(),
         )
         return self._stdio_reply(result, rpc_id)
+
+    def _carrier_output_max_chars(self) -> int:
+        """The MCP answer is transport, not a model-facing trace: it is parsed and
+        then bounded by ``tool_output_inline_max_chars`` like any tool output. So
+        it rides the backend's internal-channel ceiling (the one walk/listdir
+        use), not the 60k shell cap — a product catalog must not fail the call.
+        Backends without the attribute (local) get the protocol default."""
+        return int(getattr(self.os_backend, "walk_output_max_chars", WALK_OUTPUT_MAX_CHARS))
 
     def _interpret(self, result: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
         if getattr(result, "stdout_hit_capture_cap", False):

@@ -5,6 +5,7 @@ from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_fini
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -21,17 +22,11 @@ def _make_state() -> State:
 
 
 def test_apply_finish_gate_decision_reject_marks_output_not_ok():
-    base = SubmitSolution.output_from_cycle_stop_arguments(
-        json.dumps(
-            {
-                "solution_type": "full_solution",
-                "task_report": "done",
-                "handoff": "{}",
-            },
-            ensure_ascii=False,
-        )
-    )
-    assert base is not None
+    base = run_coro(SubmitSolution().acall(
+        solution_type="full_solution",
+        task_report="done",
+        handoff="{}",
+    ))
     validation = ValidationResult(
         ok=False,
         action="fix_report",
@@ -55,22 +50,17 @@ def test_apply_finish_gate_decision_reject_marks_output_not_ok():
     assert payload["status"] == "rejected_by_finish_gate"
     assert "Finish gate: fix_report" in payload["message"]
     assert payload["finish_gate"]["action"] == "fix_report"
-    assert payload["task_report"] == "done"
+    assert "task_report" not in payload
     assert "Dialog turn finished" not in patched
 
 
 async def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
     state = _make_state()
     call_id = "call_finish"
-    raw = SubmitSolution.output_from_cycle_stop_arguments(
-        json.dumps(
-            {
-                "solution_type": "direct_answer",
-                "task_report": "ответ",
-                "handoff": "{}",
-            },
-            ensure_ascii=False,
-        )
+    raw = await SubmitSolution().acall(
+        solution_type="direct_answer",
+        task_report="ответ",
+        handoff="{}",
     )
     state.messages = [
         {

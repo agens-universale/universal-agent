@@ -63,8 +63,15 @@ import pytest
 
 from toggle_matrix import ALL_CASES, run_case
 
+#: Эталон снят на origin/develop (956a848a) тем же стендом.
+#:
+#: Раньше он снимался на merge-base bf1cb021 — «до асинхронности». Это
+#: перестало работать, когда develop сам изменил поведение хода (PR «батч с
+#: turn_finish — сначала вся work, закрытие по output»): матрица начала ловить
+#: ЧУЖУЮ правку и краснела 144 случаями. Эталон обязан идти с той ветки, с
+#: которой сравниваем, иначе гейт меряет не то, что заявляет.
 REFERENCE = (
-    Path(__file__).parent / "fixtures" / "toggle_matrix_reference_bf1cb021.json"
+    Path(__file__).parent / "fixtures" / "toggle_matrix_reference_956a848a.json"
 )
 
 #: Поля, по которым идёт сверка.
@@ -119,16 +126,27 @@ def test_summary_cases_actually_compact(reference):
     """Случаи с включённым порогом ДЕЙСТВИТЕЛЬНО вызывают компакцию.
 
     Иначе матрица зелёная и бессмысленная: переключатель записан в конфиг, но
-    ни на что не повлиял, и сравнивать нечего. Признак компакции — история
-    схлопнулась в одно сообщение-сводку.
+    ни на что не повлиял, и сравнивать нечего.
+
+    Признак компакции — сообщение-сводка в истории И история КОРОЧЕ, чем у
+    того же сценария с выключенным порогом. Раньше здесь стояло
+    ``len(dump) == 1``, но правка develop («батч с turn_finish — сначала вся
+    work, закрытие по output») законно оставляет после сводки work и finish,
+    и точное число перестало быть признаком компакции.
     """
-    compacted = [
-        cid for cid, row in reference.items()
-        if len(row["dump"]) == 1
-        and "dialog_summary" in json.dumps(row["dump"], ensure_ascii=False)
-    ]
+    def _has_summary(row) -> bool:
+        return "dialog_summary" in json.dumps(row["dump"], ensure_ascii=False)
+
+    compacted = [cid for cid, row in reference.items() if _has_summary(row)]
     assert compacted, "ни один случай не довёл дело до компакции"
     assert "summary/trigger_tiny" in compacted
+
+    baseline = len(reference["summary/trigger_off"]["dump"])
+    for cid in compacted:
+        assert len(reference[cid]["dump"]) < baseline, (
+            f"{cid}: сводка есть, а история не короче непожатой "
+            f"({len(reference[cid]['dump'])} против {baseline})"
+        )
 
 
 def test_every_live_schema_key_is_covered_or_explained(reference):

@@ -122,10 +122,9 @@ def _submit_solution_synthetic_output_record(
     call_id: str = "call_ss_1",
     mid: str = "fco_ss_1",
 ) -> dict:
-    """Синтетический tool_output для submit_solution.
+    """Синтетический tool_output для submit_solution (запись старого формата
+    треда, писавшегося до перехода на живое исполнение turn_finish).
 
-    Пишется backend'ом в chat_completions mode через
-    `append_cycle_stop_tool_outputs_for_batch` ПОСЛЕ submit_solution function_call'а.
     Имеет `"tool": "submit_solution"` и `"synthetic": true` в output-JSON, НО
     НЕ имеет поля `name` на верхнем уровне — поэтому старый фильтр trace_mapper
     по `name == "submit_solution"` его пропускал и sentinel `_finalized` сбрасывался."""
@@ -249,11 +248,11 @@ async def test_poll_active_keeps_validating_state_until_runner_exits(tmp_path):
 
 @pytest.mark.asyncio
 async def test_synthetic_submit_solution_output_does_not_reset_sentinel(tmp_path):
-    """Регрессия (real prod-сценарий chat_completions):
+    """Регрессия (запись старого формата треда, chat_completions):
 
-    После submit_solution function_call backend сразу же пишет синтетический
-    function_call_output через append_cycle_stop_tool_outputs_for_batch.
-    У этого record'а нет поля `name`, но output-JSON содержит
+    После submit_solution function_call в jsonl мог лежать синтетический
+    function_call_output без поля `name` (до перехода на живое исполнение
+    turn_finish). У record'а нет поля `name`, но output-JSON содержит
     `"tool": "submit_solution"`. Без расширенного фильтра в trace_mapper
     он мапился как kind='result' и затирал sentinel — индикатор re-mount'ился."""
     pytest.importorskip("textual")

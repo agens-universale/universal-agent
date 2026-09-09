@@ -5,6 +5,7 @@
 ходит в сеть и исполняет тулы.
 """
 import asyncio
+import pytest
 import json
 import os
 import subprocess
@@ -22,6 +23,34 @@ from parity_harness import (
     judge_accept,
     parity_config,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_turn_finish(monkeypatch):
+    """Подменяем ТОЛЬКО ``turn_finish``, остальные тулы идут по-настоящему.
+
+    После правки develop «батч с turn_finish — сначала вся work, закрытие по
+    output» ход ИСПОЛНЯЕТ финализатор и закрывается по факту ``ok``, а не по
+    обнаружению вызова в трассе. У стенда нет tools_data, поэтому исполнение
+    даёт unknown tool, ход не закрывается и упирается в ``step_limit``.
+
+    Делегирующая, а не сплошная: эти тесты меряют ОТЗЫВЧИВОСТЬ во время
+    настоящей работы. Сплошная заглушка сделала бы ход мгновенным, хартбит
+    не успел бы ни разу тикнуть, и зелёный тест не значил бы ничего —
+    наблюдалось: 0 тиков вместо сотни.
+    """
+    from gc_core import processing_responses as pr
+    from helpers.turn_finish_apply import stub_turn_finish_apply
+
+    real = pr.aapply_tool
+
+    async def _dispatch(**kwargs):
+        if kwargs.get("tool_name") == "turn_finish":
+            return await stub_turn_finish_apply(**kwargs)
+        return await real(**kwargs)
+
+    monkeypatch.setattr(pr, "aapply_tool", _dispatch)
+
 
 #: Ход 1 — агент зовёт exec_sleep (настоящий subprocess, 0.3с).
 #: Ход 2 — финализатор. Ход 3 — вердикт судьи finish-gate.

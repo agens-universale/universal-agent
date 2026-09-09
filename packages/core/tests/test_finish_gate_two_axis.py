@@ -49,23 +49,29 @@ def _stub_tools_modules() -> None:
     # Ветка await'ит `aapply_tool`: синхронная заглушка здесь давала бы
     # `TypeError: object str can't be used in 'await' expression`.
     async def _apply_tool(*_args, **_kwargs):
+        tool_name = _kwargs.get("tool_name")
         arguments = _kwargs.get("arguments")
         try:
             payload = json.loads(arguments) if isinstance(arguments, str) else {}
         except Exception:
             payload = {}
-        result = {
-            "tool": "turn_finish",
-            "ok": True,
-            "status": "submitted",
-            "message": "Task outcome submitted.",
-            "error": None,
-        }
-        if isinstance(payload, dict):
-            for key in ("solution_type", "comment", "task_report", "handoff"):
-                if key in payload:
-                    result[key] = payload[key]
-        return json.dumps(result, ensure_ascii=False)
+        if tool_name == "turn_finish":
+            result = {
+                "tool": "turn_finish",
+                "ok": True,
+                "status": "submitted",
+                "message": "Task outcome submitted.",
+                "error": None,
+            }
+            if isinstance(payload, dict):
+                for key in ("solution_type", "comment", "task_report", "handoff"):
+                    if key in payload:
+                        result[key] = payload[key]
+            return json.dumps(result, ensure_ascii=False)
+        return json.dumps(
+            {"tool": tool_name, "ok": True, "status": "executed"},
+            ensure_ascii=False,
+        )
 
     def _build_tools_data(_config_dict):
         return {}, [], []
@@ -81,10 +87,6 @@ def _stub_tools_modules() -> None:
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
-
-    from gc_core.message_policy import cycle_stop as cycle_stop_mod
-
-    cycle_stop_mod.aapply_tool = tools_pkg.aapply_tool
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -112,10 +114,8 @@ def _load_processing_responses():
     # заглушка — pm импортирован после подмены. Настоящую функцию берём
     # переимпортом уже очищенного пакета.
     import gc_core.tools as real_tools
-    from gc_core.message_policy import cycle_stop as cycle_stop_mod
 
     pm.aapply_tool = real_tools.aapply_tool
-    cycle_stop_mod.aapply_tool = real_tools.aapply_tool
 
 
 def _make_state(*, max_steps: int = 5, parent_state_id=None):
