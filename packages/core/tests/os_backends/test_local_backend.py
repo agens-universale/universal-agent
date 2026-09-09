@@ -301,6 +301,15 @@ def test_run_python_bounded_output(be):
     assert res.stdout_hit_capture_cap is True
 
 
+def test_run_python_per_call_capture_max_overrides_default(be):
+    be.exec_output_capture_max_chars = 50
+    res = be.run_python("print('A' * 5000)", timeout=15, capture_max_chars=400)
+    assert res.return_code == 0
+    assert len(res.stdout) <= 400
+    assert len(res.stdout) > 50
+    assert res.stdout_hit_capture_cap is True
+
+
 def test_run_python_small_output_no_cap(be):
     be.exec_output_capture_max_chars = 60_000
     res = be.run_python("print('py-ok')", timeout=10)

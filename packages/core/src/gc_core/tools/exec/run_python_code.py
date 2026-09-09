@@ -4,13 +4,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from gc_core.backends.capture import CapturedStream
 from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import effective_command_cwd, moderate_command_execution
 from gc_core.security.path_policy import resolve_tool_context
-from gc_core.tools.exec.exec_envelope import build_exec_envelope
+from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
@@ -35,7 +34,6 @@ class RunPythonCode(AbstractSimpleTool):
             "description": (
                 "Run Python code synchronously in a subprocess. "
                 "Returns JSON with ok, return_code, stdout, stderr."
-                + ' Each stream is an object: a whole stream has `content`, a stream whose middle was dropped has `head`, `tail`, `total_chars` and `omitted_chars`. A long stream also gets a `preview` block with its first and last chunk, placed before the full channels. The dropped middle is gone — redirect to a file before the run if you need the whole log.'
             ),
             "parameters": {
                 "type": "object",
@@ -103,31 +101,9 @@ Usage:
 - If you need to create files and the default directory is read-only or invalid, pass cwd explicitly. If a tool error includes allowed_write_paths, choose one of those directories as cwd.
 - Do NOT use this tool for long-running tasks, interactive input, or accessing external systems in an unsafe way.
 - If execution exceeds the timeout, the process is terminated and an error message is returned.
-
-Return format (JSON string):
-{
-  "tool":"exec_python",
-  "ok": true|false,
-  "return_code": number|null,
-  "timed_out": true|false,
-  "truncated": true|false,
-  "error": null|{"type":"...","message":"..."},
-  "preview": {"stdout": {"head":"...","tail":"...","total_chars":number,"omitted_chars":number}},
-  "stdout": {"truncated": false, "content":"...", "total_chars": number},
-  "stderr": {"truncated": true, "head":"...", "tail":"...", "total_chars": number, "omitted_chars": number}
-}
-`preview` appears only for a stream longer than two preview edges and only lists such
-streams; a stream is `content` when whole and `head`+`tail` when the middle was dropped.
 '''
         )
         return description
-
-    @staticmethod
-    def _as_stream(value) -> CapturedStream:
-        if isinstance(value, CapturedStream):
-            return value
-        text = value or ""
-        return CapturedStream(head=text, total_chars=len(text))
 
     def _result(
         self,
@@ -146,8 +122,8 @@ streams; a stream is `content` when whole and `head`+`tail` when the middle was 
             exit_code=return_code,
             exit_code_key="return_code",
             timed_out=timed_out,
-            stdout=self._as_stream(stdout),
-            stderr=self._as_stream(stderr),
+            stdout=as_captured_stream(stdout),
+            stderr=as_captured_stream(stderr),
             preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
             error=error,
         )
@@ -351,10 +327,10 @@ streams; a stream is `content` when whole and `head`+`tail` when the middle was 
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
         # а не роняем тулу AttributeError уже после исполнения команды.
-        stdout_stream = self._as_stream(
+        stdout_stream = as_captured_stream(
             getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
         )
-        stderr_stream = self._as_stream(
+        stderr_stream = as_captured_stream(
             getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
         )
 

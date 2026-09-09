@@ -3,12 +3,11 @@ import json
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from gc_core.backends.capture import CapturedStream
 from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
-from gc_core.tools.exec.exec_envelope import build_exec_envelope
+from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
 
 
 class ExecuteCommand(AbstractSimpleTool):
@@ -25,7 +24,6 @@ class ExecuteCommand(AbstractSimpleTool):
             "name": "exec_command",
             "description": (
                 "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."
-                + ' Each stream is an object: a whole stream has `content`, a stream whose middle was dropped has `head`, `tail`, `total_chars` and `omitted_chars`. A long stream also gets a `preview` block with its first and last chunk, placed before the full channels. The dropped middle is gone — redirect to a file before the run if you need the whole log.'
             ),
             "parameters": {
                 "type": "object",
@@ -80,20 +78,11 @@ class ExecuteCommand(AbstractSimpleTool):
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
 Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(DEFAULT_EXEC_TIMEOUT_SEC) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
-Return format (JSON string):
-{"tool":"exec_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"error":null|{"type":"...","message":"..."},"preview":{"stdout":{"head":"...","tail":"...","total_chars":number,"omitted_chars":number}},"stdout":{"truncated":false,"content":"...","total_chars":number},"stderr":{"truncated":true,"head":"...","tail":"...","total_chars":number,"omitted_chars":number}}
-`preview` appears only for a stream longer than two preview edges and only lists such streams; `stdout`/`stderr` carry `content` when whole and `head`+`tail` when the middle was dropped.
-
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
 - Always quote arguments properly to avoid shell injection risks (the tool uses safe execution via subprocess).
 - The command is executed in the current working directory.
 - Always returns both stdout and stderr; check ok / exit_code for success or failure.
-- stdout / stderr are objects: `content` for a whole stream, or `head` + `tail` +
-  `total_chars` + `omitted_chars` when the middle was dropped. A long stream also appears
-  in a leading `preview` block (first and last chunk). The dropped middle is not
-  recoverable: if you need the full log, redirect it to a file before running, e.g.
-  `pytest > .gc-pytest.log 2>&1; status=$?; tail -n 200 .gc-pytest.log; exit $status`.
 - Be cautious with destructive commands (e.g., `rm`, `del`, `rmdir`).
 - Don't remove or create any files or folders outside of project directory!
 - Avoid interactive commands (e.g., `vim`, `python` without args) — they will time out or fail.
@@ -114,7 +103,7 @@ Important Usage Rules:
    - After ensuring proper quoting, execute the command.
    - Capture the output of the command.
    - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings
-3. Read and search file contents with the filesystem tools (`fs_read_file`, `fs_find_in_files`, `fs_find_files_by_name`, `fs_list_files`, `fs_search_and_replace`, …): they are permission-checked and return structured results. Do NOT use shell `cat`/`head`/`tail`/`grep`/`rg`/`find` to read or search file contents — use those tools instead. Shell is right for everything else; remember exec stdout/stderr are captured as first+last chunks per stream and the middle of a very long stream is dropped.
+3. Read and search file contents with the filesystem tools (`fs_read_file`, `fs_find_in_files`, `fs_find_files_by_name`, `fs_list_files`, `fs_search_and_replace`, …): they are permission-checked and return structured results. Do NOT use shell `cat`/`head`/`tail`/`grep`/`rg`/`find` to read or search file contents — use those tools instead. Shell is right for everything else.
 4. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.
     <good-example>
     pytest /foo/bar/tests
@@ -124,13 +113,6 @@ Important Usage Rules:
     </bad-example>
 ''')
         return description
-
-    @staticmethod
-    def _as_stream(value) -> CapturedStream:
-        if isinstance(value, CapturedStream):
-            return value
-        text = value or ""
-        return CapturedStream(head=text, total_chars=len(text))
 
     def _result(
         self,
@@ -150,8 +132,8 @@ Important Usage Rules:
             ok=ok,
             exit_code=exit_code,
             timed_out=timed_out,
-            stdout=self._as_stream(stdout),
-            stderr=self._as_stream(stderr),
+            stdout=as_captured_stream(stdout),
+            stderr=as_captured_stream(stderr),
             preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
             error=error,
             head_fields={"command": command, "cwd": cwd},
@@ -338,10 +320,10 @@ Important Usage Rules:
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
         # а не роняем тулу AttributeError уже после исполнения команды.
-        stdout_stream = self._as_stream(
+        stdout_stream = as_captured_stream(
             getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
         )
-        stderr_stream = self._as_stream(
+        stderr_stream = as_captured_stream(
             getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
         )
 

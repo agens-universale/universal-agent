@@ -1,4 +1,6 @@
-"""Общая сборка envelope для ``exec_command`` и ``exec_python``.
+"""Общая сборка каналов stdout/stderr для model-facing subprocess-тул.
+
+Используют ``exec_command``, ``exec_python`` и ``skills_run_script``.
 
 Два уровня представления одного и того же наблюдённого потока:
 
@@ -61,6 +63,39 @@ def stream_preview_json(stream: CapturedStream, preview_edge_chars: int) -> Opti
     }
 
 
+def as_captured_stream(value: Any) -> CapturedStream:
+    """``CapturedStream`` как есть; плоская строка — целый необрезанный поток."""
+    if isinstance(value, CapturedStream):
+        return value
+    text = value or ""
+    return CapturedStream(head=text, total_chars=len(text))
+
+
+def exec_channels_json(
+    stdout: CapturedStream,
+    stderr: CapturedStream,
+    preview_edge_chars: int,
+) -> dict[str, Any]:
+    """``preview`` (если нужен), затем расширенные ``stdout`` / ``stderr``.
+
+    Порядок полей тот же, что у exec-envelope: первая страница
+    ``stored_tool_output`` сначала показывает края, не префикс длинного канала.
+    """
+    channels: dict[str, Any] = {}
+    preview: dict[str, Any] = {}
+    stdout_preview = stream_preview_json(stdout, preview_edge_chars)
+    if stdout_preview is not None:
+        preview["stdout"] = stdout_preview
+    stderr_preview = stream_preview_json(stderr, preview_edge_chars)
+    if stderr_preview is not None:
+        preview["stderr"] = stderr_preview
+    if preview:
+        channels["preview"] = preview
+    channels["stdout"] = stream_to_json(stdout)
+    channels["stderr"] = stream_to_json(stderr)
+    return channels
+
+
 def build_exec_envelope(
     *,
     tool: str,
@@ -87,19 +122,7 @@ def build_exec_envelope(
     envelope["timed_out"] = timed_out
     envelope["truncated"] = bool(stdout.truncated or stderr.truncated)
     envelope["error"] = error
-
-    preview: dict[str, Any] = {}
-    stdout_preview = stream_preview_json(stdout, preview_edge_chars)
-    if stdout_preview is not None:
-        preview["stdout"] = stdout_preview
-    stderr_preview = stream_preview_json(stderr, preview_edge_chars)
-    if stderr_preview is not None:
-        preview["stderr"] = stderr_preview
-    if preview:
-        envelope["preview"] = preview
-
-    envelope["stdout"] = stream_to_json(stdout)
-    envelope["stderr"] = stream_to_json(stderr)
+    envelope.update(exec_channels_json(stdout, stderr, preview_edge_chars))
     return json.dumps(envelope, ensure_ascii=False)
 
 

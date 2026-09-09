@@ -318,7 +318,7 @@ class LocalFsBackend(FsBackend):
             timeout=timeout,
             env=_sanitize_env(env),
             stdin_text=code,
-            capture_max_chars=self.exec_output_capture_max_chars,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     def default_cwd(self) -> Optional[str]:

@@ -12,8 +12,12 @@ import shlex
 import sys
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.agent import exec_timeout_from_config_dict
+from gc_core.config_modules.agent import (
+    exec_output_preview_edge_chars_from_config_dict,
+    exec_timeout_from_config_dict,
+)
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE, copy_loop_warn, loop_warn_on_repeat
+from gc_core.tools.exec.exec_envelope import as_captured_stream, exec_channels_json
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from gc_core.utils.arg_decorators import parse_json_object_argument
@@ -164,11 +168,23 @@ class RunSkillScriptTool:
                 stdin=stdin,
                 timeout=exec_timeout_from_config_dict(self._config_dict),
             )
+            stdout = as_captured_stream(
+                getattr(exec_result, "stdout_stream", None)
+                or getattr(exec_result, "stdout", "")
+            )
+            stderr = as_captured_stream(
+                getattr(exec_result, "stderr_stream", None)
+                or getattr(exec_result, "stderr", "")
+            )
             result = {
-                "stdout": exec_result.stdout,
-                "stderr": exec_result.stderr,
                 "exit_code": exec_result.return_code,
                 "timed_out": exec_result.timed_out,
+                "truncated": bool(stdout.truncated or stderr.truncated),
+                **exec_channels_json(
+                    stdout,
+                    stderr,
+                    exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+                ),
             }
             script_ok = not exec_result.timed_out and exec_result.return_code == 0
             return _wrap(
