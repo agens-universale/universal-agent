@@ -104,7 +104,11 @@ class TestChildConfigMutationIsolation:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        runner._build_child_ctx(tool_name="subagent_planner")
+        # `_build_child_ctx` — корутина: без run_coro она не исполнялась
+        # вовсе, и утверждения ниже проверяли нетронутый конфиг, а не
+        # отсутствие мутации. Прогон об этом честно предупреждал
+        # («coroutine ... was never awaited»), но предупреждение не роняет.
+        _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
         assert cfg["slots"]["default"] == "flash"
         assert ctx.model_router.resolve("main").alias == "flash"

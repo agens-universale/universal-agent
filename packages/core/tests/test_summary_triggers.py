@@ -338,7 +338,13 @@ class SummaryTriggersTest(unittest.TestCase):
                 if callable(persist_cb):
                     # Реплика реального run_agent: первый persist в chat_completions
                     # получает весь батч (история + новый user message).
-                    persist_cb(messages)
+                    # Колбэк корутинный — ждём его, как ждёт настоящий цикл.
+                    # Без этого запись не происходила, а тест был зелёным.
+                    # Импорт локальный: модуль стабит `gc_core.tools` в
+                    # setup_module, и импорт ядра на уровне файла ломает порядок.
+                    from gc_core.utils.aio_compat import await_callback
+
+                    await await_callback(persist_cb(messages))
                 return "ok"
 
             with patch.object(

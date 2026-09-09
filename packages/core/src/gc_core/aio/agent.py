@@ -30,6 +30,9 @@ class AsyncAgent:
         self._subscribers = subscribers
         # Результат последнего stream(): сам итератор вернуть его не может.
         self._last_answer: Any = None
+        # Отпустил ли уже пул: повторный aclose не должен ронять счётчик
+        # владельцев ниже нуля и закрывать клиенты соседнего агента.
+        self._closed = False
 
     @classmethod
     async def create(
@@ -96,6 +99,11 @@ class AsyncAgent:
             await release_clients()
             raise
         return cls(AgentExecutor(ctx), subscribers)
+
+    @property
+    def closed(self) -> bool:
+        """Отпустил ли агент свой пул. После ``aclose`` ход не начинают."""
+        return self._closed
 
     @property
     def executor(self) -> AgentExecutor:
@@ -186,14 +194,22 @@ class AsyncAgent:
         self._executor.stop_run()
 
     async def aclose(self) -> None:
-        """Отпустить сетевой пул.
+        """Отпустить сетевой пул. Идемпотентно.
 
         Пул общий на loop, поэтому закрываем его только когда ушёл последний
         агент: иначе ``aclose`` одного рвал бы запрос соседнего — сценарий не
         экзотический, он в приёмочном тесте и в examples/async_embed.py.
+
+        Идемпотентность здесь не вежливость. Повторный вызов — обычное дело
+        (`async with` плюс явный `aclose`, повторный выход по ошибке), а
+        отпускать пул дважды значит уронить счётчик владельцев ниже нуля и
+        закрыть клиенты соседа.
         """
         from gc_core.utils.async_http import release_clients
 
+        if self._closed:
+            return
+        self._closed = True
         await release_clients()
 
     async def __aenter__(self) -> "AsyncAgent":

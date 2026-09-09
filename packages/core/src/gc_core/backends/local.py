@@ -377,11 +377,25 @@ class _Capture:
     захваченное терялось. Держим его в объекте, переживающем отмену таски.
     """
 
-    __slots__ = ("text", "hit_cap")
+    __slots__ = ("text", "hit_cap", "parts")
 
     def __init__(self) -> None:
         self.text = ""
         self.hit_cap = False
+        #: Живой буфер дренажа. Держим ЗДЕСЬ, а не в локальной переменной
+        #: корутины, чтобы вызывающий мог забрать прочитанное, НЕ отменяя
+        #: дренаж: отмена оставляла трубу нечитаемой, и фоновый потомок
+        #: вставал на write.
+        self.parts: list = []
+
+    def publish(self) -> None:
+        """Опубликовать прочитанное к этому моменту. Идемпотентно.
+
+        После достижения лимита не трогаем: там уже лежит ровно отрезанное
+        по ``capture_max_chars``, а ``parts`` дальше не растёт.
+        """
+        if not self.hit_cap:
+            self.text = "".join(self.parts)
 
 
 async def _adrain_stream(stream, capture_max_chars: int, sink: "_Capture") -> None:
@@ -391,7 +405,7 @@ async def _adrain_stream(stream, capture_max_chars: int, sink: "_Capture") -> No
     EOF. Отмена таски после этого уже не отнимает захваченное.
     """
     decoder = codecs.lookup("utf-8").incrementaldecoder(errors="replace")
-    parts: list = []
+    parts = sink.parts
     total = 0
     hit_cap = False
     try:
@@ -416,20 +430,18 @@ async def _adrain_stream(stream, capture_max_chars: int, sink: "_Capture") -> No
             if hit_cap:
                 # Публикуем немедленно: дальше только отбрасывание хвоста, и
                 # ждать его вызывающему незачем.
-                sink.text = "".join(parts)
+                sink.publish()
                 sink.hit_cap = True
     except asyncio.CancelledError:
-        # Отмена по таймауту дренажа: отдаём то, что уже прочли, и уходим.
-        if not hit_cap:
-            sink.text = "".join(parts)
+        # Отмена (сняли вызывающего): отдаём то, что уже прочли, и уходим.
+        sink.publish()
         raise
     except Exception:
-        if not hit_cap:
-            sink.text = "".join(parts)
+        sink.publish()
         return
     if not hit_cap:
         parts.append(decoder.decode(b"", final=True))
-        sink.text = "".join(parts)
+        sink.publish()
         sink.hit_cap = False
 
 
@@ -550,19 +562,34 @@ async def _arun_bounded_process(
         _done, pending = await asyncio.wait(
             {out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC
         )
-        for task in pending:
-            task.cancel()
         if pending:
-            # Дожидаемся отмены: cancel() только ПРОСИТ прекратить, а забрать
-            # прочитанное успевает лишь except-ветка внутри корутины — без
-            # этого захваченное терялось ровно там, где мы его спасаем.
-            await asyncio.gather(*pending, return_exceptions=True)
+            # НЕ отменяем, а ОТПУСКАЕМ дочитывать в фоне.
+            #
+            # Отмена здесь стоила дорого и незаметно. Труба остаётся никем не
+            # читаемой, и фоновый потомок с унаследованным stdout
+            # (`npm run dev &`) встаёт на write примерно после 64 КиБ — то
+            # есть тул «вернулся», а процесс, который он запустил, заморожен.
+            # Плюс транспорты подпроцесса не закрывались до сборки мусора, и
+            # их `__del__` уже на закрытом loop печатал «Event loop is closed».
+            # На синхронном пути, откуда переезжали, daemon-читатель дочитывал
+            # в фоне — то есть это была регрессия, а не новое ограничение.
+            #
+            # Захваченное к этому моменту уже в sink, поэтому результат мы
+            # отдаём сразу и ничего не ждём.
+            # Публикуем ДО возврата: дренаж продолжится в фоне, но результат
+            # тула собирается сейчас.
+            out_sink.publish()
+            err_sink.publish()
+            _release_drain(proc, pending)
+        else:
+            _close_transport(proc)
     except asyncio.CancelledError:
         # Вызывающего сняли (сервер отменил прогон, упал сосед по TaskGroup) —
         # без этого процесс и обе дренажные корутины пережили бы отмену.
         _kill_quietly(proc)
-        for task in (out_task, err_task):
-            task.cancel()
+        # Ребёнок убит, значит трубы вот-вот закроются сами: даём дренажу
+        # доработать и закрыть транспорт, а не бросаем открытым.
+        _release_drain(proc, {out_task, err_task})
         raise
 
     # Читаем из sink, а НЕ из task.result(): отменённая по таймауту дренажа
@@ -575,6 +602,46 @@ async def _arun_bounded_process(
         stdout_hit_capture_cap=out_sink.hit_cap,
         stderr_hit_capture_cap=err_sink.hit_cap,
     )
+
+
+#: Дренажи, отпущенные дочитывать в фоне. Ссылку держим, иначе задачу соберёт
+#: сборщик мусора посреди чтения — asyncio на это прямо предупреждает.
+_BACKGROUND_DRAINS: "set[asyncio.Task]" = set()
+
+
+def _close_transport(proc) -> None:
+    """Закрыть транспорт подпроцесса явно.
+
+    Без этого он жил до сборки мусора, и его ``__del__``, попав уже на
+    закрытый loop, печатал ``RuntimeError: Event loop is closed``. Ошибку
+    из ``__del__`` Python проглатывает, поэтому в наборе она была видна лишь
+    как ``PytestUnraisableExceptionWarning`` — и её пролистывали.
+    """
+    transport = getattr(proc, "_transport", None)
+    if transport is None:
+        return
+    try:
+        transport.close()
+    except Exception:
+        pass
+
+
+def _release_drain(proc, tasks) -> None:
+    """Отпустить дренаж дочитывать в фоне и закрыть транспорт, когда дочитает."""
+    live = {t for t in tasks if not t.done()}
+    if not live:
+        _close_transport(proc)
+        return
+
+    _BACKGROUND_DRAINS.update(live)
+
+    def _done(task: "asyncio.Task") -> None:
+        _BACKGROUND_DRAINS.discard(task)
+        if not any(t in _BACKGROUND_DRAINS for t in live):
+            _close_transport(proc)
+
+    for task in live:
+        task.add_done_callback(_done)
 
 
 def _kill_quietly(proc) -> None:

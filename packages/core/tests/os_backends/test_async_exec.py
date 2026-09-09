@@ -12,6 +12,7 @@ import time
 from gc_core.backends.async_protocol import SyncExecAdapter, aexec_port
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult
+import shlex
 
 
 async def test_exec_runs_and_captures_output():
@@ -176,3 +177,53 @@ async def test_cancel_kills_the_child():
     for pid in survivors:
         subprocess.run(["kill", "-9", pid])
     assert survivors == [], "после отмены остался процесс-сирота"
+
+
+# --- H4: дренаж отпускается, а не отменяется -------------------------------
+
+
+async def test_background_child_can_keep_writing_after_the_tool_returned():
+    """Фоновый потомок не должен вставать на write, когда тул уже вернулся.
+
+    Дренажные таски по таймауту ОТМЕНЯЛИСЬ, и трубу дальше никто не читал:
+    потомок с унаследованным stdout (`npm run dev &`) блокировался примерно
+    после 64 КиБ — то есть тул отработал, а запущенный им процесс замер.
+    На синхронном пути daemon-читатель дочитывал в фоне, так что это была
+    регрессия переезда, а не новое ограничение.
+
+    Зонд обязан писать МЕДЛЕННО: дренаж ждёт хвост `_DRAIN_JOIN_TIMEOUT_SEC`
+    (2 с), и потомок, успевший всё выплюнуть за это время, дефекта не
+    показывает — проверено подменой, на быстрой записи тест зелен и с
+    отменой. Поэтому 300 КиБ растянуты на ~6 с, а отметка ставится в самом
+    конце: без чтения трубы потомок встанет на первых же десятках килобайт.
+    """
+    import asyncio
+    import os
+    import tempfile
+
+    backend = LocalFsBackend()
+    marker = os.path.join(tempfile.mkdtemp(), "done")
+    child = (
+        "import sys, time\n"
+        "for _ in range(30):\n"
+        "    sys.stdout.write('x' * 10240)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.2)\n"
+        f"open({marker!r}, 'w').write('ok')\n"
+    )
+    script = f"(printf %s {shlex.quote(child)} | python3 - &); echo parent"
+
+    res = await backend.aexec(script, timeout=30)
+
+    assert res.timed_out is False, res
+    assert "parent" in res.stdout, res.stdout
+
+    for _ in range(300):                      # до 15 с на дозапись в фоне
+        if os.path.exists(marker):
+            break
+        await asyncio.sleep(0.05)
+
+    assert os.path.exists(marker), (
+        "фоновый потомок не дописал 300 КиБ — трубу перестали читать, "
+        "он встал на write"
+    )

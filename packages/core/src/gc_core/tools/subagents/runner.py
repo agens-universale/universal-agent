@@ -47,6 +47,7 @@ from gc_core.tools.subagents.sidecar import (
     persist_subagent_trace,
 )
 from gc_core.utils.aio_compat import run_coro_blocking
+from gc_core.utils.aio_compat import await_callback
 
 _log = logging.getLogger(__name__)
 
@@ -282,7 +283,15 @@ class SubagentRunner:
             _orig_on_summary = summary.on_summary_applied
 
             async def _on_summary_applied_with_sidecar(event: Dict[str, Any]) -> None:
-                _orig_on_summary(event)
+                # `on_summary_applied` — корутина. Без `await` она молча не
+                # исполнялась: терялись `append_summary_trace_record` и
+                # `archive_suffix`. Прогон это ВИДЕЛ — `RuntimeWarning:
+                # coroutine ... was never awaited`, — но предупреждение не
+                # роняет набор, и тест был зелёным, потому что проверяет
+                # только строку sidecar. `await_callback`, а не голый `await`:
+                # у координатора встраивающего колбэк может быть и обычной
+                # функцией.
+                await await_callback(_orig_on_summary(event))
                 synthesis = _synthesis_from_summary_event(event)
                 await apersist_subagent_trace(
                     child_ctx,
