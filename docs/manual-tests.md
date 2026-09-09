@@ -60,7 +60,7 @@ gc-core = { git = "ssh://…/universal-agent", subdirectory = "packages/core", r
 ## Чужое хранилище тредов
 
 Контракт и обе наши реализации закрыты pytest
-(`test_thread_store_protocol.py`, `test_thread_store_async.py`,
+(`test_thread_store_contract.py`, `test_thread_store_async.py`,
 `test_acceptance_sdk_thread_store.py`). Здесь — живая модель и настоящая база.
 
 ### S-1. SDK на хранилище в памяти не пишет на диск ✅ пройдено 26.08

@@ -6,10 +6,14 @@
         def load_messages(self, system_id, thread_id): ...
         # ...остальные десять
 
-Зачем он, если рядом есть ``ThreadStore`` (``Protocol``). Протокол описывает
-контракт, но не может дать две вещи, которых здесь не хватало:
+Это ЕДИНСТВЕННОЕ объявление контракта. Рядом стоял ещё ``ThreadStore``
+(``Protocol``) — те же одиннадцать методов второй копией, — и отдельный
+кортеж имён третьей. Копии никто не сверял. Теперь список выводится отсюда же
+(``CONTRACT_METHODS`` ниже), а протокол снят.
 
-**Первая — общие инварианты.** У хранилища есть поведение, одинаковое для всех
+Почему именно ABC, хотя у протокола было два преимущества:
+
+**Инварианты.** У хранилища есть поведение, одинаковое для всех
 реализаций и не выводимое из сигнатур: штампы meta и правило «снятие последнего
 флага убирает секцию ``runtime`` целиком». Пока их держать было негде, две
 НАШИ СОБСТВЕННЫЕ реализации разъехались ровно здесь: ``FileThreadStore``
@@ -19,7 +23,7 @@
 ``state_schema_version`` следующий прогон ОТКАЖЕТСЯ читать тред, и заметно это
 лишь на ВТОРОМ прогоне — первый проходит нормально.
 
-**Вторая — отказ на месте.** У протокола неполная реализация обнаруживается
+**Отказ на месте.** У протокола неполная реализация обнаруживается
 поздно: ``athread_store`` ловит её при проводке агента, а раньше молчали все.
 У ABC она не создастся вовсе: ``TypeError`` с перечнем нереализованных методов
 прямо в конструкторе.
@@ -39,7 +43,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from gc_core.thread_store_protocol import (
+from gc_core.thread_store_types import (
     MessageKey,
     SubagentTraceRecord,
     ThreadState,
@@ -126,7 +130,7 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
     (``redis.asyncio``, ``asyncpg``) — это :class:`AsyncThreadStoreBase`.
 
     Смысл каждого метода и восемь поведенческих свойств, которые легко
-    нарушить, — в ``thread_store_protocol`` и в ``docs/thread-store.md``.
+    нарушить, — в ``thread_store_base`` и в ``docs/thread-store.md``.
     Проверить себя: ``gc_testkit.thread_store_conformance.assert_conforms``.
 
     **Необязательные способности** (в контракт не входят, объявляются по
@@ -395,4 +399,41 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
         """См. :meth:`ThreadStoreBase.read_subagent_trace`."""
 
 
-__all__ = ["AsyncThreadStoreBase", "ThreadStoreBase"]
+def _abstract_names(cls: type) -> tuple:
+    """Абстрактные методы класса В ПОРЯДКЕ ОБЪЯВЛЕНИЯ.
+
+    Не ``__abstractmethods__``: это frozenset, и порядок в нём случайный — а
+    имена попадают в сообщения об ошибках, где скачущий порядок мешает
+    сравнивать два запуска глазами. ``__dict__`` порядок определения хранит.
+    """
+    return tuple(
+        name for name, attr in cls.__dict__.items()
+        if getattr(attr, "__isabstractmethod__", False)
+    )
+
+
+#: Исполняемый контракт хранилища: по этим именам ``athread_store`` решает,
+#: годится ли переданный объект.
+#:
+#: ВЫВОДИТСЯ из самого ABC, а не пишется рядом. Раньше те же одиннадцать имён
+#: были записаны трижды — в ``Protocol``, в ABC и в отдельном кортеже, — и
+#: ничто не сторожило их согласие: метод, добавленный в ABC и забытый в
+#: кортеже, ядро начало бы звать у хранилищ, которые о нём не знают, а
+#: диспетчер пропустил бы их, сверяясь со старым списком.
+#:
+#: Проверка ОСТАЁТСЯ структурной: диспетчер смотрит на имена, а не на
+#: наследование. Хранилище, которое наследовать не может (прокси на
+#: ``__getattr__``, объект из чужого DI-контейнера), принимается как прежде —
+#: см. ``test_isinstance_is_not_a_gate``.
+CONTRACT_METHODS = _abstract_names(ThreadStoreBase)
+
+#: Те же операции с приставкой ``a``. Тоже выводятся, а не дублируются.
+ASYNC_CONTRACT_METHODS = _abstract_names(AsyncThreadStoreBase)
+
+
+__all__ = [
+    "ASYNC_CONTRACT_METHODS",
+    "AsyncThreadStoreBase",
+    "CONTRACT_METHODS",
+    "ThreadStoreBase",
+]

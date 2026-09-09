@@ -1621,15 +1621,3 @@ async def arun_agent(
             pass
         elif count_completed_step:
             state.steps += 1
-
-
-
-
-
-
-
-
-
-
-
-

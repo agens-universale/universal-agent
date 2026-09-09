@@ -509,9 +509,9 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
     assert isinstance(session.history_messages, list)
 
     # Протухший флаг снимается на старте следующего прогона.
-    from gc_core.run_summary_coordinator import reset_stale_summarizing_flag
+    from gc_core.run_summary_coordinator import areset_stale_summarizing_flag
 
-    reset_stale_summarizing_flag(session)
+    await areset_stale_summarizing_flag(session)
     runtime = session.meta.get("runtime") or {}
     assert not runtime.get("summarizing"), (
         "флаг summarizing остался взведённым после отменённой компакции — "

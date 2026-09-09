@@ -16,8 +16,8 @@
 
 | файл | что |
 |---|---|
-| `gc_core/thread_store_base.py` | `ThreadStoreBase` / `AsyncThreadStoreBase` — **отсюда и начинайте**: ABC с 11 абстрактными методами и общими инвариантами |
-| `gc_core/thread_store_protocol.py` | `ThreadStore` — тот же контракт как `Protocol`, для тех, кто не хочет наследовать. Плюс типы: `ThreadState`, `SubagentTraceRecord`, `TraceKind`, `MessageKey` |
+| `gc_core/thread_store_base.py` | `ThreadStoreBase` / `AsyncThreadStoreBase` — **единственное объявление контракта**: ABC с 11 абстрактными методами и общими инвариантами. Отсюда же выводится `CONTRACT_METHODS` |
+| `gc_core/thread_store_types.py` | Типы обмена: `ThreadState`, `SubagentTraceRecord`, `TraceKind`, `MessageKey` |
 | `gc_core/thread_store_async.py` | `AsyncThreadStore` — те же 11 с приставкой `a`. Плюс `SyncThreadStoreAdapter` и фабрика `athread_store()` |
 | `gc_core/thread_store_file.py` | `FileThreadStore` — реализация поверх `data_*.jsonl`. Образец для своей |
 | `gc_core/thread_store.py` | файловый слой и `ThreadSession`. Внутренности; встраивающему сюда не нужно |
@@ -50,11 +50,22 @@ class PostgresThreadStore(ThreadStoreBase):
   хранилища: без `state_schema_version` следующий прогон откажется читать
   тред, и заметно это на ВТОРОМ прогоне — первый проходит нормально.
 
-Наследование не обязательно: `ThreadStore` остаётся `Protocol`, и хранилище,
-совпавшее по именам и сигнатурам, принимается как прежде. Это нужно тем, кому
-наследовать нельзя, — объекту из чужого DI-контейнера, обёртке на
-`__getattr__`. Проверка при проводке (`athread_store`) структурная и на
-наследование не смотрит; закреплено тестом.
+Наследование не обязательно: хранилище, совпавшее по именам и сигнатурам,
+принимается как прежде. Это нужно тем, кому наследовать нельзя, — объекту из
+чужого DI-контейнера, обёртке на `__getattr__`. Проверка при проводке
+(`athread_store`) структурная и на наследование не смотрит; закреплено тестом.
+
+Раньше для этого пути существовал ещё и `ThreadStore` (`Protocol`) — те же
+одиннадцать методов второй копией, — и отдельный кортеж имён третьей. **Копии
+сняты**: контракт объявлен один раз, абстрактными методами `ThreadStoreBase`,
+а список имён `CONTRACT_METHODS` выводится из них же. Копии никто не сверял, а
+расходятся они молча: метод, добавленный в ABC и забытый в кортеже, ядро
+начало бы звать у хранилищ, которые о нём не знают.
+
+Что изменилось на практике: утиный путь **работает как раньше** (проводка
+структурная), но аннотироваться такому объекту больше не против чего. Нужен
+тип в сигнатурах — наследуйте `ThreadStoreBase`. Оба свойства стережёт
+`test_thread_store_one_contract.py`.
 
 Оговорка про `FsBackend`, которая раньше стояла здесь как довод против ABC:
 он и правда ABC с тридцатью абстрактными методами, и добавить туда
@@ -83,10 +94,9 @@ answer = await agent.run("привет", thread_id="t1")
 ### 2. Контекст напрямую
 
 ```python
-from gc_core.run_context import create_run_context, acreate_run_context
+from gc_core.run_context import acreate_run_context
 
-ctx = create_run_context(cfg, thread_store=MyStore())          # синхронно
-ctx = await acreate_run_context(cfg, thread_store=MyStore())   # не блокируя loop
+ctx = await acreate_run_context(cfg, thread_store=MyStore())
 ```
 
 ### 3. Исполнитель
@@ -347,9 +357,10 @@ CLI и TUI делят этот путь намеренно — тред, нач�
 
 | | где |
 |---|---|
-| контракт, обе реализации, 15 свойств | `test_thread_store_protocol.py` |
+| контракт, обе реализации, 15 свойств | `test_thread_store_contract.py` |
+| контракт объявлен один раз, утиный путь открыт | `test_thread_store_one_contract.py` |
 | асинхронный путь, порт, адаптер | `test_thread_store_async.py` |
 | SDK на чужом хранилище не пишет файлы | `test_acceptance_sdk_thread_store.py` |
-| в ядре нет прямых вызовов файлового слоя | AST-гейт в `test_thread_store_protocol.py` |
+| в ядре нет прямых вызовов файлового слоя | AST-гейт в `test_thread_store_contract.py` |
 
 Живая база (настоящий Redis) — в [ручных тестах](manual-tests.md), кейсы S-1…S-4.

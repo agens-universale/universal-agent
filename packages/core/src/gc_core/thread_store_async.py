@@ -1,6 +1,6 @@
 """Асинхронный порт хранилища тредов: ядро ждёт хранилище нативно.
 
-Зачем. ``ThreadStore`` синхронный, и это правильный контракт по умолчанию:
+Зачем. Контракт хранилища (``ThreadStoreBase``) синхронный, и это правильно по умолчанию:
 файлы и локальная база отвечают за микросекунды, оборачивать их не во что.
 Но встраивающий с ``redis.asyncio`` или ``asyncpg`` синхронного клиента не
 держит вовсе — а сегодня его реализацию ядро вызвать НЕ МОЖЕТ, и хуже того,
@@ -54,15 +54,12 @@ import weakref
 import time
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, runtime_checkable
 
-from gc_core.thread_store_protocol import (
-    CONTRACT_METHODS_HINT,
+from gc_core.thread_store_base import ASYNC_CONTRACT_METHODS, CONTRACT_METHODS
+from gc_core.thread_store_types import (
     MessageKey,
     SubagentTraceRecord,
     ThreadState,
 )
-
-#: Имена асинхронного контракта — синхронные с приставкой ``a``.
-ASYNC_CONTRACT_METHODS = tuple(f"a{name}" for name in CONTRACT_METHODS_HINT)
 
 #: Дольше этого МЕДИАННЫЙ вызов хранилища держит цикл заметно: одиннадцать
 #: подряд съедают треть бюджета приёмки. Порог предупреждения, не отказа —
@@ -93,7 +90,7 @@ class ThreadStoreContractError(TypeError):
 class AsyncThreadStore(Protocol):
     """Хранилище треда для асинхронного клиента.
 
-    Те же одиннадцать операций, что у :class:`~gc_core.thread_store_protocol.ThreadStore`,
+    Те же одиннадцать операций, что у :class:`~gc_core.thread_store_base.ThreadStoreBase`,
     с теми же свойствами и той же семантикой — отличается только приставка
     ``a`` и корутинность. Свойства читать там: идемпотентность
     ``aappend_messages``, мутация ``known_keys`` на месте, ``max_seq`` как
@@ -364,15 +361,15 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
     if cached is not None:
         return cached
 
-    from gc_core.thread_store_protocol import CONTRACT_METHODS_HINT
+    from gc_core.thread_store_base import CONTRACT_METHODS
 
     missing = [
-        name for name in CONTRACT_METHODS_HINT
+        name for name in CONTRACT_METHODS
         if not callable(getattr(store, name, None))
     ]
     if not missing:
         half_async = [
-            name for name in CONTRACT_METHODS_HINT
+            name for name in CONTRACT_METHODS
             if inspect.iscoroutinefunction(getattr(store, name, None))
         ]
         if half_async:
@@ -381,7 +378,7 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
                 f"под СИНХРОННЫМИ именами: {', '.join(half_async)}.\n"
                 "  Смешивать нельзя: синхронные вызывающие отбросят корутину без "
                 "ошибки,\n  и часть записей треда потеряется молча.\n"
-                "  Либо все методы синхронные (ThreadStore), либо все "
+                "  Либо все методы синхронные (ThreadStoreBase), либо все "
                 "асинхронные с приставкой a (AsyncThreadStore)."
             )
         adapter = SyncThreadStoreAdapter(store, warn=warn)
@@ -405,7 +402,7 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
     )
     raise ThreadStoreContractError(
         f"{type(store).__name__} не годится как хранилище тредов.{detail}\n"
-        "  Нужен либо ThreadStore (одиннадцать синхронных методов), либо "
+        "  Нужен либо ThreadStoreBase (одиннадцать синхронных методов), либо "
         "AsyncThreadStore\n  (те же одиннадцать с приставкой a, все корутинные). "
         "Проверить себя:\n"
         "  gc_testkit.thread_store_conformance.assert_conforms / assert_conforms_async"

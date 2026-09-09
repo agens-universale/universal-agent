@@ -335,7 +335,21 @@ async def arequest_backend_responses(
     async with client.stream(
         "POST", url, json=data, headers=headers, timeout=timeout
     ) as r:
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError:
+            # Тело у потокового ответа не прочитано, и исключение улетало с
+            # пустым `response.text`. Для 4xx это ровно та строка, в которой
+            # бэкенд объясняет причину (неизвестная модель, превышен лимит):
+            # в лог попадал голый код, и разбираться было не с чем. Путь
+            # chat/completions это уже делал — здесь была асимметрия.
+            err_text = await _aread_error_text(r)
+            if logger is not None:
+                logger.error(
+                    "Backend responses HTTP error status=%s url=%s body=%s",
+                    r.status_code, url, (err_text or "")[:2000],
+                )
+            raise
         r_headers = r.headers
         async for line in _aiter_utf8_lines(r):
             # Пустые строки — разделители событий SSE. requests.iter_lines их

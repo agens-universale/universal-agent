@@ -94,9 +94,8 @@ async def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
         _continue_work,
     ):
         guard = FinishGateGuard(ctx=_make_ctx(cfg), state=child)
-        # Асинхронный двойник: тест стал корутинным ради await на сборке
-        # дочернего state, а синхронное имя гейта ходит через портал и из-под
-        # работающего loop законно отвечает SyncApiInsideEventLoopError.
+        # Форма у гейта одна и корутинная: синхронного имени у него больше
+        # нет — оно ушло вместе с порталом.
         decision = await guard.aevaluate_turn_finish(
             finish_handoff_arguments={"solution_type": "full_solution", "task_report": "bar"},
         )

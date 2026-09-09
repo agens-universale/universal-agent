@@ -1,7 +1,7 @@
 """Гейт: контракт хранилища тредов годен и держится.
 
 Задача 7. Встраивающий должен уметь положить историю треда в базу, а не в
-``data_*.jsonl``. Первый шаг — контракт (``ThreadStore``) и две реализации:
+``data_*.jsonl``. Первый шаг — контракт (``ThreadStoreBase``) и две реализации:
 файловая (перенос нынешнего поведения) и in-memory (доказательство годности).
 
 Почему обе проверяются ОДНИМ набором тестов: разъезжаются реализации именно
@@ -27,11 +27,7 @@ from typing import Any
 import pytest
 
 from gc_core.thread_store_file import FileThreadStore
-from gc_core.thread_store_protocol import (
-    SubagentTraceRecord,
-    ThreadState,
-    ThreadStore,
-)
+from gc_core.thread_store_types import SubagentTraceRecord, ThreadState
 from gc_testkit.memory_thread_store import MemoryThreadStore
 from gc_testkit.thread_store_conformance import (
     BEHAVIOUR_CHECKS,
@@ -142,13 +138,19 @@ def test_a_foreign_store_without_our_base_is_still_accepted():
     assert port is not None
 
 
-def test_isinstance_is_not_a_gate():
-    """``isinstance`` пропускает асинхронную реализацию — зафиксировано намеренно.
+def test_naming_alone_does_not_make_a_store():
+    """Совпасть по ИМЕНАМ мало: корутины под синхронными именами — отказ.
 
-    Тест закрепляет ФАКТ, а не желаемое: ``runtime_checkable`` сверяет только
-    наличие атрибутов. Пока это так, единственным гейтом остаётся конформанс.
-    Если однажды поведение ``Protocol`` изменится — тест покраснеет, и это
-    будет поводом упростить проверку, а не молча полагаться на неё сегодня.
+    Проверка при проводке структурная, то есть смотрит на наличие методов.
+    Реализация, у которой все одиннадцать объявлены ``async def`` под
+    синхронными именами, по именам проходит — и была бы принята молча.
+    Молчание тут дорого стоит: синхронный вызывающий отбросил бы корутину без
+    ошибки, и часть записей треда потерялась бы.
+
+    Раньше та же мысль формулировалась через ``isinstance`` к ``Protocol``
+    (``runtime_checkable`` сверяет только наличие атрибутов). Протокол снят —
+    контракт объявлен один раз, в ABC, — а проверяемое свойство осталось тем
+    же и проверяется прямо: конформанс обязан отказать и назвать причину.
     """
     class AllAsync:
         pass
@@ -158,10 +160,6 @@ def test_isinstance_is_not_a_gate():
             return None
         setattr(AllAsync, name, method)
 
-    store = AllAsync()
-    assert isinstance(store, ThreadStore), (
-        "isinstance начал проверять корутинность — конформанс можно упростить"
-    )
     with pytest.raises(ThreadStoreContractError, match="async def"):
         assert_conforms(AllAsync)
 
@@ -318,7 +316,7 @@ def test_no_direct_file_calls_left_in_core():
     }
     core = REPO / "packages" / "core" / "src" / "gc_core"
     # Сам слой и его реализации зовут модульные функции законно — это их работа.
-    own_files = {"thread_store.py", "thread_store_file.py", "thread_store_protocol.py"}
+    own_files = {"thread_store.py", "thread_store_file.py", "thread_store_types.py"}
     offenders = []
     for path in core.rglob("*.py"):
         if path.name in own_files:
@@ -334,7 +332,7 @@ def test_no_direct_file_calls_left_in_core():
                 )
 
     assert offenders == [], (
-        "прямые вызовы файлового слоя мимо ThreadStore:\n  "
+        "прямые вызовы файлового слоя мимо хранилища:\n  "
         + "\n  ".join(sorted(offenders))
         + "\nу встраивающего с базой эти записи молча уйдут на диск"
     )

@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Breaking — ядро стало асинхронным (async-only)
+
+У операций ядра теперь ОДНА форма — корутинная, с приставкой `a`. Синхронные
+двойники сняты вместе с «порталом» (приватный loop в потоке-демоне), который
+их обслуживал; `SyncApiInsideEventLoopError` больше нет.
+
+Что переименовано у вызывающего:
+
+| Было | Стало |
+|---|---|
+| `create_run_context(...)` | `await acreate_run_context(...)` |
+| `AgentExecutor.run(...)` | `await AgentExecutor.arun(...)` |
+| `processing_responses.run_agent(...)` | `await arun_agent(...)` |
+| `tools.apply_tool(...)` | `await aapply_tool(...)` |
+| `build_tools_data(...)` | `await abuild_tools_data(...)` |
+
+- Встраивающий владеет loop'ом сам: `asyncio.run(...)` вокруг своего кода.
+  Фасад SDK — `gc_core.aio.AsyncAgent` (`create` / `run` / `stream` /
+  `aclose`), примеры — `examples/async_embed.py`.
+- HTTP полностью на `httpx.AsyncClient`; `requests` убран из зависимостей.
+  Пул соединений — свой на loop, с учётом владельцев.
+- Запуск процессов — на `asyncio`-подпроцессах; команда снимается ГРУППОЙ,
+  поэтому потомки `sh -c "a; b"` больше не переживают таймаут и отмену.
+- MCP: SDK-транспорты и легаси `http`/`stdio` нативно асинхронные. Сессии
+  принадлежат владельцу (`ContextVar`), поэтому закрытие одного агента не
+  трогает сессии соседнего. Долгоживущий stdio остался на `Popen` — он должен
+  переживать разные `asyncio.run` фронтенда.
+- Хранилище тредов: контракт `ThreadStore` (11 методов) в трёх формах —
+  Protocol, ABC (`ThreadStoreBase`) и `AsyncThreadStore`. СИНХРОННОЕ хранилище
+  встраивающего по-прежнему поддержано: ядро заворачивает его адаптером.
+  Подробности — `docs/thread-store.md`.
+
+Полное описание перехода, включая места, где поток остался сознательно, —
+`docs/async.md`.
+
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
 
 - When the main agent or a subagent hits a limit (`step_limit` / `tool_call_limit` / `token_limit`), the trace is now summarized by a single auxiliary LLM call and returned as a JSON envelope `{ok:false, status, message, raw_trace_summary}` instead of a flat string.

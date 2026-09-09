@@ -1,6 +1,6 @@
 """Гейт: хранилище с асинхронным клиентом работает, и работает целиком.
 
-Задача. ``ThreadStore`` синхронный — правильный контракт по умолчанию: файлы и
+Задача. Контракт хранилища синхронный — правильно по умолчанию: файлы и
 локальная база отвечают за микросекунды. Но встраивающий с ``redis.asyncio``
 или ``asyncpg`` синхронного клиента не держит вовсе, и до этих правок ядро его
 реализацию вызвать не могло. Хуже: вызывало молча неправильно.
@@ -38,7 +38,7 @@ from gc_core.thread_store_async import (
     is_async_thread_store,
 )
 from gc_core.thread_store_file import FileThreadStore
-from gc_core.thread_store_protocol import CONTRACT_METHODS_HINT
+from gc_core.thread_store_base import CONTRACT_METHODS
 from gc_testkit.memory_thread_store import MemoryThreadStore
 from gc_testkit.thread_store_conformance import assert_conforms_async
 
@@ -66,7 +66,7 @@ class RedisLikeStore:
         method.__name__ = f"a{name}"
         return method
 
-    for _name in CONTRACT_METHODS_HINT:
+    for _name in CONTRACT_METHODS:
         locals()[f"a{_name}"] = _make(_name)
     del _make, _name
 

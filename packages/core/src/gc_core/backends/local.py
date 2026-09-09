@@ -1,6 +1,7 @@
 """Host implementation of FsBackend (os / open() / subprocess); the host-I/O
 details that used to live inline in the tools are concentrated here."""
 import asyncio
+import signal
 import codecs
 import hashlib
 import os
@@ -486,6 +487,11 @@ async def _arun_bounded_process(
     stdin_arg = (
         asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL
     )
+    # Своя группа процессов. Без неё `proc.kill()` на таймауте убивал ТОЛЬКО
+    # шелл: потомки `sh -c "a; b"` продолжали работать, унаследовав pipe'ы, и
+    # переживали и таймаут, и отмену. С группой убиваем всю команду разом
+    # (см. `_kill_quietly`). На Windows группы нет — там поведение прежнее.
+    spawn_kwargs = {"start_new_session": True} if os.name != "nt" else {}
     with preserve_console_mode():
         if shell:
             proc = await asyncio.create_subprocess_shell(
@@ -493,6 +499,7 @@ async def _arun_bounded_process(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
+                **spawn_kwargs,
             )
         else:
             proc = await asyncio.create_subprocess_exec(
@@ -500,6 +507,7 @@ async def _arun_bounded_process(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
+                **spawn_kwargs,
             )
 
     # Читатели ЗАПУСКАЮТСЯ ПЕРВЫМИ, до записи в stdin, и это не стилистика.
@@ -645,6 +653,20 @@ def _release_drain(proc, tasks) -> None:
 
 
 def _kill_quietly(proc) -> None:
+    """Снять команду ЦЕЛИКОМ, а не только её шелл.
+
+    `proc.kill()` бьёт по одному pid. Для `sh -c "a; b"` это шелл, а его
+    потомки переживали и таймаут, и отмену — с унаследованными pipe'ами, то
+    есть ещё и удерживая дескрипторы. Процесс запускается своей группой
+    (`start_new_session=True`), поэтому здесь бьём по группе.
+    """
+    pid = getattr(proc, "pid", None)
+    if pid and os.name != "nt":
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass                      # группы уже нет либо она не наша
     try:
         proc.kill()
     except Exception:

@@ -162,8 +162,21 @@ def get_async_client(
             # против коротких проб), а клиент переиспользуется. Зашитый в клиент
             # таймаут молча применился бы к чужому запросу.
         )
+        # Прибираем записи мёртвых loop'ов. Раньше их снимала только защита
+        # «id совпал, а объект другой» — то есть лишь когда id ПЕРЕИСПОЛЬЗОВАЛИ.
+        # Процесс, который гоняет много коротких `asyncio.run` (TUI — по
+        # одному на ход), копил записи без счёта: сокеты закрывал выход из
+        # `asyncio.run`, а вот словарь рос до конца процесса.
+        _purge_dead_locked()
         _clients[key] = (weakref.ref(loop), client)
         return client
+
+
+def _purge_dead_locked() -> None:
+    """Снять записи, чей loop уже собран. Звать ТОЛЬКО под ``_registry_lock``."""
+    dead = [k for k, (loop_ref, _c) in _clients.items() if loop_ref() is None]
+    for k in dead:
+        _clients.pop(k, None)
 
 
 #: Сколько владельцев (обычно ``AsyncAgent``) держат пул этого loop.

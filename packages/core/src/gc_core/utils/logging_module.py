@@ -280,13 +280,53 @@ def create_run_logger(
         built = _build_text_logger(logger, config_dict, effective_run_id, kind, redactor)
 
     # Хендлеры вызывающего — ПОСЛЕ сборки: handlers.clear() выше стёр бы их.
+    # Их мы запоминаем как ЧУЖИЕ: закрывать чужое хозяйство не наше дело.
+    foreign = set()
     for handler in log_handlers or ():
         logger.addHandler(handler)
+        foreign.add(id(handler))
+    _FOREIGN_HANDLERS[logger.name] = foreign
     return built
+
+
+#: Хендлеры, переданные вызывающим. Их ``release_run_logger`` не трогает.
+_FOREIGN_HANDLERS: dict[str, set] = {}
+
+
+def release_run_logger(logger: Any) -> None:
+    """Закрыть хендлеры прогона и снять логгер из реестра ``logging``.
+
+    Имя логгера уникально на ран (``agent_run_<kind>_<run_id>``), а
+    ``logging`` держит созданные объекты в ``loggerDict`` до конца процесса и
+    сам их не отдаёт. Один процесс — один-два логгера, и это было незаметно.
+    Но ветка объявляет сценарий «много ``AsyncAgent`` в одном процессе», где
+    каждый агент и каждый субагент заводит свой: рост становится линейным, и
+    вместе с логгерами живут ОТКРЫТЫЕ ``FlushFileHandler`` — то есть
+    дескрипторы.
+
+    Чужие хендлеры (``log_handlers`` вызывающего) не закрываются: их жизнь
+    принадлежит тому, кто их передал.
+    """
+    if logger is None:
+        return
+    name = getattr(logger, "name", None)
+    if not name or not str(name).startswith("agent_run_"):
+        return                       # не наш логгер — не наше дело
+    foreign = _FOREIGN_HANDLERS.pop(name, set())
+    for handler in list(getattr(logger, "handlers", ())):
+        logger.removeHandler(handler)
+        if id(handler) in foreign:
+            continue
+        try:
+            handler.close()
+        except Exception:
+            pass
+    logging.Logger.manager.loggerDict.pop(name, None)
 
 
 __all__ = [
     "create_run_logger",
+    "release_run_logger",
     "FlushFileHandler",
     "JsonlFormatter",
     "RunContextFilter",

@@ -17,7 +17,6 @@ from gc_core.config_modules.agent import exec_timeout_from_config_dict
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE, copy_loop_warn, loop_warn_on_repeat
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.skills.registry import AmbiguousSkillId, SkillsRegistry
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.arg_decorators import parse_json_object_argument
 from gc_core.utils.json_arg_parser import JsonArgParseError
 

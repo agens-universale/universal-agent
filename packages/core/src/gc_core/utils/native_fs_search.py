@@ -476,41 +476,6 @@ def build_prefilter_command(
     return f"{find_s} | xargs -0 -r {_inline_env(dict(_PREFILTER_ENV))}{grep_s} {bom_s}"
 
 
-def native_prefilter_candidates(
-    backend: Any,
-    path: str,
-    *,
-    terms: Sequence[str],
-    case_insensitive: bool,
-    exclude_dir_names: Sequence[str],
-    exclude_nested_dot_dirs: bool,
-    file_pattern: Optional[str],
-    exclude_paths: Sequence[str],
-) -> tuple[Optional[List[str]], Optional[str]]:
-    """``(paths, None)``: absolute paths grep would open for ``terms``;
-    ``(None, reason)``: the caller walks as before and tells the agent why
-    (``timeout`` / ``capped`` — an incomplete listing is unsafe / ``failed``).
-
-    One minute is the whole budget: a tree where ``grep -l`` cannot finish in
-    that time is hopeless for the host-side walk anyway — fail fast instead.
-    """
-    cmd = build_prefilter_command(
-        path,
-        terms=terms,
-        case_insensitive=case_insensitive,
-        exclude_dir_names=exclude_dir_names,
-        exclude_nested_dot_dirs=exclude_nested_dot_dirs,
-        file_pattern=file_pattern,
-        exclude_paths=exclude_paths,
-    )
-    try:
-        res = backend.exec(cmd, **_prefilter_run_kwargs(backend))
-    except Exception as exc:
-        log.debug("native prefilter failed: %s", exc)
-        return None, "failed"
-    return _prefilter_result(res, backend, path)
-
-
 async def anative_prefilter_candidates(
     backend: Any,
     path: str,
@@ -629,88 +594,6 @@ def _grep_recipe(
         return _GrepRecipe(shell=False, target=argv, kwargs=common)
     # single file
     return _GrepRecipe(shell=False, target=list(grep_argv) + [path], kwargs=common)
-
-
-def run_native_grep(
-    backend: Any,
-    path: str,
-    plan: NativeGrepPlan,
-    *,
-    exclude_dir_names: Sequence[str],
-    exclude_nested_dot_dirs: bool,
-    file_pattern: Optional[str],
-    max_matches: Optional[int],  # None: no count cut — the caller ranks, then limits
-    report_path: Callable[[str], str],
-    is_dir_target: bool,
-    allow_path: Optional[Callable[[str], bool]] = None,
-    exclude_paths: Sequence[str] = (),
-    rank_key: Optional[Callable[[str], Any]] = None,
-    top_k: Optional[int] = None,
-) -> NativeGrepResult:
-    """Execute grep recipe (optionally via find prune).
-
-    Never answers with a silent ``None``: an anomaly (exception, timeout, odd
-    exit code, unparseable output) comes back as ``failure`` so the caller can
-    fall back to the Python path AND name the reason to the agent.
-
-    ``allow_path``: optional per-hit path predicate owned by the caller (this
-    module knows no policy). Applied BEFORE the ``max_matches`` cut — otherwise
-    rejected hits eat the budget and accepted ones are silently dropped.
-
-    ``rank_key`` + ``top_k``: stream the buffer and keep only the K best by the
-    caller's key (see ``_stream_top_k``); ``matches`` come back ranked, plus
-    ``total_matches`` and ``files_seen``. Without them every record is parsed.
-    """
-
-    def _failed(kind: str, *, hit_cap: bool = False) -> NativeGrepResult:
-        return NativeGrepResult(
-            matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind
-        )
-
-    names = [n for n in exclude_dir_names if n]
-    need_prune = is_dir_target and (
-        bool(names) or exclude_nested_dot_dirs or bool(exclude_paths)
-    )
-
-    grep_argv: List[str] = build_grep_argv_flags(
-        case_insensitive=plan.case_insensitive, fixed=plan.fixed
-    )
-    grep_argv.extend(["--", plan.pattern])
-    env = _grep_env(plan)
-
-    recipe = _grep_recipe(
-        backend,
-        path,
-        plan,
-        names=names,
-        need_prune=need_prune,
-        exclude_nested_dot_dirs=exclude_nested_dot_dirs,
-        file_pattern=file_pattern,
-        exclude_paths=exclude_paths,
-        grep_argv=grep_argv,
-        env=env,
-        is_dir_target=is_dir_target,
-    )
-    try:
-        res = (
-            backend.exec(recipe.target, **recipe.kwargs)
-            if recipe.shell
-            else backend.exec_argv(recipe.target, **recipe.kwargs)
-        )
-    except Exception as exc:
-        log.debug("native grep failed: %s", exc)
-        return _failed("native_error")
-
-    return _grep_result(
-        res,
-        path=path,
-        backend=backend,
-        report_path=report_path,
-        allow_path=allow_path,
-        rank_key=rank_key,
-        top_k=top_k,
-        max_matches=max_matches,
-    )
 
 
 async def arun_native_grep(

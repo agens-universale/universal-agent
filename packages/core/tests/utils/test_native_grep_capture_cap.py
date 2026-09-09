@@ -5,7 +5,7 @@
 остаётся в ответе с пометкой line_content_truncated, а не выбрасывается.
 """
 
-from gc_core.utils.native_fs_search import run_native_grep
+from gc_core.utils.native_fs_search import arun_native_grep
 from gc_core.utils.pattern_native_gate import NativeGrepPlan
 
 PLAN = NativeGrepPlan(fixed=True, pattern="KEY", case_insensitive=False)
@@ -37,8 +37,8 @@ class _Backend:
         return p.startswith("/")
 
 
-def _run(stdout, *, capped):
-    return run_native_grep(
+async def _run(stdout, *, capped):
+    return await arun_native_grep(
         _Backend(stdout, capped=capped),
         "/work",
         PLAN,
@@ -51,8 +51,8 @@ def _run(stdout, *, capped):
     )
 
 
-def test_capped_output_keeps_the_cut_last_line_but_flags_it():
-    res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = ", capped=True)
+async def test_capped_output_keeps_the_cut_last_line_but_flags_it():
+    res = await _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = ", capped=True)
     assert [(m["line"], m["line_content"]) for m in res.matches] == [(1, "KEY = 1"), (2, "KEY = ")]
     assert "line_content_truncated" not in res.matches[0]
     assert res.matches[1]["line_content_truncated"] is True
@@ -60,23 +60,23 @@ def test_capped_output_keeps_the_cut_last_line_but_flags_it():
     assert res.hit_capture_cap is True
 
 
-def test_capped_output_ending_on_a_newline_flags_nothing():
-    res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = 2\n", capped=True)
+async def test_capped_output_ending_on_a_newline_flags_nothing():
+    res = await _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = 2\n", capped=True)
     assert [m["line"] for m in res.matches] == [1, 2]
     assert all("line_content_truncated" not in m for m in res.matches)
     assert res.truncated is True
 
 
-def test_uncapped_output_without_trailing_newline_is_complete():
-    res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = 2", capped=False)
+async def test_uncapped_output_without_trailing_newline_is_complete():
+    res = await _run("/work/a.py:1:KEY = 1\n/work/a.py:2:KEY = 2", capped=False)
     assert [m["line"] for m in res.matches] == [1, 2]
     assert all("line_content_truncated" not in m for m in res.matches)
     assert res.truncated is False
 
 
-def test_capped_output_drops_an_unparseable_tail_and_keeps_the_prefix():
+async def test_capped_output_drops_an_unparseable_tail_and_keeps_the_prefix():
     """Срез внутри file:line: — не провал всего буфера и не Python-download."""
-    res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2", capped=True)
+    res = await _run("/work/a.py:1:KEY = 1\n/work/a.py:2", capped=True)
     assert [(m["line"], m["line_content"]) for m in res.matches] == [(1, "KEY = 1")]
     assert "line_content_truncated" not in res.matches[0]
     assert res.failure is None
@@ -84,14 +84,14 @@ def test_capped_output_drops_an_unparseable_tail_and_keeps_the_prefix():
     assert res.truncated is True
 
 
-def test_uncapped_unparseable_line_is_still_a_failure():
-    res = _run("/work/a.py:1:KEY = 1\n/work/a.py:2", capped=False)
+async def test_uncapped_unparseable_line_is_still_a_failure():
+    res = await _run("/work/a.py:1:KEY = 1\n/work/a.py:2", capped=False)
     assert res.failure == "native_error"
     assert res.matches == []
 
 
-def test_capped_output_with_a_foreign_line_in_the_middle_is_still_a_failure():
+async def test_capped_output_with_a_foreign_line_in_the_middle_is_still_a_failure():
     """Оборванный хвост — только последняя строка; чужая строка посреди потока — сбой и откат."""
-    res = _run("/work/a.py:1:KEY = 1\nsome foreign line\n/work/b.py:2:KEY = 2\n", capped=True)
+    res = await _run("/work/a.py:1:KEY = 1\nsome foreign line\n/work/b.py:2:KEY = 2\n", capped=True)
     assert res.failure == "native_error"
     assert res.matches == []

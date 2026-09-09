@@ -160,7 +160,9 @@ def test_registry_hands_out_one_client_per_key():
     def _worker() -> None:
         async def _body():
             ready.wait(10)
-            seen.append(id(async_http.get_async_client()))
+            # Держим САМ объект, а не id: после сборки id переиспользуются,
+            # и проверка на различие стала бы случайной.
+            seen.append(async_http.get_async_client())
 
         asyncio.run(_body())
 
@@ -173,5 +175,75 @@ def test_registry_hands_out_one_client_per_key():
         t.join(30)
 
     assert len(seen) == 6, seen
-    # Все клиенты остались в реестре, ни один не затёрт молча.
-    assert len(async_http._clients) == 6, len(async_http._clients)
+    # Ни один не затёрт молча: у каждого потока СВОЙ клиент.
+    #
+    # Считать записи в реестре здесь больше нельзя: loop'ы этих потоков к
+    # моменту проверки уже мертвы, а мёртвые записи снимаются (см.
+    # `test_registry_does_not_accumulate_dead_loops`). Затёртый клиент виден
+    # прямо — как совпадение объектов, — и это и есть проверяемое свойство:
+    # затёртый утёк бы сокетом.
+    assert len({id(c) for c in seen}) == 6, "два потока получили одного клиента"
+
+
+# --- L6: реестр не копит мёртвые записи, общий пул не декорация ------------
+
+
+def test_registry_does_not_accumulate_dead_loops():
+    """Записи мёртвых loop'ов снимаются, а не копятся до конца процесса.
+
+    Раньше их убирала только защита «id совпал, а объект другой» — то есть
+    лишь когда id ПЕРЕИСПОЛЬЗОВАЛИ. Процесс с множеством коротких
+    ``asyncio.run`` (TUI заводит по одному на ход) рос словарём без счёта:
+    сокеты закрывал выход из ``asyncio.run``, а запись оставалась.
+    """
+    import gc
+
+    async def _touch():
+        async_http.get_async_client()
+
+    for _ in range(30):
+        asyncio.run(_touch())
+    gc.collect()
+    # Ещё один вызов — он и запускает уборку.
+    asyncio.run(_touch())
+    gc.collect()
+
+    alive = [k for k, (ref, _c) in async_http._clients.items() if ref() is not None]
+    assert len(async_http._clients) <= len(alive) + 1, (
+        f"реестр копит мёртвые записи: всего {len(async_http._clients)}, "
+        f"живых {len(alive)}"
+    )
+
+
+def test_shared_sync_client_is_actually_used():
+    """`verify=True` обязан идти через ОБЩИЙ клиент, а не поднимать свой.
+
+    Условие было `verify is not None`, а вызывающие передают `verify=`
+    всегда: общий пул не использовался ни разу, и каждый запрос платил своим
+    TLS-рукопожатием.
+    """
+    import httpx
+
+    from gc_core.utils.http_session import NO_NETRC_SESSION
+
+    one_shots: list = []
+    real_client = httpx.Client
+
+    class _Counting(httpx.Client):
+        def __init__(self, *a, **kw):
+            one_shots.append(kw)
+            super().__init__(*a, **kw)
+
+    def _dispatch(request):
+        return httpx.Response(200, json={"ok": True})
+
+    NO_NETRC_SESSION._transport = httpx.MockTransport(_dispatch)
+    httpx.Client = _Counting
+    try:
+        NO_NETRC_SESSION.request("GET", "https://example.com", verify=True)
+    finally:
+        httpx.Client = real_client
+
+    assert one_shots == [], (
+        "verify=True снова поднял одноразовый клиент — общий пул декоративен"
+    )

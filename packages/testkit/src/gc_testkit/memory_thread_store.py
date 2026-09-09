@@ -5,8 +5,10 @@
 в TUI — там протокол объявлен, но второй реализации нет, и потому он тихо
 разъехался с фактическим употреблением (4 метода против 12 у файлового).
 
-Ничего не наследует: ``ThreadStore`` — ``Protocol``, структурная типизация.
-Так же будет выглядеть и чужой store поверх базы.
+Наследует ``ThreadStoreBase`` — рекомендуемый путь: абстрактные методы
+отказывают на этапе создания класса, а инварианты меты достаются готовыми.
+Наследование при этом НЕ обязательно: проводка структурная, и чужой store,
+который наследовать не может, принимается по именам методов.
 
 Внутри — конверт ``{"seq": n, "payload": {...}}``, тот же, что пишет файловый
 слой в ``data_*.jsonl``. Не ради сходства: без хранимого ``seq`` третий элемент
@@ -22,7 +24,7 @@ import copy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from gc_core.thread_store_protocol import MessageKey, SubagentTraceRecord, ThreadState
+from gc_core.thread_store_types import MessageKey, SubagentTraceRecord, ThreadState
 from gc_core.thread_store_base import ThreadStoreBase
 
 

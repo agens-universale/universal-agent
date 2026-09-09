@@ -35,7 +35,11 @@ from gc_core.config_modules.agent import merge_special_instructions_with_model_s
 from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.utils.local_render_system_prompt import render_system_prompt
-from gc_core.utils.logging_module import create_run_logger, generate_run_id
+from gc_core.utils.logging_module import (
+    create_run_logger,
+    generate_run_id,
+    release_run_logger,
+)
 from gc_core.message_policy.user_message_policy import extract_real_user_message_text
 from gc_core.message_policy.user_stop import cancelled_by_user_output
 from gc_core.tools.subagents.active_scope import activate_child_input
@@ -394,6 +398,11 @@ class SubagentRunner:
             # (иначе double-count уже запушенных токенов).
             self._push_usage_delta(child_state, child_ctx)
             self._push_tool_calls_delta(child_state)
+            # Логгер субагента уникален по имени и живёт в реестре `logging`
+            # до конца процесса, а с ним — открытый файловый хендлер. На один
+            # ран это незаметно, но субагентов за прогон бывают десятки, и
+            # дескрипторы росли линейно.
+            release_run_logger(getattr(child_ctx, "logger", None))
 
         if result is None:
             self._log_lifecycle(

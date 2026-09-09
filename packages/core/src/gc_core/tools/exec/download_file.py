@@ -12,7 +12,6 @@ from gc_core.security.url_policy import UrlPolicyDecision, enforce_url_policy, v
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.utils.atomic_io import atomic_replace
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies
 from contextlib import asynccontextmanager

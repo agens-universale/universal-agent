@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from gc_core.thread_store_base import ThreadStoreBase
-from gc_core.thread_store_protocol import (
+from gc_core.thread_store_types import (
     MessageKey,
     SubagentTraceRecord,
     ThreadState,

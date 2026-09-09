@@ -206,11 +206,17 @@ class AsyncAgent:
         закрыть клиенты соседа.
         """
         from gc_core.utils.async_http import release_clients
+        from gc_core.utils.logging_module import release_run_logger
 
         if self._closed:
             return
         self._closed = True
         await release_clients()
+        # Логгер прогона уникален по имени и остаётся в реестре `logging` до
+        # конца процесса вместе с открытым файловым хендлером. Ветка объявляет
+        # сценарий «много AsyncAgent в одном процессе» — там это линейный рост
+        # дескрипторов. Хендлеры, переданные вызывающим, не трогаем.
+        release_run_logger(getattr(getattr(self._executor, "_ctx", None), "logger", None))
 
     async def __aenter__(self) -> "AsyncAgent":
         return self

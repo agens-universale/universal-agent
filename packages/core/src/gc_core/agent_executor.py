@@ -59,51 +59,6 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
 )
 
 
-def _append_trace_id_to_meta(
-    thread_session: Any, trace_id: str, logger: Any | None = None
-) -> None:
-    """Дописать trace_id в ``meta.runtime.trace_ids`` (append + дедуп).
-
-    Через ``update_runtime_meta`` (read-merge-write по диску), а НЕ через
-    ``thread_session.meta``: ``persist_batch`` пересобирает base_meta с диска и
-    переносит из ``self.meta`` только whitelist ключей, в который ``runtime`` не
-    входит — запись в память была бы потеряна.
-
-    Отвечает на вопрос аудита «какие шаги оркестратора трогали этот тред».
-    Ошибки бухгалтерии меты не должны ронять ран, но раз это единственный путь
-    записи trace_id в мету — молчаливый swallow оставляем, а факт и причину
-    ошибки пишем в debug (``logger`` опционален, чтобы не менять контракт
-    вызывающих сторон).
-    """
-    from gc_core.persistence.meta_ownership import runtime_section
-    from gc_core.thread_store import sanitize_system_id
-
-    # Хранилище берём у самой сессии: у неё оно уже своё — файловое по
-    # умолчанию или переданное встраивающим. Прямой вызов модульных функций
-    # уводил бы записи на диск даже тогда, когда история лежит в базе.
-    store = getattr(thread_session, "store", None)
-    system_id = getattr(thread_session, "system_id", None)
-    thread_id = getattr(thread_session, "thread_id", None)
-    if store is None or not system_id or not thread_id:
-        return
-    try:
-        sys_norm = sanitize_system_id(system_id)
-        meta = store.load_meta(sys_norm, thread_id) or {}
-        existing = runtime_section(meta).get("trace_ids")
-        ids = [str(x) for x in existing] if isinstance(existing, list) else []
-        if trace_id in ids:
-            return
-        ids.append(trace_id)
-        store.update_runtime_meta(sys_norm, thread_id, {"trace_ids": ids})
-    except Exception as exc:
-        if logger is not None:
-            try:
-                logger.debug("trace_id_meta_write_failed error=%s", exc, exc_info=True)
-            except Exception:
-                pass
-        return
-
-
 async def _aappend_trace_id_to_meta(
     thread_session: Any, trace_id: str, logger: Any | None = None
 ) -> None:

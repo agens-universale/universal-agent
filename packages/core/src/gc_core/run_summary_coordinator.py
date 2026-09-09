@@ -133,51 +133,6 @@ def _summarizing_flag(thread_session):
         _set_runtime_flag(ts, "summarizing", False)
 
 
-def reset_stale_summarizing_flag(thread_session) -> None:
-    """Снять протухший ``runtime.summarizing`` на старте run'а.
-
-    Флаг транзиентный (живёт только на время компакции внутри ``_summarizing_flag``),
-    но персистится в meta. Если прошлый run был прерван посреди компакции (закрытие
-    TUI/выход процесса убивает daemon-поток до finally, либо зависание summary-вызова
-    на нездоровом бэкенде), флаг остаётся на диске навсегда — и TUI вечно
-    показывает «сжимаю контекст» вместо «думаю». На старте нового run'а компакция
-    точно не идёт, поэтому сбрасываем. ``thread_session=None`` → no-op.
-    """
-    if thread_session is None:
-        return
-    ts = thread_session
-    disk = ts.store.load_meta(ts.system_id, ts.thread_id) or {}
-    rt = (ts.meta.get("runtime") or {}) if isinstance(ts.meta.get("runtime"), dict) else {}
-    disk_rt = disk.get("runtime") if isinstance(disk.get("runtime"), dict) else {}
-    if rt.get("summarizing") or disk_rt.get("summarizing"):
-        _set_runtime_flag(ts, "summarizing", False)
-
-
-def set_tui_finalizing(thread_session, active: bool) -> None:
-    """TUI-индикатор: ``meta.runtime.finalizing`` (+ flush).
-
-    Ставится на время записи/саммари финальной прозы в accept-ветке run_agent,
-    снимается строго в finally. ``active=False`` также снимает протухший флаг на старте
-    run'а. ``thread_session=None`` (CLI без треда) → no-op.
-    """
-    if thread_session is None:
-        return
-    _set_runtime_flag(thread_session, "finalizing", active)
-
-
-def set_tui_finish_gate_checking(thread_session, active: bool) -> None:
-    """TUI-индикатор: ``meta.runtime.finish_gate_checking`` (+ flush).
-
-    В turn_finish-ветке run_agent ставится только при ``FinishGateGuard.enabled``
-    (судья реально пойдёт в LLM); smart-skip / выключенный гейт флаг не трогают.
-    Снимается строго в finally. ``active=False`` также снимает протухший флаг на
-    старте run'а. ``thread_session=None`` (CLI без треда) → no-op.
-    """
-    if thread_session is None:
-        return
-    _set_runtime_flag(thread_session, "finish_gate_checking", active)
-
-
 def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:
     """True, если ``messages`` заканчивается на ``suffix`` (поэлементное ``==``)."""
     if not suffix or len(messages) < len(suffix):

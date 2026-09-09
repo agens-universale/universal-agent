@@ -42,9 +42,9 @@ def test_wire_match_falls_back_to_meta_wire_content():
     assert scr._pending_wire_match("c1", "wire-hello")
 
 
-def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
+async def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
     """TUI снял pending с диска → set_tui_* их не возвращает (I1)."""
-    from gc_core.run_summary_coordinator import set_tui_finalizing
+    from gc_core.run_summary_coordinator import aset_tui_finalizing
     from gc_core.thread_store import ThreadSession, save_thread_meta, update_tui_meta
 
     tid = "t1"
@@ -68,7 +68,7 @@ def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
     save_thread_meta(str(tmp_path), "cli", tid, ts.meta)
     update_tui_meta(str(tmp_path), "cli", tid, {"pending_user_messages": []})
 
-    set_tui_finalizing(ts, True)
+    await aset_tui_finalizing(ts, True)
 
     meta = json.loads((tmp_path / f"meta_cli_{tid}.json").read_text(encoding="utf-8"))
     assert (meta.get("runtime") or {}).get("finalizing") is True

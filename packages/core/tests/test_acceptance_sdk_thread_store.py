@@ -77,7 +77,7 @@ class AsyncMemoryThreadStore:
         method.__name__ = f"a{name}"
         return method
 
-    from gc_core.thread_store_protocol import CONTRACT_METHODS_HINT as _NAMES
+    from gc_core.thread_store_base import CONTRACT_METHODS as _NAMES
 
     for _n in _NAMES:
         locals()[f"a{_n}"] = _make(_n)
@@ -242,7 +242,7 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
                 return getattr(self.inner, name)(*args, **kwargs)
             return method
 
-        from gc_core.thread_store_protocol import CONTRACT_METHODS_HINT as _NAMES
+        from gc_core.thread_store_base import CONTRACT_METHODS as _NAMES
 
         for _n in _NAMES:
             locals()[f"a{_n}"] = _make(_n)

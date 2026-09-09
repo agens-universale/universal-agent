@@ -12,7 +12,6 @@ import httpx
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies

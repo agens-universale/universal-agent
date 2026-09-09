@@ -18,7 +18,7 @@ import pytest
 from gc_core.backends.local import LocalFsBackend
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 from gc_core.tools.fs.find_in_files import FindInFiles
-from gc_core.utils.native_fs_search import run_native_grep
+from gc_core.utils.native_fs_search import arun_native_grep
 from gc_core.utils.pattern_native_gate import NativeGrepPlan
 
 
@@ -336,12 +336,12 @@ def test_native_clips_long_line_to_the_head_budget(tmp_path):
 
 
 @requires_grep
-def test_recursive_grep_recipe_without_find_prune(tmp_path, monkeypatch):
+async def test_recursive_grep_recipe_without_find_prune(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     backend = LocalFsBackend()
     calls = _spy_exec(monkeypatch, backend)
 
-    result = run_native_grep(
+    result = await arun_native_grep(
         backend,
         str(tmp_path),
         PLAN,
@@ -365,13 +365,13 @@ def test_recursive_grep_recipe_without_find_prune(tmp_path, monkeypatch):
 
 
 @requires_grep
-def test_single_file_grep_recipe(tmp_path, monkeypatch):
+async def test_single_file_grep_recipe(tmp_path, monkeypatch):
     target = tmp_path / "app.py"
     target.write_text("TOKEN = 1\n", encoding="utf-8")
     backend = LocalFsBackend()
     calls = _spy_exec(monkeypatch, backend)
 
-    result = run_native_grep(
+    result = await arun_native_grep(
         backend,
         str(target),
         PLAN,

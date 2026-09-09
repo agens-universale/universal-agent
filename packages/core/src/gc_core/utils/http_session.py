@@ -50,7 +50,14 @@ class _CompatClient(httpx.Client):
         if "allow_redirects" in kwargs:
             kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
 
-        if proxies or verify is not None or cert is not None:
+        # Одноразовый клиент — только если настройки ОТЛИЧАЮТСЯ от общих.
+        #
+        # Условие было `verify is not None`, а вызывающие передают `verify=`
+        # всегда: общий пул не использовался НИ РАЗУ, и каждый запрос платил
+        # своим TLS-рукопожатием. `verify=True` без прокси и клиентского
+        # сертификата — это ровно то, с чем создан общий клиент.
+        needs_own = bool(proxies) or cert is not None or verify not in (None, True)
+        if needs_own:
             from gc_core.utils.async_http import build_ssl_context, mounts_from_proxies
 
             ssl_context = build_ssl_context(

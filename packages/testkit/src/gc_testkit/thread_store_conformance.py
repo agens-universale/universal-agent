@@ -1,4 +1,4 @@
-"""Конформанс ``ThreadStore``: проверка чужой реализации одной функцией.
+"""Конформанс хранилища тредов: проверка чужой реализации одной функцией.
 
 Зачем отдельный модуль, а не тесты в ядре. Реализацию хранилища пишет
 ВСТРАИВАЮЩИЙ — у себя, поверх своей базы, в своём репозитории. Ему нужно уметь
@@ -9,13 +9,15 @@
     def test_my_postgres_store():
         assert_conforms(lambda: PostgresThreadStore(dsn=TEST_DSN))
 
-Почему не ``isinstance``. ``ThreadStore`` — ``runtime_checkable`` ``Protocol``,
-а он сверяет ТОЛЬКО наличие атрибутов: ни сигнатур, ни корутинности, ни форм.
-Проверено запуском — у класса, где все одиннадцать методов ``async def``,
-``isinstance`` истинно, структурный тест зелёный, а восемь поведенческих
-красные. Ошибка симметрична: законное прокси-хранилище на ``__getattr__``
-``isinstance`` НЕ пройдёт, потому что в 3.12 проверка идёт через
-``getattr_static``. Опираться на него нельзя ни в ту, ни в другую сторону.
+Почему не ``isinstance``. Ошибка симметрична в обе стороны. Наследование
+``ThreadStoreBase`` НЕ обязательно — законное прокси-хранилище на
+``__getattr__`` его не пройдёт, хотя работает; а пройденная проверка ничего не
+доказывает — наследник с одиннадцатью заглушками ``pass`` тоже наследник.
+Раньше здесь стоял ``runtime_checkable`` ``Protocol``, и он был не лучше:
+сверял ТОЛЬКО наличие атрибутов, ни сигнатур, ни корутинности. Проверено
+запуском — у класса, где все одиннадцать методов ``async def``, ``isinstance``
+был истинным, структурный тест зелёным, а восемь поведенческих красными.
+Единственный честный ответ на вопрос «годится ли хранилище» — прогнать его.
 
 Почему проверок больше, чем было. Первая редакция контракта описывала методы,
 но не свойства — и две НАШИ СОБСТВЕННЫЕ реализации разошлись в четырёх местах,
@@ -34,12 +36,12 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, Dict, List
 
-from gc_core.thread_store_protocol import CONTRACT_METHODS_HINT
+from gc_core.thread_store_base import CONTRACT_METHODS
 
 SYS = "cli"
 
 #: Одиннадцать методов контракта.
-CONTRACT_METHODS = CONTRACT_METHODS_HINT
+CONTRACT_METHODS = CONTRACT_METHODS
 
 #: Шесть полей записи трассы. Форма замкнутая: её пишет и читает только ядро.
 TRACE_FIELDS = frozenset(
@@ -79,7 +81,7 @@ def check_methods_present(store: Any) -> None:
         hint = (
             f"\n  У вас есть {', '.join('a' + m for m in a_named)} — это имена"
             "\n  АСИНХРОННОГО контракта (gc_core.thread_store_async.AsyncThreadStore)."
-            "\n  Синхронный ThreadStore ждёт имена без приставки."
+            "\n  Синхронный контракт ждёт имена без приставки."
         )
     _fail(
         f"{type(store).__name__}: нет методов контракта: {', '.join(missing)}",
@@ -103,7 +105,7 @@ def check_methods_are_sync(store: Any) -> None:
         return
     _fail(
         f"{type(store).__name__}: методы объявлены async def: {', '.join(bad)}",
-        "Синхронный ThreadStore обязан быть синхронным: ядро зовёт его из"
+        "Синхронное хранилище обязано быть синхронным: ядро зовёт его из"
         "\n  обычных def, и корутина там отбрасывается БЕЗ ОШИБКИ — запись"
         "\n  теряется молча."
         "\n  Асинхронному клиенту (redis.asyncio, asyncpg) предназначен"
@@ -112,15 +114,17 @@ def check_methods_are_sync(store: Any) -> None:
 
 
 def check_signatures(store: Any) -> None:
-    """Имена и вид параметров совпадают с протоколом.
+    """Имена и вид параметров совпадают с контрактом.
 
-    Сверяем с самим ``ThreadStore``, а не со списком в прозе: разъехаться
-    прозе и коду проще, чем коду и коду.
+    Сверяем с самим ``ThreadStoreBase``, а не со списком в прозе: разъехаться
+    прозе и коду проще, чем коду и коду. Раньше здесь стоял ``ThreadStore``
+    (``Protocol``) — он снят, чтобы контракт был объявлен ровно один раз;
+    сигнатуры у ABC те же.
     """
-    from gc_core.thread_store_protocol import ThreadStore
+    from gc_core.thread_store_base import ThreadStoreBase
 
     for name in CONTRACT_METHODS:
-        want = inspect.signature(getattr(ThreadStore, name))
+        want = inspect.signature(getattr(ThreadStoreBase, name))
         got = inspect.signature(getattr(store, name))
         want_p = [p for p in want.parameters.values() if p.name != "self"]
         got_p = list(got.parameters.values())
