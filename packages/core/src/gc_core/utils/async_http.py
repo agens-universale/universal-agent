@@ -14,6 +14,7 @@ event loop. Клиент, созданный на портальном loop и �
 from __future__ import annotations
 
 import asyncio
+import threading
 import ssl
 import weakref
 from typing import Any, Optional, Union
@@ -102,6 +103,20 @@ def mounts_from_proxies(
     return mounts or None
 
 
+#: Лок на модульные реестры.
+#:
+#: Потоков с собственным loop в процессе несколько ПО ДИЗАЙНУ: рабочий поток
+#: TUI, guard-потоки модерации, воркеры сервера. Итерация
+#: ``[k for k in _clients ...]`` при вставке из другого потока даёт
+#: ``dictionary changed size during iteration`` — и вылетает она из ``finally``
+#: в ``_closing_clients``, то есть подменяет результат судьи модерации на
+#: отказ. Дефект воспроизведён стрессом.
+#:
+#: GIL сам по себе тут не спасает: он атомарен на уровне байткода, а цикл по
+#: словарю — это много байткодов.
+_registry_lock = threading.Lock()
+
+
 def get_async_client(
     *,
     verify: Union[bool, str] = True,
@@ -116,14 +131,20 @@ def get_async_client(
     # CA-бандла попадали в одну ячейку, и вызывающий получал клиент с чужим
     # корнем доверия — чьим именно, решал порядок вызовов.
     key = (loop_key, verify, cert, proxy_key)
-    entry = _clients.get(key)
-    client = None
-    if entry is not None:
-        loop_ref, cached = entry
-        # Тот ли это loop, для которого клиент создан: id совпал, а объект мог
-        # смениться (см. комментарий у `_clients`).
-        client = cached if loop_ref() is loop else None
-    if client is None or client.is_closed:
+    # Весь get-or-create ПОД ЛОКОМ, а не только чтение: иначе два потока
+    # создают по клиенту, один затирает другого, и затёртый течёт сокетом.
+    # Создание клиента не ходит в сеть, так что лок держится микросекунды.
+    with _registry_lock:
+        entry = _clients.get(key)
+        client = None
+        if entry is not None:
+            loop_ref, cached = entry
+            # Тот ли это loop, для которого клиент создан: id совпал, а объект
+            # мог смениться (см. комментарий у `_clients`).
+            client = cached if loop_ref() is loop else None
+        if client is not None and not client.is_closed:
+            return client
+
         ssl_context = build_ssl_context(verify, cert)
         client = httpx.AsyncClient(
             verify=ssl_context,
@@ -142,7 +163,7 @@ def get_async_client(
             # таймаут молча применился бы к чужому запросу.
         )
         _clients[key] = (weakref.ref(loop), client)
-    return client
+        return client
 
 
 #: Сколько владельцев (обычно ``AsyncAgent``) держат пул этого loop.
@@ -168,7 +189,8 @@ def acquire_clients() -> None:
     сейчас пользуется соседний, и рвал его запрос к модели на полуслове.
     """
     loop = asyncio.get_running_loop()
-    _holders[id(loop)] = (weakref.ref(loop), _holder_count(loop) + 1)
+    with _registry_lock:
+        _holders[id(loop)] = (weakref.ref(loop), _holder_count(loop) + 1)
 
 
 async def release_clients() -> None:
@@ -182,15 +204,19 @@ async def release_clients() -> None:
     одной лишней строкой у вызывающего.
     """
     loop = asyncio.get_running_loop()
-    count = _holder_count(loop)
+    with _registry_lock:
+        count = _holder_count(loop)
     if count <= 0:
         # Владельцев и не было: закрывать нечего, а закрыть можно чужое.
         return
     left = count - 1
+    with _registry_lock:
+        if left > 0:
+            _holders[id(loop)] = (weakref.ref(loop), left)
+        else:
+            _holders.pop(id(loop), None)
     if left > 0:
-        _holders[id(loop)] = (weakref.ref(loop), left)
         return
-    _holders.pop(id(loop), None)
     await aclose_clients()
 
 
@@ -203,9 +229,13 @@ async def aclose_clients() -> None:
     нечем — они живут на своих loop, и корректно закроет их только владелец.
     """
     loop_key = id(asyncio.get_running_loop())
-    _holders.pop(loop_key, None)
-    for key in [k for k in _clients if k[0] == loop_key]:
-        _loop_ref, client = _clients.pop(key)
+    with _registry_lock:
+        _holders.pop(loop_key, None)
+        # Снимок ПОД ЛОКОМ и материализованный: итерировать словарь, в который
+        # в этот момент пишет соседний поток, нельзя.
+        mine = [k for k in list(_clients) if k[0] == loop_key]
+        taken = [_clients.pop(k) for k in mine]
+    for _loop_ref, client in taken:
         await client.aclose()
 
 

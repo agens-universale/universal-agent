@@ -260,6 +260,19 @@ async def get_run_status(system: str, task_id: str):
             "last_activity_at": run.last_activity_at,
         }
 
+    if run.cancelled:
+        # Снятый прогон — не упавший. Так выглядит остановка uvicorn и явная
+        # отмена таски; без отдельного статуса клиент видел `completed` с
+        # пустым результатом и не мог отличить одно от другого.
+        return {
+            "status": "cancelled",
+            "system": sys_norm,
+            "task_id": task_norm,
+            "thread_id": run.thread_id,
+            "started_at": run.started_at,
+            "finished_at": run.finished_at,
+        }
+
     if run.error is not None:
         return {
             "status": "failed",

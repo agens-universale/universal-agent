@@ -539,6 +539,19 @@ class PersistentStdioRegistry:
         # (owner, server_key) -> сессия
         self._sessions: Dict[tuple, PersistentStdioSession] = {}
         self._lock = threading.Lock()
+        self._exit_hook_armed = False
+
+    def _arm_exit_hook(self) -> None:
+        """Один раз повесить закрытие безвладельческих сессий на выход процесса."""
+        if self._exit_hook_armed:
+            return
+        with self._lock:
+            if self._exit_hook_armed:
+                return
+            self._exit_hook_armed = True
+        import atexit
+
+        atexit.register(self.close_everything)
 
     @classmethod
     def instance(cls) -> "PersistentStdioRegistry":
@@ -552,7 +565,17 @@ class PersistentStdioRegistry:
         server_key: str,
         server_cfg: Dict[str, Any],
     ) -> PersistentStdioSession:
-        key = (current_owner(), server_key)
+        owner = current_owner()
+        key = (owner, server_key)
+        if owner is None:
+            # Сессия без владельца: её не закроет ни один `arun`, потому что
+            # ни один прогон её не заводил (прямой `apply_tool`, `gc-mcp`).
+            # Докстрока `mcp_session_owner` обещала явный `close_everything()`,
+            # но такого вызова не было НИ В ОДНОМ пакете — сессия жила до конца
+            # процесса, а с ней и Chromium. Ставим хук на выход; при SIGKILL он
+            # не отработает, но это разница между «обычно закрываем» и
+            # «не закрываем никогда».
+            self._arm_exit_hook()
         with self._lock:
             session = self._sessions.get(key)
             if session is None:

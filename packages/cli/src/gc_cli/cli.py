@@ -363,8 +363,16 @@ async def _run_init_agents_md() -> int:
     # против 0.01 с и 365 тиков у асинхронного двойника.
     ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
 
+    from gc_core.utils.async_http import aclose_clients
+
     prompt = build_init_prompt(cwd=os.getcwd(), can_ask=confirm_available(ctx))
-    await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам (write_to_file)
+    try:
+        await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам
+    finally:
+        # Тот же `finally`, что и у `amain`: свой `asyncio.run` — свой пул
+        # клиентов, и закрыть его больше некому. Без этого `--init` уходил с
+        # открытым сокетом и «Event loop is closed» на закрытии loop.
+        await aclose_clients()
     print("[gc] --init: генерация AGENTS.md завершена", file=sys.stderr)
     return 0
 

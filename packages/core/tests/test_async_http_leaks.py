@@ -109,3 +109,69 @@ async def test_holder_count_ignores_a_reused_loop_id():
     async_http._holders[id(loop)] = (lambda: dead, 7)
 
     assert async_http._holder_count(loop) == 0
+
+
+# --- M7: реестр клиентов под локом -----------------------------------------
+
+
+def test_registry_survives_concurrent_loops():
+    """Реестр читают и пишут потоки со СВОИМИ loop — по дизайну.
+
+    Их в процессе несколько: рабочий поток TUI, guard-потоки модерации,
+    воркеры сервера. Итерация `[k for k in _clients ...]` при вставке из
+    другого потока даёт `dictionary changed size during iteration`, и вылетает
+    она из `finally` в `_closing_clients` — то есть подменяет результат судьи
+    модерации на отказ. GIL тут не спасает: он атомарен на байткоде, а цикл по
+    словарю — это много байткодов.
+    """
+    import threading
+
+    errors: list = []
+
+    def _worker() -> None:
+        async def _body():
+            async_http.get_async_client()
+            await asyncio.sleep(0)
+            await async_http.aclose_clients()
+
+        for _ in range(40):
+            try:
+                asyncio.run(_body())
+            except BaseException as exc:  # noqa: BLE001 — нам важен сам факт
+                errors.append(exc)
+                return
+
+    threads = [threading.Thread(target=_worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(60)
+
+    assert not errors, f"гонка на реестре: {errors[:3]}"
+
+
+def test_registry_hands_out_one_client_per_key():
+    """Гонка на создании не должна плодить клиентов: затёртый утечёт сокетом."""
+    import threading
+
+    seen: list = []
+    ready = threading.Barrier(6)
+
+    def _worker() -> None:
+        async def _body():
+            ready.wait(10)
+            seen.append(id(async_http.get_async_client()))
+
+        asyncio.run(_body())
+
+    # Каждый поток со своим loop — ключи разные, но код создания общий:
+    # проверяем, что параллельное создание не оставляет записей-сирот.
+    threads = [threading.Thread(target=_worker) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+
+    assert len(seen) == 6, seen
+    # Все клиенты остались в реестре, ни один не затёрт молча.
+    assert len(async_http._clients) == 6, len(async_http._clients)

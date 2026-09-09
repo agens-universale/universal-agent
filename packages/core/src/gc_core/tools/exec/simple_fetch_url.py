@@ -16,6 +16,7 @@ from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies
+import asyncio
 
 
 def _response_url(exc: Exception) -> "str | None":
@@ -654,7 +655,11 @@ class SimpleFetchUrl(AbstractSimpleTool):
 
         text = response.text or ""
         page_meta = self._extract_meta(text)
-        extracted = self._extract_simple_html_text(text)
+        # Разбор — десяток `re.sub` с бэктрекингом по всему документу, то есть
+        # чистый CPU на размере страницы. У `fetch_url` он по этой же причине
+        # давно уходит в поток (замер там: 237 мс инлайн против 22 мс), а
+        # здесь оставался на loop.
+        extracted = await asyncio.to_thread(self._extract_simple_html_text, text)
         if extracted:
             self._put_to_cache(cache_key, extracted, page_meta)
             sliced = self._slice_content(extracted, offset, limit)

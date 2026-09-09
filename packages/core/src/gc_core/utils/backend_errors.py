@@ -51,11 +51,23 @@ class EmbeddedChoiceError(Exception):
 #: и вызывающие полагаются на isinstance с кортежем.
 HTTP_STATUS_ERRORS = (httpx.HTTPStatusError,)
 
-#: Сетевые сбои: таймаут, обрыв, DNS. TransportError покрывает всё это,
-#: TimeoutException оставлен явно — он читается в списке.
+#: Сетевые сбои, которые имеет смысл ПОВТОРЯТЬ: таймаут, обрыв, DNS, прокси.
+#:
+#: Раньше здесь стоял голый ``httpx.TransportError``, а он покрывает и то,
+#: что повторять бессмысленно: ``UnsupportedProtocol`` (URL без схемы) и
+#: ``LocalProtocolError`` (например не-latin1 в заголовке). То есть на
+#: ОШИБКЕ КОНФИГУРАЦИИ предохранитель ставил алиас модели в «недоступна» на
+#: всю сессию и перед этим честно ретраил 10/20/40/80 секунд. Докстрока
+#: предохранителя при этом требовала обратного — «конфигурационные ошибки
+#: наверх сразу».
+#:
+#: ``TimeoutException`` оставлен явно: он подкласс ``TransportError``, но
+#: читается в списке.
 HTTP_TRANSPORT_ERRORS = (
     httpx.TimeoutException,
-    httpx.TransportError,
+    httpx.NetworkError,
+    httpx.ProxyError,
+    httpx.RemoteProtocolError,
 )
 
 
