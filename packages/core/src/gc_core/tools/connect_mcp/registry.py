@@ -9,7 +9,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
-from gc_core.tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry, is_persistent_stdio
 from gc_core.tools.connect_mcp.stream_client import (
     alist_tools_stream_http,

@@ -15,9 +15,6 @@ from gc_core.tools.connect_mcp.client import (
     _acall_mcp_tool,
     _aget_or_init_session_id,
     _atools_list_request,
-    _call_mcp_tool,
-    _get_or_init_session_id,
-    _tools_list_request,
 )
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
@@ -120,131 +117,46 @@ class AgentRuntimeClient(McpClientPort):
         return str(token) if token else None
 
     def list_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
-        transport = self._require_transport()
-        effective = _effective_transport(self.server_cfg)
-        url = self._url()
-        token = self._token()
+        """Только долгоживущий stdio. Остальные транспорты — асинхронной формой.
 
-        if effective in ("stream_sse", "stream_http", "stream_stdio"):
-            # Сюда попасть больше нельзя, и это проверено маршрутом: транспорты
-            # SDK идут нативной веткой `_adiscover_one_sdk`, а синхронный путь
-            # остаётся только для легаси и persistent stdio. Отказ громкий
-            # намеренно: молчаливое возвращение сюда означало бы, что дискавери
-            # снова уводит SDK-транспорт в поток, — а именно это и чинил шаг A1.
+        Метод остался ради одного случая: обмен с долгоживущей сессией
+        блокирующий (``Popen``, сессия переживает разные ``asyncio.run``), и
+        асинхронный близнец сам уводит этот вызов сюда через брошенный поток.
+
+        Легаси `http`/`sse` отсюда УШЛИ: до них доходила только синхронная
+        дискавери, а форм дискавери больше не две. Транспорты SDK сюда не
+        попадали и раньше.
+        """
+        self._require_transport()
+        if not is_persistent_stdio(self.server_cfg):
             raise RuntimeError(
-                f"MCP server '{self.server_name}': транспорт {effective!r} "
-                "обслуживается только асинхронной формой (alist_tools/acall_tool)"
+                f"MCP server '{self.server_name}': синхронная форма осталась "
+                "только для persistent stdio; остальное — alist_tools/acall_tool"
             )
-        if is_persistent_stdio(self.server_cfg):
-            session = PersistentStdioRegistry.instance().get_or_create(
-                self.server_name, self.server_cfg
-            )
-            resp = session.call("tools/list", {}, timeout)
-            result = resp.get("result") if isinstance(resp, dict) else None
-            tools = result.get("tools", []) if isinstance(result, dict) else []
-            return tools if isinstance(tools, list) else []
-
-        session_id = _get_or_init_session_id(
-            self.server_name, url, self.server_cfg, token=token
+        session = PersistentStdioRegistry.instance().get_or_create(
+            self.server_name, self.server_cfg
         )
-        if not session_id:
-            raise RuntimeError(
-                f"Failed to initialize MCP session for server '{self.server_name}'"
-            )
-        try:
-            return _tools_list_request(
-                url, session_id=session_id, server_cfg=self.server_cfg, token=token
-            )
-        except httpx.HTTPStatusError:
-            forget_session(self.server_name)
-            session_id = _get_or_init_session_id(
-                self.server_name, url, self.server_cfg, token=token
-            )
-            if not session_id:
-                raise RuntimeError(
-                    f"Failed to re-initialize MCP session for server "
-                    f"'{self.server_name}'"
-                )
-            return _tools_list_request(
-                url, session_id=session_id, server_cfg=self.server_cfg, token=token
-            )
+        resp = session.call("tools/list", {}, timeout)
+        result = resp.get("result") if isinstance(resp, dict) else None
+        tools = result.get("tools", []) if isinstance(result, dict) else []
+        return tools if isinstance(tools, list) else []
 
     def call_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
     ) -> Any:
-        transport = self._require_transport()
-        effective = _effective_transport(self.server_cfg)
-        url = self._url()
-        token = self._token()
-
-        if effective in ("stream_sse", "stream_http", "stream_stdio"):
-            # Сюда попасть больше нельзя, и это проверено маршрутом: транспорты
-            # SDK идут нативной веткой `_adiscover_one_sdk`, а синхронный путь
-            # остаётся только для легаси и persistent stdio. Отказ громкий
-            # намеренно: молчаливое возвращение сюда означало бы, что дискавери
-            # снова уводит SDK-транспорт в поток, — а именно это и чинил шаг A1.
+        """Только долгоживущий stdio — см. :meth:`list_tools`."""
+        self._require_transport()
+        if not is_persistent_stdio(self.server_cfg):
             raise RuntimeError(
-                f"MCP server '{self.server_name}': транспорт {effective!r} "
-                "обслуживается только асинхронной формой (alist_tools/acall_tool)"
+                f"MCP server '{self.server_name}': синхронная форма осталась "
+                "только для persistent stdio; остальное — alist_tools/acall_tool"
             )
-        if is_persistent_stdio(self.server_cfg):
-            session = PersistentStdioRegistry.instance().get_or_create(
-                self.server_name, self.server_cfg
-            )
-            return session.call(
-                "tools/call", {"name": tool_name, "arguments": arguments}, timeout
-            )
-
-        session_id = _get_or_init_session_id(
-            self.server_name, url, self.server_cfg, token=token, timeout=timeout
+        session = PersistentStdioRegistry.instance().get_or_create(
+            self.server_name, self.server_cfg
         )
-        if not session_id:
-            raise RuntimeError(
-                f"Failed to initialize MCP session for server '{self.server_name}'"
-            )
-
-        def do_call(sid: str) -> Any:
-            return _call_mcp_tool(
-                url=url,
-                session_id=sid,
-                tool_name=tool_name,
-                arguments=arguments,
-                server_cfg=self.server_cfg,
-                token=token,
-                timeout=timeout,
-                server_key=self.server_name,
-            )
-
-        try:
-            data = do_call(session_id)
-        except httpx.HTTPStatusError:
-            forget_session(self.server_name)
-            session_id = _get_or_init_session_id(
-                self.server_name, url, self.server_cfg, token=token, timeout=timeout
-            )
-            if not session_id:
-                raise RuntimeError(
-                    f"Failed to re-initialize MCP session for server "
-                    f"'{self.server_name}'"
-                )
-            data = do_call(session_id)
-
-        if data == {} and transport == "sse":
-            forget_session(self.server_name)
-            session_id = _get_or_init_session_id(
-                self.server_name, url, self.server_cfg, token=token, timeout=timeout
-            )
-            if session_id:
-                data = do_call(session_id)
-        return data
-
-    # --- асинхронные двойники -------------------------------------------------
-    #
-    # SDK-транспорты (stream_*) асинхронны насквозь — идём в них нативно.
-    # Персистентный stdio и легаси-HTTP асинхронной формы не имеют: их уводим в
-    # `run_abandonable` (поток-демон, который переживёт отмену по таймауту —
-    # прервать блокирующий сокет всё равно нечем). Тот же приём, которым
-    # дискавери уже пользовалась до появления порта.
+        return session.call(
+            "tools/call", {"name": tool_name, "arguments": arguments}, timeout
+        )
 
     async def alist_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
         transport = self._require_transport()

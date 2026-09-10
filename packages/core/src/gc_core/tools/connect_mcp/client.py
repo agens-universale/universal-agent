@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, aget_transport, get_transport
+from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, aget_transport
 
 
 #: Параметры ``initialize`` — ОДИН источник на все локусы.
@@ -56,7 +56,6 @@ def _normalize_url(url: str) -> str:
     if not url.startswith("http://") and not url.startswith("https://"):
         return f"http://{url}"
     return url
-
 
 
 #: Спека streamable HTTP требует готовности принять ОБА типа: сервер вправе
@@ -140,18 +139,6 @@ def _tools_call_payload(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, 
     }
 
 
-def _send_initialized_notification(
-    url: str,
-    session_id: str,
-    server_cfg: Dict[str, Any],
-    token: Optional[str] = None,
-    timeout: float = 10.0,
-) -> None:
-    """Отправить notifications/initialized после успешного initialize."""
-    headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    get_transport(server_cfg)(url, headers, _NOTIFICATION_PAYLOAD, timeout)
-
-
 async def _asend_initialized_notification(
     url: str,
     session_id: str,
@@ -162,32 +149,6 @@ async def _asend_initialized_notification(
     """Асинхронный двойник: отличается ровно транспортом."""
     headers = _mcp_headers(server_cfg, token, session_id=session_id)
     await aget_transport(server_cfg)(url, headers, _NOTIFICATION_PAYLOAD, timeout)
-
-
-def _init_mcp_session(
-    url: str,
-    server_cfg: Dict[str, Any],
-    token: Optional[str] = None,
-    timeout: float = 10.0,
-) -> Optional[str]:
-    """
-    Инициализировать MCP-сессию:
-    - вызвать метод initialize;
-    - прочитать mcp-session-id из заголовков ответа;
-    - отправить notifications/initialized;
-    - вернуть session_id.
-    """
-    headers = _mcp_headers(server_cfg, token, session_id=None)
-    resp_headers, _body = get_transport(server_cfg)(
-        url, headers, _initialize_payload(), timeout
-    )
-    session_id = _session_id_from(resp_headers)
-    if not session_id:
-        return None
-    _send_initialized_notification(
-        url, session_id, server_cfg, token=token, timeout=timeout
-    )
-    return session_id
 
 
 async def _ainit_mcp_session(
@@ -208,21 +169,6 @@ async def _ainit_mcp_session(
         url, session_id, server_cfg, token=token, timeout=timeout
     )
     return session_id
-
-
-def _tools_list_request(
-    url: str,
-    session_id: str,
-    server_cfg: Dict[str, Any],
-    token: Optional[str] = None,
-    timeout: float = 10.0,
-) -> List[Dict[str, Any]]:
-    """Вызвать MCP-метод tools/list и вернуть список tools."""
-    headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    _resp_headers, data = get_transport(server_cfg)(
-        url, headers, _tools_list_payload(), timeout
-    )
-    return _tools_from(data)
 
 
 async def _atools_list_request(
@@ -249,28 +195,6 @@ def _remember_session(resp_headers: Dict[str, str], server_key: Optional[str]) -
         _MCP_SESSIONS[(current_owner(), server_key)] = new_sid
 
 
-def _call_mcp_tool(
-    url: str,
-    session_id: str,
-    tool_name: str,
-    arguments: Dict[str, Any],
-    server_cfg: Dict[str, Any],
-    token: Optional[str] = None,
-    timeout: float = 10.0,
-    server_key: Optional[str] = None,
-) -> Any:
-    """
-    Вызвать MCP-метод tools/call для конкретного инструмента.
-    Если server_key передан и в ответе есть mcp-session-id — обновляем кэш сессии.
-    """
-    headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    resp_headers, body = get_transport(server_cfg)(
-        url, headers, _tools_call_payload(tool_name, arguments), timeout
-    )
-    _remember_session(resp_headers, server_key)
-    return body
-
-
 async def _acall_mcp_tool(
     url: str,
     session_id: str,
@@ -288,30 +212,6 @@ async def _acall_mcp_tool(
     )
     _remember_session(resp_headers, server_key)
     return body
-
-
-def _get_or_init_session_id(
-    server_key: str,
-    url: str,
-    server_cfg: Dict[str, Any],
-    token: Optional[str] = None,
-    timeout: float = 10.0,
-) -> Optional[str]:
-    """
-    Вернуть session_id для MCP-сервера.
-    Если в кэше нет — инициализировать сессию и сохранить.
-    """
-    session_id = _MCP_SESSIONS.get((current_owner(), server_key))
-    if session_id:
-        return session_id
-
-    session_id = _init_mcp_session(
-        url, server_cfg, token=token, timeout=timeout
-    )
-    if session_id:
-        _MCP_SESSIONS[(current_owner(), server_key)] = session_id
-
-    return session_id
 
 
 def forget_session(server_key: str) -> None:
@@ -353,12 +253,7 @@ __all__ = [
     "_MCP_SESSIONS",
     "forget_session",
     "_normalize_url",
-    "_send_initialized_notification",
-    "_init_mcp_session",
-    "_tools_list_request",
     "_atools_list_request",
-    "_call_mcp_tool",
     "_acall_mcp_tool",
-    "_get_or_init_session_id",
     "_aget_or_init_session_id",
 ]

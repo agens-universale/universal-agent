@@ -84,10 +84,15 @@ async def test_tools_list_longer_than_64k_is_read(big_server_cfg):
     assert len(tools) == 600, f"прочитано {len(tools)} инструментов: {str(body)[:200]}"
 
 
-def test_sync_exchange_reads_the_same_long_line(big_server_cfg):
-    """Синхронный вход идёт через тот же обмен — и тоже обязан прочитать."""
-    request = transport._request_stdio(big_server_cfg)
-    _, body = request("", {}, dict(_LIST_CALL), 30.0)
+def test_no_sync_exchange_remains():
+    """Синхронного обмена по stdio больше нет.
 
-    tools = (body.get("result") or {}).get("tools") or []
-    assert len(tools) == 600, f"прочитано {len(tools)}"
+    Здесь стоял его двойник: «синхронный вход идёт через тот же обмен и тоже
+    обязан прочитать длинную строку». Синхронный слой транспорта снят вместе с
+    маршрутом, который его звал, — свойство проверяется на корутинной форме
+    тестом выше. У долгоживущего stdio свой путь, он к этому обмену не
+    относится.
+    """
+    assert not hasattr(transport, "_request_stdio")
+    assert not hasattr(transport, "_stdio_exchange")
+    assert hasattr(transport, "_arequest_stdio")

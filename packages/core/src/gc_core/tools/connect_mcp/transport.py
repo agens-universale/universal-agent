@@ -89,24 +89,6 @@ def _parse_http_response(resp: "httpx.Response") -> Tuple[Dict[str, str], Dict[s
         return out_headers, {}
 
 
-def _request_http(
-    url: str,
-    headers: Dict[str, str],
-    json_payload: Dict[str, Any],
-    timeout: float,
-    verify: Union[bool, str] = True,
-    cert: Optional[tuple] = None,
-) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """Обычный HTTP: один POST, тело — JSON. Ответ — один JSON-объект."""
-    with _sync_client(verify, cert) as client:
-        resp = client.post(
-            _normalize_url(url), json=json_payload,
-            headers=_http_headers_for(headers), timeout=timeout,
-        )
-    resp.raise_for_status()
-    return _parse_http_response(resp)
-
-
 async def _arequest_http(
     url: str,
     headers: Dict[str, str],
@@ -220,18 +202,6 @@ def _sse_headers_for(headers: Dict[str, str]) -> Dict[str, str]:
     return headers
 
 
-def _read_sse_first_json(resp: "httpx.Response", timeout: float) -> Dict[str, Any]:
-    """Читать стрим SSE построчно; вернуть первый JSON-RPC ответ."""
-    reader = _SseFirstJson(_sse_debug())
-    # httpx.iter_lines отдаёт уже декодированные str — параметра decode_unicode
-    # у него нет (это имя из requests).
-    for line in resp.iter_lines():
-        parsed = reader.feed(line)
-        if parsed is not None:
-            return parsed
-    return reader.flush() or {}
-
-
 async def _aread_sse_first_json(resp: "httpx.Response", timeout: float) -> Dict[str, Any]:
     """Асинхронный двойник :func:`_read_sse_first_json`; разбор общий."""
     reader = _SseFirstJson(_sse_debug())
@@ -240,29 +210,6 @@ async def _aread_sse_first_json(resp: "httpx.Response", timeout: float) -> Dict[
         if parsed is not None:
             return parsed
     return reader.flush() or {}
-
-
-def _request_sse(
-    url: str,
-    headers: Dict[str, str],
-    json_payload: Dict[str, Any],
-    timeout: float,
-    verify: Union[bool, str] = True,
-    cert: Optional[tuple] = None,
-) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """SSE: POST со стримом, читаем первое событие ``data: {…}`` и закрываемся."""
-    # Стрим у httpx — контекстный менеджер: тело читается ВНУТРИ блока, за его
-    # пределами соединение уже закрыто. Поэтому и разбор идёт внутри.
-    with _sync_client(verify, cert) as client:
-        with client.stream(
-            "POST", _normalize_url(url), json=json_payload,
-            headers=_sse_headers_for(headers), timeout=timeout,
-        ) as resp:
-            resp.raise_for_status()
-            _fix_sse_encoding(resp)
-            out_headers = {k.lower(): v for k, v in resp.headers.items()}
-            body = _read_sse_first_json(resp, timeout)
-    return out_headers, body
 
 
 async def _arequest_sse(
@@ -286,7 +233,6 @@ async def _arequest_sse(
         out_headers = {k.lower(): v for k, v in resp.headers.items()}
         body = await _aread_sse_first_json(resp, timeout)
     return out_headers, body
-
 
 
 # --------- stdio transport: процесс на один обмен, без долгоживущих процессов ---------
@@ -616,93 +562,6 @@ async def _akill_process(proc) -> None:
             pass
 
 
-def _stdio_exchange(
-    server_cfg: Dict[str, Any],
-    timeout: float,
-    steps: List[Tuple[Dict[str, Any], bool]],
-) -> List[Dict[str, Any]]:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    return run_coro_blocking(_astdio_exchange(server_cfg, timeout, steps))
-
-
-def _request_stdio(
-    server_cfg: Dict[str, Any],
-) -> Callable[..., Tuple[Dict[str, str], Dict[str, Any]]]:
-    """
-    Вернуть функцию запроса для stdio с той же сигнатурой, что и http/sse:
-    (url, headers, json_payload, timeout) -> (response_headers, body_dict).
-    Один вызов = один процесс: handshake при необходимости, один ответ, процесс завершается.
-    """
-    cfg = server_cfg
-
-    def request_fn(
-        url: str,
-        headers: Dict[str, str],
-        json_payload: Dict[str, Any],
-        timeout: float,
-    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        method = (json_payload or {}).get("method")
-        if method == "initialize":
-            steps: List[Tuple[Dict[str, Any], bool]] = [(json_payload, True)]
-            responses = _stdio_exchange(cfg, timeout, steps)
-            body = responses[0] if responses else {}
-            return ({"mcp-session-id": "stdio"}, body)
-        if method == "notifications/initialized":
-            steps = [(_INIT_PAYLOAD, True), (json_payload, False)]
-            _stdio_exchange(cfg, timeout, steps)
-            return ({}, {})
-        # tools/list, tools/call и др.: полный handshake в одном процессе
-        steps = [(_INIT_PAYLOAD, True), (_INITIALIZED_PAYLOAD, False), (json_payload, True)]
-        responses = _stdio_exchange(cfg, timeout, steps)
-        body = responses[2] if len(responses) > 2 else {}
-        return ({}, body)
-
-    return request_fn
-
-
-def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, str], Dict[str, Any]]]:
-    """
-    Вернуть функцию запроса по конфигу сервера.
-
-    server_cfg должен содержать ключ "transport" со значением "http", "sse" или "stdio".
-
-    Возвращаемая функция имеет единую сигнатуру для всех транспортов:
-        request(url, headers, json_payload, timeout) -> (response_headers, body_dict)
-    """
-    transport = (server_cfg or {}).get("transport")
-
-    verify = get_verify_ssl(server_cfg)
-    cert = get_client_cert(server_cfg)
-
-    if transport == "http":
-        def request_http(
-            url: str,
-            headers: Dict[str, str],
-            json_payload: Dict[str, Any],
-            timeout: float,
-        ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-            return _request_http(url, headers, json_payload, timeout, verify=verify, cert=cert)
-
-        return request_http
-
-    if transport == "sse":
-        def request_sse(
-            url: str,
-            headers: Dict[str, str],
-            json_payload: Dict[str, Any],
-            timeout: float,
-        ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-            return _request_sse(url, headers, json_payload, timeout, verify=verify, cert=cert)
-
-        return request_sse
-    if transport == "stdio":
-        return _request_stdio(server_cfg)
-    raise ValueError(
-        f"Invalid or missing 'transport' in MCP server config. "
-        f"Expected 'http', 'sse' or 'stdio', got: {transport!r}"
-    )
-
-
 def _arequest_stdio(
     server_cfg: Dict[str, Any],
 ) -> Callable[..., Any]:
@@ -781,9 +640,5 @@ def aget_transport(server_cfg: Dict[str, Any]) -> Callable[..., Any]:
 
 
 __all__ = [
-    "get_transport",
     "aget_transport",
-    "_request_http",
-    "_request_sse",
-    "_request_stdio",
 ]

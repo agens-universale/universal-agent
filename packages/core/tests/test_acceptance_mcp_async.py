@@ -38,7 +38,7 @@ from pathlib import Path
 import pytest
 
 from gc_core.mcp_session_owner import new_owner_token, use_owner
-from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, get_transport
+from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, aget_transport
 
 
 # --- M-1/M-2: не обещаем того, чего не делаем ------------------------------
@@ -72,7 +72,7 @@ def _stdio_cfg(**env_extra) -> dict:
     }
 
 
-def test_handshake_is_fast_against_a_server_that_waits():
+async def test_handshake_is_fast_against_a_server_that_waits():
     """НАСТОЯЩИЙ РЕГРЕСС-ГЕЙТ на 61-секундный инцидент.
 
     Наш клиент идёт к серверу, который ждёт от клиента ответа на встречный
@@ -83,10 +83,10 @@ def test_handshake_is_fast_against_a_server_that_waits():
     ПОСЛЕДСТВИЕ: время. Тест покраснеет и в том случае, если способность
     появится не в ``_INIT_PAYLOAD``, а где-то ещё по пути.
     """
-    request = get_transport(_stdio_cfg())
+    request = aget_transport(_stdio_cfg())
 
     started = time.monotonic()
-    _headers, body = request("", {}, dict(_INIT_PAYLOAD), 30.0)
+    _headers, body = await request("", {}, dict(_INIT_PAYLOAD), 30.0)
     spent = time.monotonic() - started
 
     assert body.get("result"), f"сервер не ответил на initialize: {body!r}"
@@ -97,7 +97,7 @@ def test_handshake_is_fast_against_a_server_that_waits():
     )
 
 
-def test_the_gate_would_catch_a_regression(monkeypatch):
+async def test_the_gate_would_catch_a_regression(monkeypatch):
     """Контроль: гейт выше действительно ловит, а не зелёный по случайности.
 
     Объявляем способность, которой не обслуживаем, — и тот же сервер начинает
@@ -111,9 +111,9 @@ def test_the_gate_would_catch_a_regression(monkeypatch):
     monkeypatch.setitem(transport_mod._INIT_PAYLOAD["params"],
                         "capabilities", payload["params"]["capabilities"])
 
-    request = get_transport(_stdio_cfg())
+    request = aget_transport(_stdio_cfg())
     started = time.monotonic()
-    _headers, body = request("", {}, payload, 30.0)
+    _headers, body = await request("", {}, payload, 30.0)
     spent = time.monotonic() - started
 
     assert body.get("result"), "сервер всё же обязан ответить, но позже"
@@ -128,7 +128,7 @@ def test_protocol_version_is_declared():
     assert _INIT_PAYLOAD["params"].get("protocolVersion")
 
 
-def test_unsolicited_notification_is_not_mistaken_for_the_answer():
+async def test_unsolicited_notification_is_not_mistaken_for_the_answer():
     """Уведомление сервера не принимается за ответ.
 
     Найдено этой же приёмкой. Клиент читал ОДНУ строку и считал её ответом —
@@ -139,8 +139,8 @@ def test_unsolicited_notification_is_not_mistaken_for_the_answer():
 
     Сервер здесь шлёт уведомление ПЕРЕД ответом на ``initialize``.
     """
-    request = get_transport(_stdio_cfg(CHATTY="1"))
-    _headers, body = request("", {}, dict(_INIT_PAYLOAD), 30.0)
+    request = aget_transport(_stdio_cfg(CHATTY="1"))
+    _headers, body = await request("", {}, dict(_INIT_PAYLOAD), 30.0)
 
     assert body.get("method") != "notifications/message", (
         "уведомление сервера принято за ответ на initialize"
@@ -265,13 +265,13 @@ def test_every_declared_transport_resolves(transport):
     cfg = {"transport": transport}
     if transport == "stdio":
         cfg.update({"command": "echo", "args": ["{}"]})
-    assert callable(get_transport(cfg))
+    assert callable(aget_transport(cfg))
 
 
 def test_unknown_transport_is_rejected_by_name():
     """Неизвестный транспорт отвергается с перечислением годных."""
     with pytest.raises(ValueError) as err:
-        get_transport({"transport": "выдуманный"})
+        aget_transport({"transport": "выдуманный"})
     text = str(err.value)
     assert "выдуманный" in text, "отказ не назвал, что именно передали"
     for name in ("http", "sse", "stdio"):
@@ -281,7 +281,7 @@ def test_unknown_transport_is_rejected_by_name():
 def test_missing_transport_is_rejected():
     """Транспорт не указан вовсе — тоже отказ, а не молчаливый дефолт."""
     with pytest.raises(ValueError):
-        get_transport({})
+        aget_transport({})
 
 
 async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(monkeypatch):

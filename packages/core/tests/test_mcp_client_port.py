@@ -71,12 +71,14 @@ async def test_call_tool_routes_stream_http(monkeypatch):
     assert seen == {"tool": "echo"}
 
 
-def test_sync_port_refuses_sdk_transports_loudly():
-    """Синхронный путь для SDK-транспортов обязан отказывать ГРОМКО.
+def test_sync_port_serves_only_persistent_stdio():
+    """Синхронная форма осталась РОВНО для долгоживущего stdio.
 
-    Попасть туда больше нельзя: дискавери таких серверов идёт нативно. Но
-    молчаливый возврат означал бы, что маршрут снова уводит SDK-транспорт в
-    поток, — а это и есть дефект, который чинил шаг A1.
+    Обмен с такой сессией блокирующий (`Popen`, сессия переживает разные
+    `asyncio.run`), и асинхронный близнец сам уводит вызов сюда через
+    брошенный поток. Всё остальное обязано отказывать ГРОМКО: молчаливый
+    возврат означал бы, что маршрут снова уводит транспорт в поток, — а это и
+    есть дефект, который чинили шаги A1 и A3.
     """
     import pytest as _pytest
 
@@ -85,10 +87,16 @@ def test_sync_port_refuses_sdk_transports_loudly():
     client = cp.AgentRuntimeClient(
         "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
     )
-    with _pytest.raises(RuntimeError, match="асинхронной формой"):
+    with _pytest.raises(RuntimeError, match="только для persistent stdio"):
         client.list_tools(timeout=1.0)
-    with _pytest.raises(RuntimeError, match="асинхронной формой"):
+    with _pytest.raises(RuntimeError, match="только для persistent stdio"):
         client.call_tool("echo", {}, timeout=1.0)
+
+    # Легаси-транспорт теперь тоже сюда не ходит: до него доходила только
+    # синхронная дискавери, а форма дискавери одна и корутинная.
+    legacy = cp.AgentRuntimeClient("srv", {"transport": "http", "url": "http://x/mcp"})
+    with _pytest.raises(RuntimeError, match="только для persistent stdio"):
+        legacy.list_tools(timeout=1.0)
 
 
 def test_unsupported_transport_raises():
