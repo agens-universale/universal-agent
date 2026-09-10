@@ -18,7 +18,7 @@ from gc_core.tools.connect_mcp.stream_client import (
 )
 from gc_core.tools.connect_mcp.abandonable import run_abandonable
 from gc_core.utils.aio_compat import run_coro_blocking
-from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
+from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client, runs_in_agent_runtime
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -225,13 +225,23 @@ async def _adiscover_one(
     # Короткое замыкание в SDK — только когда говорим С ХОСТА агента.
     #
     # `_adiscover_one_sdk` ходит из нашего процесса и про `os_backend` не
-    # знает. Для сервера с `execute_on: os_backend` это значит «нет
-    # соединения» на дискавери, хотя ВЫЗОВЫ тулов потом пойдут через
-    # `OsBackendStatelessClient` и прекрасно достучатся: сервер виден только
-    # изнутри песочницы. Симптом — сервер молча без тулов.
+    # знает. Для сервера, который исполняется ВНУТРИ ПЕСОЧНИЦЫ, это значит
+    # «нет соединения» на дискавери, хотя вызовы тулов потом пойдут через
+    # `OsBackendStatelessClient` и достучатся: сервер виден только оттуда.
+    # Симптом — сервер молча без тулов.
     #
-    # С бэкендом отдаём общей ветке ниже: она резолвит клиента правильно.
-    if isinstance(server_cfg, dict) and transport is not None and os_backend is None:
+    # Спрашиваем ИМЕННО ЭТО — через `runs_in_agent_runtime`, тем же правилом,
+    # по которому `resolve_mcp_client` выбирает реализацию. Раньше здесь
+    # стояло `os_backend is None`, и это грубее правила: объект бэкенда есть
+    # ВСЕГДА (его ставит `acreate_run_context`), поэтому нативная ветка не
+    # исполнялась НИКОГДА. Весь обход MCP-серверов на старте уходил в
+    # брошенный поток с синхронным httpx — включая `execute_on: agent`,
+    # то есть умолчание и подавляющее большинство серверов.
+    if (
+        isinstance(server_cfg, dict)
+        and transport is not None
+        and runs_in_agent_runtime(server_cfg, os_backend=os_backend)
+    ):
         effective = resolve_effective_transport(server_cfg, server_name=server_name)
         if effective in ("stream_sse", "stream_http", "stream_stdio"):
             return await _adiscover_one_sdk(
