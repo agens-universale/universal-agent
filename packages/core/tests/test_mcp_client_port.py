@@ -97,7 +97,7 @@ def test_unsupported_transport_raises():
         client.list_tools(timeout=1.0)
 
 
-def test_os_backend_reaches_the_resolver_from_build_tools_data(monkeypatch):
+async def test_os_backend_reaches_the_resolver_from_build_tools_data(monkeypatch):
     """The backend RunContext already built must reach the per-server resolver."""
     seen = {}
 
@@ -113,11 +113,11 @@ def test_os_backend_reaches_the_resolver_from_build_tools_data(monkeypatch):
     from gc_core.tools.connect_mcp import registry as reg
 
     monkeypatch.setitem(
-        reg._discover_one.__globals__, "resolve_mcp_client", fake_resolve
+        reg._adiscover_one.__globals__, "resolve_mcp_client", fake_resolve
     )
 
     cfg = {"transport": "stream_http", "url": "http://x:8000/mcp"}
-    tools, status = reg._discover_one("srv", cfg, timeout=1.0, os_backend=sandbox)
+    tools, status = await reg._adiscover_one("srv", cfg, timeout=1.0, os_backend=sandbox)
     assert tools == []
     assert status["status"] == "failed"
     assert seen["backend"] is sandbox

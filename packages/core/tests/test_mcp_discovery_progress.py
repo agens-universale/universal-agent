@@ -4,9 +4,9 @@ from gc_testkit import as_coro
 
 
 def test_on_progress_called_per_server(monkeypatch):
-    def fake_discover_one(name, cfg, *, timeout, os_backend=None):
+    async def fake_discover_one(name, cfg, *, timeout, os_backend=None):
         return ([], {"status": "connected", "reason": None, "tool_count": 0, "elapsed_ms": 1})
-    monkeypatch.setattr(reg, "_discover_one", fake_discover_one)
+    monkeypatch.setattr(reg, "_adiscover_one", fake_discover_one)
     seen = {}
     servers = {"a": {"transport": "stdio", "command": "a"},
                "b": {"transport": "stdio", "command": "b"}}
@@ -16,10 +16,14 @@ def test_on_progress_called_per_server(monkeypatch):
 
 
 def test_on_progress_called_for_timeout(monkeypatch):
-    def fake_discover_one(name, cfg, *, timeout, os_backend=None):
-        time.sleep(timeout + 2)
+    async def fake_discover_one(name, cfg, *, timeout, os_backend=None):
+        # Ждём АСИНХРОННО: моделируем медленный сервер, а не клиента,
+        # который морозит loop (см. test_mcp_discovery_status).
+        import asyncio
+
+        await asyncio.sleep(timeout + 2)
         return ([], {"status": "connected", "reason": None, "tool_count": 0, "elapsed_ms": 0})
-    monkeypatch.setattr(reg, "_discover_one", fake_discover_one)
+    monkeypatch.setattr(reg, "_adiscover_one", fake_discover_one)
     seen = {}
     reg._build_tools_registry({"hang": {"transport": "stdio", "command": "x"}},
                               discovery_timeout_sec=1,
@@ -29,7 +33,7 @@ def test_on_progress_called_for_timeout(monkeypatch):
 
 
 def test_on_progress_none_is_noop(monkeypatch):
-    monkeypatch.setattr(reg, "_discover_one",
+    monkeypatch.setattr(reg, "_adiscover_one",
                         lambda n, c, *, timeout, os_backend=None: ([], {"status": "connected", "reason": None,
                                                        "tool_count": 0, "elapsed_ms": 1}))
     reg._build_tools_registry({"a": {"transport": "stdio", "command": "a"}}, discovery_timeout_sec=2)

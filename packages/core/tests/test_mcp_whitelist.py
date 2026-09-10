@@ -110,14 +110,16 @@ async def test_discover_one_applies_whitelist(monkeypatch):
     Берём корутинный путь: SDK-транспорты после шага A1 ходят нативно, а
     синхронный вход для них теперь громко отказывает.
     """
-    # Подменяем ЗАБОР тулов у SDK-ветки — фильтр стоит сразу после него.
-    # conftest подменяет sys.modules["tools"], поэтому строковая цель может
-    # разрешиться в другой объект модуля: патчим по globals самой функции.
-    async def _fake(*_a, **_kw):
-        return list(_RAW)
+    # Дискавери ходит через КЛИЕНТА, поэтому подменяем его: фильтр стоит
+    # сразу после `alist_tools`. Форм дискавери больше не три, а одна, и
+    # отдельного шва «забор тулов у SDK-ветки» в ней нет.
+    class _Client:
+        async def alist_tools(self, *, timeout):
+            return list(_RAW)
 
     monkeypatch.setitem(
-        reg._adiscover_one_sdk.__globals__, "_afetch_tools_sdk", _fake
+        reg._adiscover_one.__globals__, "resolve_mcp_client",
+        lambda *a, **kw: _Client(),
     )
     server_cfg = {
         "transport": "stream_stdio",
