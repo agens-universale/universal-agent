@@ -176,16 +176,19 @@ class RunSkillScriptTool:
                 getattr(exec_result, "stderr_stream", None)
                 or getattr(exec_result, "stderr", "")
             )
-            result = {
+            result: Dict[str, Any] = {
                 "exit_code": exec_result.return_code,
                 "timed_out": exec_result.timed_out,
-                "truncated": bool(stdout.truncated or stderr.truncated),
-                **exec_channels_json(
+            }
+            if stdout.truncated or stderr.truncated:
+                result["truncated"] = True
+            result.update(
+                exec_channels_json(
                     stdout,
                     stderr,
                     exec_output_preview_edge_chars_from_config_dict(self._config_dict),
-                ),
-            }
+                )
+            )
             script_ok = not exec_result.timed_out and exec_result.return_code == 0
             return _wrap(
                 tool="skills_run_script",

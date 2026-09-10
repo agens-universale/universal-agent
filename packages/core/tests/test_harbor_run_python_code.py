@@ -44,8 +44,9 @@ def _tool(backend, config_dict=None):
 def test_envelope_shape_matches_base_contract():
     b = _RecordingFakeBackend(stdout="42", rc=0)
     env = json.loads(_tool(b)(code="print(42)"))
-    for k in ("tool", "ok", "return_code", "timed_out", "truncated", "error", "stdout", "stderr"):
+    for k in ("tool", "ok", "return_code", "timed_out", "error", "stdout", "stderr"):
         assert k in env, k
+    assert "truncated" not in env
     assert env["return_code"] == 0 and env["ok"] is True
 
 

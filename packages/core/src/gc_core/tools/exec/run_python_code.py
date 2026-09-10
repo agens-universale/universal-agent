@@ -117,7 +117,7 @@ Usage:
         stderr=None,
         error: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Envelope с front-loaded preview; ``truncated`` выводится из потоков."""
+        """Envelope с front-loaded preview; ``truncated`` только если поток обрезан."""
         return build_exec_envelope(
             tool=RunPythonCode.registered_tool_name(),
             ok=ok,
