@@ -11,7 +11,6 @@ import uuid
 
 from gc_core.config import load_config
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
-from gc_core.tools.connect_mcp.registry import get_all_tools
 from gc_core.tools.connect_mcp.abandonable import run_abandonable
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
@@ -256,7 +255,14 @@ def _prepare_mcp_call(
     сообщения видит агент.
     """
     if tools_registry is None:
-        tools_registry = get_all_tools(servers_cfg)
+        # Дискавери — это сеть и запуск процессов; синхронный откат здесь
+        # уводил её в `run_coro_blocking` и морозил loop вызывающего на весь
+        # обход серверов. Реестр обязан приехать готовым: его собирает
+        # `acall_mcp_tool` до разбора имени.
+        raise ValueError(
+            "tools_registry обязателен: дискавери делает вызывающий "
+            "(`ToolsCache.aget_tools`), а не разбор имени тула"
+        )
 
     if full_tool_name not in tools_registry:
         raise ValueError(f"Unknown tool '{full_tool_name}'")

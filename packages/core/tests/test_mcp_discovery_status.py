@@ -2,7 +2,7 @@ import time
 from gc_core.tools.connect_mcp import registry as reg
 
 
-def test_build_registry_parallel_and_status(monkeypatch):
+async def test_build_registry_parallel_and_status(monkeypatch):
     async def fake_discover_one(name, cfg, *, timeout, os_backend=None):
         if name == "ok":
             return ([{"name": "do_x", "description": "d"}],
@@ -25,7 +25,7 @@ def test_build_registry_parallel_and_status(monkeypatch):
                "hang": {"transport": "stdio", "command": "y"}}
 
     t0 = time.monotonic()
-    tools, status = reg._build_tools_registry(servers, discovery_timeout_sec=1)
+    tools, status = await reg._abuild_tools_registry(servers, discovery_timeout_sec=1)
     elapsed = time.monotonic() - t0
 
     assert elapsed < 1.5

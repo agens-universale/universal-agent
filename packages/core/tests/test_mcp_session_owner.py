@@ -166,7 +166,18 @@ async def test_stream_aclose_all_spares_other_owners():
 
 
 @pytest.mark.asyncio
-async def test_stream_close_all_releases_everything():
+async def test_stream_teardown_spares_a_foreign_owner():
+    """``aclose_all`` закрывает сессии СВОЕГО владельца — и только их.
+
+    Прежде здесь стоял синхронный ``close_all``, который забывал всё подряд,
+    включая чужое. Это была не вторая форма того же, а ДРУГАЯ операция под
+    похожим именем: она ничего не закрывала, только роняла ссылки. Прода у
+    неё не было, и она снята.
+
+    Узость корутинной формы — не недоделка, а условие корректности: чужой
+    владелец в этот момент может быть внутри вызова тула, и закрытие из нашей
+    задачи отменило бы его anyio-scope.
+    """
     from gc_core.tools.connect_mcp.stream_client import _PersistentSessionManager
 
     mgr = _PersistentSessionManager()
@@ -174,10 +185,12 @@ async def test_stream_close_all_releases_everything():
         mgr.set_session("s", "one", ())
     with use_owner("agent-2"):
         mgr.set_session("s", "two", ())
-    # close_all синхронный — зовём вне loop, как и предписано его докстрокой.
-    await asyncio.to_thread(mgr.close_all)
+
     with use_owner("agent-1"):
+        await mgr.aclose_all()
         assert mgr.get_session("s") is None
+    with use_owner("agent-2"):
+        assert mgr.get_session("s") == "two", "снесли сессию чужого владельца"
 
 
 # --- свои http/sse: session-id --------------------------------------------

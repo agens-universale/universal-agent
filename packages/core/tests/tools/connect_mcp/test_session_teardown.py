@@ -21,6 +21,8 @@ import asyncio
 import threading
 import time
 
+import inspect
+
 import pytest
 
 from gc_core.tools.connect_mcp import persistent_stdio as ps
@@ -82,16 +84,20 @@ async def test_ainvalidate_survives_a_broken_stack():
     assert manager.get_session("srv") is None
 
 
-def test_no_bare_invalidate_left_on_the_async_path():
-    """На асинхронном пути голого ``invalidate`` быть не должно."""
-    import pathlib
+def test_the_manager_has_no_sync_teardown_at_all():
+    """У менеджера сессий синхронных форм сноса нет — ни одной.
 
-    src = pathlib.Path(sc.__file__).read_text(encoding="utf-8")
-
-    assert "_SESSION_MANAGER.invalidate(" not in src, (
-        "вернулся синхронный снос сессии: стек уедет к сборщику мусора, "
-        "и его закрытие швырнёт CancelledError в ход агента"
-    )
+    Раньше сторожили, что ``_SESSION_MANAGER.invalidate(`` не встречается в
+    источнике: формы существовали, и вернуть их в код было делом одной
+    строки. Синхронный снос НЕ закрывает стек, он только забывает ссылку, —
+    стек уезжает к сборщику мусора, и его закрытие швыряет ``CancelledError``
+    в ход агента. Теперь форм просто нет, и вернуть их нечем.
+    """
+    mgr = sc._PersistentSessionManager()
+    for name in ("close_all", "invalidate"):
+        assert not hasattr(mgr, name), f"вернулась синхронная {name}"
+    for name in ("aclose_all", "ainvalidate"):
+        assert inspect.iscoroutinefunction(getattr(mgr, name))
 
 
 # --- H1: закрытие не встаёт на локе ----------------------------------------

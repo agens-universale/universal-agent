@@ -3,19 +3,19 @@ from gc_core.tools.connect_mcp import registry as reg
 from gc_testkit import as_coro
 
 
-def test_on_progress_called_per_server(monkeypatch):
+async def test_on_progress_called_per_server(monkeypatch):
     async def fake_discover_one(name, cfg, *, timeout, os_backend=None):
         return ([], {"status": "connected", "reason": None, "tool_count": 0, "elapsed_ms": 1})
     monkeypatch.setattr(reg, "_adiscover_one", fake_discover_one)
     seen = {}
     servers = {"a": {"transport": "stdio", "command": "a"},
                "b": {"transport": "stdio", "command": "b"}}
-    reg._build_tools_registry(servers, discovery_timeout_sec=5,
+    await reg._abuild_tools_registry(servers, discovery_timeout_sec=5,
                               on_progress=lambda s, st: seen.__setitem__(s, st["status"]))
     assert seen == {"a": "connected", "b": "connected"}
 
 
-def test_on_progress_called_for_timeout(monkeypatch):
+async def test_on_progress_called_for_timeout(monkeypatch):
     async def fake_discover_one(name, cfg, *, timeout, os_backend=None):
         # Ждём АСИНХРОННО: моделируем медленный сервер, а не клиента,
         # который морозит loop (см. test_mcp_discovery_status).
@@ -25,18 +25,18 @@ def test_on_progress_called_for_timeout(monkeypatch):
         return ([], {"status": "connected", "reason": None, "tool_count": 0, "elapsed_ms": 0})
     monkeypatch.setattr(reg, "_adiscover_one", fake_discover_one)
     seen = {}
-    reg._build_tools_registry({"hang": {"transport": "stdio", "command": "x"}},
+    await reg._abuild_tools_registry({"hang": {"transport": "stdio", "command": "x"}},
                               discovery_timeout_sec=1,
                               on_progress=lambda s, st: seen.__setitem__(s, st))
     assert seen["hang"]["status"] == "failed"
     assert "таймаут" in seen["hang"]["reason"]
 
 
-def test_on_progress_none_is_noop(monkeypatch):
+async def test_on_progress_none_is_noop(monkeypatch):
     monkeypatch.setattr(reg, "_adiscover_one",
                         lambda n, c, *, timeout, os_backend=None: ([], {"status": "connected", "reason": None,
                                                        "tool_count": 0, "elapsed_ms": 1}))
-    reg._build_tools_registry({"a": {"transport": "stdio", "command": "a"}}, discovery_timeout_sec=2)
+    await reg._abuild_tools_registry({"a": {"transport": "stdio", "command": "a"}}, discovery_timeout_sec=2)
 
 
 async def test_on_progress_threads_through_build_tools_data(monkeypatch):

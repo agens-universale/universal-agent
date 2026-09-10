@@ -156,15 +156,6 @@ class _PersistentSessionManager:
                 cms, opened_in=owner_task() if owner_task is not None else None
             )
 
-    def invalidate(self, server_key: str) -> None:
-        """Синхронный вход: только забыть, закрыть здесь нечем.
-
-        Оставлен для вызывающих без loop. На асинхронном пути пользуйтесь
-        ``ainvalidate`` — иначе стек уедет к сборщику мусора со всеми
-        последствиями, описанными выше.
-        """
-        self._take(server_key)
-
     async def _aclose_stack(self, cms: Any, *, opened_in: Any = None) -> None:
         """Закрыть стек в обратном порядке, глотая ошибку по каждому.
 
@@ -227,39 +218,6 @@ class _PersistentSessionManager:
                         cms, opened_in=owner_ref() if owner_ref is not None else None
                     )
                 )
-
-    def close_all(self) -> None:
-        """Отпустить ВСЕ сессии, включая чужие. Для завершения процесса и тестов.
-
-        Если loop живёт на этом потоке, звать нельзя: получился бы вложенный
-        ``asyncio.run``. Такой вызывающий обязан использовать ``aclose_all``.
-        """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-        else:
-            raise RuntimeError(
-                "close_all() вызван из работающего event loop; используйте "
-                "await aclose_all()"
-            )
-        if not self._cm_stacks:
-            return
-        # Сессии принадлежат уже мёртвым loop: их корректно закрыть нечем,
-        # просто отпускаем ссылки, чтобы не течь.
-        #
-        # ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ. Для `stream_stdio` это значит, что дочерний
-        # процесс сервера может пережить наш: закрыть его штатно можно только
-        # изнутри anyio-стека и в той же задаче, где он открыт, — а её уже
-        # нет. Пробовать снаружи нельзя: ровно так выглядел блокер B1, где
-        # выход из cancel scope в чужой задаче прошивал ход агента чужой
-        # отменой.
-        #
-        # Кому важно, чтобы потомок гарантированно умирал (браузер
-        # playwright), — тому `persistent_session: true`: у долгоживущего
-        # stdio свой путь с `atexit`, close-тулом и `killpg`.
-        self._sessions.clear()
-        self._cm_stacks.clear()
 
 
 _SESSION_MANAGER = _PersistentSessionManager()

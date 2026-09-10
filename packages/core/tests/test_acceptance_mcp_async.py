@@ -238,19 +238,6 @@ async def test_sessions_of_different_owners_do_not_collide():
     assert got_first is not got_second, "владельцы поделили одну сессию"
 
 
-async def test_close_all_refuses_from_a_running_loop():
-    """Синхронный ``close_all`` из-под живого loop — громкий отказ.
-
-    Молчаливый вариант дал бы вложенный ``asyncio.run``, а он падает не там,
-    где ошибка.
-    """
-    from gc_core.tools.connect_mcp.stream_client import _PersistentSessionManager
-
-    registry = _PersistentSessionManager()
-    with pytest.raises(RuntimeError, match="aclose_all"):
-        registry.close_all()
-
-
 # --- M-10: транспорты -------------------------------------------------------
 
 @pytest.mark.parametrize("transport", ["http", "sse", "stdio"])
@@ -290,7 +277,8 @@ async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(monkeypatch)
     ``acall_mcp_tool(tools_registry=None)`` шёл в синхронный ``get_all_tools``,
     а тот — в ``run_coro_blocking``: свой ``asyncio.run`` внутри чужого loop
     невозможен, поэтому обход серверов исполнялся, держа loop. Асинхронная
-    форма у кэша была всё это время.
+    форма у кэша была всё это время; синхронных входов в реестр больше нет
+    вовсе — это тоже проверяем, ловушкой такое стеречь уже нечем.
 
     Проверяется отзывчивость, а не форма вызова: пока дискавери идёт, соседний
     хартбит обязан тикать.
@@ -306,11 +294,11 @@ async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(monkeypatch)
 
     monkeypatch.setattr(mcp_registry.ToolsCache, "aget_tools", _slow_discovery)
 
-    def _sync_trap(*_a, **_kw):
-        raise AssertionError("дискавери ушла в синхронную форму и заморозила loop")
-
-    monkeypatch.setattr(mcp_registry, "get_all_tools", _sync_trap)
-    monkeypatch.setattr(mcp_api, "get_all_tools", _sync_trap, raising=False)
+    for name in ("get_all_tools", "_build_tools_registry"):
+        assert not hasattr(mcp_registry, name), (
+            f"{name} вернулся в реестр — это синхронный вход в дискавери"
+        )
+    assert not hasattr(mcp_api, "get_all_tools")
 
     ticks = 0
 

@@ -1,6 +1,6 @@
 from gc_core.tools.connect_mcp.agent_tools import aget_mcp_tools_data_for_config
 from gc_core.tools.connect_mcp.api import acall_mcp_tool
-from gc_core.tools.connect_mcp.registry import get_all_tools, ToolsCache
+from gc_core.tools.connect_mcp.registry import ToolsCache
 
 # Обратная совместимость: старое имя get_mcp_tools_data.
 #
@@ -13,6 +13,5 @@ __all__ = [
     "acall_mcp_tool",
     "aget_mcp_tools_data",
     "aget_mcp_tools_data_for_config",
-    "get_all_tools",
     "ToolsCache",
 ]

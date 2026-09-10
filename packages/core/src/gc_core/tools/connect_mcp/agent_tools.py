@@ -581,8 +581,8 @@ async def aget_mcp_tools_data_for_config(
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """MCP-тулы в формате tools_data, без потока на дискавери.
 
-    Основная форма. Синхронное имя ``get_mcp_tools_data_for_config``
-    сохранено для вызывающих без loop и работает через ``run_coro_blocking``.
+    Форма одна. Синхронного имени нет: единственный вызывающий — сборка
+    набора тулов, и она корутинная.
     """
     prepared = _prepare_mcp_tools_data(
         config_dict, tools_cache=tools_cache, os_backend=os_backend

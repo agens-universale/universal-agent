@@ -15,7 +15,6 @@ from gc_core.tools.connect_mcp.stream_client import (
     alist_tools_stream_sse,
     alist_tools_stream_stdio,
 )
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client, runs_in_agent_runtime
 
 
@@ -178,9 +177,9 @@ async def _afetch_tools_sdk(
 ) -> list:
     """Список тулов по SDK-транспорту, нативно, без потока.
 
-    Синхронные имена ``list_tools_stream_*`` — шимы через
-    ``run_coro_blocking``; из уже асинхронного контекста они завели бы лишний
-    loop в отдельном потоке. Здесь берём асинхронные точки напрямую.
+    Синхронных имён ``list_tools_stream_*`` больше нет: они были шимами через
+    ``run_coro_blocking`` и из уже асинхронного контекста заводили лишний loop
+    в отдельном потоке. Здесь — асинхронные точки напрямую.
     """
     if effective_transport == "stream_sse":
         return await alist_tools_stream_sse(
@@ -277,7 +276,6 @@ async def _adiscover_one(
         }
 
 
-
 async def _abuild_tools_registry(
     servers_cfg: Dict[str, Dict[str, Any]],
     *,
@@ -358,29 +356,6 @@ async def _abuild_tools_registry(
                 name, server_cfg=cfg, tool=tool
             )
     return all_tools, status_map
-
-
-def _build_tools_registry(
-    servers_cfg: Dict[str, Dict[str, Any]],
-    *,
-    discovery_timeout_sec: float = 8,
-    on_progress=None,
-) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    """Синхронный двойник. Реализация одна — асинхронная.
-
-    ``run_coro_blocking``: он умеет и «нет loop», и «loop уже крутится», а
-    сюда законно приходят
-    вызывающие, у которых loop уже крутится. До переезда дискавери звалась
-    через тот же хелпер — семантику сохраняем.
-    """
-    return run_coro_blocking(
-        _abuild_tools_registry(
-            servers_cfg,
-            discovery_timeout_sec=discovery_timeout_sec,
-            on_progress=on_progress,
-        )
-    )
-
 
 
 class ToolsCache:
@@ -500,39 +475,8 @@ class ToolsCache:
 
         return fresh_tools
 
-    def get_tools(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
-        """Синхронный двойник. Реализация одна — асинхронная.
-
-        ``run_coro_blocking``: он умеет и «нет loop», и «loop уже крутится»,
-        а сюда законно приходят вызывающие с уже работающим loop.
-        """
-        return run_coro_blocking(self.aget_tools(on_progress=on_progress))
-
-
-def get_all_tools(
-    servers_cfg: Dict[str, Dict[str, Any]],
-    mcp_meta: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Dict[str, Any]]:
-    """
-    Получить все MCP‑тулы для заданной конфигурации серверов.
-
-    Функция-обёртка: внутри создаётся временный ToolsCache на основе
-    переданных servers_cfg и mcp_meta и возвращается результат get_tools().
-
-    Для более тонкого управления кэшем (например, переиспользование
-    инстанса ToolsCache между вызовами) рекомендуется создавать и хранить
-    ToolsCache снаружи (например, в run_context).
-    """
-    cfg: Dict[str, Any] = {"mcp-servers": servers_cfg}
-    if mcp_meta is not None:
-        cfg["mcp-meta"] = mcp_meta
-
-    cache = ToolsCache(cfg)
-    return cache.get_tools()
-
 
 __all__ = [
-    "_build_tools_registry",
+    "_abuild_tools_registry",
     "ToolsCache",
-    "get_all_tools",
 ]
