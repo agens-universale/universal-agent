@@ -144,6 +144,11 @@ class FileThreadStore(ThreadStoreBase):
     def _restore_subagent_trace(self, system_id, thread_id, records) -> None:
         """Вернуть трассу СО СВОИМИ штампами: см. базовый класс.
 
+        Формы одна. Корутинного близнеца звать было НЕКОМУ: его вызывает
+        только ``AsyncThreadStoreBase.areplace_messages``, а это хранилище
+        синхронное и наследует синхронную базу — ядро приходит сюда через
+        адаптер ``thread_store_async``, то есть по синхронному имени.
+
         Умолчание базы идёт через ``append_subagent_trace``, а тот ставит
         свежие ``ts`` и ``seq``. Здесь пишем файл целиком записями как есть.
         """
@@ -152,10 +157,6 @@ class FileThreadStore(ThreadStoreBase):
         restore_subagent_trace_records(
             self._dir, system_id, thread_id, list(records)
         )
-
-    async def _arestore_subagent_trace(self, system_id, thread_id, records) -> None:
-        """См. синхронный близнец: файловый ввод-вывод здесь короткий."""
-        self._restore_subagent_trace(system_id, thread_id, records)
 
     def append_subagent_trace(
         self,

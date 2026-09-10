@@ -238,7 +238,7 @@ class TestChildModelResolve:
         level_box["value"] = "max"  # живой /level родителя меняется посреди работы
         assert child_ctx.model_router.resolve("main").alias == "flash"
 
-    def test_child_state_default_model_is_subagent_resolved_model(self, tmp_path):
+    async def test_child_state_default_model_is_subagent_resolved_model(self, tmp_path):
         """state.default_model ребёнка = резолв субагента (begin_turn на старте
         child-хода, см. SubagentRunner._run_internal)."""
         raw = {
@@ -256,7 +256,7 @@ class TestChildModelResolve:
             captured["default_model"] = child_state.default_model
             return "ok"
 
-        runner.run("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
+        await runner.arun("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
 
         assert captured["default_model"] == "deepseek-v3-max"
 

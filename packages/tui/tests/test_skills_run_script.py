@@ -128,7 +128,7 @@ async def test_skills_run_script_long_stdout_is_head_tail_with_preview(reg_with_
     assert raw.index('"preview"') < raw.index('"stdout"')
 
 
-def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_path):
+async def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_path):
     """Tokens that break shell quoting (Windows paths, quotes) pass verbatim.
 
     This is the cross-platform guarantee: an argv list goes through
@@ -140,7 +140,7 @@ def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_path):
         encoding="utf-8",
     )
     hostile = [r"C:\temp\it's report.pdf", '{"a": "b c"}', "--flag='x'"]
-    res = LocalFsBackend().exec_argv(
+    res = await LocalFsBackend().aexec_argv(
         [sys.executable, str(script), *hostile], stdin="42"
     )
     assert res.return_code == 0
@@ -149,13 +149,17 @@ def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_path):
     assert lines[1] == "42"
 
 
-def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_path):
+async def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_path):
     """TrackingFsBackend (TUI wrapper) must expose exec_argv and delegate
     to the inner LocalFsBackend without a POSIX shell string.
 
     Regression for skills_run_script under TUI: the Tracking decorator
     previously had no exec_argv method, so ``backend.exec_argv(...)``
     raised AttributeError. argv must pass through verbatim (shell-less).
+
+    Форма — корутинная: синхронных ``exec_argv`` у наших бэкендов больше нет
+    (они были обёртками ``run_coro_blocking``, то есть заводили второй loop).
+    Синхронное имя осталось на ``FsBackend`` входом для ЧУЖИХ реализаций.
     """
     from gc_tui.diff_tui.tracking import TrackingFsBackend
 
@@ -168,7 +172,7 @@ def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_path):
     inner = LocalFsBackend()
     ctx = local_ctx()
     wrapped = TrackingFsBackend(inner, ctx)
-    res = wrapped.exec_argv(
+    res = await wrapped.aexec_argv(
         [sys.executable, str(script), *hostile], stdin="42"
     )
     assert res.return_code == 0

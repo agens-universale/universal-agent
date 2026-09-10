@@ -11,7 +11,6 @@ from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     backend_override_value,
     acreate_call_headers,
-    create_call_headers,
     resolve_network_params,
 )
 from gc_core.usage.account import category_for_request_label

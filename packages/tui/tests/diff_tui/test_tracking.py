@@ -241,7 +241,7 @@ def test_git_mode_ignored_is_tracked_via_cache(launch_root):
     assert "src/secret.md" in TouchedJournal(str(threads), "tui", "t1").paths()
 
 
-def test_exec_delta_adds_journal(launch_root):
+async def test_exec_delta_adds_journal(launch_root):
     root, threads = launch_root
     if not _has_git():
         pytest.skip("git недоступен")
@@ -253,7 +253,7 @@ def test_exec_delta_adds_journal(launch_root):
     )
     ctx = _tool_ctx(root, threads)
     assert isinstance(ctx.os_backend, TrackingFsBackend)
-    ctx.os_backend.exec("echo hello > shell_out.txt", cwd=str(root))
+    await ctx.os_backend.aexec("echo hello > shell_out.txt", cwd=str(root))
     assert "shell_out.txt" in TouchedJournal(str(threads), "tui", "t1").paths()
 
 
@@ -282,7 +282,14 @@ def test_tools_do_not_import_diff_tui():
 # Members of FsBackend the wrapper is allowed NOT to expose. Keep it empty:
 # TrackingFsBackend is a decorator, so every public member of the port must be
 # reachable through it (it is not an FsBackend subclass, so ABC cannot enforce).
-TRACKING_NOT_FORWARDED: set[str] = set()
+# Синхронная тройка exec сознательно НЕ проксируется. На ``FsBackend`` она
+# осталась входом для ЧУЖИХ реализаций (их ядро видит через
+# ``SyncExecAdapter``), а наши бэкенды её не реализуют вовсе: прежние тела
+# были обёртками ``run_coro_blocking``, то есть заводили второй event loop, а
+# из-под живого — морозили поток вызывающего на всё время команды. Обёртка
+# оборачивает НАШ бэкенд, поэтому проксирует только корутинную форму — её
+# наличие сторожится отдельной проверкой ниже.
+TRACKING_NOT_FORWARDED: set[str] = {"exec", "exec_argv", "run_python"}
 
 
 def _fsbackend_public_members() -> set[str]:
@@ -303,6 +310,14 @@ def test_tracking_fs_backend_mirrors_fsbackend_public_surface():
     exposed = set(dir(type(wrapper))) | set(vars(wrapper))
     missing = sorted(_fsbackend_public_members() - exposed - TRACKING_NOT_FORWARDED)
     assert missing == []
+
+    # Исключение из списка выше не должно означать «форму потеряли»: у каждой
+    # снятой синхронной операции обёртка обязана проксировать корутинную.
+    for name in TRACKING_NOT_FORWARDED:
+        assert hasattr(type(wrapper), f"a{name}"), (
+            f"обёртка не проксирует a{name} — операция потеряна целиком, "
+            "а не переведена в корутинную форму"
+        )
 
 
 class _CapStub:

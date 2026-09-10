@@ -39,25 +39,16 @@ _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
 
-def _set_runtime_flag(thread_session, flag: str, active: bool) -> None:
+async def _aset_runtime_flag(thread_session, flag: str, active: bool) -> None:
     """Прокси в хранилище сессии (I1: не clobber tui).
 
-    Через ``ts.store``, а не через модульную функцию: у сессии хранилище своё —
+    Через ``ts.port``, а не через модульную функцию: у сессии хранилище своё —
     файловое по умолчанию или переданное встраивающим. Прямой вызов уводил бы
     флаг на диск даже тогда, когда весь остальной тред лежит в базе.
-    """
-    ts = thread_session
-    ts.store.patch_runtime_flag(
-        ts.system_id,
-        ts.thread_id,
-        flag,
-        active=active,
-        session_meta=ts.meta,
-    )
 
-
-async def _aset_runtime_flag(thread_session, flag: str, active: bool) -> None:
-    """То же, что ``_set_runtime_flag``, но не блокируя цикл.
+    ЕДИНСТВЕННАЯ форма: синхронного близнеца звал только синхронный
+    ``_summarizing_flag``, а того — только его собственный тест. В проде оба
+    были мертвы, и держать их значило держать вторую дорогу к тому же meta.
 
     Через этот шов идут ТРИ индикатора TUI — ``summarizing``, ``finalizing`` и
     ``finish_gate_checking``, — и возврат у него не используется вовсе. Для
@@ -77,7 +68,12 @@ async def _aset_runtime_flag(thread_session, flag: str, active: bool) -> None:
 
 @contextlib.asynccontextmanager
 async def _asummarizing_flag(thread_session):
-    """Асинхронный двойник ``_summarizing_flag``."""
+    """Помечает тред как «идёт суммаризация» для TUI-индикатора.
+
+    Флаг ``meta.runtime.summarizing`` + немедленный flush (TUI поллит meta).
+    Снимается строго в finally — иначе индикатор залипнет.
+    ``thread_session=None`` (CLI без треда) → no-op.
+    """
     if thread_session is None:
         yield
         return
@@ -90,7 +86,7 @@ async def _asummarizing_flag(thread_session):
 
 
 async def areset_stale_summarizing_flag(thread_session) -> None:
-    """Асинхронный двойник ``reset_stale_summarizing_flag``."""
+    """Снять залипший ``summarizing`` при старте: форма одна, синхронной нет."""
     if thread_session is None:
         return
     ts = thread_session
@@ -113,25 +109,6 @@ async def aset_tui_finish_gate_checking(thread_session, active: bool) -> None:
     if thread_session is None:
         return
     await _aset_runtime_flag(thread_session, "finish_gate_checking", active)
-
-
-@contextlib.contextmanager
-def _summarizing_flag(thread_session):
-    """Помечает тред как «идёт суммаризация» для TUI-индикатора.
-
-    Флаг ``meta.runtime.summarizing`` + немедленный flush (TUI поллит meta).
-    Снимается строго в finally — иначе индикатор залипнет.
-    ``thread_session=None`` (CLI без треда) → no-op.
-    """
-    if thread_session is None:
-        yield
-        return
-    ts = thread_session
-    try:
-        _set_runtime_flag(ts, "summarizing", True)
-        yield
-    finally:
-        _set_runtime_flag(ts, "summarizing", False)
 
 
 def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:

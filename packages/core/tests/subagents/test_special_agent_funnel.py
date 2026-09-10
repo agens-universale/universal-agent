@@ -6,7 +6,7 @@
 уходила без Bearer). Теперь она идёт через
 ``utils.llm_chat_client.request_chat_completion_text`` — тот же путь, что и
 любой другой служебный LLM-вызов (summary/finish_gate/judges/memory_compaction),
-с заголовками из ``create_call_headers`` (auth_connector/resolved-модель).
+с заголовками из ``acreate_call_headers`` (auth_connector/resolved-модель).
 
 Заодно бюджет-хардкоды (special_agent: 4096, project_memory compaction: 4000)
 вынесены в конфиг с теми же дефолтами.
@@ -78,7 +78,7 @@ def test_default_budgets_match_prior_hardcodes():
 
 def test_special_agent_role_generation_attaches_bearer_header(monkeypatch):
     """Регресс: раньше заголовки собирались вручную из ``chat_completion_headers``
-    и Authorization никогда не прикладывался. Теперь ``create_call_headers`` (не
+    и Authorization никогда не прикладывался. Теперь ``acreate_call_headers`` (не
     замоканный здесь) читает ``ctx.auth_connector`` и кладёт Bearer-токен."""
     captured = {}
 

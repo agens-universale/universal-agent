@@ -250,7 +250,7 @@ class TestProcessToolCallsForwardsCallId:
 
 
 class TestRunnerWiresSinkOntoChildCtx:
-    def test_child_ctx_gets_parent_call_id_and_sink(self, tmp_path):
+    async def test_child_ctx_gets_parent_call_id_and_sink(self, tmp_path):
         from gc_testkit.helpers.tool_ctx import local_ctx
 
         orch = _make_state()
@@ -273,7 +273,7 @@ class TestRunnerWiresSinkOntoChildCtx:
             captured["child_ctx"] = child_ctx
             return "done"
 
-        result = runner.run(
+        result = await runner.arun(
             "subagent_worker",
             {"task": "x", "reason": "y"},
             fake_run_agent,
@@ -285,7 +285,7 @@ class TestRunnerWiresSinkOntoChildCtx:
         assert child_ctx.subagent_progress_sink is sink
         assert json.loads(result)["ok"] is True
 
-    def test_child_ctx_sink_none_when_parent_has_no_sink(self, tmp_path):
+    async def test_child_ctx_sink_none_when_parent_has_no_sink(self, tmp_path):
         from gc_testkit.helpers.tool_ctx import local_ctx
 
         orch = _make_state()
@@ -306,7 +306,7 @@ class TestRunnerWiresSinkOntoChildCtx:
             captured["child_ctx"] = child_ctx
             return "done"
 
-        runner.run(
+        await runner.arun(
             "subagent_worker",
             {"task": "x", "reason": "y"},
             fake_run_agent,

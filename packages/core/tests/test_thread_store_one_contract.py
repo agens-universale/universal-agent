@@ -104,3 +104,105 @@ def test_a_store_missing_one_method_is_still_refused():
 
     with pytest.raises(ThreadStoreContractError, match=missing):
         athread_store(_Incomplete())
+
+
+# --- дрейф умолчаний: два драйвера над одним порядком ввода-вывода ----------
+
+def _io_sequences_of_bases() -> "tuple[dict[str, list[str]], dict[str, list[str]]]":
+    """Последовательность обращений к хранилищу у каждого умолчания — по AST.
+
+    Читается ИСХОДНИК, а не объекты: сравнивать надо именно порядок операций в
+    теле, а по объекту его не видно. Считаются только вызовы вида
+    ``self.<имя>(…)``, где ``<имя>`` объявлено в синхронной базе — то есть
+    обращения к своему же контракту. Чистые помощники (``stamp_meta``,
+    ``merge_runtime_meta``) живут в ``_ThreadStoreInvariants`` и сюда не
+    попадают.
+
+    Эталон имён ВЫВОДИТСЯ из синхронной базы, а не пишется списком: приставка
+    ``a`` снимается тогда и только тогда, когда получившееся имя у неё есть.
+    """
+    import ast
+    import pathlib
+    import re
+
+    import gc_core.thread_store_base as mod
+
+    tree = ast.parse(pathlib.Path(mod.__file__).read_text(encoding="utf-8"))
+
+    def methods(class_name):
+        cls = next(
+            n for n in tree.body
+            if isinstance(n, ast.ClassDef) and n.name == class_name
+        )
+        return [m for m in cls.body
+                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+    sync_methods = methods("ThreadStoreBase")
+    sync_names = {m.name for m in sync_methods}
+
+    def unprefix(name: str) -> str:
+        m = re.match(r"^(_*)a(.+)$", name)
+        if not m:
+            return name
+        base = m.group(1) + m.group(2)
+        return base if base in sync_names else name
+
+    def sequences(members):
+        out = {}
+        for member in members:
+            ops = []
+            for node in ast.walk(member):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = node.func
+                if not (isinstance(fn, ast.Attribute)
+                        and isinstance(fn.value, ast.Name)
+                        and fn.value.id == "self"):
+                    continue
+                name = unprefix(fn.attr)
+                if name in sync_names:
+                    ops.append(name)
+            out[unprefix(member.name)] = ops
+        return out
+
+    return sequences(sync_methods), sequences(methods("AsyncThreadStoreBase"))
+
+
+def test_default_implementations_keep_the_same_io_order():
+    """Умолчания двух ABC обращаются к хранилищу в ОДНОМ порядке.
+
+    Сжать эти два тела в одно нельзя: ``ThreadStoreBase`` — публичный
+    синхронный контракт для встраивающих, ``AsyncThreadStoreBase`` — для тех,
+    у кого ``redis.asyncio`` / ``asyncpg``; оба обязаны существовать. Чистые
+    части уже вынесены в ``_ThreadStoreInvariants``, и различается ровно
+    последовательность обращений — единственное, что ещё может разъехаться.
+
+    Цена расхождения измерима и уже случалась (см. докстроку модуля): у
+    ``replace_messages`` порядок ``reset`` → ``append_messages`` →
+    ``save_meta`` → восстановление трассы держит два свойства сразу — тред не
+    исчезает целиком между ``reset`` и ``save_meta``, и трасса субагентов
+    переживает компакцию. Переставленный или потерянный шаг ломает то или
+    другое молча: конформанс-набор проверяет РЕЗУЛЬТАТ каждой операции по
+    отдельности, а порядок внутри умолчания — нет.
+    """
+    sync_io, async_io = _io_sequences_of_bases()
+
+    assert set(sync_io) == set(async_io), (
+        "наборы методов у двух баз разошлись: "
+        f"только синхронные {sorted(set(sync_io) - set(async_io))}, "
+        f"только асинхронные {sorted(set(async_io) - set(sync_io))}"
+    )
+    for name in sorted(sync_io):
+        assert sync_io[name] == async_io[name], (
+            f"{name}: порядок обращений к хранилищу разошёлся.\n"
+            f"  синхронный:   {sync_io[name]}\n"
+            f"  асинхронный:  {async_io[name]}"
+        )
+
+    # Проверка не должна быть пустой: хотя бы у одного умолчания
+    # последовательность непустая, иначе сравнивать нечего и тест зеленеет
+    # на любом изменении.
+    assert any(ops for ops in sync_io.values()), (
+        "ни одного обращения к контракту не найдено — сборщик последовательностей "
+        "перестал их видеть, и сторож стал холостым"
+    )

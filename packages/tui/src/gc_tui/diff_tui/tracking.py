@@ -216,42 +216,15 @@ class TrackingFsBackend:
         except Exception:
             _logger.exception("diff_tui tracking write failed path=%s", path)
 
-    def _track_shell_delta(self, run: Callable[[], Any]) -> Any:
-        """git-mode: status before/after → journal newly dirty paths. Soft-fail."""
-        before: set[str] | None = None
-        launch_root = ""
-        if self._active():
-            try:
-                launch_root, _, _, _ = _perimeter(self._ctx)
-                if launch_root and resolve_mode(launch_root) == "git-mode":
-                    before = {e.path for e in git_ops.git_status(launch_root)}
-            except Exception:
-                _logger.warning(
-                    "shell mutation scope: pre-status failed", exc_info=True
-                )
-                before = None
-        result = run()
-        if before is not None:
-            try:
-                after = {e.path for e in git_ops.git_status(launch_root)}
-                journal = self._journal()
-                if journal is not None:
-                    for rel in sorted(after - before):
-                        journal.add(rel)
-            except Exception:
-                _logger.warning(
-                    "shell mutation scope: post-status failed", exc_info=True
-                )
-        return result
-
     async def _atrack_shell_delta(self, run: Callable[[], Any]) -> Any:
-        """То же, но команда ждётся, а два `git status` уходят в поток.
+        """Команда ждётся, а два `git status` уходят в поток.
 
-        Без этой формы `aexec_port()` не находил у обёртки `aexec` и
-        подставлял `SyncExecAdapter`: `to_thread(TrackingFsBackend.exec)` →
-        `LocalFsBackend.exec` → `run_coro_blocking(self.aexec)` → ЕЩЁ ОДИН
-        loop в потоке пула. Кооперативный стоп до подпроцесса не доходил, а
-        `asyncio.run` хода на выходе ждал `shutdown_default_executor`: после
+        ЕДИНСТВЕННАЯ форма. Синхронный близнец снят вместе с синхронными
+        `exec` / `exec_argv` / `run_python` этой обёртки: цепочка
+        `SyncExecAdapter` → `to_thread(TrackingFsBackend.exec)` →
+        `LocalFsBackend.exec` → `run_coro_blocking(self.aexec)` заводила ЕЩЁ
+        ОДИН loop в потоке пула. Кооперативный стоп до подпроцесса не доходил,
+        а `asyncio.run` хода на выходе ждал `shutdown_default_executor`: после
         Esc поток жил до таймаута команды.
 
         `git_status` — это запуск git, то есть блокирующий вызов; на loop его
@@ -364,72 +337,13 @@ class TrackingFsBackend:
         # свой флаг здесь означал бы, что журнал diff решает за него.
         return bool(getattr(self._inner, "bridges_to_loop", False))
 
-    def warm_capabilities(self) -> None:
+    async def awarm_capabilities(self) -> None:
         # Пробы — свойство ВНУТРЕННЕГО бэкенда: журналу diff тут отслеживать
         # нечего, а кэш обязан лечь именно на него, иначе обёртка прогреет
         # свой и первый поиск снова заплатит за пробы.
-        self._inner.warm_capabilities()
-
-    async def awarm_capabilities(self) -> None:
+        #
+        # Синхронного близнеца больше нет — как и у самих проб.
         await self._inner.awarm_capabilities()
-
-    def exec(
-        self,
-        command: str,
-        *,
-        cwd: Optional[str] = None,
-        timeout: Optional[int] = None,
-        env: Optional[dict] = None,
-        capture_max_chars: Optional[int] = None,
-    ) -> Any:
-        return self._track_shell_delta(
-            lambda: self._inner.exec(
-                command,
-                cwd=cwd,
-                timeout=timeout,
-                env=env,
-                capture_max_chars=capture_max_chars,
-            )
-        )
-
-    def exec_argv(
-        self,
-        argv: list,
-        *,
-        stdin: Optional[str] = None,
-        cwd: Optional[str] = None,
-        timeout: Optional[int] = None,
-        env: Optional[dict] = None,
-        capture_max_chars: Optional[int] = None,
-    ) -> Any:
-        return self._track_shell_delta(
-            lambda: self._inner.exec_argv(
-                argv,
-                stdin=stdin,
-                cwd=cwd,
-                timeout=timeout,
-                env=env,
-                capture_max_chars=capture_max_chars,
-            )
-        )
-
-    def run_python(
-        self,
-        code: str,
-        *,
-        cwd: Optional[str] = None,
-        timeout: Optional[int] = None,
-        env: Optional[dict] = None,
-        capture_max_chars: Optional[int] = None,
-    ) -> Any:
-        # Прокидываем потолок захвата: без него внутренние каналы (MCP-carrier)
-        # молча падают на дефолт exec-тулы вместо своего 50M.
-        return self._track_shell_delta(
-            lambda: self._inner.run_python(
-                code, cwd=cwd, timeout=timeout, env=env,
-                capture_max_chars=capture_max_chars,
-            )
-        )
 
     def default_cwd(self) -> Optional[str]:
         return self._inner.default_cwd()

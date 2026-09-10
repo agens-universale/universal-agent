@@ -78,7 +78,7 @@ def test_state_user_intent_log_preserves_order_and_dedup():
     ]
 
 
-def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
+async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         thread_id = "demo-thread"
         system_id = "cli"
@@ -106,7 +106,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
                 "user_intent_log": meta_intent_log("first request", "second request"),
             },
         )
-        session = ThreadSession.from_config(
+        session = await ThreadSession.afrom_config(
             config_dict={"threads_data_path": tmp_dir},
             system_id=system_id,
             thread_id=thread_id,
@@ -133,16 +133,16 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         state.messages = session.get_full_history_messages()
         state.user_intent_log = user_ask_records("first request", "second request", turn=1)
         state.user_turn_seq = 1
-        ran_1 = run_coro(amaybe_run_summary_compaction(
+        ran_1 = await amaybe_run_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        ))
+        )
         assert ran_1 is True
         assert "<original_user_messages>" not in session.history_messages[0]["content"]
 
@@ -152,7 +152,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             user_turn_seq=state.user_turn_seq,
             ts=TS,
         )
-        session.persist_batch(
+        await session.apersist_batch(
             [
                 {"role": "user", "content": "third request"},
                 {"role": "assistant", "content": "third reply"},
@@ -160,16 +160,16 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             previous_response_id=None,
         )
         state.messages = session.get_full_history_messages()
-        ran_2 = run_coro(amaybe_run_summary_compaction(
+        ran_2 = await amaybe_run_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        ))
+        )
         assert ran_2 is True
         assert intent_user_ask_texts(state.user_intent_log) == [
             "first request",
@@ -178,18 +178,18 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         ]
 
 
-def test_persist_batch_writes_user_intent_log_to_meta():
+async def test_persist_batch_writes_user_intent_log_to_meta():
     with tempfile.TemporaryDirectory() as tmp_dir:
         thread_id = "demo-thread"
         system_id = "cli"
-        session = ThreadSession.from_config(
+        session = await ThreadSession.afrom_config(
             config_dict={"threads_data_path": tmp_dir},
             system_id=system_id,
             thread_id=thread_id,
         )
         session.meta["user_intent_log"] = meta_intent_log("first request", "second request")
         session.meta["state_schema_version"] = "v2"
-        session.persist_batch(
+        await session.apersist_batch(
             [
                 {"role": "user", "content": "first request"},
                 {"role": "assistant", "content": "first reply"},
@@ -197,7 +197,7 @@ def test_persist_batch_writes_user_intent_log_to_meta():
             previous_response_id=None,
         )
 
-        reloaded = ThreadSession.from_config(
+        reloaded = await ThreadSession.afrom_config(
             config_dict={"threads_data_path": tmp_dir},
             system_id=system_id,
             thread_id=thread_id,

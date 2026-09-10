@@ -50,10 +50,17 @@ def loop_in_thread():
     t.join(timeout=2)
 
 
-def test_exec_bridges_sync_to_async(loop_in_thread):
+async def test_aexec_reaches_the_harbor_loop_from_another_one(loop_in_thread):
+    """Ход агента и loop Harbor — разные loop'ы, и это норма.
+
+    Имя «мост sync→async» ушло вместе с синхронной формой: моста нет,
+    ``_aawait`` ставит корутину env на loop владельца и ждёт её через
+    ``wrap_future`` — у вызывающего это обычный ``await``, нового потока не
+    появляется.
+    """
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
-    result = backend.exec("echo hi")
+    result = await backend.aexec("echo hi")
     assert result.return_code == 0
     assert result.stdout == "ran:echo hi"
     assert env.calls == ["echo hi"]
@@ -87,7 +94,7 @@ def test_is_sandbox_and_default_exec_timeout(loop_in_thread):
     assert backend.exec_output_capture_max_chars == 40_000
 
 
-def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
+async def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
     """D8: Harbor ExecResult on agent is capped; hit_capture_cap set."""
     env = FakeEnv()
     huge = "X" * 1000
@@ -99,14 +106,14 @@ def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
     env.exec = big_exec
     backend = HarborBackend(env, loop_in_thread)
     backend.exec_output_capture_max_chars = 100
-    result = backend.exec("echo huge")
+    result = await backend.aexec("echo huge")
     assert len(result.stdout) == 100
     assert result.stdout_hit_capture_cap is True
     assert result.stderr_hit_capture_cap is False
     assert result.return_code == 0
 
 
-def test_exec_per_call_capture_max_overrides_tool_cap(loop_in_thread):
+async def test_exec_per_call_capture_max_overrides_tool_cap(loop_in_thread):
     """Internal post-processed exec (native grep) may raise the RAM cap."""
     env = FakeEnv()
     huge = "X" * 1000
@@ -117,15 +124,15 @@ def test_exec_per_call_capture_max_overrides_tool_cap(loop_in_thread):
     env.exec = big_exec
     backend = HarborBackend(env, loop_in_thread)
     backend.exec_output_capture_max_chars = 100
-    result = backend.exec("echo huge", capture_max_chars=500)
+    result = await backend.aexec("echo huge", capture_max_chars=500)
     assert len(result.stdout) == 500
     assert result.stdout_hit_capture_cap is True
 
 
-def test_exec_small_output_no_cap_hit(loop_in_thread):
+async def test_exec_small_output_no_cap_hit(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
-    result = backend.exec("echo hi")
+    result = await backend.aexec("echo hi")
     assert result.stdout_hit_capture_cap is False
     assert result.stderr_hit_capture_cap is False
 
@@ -194,17 +201,17 @@ async def test_append_concatenates_existing_content(loop_in_thread):
     assert any("cat " in c and ">>" in c and "/work/f.txt" in c for c in env.calls)
     assert not any(c.startswith("test -e") for c in env.calls)
 
-def test_exec_env_prefix_quoting(loop_in_thread):
+async def test_exec_env_prefix_quoting(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
-    backend.exec("echo hi", env={"FOO": "bar baz"})
+    await backend.aexec("echo hi", env={"FOO": "bar baz"})
     assert env.calls == ["env FOO='bar baz' echo hi"]
 
 
-def test_exec_env_prefix_with_cwd(loop_in_thread):
+async def test_exec_env_prefix_with_cwd(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
-    backend.exec("echo hi", cwd="/work", env={"FOO": "bar"})
+    await backend.aexec("echo hi", cwd="/work", env={"FOO": "bar"})
     assert env.calls == ["cd /work && env FOO=bar echo hi"]
 
 
@@ -258,7 +265,7 @@ def _make_exec_returning(env, stdout, return_code=0):
     return fake_exec
 
 
-def test_exec_propagates_timed_out_from_environment(loop_in_thread):
+async def test_exec_propagates_timed_out_from_environment(loop_in_thread):
     env = FakeEnv()
 
     async def timed_exec(command, **kw):
@@ -267,7 +274,7 @@ def test_exec_propagates_timed_out_from_environment(loop_in_thread):
 
     env.exec = timed_exec
     backend = HarborBackend(env, loop_in_thread)
-    result = backend.exec("sleep 99", timeout=1)
+    result = await backend.aexec("sleep 99", timeout=1)
     assert result.timed_out is True
     assert result.return_code is None
     assert result.stdout == "partial"
@@ -324,7 +331,7 @@ async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread)
         return FakeExecResult(stdout="Y" * 100_000, return_code=0)
 
     env.exec = huge_tool
-    tool = backend.exec("echo y")
+    tool = await backend.aexec("echo y")
     assert len(tool.stdout) == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
     assert tool.stdout_hit_capture_cap is True
 
@@ -474,25 +481,39 @@ async def test_aexec_runs_without_taking_a_thread(loop_in_thread):
     )
 
 
-async def test_async_and_sync_forms_run_the_same_command(loop_in_thread):
-    """Сборка команды общая: env-префикс, cd и argv → шелл.
+async def test_every_exec_entry_funnels_through_one_command_builder(loop_in_thread):
+    """Три входа (команда, argv, python) собирают команду ОДНИМ составителем.
 
-    Расхождение здесь означало бы, что синхронный и асинхронный вызовы
-    запускают РАЗНЫЕ команды, а это худший вид расхождения: оба «работают».
+    Раньше здесь сравнивались синхронная и асинхронная формы: «расхождение
+    означало бы, что они запускают РАЗНЫЕ команды». Синхронной формы больше
+    нет, и в этом виде тест сравнивал бы вызов с самим собой — то есть зеленел
+    бы при любой поломке составителя.
+
+    Проверяется то же свойство, но по существу: у каждого входа команда равна
+    той, что даёт общий составитель. Разъехаться им негде — а цена
+    расхождения прежняя: оба входа «работают», просто запускают разное.
     """
+    from gc_core.backends.protocol import argv_to_posix_command
+
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
 
-    backend.exec("ls", cwd="/work", env={"A": "1"})
     await backend.aexec("ls", cwd="/work", env={"A": "1"})
-    assert env.calls[0] == env.calls[1]
+    expected = backend._full_command("ls", cwd="/work", env={"A": "1"})
+    assert env.calls == [expected]
+    assert "cd " in expected and "A=1" in expected, expected
 
     env.calls.clear()
-    backend.exec_argv(["grep", "-n", "TOKEN", "/work/a b.py"])
-    await backend.aexec_argv(["grep", "-n", "TOKEN", "/work/a b.py"])
-    assert env.calls[0] == env.calls[1]
+    argv = ["grep", "-n", "TOKEN", "/work/a b.py"]
+    await backend.aexec_argv(argv)
+    assert env.calls == [
+        backend._full_command(argv_to_posix_command(argv), cwd=None, env=None)
+    ]
 
     env.calls.clear()
-    backend.run_python("print(1)")
     await backend.arun_python("print(1)")
-    assert env.calls[0] == env.calls[1]
+    assert env.calls == [
+        backend._full_command(
+            backend._python_command("print(1)"), cwd=None, env=None
+        )
+    ]

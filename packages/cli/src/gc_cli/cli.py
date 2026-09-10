@@ -348,7 +348,7 @@ def _run_update() -> int:
 async def _run_init_agents_md() -> int:
     """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md.
 
-    Корутина, потому что зовётся из-под ``asyncio.run(amain())``, а
+    Корутина, потому что зовётся из-под ``asyncio.run(arun_cli())``, а
     синхронного входа у ядра нет вовсе.
     """
     from gc_core.instructions.init_agents_md import build_init_prompt
@@ -368,7 +368,7 @@ async def _run_init_agents_md() -> int:
     try:
         await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам
     finally:
-        # Тот же `finally`, что и у `amain`: свой `asyncio.run` — свой пул
+        # Тот же `finally`, что и у `arun_cli`: свой `asyncio.run` — свой пул
         # клиентов, и закрыть его больше некому. Без этого `--init` уходил с
         # открытым сокетом и «Event loop is closed» на закрытии loop.
         await aclose_clients()
@@ -376,7 +376,7 @@ async def _run_init_agents_md() -> int:
     return 0
 
 
-async def amain() -> int:
+async def arun_cli() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
     создание RunContext и запуск агента.
@@ -464,7 +464,7 @@ async def amain() -> int:
         ensure_mcp_daemons(
             config_dict, disable_hint="отключить автозапуск: запустите без `-a`"
         )
-    # Асинхронная сборка: мы внутри asyncio.run(amain()), и синхронный
+    # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
     # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
     ctx = await acreate_run_context(
@@ -529,12 +529,16 @@ async def amain() -> int:
 def main() -> int:
     """Синхронная точка входа команды ``gc-cli``.
 
-    Сам прогон асинхронный (``amain``), поэтому здесь заводится ОДИН loop на
+    Сам прогон асинхронный (``arun_cli``), поэтому здесь заводится ОДИН loop на
     процесс, и ход агента идёт на нём же.
+
+    Это НЕ синхронный двойник: одноимённой корутины ``amain`` больше нет.
+    Пара ``main``/``amain`` читалась счётчиком как случайная — точка входа
+    консольной команды обязана быть синхронной, и прогон у неё ровно один.
     """
     import asyncio
 
-    return asyncio.run(amain())
+    return asyncio.run(arun_cli())
 
 
 if __name__ == "__main__":

@@ -71,7 +71,7 @@ async def test_walk_uses_elevated_cap_not_tool_60k(loop_in_thread):
         return FakeExecResult(stdout="Y" * 100_000, return_code=0)
 
     env.exec = huge_tool
-    res = backend.exec("echo y")
+    res = await backend.aexec("echo y")
     assert len(res.stdout) == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
     assert res.stdout_hit_capture_cap is True
 

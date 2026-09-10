@@ -62,7 +62,7 @@ def _read_current_data_rows(tmp_dir: str, thread_id: str):
         return [json.loads(line) for line in fd if line.strip()]
 
 
-def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(monkeypatch):
+async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         thread_id = "demo-thread"
         system_id = "cli"
@@ -80,7 +80,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             known,
             start_seq=0,
         )
-        session = ThreadSession.from_config(
+        session = await ThreadSession.afrom_config(
             config_dict={"threads_data_path": tmp_dir},
             system_id=system_id,
             thread_id=thread_id,
@@ -109,16 +109,16 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             _fake_patch_replace,
         )
 
-        assert run_coro(amaybe_run_summary_compaction(
+        assert await amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        ))
+        )
 
         rows_after_first = _read_current_data_rows(tmp_dir, thread_id)
         assert len(rows_after_first) == 1
@@ -129,7 +129,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state.user_intent_log.extend(
             deserialize_list(["third request", "fourth request"])
         )
-        session.persist_batch(
+        await session.apersist_batch(
             [
                 {"role": "user", "content": "third request"},
                 {"role": "assistant", "content": "third reply"},
@@ -140,16 +140,16 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         )
         prev_offset = int(state.dialog_steps_offset)
         state.messages = session.get_full_history_messages()
-        assert run_coro(amaybe_run_summary_compaction(
+        assert await amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        ))
+        )
         assert int(state.dialog_steps_offset) > prev_offset
 
         assert intent_user_ask_texts(state.user_intent_log) == [
@@ -183,7 +183,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert len(archives) >= 2
 
 
-def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
+async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         thread_id = "demo-thread-tech"
         system_id = "cli"
@@ -204,7 +204,7 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             known,
             start_seq=0,
         )
-        session = ThreadSession.from_config(
+        session = await ThreadSession.afrom_config(
             config_dict={"threads_data_path": tmp_dir},
             system_id=system_id,
             thread_id=thread_id,
@@ -238,16 +238,16 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             _fake_patch_replace,
         )
 
-        assert run_coro(amaybe_run_summary_compaction(
+        assert await amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
-        ))
+        )
         # После compaction user log в state не перезаписывается: source of truth
         # для него формируется инкрементально в runtime и здесь сохраняется как есть.
         assert intent_user_ask_texts(state.user_intent_log) == [

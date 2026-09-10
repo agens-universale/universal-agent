@@ -1,65 +1,102 @@
-"""Кэш возможностей бэкенда: повторный захват одного и того же замка.
+"""Кэш возможностей бэкенда: кто его наполняет и на чём экономит.
 
-``grep_exclude_dir`` / ``grep_include`` берут ``_cap_lock`` и внутри читают
-``has_grep``, который берёт тот же нереентерабельный замок. В проде спасал
-только порядок вызовов — холодное чтение зависает.
+Раньше здесь сторожили повторный захват ``_cap_lock``: ``grep_exclude_dir`` и
+``grep_include`` брали замок и внутри читали ``has_grep``, который брал тот же
+нереентерабельный замок, — холодное чтение зависало, и спасал только порядок
+вызовов. Предмета больше нет: пробы стали корутинными, свойства читают ТОЛЬКО
+кэш, и единственный его писатель — ``awarm_capabilities``. Замок снят вместе с
+ленивой пробой из свойства.
+
+Осталось два свойства, которые стоит держать: под-возможности проверяются
+пробой, когда grep рабочий, и не проверяются, когда его нет.
 """
 
-import threading
+import pytest
 
 from gc_core.backends import capabilities as capabilities
 from gc_core.backends.local import LocalFsBackend
+from gc_core.backends.protocol import CapabilitiesNotWarmedError
 
 
-def _read_in_thread(backend, name, timeout=5.0):
-    box = {}
+def _stub(value, calls=None, name=""):
+    """Двойник пробы повторяет ФОРМУ прода: проба корутинная.
 
-    def run():
-        box["value"] = getattr(backend, name)
+    Синхронная заглушка дала бы ``TypeError: object bool can't be used in
+    'await'``, а прогрев ловит исключение пробы и пишет ``False`` — то есть
+    подмена молча превратилась бы в «возможности нет», и тест зеленел бы на
+    ложном основании.
+    """
 
-    worker = threading.Thread(target=run, daemon=True)
-    worker.start()
-    worker.join(timeout)
-    assert not worker.is_alive(), f"чтение {name} зависло: повторный захват _cap_lock"
-    return box["value"]
+    async def probe(_backend):
+        if calls is not None:
+            calls.append(name)
+        return value
+
+    return probe
 
 
-def test_grep_include_cold_read_does_not_deadlock(monkeypatch):
-    monkeypatch.setattr(capabilities, "probe_has_grep", lambda backend: False)
+async def test_sub_capabilities_are_probed_when_grep_is_usable(monkeypatch):
+    """При рабочем grep под-возможности всё ещё проверяются пробой."""
+    monkeypatch.setattr(capabilities, "aprobe_has_grep", _stub(True))
+    monkeypatch.setattr(capabilities, "aprobe_grep_include", _stub(True))
+    monkeypatch.setattr(capabilities, "aprobe_grep_exclude_dir", _stub(True))
     backend = LocalFsBackend()
 
-    assert _read_in_thread(backend, "grep_include") is False
+    await backend.awarm_capabilities()
+
+    assert backend.grep_include is True
+    assert backend.grep_exclude_dir is True
 
 
-def test_grep_exclude_dir_cold_read_does_not_deadlock(monkeypatch):
-    monkeypatch.setattr(capabilities, "probe_has_grep", lambda backend: False)
+async def test_sub_capabilities_are_skipped_when_grep_is_missing(monkeypatch):
+    """Нет grep — под-пробы не запускаются вовсе, но кэш всё равно закрыт.
+
+    Два свойства сразу. Первое: два запуска процесса на боксе, где ответ уже
+    известен, — чистая плата (в песочнице это до ~10 с на пробу). Второе: кэш
+    обязан закрыться значением, а не остаться пустым, иначе чтение свойства
+    ПОСЛЕ прогрева получило бы отказ «не прогрето» — самый сбивающий с толку
+    из возможных ответов.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(capabilities, "aprobe_has_grep", _stub(False, calls, "grep"))
+    monkeypatch.setattr(
+        capabilities, "aprobe_grep_include", _stub(True, calls, "include")
+    )
+    monkeypatch.setattr(
+        capabilities, "aprobe_grep_exclude_dir", _stub(True, calls, "exclude")
+    )
     backend = LocalFsBackend()
 
-    assert _read_in_thread(backend, "grep_exclude_dir") is False
+    await backend.awarm_capabilities()
+
+    assert calls == ["grep"], f"под-пробы запускались напрасно: {calls}"
+    assert backend.grep_include is False
+    assert backend.grep_exclude_dir is False
 
 
-def test_sub_capabilities_are_probed_when_grep_is_usable(monkeypatch):
-    """Регрессия: при рабочем grep под-возможности всё ещё проверяются пробой."""
-    monkeypatch.setattr(capabilities, "probe_has_grep", lambda backend: True)
-    monkeypatch.setattr(capabilities, "probe_grep_include", lambda backend: True)
-    monkeypatch.setattr(capabilities, "probe_grep_exclude_dir", lambda backend: True)
+async def test_capability_values_are_cached_once(monkeypatch):
+    """Второй прогрев проб не повторяет: кэш наполняется однократно."""
+    calls: list[str] = []
+    monkeypatch.setattr(capabilities, "aprobe_has_grep", _stub(False, calls, "grep"))
     backend = LocalFsBackend()
 
-    assert _read_in_thread(backend, "grep_include") is True
-    assert _read_in_thread(backend, "grep_exclude_dir") is True
+    await backend.awarm_capabilities()
+    await backend.awarm_capabilities()
+
+    assert calls == ["grep"], f"проба запускалась повторно: {calls}"
+    assert backend.has_grep is False
 
 
-def test_capability_values_are_cached_once(monkeypatch):
-    calls = []
+def test_a_cold_read_refuses_instead_of_probing(monkeypatch):
+    """Холодное чтение — отказ, а не проба.
 
-    def counting(backend):
-        calls.append(1)
-        return False
-
-    monkeypatch.setattr(capabilities, "probe_has_grep", counting)
+    Именно здесь была заморозка: свойство запускало пробу само, из-под loop
+    вызывающего.
+    """
+    monkeypatch.setattr(
+        capabilities, "aprobe_has_grep", _stub(True),
+    )
     backend = LocalFsBackend()
 
-    _read_in_thread(backend, "has_grep")
-    _read_in_thread(backend, "has_grep")
-
-    assert len(calls) == 1
+    with pytest.raises(CapabilitiesNotWarmedError):
+        backend.grep_include

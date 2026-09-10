@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from gc_testkit import as_coro
+
 # tests/harbor/ (a test-fixture package) shadows the real harbor framework:
 # reorder sys.path so real site-packages wins, then evict cached shadows.
 _harbor_sp = next(
@@ -223,7 +225,7 @@ def test_run_merges_profile_skills_without_backend_special_casing(tmp_path, monk
     assert captured["config"]["skills_data_path"] == "/harbor/skills"
 
 
-def test_skills_debug_artifact_records_loaded_ids_and_sources(tmp_path, monkeypatch):
+async def test_skills_debug_artifact_records_loaded_ids_and_sources(tmp_path, monkeypatch):
     agent = GcCliExternal(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",
@@ -232,14 +234,14 @@ def test_skills_debug_artifact_records_loaded_ids_and_sources(tmp_path, monkeypa
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry",
         lambda cfg, backend=None: SimpleNamespace(
-            list_skills=lambda: [{"id": "threat-model"}, {"id": "mesh-analysis"}]
+            list_skills=as_coro(lambda: [{"id": "threat-model"}, {"id": "mesh-analysis"}])
         ),
     )
     ctx = SimpleNamespace(
         config_dict={"skills_data_path": "/harbor/skills"}, os_backend=None
     )
 
-    agent._write_skills_debug(ctx, {"threat-model": "profile", "validation": "skipped"})
+    await agent._write_skills_debug(ctx, {"threat-model": "profile", "validation": "skipped"})
 
     payload = json.loads((tmp_path / "logs" / "skills.json").read_text())
     assert payload["skills_root"] == "/harbor/skills"
@@ -251,7 +253,7 @@ def test_skills_debug_artifact_records_loaded_ids_and_sources(tmp_path, monkeypa
     assert payload["counts"] == {"loaded": 2, "profile": 1, "skipped": 1}
 
 
-def test_skills_debug_artifact_marks_collision_source_as_task(tmp_path, monkeypatch):
+async def test_skills_debug_artifact_marks_collision_source_as_task(tmp_path, monkeypatch):
     agent = GcCliExternal(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",
@@ -260,7 +262,7 @@ def test_skills_debug_artifact_marks_collision_source_as_task(tmp_path, monkeypa
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry",
         lambda cfg, backend=None: SimpleNamespace(
-            list_skills=lambda: [{"id": "threat-model"}]
+            list_skills=as_coro(lambda: [{"id": "threat-model"}])
         ),
     )
     ctx = SimpleNamespace(
@@ -271,7 +273,7 @@ def test_skills_debug_artifact_marks_collision_source_as_task(tmp_path, monkeypa
     # the profile's copy was skipped, but the registry still loads *a* skill under
     # this name — the task's copy. The artifact must attribute that loaded copy to
     # "task", not mislabel it "skipped" just because the profile's upload was skipped.
-    agent._write_skills_debug(ctx, {"threat-model": "skipped"})
+    await agent._write_skills_debug(ctx, {"threat-model": "skipped"})
 
     payload = json.loads((tmp_path / "logs" / "skills.json").read_text())
     assert payload["loaded"] == [{"id": "threat-model", "source": "task"}]
@@ -290,6 +292,6 @@ async def test_skills_debug_artifact_failure_does_not_raise(tmp_path, monkeypatc
 
     monkeypatch.setattr("gc_core.tools.skills.registry.get_skills_registry", _boom)
 
-    agent._write_skills_debug(SimpleNamespace(config_dict={}, os_backend=None), {})
+    await agent._write_skills_debug(SimpleNamespace(config_dict={}, os_backend=None), {})
 
     assert not (tmp_path / "logs" / "skills.json").exists()

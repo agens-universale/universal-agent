@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from gc_core.states import SharedStateData, State
 from gc_core.thread_store import read_subagent_trace
-from gc_core.tools.subagents.sidecar import persist_subagent_trace
+from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_testkit import run_coro
 
 
@@ -133,7 +133,7 @@ class TestSidecarIntermediateReply:
 
 
 class TestSidecarFinished:
-    def test_finished_on_success(self, tmp_path):
+    async def test_finished_on_success(self, tmp_path):
         from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
@@ -160,7 +160,7 @@ class TestSidecarFinished:
             child_state.steps = 3
             return "done"
 
-        result = runner.run(
+        result = await runner.arun(
             "subagent_worker",
             {"task": "x", "reason": "y"},
             fake_run_agent,
@@ -177,7 +177,7 @@ class TestSidecarFinished:
         }
         assert finished[0]["parent_call_id"] == "call_sub_1"
 
-    def test_finished_on_user_stop(self, tmp_path):
+    async def test_finished_on_user_stop(self, tmp_path):
         from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
@@ -204,7 +204,7 @@ class TestSidecarFinished:
             child_state.steps = 1
             return None
 
-        runner.run(
+        await runner.arun(
             "subagent_worker",
             {"task": "x", "reason": "y"},
             fake_run_agent,
@@ -218,7 +218,7 @@ class TestSidecarFinished:
 
 
 class TestSidecarChildSummary:
-    def test_child_summary_on_compaction_applied(self, tmp_path):
+    async def test_child_summary_on_compaction_applied(self, tmp_path):
         from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
@@ -268,7 +268,7 @@ class TestSidecarChildSummary:
                 {"role": "user", "content": "new"},
             ]
             # строки до маркера остаются в sidecar
-            persist_subagent_trace(
+            await apersist_subagent_trace(
                 child_ctx,
                 kind="call",
                 payload={
@@ -291,7 +291,7 @@ class TestSidecarChildSummary:
                 rsc, "arun_summary_compaction", side_effect=fake_run_summary_compaction
             ),
         ):
-            runner.run(
+            await runner.arun(
                 "subagent_worker",
                 {"task": "long", "reason": "y"},
                 fake_run_agent,

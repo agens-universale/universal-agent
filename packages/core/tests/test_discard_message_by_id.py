@@ -12,9 +12,9 @@ def _session(tmp_path):
     )
 
 
-def test_removes_only_matching_id(tmp_path):
+async def test_removes_only_matching_id(tmp_path):
     ts = _session(tmp_path)
-    ts.persist_batch(
+    await ts.apersist_batch(
         [{"role": "user", "content": "одинаковый", "id": "m_orphan"},
          {"type": "function_call", "call_id": "c1", "name": "x", "arguments": "{}", "id": "a1"},
          {"role": "user", "content": "одинаковый", "id": "m_resend"}],
@@ -32,9 +32,9 @@ def test_removes_only_matching_id(tmp_path):
     assert load_thread_meta(str(tmp_path), "cli", "t1")["messages_count"] == 2
 
 
-def test_missing_id_is_noop(tmp_path):
+async def test_missing_id_is_noop(tmp_path):
     ts = _session(tmp_path)
-    ts.persist_batch([{"role": "user", "content": "x", "id": "m1"}], previous_response_id=None)
+    await ts.apersist_batch([{"role": "user", "content": "x", "id": "m1"}], previous_response_id=None)
     assert discard_message_by_id(str(tmp_path), "cli", "t1", "nope") is False
     msgs, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
     assert len(msgs) == 1

@@ -350,7 +350,7 @@ class GcCliExternal(BaseAgent):
             sources[skill_dir.name] = "profile"
         return root, sources
 
-    def _write_skills_debug(self, ctx: Any, sources: dict[str, str]) -> None:
+    async def _write_skills_debug(self, ctx: Any, sources: dict[str, str]) -> None:
         """Dump the skills the registry actually loaded to ``logs_dir/skills.json``.
 
         Authoritative by construction: the listing comes from the same registry and
@@ -364,7 +364,7 @@ class GcCliExternal(BaseAgent):
             config_dict = getattr(ctx, "config_dict", {}) or {}
             root = config_dict.get("skills_data_path")
             registry = get_skills_registry(config_dict, backend=ctx.os_backend)
-            loaded = sorted(str(s["id"]) for s in registry.list_skills())
+            loaded = sorted(str(s["id"]) for s in await registry.list_skills())
             payload = {
                 "skills_root": root,
                 # A name in `sources` mapped to "skipped" means the profile's copy was
@@ -611,7 +611,7 @@ class GcCliExternal(BaseAgent):
                     loop=loop,
                     on_messages_evicted=_on_messages_evicted,
                 )
-                self._write_skills_debug(ctx, skill_sources)
+                await self._write_skills_debug(ctx, skill_sources)
                 executor = AgentExecutor(ctx)
                 # Отмену могли попросить, пока шла дискавери (до 120 с): тогда
                 # `stop_run()` звать было НЕ НА ЧЁМ — `executor` ещё не был

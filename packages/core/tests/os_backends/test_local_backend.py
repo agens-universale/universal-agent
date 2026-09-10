@@ -103,20 +103,20 @@ async def test_traverse_and_paths(be, tmp_path):
     assert be.join(root, "x") == os.path.join(root, "x")
 
 
-def test_exec_ok_and_timeout(be, tmp_path):
-    res = be.exec("echo hi", cwd=str(tmp_path), timeout=10)
+async def test_exec_ok_and_timeout(be, tmp_path):
+    res = await be.aexec("echo hi", cwd=str(tmp_path), timeout=10)
     assert isinstance(res, ExecResult)
     assert res.return_code == 0 and res.stdout.strip() == "hi" and not res.timed_out
-    res = be.exec("sleep 5", timeout=1)
+    res = await be.aexec("sleep 5", timeout=1)
     assert res.timed_out and res.return_code is None
-    env_res = be.exec("echo $GC_T", timeout=10, env={"GC_T": "42"})
+    env_res = await be.aexec("echo $GC_T", timeout=10, env={"GC_T": "42"})
     assert env_res.stdout.strip() == "42"
 
 
-def test_run_python(be, tmp_path):
-    res = be.run_python("print('ok')", cwd=str(tmp_path), timeout=10)
+async def test_run_python(be, tmp_path):
+    res = await be.arun_python("print('ok')", cwd=str(tmp_path), timeout=10)
     assert res.return_code == 0 and res.stdout.strip() == "ok"
-    res = be.run_python("import time; time.sleep(5)", timeout=1)
+    res = await be.arun_python("import time; time.sleep(5)", timeout=1)
     assert res.timed_out
 
 
@@ -200,8 +200,8 @@ async def test_read_head_bytes_binary(be, tmp_path):
 
 # --- bounded exec runner (spec D1/D2/D9/D10) ---
 
-def test_exec_result_has_capture_cap_flags(be):
-    res = be.exec("echo hi", timeout=10)
+async def test_exec_result_has_capture_cap_flags(be):
+    res = await be.aexec("echo hi", timeout=10)
     assert isinstance(res, ExecResult)
     assert res.stdout_hit_capture_cap is False
     assert res.stderr_hit_capture_cap is False
@@ -213,7 +213,7 @@ def test_exec_default_capture_cap_is_40k(be):
 
 
 
-def test_exec_spawns_no_helper_threads(be):
+async def test_exec_spawns_no_helper_threads(be):
     """Ни одного вспомогательного потока на вызов.
 
     Прежняя реализация держала два дренажных потока: pipe нельзя не читать —
@@ -222,12 +222,12 @@ def test_exec_spawns_no_helper_threads(be):
     (раньше здесь проверялось, что они хотя бы демонские).
     """
     before = threading.active_count()
-    res = be.exec("echo hi", timeout=10)
+    res = await be.aexec("echo hi", timeout=10)
     assert res.return_code == 0
     assert threading.active_count() == before
 
 
-def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be):
+async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be):
     """Захват ограничен, но процесс дочитывается и завершается сам.
 
     Раньше это проверялось на приватном _drain_pipe; теперь — на поведении
@@ -237,7 +237,7 @@ def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be):
     # sys.executable, а не голое `python`: имени `python` в PATH может не быть
     # (в окружениях uv/pyenv ставится только `python3`), и тест падал бы на
     # `command not found` — не на том свойстве, которое проверяет.
-    res = be.exec(f'{sys.executable} -c "print(\'z\' * 20000)"', timeout=15)
+    res = await be.aexec(f'{sys.executable} -c "print(\'z\' * 20000)"', timeout=15)
 
     assert len(res.stdout) <= 40
     assert res.stdout_hit_capture_cap is True
@@ -245,20 +245,20 @@ def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be):
     assert res.timed_out is False
 
 
-def test_exec_per_call_capture_max_overrides_default(be):
+async def test_exec_per_call_capture_max_overrides_default(be):
     be.exec_output_capture_max_chars = 50
-    res = be.exec("yes A | head -c 5000", timeout=15, capture_max_chars=400)
+    res = await be.aexec("yes A | head -c 5000", timeout=15, capture_max_chars=400)
     assert res.return_code == 0
     assert len(res.stdout) <= 400
     assert len(res.stdout) > 50
     assert res.stdout_hit_capture_cap is True
 
 
-def test_exec_bounded_stdout_not_killed(be):
+async def test_exec_bounded_stdout_not_killed(be):
     """Output exceeding cap is bounded; process is NOT killed (drain & discard)."""
     be.exec_output_capture_max_chars = 200
     # Print ~5000 chars to stdout; process must finish on its own (exit 0).
-    res = be.exec("yes A | head -c 5000", timeout=15)
+    res = await be.aexec("yes A | head -c 5000", timeout=15)
     assert res.return_code == 0
     assert not res.timed_out
     assert len(res.stdout) <= 200
@@ -266,21 +266,21 @@ def test_exec_bounded_stdout_not_killed(be):
     assert res.stderr_hit_capture_cap is False
 
 
-def test_exec_bounded_stderr(be):
+async def test_exec_bounded_stderr(be):
     be.exec_output_capture_max_chars = 150
     # Redirect to stderr only.
-    res = be.exec("yes B | head -c 5000 >&2", timeout=15)
+    res = await be.aexec("yes B | head -c 5000 >&2", timeout=15)
     assert res.return_code == 0
     assert len(res.stderr) <= 150
     assert res.stderr_hit_capture_cap is True
     assert res.stdout_hit_capture_cap is False
 
 
-def test_exec_both_pipes_large_no_deadlock(be):
+async def test_exec_both_pipes_large_no_deadlock(be):
     """Both stdout and stderr large simultaneously must not deadlock the runner."""
     be.exec_output_capture_max_chars = 100
     cmd = "yes O | head -c 8000 & yes E | head -c 8000 >&2 & wait"
-    res = be.exec(cmd, timeout=20)
+    res = await be.aexec(cmd, timeout=20)
     assert res.return_code == 0
     assert len(res.stdout) <= 100
     assert len(res.stderr) <= 100
@@ -288,61 +288,61 @@ def test_exec_both_pipes_large_no_deadlock(be):
     assert res.stderr_hit_capture_cap is True
 
 
-def test_exec_small_output_no_cap_hit(be):
+async def test_exec_small_output_no_cap_hit(be):
     be.exec_output_capture_max_chars = 60_000
-    res = be.exec("echo small", timeout=10)
+    res = await be.aexec("echo small", timeout=10)
     assert res.return_code == 0
     assert res.stdout.strip() == "small"
     assert res.stdout_hit_capture_cap is False
     assert res.stderr_hit_capture_cap is False
 
 
-def test_exec_timeout_partial_buffer(be):
+async def test_exec_timeout_partial_buffer(be):
     """On timeout: timed_out=True, exit_code=None, partial buffer preserved."""
     be.exec_output_capture_max_chars = 60_000
-    res = be.exec("echo started; sleep 5", timeout=1)
+    res = await be.aexec("echo started; sleep 5", timeout=1)
     assert res.timed_out is True
     assert res.return_code is None
     assert "started" in res.stdout
 
 
-def test_run_python_bounded_output(be):
+async def test_run_python_bounded_output(be):
     be.exec_output_capture_max_chars = 120
     code = "print('A' * 5000)"
-    res = be.run_python(code, timeout=15)
+    res = await be.arun_python(code, timeout=15)
     assert res.return_code == 0
     assert len(res.stdout) <= 120
     assert res.stdout_hit_capture_cap is True
 
 
-def test_run_python_per_call_capture_max_overrides_default(be):
+async def test_run_python_per_call_capture_max_overrides_default(be):
     be.exec_output_capture_max_chars = 50
-    res = be.run_python("print('A' * 5000)", timeout=15, capture_max_chars=400)
+    res = await be.arun_python("print('A' * 5000)", timeout=15, capture_max_chars=400)
     assert res.return_code == 0
     assert len(res.stdout) <= 400
     assert len(res.stdout) > 50
     assert res.stdout_hit_capture_cap is True
 
 
-def test_run_python_small_output_no_cap(be):
+async def test_run_python_small_output_no_cap(be):
     be.exec_output_capture_max_chars = 60_000
-    res = be.run_python("print('py-ok')", timeout=10)
+    res = await be.arun_python("print('py-ok')", timeout=10)
     assert res.return_code == 0
     assert res.stdout.strip() == "py-ok"
     assert res.stdout_hit_capture_cap is False
 
 
-def test_run_python_bounded_stderr(be):
+async def test_run_python_bounded_stderr(be):
     be.exec_output_capture_max_chars = 100
     code = "import sys; sys.stderr.write('E' * 4000)"
-    res = be.run_python(code, timeout=15)
+    res = await be.arun_python(code, timeout=15)
     assert res.return_code == 0
     assert len(res.stderr) <= 100
     assert res.stderr_hit_capture_cap is True
 
 
-def test_run_python_timeout(be, tmp_path):
-    res = be.run_python("import time; print('go'); time.sleep(5)", cwd=str(tmp_path), timeout=1)
+async def test_run_python_timeout(be, tmp_path):
+    res = await be.arun_python("import time; print('go'); time.sleep(5)", cwd=str(tmp_path), timeout=1)
     assert res.timed_out is True
     assert res.return_code is None
     assert "go" in res.stdout

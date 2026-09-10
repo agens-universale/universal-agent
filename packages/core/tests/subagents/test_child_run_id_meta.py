@@ -77,7 +77,7 @@ def _runner():
     return SubagentRunner(ctx, orch, {"use_local_subagents": True})
 
 
-def test_success_meta_includes_child_run_id_not_path(monkeypatch):
+async def test_success_meta_includes_child_run_id_not_path(monkeypatch):
     runner = _runner()
     child = _FakeChildState()
     cls = _wire(monkeypatch, runner, child, run_id="child-guid-1")
@@ -85,7 +85,7 @@ def test_success_meta_includes_child_run_id_not_path(monkeypatch):
     async def _fake_run_agent(*a, **k):
         return "done"
 
-    out = runner._run_internal(
+    out = await runner._arun_internal(
         "subagent_worker",
         cls,
         {"task": "t"},
@@ -101,7 +101,7 @@ def test_success_meta_includes_child_run_id_not_path(monkeypatch):
     assert ".log" not in blob
 
 
-def test_run_failed_error_includes_child_run_id(monkeypatch):
+async def test_run_failed_error_includes_child_run_id(monkeypatch):
     runner = _runner()
     child = _FakeChildState()
     cls = _wire(monkeypatch, runner, child, run_id="child-guid-err")
@@ -109,14 +109,14 @@ def test_run_failed_error_includes_child_run_id(monkeypatch):
     async def boom(*a, **k):
         raise RuntimeError("boom")
 
-    out = runner._run_internal("subagent_worker", cls, {"task": "t"}, boom)
+    out = await runner._arun_internal("subagent_worker", cls, {"task": "t"}, boom)
     payload = json.loads(out)
     assert payload["ok"] is False
     assert payload["meta"]["child_run_id"] == "child-guid-err"
     assert "child_log_path" not in payload["meta"]
 
 
-def test_early_error_without_ctx_has_no_child_run_id():
+async def test_early_error_without_ctx_has_no_child_run_id():
     """До build child_ctx run_id ещё нет — meta без child_run_id."""
     orch = SimpleNamespace(
         usage=UsageAccount(),
@@ -131,7 +131,7 @@ def test_early_error_without_ctx_has_no_child_run_id():
     async def _fake_run_agent(*a, **k):
         return None
 
-    out = runner.run("subagent_no_such", {"task": "t"}, _fake_run_agent)
+    out = await runner.arun("subagent_no_such", {"task": "t"}, _fake_run_agent)
     payload = json.loads(out)
     assert payload["ok"] is False
     assert "child_run_id" not in payload["meta"]

@@ -32,7 +32,7 @@ def _runner_with_orchestrator():
     return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
 
 
-def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
+async def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
     runner, orch = _runner_with_orchestrator()
     child = _FakeChildState()
 
@@ -69,7 +69,7 @@ def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
     async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         return "done"
 
-    out = runner._run_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
+    out = await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
     payload = json.loads(out)
 
     assert payload["ok"] is True

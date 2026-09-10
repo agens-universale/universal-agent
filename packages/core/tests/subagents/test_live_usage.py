@@ -68,7 +68,7 @@ def _runner_with_orchestrator():
     return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
 
 
-def test_live_delta_then_finally_no_double_count(monkeypatch):
+async def test_live_delta_then_finally_no_double_count(monkeypatch):
     runner, orch = _runner_with_orchestrator()
     child = _FakeChildState()
     subagent_cls = _wire_runner(monkeypatch, runner, child)
@@ -89,7 +89,7 @@ def test_live_delta_then_finally_no_double_count(monkeypatch):
         assert orch.usage.by_category["subagent"]["output"] == 22
         return "done"
 
-    out = runner._run_internal(
+    out = await runner._arun_internal(
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
     payload = json.loads(out)
@@ -100,7 +100,7 @@ def test_live_delta_then_finally_no_double_count(monkeypatch):
     assert "usage" in payload["meta"]
 
 
-def test_finally_pushes_residual_if_no_mid_run_persist(monkeypatch):
+async def test_finally_pushes_residual_if_no_mid_run_persist(monkeypatch):
     """Если persist не звали — finally всё равно догоняет residual delta."""
     runner, orch = _runner_with_orchestrator()
     child = _FakeChildState()
@@ -110,12 +110,12 @@ def test_finally_pushes_residual_if_no_mid_run_persist(monkeypatch):
         child_state.usage.add(CATEGORY_MAIN, 50, 5)
         return "done"
 
-    runner._run_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
+    await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
     assert orch.usage.by_category["subagent"]["input"] == 50
     assert orch.usage.by_category["subagent"]["output"] == 5
 
 
-def test_parent_messages_untouched_by_usage_push(monkeypatch):
+async def test_parent_messages_untouched_by_usage_push(monkeypatch):
     """Контекст-бар родителя — только parent messages; runner не пишет в них."""
     runner, orch = _runner_with_orchestrator()
     orch.messages = [{"role": "user", "content": "parent only"}]
@@ -130,5 +130,5 @@ def test_parent_messages_untouched_by_usage_push(monkeypatch):
             persist([{"role": "assistant", "content": "x"}])
         return "done"
 
-    runner._run_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
+    await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
     assert orch.messages == [{"role": "user", "content": "parent only"}]

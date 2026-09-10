@@ -130,7 +130,7 @@ def test_meta_only_long_memory_check_cnt():
     assert get_project_memory_check_cnt(meta) == 5
 
 
-def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
+async def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
     monkeypatch.setattr(
@@ -155,7 +155,7 @@ def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
     set_project_memory_check_cnt(session.meta, 1)
 
     persist_tool_usage_notice_state(state, session.meta)
-    session.persist_batch([], previous_response_id=None)
+    await session.apersist_batch([], previous_response_id=None)
 
     from gc_core.thread_store import load_thread_meta
 

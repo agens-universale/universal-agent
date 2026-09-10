@@ -11,7 +11,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from gc_testkit.paths import module_dir
-from gc_testkit import run_coro
 
 
 def teardown_module(_module) -> None:
@@ -78,15 +77,26 @@ def _stub_tools_modules() -> None:
     tools_pkg.abuild_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_dir = module_dir("tools")
+    # `processing_responses` импортирует эти имена на уровне модуля. Без них
+    # подмена пакета даёт ImportError, и файл падает целиком — но только
+    # когда реальные модули не подтянул сосед по прогону. При случайном
+    # порядке (pytest-randomly) это молчащая мина, а не свойство файла.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_kw: False
+    tools_pkg.is_unknown_tool_output = lambda *_a, **_kw: False
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
 
     skills_pkg = types.ModuleType("gc_core.tools.skills")
-    skills_pkg.__path__ = []
+    # На РЕАЛЬНЫЙ каталог, а не пустой список: `states` импортирует
+    # `gc_core.tools.skills.skills_policy`, и с пустым __path__ настоящий
+    # подмодуль не находится. Подменён ниже только `registry`.
+    skills_pkg.__path__ = [str(tools_dir / "skills")]
     sys.modules["gc_core.tools.skills"] = skills_pkg
 
     registry_mod = types.ModuleType("gc_core.tools.skills.registry")
     registry_mod.get_skills_registry = lambda _cfg, **_kw: _SkillsRegistryStub()
+    # `run_context` импортирует и сам класс — без него подмена даёт ImportError.
+    registry_mod.SkillsRegistry = _SkillsRegistryStub
     sys.modules["gc_core.tools.skills.registry"] = registry_mod
 
 
@@ -186,7 +196,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=_record_summary_call,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = run_coro(executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False))
+                result = await executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             self.assertEqual(call_order[0], "summary:pre_run")
@@ -238,7 +248,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=_record,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = run_coro(executor.arun(["hello"], system="cli", verbose=False))
+                result = await executor.arun(["hello"], system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             self.assertEqual(calls, ["pre_run", "pre_backend"])
@@ -253,7 +263,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 run_summary_coordinator_module, "arun_summary_compaction"
             ) as compaction_mock:
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = run_coro(executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False))
+                result = await executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             compaction_mock.assert_not_called()
@@ -276,7 +286,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 return_value=False,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = run_coro(executor.arun(["hello"], system="cli", verbose=False))
+                result = await executor.arun(["hello"], system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             hook = captured.get("pre_backend_compaction_hook")
@@ -351,12 +361,12 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 return_value=False,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = run_coro(executor.arun(
+                result = await executor.arun(
                     ["новый вопрос"],
                     thread_id=thread_id,
                     system="cli",
                     verbose=False,
-                ))
+                )
                 self.assertEqual(result, "ok")
 
             from gc_testkit.intent_fixtures import intent_user_ask_texts

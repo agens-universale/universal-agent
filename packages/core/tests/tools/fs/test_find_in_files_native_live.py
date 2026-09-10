@@ -11,6 +11,7 @@ skips the whole module.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -23,16 +24,24 @@ from gc_core.utils.pattern_native_gate import NativeGrepPlan
 
 
 def _host_caps():
+    """Возможности хоста — ОДИН прогрев, потом чтение кэша.
+
+    Прежняя версия читала свойства напрямую и глотала исключение в ``False``.
+    После того как пробы стали корутинными (свойство отвечает только из кэша
+    и до прогрева отказывает), это молча превратило ВСЕ тесты модуля в
+    пропуски: тринадцать живых проверок нативного grep исчезли из прогона, а
+    сводка осталась зелёной. Ровно та тихая деградация, от которой этот
+    модуль и сторожит.
+
+    Свой ``asyncio.run``: функция зовётся на сборе тестов, где loop'а нет.
+    """
     backend = LocalFsBackend()
     try:
-        grep = bool(backend.has_grep)
+        asyncio.run(backend.awarm_capabilities())
+        return bool(backend.has_grep), bool(backend.has_find)
     except Exception:
-        grep = False
-    try:
-        find = bool(backend.has_find)
-    except Exception:
-        find = False
-    return grep, find
+        # Отказ ЗДЕСЬ — это «на хосте нет grep/find», и пропуск честен.
+        return False, False
 
 
 _HOST_HAS_GREP, _HOST_HAS_FIND = _host_caps()
@@ -63,20 +72,24 @@ def _call_tool(tmp_path, extra=None, **kwargs):
     return json.loads(raw) if isinstance(raw, str) else raw
 
 
-def _warm_caps(backend):
-    """Run capability probes before spying so fixture exec is not mixed in."""
-    _ = backend.has_grep
-    _ = backend.has_find
+async def _warm_caps(backend):
+    """Прогреть пробы до слежки, чтобы exec фикстуры не смешался с замером.
+
+    Корутина: прогрев корутинный, а зовут её из корутинных тестов — свой
+    ``asyncio.run`` здесь отказал бы на живом loop. Чтение свойств ничего бы
+    не прогрело: они отвечают только из кэша.
+    """
+    await backend.awarm_capabilities()
 
 
-def _spy_exec(monkeypatch, backend):
+async def _spy_exec(monkeypatch, backend):
     """Слежка за ЗАПУСКОМ команды. Шов асинхронный: тул ходит через
     ``aexec``/``aexec_argv`` (у запуска процесса нативная форма есть, и держать
     на нём слот пула на 120 секунд бюджета нельзя). Синхронные ``exec`` при
     этом никто не зовёт, и слежка за ними ловила бы пустоту — так и вышло,
     когда тул перевели на async: ответ оставался верным, а список вызовов
     пустел."""
-    _warm_caps(backend)
+    await _warm_caps(backend)
     calls: list[tuple[str, object]] = []
     orig_exec = backend.aexec
     orig_argv = backend.aexec_argv
@@ -100,14 +113,16 @@ def _spy_exec(monkeypatch, backend):
 
 
 @requires_native_search
-def test_dir_search_uses_find_xargs_grep_pipeline(tmp_path, monkeypatch):
+async def test_dir_search_uses_find_xargs_grep_pipeline(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     (tmp_path / ".hidden").mkdir()
     (tmp_path / ".hidden" / "secret.py").write_text("TOKEN = leak\n", encoding="utf-8")
 
     tool = _tool(tmp_path)
-    calls = _spy_exec(monkeypatch, tool._backend)
-    data = json.loads(tool(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
+    calls = await _spy_exec(monkeypatch, tool._backend)
+    data = json.loads(
+        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
+    )
 
     assert data["search_backend"] == "grep"
     assert data["count"] == 1
@@ -119,14 +134,16 @@ def test_dir_search_uses_find_xargs_grep_pipeline(tmp_path, monkeypatch):
 
 
 @requires_native_search
-def test_find_prunes_hard_exclude_dirs(tmp_path, monkeypatch):
+async def test_find_prunes_hard_exclude_dirs(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules" / "pkg.js").write_text("TOKEN = dep\n", encoding="utf-8")
 
     tool = _tool(tmp_path)
-    calls = _spy_exec(monkeypatch, tool._backend)
-    data = json.loads(tool(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
+    calls = await _spy_exec(monkeypatch, tool._backend)
+    data = json.loads(
+        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
+    )
 
     assert data["search_backend"] == "grep"
     files = [m["file"] for m in data["matches"]]
@@ -186,7 +203,7 @@ def test_native_dir_mode_omits_context_when_file_exceeds_max_bytes(tmp_path, mon
 
 
 @requires_native_search
-def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypatch):
+async def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypatch):
     body = "\n".join(
         ["alpha", "TOKEN first", "beta", "gamma", "TOKEN second", "delta"]
     ) + "\n"
@@ -208,7 +225,9 @@ def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tool._backend, "read_bytes", _read)
     monkeypatch.setattr(tool._backend, "getsize", _size)
-    data = json.loads(tool(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
+    data = json.loads(
+        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
+    )
 
     assert data["search_backend"] == "grep"
     assert data["count"] == 2
@@ -219,7 +238,7 @@ def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypatch):
 
 
 @requires_native_search
-def test_native_context_omitted_on_read_error(tmp_path, monkeypatch):
+async def test_native_context_omitted_on_read_error(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     tool = _tool(tmp_path)
     orig_size = tool._backend.getsize
@@ -232,7 +251,9 @@ def test_native_context_omitted_on_read_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tool._backend, "getsize", _size)
     monkeypatch.setattr(tool._backend, "read_bytes", _read)
-    data = json.loads(tool(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
+    data = json.loads(
+        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
+    )
 
     assert data["search_backend"] == "grep"
     assert data["count"] == 1
@@ -244,7 +265,7 @@ def test_native_context_omitted_on_read_error(tmp_path, monkeypatch):
 
 
 @requires_native_search
-def test_native_context_omitted_on_stat_error(tmp_path, monkeypatch):
+async def test_native_context_omitted_on_stat_error(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     tool = _tool(tmp_path)
 
@@ -259,7 +280,9 @@ def test_native_context_omitted_on_stat_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tool._backend, "getsize", _size)
     monkeypatch.setattr(tool._backend, "read_bytes", _read)
-    data = json.loads(tool(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
+    data = json.loads(
+        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
+    )
 
     assert data["search_backend"] == "grep"
     assert data["count"] == 1
@@ -339,7 +362,7 @@ def test_native_clips_long_line_to_the_head_budget(tmp_path):
 async def test_recursive_grep_recipe_without_find_prune(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("TOKEN = 1\n", encoding="utf-8")
     backend = LocalFsBackend()
-    calls = _spy_exec(monkeypatch, backend)
+    calls = await _spy_exec(monkeypatch, backend)
 
     result = await arun_native_grep(
         backend,
@@ -369,7 +392,7 @@ async def test_single_file_grep_recipe(tmp_path, monkeypatch):
     target = tmp_path / "app.py"
     target.write_text("TOKEN = 1\n", encoding="utf-8")
     backend = LocalFsBackend()
-    calls = _spy_exec(monkeypatch, backend)
+    calls = await _spy_exec(monkeypatch, backend)
 
     result = await arun_native_grep(
         backend,

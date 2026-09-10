@@ -189,17 +189,19 @@ async def test_find_in_files_runs_grep_through_the_async_backend(tmp_path):
 
     tool = FindInFiles(ctx=local_ctx())
     backend = tool._backend
-    if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
-        pytest.skip("в песочнице нет grep/find — нативного пути нет")
 
-    # Пробы возможностей греем ДО ловушек, все четыре.
+    # Пробы возможностей греем ДО чтения свойств и ДО ловушек, все четыре.
     #
-    # Они синхронные по контракту `FsBackend` (менять это значило бы править
-    # протокол у каждого встраивающего) и кэшируются однократно на процесс —
-    # в проде их греет тот же вызов, `acall` перед поиском. Ловушка ниже
-    # сторожит МАРШРУТ САМОГО ПОИСКА, а не пробы: без прогрева она считала бы
-    # `grep_exclude_dir` и `grep_include`, которых строчкой выше не было.
+    # Порядок здесь несущий, и раньше он был обратным: свойства читались
+    # первыми и запускали пробы САМИ, лениво и синхронно. Теперь свойство
+    # отвечает только из кэша, а до прогрева отказывает — прочитать его первым
+    # значит получить `CapabilitiesNotWarmedError` вместо ответа.
+    #
+    # Ловушка ниже сторожит МАРШРУТ САМОГО ПОИСКА, а не проб: без прогрева она
+    # посчитала бы ещё и их запуски.
     await backend.awarm_capabilities()
+    if not (backend.has_grep and backend.has_find):
+        pytest.skip("в песочнице нет grep/find — нативного пути нет")
 
     seen = {"sync": 0, "async": 0}
     orig_aexec, orig_aexec_argv = backend.aexec, backend.aexec_argv

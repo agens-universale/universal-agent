@@ -99,16 +99,45 @@ async def test_native_backend_is_used_directly():
     assert aexec_port(backend) is backend
 
 
-async def test_async_and_sync_results_agree():
-    """Паритет: тот же результат, что у синхронного пути."""
-    backend = LocalFsBackend()
-    cmd = f'{sys.executable} -c "print(\'паритет\')"'
-    sync_res = await asyncio.to_thread(lambda: backend.exec(cmd))
-    async_res = await backend.aexec(cmd)
+async def test_native_and_adapted_paths_agree():
+    """Паритет: чужой синхронный бэкенд через адаптер даёт тот же результат.
 
-    assert async_res.stdout == sync_res.stdout
-    assert async_res.return_code == sync_res.return_code
-    assert async_res.timed_out == sync_res.timed_out
+    Сравнивать асинхронный путь с синхронным больше нечего: синхронной формы
+    у НАШИХ бэкендов нет — она была обёрткой ``run_coro_blocking``, то есть
+    заводила второй loop. Прежняя версия этого теста сравнивала
+    ``backend.exec`` с ``backend.aexec``; после снятия двойника она сравнивала
+    бы результат с самим собой и зеленела бы при любой поломке.
+
+    Настоящая двойственность осталась на уровне БЭКЕНДА: свой ядро видит
+    напрямую, чужой синхронный — через ``SyncExecAdapter``. Оба обязаны дать
+    один результат.
+    """
+    cmd = f'{sys.executable} -c "print(\'паритет\')"'
+    native = LocalFsBackend()
+    assert aexec_port(native) is native
+    native_res = await native.aexec(cmd)
+
+    class _Legacy:
+        """Чужой бэкенд: только синхронная форма, как у встраивающего."""
+
+        def __init__(self) -> None:
+            self._inner = LocalFsBackend()
+
+        def exec(self, command, *, cwd=None, timeout=None, env=None,
+                 capture_max_chars=None):
+            # Адаптер зовёт это в БРОШЕННОМ потоке, где своего loop нет.
+            return asyncio.run(self._inner.aexec(
+                command, cwd=cwd, timeout=timeout, env=env,
+                capture_max_chars=capture_max_chars,
+            ))
+
+    port = aexec_port(_Legacy())
+    assert isinstance(port, SyncExecAdapter)
+    adapted_res = await port.aexec(cmd)
+
+    assert adapted_res.stdout == native_res.stdout
+    assert adapted_res.return_code == native_res.return_code
+    assert adapted_res.timed_out == native_res.timed_out
 
 
 # --- регрессии, найденные ревизией переезда --------------------------------

@@ -12,7 +12,6 @@ import threading
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 from gc_core.backends.capture import BoundedStreamAccumulator, CapturedStream
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
     ExecResult,
@@ -275,42 +274,6 @@ class LocalFsBackend(FsBackend):
         return capture_max_chars
 
     # --- exec ---
-    def exec(self, command: str, *, cwd: Optional[str] = None,
-             timeout: Optional[int] = None,
-             env: Optional[dict] = None,
-             capture_max_chars: Optional[int] = None) -> ExecResult:
-        # Реализация одна — асинхронная (см. _arun_bounded_process): она не
-        # держит по два дренажных потока на вызов. Синхронный вход остаётся
-        # блокирующим, как и был. `capture_max_chars` приехал с develop
-        # (потолок захвата на ВЫЗОВ, а не на бэкенд) и просто проезжает дальше.
-        return run_coro_blocking(self.aexec(
-            command, cwd=cwd, timeout=timeout, env=env,
-            capture_max_chars=capture_max_chars,
-        ))
-
-    def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
-                  cwd: Optional[str] = None,
-                  timeout: Optional[int] = None,
-                  env: Optional[dict] = None,
-                  capture_max_chars: Optional[int] = None) -> ExecResult:
-        # Shell-less on purpose: the base-class default builds a POSIX shell
-        # string, which breaks under Windows cmd.exe (no printf, single quotes
-        # not honored). An argv list + stdin goes through CreateProcess /
-        # execvp uniformly on every OS.
-        return run_coro_blocking(
-            self.aexec_argv(argv, stdin=stdin, cwd=cwd, timeout=timeout, env=env,
-                            capture_max_chars=capture_max_chars)
-        )
-
-    def run_python(self, code: str, *, cwd: Optional[str] = None,
-                   timeout: Optional[int] = None,
-                   env: Optional[dict] = None,
-                   capture_max_chars: Optional[int] = None) -> ExecResult:
-        return run_coro_blocking(
-            self.arun_python(code, cwd=cwd, timeout=timeout, env=env,
-                             capture_max_chars=capture_max_chars)
-        )
-
     # --- exec (async) ---
     async def aexec(self, command: str, *, cwd: Optional[str] = None,
                     timeout: Optional[int] = None,

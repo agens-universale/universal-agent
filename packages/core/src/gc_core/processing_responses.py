@@ -46,7 +46,6 @@ from gc_core.utils.connect_backend import (
     backend_override_value,
     acreate_call_headers,
     aresolve_auth_token,
-    create_call_headers,
     resolve_network_params,
 )
 from gc_core.utils.connect_backend import arequest_backend_responses as arequest_backend

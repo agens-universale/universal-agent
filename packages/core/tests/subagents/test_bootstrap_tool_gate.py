@@ -40,7 +40,7 @@ def _runner():
     return SubagentRunner(ctx, orch, {"use_local_subagents": True})
 
 
-def _run_with_tools(monkeypatch, tools):
+async def _run_with_tools(monkeypatch, tools):
     runner = _runner()
     child = _FakeChildState(tools)
 
@@ -73,7 +73,7 @@ def _run_with_tools(monkeypatch, tools):
     async def _create(*a, **k):
         return _Inst()
 
-    runner._run_internal(
+    await runner._arun_internal(
         "subagent_worker",
         SimpleNamespace(create_instance=_create),
         {"task": "t"},
@@ -90,14 +90,14 @@ def _run_with_tools(monkeypatch, tools):
     ],
     ids=["tool_present", "tool_absent"],
 )
-def test_bootstrap_follows_tool_availability(monkeypatch, tools, expected):
-    child = _run_with_tools(monkeypatch, tools)
+async def test_bootstrap_follows_tool_availability(monkeypatch, tools, expected):
+    child = await _run_with_tools(monkeypatch, tools)
     sent = any(BOOT_MARKER in str(m.get("content", "")) for m in child.messages)
     assert sent is expected
 
 
-def test_unknown_tool_set_keeps_old_behaviour(monkeypatch):
+async def test_unknown_tool_set_keeps_old_behaviour(monkeypatch):
     # Пустой список схем = «не знаем набор» (см. контракт None в tool_availability):
     # молча выключать bootstrap из-за незнания нельзя.
-    child = _run_with_tools(monkeypatch, [])
+    child = await _run_with_tools(monkeypatch, [])
     assert any(BOOT_MARKER in str(m.get("content", "")) for m in child.messages)

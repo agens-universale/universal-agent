@@ -622,7 +622,7 @@ def _subagent_cfg(tmp_path, raw):
     return cfg
 
 
-def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
+async def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
     from gc_core.tools.subagents.runner import SubagentRunner
 
     raw = {
@@ -647,7 +647,7 @@ def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
         assert child_ctx.model_router.resolve("main").alias == "flash"
         return "ok"
 
-    result = runner.run(
+    result = await runner.arun(
         "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
     )
 
@@ -658,7 +658,7 @@ def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
     assert parent_router.breaker.is_open("deepseek-max") is True
 
 
-def test_subagent_non_first_call_failure_degrades_without_restart(tmp_path):
+async def test_subagent_non_first_call_failure_degrades_without_restart(tmp_path):
     from gc_core.tools.subagents.runner import SubagentRunner
 
     raw = {
@@ -687,7 +687,7 @@ def test_subagent_non_first_call_failure_degrades_without_restart(tmp_path):
         assert seeded_trace_message in messages
         return "ok"
 
-    result = runner.run(
+    result = await runner.arun(
         "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
     )
 
@@ -697,7 +697,7 @@ def test_subagent_non_first_call_failure_degrades_without_restart(tmp_path):
     assert parent_router.breaker.is_open("deepseek-max") is True
 
 
-def test_subagent_repeated_failure_after_fallback_returns_honest_tool_error(tmp_path):
+async def test_subagent_repeated_failure_after_fallback_returns_honest_tool_error(tmp_path):
     from gc_core.tools.subagents.runner import SubagentRunner
 
     raw = {
@@ -714,7 +714,7 @@ def test_subagent_repeated_failure_after_fallback_returns_honest_tool_error(tmp_
     async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
         raise _http_error(500)
 
-    result = runner.run(
+    result = await runner.arun(
         "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
     )
 
@@ -723,7 +723,7 @@ def test_subagent_repeated_failure_after_fallback_returns_honest_tool_error(tmp_
     assert payload["error"]["code"] == "subagent_run_failed"
 
 
-def test_subagent_non_availability_error_skips_fallback_entirely(tmp_path):
+async def test_subagent_non_availability_error_skips_fallback_entirely(tmp_path):
     """Небольшой регресс-предохранитель: логическая ошибка (не недоступность
     модели) не должна триггерить рестарт/деградацию — обычная честная ошибка тула."""
     from gc_core.tools.subagents.runner import SubagentRunner
@@ -745,7 +745,7 @@ def test_subagent_non_availability_error_skips_fallback_entirely(tmp_path):
         calls["n"] += 1
         raise ValueError("some unrelated bug")
 
-    result = runner.run(
+    result = await runner.arun(
         "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
     )
 
@@ -756,7 +756,7 @@ def test_subagent_non_availability_error_skips_fallback_entirely(tmp_path):
     assert parent_router.breaker.snapshot() == {}
 
 
-def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(tmp_path, monkeypatch):
+async def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(tmp_path, monkeypatch):
     """Ревью Task 9 (Important): непинованный субагент (нет ``assign.subagents.<name>``,
     резолв через активный уровень) при подтверждённом фейле обязан трипать
     предохранитель — иначе ни один trip-путь не срабатывает и повторные вызовы (этого
@@ -775,7 +775,7 @@ def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(tmp_path
     def failing_run_agent(messages, child_state, child_ctx, **kwargs):
         raise _http_error(500)
 
-    result = runner.run(
+    result = await runner.arun(
         "subagent_worker", {"task": "do x", "reason": "r"}, failing_run_agent
     )
     payload = json.loads(result)
@@ -793,7 +793,7 @@ def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(tmp_path
         calls["n"] += 1
         return "unreachable"
 
-    result2 = runner.run(
+    result2 = await runner.arun(
         "subagent_worker", {"task": "do x again", "reason": "r"}, should_not_be_called
     )
     payload2 = json.loads(result2)
@@ -809,7 +809,7 @@ def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(tmp_path
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
     with pytest.raises(RuntimeError):
-        run_coro(pr._arequest_backend_canonical([], object(), parent_ctx))
+        await pr._arequest_backend_canonical([], object(), parent_ctx)
     assert once_calls["n"] == 0
 
 

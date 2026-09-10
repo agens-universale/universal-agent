@@ -16,7 +16,8 @@ from gc_core.utils import llm_chat_client
 from gc_core.utils.connect_backend import (
     create_call_data_completions,
     create_call_data_responses,
-    create_call_headers,
+    acreate_call_headers,
+    build_call_headers,
 )
 
 
@@ -68,12 +69,12 @@ def _state(**overrides) -> SimpleNamespace:
 # ---------------------------------------------------------------------------
 
 
-def test_create_call_headers_authorization_none_inherits_effective_header():
+async def test_create_call_headers_authorization_none_inherits_effective_header():
     ctx = SimpleNamespace(
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(_state(), ctx, resolved=_resolved(authorization=None))
+    headers = await acreate_call_headers(_state(), ctx, resolved=_resolved(authorization=None))
     assert headers["Authorization"] == "Bearer tok-123"
 
 
@@ -82,7 +83,7 @@ def test_create_call_headers_authorization_empty_string_omits_header():
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(_state(), ctx, resolved=_resolved(authorization=""))
+    headers = build_call_headers(_state(), ctx, resolved=_resolved(authorization=""))
     assert "Authorization" not in headers
 
 
@@ -91,19 +92,19 @@ def test_create_call_headers_authorization_value_used_as_is():
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
     )
     assert headers["Authorization"] == "Bearer model-token"
 
 
-def test_create_call_headers_responses_mode_ignores_resolved_authorization():
+async def test_create_call_headers_responses_mode_ignores_resolved_authorization():
     # спека §4: per-model token/url/backend-квирки — chat_completions-only.
     ctx = SimpleNamespace(
         config_dict={"backend_api_mode": "responses", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(
+    headers = await acreate_call_headers(
         _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
     )
     assert headers["Authorization"] == "Bearer tok-123"
@@ -124,7 +125,7 @@ def test_create_call_headers_model_token_survives_global_chat_completion_headers
         },
         auth_connector=None,
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
     )
     assert headers["Authorization"] == "Bearer model-token"
@@ -141,7 +142,7 @@ def test_create_call_headers_empty_token_not_revived_by_global_headers():
         },
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(_state(), ctx, resolved=_resolved(authorization=""))
+    headers = build_call_headers(_state(), ctx, resolved=_resolved(authorization=""))
     assert "Authorization" not in headers
 
 
@@ -154,14 +155,14 @@ def test_create_call_headers_lowercase_global_authorization_also_yields_to_model
         },
         auth_connector=None,
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
     )
     assert headers["Authorization"] == "Bearer model-token"
     assert "authorization" not in headers
 
 
-def test_create_call_headers_global_authorization_applies_without_model_token():
+async def test_create_call_headers_global_authorization_applies_without_model_token():
     # Охранный: без per-model решения (authorization=None) поведение прежнее —
     # статический заголовок конфига выигрывает у токена коннектора.
     ctx = SimpleNamespace(
@@ -172,7 +173,7 @@ def test_create_call_headers_global_authorization_applies_without_model_token():
         },
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(_state(), ctx, resolved=_resolved(authorization=None))
+    headers = await acreate_call_headers(_state(), ctx, resolved=_resolved(authorization=None))
     assert headers["Authorization"] == "Bearer corp-token"
 
 
@@ -187,7 +188,7 @@ def test_create_call_headers_model_backend_overlay_authorization_wins_over_token
         },
         auth_connector=None,
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(),
         ctx,
         resolved=_resolved(
@@ -291,7 +292,7 @@ def test_create_call_headers_backend_overrides_chat_completion_headers():
         },
         auth_connector=None,
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(),
         ctx,
         resolved=_resolved(
@@ -820,12 +821,12 @@ def test_legacy_create_call_data_responses_keeps_state_default_model_without_res
     assert data["model"] == "legacy-model"
 
 
-def test_legacy_create_call_headers_uses_auth_connector_without_resolved():
+async def test_legacy_create_call_headers_uses_auth_connector_without_resolved():
     ctx = SimpleNamespace(
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "7"},
         auth_connector=SimpleNamespace(get_token=lambda: "legacy-token"),
     )
-    headers = create_call_headers(_state(), ctx)
+    headers = await acreate_call_headers(_state(), ctx)
     assert headers["Authorization"] == "Bearer legacy-token"
 
 

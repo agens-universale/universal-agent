@@ -179,7 +179,7 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
             history_messages=[], known_message_keys=set(), persisted_messages_count=0,
             meta={}, previous_response_id=None, backend_api_mode="chat_completions",
         )
-        ts.persist_batch([{"role": "user", "content": "отменяю", "id": msg_id}],
+        await ts.apersist_batch([{"role": "user", "content": "отменяю", "id": msg_id}],
                          previous_response_id=None)
 
         app.active_runner = _FakeRunner()
@@ -219,11 +219,11 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
         app.tui_state.active_task_id = tid
         scr._active_task_id = tid
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
-        ThreadSession(
+        await ThreadSession(
             threads_dir=str(tmp_path), system_id="cli", thread_id=tid,
             history_messages=[], known_message_keys=set(), persisted_messages_count=0,
             meta={}, previous_response_id=None, backend_api_mode="chat_completions",
-        ).persist_batch([{"role": "user", "content": "ты тут?", "id": msg_id}],
+        ).apersist_batch([{"role": "user", "content": "ты тут?", "id": msg_id}],
                         previous_response_id=None)
 
         # Курсор указывает на конец файла С осиротевшей записью.
@@ -261,11 +261,11 @@ async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
         scr = pilot.app.screen
         tid, msg_id = "t1", "m_orphan"
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
-        ThreadSession(
+        await ThreadSession(
             threads_dir=str(tmp_path), system_id="cli", thread_id=tid,
             history_messages=[], known_message_keys=set(), persisted_messages_count=0,
             meta={}, previous_response_id=None, backend_api_mode="chat_completions",
-        ).persist_batch([{"role": "user", "content": "x", "id": msg_id}],
+        ).apersist_batch([{"role": "user", "content": "x", "id": msg_id}],
                         previous_response_id=None)
 
         # Старый runner уже стоп, НО на треде активен новый run (повтор) → откладываем.

@@ -84,58 +84,21 @@ def resolve_sidecar_identity(ctx: Any) -> Optional[SidecarIdentity]:
     )
 
 
-def persist_subagent_trace(
-    ctx: Any, *, kind: str, payload: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-    """Append sidecar record when gate passes. Else no-op."""
-    ident = resolve_sidecar_identity(ctx)
-    if ident is None:
-        return None
-    # Хранилище контекста, если встраивающий его передал; нет — файловое по
-    # ``threads_dir``, ровно как раньше. Прямой вызов модульной функции уводил
-    # бы трассу субагента на диск даже тогда, когда весь тред лежит в базе.
-    store = getattr(ctx, "thread_store", None)
-    if store is None:
-        from gc_core.thread_store_file import FileThreadStore
-
-        store = FileThreadStore(ident.threads_dir)
-
-    # Этот путь СИНХРОННЫЙ и остаётся таким намеренно: сюда приходит сообщение
-    # живому субагенту из чужого потока (``ActiveChildScope.enqueue``), и
-    # ждать там нечем. С асинхронным хранилищем записать трассу отсюда нельзя —
-    # но молчать об этом хуже всего: корутина просто выбрасывалась бы, а
-    # встраивающий видел бы работающих субагентов с пустой историей вызовов.
-    import inspect
-
-    if inspect.iscoroutinefunction(getattr(store, "append_subagent_trace", None)):
-        import logging
-
-        logging.getLogger("gc_core.thread_store").warning(
-            "subagent_trace_skipped_async_store store=%s kind=%s "
-            "reason=sync_enqueue_path_cannot_await",
-            type(store).__name__, kind,
-        )
-        return None
-    return store.append_subagent_trace(
-        ident.system_id,
-        ident.thread_id,
-        parent_call_id=ident.parent_call_id,
-        child_run_id=ident.child_run_id,
-        kind=kind,
-        payload=payload,
-    )
-
-
 async def apersist_subagent_trace(
     ctx: Any, *, kind: str, payload: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
-    """То же, что ``persist_subagent_trace``, но не блокируя цикл.
+    """Дописать sidecar-запись, если гейт пропустил. Иначе no-op.
 
-    Самый тихий шов контракта: возврат отбрасывают ВСЕ семь вызывающих
-    (``processing_responses`` ×4, ``subagents/runner`` ×3). С асинхронным
-    хранилищем на синхронном пути корутина здесь просто выбрасывалась бы —
-    ни ошибки, ни лога, а трасса субагентов не писалась бы ни разу. Субагенты
-    при этом работают нормально, поэтому заметить нечего.
+    ЕДИНСТВЕННАЯ форма. Синхронный близнец снят: он умел писать только в
+    синхронное хранилище, а на асинхронном честно отказывался (варнинг и
+    ``None``) — то есть у встраивающего с redis/postgres трасса субагентов не
+    писалась ни разу, при полностью работающих субагентах.
+
+    Самый тихий шов контракта: возврат отбрасывают ВСЕ вызывающие
+    (``processing_responses`` ×4, ``subagents/runner`` ×3). Единственный
+    вызывающий без своего loop — колбэк ``ChildInputScope.enqueue`` из чужого
+    потока; он уводит эту корутину на loop прогона через
+    ``run_coroutine_threadsafe`` (см. ``SubagentRunner``).
     """
     ident = resolve_sidecar_identity(ctx)
     if ident is None:
@@ -164,6 +127,5 @@ __all__ = [
     "apersist_subagent_trace",
     "bind_thread_identity",
     "clear_thread_identity",
-    "persist_subagent_trace",
     "resolve_sidecar_identity",
 ]

@@ -80,10 +80,6 @@ class HarborBackend(FsBackend):
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
 
-    def _await(self, coro):
-        """Дождаться корутины Harbor из СИНХРОННОГО кода: поток блокируется."""
-        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
-
     async def _aawait(self, coro):
         """То же из асинхронного кода — не занимая ни поток, ни event loop.
 
@@ -190,28 +186,6 @@ class HarborBackend(FsBackend):
             cap,
         )
 
-    def _exec(
-        self,
-        command: str,
-        *,
-        cwd: Optional[str] = None,
-        timeout: Optional[int] = None,
-        env: Optional[dict] = None,
-        capture_max_chars: Optional[int] = None,
-    ) -> ExecResult:
-        """Internal exec. ``capture_max_chars=None`` → tool-trace cap (40k/поток)."""
-        full = self._full_command(command, cwd=cwd, env=env)
-        cap = self._capture_cap(capture_max_chars)
-        scope, streamed = self._output_capture(cap)
-        try:
-            with scope:
-                res = self._await(self._env.exec(full, timeout_sec=timeout))
-        except Exception as exc:
-            if not self._is_exec_timeout(exc):
-                raise
-            return self._timed_out_result(streamed, cap)
-        return self._completed_result(res, cap)
-
     async def _aexec_impl(
         self,
         command: str,
@@ -240,49 +214,27 @@ class HarborBackend(FsBackend):
             return self._timed_out_result(streamed, cap)
         return self._completed_result(res, cap)
 
-    def exec(
-        self,
-        command: str,
-        *,
-        cwd: Optional[str] = None,
-        timeout: Optional[int] = None,
-        env: Optional[dict] = None,
-        capture_max_chars: Optional[int] = None,
-    ) -> ExecResult:
-        return self._exec(
-            command,
-            cwd=cwd,
-            timeout=timeout,
-            env=env,
-            capture_max_chars=capture_max_chars,
-        )
-
-    def _fs_exec(self, command: str) -> ExecResult:
-        """Internal FS helper (stat/head/mkdir). Walk ceiling, not the tool-trace cap."""
-        return self._exec(command, capture_max_chars=self.walk_output_max_chars)
-
-    def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
-                    env: Optional[dict] = None,
-                    capture_max_chars: Optional[int] = None) -> ExecResult:
-        # Quoted heredoc → code body taken literally. Tool-trace cap: this is
-        # the model-facing python tool, not an internal FS helper.
-        return self.exec(
-            self._python_command(code), cwd=cwd, timeout=timeout, env=env,
-            capture_max_chars=capture_max_chars,
-        )
-
     @staticmethod
     def _python_command(code: str) -> str:
-        """Quoted heredoc → тело кода берётся буквально. Общее для обеих форм."""
+        """Quoted heredoc → тело кода берётся буквально."""
         return f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
 
-    # --- асинхронный порт запуска (backends.async_protocol.AsyncExecPort) ---
-    #
-    # Под Harbor УЖЕ нативный async: `self._env.exec` — корутина. Синхронные
-    # имена выше блокируют поток на `run_coroutine_threadsafe(...).result()`,
-    # и из-за этого `aexec_port` заворачивал бэкенд в `SyncExecAdapter`, а тот
-    # уводил каждый запуск в поток из общего пула. Порт объявлен — обёртки
-    # больше нет, запуск идёт на loop вызывающего.
+    async def _afs_exec(self, command: str) -> ExecResult:
+        """Internal FS helper (stat/head/mkdir). Walk ceiling, not the tool-trace cap.
+
+        ЕДИНСТВЕННАЯ форма. Синхронная (`_fs_exec`) снята вместе с `_exec` и
+        `_await`: у Harbor файловая операция — это сеть, и ждала она через
+        ``run_coroutine_threadsafe(...).result()``. На loop самого Harbor это
+        не «блокировка потока», а самоблокировка: поток loop'а ждёт корутину,
+        которую выполнить может только он же. Двенадцать ``async def``
+        методов (``exists``, ``lexists``, ``is_symlink``, ``realpath``,
+        ``getsize``, ``append``, ``copy``, ``makedirs``, ``read_head_bytes``,
+        ``walk_entries``, ``listdir`` и через ``sha256``/``stat`` ещё два)
+        звали её напрямую.
+        """
+        return await self._aexec_impl(
+            command, capture_max_chars=self.walk_output_max_chars
+        )
 
     async def aexec(
         self,
@@ -366,7 +318,7 @@ class HarborBackend(FsBackend):
             return b""
         # GNU coreutils in harbor images (same assumption as ``stat -c`` / ``find -printf``).
         # Capture at walk ceiling: append samples 100KiB (~137k base64) > tool cap.
-        res = self._fs_exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
+        res = await self._afs_exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"head failed: {path}")
         if res.stdout_hit_capture_cap:
@@ -377,14 +329,14 @@ class HarborBackend(FsBackend):
             raise OSError(f"base64 decode failed for head of {path}") from exc
 
     async def sha256_bytes(self, path: str) -> str:
-        return self.sha256(path)
+        return await self.sha256(path)
 
     # --- stat: native BaseEnvironment handles where they exist, shell otherwise ---
     async def exists(self, path: str) -> bool:
-        return self._fs_exec(f"test -e {shlex.quote(path)}").return_code == 0
+        return await self._afs_exec(f"test -e {shlex.quote(path)}").return_code == 0
 
     async def lexists(self, path: str) -> bool:
-        return self._fs_exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}").return_code == 0
+        return await self._afs_exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}").return_code == 0
 
     async def is_file(self, path: str) -> bool:
         return await self._aawait(self._env.is_file(path))
@@ -393,10 +345,10 @@ class HarborBackend(FsBackend):
         return await self._aawait(self._env.is_dir(path))
 
     async def is_symlink(self, path: str) -> bool:
-        return self._fs_exec(f"test -L {shlex.quote(path)}").return_code == 0
+        return await self._afs_exec(f"test -L {shlex.quote(path)}").return_code == 0
 
     async def realpath(self, path: str) -> str:
-        res = self._fs_exec(f"readlink -f {shlex.quote(path)}")
+        res = await self._afs_exec(f"readlink -f {shlex.quote(path)}")
         return res.stdout.strip() if res.return_code == 0 else path
 
     async def readable(self, path: str) -> bool:
@@ -409,19 +361,19 @@ class HarborBackend(FsBackend):
         return path.rstrip("/").rsplit("/", 1)[-1].startswith(".")
 
     async def getsize(self, path: str) -> int:
-        res = self._fs_exec(f"stat -c %s {shlex.quote(path)}")
+        res = await self._afs_exec(f"stat -c %s {shlex.quote(path)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"stat failed: {path}")
         return int(res.stdout.strip())
 
-    def sha256(self, path: str) -> str:
-        res = self._fs_exec(f"sha256sum {shlex.quote(path)}")
+    async def sha256(self, path: str) -> str:
+        res = await self._afs_exec(f"sha256sum {shlex.quote(path)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"sha256sum failed: {path}")
         return res.stdout.split()[0]
 
-    def stat(self, path: str) -> dict:
-        res = self._fs_exec(f"stat -c '%s|%Y|%a|%F' {shlex.quote(path)}")
+    async def stat(self, path: str) -> dict:
+        res = await self._afs_exec(f"stat -c '%s|%Y|%a|%F' {shlex.quote(path)}")
         if res.return_code != 0:
             raise FileNotFoundError(path)
         size, mtime, mode, kind = res.stdout.strip().split("|", 3)
@@ -432,7 +384,7 @@ class HarborBackend(FsBackend):
         }
 
     async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
-        st = self.stat(path)  # existing stat -c '%s|%Y|%a|%F' wrapper
+        st = await self.stat(path)  # existing stat -c '%s|%Y|%a|%F' wrapper
         return {
             "size": st["size"], "mtime": st["mtime"],
             "mode": int(str(st["mode"]), 8),
@@ -450,7 +402,7 @@ class HarborBackend(FsBackend):
         traverse channel (50M chars). Pruned dirs are cut inside ``find`` so the
         channel is not spent on junk trees. Hit ceiling → fail-closed.
         """
-        res = self._exec(
+        res = await self._aexec_impl(
             _build_find_walk_command(
                 path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
             ),
@@ -473,7 +425,7 @@ class HarborBackend(FsBackend):
         # Тот же общий рецепт, что у обхода: без -H find не идёт по ссылке-аргументу,
         # и каталог-ссылка выглядел пустым (пустой stdout при коде возврата 0).
         head = " ".join(shlex.quote(a) for a in find_walk_head(path))
-        res = self._exec(
+        res = await self._aexec_impl(
             f"{head} -maxdepth 1 -printf '%f\\t%y\\n'",
             capture_max_chars=self.walk_output_max_chars,
         )
@@ -563,7 +515,7 @@ class HarborBackend(FsBackend):
         try:
             await self._aawait(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
             await self._aawait(self._env.upload_file(local_tmp, remote_tmp))
-            res = self._fs_exec(
+            res = await self._afs_exec(
                 f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; "
                 f"rm -f {shlex.quote(remote_tmp)}"
             )
@@ -573,16 +525,16 @@ class HarborBackend(FsBackend):
             local_tmp.unlink(missing_ok=True)
             # Best-effort: upload/exec may leave remote_tmp if the cat+rm line never ran.
             try:
-                self._fs_exec(f"rm -f {shlex.quote(remote_tmp)}")
+                await self._afs_exec(f"rm -f {shlex.quote(remote_tmp)}")
             except Exception:
                 pass
 
     async def copy(self, src: str, dst: str) -> None:
-        res = self._fs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
+        res = await self._afs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"cp failed: {src} -> {dst}")
 
     async def makedirs(self, path: str) -> None:
-        res = self._fs_exec(f"mkdir -p {shlex.quote(path)}")
+        res = await self._afs_exec(f"mkdir -p {shlex.quote(path)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"mkdir failed: {path}")

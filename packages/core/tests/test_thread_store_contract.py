@@ -221,7 +221,7 @@ async def test_store_reaches_the_context_and_session(tmp_path):
     """Хранилище доезжает от вызывающего до ``ThreadSession``.
 
     Проверяем всю цепочку разом: ``acreate_run_context(thread_store=…)`` →
-    ``ctx.thread_store`` → ``ThreadSession.from_config(store=…)``. Разрыв в
+    ``ctx.thread_store`` → ``ThreadSession.afrom_config(store=…)``. Разрыв в
     любом звене означал бы, что параметр принят и молча проигнорирован — самый
     неприятный вид поломки, потому что выглядит как работающая фича.
     """
@@ -235,7 +235,7 @@ async def test_store_reaches_the_context_and_session(tmp_path):
     )
     assert ctx.thread_store is store, "контекст не донёс хранилище"
 
-    session = ThreadSession.from_config(
+    session = await ThreadSession.afrom_config(
         config_dict=ctx.config_dict, system_id=SYS, thread_id=TID,
         store=getattr(ctx, "thread_store", None),
     )
@@ -243,7 +243,7 @@ async def test_store_reaches_the_context_and_session(tmp_path):
     assert store.calls.get("load_thread_state"), "сессия читала мимо хранилища"
 
 
-def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
+async def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
     """Запись сессии идёт в хранилище, а не на диск.
 
     Гейт, ради которого задача и делалась: с in-memory хранилищем прогон не
@@ -254,11 +254,11 @@ def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
     from gc_core.thread_store import ThreadSession
 
     store = MemoryThreadStore()
-    session = ThreadSession.from_config(
+    session = await ThreadSession.afrom_config(
         config_dict={"threads_dump_dir": str(tmp_path / "threads")},
         system_id=SYS, thread_id=TID, store=store,
     )
-    session.persist_batch([_msg("m1", "раз")], previous_response_id=None)
+    await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
 
     assert store.calls.get("append_messages"), "запись прошла мимо хранилища"
     assert store.load_messages(SYS, TID), "сообщение не сохранилось"

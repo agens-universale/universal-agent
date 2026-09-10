@@ -184,7 +184,7 @@ class TestFinalizeRole:
 
 
 class TestSpecialAgentWithRunner:
-    def test_runner_calls_special_agent_end_to_end(self):
+    async def test_runner_calls_special_agent_end_to_end(self):
         """SubagentRunner.run integrates with SpecialAgent correctly: role generation
         now happens after child ctx is built, via finalize_role."""
         orch = _make_orchestrator_state()
@@ -209,7 +209,7 @@ class TestSpecialAgentWithRunner:
                 ),
             ),
         ):
-            result = runner.run(
+            result = await runner.arun(
                 "subagent_special_agent",
                 {
                     "reason": "Need security audit",

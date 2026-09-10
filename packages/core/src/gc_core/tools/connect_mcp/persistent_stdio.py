@@ -114,46 +114,6 @@ def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Pope
     return subprocess.Popen(cmd, **popen_kwargs)
 
 
-def _terminate_process_tree(proc: subprocess.Popen, graceful_timeout: float = 5.0) -> None:
-    """Убить процесс вместе со всей его группой (детьми), с эскалацией до KILL."""
-    if proc.poll() is not None:
-        return
-    pid = proc.pid
-    try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        else:
-            proc.terminate()
-    except ProcessLookupError:
-        return
-    except Exception:
-        # Фоллбек на обычный terminate, если по какой-то причине
-        # не смогли узнать pgid (например, процесс уже умер).
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-    try:
-        proc.wait(timeout=graceful_timeout)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    except Exception:
-        return
-    # Не успели завершиться по-хорошему — добиваем SIGKILL по всей группе.
-    try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
-        else:
-            proc.kill()
-    except Exception:
-        pass
-    try:
-        proc.wait(timeout=2.0)
-    except Exception:
-        pass
-
-
 #: Шаг опроса при асинхронном ожидании смерти процесса. Компромисс: реже —
 #: закрытие тянется дольше нужного, чаще — лишние пробуждения loop на пустом
 #: месте. При graceful-таймауте 5 с это до сотни проверок, каждая — один
@@ -180,15 +140,20 @@ async def _await_exit(proc: subprocess.Popen, timeout: float) -> bool:
 async def _aterminate_process_tree(
     proc: subprocess.Popen, graceful_timeout: float = 5.0
 ) -> None:
-    """Асинхронный двойник :func:`_terminate_process_tree`.
+    """Убить процесс вместе со всей его группой (детьми), с эскалацией до KILL.
 
-    Отличается ровно способом ждать: сигналы (``killpg``, ``terminate``) —
-    мгновенные системные вызовы и в потоке не нуждались никогда; блокировало
-    только ``proc.wait(timeout)``, и вместо него здесь опрос.
+    ЕДИНСТВЕННАЯ форма терминации. Синхронный близнец снят: он отличался
+    ровно способом ждать — сигналы (``killpg``, ``terminate``) мгновенные
+    системные вызовы и в потоке не нуждались никогда, блокировал только
+    ``proc.wait(timeout)``. Держать ради него второй экземпляр эскалации
+    дорого: разъехаться эти два экземпляра могли молча, а цена расхождения —
+    выживший MCP-сервер. Вызывающему без loop (``close`` из ``atexit``)
+    хватает своего ``asyncio.run`` — обмена с процессом здесь нет, только
+    сигнал и ожидание, поэтому отдельная синхронная форма не нужна.
 
-    Эскалация сохранена дословно: SIGTERM по группе → graceful-таймаут →
-    SIGKILL по группе. Терять её нельзя — сервер, игнорирующий SIGTERM
-    (Chromium под @playwright/mcp), иначе переживёт агента.
+    Эскалация: SIGTERM по группе → graceful-таймаут → SIGKILL по группе.
+    Терять её нельзя — сервер, игнорирующий SIGTERM (Chromium под
+    @playwright/mcp), иначе переживёт агента.
     """
     if proc.poll() is not None:
         return
@@ -345,7 +310,9 @@ class PersistentStdioSession:
         if proc is not None:
             if had_lock:
                 self._close_prologue(proc)
-            _terminate_process_tree(proc, graceful_timeout=5.0)
+            # Своя форма терминации одна и корутинная; здесь loop'а нет
+            # (`atexit`), поэтому заводим собственный — как `main` у gc-cli.
+            asyncio.run(_aterminate_process_tree(proc, graceful_timeout=5.0))
 
     async def aclose(self) -> None:
         """То же закрытие, но ожидание не занимает поток.

@@ -3,7 +3,6 @@
 does this byte live / where does this command run"."""
 import os
 import shlex
-import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Iterable, Optional, Sequence
@@ -147,6 +146,34 @@ def argv_to_posix_command(argv: list, *, stdin: Optional[str] = None) -> str:
         command = f"printf '%s' {shlex.quote(stdin)} | {command}"
     return command
 
+def _sync_exec_message(backend: object, name: str) -> str:
+    return (
+        f"{type(backend).__name__}.{name} синхронной формы не имеет: команду у "
+        f"этого бэкенда запускает корутина (a{name}). Ходите через "
+        "`gc_core.backends.async_protocol.aexec_port(backend)` — он отдаёт сам "
+        "бэкенд, если тот корутинный, и заворачивает чужой синхронный в поток."
+    )
+
+
+class SyncExecNotSupportedError(NotImplementedError):
+    """Синхронный запуск команды у бэкенда, который умеет только корутину.
+
+    Отдельный тип, а не голый ``NotImplementedError``: у ``FsBackend`` есть и
+    настоящие абстрактные методы, и путать «не реализовано» с «формы нет
+    намеренно» дорого — второе означает «позовите a-форму», а не «допишите
+    бэкенд».
+    """
+
+
+class CapabilitiesNotWarmedError(RuntimeError):
+    """Свойство-проба прочитано до ``await backend.awarm_capabilities()``.
+
+    Отдельный тип, а не голый ``RuntimeError``: вызывающему, который умеет
+    работать и без нативного grep, нужно уметь отличить «не прогрето» от
+    настоящей поломки бэкенда.
+    """
+
+
 class FsBackend(ABC):
     """Физический порт ввода-вывода. Файловые операции — КОРУТИНЫ.
 
@@ -181,19 +208,20 @@ class FsBackend(ABC):
     # Потолок RAM-буфера stdout/stderr на поток (spec D2/D8).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
-    # Capability probe cache (lazy, thread-safe once). Subclasses may set
-    # overrides via ``_cap_overrides`` without running probes (FakeBackend).
-    _cap_lock: Optional[threading.Lock] = None
+    # Кэш ответов проб. Заполняет ЕДИНСТВЕННЫЙ писатель —
+    # ``awarm_capabilities``; подклассы могут задать ответы заранее через
+    # ``_cap_overrides``, не запуская проб вовсе (FakeBackend).
+    #
+    # Лока здесь больше нет. Он охранял ленивую пробу из свойства, которой не
+    # стало; а ``asyncio.Lock`` на его место не годится — бэкенд переживает
+    # свой loop (тесты гоняют один и тот же объект под несколькими
+    # ``asyncio.run``), и лок, созданный на умершем loop, отказал бы. Двойной
+    # прогрев безвреден: он идемпотентен и стоит лишних проб, не рассогласования.
     _has_find_cache: Optional[bool] = None
     _has_grep_cache: Optional[bool] = None
     _grep_exclude_dir_cache: Optional[bool] = None
     _grep_include_cache: Optional[bool] = None
     _cap_overrides: Optional[dict] = None
-
-    def _ensure_cap_lock(self) -> threading.Lock:
-        if self._cap_lock is None:
-            self._cap_lock = threading.Lock()
-        return self._cap_lock
 
     def _cap_override(self, name: str) -> Optional[bool]:
         ov = self._cap_overrides
@@ -203,6 +231,34 @@ class FsBackend(ABC):
             return None
         return bool(ov[name])
 
+    def _cap(self, name: str, cache_attr: str) -> bool:
+        """Ответ пробы: подмена, иначе кэш, иначе ЧЕСТНЫЙ ОТКАЗ.
+
+        Сама проба здесь не запускается. Она корутинная — каждая гоняет
+        процессы, а в песочнице это сеть, до ~10 с на пробу, — и запустить её
+        из свойства нечем: свойство корутиной не сделаешь.
+
+        Раньше на этом месте стоял ленивый синхронный ``exec`` под
+        ``threading.Lock``. Читали свойство ИЗ-ПОД LOOP, то есть четыре
+        запуска процесса подряд морозили цикл целиком, а выглядело это как
+        зависший агент на первом же инструменте. Прогрев (
+        ``awarm_capabilities``) был необязательной оптимизацией — теперь он
+        обязательный шаг, и кто его не сделал, получает отказ, а не тихую
+        заморозку.
+        """
+        ov = self._cap_override(name)
+        if ov is not None:
+            return ov
+        cached = getattr(self, cache_attr)
+        if cached is not None:
+            return bool(cached)
+        raise CapabilitiesNotWarmedError(
+            f"{type(self).__name__}.{name} прочитано до прогрева проб. "
+            "Позовите `await backend.awarm_capabilities()` один раз перед "
+            "работой (это делает `fs_find_in_files`), либо задайте "
+            "`_cap_overrides` — пробы синхронной формы больше не имеют."
+        )
+
     @property
     def has_find(self) -> bool:
         """Usable ``find -print0 | xargs -0 -r grep`` wire (content search only).
@@ -211,120 +267,65 @@ class FsBackend(ABC):
         ``native_grep_refusal``. Listing / by-name / walk go through
         ``backend.walk`` / ``iter_walk`` and never consult this flag.
         """
-        ov = self._cap_override("has_find")
-        if ov is not None:
-            return ov
-        if self._has_find_cache is not None:
-            return self._has_find_cache
-        with self._ensure_cap_lock():
-            if self._has_find_cache is not None:
-                return self._has_find_cache
-            try:
-                from gc_core.backends.capabilities import probe_has_find
-
-                self._has_find_cache = bool(probe_has_find(self))
-            except Exception:
-                self._has_find_cache = False
-            return self._has_find_cache
+        return self._cap("has_find", "_has_find_cache")
 
     @property
     def has_grep(self) -> bool:
         """Usable grep for content search (``-E``, ``-n``, ``-R``)."""
-        ov = self._cap_override("has_grep")
-        if ov is not None:
-            return ov
-        if self._has_grep_cache is not None:
-            return self._has_grep_cache
-        with self._ensure_cap_lock():
-            if self._has_grep_cache is not None:
-                return self._has_grep_cache
-            try:
-                from gc_core.backends.capabilities import probe_has_grep
-
-                self._has_grep_cache = bool(probe_has_grep(self))
-            except Exception:
-                self._has_grep_cache = False
-            return self._has_grep_cache
+        return self._cap("has_grep", "_has_grep_cache")
 
     @property
     def grep_exclude_dir(self) -> bool:
-        """Internal: ``--exclude-dir=NAME`` hides hits (lazy smoke)."""
-        ov = self._cap_override("grep_exclude_dir")
-        if ov is not None:
-            return ov
-        if self._grep_exclude_dir_cache is not None:
-            return self._grep_exclude_dir_cache
-        # Read the dependency BEFORE taking the lock: has_grep takes the same
-        # non-reentrant lock, so reading it inside would deadlock on a cold cache.
-        if not self.has_grep:
-            self._grep_exclude_dir_cache = False
-            return False
-        with self._ensure_cap_lock():
-            if self._grep_exclude_dir_cache is not None:
-                return self._grep_exclude_dir_cache
-            try:
-                from gc_core.backends.capabilities import probe_grep_exclude_dir
-
-                self._grep_exclude_dir_cache = bool(probe_grep_exclude_dir(self))
-            except Exception:
-                self._grep_exclude_dir_cache = False
-            return self._grep_exclude_dir_cache
+        """Internal: ``--exclude-dir=NAME`` hides hits."""
+        return self._cap("grep_exclude_dir", "_grep_exclude_dir_cache")
 
     @property
     def grep_include(self) -> bool:
-        """Internal: ``--include='*.ext'`` works (lazy smoke)."""
-        ov = self._cap_override("grep_include")
-        if ov is not None:
-            return ov
-        if self._grep_include_cache is not None:
-            return self._grep_include_cache
-        # Same reason as grep_exclude_dir: has_grep must not be read under the lock.
-        if not self.has_grep:
-            self._grep_include_cache = False
-            return False
-        with self._ensure_cap_lock():
-            if self._grep_include_cache is not None:
-                return self._grep_include_cache
-            try:
-                from gc_core.backends.capabilities import probe_grep_include
-
-                self._grep_include_cache = bool(probe_grep_include(self))
-            except Exception:
-                self._grep_include_cache = False
-            return self._grep_include_cache
-
-    def warm_capabilities(self) -> None:
-        """Прогреть кэш проб: четыре свойства читаются подряд, здесь и сейчас.
-
-        Свойства остаются СИНХРОННЫМИ намеренно. Сделать их асинхронными
-        значит превратить часть протокола ``FsBackend`` в async-аксессоры —
-        правку контракта, которую видит каждый встраивающий, ради разового
-        выигрыша: пробы кэшируются, то есть блокируют однократно на процесс.
-
-        Вместо этого прогрев уводится с ГОРЯЧЕГО пути. Без него первая же
-        `fs_find_in_files` платит за четыре пробы (до ~10 с на пробу в
-        медленной песочнице) прямо внутри поиска, и агент выглядит зависшим на
-        первом инструменте.
-        """
-        for name in ("has_find", "has_grep", "grep_exclude_dir", "grep_include"):
-            try:
-                getattr(self, name)
-            except Exception:
-                # Проба сама по себе не должна ронять прогрев: неудачная
-                # запишет False в кэш, а недоступный бэкенд всплывёт на первом
-                # настоящем вызове с внятной ошибкой, а не здесь.
-                pass
+        """Internal: ``--include='*.ext'`` works."""
+        return self._cap("grep_include", "_grep_include_cache")
 
     async def awarm_capabilities(self) -> None:
-        """Прогрев, не занимая event loop вызывающего.
+        """Прогреть кэш проб. ЕДИНСТВЕННАЯ форма и обязательный шаг.
 
-        Все четыре пробы уходят в ОДИН поток, а не в четыре: они и так
-        последовательны (``grep_include`` ждёт ``has_grep``), и делить их
-        между слотами общего пула незачем.
+        Порядок последователен по существу: ``grep_exclude_dir`` и
+        ``grep_include`` осмысленны только при работающем grep, и запускать их
+        на боксе без него — четыре лишних процесса вместо одного ответа.
+
+        Синхронный близнец снят. Он был обёрткой ``asyncio.to_thread`` вокруг
+        чтения четырёх свойств, то есть держал поток пула на всё время проб, а
+        существовал ровно потому, что пробы были синхронными.
+
+        Проба, упавшая сама по себе, пишет в кэш ``False`` и прогрев не
+        роняет: недоступный бэкенд всплывёт на первом настоящем вызове с
+        внятной ошибкой, а не здесь.
         """
-        import asyncio
+        from gc_core.backends.capabilities import (
+            aprobe_grep_exclude_dir,
+            aprobe_grep_include,
+            aprobe_has_find,
+            aprobe_has_grep,
+        )
 
-        await asyncio.to_thread(self.warm_capabilities)
+        async def _fill(cache_attr: str, probe) -> bool:
+            if getattr(self, cache_attr) is not None:
+                return bool(getattr(self, cache_attr))
+            try:
+                value = bool(await probe(self))
+            except Exception:
+                value = False
+            setattr(self, cache_attr, value)
+            return value
+
+        await _fill("_has_find_cache", aprobe_has_find)
+        has_grep = await _fill("_has_grep_cache", aprobe_has_grep)
+        if not has_grep:
+            # Зависимые пробы без grep смысла не имеют — закрываем их сразу,
+            # иначе чтение свойства после прогрева получит отказ на пустом кэше.
+            self._grep_exclude_dir_cache = False
+            self._grep_include_cache = False
+            return
+        await _fill("_grep_exclude_dir_cache", aprobe_grep_exclude_dir)
+        await _fill("_grep_include_cache", aprobe_grep_include)
 
     # --- stat ---
     @abstractmethod
@@ -454,11 +455,23 @@ class FsBackend(ABC):
         return os.path.isabs(path)
 
     # --- exec ---
-    @abstractmethod
+    #
+    # Синхронные `exec` / `exec_argv` / `run_python` — НЕ абстрактные и НЕ
+    # часть того, что реализуют наши бэкенды. Они остались точкой входа для
+    # ЧУЖИХ реализаций: встраивающий пишет свой синхронный бэкенд (песочница,
+    # контейнер, удалённый хост), а ядро видит его через ``SyncExecAdapter``
+    # (см. ``backends/async_protocol``). Снять их значило бы сломать каждую
+    # такую реализацию — ровно то, чего переезд обязан избежать.
+    #
+    # Свои бэкенды (local, harbor, обёртка TUI) реализуют ТОЛЬКО корутинную
+    # форму: их синхронные двойники были обёртками ``run_coro_blocking``, то
+    # есть заводили второй loop, а из-под живого — морозили поток вызывающего
+    # на всё время команды (минуты). Умолчание ниже поэтому отказывает громко.
     def exec(self, command: str, *, cwd: Optional[str] = None,
              timeout: Optional[int] = None,
              env: Optional[dict] = None,
-             capture_max_chars: Optional[int] = None) -> ExecResult: ...
+             capture_max_chars: Optional[int] = None) -> ExecResult:
+        raise SyncExecNotSupportedError(_sync_exec_message(self, "exec"))
 
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
@@ -487,10 +500,11 @@ class FsBackend(ABC):
             capture_max_chars=capture_max_chars,
         )
 
-    @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
                    env: Optional[dict] = None,
-                   capture_max_chars: Optional[int] = None) -> ExecResult: ...
+                   capture_max_chars: Optional[int] = None) -> ExecResult:
+        """См. ``exec``: синхронная форма — вход для чужих реализаций."""
+        raise SyncExecNotSupportedError(_sync_exec_message(self, "run_python"))
     @abstractmethod
     def default_cwd(self) -> Optional[str]: ...

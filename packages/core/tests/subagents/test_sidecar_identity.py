@@ -190,7 +190,7 @@ class TestChildCtxCopiesThreadIdentity:
 # --- H7: трасса доезжает до нефайлового хранилища --------------------------
 
 
-def test_trace_reaches_a_store_without_files():
+async def test_trace_reaches_a_store_without_files():
     """Сквозная проверка: запись доходит до стороннего хранилища.
 
     Гейт требовал непустой `threads_dir`, а у хранилища в базе или в памяти
@@ -202,7 +202,7 @@ def test_trace_reaches_a_store_without_files():
     """
     from types import SimpleNamespace
 
-    from gc_core.tools.subagents.sidecar import persist_subagent_trace
+    from gc_core.tools.subagents.sidecar import apersist_subagent_trace
     from gc_testkit.memory_thread_store import MemoryThreadStore
 
     store = MemoryThreadStore()
@@ -215,7 +215,7 @@ def test_trace_reaches_a_store_without_files():
         threads_dir=None,          # хранилище без файлов
     )
 
-    written = persist_subagent_trace(ctx, kind="child_start", payload={"x": 1})
+    written = await apersist_subagent_trace(ctx, kind="child_start", payload={"x": 1})
 
     assert written is not None, "запись не состоялась — гейт снова требует каталог"
     trace = store.read_subagent_trace("cli", "t1")

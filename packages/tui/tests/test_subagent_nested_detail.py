@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from gc_core.thread_store import append_subagent_trace_record
-from gc_core.tools.subagents.sidecar import persist_subagent_trace
+from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_tui.services.subagent_sidecar_mapper import detail_from_sidecar_records, resolve_nested_tool_detail, trace_events_from_nested_detail
 
 
@@ -220,7 +220,7 @@ async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
         system_id="cli",
         thread_id="live_disk",
     )
-    persist_subagent_trace(
+    await apersist_subagent_trace(
         ctx,
         kind="call",
         payload={
@@ -230,7 +230,7 @@ async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
             "call_id": "live_child",
         },
     )
-    persist_subagent_trace(
+    await apersist_subagent_trace(
         ctx,
         kind="result",
         payload={

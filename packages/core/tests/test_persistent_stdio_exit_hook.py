@@ -78,7 +78,13 @@ def _session(monkeypatch, *, close_tool: str | None = None):
     )
     sess._server_name = "probe"
 
-    monkeypatch.setattr(ps, "_terminate_process_tree", lambda proc, **kw: proc.kill())
+    # Двойник повторяет ФОРМУ прода: терминация теперь только корутинная,
+    # а `close()` ждёт её своим `asyncio.run`. Синхронная подмена вернула бы
+    # не-awaitable, и `asyncio.run` упал бы на ней, а не на нашей проверке.
+    async def _kill(proc, **_kw):
+        proc.kill()
+
+    monkeypatch.setattr(ps, "_aterminate_process_tree", _kill)
     return sess
 
 

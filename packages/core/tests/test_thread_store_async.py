@@ -159,12 +159,19 @@ async def test_session_reads_and_writes_through_the_async_store():
     assert store.awaited > 0, "ни одна корутина не была дождана"
 
 
-async def test_sync_and_async_paths_agree(tmp_path):
-    """Синхронный и асинхронный пути дают одно и то же.
+async def test_adapter_and_native_port_agree(tmp_path):
+    """Синхронное хранилище через адаптер и асинхронное нативно — одно и то же.
 
-    Главное свойство разделения: у них различается ТОЛЬКО последовательность
-    обращений к хранилищу, вся логика — в общих чистых помощниках. Разъехаться
-    им негде, и этот тест краснеет, если кто-то заведёт вторую копию логики.
+    Сессия теперь ходит в хранилище ЕДИНСТВЕННОЙ формой (синхронные двойники
+    ``from_config`` / ``persist_batch`` / ``archive_and_compact_summary_payload``
+    сняты), и сравнивать два пути СЕССИИ больше нечего. Осталась настоящая
+    двойственность — на уровне ХРАНИЛИЩА: синхронную реализацию ядро видит
+    через ``SyncThreadStoreAdapter``, асинхронную — своим портом напрямую.
+    Тред обеими дорогами обязан получиться один и тот же.
+
+    Прежняя версия сравнивала синхронный путь сессии с асинхронным. После
+    снятия двойников она сравнивала бы два ОДИНАКОВЫХ прогона и зеленела бы
+    при любой поломке.
     """
     payload = {
         "summary_message_content": "сводка",
@@ -176,30 +183,33 @@ async def test_sync_and_async_paths_agree(tmp_path):
     volatile = {"created_at", "updated_at", "last_summarized_at",
                 "last_summary_archive_suffix"}
 
-    sync_store = MemoryThreadStore()
-    s = ThreadSession.from_config(
-        config_dict={}, system_id=SYS, thread_id=TID, store=sync_store,
-    )
-    s.persist_batch(messages[:2], previous_response_id="r1")
-    s.persist_batch(messages[2:], previous_response_id="r2")
-    sync_result = s.archive_and_compact_summary_payload(payload)
+    async def _run(store):
+        session = await ThreadSession.afrom_config(
+            config_dict={}, system_id=SYS, thread_id=TID, store=store,
+        )
+        await session.apersist_batch(messages[:2], previous_response_id="r1")
+        await session.apersist_batch(messages[2:], previous_response_id="r2")
+        return await session.aarchive_and_compact_summary_payload(payload)
 
-    async_store = MemoryThreadStore()
-    a = await ThreadSession.afrom_config(
-        config_dict={}, system_id=SYS, thread_id=TID, store=async_store,
-    )
-    await a.apersist_batch(messages[:2], previous_response_id="r1")
-    await a.apersist_batch(messages[2:], previous_response_id="r2")
-    async_result = await a.aarchive_and_compact_summary_payload(payload)
+    sync_store = MemoryThreadStore()                 # ядро видит через адаптер
+    native_store = RedisLikeStore()                  # ядро видит своим портом
+    sync_result = await _run(sync_store)
+    native_result = await _run(native_store)
 
-    assert sync_result["new_messages_count"] == async_result["new_messages_count"]
+    assert native_store.awaited > 0, (
+        "проверка пустая: асинхронное хранилище ни разу не позвали нативно"
+    )
+    assert sync_result["new_messages_count"] == native_result["new_messages_count"]
     assert (
         [m["content"] for m in sync_store.load_messages(SYS, TID)]
-        == [m["content"] for m in async_store.load_messages(SYS, TID)]
+        == [m["content"] for m in native_store._inner.load_messages(SYS, TID)]
     )
     sync_meta = {k: v for k, v in sync_store.load_meta(SYS, TID).items() if k not in volatile}
-    async_meta = {k: v for k, v in async_store.load_meta(SYS, TID).items() if k not in volatile}
-    assert sync_meta == async_meta
+    native_meta = {
+        k: v for k, v in native_store._inner.load_meta(SYS, TID).items()
+        if k not in volatile
+    }
+    assert sync_meta == native_meta
 
 
 async def test_compaction_without_files_does_not_write_to_disk(tmp_path, monkeypatch):
@@ -310,121 +320,3 @@ async def test_subagent_trace_reaches_the_async_store(tmp_path):
     record = await apersist_subagent_trace(ctx, kind="call", payload={"name": "fs_read"})
     assert record is not None and record["kind"] == "call"
     assert len(store._inner.read_subagent_trace(SYS, TID)) == 1
-
-
-def test_sync_sidecar_path_warns_instead_of_dropping(tmp_path, caplog):
-    """Синхронный путь sidecar не может ждать — но и молчать не должен.
-
-    Сюда приходит сообщение живому субагенту из чужого потока
-    (``ActiveChildScope.enqueue``), и ждать там нечем. С асинхронным
-    хранилищем записать трассу отсюда нельзя, но молчание было бы худшим из
-    исходов: корутина выбрасывалась бы, а встраивающий видел бы работающих
-    субагентов с пустой историей вызовов.
-    """
-    import logging
-    from types import SimpleNamespace
-
-    from gc_core.tools.subagents.sidecar import persist_subagent_trace
-
-    ctx = SimpleNamespace(
-        parent_call_id="call-1", threads_dir=str(tmp_path),
-        system_id=SYS, thread_id=TID, run_id="run-1",
-        thread_store=type(
-            "AsyncOnly", (), {"append_subagent_trace": _coroutine_stub()},
-        )(),
-    )
-    with caplog.at_level(logging.WARNING, logger="gc_core.thread_store"):
-        assert persist_subagent_trace(ctx, kind="call", payload={}) is None
-    assert "subagent_trace_skipped_async_store" in caplog.text
-
-
-def _coroutine_stub():
-    async def method(self, *args, **kwargs):
-        return None
-    return method
-
-
-# --- предупреждение о блокирующем хранилище --------------------------------
-
-async def test_adapter_warns_on_slow_sync_store():
-    """Синхронное СЕТЕВОЕ хранилище предупреждает о себе один раз.
-
-    Отличить его от быстрого локального статически нельзя, а разница велика:
-    максимальный лаг цикла ≈ ``11 × RTT + 29 мс`` (25 обращений за прогон
-    укладываются в три блока подряд — 11, 11 и 3). При 10 мс на вызов бюджет
-    приёмки в 150 мс уже пробит.
-    """
-    class SlowStore(MemoryThreadStore):
-        def load_meta(self, system_id, thread_id):
-            import time
-            time.sleep(SLOW_CALL_WARN_SEC * 3)
-            return super().load_meta(system_id, thread_id)
-
-    from gc_core.thread_store_async import SLOW_CALL_PROBE_COUNT
-
-    warnings: list = []
-    port = athread_store(SlowStore(), warn=warnings.append)
-    # Суждение выносится по МЕДИАНЕ окна замеров, а не по отдельному вызову:
-    # иначе единичный всплеск на обычных файлах советовал бы их владельцу
-    # переписать хранилище на асинхронное (поймано на живом стенде).
-    for _ in range(SLOW_CALL_PROBE_COUNT + 2):
-        await port.aload_meta(SYS, TID)
-
-    assert len(warnings) == 1, "предупреждение должно быть однократным"
-    assert "thread_store_blocking_loop" in warnings[0]
-    assert "load_meta" in warnings[0]
-    assert "AsyncThreadStore" in warnings[0], "не подсказан асинхронный контракт"
-
-
-async def test_adapter_is_quiet_when_only_one_call_spikes():
-    """Единичный всплеск на быстром хранилище не поднимает тревогу.
-
-    Ровно этот случай поймал живой стенд: ``FileThreadStore`` с медианой
-    0,29 мс дал отдельные вызовы по 2,5–2,8 мс (запись меты, конкуренция за
-    диск между агентами), и порог по одному вызову советовал владельцу ОБЫЧНЫХ
-    ФАЙЛОВ переписать хранилище на асинхронное. Шумное предупреждение
-    перестают читать.
-    """
-    from gc_core.thread_store_async import SLOW_CALL_PROBE_COUNT
-
-    class SpikyStore(MemoryThreadStore):
-        def __init__(self):
-            super().__init__()
-            self.calls_made = 0
-
-        def load_meta(self, system_id, thread_id):
-            import time
-            self.calls_made += 1
-            if self.calls_made == 1:          # один медленный вызов из всех
-                time.sleep(SLOW_CALL_WARN_SEC * 4)
-            return super().load_meta(system_id, thread_id)
-
-    warnings: list = []
-    port = athread_store(SpikyStore(), warn=warnings.append)
-    for _ in range(SLOW_CALL_PROBE_COUNT + 2):
-        await port.aload_meta(SYS, TID)
-
-    assert warnings == [], (
-        f"единичный всплеск поднял тревогу: {warnings}"
-    )
-
-
-async def test_adapter_is_quiet_on_fast_stores():
-    """Быстрое хранилище не предупреждает ни о чём."""
-    warnings: list = []
-    port = athread_store(MemoryThreadStore(), warn=warnings.append)
-    for _ in range(5):
-        await port.aload_meta(SYS, TID)
-        await port.aappend_messages(SYS, TID, [_msg("m1")])
-    assert warnings == []
-
-
-def test_adapter_covers_every_contract_method():
-    """У адаптера есть все одиннадцать ``a``-методов.
-
-    Гейт на недостачу: пропущенный метод обнаружился бы только в рантайме, на
-    том пути, который редко исполняется.
-    """
-    adapter = SyncThreadStoreAdapter(MemoryThreadStore())
-    for name in ASYNC_CONTRACT_METHODS:
-        assert inspect.iscoroutinefunction(getattr(adapter, name, None)), name

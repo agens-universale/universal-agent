@@ -71,7 +71,7 @@ def _runner():
     return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
 
 
-def test_step_limit_returns_ok_false_not_completed(monkeypatch):
+async def test_step_limit_returns_ok_false_not_completed(monkeypatch):
     runner, _orch = _runner()
     child = _FakeChildState(steps=5, max_steps=5, terminal_outcome="step_limit")
     subagent_cls = _wire_runner(monkeypatch, runner, child)
@@ -87,7 +87,7 @@ def test_step_limit_returns_ok_false_not_completed(monkeypatch):
             "raw_trace_summary": "## Intent\n\nDid work.",
         })
 
-    out = runner._run_internal(
+    out = await runner._arun_internal(
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
     # Runner pass-through: child envelope returned as-is (spec §6.2).
@@ -99,7 +99,7 @@ def test_step_limit_returns_ok_false_not_completed(monkeypatch):
     assert "error" not in payload  # no _limit_response rebuild
 
 
-def test_normal_complete_still_ok_true(monkeypatch):
+async def test_normal_complete_still_ok_true(monkeypatch):
     runner, _orch = _runner()
     child = _FakeChildState(steps=2, max_steps=50, terminal_outcome=None)
     subagent_cls = _wire_runner(monkeypatch, runner, child)
@@ -107,7 +107,7 @@ def test_normal_complete_still_ok_true(monkeypatch):
     async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         return "done"
 
-    out = runner._run_internal(
+    out = await runner._arun_internal(
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
     payload = json.loads(out)

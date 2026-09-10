@@ -503,7 +503,7 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
     # Тред читается, а не падает.
     from gc_core.thread_store import ThreadSession
 
-    session = ThreadSession.from_config(
+    session = await ThreadSession.afrom_config(
         config_dict=cfg, system_id="sdk", thread_id="t-s8",
     )
     assert isinstance(session.history_messages, list)

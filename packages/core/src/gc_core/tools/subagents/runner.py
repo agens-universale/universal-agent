@@ -1,8 +1,10 @@
+import asyncio
 import copy
 import inspect
 import json
 import logging
 import os
+import threading
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -48,9 +50,7 @@ from gc_core.tools.subagents.sidecar import (
     apersist_subagent_trace,
     bind_thread_identity,
     clear_thread_identity,
-    persist_subagent_trace,
 )
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.aio_compat import await_callback
 
 _log = logging.getLogger(__name__)
@@ -86,6 +86,27 @@ _CHILD_CONFIG_DEEP_COPY_KEYS = (
 )
 
 
+async def _drain_trace_writes(futures: List[Any], lock: "threading.Lock") -> None:
+    """Дождаться записей трассы, поставленных в очередь из чужого потока.
+
+    Без этого прогон возвращался бы раньше своих же записей, и `asyncio.run`
+    вызывающего снимал бы их отменой — трасса терялась бы молча, тем тише чем
+    позже пришло сообщение. Отказ каждой записи логируется отдельно: возврат
+    ``apersist_subagent_trace`` не читает ни один вызывающий, и другого следа
+    у ошибки нет.
+    """
+    with lock:
+        pending = futures[:]
+        futures.clear()
+    for future in pending:
+        try:
+            await asyncio.wrap_future(future)
+        except Exception:
+            logging.getLogger("gc_core.subagents").warning(
+                "subagent_trace_write_failed", exc_info=True
+            )
+
+
 class SubagentRunner:
     """Создаёт дочерний State и запускает run_agent для субагента."""
 
@@ -104,20 +125,6 @@ class SubagentRunner:
         # считается по всему дереву, а не только по вызовам самого родителя.
         self._tool_calls_pushed = 0
 
-    def run(
-        self,
-        tool_name: str,
-        arguments: Dict[str, Any],
-        run_agent_func: Callable,
-        *,
-        parent_call_id: Optional[str] = None,
-    ) -> str:
-        """Синхронный вход (прямые вызовы apply_tool, тесты)."""
-        return run_coro_blocking(
-            self.arun(tool_name, arguments, run_agent_func,
-                      parent_call_id=parent_call_id)
-        )
-
     async def arun(
         self,
         tool_name: str,
@@ -126,11 +133,17 @@ class SubagentRunner:
         *,
         parent_call_id: Optional[str] = None,
     ) -> str:
-        """Прогон субагента.
+        """Прогон субагента. ЕДИНСТВЕННАЯ форма.
 
         Асинхронный, потому что внутри — полноценный прогон агента: держать на
         нём поток означало бы, что переезд ядра на asyncio останавливается на
         границе субагентов, а они самые долгие.
+
+        Синхронные близнецы (``run``, ``_run_internal``) сняты. Оба были
+        обёртками над ``run_coro_blocking``, то есть заводили ВТОРОЙ loop, а из
+        под живого — морозили поток вызывающего на весь прогон субагента.
+        Производственных вызывающих у них не было ни одного: ``apply_tool``
+        ходит корутиной, остальные 48 вызовов жили в тестах.
         """
         self._parent_call_id = parent_call_id or ""
         self._active_tool_name = tool_name
@@ -150,13 +163,6 @@ class SubagentRunner:
                 retryable=False,
             )
         return await self._arun_internal(tool_name, subagent_cls, arguments, run_agent_func)
-
-    def _run_internal(self, *args: Any, **kwargs: Any) -> str:
-        """Синхронный вход в тело субагента.
-
-        Тело асинхронное (внутри — полноценный прогон агента); этот двойник
-        оставлен для прямых вызовов из тестов и стороннего кода."""
-        return run_coro_blocking(self._arun_internal(*args, **kwargs))
 
     async def _arun_internal(
         self,
@@ -497,6 +503,23 @@ class SubagentRunner:
         мог вызвать его повторно (рестарт/деградация) со свежим scope — переиспользовать
         уже закрытый ``scope`` первой попытки небезопасно (его `__exit__` уже отработал)."""
         with activate_child_input(parent_call_id=self._parent_call_id) as scope:
+            # Колбэк enqueue приходит из ЧУЖОГО потока: его дёргает
+            # `AgentExecutor.add_message`, которую зовёт TUI, и loop'а там нет.
+            # Поэтому запись трассы уезжает на loop ЭТОГО прогона, а не делается
+            # на месте. Синхронной формы у операции больше нет, и это к лучшему:
+            # прежняя ОТКАЗЫВАЛАСЬ писать в асинхронное хранилище (лог-варнинг и
+            # `return None`), то есть у встраивающего с redis/postgres история
+            # вызовов субагента не писалась вовсе, а сами субагенты работали —
+            # заметить было нечего.
+            loop = asyncio.get_running_loop()
+            # Планировать и забыть нельзя: `asyncio.run` вызывающего снимает
+            # незавершённые задачи ОТМЕНОЙ при закрытии loop, и запись,
+            # поставленную в очередь последним сообщением, теряло молча
+            # (проверено: CancelledError в done-колбэке). Поэтому futures
+            # собираются и дожидаются на границе прогона. Лок — потому что
+            # добавляет их чужой поток, а разбирает loop.
+            trace_writes: list = []
+            trace_writes_lock = threading.Lock()
 
             def _on_child_user_enqueue(message: Dict[str, Any]) -> None:
                 prose = extract_real_user_message_text(message)
@@ -515,7 +538,14 @@ class SubagentRunner:
                 msg_id = message.get("id")
                 if isinstance(msg_id, str) and msg_id:
                     payload["id"] = msg_id
-                persist_subagent_trace(child_ctx, kind="user", payload=payload)
+                future = asyncio.run_coroutine_threadsafe(
+                    apersist_subagent_trace(
+                        child_ctx, kind="user", payload=payload
+                    ),
+                    loop,
+                )
+                with trace_writes_lock:
+                    trace_writes.append(future)
 
             scope.set_on_enqueue(_on_child_user_enqueue)
             # run_agent_func обязана быть корутинной — это arun_agent. Раньше здесь
@@ -523,16 +553,19 @@ class SubagentRunner:
             # поломку: TypeError от await над обычной функцией ловил except ниже и
             # превращал в конверт subagent_run_failed, а тесты, не проверяющие
             # результат, оставались зелёными.
-            return await run_agent_func(
-                messages,
-                child_state,
-                child_ctx,
-                check_stop=self._check_stop_requested,
-                persist_messages_callback=persist_messages_callback,
-                pre_backend_compaction_hook=pre_backend_compaction_hook,
-                session_meta=child_meta,
-                get_pending_messages=scope.drain,
-            )
+            try:
+                return await run_agent_func(
+                    messages,
+                    child_state,
+                    child_ctx,
+                    check_stop=self._check_stop_requested,
+                    persist_messages_callback=persist_messages_callback,
+                    pre_backend_compaction_hook=pre_backend_compaction_hook,
+                    session_meta=child_meta,
+                    get_pending_messages=scope.drain,
+                )
+            finally:
+                await _drain_trace_writes(trace_writes, trace_writes_lock)
 
     def _maybe_pin_fallback(
         self,

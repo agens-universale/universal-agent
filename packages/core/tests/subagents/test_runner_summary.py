@@ -62,7 +62,7 @@ def _make_ctx(cfg):
 
 
 class TestRunnerSummary:
-    def test_passes_summary_hook_to_run_agent(self):
+    async def test_passes_summary_hook_to_run_agent(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
@@ -75,13 +75,13 @@ class TestRunnerSummary:
         with (
             patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
         ):
-            runner.run("subagent_worker", {"task": "short task"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "short task"}, fake_run_agent)
 
         assert callable(captured.get("persist_messages_callback"))
         assert callable(captured.get("pre_backend_compaction_hook"))
         assert "post_step_hook" not in captured
 
-    def test_runs_pre_backend_summary_check(self):
+    async def test_runs_pre_backend_summary_check(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
@@ -115,12 +115,12 @@ class TestRunnerSummary:
                 side_effect=fake_run_summary_compaction,
             ),
         ):
-            runner.run("subagent_worker", {"task": "long task"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "long task"}, fake_run_agent)
 
         assert "subagent_pre_backend" in calls
         assert "subagent_pre_run" not in calls
 
-    def test_summary_disabled_when_trigger_zero(self):
+    async def test_summary_disabled_when_trigger_zero(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=0)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
@@ -131,7 +131,7 @@ class TestRunnerSummary:
             return "ok"
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            runner.run("subagent_worker", {"task": "task"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "task"}, fake_run_agent)
 
         assert captured.get("persist_messages_callback") is not None
         assert captured.get("pre_backend_compaction_hook") is None

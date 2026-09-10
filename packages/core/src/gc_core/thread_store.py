@@ -726,7 +726,7 @@ class ThreadSession:
         return self._port
 
     @classmethod
-    def from_config(
+    async def afrom_config(
         cls,
         *,
         config_dict: Dict[str, Any],
@@ -736,36 +736,15 @@ class ThreadSession:
     ) -> "ThreadSession":
         """Загрузить тред. ``store`` не передан — файловое хранилище, как раньше.
 
-        Параметр — точка подмены для встраивающего: своя реализация
-        Хранилище (например поверх базы) передаётся сюда, и сессия больше
-        нигде диска не касается. Дефолт сохраняет прежнее поведение полностью.
-        """
-        sys_norm = sanitize_system_id(system_id)
-        normalized_thread_id = validate_thread_id(thread_id)
+        ЕДИНСТВЕННАЯ форма. Параметр ``store`` — точка подмены для
+        встраивающего: своя реализация (например поверх базы) передаётся сюда,
+        и сессия больше нигде диска не касается.
 
-        store, threads_dir = cls._resolve_store(config_dict, store)
-
-        meta = store.load_meta(sys_norm, normalized_thread_id)
-        state = store.load_thread_state(sys_norm, normalized_thread_id)
-        return cls._build(
-            config_dict=config_dict,
-            threads_dir=threads_dir, store=store, sys_norm=sys_norm,
-            thread_id=normalized_thread_id, meta=meta, state=state,
-        )
-
-    @classmethod
-    async def afrom_config(
-        cls,
-        *,
-        config_dict: Dict[str, Any],
-        system_id: str,
-        thread_id: str,
-        store: Any = None,
-    ) -> "ThreadSession":
-        """То же, что ``from_config``, но хранилище ждётся нативно.
-
-        Этим путём тред читает ЦИКЛ АГЕНТА. Синхронный двойник остаётся для
-        прямых вызывающих вне цикла.
+        Синхронный близнец снят: производственных вызывающих у него не было ни
+        одного (ядро читает тред только этим путём), а 56 обращений жили в
+        тестах. Держать его значило держать вторую дорогу к тому же треду —
+        мимо порта, то есть мимо адаптера, который и решает, синхронное
+        хранилище или нет.
         """
         from gc_core.thread_store_async import athread_store
 
@@ -937,43 +916,18 @@ class ThreadSession:
         merge_tool_usage_notice_meta_to_base(base_meta, self.meta)
         return base_meta
 
-    def persist_batch(
-        self,
-        step_messages: List[Dict[str, Any]],
-        *,
-        previous_response_id: Optional[str],
-    ) -> None:
-        known_before = self._persist_batch_begin(step_messages)
-        written = self.store.append_messages(
-            self.system_id,
-            self.thread_id,
-            step_messages,
-            known_keys=self.known_message_keys,
-            start_seq=self.persisted_messages_count,
-        )
-        self._persist_batch_apply(
-            step_messages, known_before, written, previous_response_id
-        )
-        # Preserve arbitrary meta fields (e.g. shared.working_memory), otherwise tools that
-        # update meta would get their data wiped on the next persist_batch().
-        base_meta = self.store.load_meta(self.system_id, self.thread_id) or {}
-        self.store.save_meta(
-            self.system_id,
-            self.thread_id,
-            self._persist_batch_meta(base_meta, step_messages, known_before),
-        )
-
     async def apersist_batch(
         self,
         step_messages: List[Dict[str, Any]],
         *,
         previous_response_id: Optional[str],
     ) -> None:
-        """То же, что ``persist_batch``, но хранилище ждётся нативно.
+        """Записать батч сообщений и meta. ЕДИНСТВЕННАЯ форма.
 
-        Этим путём ходит ЦИКЛ АГЕНТА — самый горячий шов контракта: раз за
-        итерацию ``while True`` и раз за тул-колл. Синхронный двойник остаётся
-        для прямых вызывающих вне цикла (TUI, тесты, ручные сценарии).
+        Самый горячий шов контракта: раз за итерацию ``while True`` и раз за
+        тул-колл. Синхронный близнец снят — производственных вызывающих у него
+        не было, а порядок обращений к хранилищу у обоих был один и тот же
+        (сторож этого порядка — в тестах базы хранилища).
         """
         known_before = self._persist_batch_begin(step_messages)
         written = await self.port.aappend_messages(
@@ -1100,7 +1054,7 @@ class ThreadSession:
         self.previous_response_id = None
         self.meta = new_meta
 
-    def _archive_via_store(
+    async def _aarchive_via_store(
         self, compact_messages: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Замещение истории без архива — для хранилищ без файлов.
@@ -1108,34 +1062,14 @@ class ThreadSession:
         Резервный путь, когда хранилище не объявляет способность
         ``archive_and_replace``. Архива нет, и это честно: «отложить прежнюю
         историю рядом» осмысленно для файлов, а у базы это либо отдельная
-        таблица, либо не нужно вовсе. Раньше на этом месте была прямая запись в
-        файлы мимо контракта — у хранилища без ``threads_dir`` она уходила в
-        относительный путь от текущего каталога, молча.
+        таблица, либо не нужно вовсе.
 
-        Через ``replace_messages``, а не ``reset`` + ``append_messages``:
+        Через ``areplace_messages``, а не ``areset`` + ``aappend_messages``:
         ``reset`` по контракту сносит ВЕСЬ тред, включая ``subagent_trace`` —
         каждая компакция теряла историю вызовов субагентов, — и между ним и
         последующим ``save_meta`` треда не существовало вовсе. Хранилищу без
         этого метода (структурная реализация мимо базы) остаётся прежняя пара.
         """
-        replace = getattr(self.store, "replace_messages", None)
-        if callable(replace):
-            replace(self.system_id, self.thread_id, compact_messages)
-        else:
-            self.store.reset(self.system_id, self.thread_id)
-            self.store.append_messages(
-                self.system_id, self.thread_id, compact_messages
-            )
-        return {
-            "archive_suffix": _utc_now_suffix(),
-            "archive_data_path": None,
-            "archive_meta_path": None,
-        }
-
-    async def _aarchive_via_store(
-        self, compact_messages: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """См. синхронного двойника: то же замещение без потери трассы."""
         replace = getattr(self.port, "areplace_messages", None)
         if callable(replace):
             await replace(self.system_id, self.thread_id, compact_messages)
@@ -1164,37 +1098,17 @@ class ThreadSession:
             "newly_summarized_message_id": summary_message.get("id"),
         }
 
-    def archive_and_compact_summary_payload(
-        self,
-        summary_payload: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        # Diff touched-journal не трогаем: это operational state сессии (как
-        # data_subagents_*), не история диалога. Удаляется только с тредом.
-        # До переноса meta в архив: снимок disk tui/runtime (TUI-ключи не клобберить).
-        disk_meta = self.store.load_meta(self.system_id, self.thread_id) or {}
-        summary_message = self._compact_summary_message(summary_payload)
-        compact_messages = [summary_message]
-
-        archiver = getattr(self.store, "archive_and_replace", None)
-        if callable(archiver):
-            archived = archiver(self.system_id, self.thread_id, compact_messages)
-        else:
-            archived = self._archive_via_store(compact_messages)
-
-        known_message_keys = {make_message_key(m) for m in compact_messages}
-        new_meta = self._compact_meta(
-            summary_payload, compact_messages, disk_meta,
-            archived.get("archive_suffix") or "",
-        )
-        self.store.save_meta(self.system_id, self.thread_id, new_meta)
-        self._compact_apply(compact_messages, known_message_keys, new_meta)
-        return self._compact_result(archived, compact_messages, summary_message)
-
     async def aarchive_and_compact_summary_payload(
         self,
         summary_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """То же, что ``archive_and_compact_summary_payload``, но не блокируя цикл."""
+        """Отложить историю в архив и заместить её сводкой. ЕДИНСТВЕННАЯ форма.
+
+        Синхронный близнец снят: производственных вызывающих не было, а
+        расходились эти два тела как раз в самом опасном месте — синхронный
+        искал ТОЛЬКО синхронное ``archive_and_replace`` и звал его прямо на
+        loop.
+        """
         disk_meta = await self.port.aload_meta(self.system_id, self.thread_id) or {}
         summary_message = self._compact_summary_message(summary_payload)
         compact_messages = [summary_message]

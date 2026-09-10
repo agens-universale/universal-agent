@@ -9,18 +9,28 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from gc_testkit.paths import module_dir
-from gc_testkit import run_coro
 
 
 def _restore_tools_and_dependents() -> None:
+    dependents = []
     for name in list(sys.modules):
         # Полные имена: ключ в sys.modules — "gc_core.agent_executor". Старые
         # плоские имена пережили переезд внутри кортежа, и pop был no-op.
         if name in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
             sys.modules.pop(name, None)
+            dependents.append(name)
         elif name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
     real_tools = importlib.import_module("gc_core.tools")
+    # Вернуть снятые модули СРАЗУ. `sys.modules.pop` не убирает одноимённый
+    # атрибут с родительского пакета, и `gc_core.agent_executor` продолжает
+    # указывать на снятый модуль. Кто патчит по строковому пути
+    # ("gc_core.agent_executor.AgentExecutor"), приходит туда через
+    # `getattr(gc_core, "agent_executor")` — то есть в ОСИРОТЕВШУЮ копию, — а
+    # прод затем импортирует модуль заново и получает настоящий класс: подмена
+    # бьёт мимо, и следующий тест молча гоняет живой агент вместо заглушки.
+    for name in dependents:
+        importlib.import_module(name)
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.aapply_tool = real_tools.aapply_tool
@@ -52,6 +62,9 @@ def _stub_tools_modules() -> None:
     tools_pkg.abuild_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_pkg.is_unknown_tool_output = lambda *_a, **_kw: False
+    # `processing_responses` импортирует это имя на уровне модуля: без него
+    # подмена пакета даёт ImportError ещё до первой проверки.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_kw: False
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
@@ -221,21 +234,21 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                     executor = agent_executor_module.AgentExecutor(ctx)
                     thread_id = "switch_mode_1"
 
-                    result_step_1 = run_coro(executor.arun(
+                    result_step_1 = await executor.arun(
                         ["step one"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,
-                    ))
+                    )
                     self.assertIn("step limit", result_step_1)
 
                     config_dict["backend_api_mode"] = "chat_completions"
-                    result_step_2 = run_coro(executor.arun(
+                    result_step_2 = await executor.arun(
                         ["step two"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,
-                    ))
+                    )
                     self.assertIn("step limit", result_step_2)
 
                     threads_dir = resolve_threads_dir(config_dict)
@@ -249,12 +262,12 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                     )
 
                     config_dict["backend_api_mode"] = "responses"
-                    result_step_3 = run_coro(executor.arun(
+                    result_step_3 = await executor.arun(
                         ["step three"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,
-                    ))
+                    )
                     self.assertIn("step limit", result_step_3)
 
                     self.assertEqual(len(responses_calls), 2)

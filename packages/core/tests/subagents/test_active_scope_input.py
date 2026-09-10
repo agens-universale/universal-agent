@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -169,12 +170,14 @@ class TestRunnerWiresPending:
                     logger=None,
                 )
             ):
-                runner.run(
+                # Цель потока: loop'а здесь нет, поэтому свой — как у точки
+                # входа `main`. Синхронной формы у прогона субагента больше нет.
+                asyncio.run(runner.arun(
                     "subagent_worker",
                     {"task": "test"},
                     fake_run_agent,
                     parent_call_id="call_parent_9",
-                )
+                ))
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -216,12 +219,12 @@ class TestRunnerWiresPending:
 
         def _run():
             with patch.object(runner, "_build_child_ctx", return_value=child_ctx):
-                runner.run(
+                asyncio.run(runner.arun(
                     "subagent_worker",
                     {"task": "test"},
                     fake_run_agent,
                     parent_call_id="call_sub_steer",
-                )
+                ))
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -242,13 +245,19 @@ class TestRunnerWiresPending:
         assert user_evs[0].prose == "check auth next"
         assert user_evs[0].parent_call_id == "call_sub_steer"
 
+        release.set()
+        t.join(timeout=5)
+
+        # Запись трассы уехала на loop прогона (см. `SubagentRunner`: колбэк
+        # enqueue приходит из чужого потока и своей синхронной формы у операции
+        # больше нет), поэтому смотрим её ПОСЛЕ того, как прогон закончился.
+        # Здесь `fake_run_agent` держит loop в `release.wait`, то есть до
+        # `release.set()` очередь loop'а не двигалась вовсе; в проде на его
+        # месте `arun_agent`, который отдаёт управление на каждом await.
         rows = read_subagent_trace(str(tmp_path), "cli", "task-steer")
         user_rows = [r for r in rows if r.get("kind") == "user"]
         assert len(user_rows) == 1
         assert user_rows[0]["payload"]["content"] == "check auth next"
-
-        release.set()
-        t.join(timeout=5)
 
 
 class TestParentPendingUnchangedWithoutChild:

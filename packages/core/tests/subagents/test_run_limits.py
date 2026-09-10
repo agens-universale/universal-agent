@@ -9,7 +9,7 @@ from subagents.test_step_limit import _FakeChildState, _runner, _wire_runner
 
 
 @pytest.mark.parametrize("finish_reason", ["token_limit", "tool_call_limit"])
-def test_run_limit_returns_ok_false_not_completed(monkeypatch, finish_reason):
+async def test_run_limit_returns_ok_false_not_completed(monkeypatch, finish_reason):
     runner, _orch = _runner()
     child = _FakeChildState(steps=5, max_steps=50, terminal_outcome=finish_reason)
     subagent_cls = _wire_runner(monkeypatch, runner, child)
@@ -25,7 +25,7 @@ def test_run_limit_returns_ok_false_not_completed(monkeypatch, finish_reason):
             "raw_trace_summary": "",
         })
 
-    out = runner._run_internal(
+    out = await runner._arun_internal(
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
     # Runner pass-through: child envelope returned as-is (spec §6.2).

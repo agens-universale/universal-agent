@@ -514,27 +514,37 @@ async def aresolve_auth_token(auth_connector, *, force: bool = False) -> str:
 async def acreate_call_headers(
     state, ctx, resolved: Optional[ResolvedModel] = None
 ) -> Dict[str, str]:
-    """Асинхронный двойник :func:`create_call_headers`.
+    """Заголовки вызова backend. ЕДИНСТВЕННАЯ форма этой операции.
 
-    Отличие ровно одно и несущее: токен берётся не на loop. Всё остальное —
-    работа со словарями.
+    Отличие от чистой сборки ровно одно и несущее: токен берётся не на loop.
+    Всё остальное — работа со словарями, и она вынесена в
+    :func:`build_call_headers`, которая ничего не ждёт и потому двойником не
+    является: у неё нет своей формы «сходить за токеном».
+
+    Синхронный близнец снят. Он звал ``auth_connector.get_token()`` прямо —
+    два последовательных блокирующих HTTP-вызова по 10 с таймаута, — и это
+    единственное, чем он отличался. В проде его не звал никто (оставались
+    только мёртвые импорты в ``processing_responses`` и ``llm_chat_client``).
     """
     auth_connector = getattr(ctx, "auth_connector", None)
     token = None
     if auth_connector is not None:
         token = await aresolve_auth_token(auth_connector)
-    return create_call_headers(state, ctx, resolved, _token=token)
+    return build_call_headers(state, ctx, resolved, token=token)
 
 
-def create_call_headers(
+def build_call_headers(
     state,
     ctx,
     resolved: Optional[ResolvedModel] = None,
     *,
-    _token: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> Dict[str, str]:
     """
-    Сформировать заголовки вызова для backend API на основе State и RunContext.
+    Собрать заголовки вызова для backend API на основе State и RunContext.
+
+    ЧИСТАЯ часть: ни одного ожидания, ни одного похода в сеть. Токен приходит
+    готовым — добывает его :func:`acreate_call_headers`, вне loop.
 
     ``resolved`` — комплект ResolvedModel этого вызова (Router, спека §6/§7). Per-model
     ``authorization``/``backend.chat_completion_headers`` действуют только в chat_completions —
@@ -564,9 +574,18 @@ def create_call_headers(
     elif authorization_override:
         call_headers["Authorization"] = authorization_override
     elif auth_connector is not None:
-        # ``_token`` приходит от асинхронного двойника, который взял его вне
-        # loop. Своего похода в сеть тут быть не должно — см. `acreate_call_headers`.
-        token = _token if _token is not None else auth_connector.get_token()
+        # Токен добывает ТОЛЬКО `acreate_call_headers`, и вне loop. Здесь его
+        # брать нечем: `AuthConnector.get_token()` — два блокирующих HTTP-вызова
+        # по 10 с, и снятая синхронная форма морозила loop ровно на них.
+        # `token is None` при живом коннекторе — это незаполненный аргумент, а
+        # не «явно без авторизации»; молча уйти без Authorization хуже всего:
+        # backend ответит 401, и искать причину будут в конфиге.
+        if token is None:
+            raise ValueError(
+                "build_call_headers: ctx.auth_connector задан, а token не передан. "
+                "Заголовки с авторизацией собирает acreate_call_headers — она "
+                "берёт токен вне loop."
+            )
         call_headers["Authorization"] = f"Bearer {token}"
 
     # Дополнительные заголовки для chat/completions передаются
