@@ -90,10 +90,11 @@ def test_get_output_list_accepts_unknown_finish_with_content():
     out = get_output_list(_dct("content_filter", content="текст"))
     assert any(o["type"] == "message" for o in out)
 
-def test_get_output_list_rejects_unknown_finish_when_empty():
-    import pytest
-    with pytest.raises(ValueError):
-        get_output_list(_dct(None, content=""))   # пусто → внятный raise
+def test_get_output_list_empty_unknown_finish_is_empty_batch():
+    # Случай C: пустой choice — не ValueError транспорта, цикл bounce сам.
+    assert get_output_list(_dct(None, content="")) == []
+    assert get_output_list(_dct("stop", content="")) == []
+    assert get_output_list(_dct("stop", content=None)) == []
 
 
 def _dct_with_reasoning(content="<think>t</think>ok", reasoning="secret"):
@@ -164,6 +165,81 @@ def test_get_output_list_default_drops_reasoning_on_null_content_tool_call():
     out = get_output_list(payload)
     assert [o["type"] for o in out] == ["function_call"]
     assert all("reasoning_content" not in o for o in out)
+
+
+def _message_text(out):
+    msg = next(o for o in out if o["type"] == "message")
+    return msg, msg["content"][0]["text"]
+
+
+def test_get_output_list_salvages_reasoning_only_into_think_tags():
+    payload = _dct("stop", content=None)
+    payload["choices"][0]["message"]["reasoning_content"] = "search the leaderboard"
+    out = get_output_list(payload)
+    msg, text = _message_text(out)
+    assert text == "<think>search the leaderboard</think>"
+    assert "reasoning_content" not in msg
+    assert all(o["type"] != "function_call" for o in out)
+
+
+def test_get_output_list_salvages_reasoning_only_unknown_finish():
+    payload = _dct(None, content=None)
+    payload["choices"][0]["message"]["reasoning_content"] = "try another approach"
+    out = get_output_list(payload)
+    _, text = _message_text(out)
+    assert text == "<think>try another approach</think>"
+
+
+def test_get_output_list_keeps_think_only_content_verbatim():
+    out = get_output_list(_dct("stop", content="<think>план</think>"))
+    msg, text = _message_text(out)
+    assert text == "<think>план</think>"
+    assert "reasoning_content" not in msg
+
+
+def test_get_output_list_think_plus_reasoning_field_does_not_merge():
+    payload = _dct("stop", content="<think>план</think>")
+    payload["choices"][0]["message"]["reasoning_content"] = "другое"
+    out = get_output_list(payload)
+    msg, text = _message_text(out)
+    assert text == "<think>план</think>"
+    assert "reasoning_content" not in msg
+
+
+def test_get_output_list_visible_prose_not_salvaged():
+    payload = _dct("stop", content="<think>план</think>\nсделаю вывод")
+    payload["choices"][0]["message"]["reasoning_content"] = "secret"
+    out = get_output_list(payload)
+    msg, text = _message_text(out)
+    assert text == "<think>план</think>\nсделаю вывод"
+    assert "reasoning_content" not in msg
+
+
+def test_get_output_list_persist_reasoning_only_does_not_wrap_think():
+    payload = _dct("stop", content=None)
+    payload["choices"][0]["message"]["reasoning_content"] = "secret"
+    out = get_output_list(payload, persist_reasoning_content=True)
+    msg, text = _message_text(out)
+    assert text == ""
+    assert msg["reasoning_content"] == "secret"
+
+
+def test_salvaged_think_is_not_text_answer_even_in_allow():
+    from gc_core.intent_guard.text_answer_judge import should_return_text_answer
+    from gc_core.message_policy.no_tool_call_bounce import extract_last_assistant_text
+    from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
+
+    payload = _dct("stop", content=None)
+    payload["choices"][0]["message"]["reasoning_content"] = "search the leaderboard"
+    out = get_output_list(payload)
+    projected = extract_last_assistant_text(out)
+    assert projected == ""
+    ctx = type("C", (), {"config_dict": {"text_answer_mode": "allow"}})()
+    assert should_return_text_answer(ctx, object(), projected).accept is False
+
+    outbound = format_message_chat_completions_to_send_backend(out[0])
+    assert outbound["content"] == "<think>search the leaderboard</think>"
+    assert "reasoning_content" not in outbound
 
 
 if __name__ == "__main__":

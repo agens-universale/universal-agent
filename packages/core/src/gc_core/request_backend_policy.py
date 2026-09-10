@@ -54,7 +54,9 @@ def _raise_on_embedded_choice_error(response: Dict[str, Any]) -> None:
         fr = ch0.get("finish_reason")
         if isinstance(fr, str) and fr.lower() == "error":
             msg = ch0.get("message") or {}
-            if not (msg.get("content") or msg.get("tool_calls")):
+            reasoning = msg.get("reasoning_content")
+            has_reasoning = isinstance(reasoning, str) and bool(reasoning.strip())
+            if not (msg.get("content") or msg.get("tool_calls") or has_reasoning):
                 raise EmbeddedChoiceError(
                     "provider returned finish_reason='error' with empty choice"
                 )

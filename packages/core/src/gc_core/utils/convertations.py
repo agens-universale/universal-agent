@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import json
 import hashlib
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
+from gc_core.message_projection import project_text_for_model
 from gc_core.utils.backend_errors import normalize_finish_reason
 
 _MAX_BACKEND_LOG_CHARS = 8000
@@ -61,10 +64,54 @@ def get_md5_hash(obj):
     return hashlib.md5(s.encode('utf-8')).hexdigest()
 
 
+def _message_content_as_text(content) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text:
+                parts.append(text)
+        return "\n\n".join(parts)
+    return str(content)
+
+
+def _nonempty_reasoning_text(msg_obj) -> str | None:
+    reasoning = msg_obj.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning
+    return None
+
+
+def _canonical_message_item(dct_choice, *, text, role, reasoning=None):
+    item = {
+        "id": "msg_" + get_md5_hash(dct_choice),
+        "type": "message",
+        "status": "completed",
+        "content": [{
+            "type": "output_text",
+            "annotations": [],
+            "logprobs": [],
+            "text": text,
+        }],
+        "role": role,
+    }
+    if reasoning is not None:
+        item["reasoning_content"] = reasoning
+    return item
+
+
 def get_output_list(dct, logger_override=None, *, persist_reasoning_content=False):
     """Transforms chat completion 'choices' into a standardized response 'output' list.
 
     ``reasoning_content`` копируется в канон только при ``persist_reasoning_content``.
+    Reasoning-only без tools (дефолтный strip) salvage в ``<think>…</think>``.
+    Совсем пустой choice — пустой output (цикл bounce), не ValueError.
     """
     output_list = []
     for dct_choice in dct['choices']:
@@ -79,21 +126,21 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
             )
         fr = dct_choice.get("finish_reason")
         msg_obj = dct_choice.get("message") or {}
+        content = msg_obj.get("content")
+        raw_text = _message_content_as_text(content)
+        visible = project_text_for_model(raw_text, strip_think=True)
+        reasoning_text = _nonempty_reasoning_text(msg_obj)
+        has_tools = bool(msg_obj.get("tool_calls"))
         _decision = normalize_finish_reason(
             fr,
-            has_content=bool(msg_obj.get("content")),
-            has_tool_calls=bool(msg_obj.get("tool_calls")),
+            has_content=bool(raw_text.strip()),
+            has_tool_calls=has_tools,
+            has_reasoning=reasoning_text is not None,
         )
         if not _decision.accept:
-            if logger_override is not None:
-                logger_override.error(
-                    "Empty/unusable chat/completions response (finish_reason=%r, "
-                    "no content/tool_calls): payload=%s",
-                    fr, _safe_json_for_log(dct),
-                )
-            raise ValueError(
-                f"Backend returned empty/unusable response (finish_reason={fr!r})"
-            )
+            # Нет полезной нагрузки и неизвестный finish — не транспортный
+            # ValueError: пустой батч, цикл сам bounce. Choice error уже выше.
+            continue
         if _decision.unknown and logger_override is not None:
             logger_override.warning(
                 "Unknown finish_reason=%r accepted permissively (content/tool_calls "
@@ -107,39 +154,41 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                 _safe_json_for_log(dct),
             )
 
-        # Message-item: есть проза, либо persist_reasoning_content и есть
-        # reasoning_content при content=None — носитель CoT на tool-only такте.
-        # Пустой message без ризонинга не плодим.
-        content = msg_obj.get("content")
-        reasoning = None
+        persist_field = None
         if persist_reasoning_content:
-            reasoning = msg_obj.get("reasoning_content")
-        if content is not None or reasoning is not None:
-            id_choice = get_md5_hash(dct_choice)
-            item = {
-                "id": "msg_" + id_choice,
-                "type": "message",
-                "status": "completed",
-                "content": [{
-                    "type": "output_text",
-                    "annotations": [],
-                    "logprobs": [],
-                    "text": "" if content is None else content
-                }],
-                "role": msg_obj.get("role")
-            }
-            if reasoning is not None:
-                item["reasoning_content"] = reasoning
-            output_list.append(item)
+            persist_field = msg_obj.get("reasoning_content")
 
-        # --- FIX 2: Generate a unique ID for each tool call ---
+        text_out = None
+        item_reasoning = persist_field if persist_reasoning_content else None
+        if has_tools:
+            # Случай A: tools. Salvage не трогает. Носитель CoT — только persist.
+            if content is not None or item_reasoning is not None:
+                text_out = "" if content is None else content
+        elif visible or raw_text.strip():
+            # Видимая проза или think-only в content — как пришло, без обёртки.
+            text_out = content if content is not None else raw_text
+        elif reasoning_text is not None:
+            if persist_reasoning_content:
+                text_out = "" if content is None else content
+            else:
+                text_out = f"<think>{reasoning_text.strip()}</think>"
+                item_reasoning = None
+
+        if text_out is not None:
+            output_list.append(
+                _canonical_message_item(
+                    dct_choice,
+                    text=text_out,
+                    role=msg_obj.get("role"),
+                    reasoning=item_reasoning,
+                )
+            )
 
         if dct_choice['message'].get("tool_calls", None) is not None:
             for tool_call_dict in dct_choice['message']['tool_calls']:
                 if tool_call_dict['type'] != 'function':
                     raise ValueError("Unknown logic")
 
-                # Generate a unique hash for THIS specific tool call
                 id_tool_call = get_md5_hash(tool_call_dict)
 
                 output_list.append({
@@ -147,7 +196,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                     "call_id": tool_call_dict['id'],
                     "name": tool_call_dict['function']['name'],
                     "type": "function_call",
-                    "id": "fc_" + id_tool_call,  # Use the new unique ID
+                    "id": "fc_" + id_tool_call,
                     "status": "completed"
                 })
 

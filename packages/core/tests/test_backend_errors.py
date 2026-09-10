@@ -30,6 +30,18 @@ def test_not_empty_with_content():
 def test_not_empty_with_tool_calls():
     assert is_empty_completion(_resp(tool_calls=[{"id": "c1", "type": "function"}])) is False
 
+
+def test_not_empty_with_reasoning_content():
+    dct = _resp()
+    dct["choices"][0]["message"]["reasoning_content"] = "search the leaderboard"
+    assert is_empty_completion(dct) is False
+
+
+def test_empty_whitespace_reasoning_without_finish_is_empty():
+    dct = _resp()
+    dct["choices"][0]["message"]["reasoning_content"] = "  \n"
+    assert is_empty_completion(dct) is True
+
 def test_not_empty_with_finish_reason():
     assert is_empty_completion(_resp(finish_reason="stop")) is False
 
@@ -246,3 +258,10 @@ def test_finish_unknown_empty_rejects():
     assert d.accept is False and d.unknown is True
     d2 = normalize_finish_reason("eos", has_content=False, has_tool_calls=False)
     assert d2.accept is False
+
+
+def test_finish_null_with_reasoning_accepts_flagged():
+    d = normalize_finish_reason(
+        None, has_content=False, has_tool_calls=False, has_reasoning=True
+    )
+    assert d.accept is True and d.unknown is True

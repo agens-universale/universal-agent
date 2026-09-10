@@ -96,10 +96,16 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
         return False
 
 
+def _nonempty_reasoning_content(msg: dict) -> bool:
+    reasoning = msg.get("reasoning_content")
+    return isinstance(reasoning, str) and bool(reasoning.strip())
+
+
 def is_empty_completion(dct: dict) -> bool:
     """True, если ответ бэкенда генуинно пуст: нет content, нет tool_calls, нет
-    finish_reason, нет error (ни top-level, ни choice-level). Напр. оборванный
-    SSE-стрим, отдавший 0 токенов. Такой ответ → retriable (см. connect_backend)."""
+    reasoning_content, нет finish_reason, нет error (ни top-level, ни choice-level).
+    Напр. оборванный SSE-стрим, отдавший 0 токенов. Такой ответ → retriable
+    (см. connect_backend). Непустой reasoning — не пустой стрим (salvage, не ретрай)."""
     if not isinstance(dct, dict):
         return False
     if dct.get("error") is not None:
@@ -115,6 +121,8 @@ def is_empty_completion(dct: dict) -> bool:
         return False
     if msg.get("tool_calls"):
         return False
+    if _nonempty_reasoning_content(msg):
+        return False
     return True
 
 
@@ -126,15 +134,22 @@ class FinishDecision(NamedTuple):
 _KNOWN_FINISH_REASONS = frozenset({"stop", "tool_calls", "length"})
 
 
-def normalize_finish_reason(finish_reason, *, has_content: bool, has_tool_calls: bool) -> FinishDecision:
+def normalize_finish_reason(
+    finish_reason,
+    *,
+    has_content: bool,
+    has_tool_calls: bool,
+    has_reasoning: bool = False,
+) -> FinishDecision:
     """Permissive-но-честная трактовка finish_reason (провайдер-агностично).
 
     Известный {stop, tool_calls, length} → принять. Незнакомый/null + есть
-    content/tool_calls → принять как «stop», но пометить unknown (warning).
-    Незнакомый/null + пусто → не принять (генуинно непригодно → путь пустого)."""
+    content/tool_calls/reasoning → принять как «stop», но пометить unknown (warning).
+    Незнакомый/null + пусто → не принять (генуинно непригодно; конвертер отдаёт
+    пустой батч → bounce, не транспортный ретрай)."""
     if finish_reason in _KNOWN_FINISH_REASONS:
         return FinishDecision(accept=True, unknown=False)
-    if has_content or has_tool_calls:
+    if has_content or has_tool_calls or has_reasoning:
         return FinishDecision(accept=True, unknown=True)
     return FinishDecision(accept=False, unknown=True)
 
