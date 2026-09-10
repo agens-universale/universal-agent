@@ -6,9 +6,12 @@
 #
 # gc_cli_config — плоские ключи config_dict. Сборка:
 #   schema defaults < bench defaults адаптера < этот блок < runtime (url/model).
-# Здесь перечислены ВСЕ поведенческие ключи, чтобы слой схемы/bench не подмешивал
-# скрытых значений. Не пишем: completions_url, model (runtime), пути промптов и
-# skills_data_path (адаптер резолвит bundled prompts/skills и контейнерный skills root).
+# Здесь перечислены поведенческие ключи живых тулов/цикла, чтобы слой схемы/bench
+# не подмешивал скрытых значений. Не пишем: completions_url, model (runtime), пути
+# промптов и skills_data_path (адаптер резолвит bundled prompts/skills и контейнерный
+# skills root). Не пишем TUI/voice/update/models/slots — harbor-ран их не читает.
+# Дефолты тулов из stop_tools (project_memory, download_file, exec_fetch_url,
+# session_read_user_intent_log, …) не дублируем — схема и так их знает.
 import_path: adapters.gc_cli_external:GcCliExternal
 model_name: ???
 model: openai/${model_name}
@@ -21,7 +24,9 @@ agent_kwargs:
     chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
     use_max_tokens_param: true
     openai_strict_tools_schema: false    # не требовать все properties в required (GigaCode / non-OpenAI)
-    send_tool_strict: false              # не слать function.strict на провод; vllm/sglang на него иногда дают 500
+    send_tool_strict: true               # слать function.strict на провод
+    retry_embedded_choice_errors: true   # ретрай, если бэкенд вернул choice с ошибкой внутри
+    claude_prompt_cache: null            # авто по id модели; Qwen не claude
     use_ssl: false
     cert_path: null
     key_path: null
@@ -30,7 +35,7 @@ agent_kwargs:
     proxy: null
     stream: true                             # legacy; CLI/harbor non-stream, канон — tui_stream
     chat_completion_headers: {}
-    chat_completion_kwargs:                  # {} НЕ сбрасывает bench-слой (deep-merge dict)
+    chat_completion_kwargs:                  # dict deep-merge: ключи ниже плюс bench enable_thinking/tool_choice
       chat_template_kwargs:
         enable_thinking: false
       tool_choice: auto
@@ -38,6 +43,7 @@ agent_kwargs:
       llm:
         max_tokens: 8192                     # aux LLM: summary / intent-scope
         judge_max_tokens: 10000              # finish-gate / command_moderation
+        subagent_role_max_tokens: 4096       # special_agent role draft; субагенты выкл
         completion_kwargs: {}
 
     # --- agent loop ---
@@ -53,9 +59,10 @@ agent_kwargs:
     subagent_max_steps: 100                  # лимит шагов одного субагента (действует только при включённых субагентах)
     subagents_dir: null
     subagents_max_count: 20
-    strict_turn_finish_validation: true      # строгая валидация turn_finish: финальный отчёт обязан пройти проверки, иначе агент дорабатывает
-    finish_gate_max_iterations: 10           # то же для основного агента: макс. кругов finish-гейта перед принятием ответа
-    subagent_finish_gate_max_iterations: 3   # сколько раз finish-гейт может завернуть финальный ответ субагента на доработку
+    strict_turn_finish_validation: true      # вкл finish-gate: LLM-судья на turn_finish (нужен backend_api_mode: chat_completions)
+    finish_gate_max_iterations: 10           # макс. reject основного агента; дальше fail-open, отчёт принимается
+    subagent_finish_gate_max_iterations: 3   # то же для субагента (здесь субагенты выкл)
+    finish_gate_use_rule_hints: false        # зарезервировано, код не читает; rule-layer без LLM вне v1
     client_name: mini_cli_pub_agent_1
     x_cl_id: "12345"
     trace_id_header_name: null
@@ -126,23 +133,49 @@ agent_kwargs:
       max_chars_state: 6000
       max_chars_knowledge: 8000
       total_budget_chars: 20000
+    todo_params:
+      reminder_steps: 10                     # каждые N шагов без session_todo при открытых пунктах; 0 = выкл
     tool_usage_notice: []
     intent_scope_params:
       tools: {}
+      max_summary_chars: 500
+      max_tool_output_chars: 8000
+      max_raw_record_chars: 5000
+      max_final_answer_raw_chars: 2000
+      fallback_raw_on_llm_error: true
 
     # --- security ---
-    # write/read/url — bench_defaults уже OFF. command_moderation.enabled остаётся
-    # схемным true; mode=allow судью не вызывает. protected_paths в flatten нет:
-    # без ключа protection_enabled() считает ON.
+    # Гарды OFF явно: иначе контейнерные пути режутся по ФС раннера.
     command_moderation:
       enabled: false
       mode: allow
+      allowed_command_examples: []
+      denied_command_examples: []
     write_guard:
       enabled: false
+      mode: ask
+      extra_paths: []
     read_guard:
       enabled: false
-    url_policy:
-      enabled: false
+      mode: allow
+      allowed_read_roots: []
+      allowed_read_paths: []
+      denied_read_paths: []
+      denied_file_patterns: []
+      denied_extensions: []
+      max_file_size_kb: 1024
+      binary_read_policy: ask
+      binary_allowed_types:
+        - application/pdf
+        - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+        - image/png
+        - image/jpeg
+      binary_allowed_extensions:
+        - .pdf
+        - .docx
+        - .png
+        - .jpg
+        - .jpeg
     protected_paths:
       enabled: false
       extra: []
@@ -151,15 +184,46 @@ agent_kwargs:
     fs_tools:
       max_read_bytes: 8388608
       max_mutate_bytes: 16777216
+      find_in_files:
+        max_file_bytes: 16777216
+        max_candidates_like: 500000
+        max_candidates_or_simple: 200000
+        max_candidates_affix_or: 300000
+        max_candidates_complex: 50000
+        max_unfiltered_host_reads: 1000
+        max_open_files_affix_or: 50000
+        content_workers_threshold: 20000
+        max_exclude_dirs: 32
+        top_level_dirs_cap: 5
+        default_limit: 100
+        max_total_matches: 300
+        exclude_dot_dirs: true
+        exclude_dir_names: []
+      find_files_by_name:
+        default_max_matches: 100
+        hard_max_matches: 300
+        max_visited: 500000
     mcp-servers: {}
+    mcp-meta:
+      tools-cache-ttl: 3600
+      request_timeout_sec: 600               # адаптер поднимает до max(это, 600)
+      discovery_timeout_sec: 120             # адаптер поднимает до max(это, 120); схема была 30
     pricing:
       enabled: false
+      currency: "₽"
+      per_tokens: 1000000
+      input: null
+      output: null
+      cache_read: null
+      models: {}
     save_logs: false
     console_trace: false
     logging_format: text
     log_level: info
     redact_secrets:
       enabled: false
+      extra_keys: []
+      extra_patterns: []
     logging_params:
       full_log_backend: false
     strip_tags_projection:
