@@ -41,30 +41,23 @@ _SUPPORTED_TRANSPORTS = (
 
 
 class McpClientPort(ABC):
-    """One MCP server, seen as three operations."""
+    """Один MCP-сервер, две операции. Обе корутинные.
+
+    Синхронных в контракте НЕТ. Они были, пока дискавери ходила двумя формами;
+    после сведения её в одну (шаг A3) синхронный путь остался ровно у
+    долгоживущего stdio — там обмен блокирующий по существу (``Popen``,
+    сессия переживает разные ``asyncio.run``). Это деталь реализации
+    конкретного клиента, а не обязательство порта: требовать вторую форму от
+    всех значило бы заставлять каждого писать её ради одного случая.
+    """
 
     def __init__(self, server_name: str, server_cfg: Dict[str, Any]) -> None:
         self.server_name = server_name
         self.server_cfg = server_cfg if isinstance(server_cfg, dict) else {}
 
     @abstractmethod
-    def list_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
-        """Raw `tools/list` entries, exactly as the server returned them."""
-
-    @abstractmethod
-    def call_tool(
-        self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
-    ) -> Any:
-        """Raw `tools/call` response, exactly as the transport produced it.
-
-        Not coerced to a dict: legacy transports may answer with a list or a
-        string, and `call_mcp_tool` has a branch that hands such a value to the
-        model as-is.
-        """
-
-    @abstractmethod
     async def alist_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
-        """Асинхронный двойник ``list_tools``.
+        """Сырые записи ``tools/list`` — ровно как их вернул сервер.
 
         Порт приехал с develop синхронным, а дискавери и вызовы тулов здесь
         нативно асинхронны. Без этой пары async-путь звал бы синхронный метод и
@@ -79,7 +72,11 @@ class McpClientPort(ABC):
     async def acall_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
     ) -> Any:
-        """Асинхронный двойник ``call_tool`` — см. ``alist_tools``."""
+        """Сырой ответ ``tools/call`` — ровно как его отдал транспорт.
+
+        Не приводится к dict: легаси-транспорты отвечают списком или строкой,
+        и вызывающий отдаёт такое значение модели как есть.
+        """
 
 
 def _effective_transport(server_cfg: Dict[str, Any]) -> str:

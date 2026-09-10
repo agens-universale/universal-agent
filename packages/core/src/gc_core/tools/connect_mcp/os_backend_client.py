@@ -70,7 +70,6 @@ def _split_share(share: float) -> tuple[float, int]:
 _CARRIER_CACHE_ATTR = "_gc_mcp_has_python3"
 
 
-
 def _tools_from_body(body: Any, server_name: str) -> List[Dict[str, Any]]:
     """Тело tools/list → список тулов. Общее для синхронной и асинхронной форм."""
     result = body.get("result") if isinstance(body, dict) else None
@@ -270,36 +269,12 @@ class OsBackendStatelessClient(McpClientPort):
         if not cached:
             raise McpExecCarrierError(self._no_python3_message())
 
-    def _require_python3(self, *, timeout: float) -> None:
-        """Probe once per backend: the carrier is an environment property."""
-        cached = getattr(self.os_backend, _CARRIER_CACHE_ATTR, None)
-        if cached is None:
-            probe = self.os_backend.exec(
-                self._PROBE_COMMAND, timeout=self._probe_timeout(timeout)
-            )
-            cached = self._remember_probe(probe)
-        if not cached:
-            raise McpExecCarrierError(self._no_python3_message())
-
     def _no_python3_message(self) -> str:
         return (
             f"MCP server '{self.server_name}': the environment has no python3 on "
             f"PATH, so an MCP request cannot be carried there. Nothing will be "
             f"installed into the task image; set execute_on: agent for this "
             f"server if it is reachable from the agent."
-        )
-
-    # --- public port ---
-
-    def list_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
-        body = self._operation("tools/list", {}, timeout=timeout)
-        return _tools_from_body(body, self.server_name)
-
-    def call_tool(
-        self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
-    ) -> Dict[str, Any]:
-        return self._operation(
-            "tools/call", {"name": tool_name, "arguments": arguments}, timeout=timeout
         )
 
     # --- асинхронные двойники -------------------------------------------------
@@ -323,27 +298,6 @@ class OsBackendStatelessClient(McpClientPort):
         return await self._aoperation(
             "tools/call", {"name": tool_name, "arguments": arguments}, timeout=timeout
         )
-
-    # --- one stateless operation ---
-
-    def _operation(
-        self, method: str, params: Dict[str, Any], *, timeout: float
-    ) -> Dict[str, Any]:
-        """Handshake, the method, then release the session on both sides."""
-        if str(self.server_cfg.get("transport") or "") == "stdio":
-            return self._stdio_operation(method, params, timeout=timeout)
-        # The caller's timeout covers the whole operation, not one request.
-        per_request = max(1.0, float(timeout) / _REQUESTS_PER_OPERATION)
-        self._require_python3(timeout=per_request)
-        session_id = self._handshake(timeout=per_request)
-        _headers, body = self._request(
-            {"jsonrpc": "2.0", "id": f"gc-{method}", "method": method,
-             "params": params},
-            session_id=session_id,
-            timeout=per_request,
-            close_session=True,
-        )
-        return body
 
     async def _aoperation(
         self, method: str, params: Dict[str, Any], *, timeout: float
@@ -372,21 +326,6 @@ class OsBackendStatelessClient(McpClientPort):
         )
         session_id = headers.get("mcp-session-id")
         await self._arequest(
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            session_id=session_id,
-            timeout=timeout,
-        )
-        return session_id
-
-    def _handshake(self, *, timeout: float) -> Optional[str]:
-        headers, _body = self._request(
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-             "params": MCP_INIT_PARAMS},
-            session_id=None,
-            timeout=timeout,
-        )
-        session_id = headers.get("mcp-session-id")
-        self._request(
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             session_id=session_id,
             timeout=timeout,
@@ -447,26 +386,6 @@ class OsBackendStatelessClient(McpClientPort):
         трассу тула, и крупный ответ MCP он обрезал.
         """
         return ["python3", "-"]
-
-    def _request(
-        self,
-        payload: Dict[str, Any],
-        *,
-        session_id: Optional[str],
-        timeout: float,
-        close_session: bool = False,
-    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        code, deadline = self._carrier_code(
-            payload, session_id=session_id, timeout=timeout,
-            close_session=close_session,
-        )
-        result = self.os_backend.exec_argv(
-            self._carrier_argv(),
-            stdin=code,
-            timeout=deadline,
-            capture_max_chars=self._carrier_output_max_chars(),
-        )
-        return self._interpret(result)
 
     async def _arequest(
         self,
@@ -545,19 +464,6 @@ class OsBackendStatelessClient(McpClientPort):
             f"stdio output (rc={getattr(result, 'return_code', None)}, "
             f"stderr={stderr})"
         )
-
-
-    def _stdio_operation(
-        self, method: str, params: Dict[str, Any], *, timeout: float
-    ) -> Dict[str, Any]:
-        argv, stdin, rpc_id = self._stdio_call_parts(method, params)
-        # One exchange carries the whole operation, so it gets the whole budget.
-        result = self.os_backend.exec_argv(
-            argv, stdin=stdin, cwd=self.server_cfg.get("cwd"),
-            timeout=max(1, int(timeout)),
-            capture_max_chars=self._carrier_output_max_chars(),
-        )
-        return self._stdio_reply(result, rpc_id)
 
     async def _astdio_operation(
         self, method: str, params: Dict[str, Any], *, timeout: float

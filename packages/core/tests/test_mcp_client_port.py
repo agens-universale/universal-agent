@@ -3,9 +3,21 @@ import pytest
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient, McpClientPort
 
 
-def test_port_defines_the_two_operations():
+def test_port_asks_only_for_coroutines():
+    """Контракт порта — две корутины и ни одной синхронной формы.
+
+    Синхронный обмен остался ровно у долгоживущего stdio (там он блокирующий
+    по существу) и живёт как деталь реализации ОДНОГО клиента. Верни сюда
+    абстрактную `list_tools` — и каждый новый транспорт снова обязан писать
+    вторую форму ради единственного случая; ровно это и порождало пары,
+    которые снимали шаги A1–A4.
+    """
+    import inspect
+
+    for name in ("alist_tools", "acall_tool"):
+        assert inspect.iscoroutinefunction(getattr(McpClientPort, name))
     for name in ("list_tools", "call_tool"):
-        assert hasattr(McpClientPort, name)
+        assert not hasattr(McpClientPort, name)
 
 
 def test_port_has_no_lifecycle_hook():
