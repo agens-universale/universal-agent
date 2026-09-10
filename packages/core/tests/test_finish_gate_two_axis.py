@@ -82,7 +82,7 @@ def _stub_tools_modules() -> None:
     tools_pkg.is_internal_tool_error_output = lambda *_a, **_k: False
     tools_pkg.is_unknown_tool_output = lambda *_a, **_k: False
     tools_pkg.tool_arguments_valid = lambda *_a, **_k: True
-    tools_pkg.build_tools_data = _build_tools_data
+    tools_pkg.abuild_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]

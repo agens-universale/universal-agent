@@ -75,7 +75,7 @@ def _stub_tools_modules() -> None:
         return {}, [], []
 
     tools_pkg.aapply_tool = _apply_tool
-    tools_pkg.build_tools_data = _build_tools_data
+    tools_pkg.abuild_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]

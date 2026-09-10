@@ -8,7 +8,6 @@ import sys
 import logging
 from typing import Any, Dict, Iterable, Tuple, Optional
 
-from gc_core.tools.connect_mcp import get_mcp_tools_data
 from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
@@ -256,40 +255,6 @@ def _collect_local_tools_data(
     for k, v in skills_tools_data.items():
         tools_data[k] = v
     return tools_data
-
-
-def build_tools_data(
-    config_dict: Dict[str, Any],
-    on_progress=None,
-    *,
-    os_backend: FsBackend | None = None,
-    skills_registry: SkillsRegistry | None = None,
-    logger: Any = None,
-    tools_cache: Any = None,
-) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
-    """
-    Собрать единый словарь tools_data и производные списки spec/description
-    на основе config_dict.
-
-    ``tools_cache`` — ``ToolsCache`` вызывающего. Не передан — MCP-дискавери
-    выполняется заново (866–1405 мс на реальном конфиге). Передан — второй и
-    последующие вызовы с тем же набором ``mcp-servers`` берут готовое.
-
-    Кому это важно на практике: сервер собирает контекст НА КАЖДЫЙ POST, а
-    субагент — НА КАЖДЫЙ СПАВН, причём прямо на event loop (замер: 993 мс
-    заморозки). Обоим достаточно передать сюда один кэш.
-    """
-    tools_data = _collect_local_tools_data(
-        config_dict, os_backend=os_backend, skills_registry=skills_registry
-    )
-
-    mcp_tools_data, mcp_status = get_mcp_tools_data(
-        config_dict, on_progress=on_progress, tools_cache=tools_cache
-    )
-    return _finish_tools_data(
-        tools_data, mcp_tools_data, mcp_status, config_dict,
-        os_backend=os_backend, logger=logger,
-    )
 
 
 async def abuild_tools_data(
@@ -616,8 +581,6 @@ def _tool_result_to_text(res: Any) -> str:
     return str(res)
 
 
-
-
 async def aapply_tool(
     tool_name: str,
     arguments: str | Dict[str, Any],
@@ -663,7 +626,6 @@ async def aapply_tool(
 __all__ = [
     "WrongFunctionArgumentsException",
     "INTERNAL_TOOL_ERROR",
-    "build_tools_data",
     "aapply_tool",
     "tool_arguments_valid",
     "format_internal_tool_error_output",

@@ -3,7 +3,7 @@
 Дискавери — 99.7% времени сборки контекста: замер на реальном конфиге дал
 866–1405 мс при 2.4–6.9 мс на всё остальное. Кэш в ``ToolsCache`` был, но не
 работал никогда: данные лежат в полях ЭКЗЕМПЛЯРА, а экземпляр создавался заново
-на каждый ``build_tools_data``. Обещанный ``tools-cache-ttl: 3600`` не наступал.
+на каждый ``abuild_tools_data``. Обещанный ``tools-cache-ttl: 3600`` не наступал.
 
 Больнее всего это било по двум местам:
 
@@ -115,9 +115,9 @@ def test_subagents_take_the_cache_from_parent_ctx():
         )
 
 
-def test_default_is_unchanged_behaviour():
+async def test_default_is_unchanged_behaviour():
     """Без ``tools_cache`` всё как было: свой одноразовый кэш, полная дискавери."""
-    from gc_core.tools.connect_mcp.agent_tools import get_mcp_tools_data_for_config
+    from gc_core.tools.connect_mcp.agent_tools import aget_mcp_tools_data_for_config
 
-    tools, status = get_mcp_tools_data_for_config({"mcp-servers": {}})
+    tools, status = await aget_mcp_tools_data_for_config({"mcp-servers": {}})
     assert tools == {} and status == {}

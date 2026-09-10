@@ -346,9 +346,9 @@ def _mcp_registry_entry(server: str, tool: str):
     }
 
 
-def test_mcp_tools_data_has_no_loop_warn_by_default(monkeypatch):
+async def test_mcp_tools_data_has_no_loop_warn_by_default(monkeypatch):
     from gc_core.tools.connect_mcp import registry as reg
-    from gc_core.tools.connect_mcp.agent_tools import get_mcp_tools_data_for_config
+    from gc_core.tools.connect_mcp.agent_tools import aget_mcp_tools_data_for_config
 
     monkeypatch.setattr(
         reg,
@@ -360,16 +360,16 @@ def test_mcp_tools_data_has_no_loop_warn_by_default(monkeypatch):
             )
         ),
     )
-    tools_data, _status = get_mcp_tools_data_for_config(
+    tools_data, _status = await aget_mcp_tools_data_for_config(
         {"mcp-servers": {"srv": {"transport": "stdio", "command": "x"}}}
     )
     assert LOOP_WARN_KEY not in tools_data["mcp_srv_search"]
     assert resolve_thresholds(tools_data, "mcp_srv_search") is None
 
 
-def test_mcp_loop_control_tools_all_and_list(monkeypatch):
+async def test_mcp_loop_control_tools_all_and_list(monkeypatch):
     from gc_core.tools.connect_mcp import registry as reg
-    from gc_core.tools.connect_mcp.agent_tools import get_mcp_tools_data_for_config
+    from gc_core.tools.connect_mcp.agent_tools import aget_mcp_tools_data_for_config
 
     registry = {
         "mcp_srv_search": _mcp_registry_entry("srv", "search"),
@@ -378,7 +378,7 @@ def test_mcp_loop_control_tools_all_and_list(monkeypatch):
     monkeypatch.setattr(
         reg, "_abuild_tools_registry", as_coro(lambda *_a, **_k: (registry, {"srv": {}}))
     )
-    listed, _ = get_mcp_tools_data_for_config(
+    listed, _ = await aget_mcp_tools_data_for_config(
         {
             "mcp-servers": {
                 "srv": {
@@ -392,7 +392,7 @@ def test_mcp_loop_control_tools_all_and_list(monkeypatch):
     assert listed["mcp_srv_search"][LOOP_WARN_KEY] == GENERIC_PROFILE
     assert LOOP_WARN_KEY not in listed["mcp_srv_poll"]
 
-    all_tools, _ = get_mcp_tools_data_for_config(
+    all_tools, _ = await aget_mcp_tools_data_for_config(
         {
             "mcp-servers": {
                 "srv": {

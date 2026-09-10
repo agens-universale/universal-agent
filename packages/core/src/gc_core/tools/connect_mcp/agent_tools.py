@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
-from gc_core.tools.connect_mcp.api import acall_mcp_tool, call_mcp_tool
+from gc_core.tools.connect_mcp.api import acall_mcp_tool
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.schema_optional import apply_openai_strict_object
 from gc_core.trace_id import trace_id_from_config, trace_header_name
@@ -55,7 +55,6 @@ class MCPToolWrapper:
             default_use_retry=self._default_use_retry,
             os_backend=self._os_backend,
         )
-
 
 
 def _collect_schema_refs(node: Any) -> set[str]:
@@ -602,29 +601,7 @@ async def aget_mcp_tools_data_for_config(
     )
 
 
-def get_mcp_tools_data_for_config(
-    config_dict: Dict[str, Any],
-    on_progress=None,
-    *,
-    tools_cache: Optional[ToolsCache] = None,
-    os_backend: Any = None,
-) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    """Синхронный двойник. Реализация одна — асинхронная.
-
-    ``run_coro_blocking``: он умеет и «нет loop», и «loop уже крутится», а
-    сюда законно приходят вызывающие, у которых loop уже крутится.
-    """
-    from gc_core.utils.aio_compat import run_coro_blocking
-
-    return run_coro_blocking(
-        aget_mcp_tools_data_for_config(
-            config_dict, on_progress, tools_cache=tools_cache, os_backend=os_backend
-        )
-    )
-
-
 __all__ = [
     "MCPToolWrapper",
     "aget_mcp_tools_data_for_config",
-    "get_mcp_tools_data_for_config",
 ]

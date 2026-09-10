@@ -102,7 +102,7 @@ def _stub_tools_modules() -> None:
         return {}, [], []
 
     tools_pkg.aapply_tool = _apply_tool
-    tools_pkg.build_tools_data = _build_tools_data
+    tools_pkg.abuild_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     # Цикл импортирует ещё и распознаватель «неизвестный тул» — заглушка обязана
     # его отдавать, иначе импорт processing_responses падает на пустом месте.

@@ -5,7 +5,7 @@
 `asyncio.to_thread`». Ступень существовала «ради встраивающих», но
 зарегистрировать свой Python-класс-тул извне НЕЛЬЗЯ:
 
-* `build_tools_data` собирает набор целиком из `config_dict`;
+* `abuild_tools_data` собирает набор целиком из `config_dict`;
 * у `acreate_run_context` нет параметра для чужих тулов;
 * механизма плагинов или entry-points нет.
 
@@ -76,15 +76,15 @@ def test_acall_is_the_abstract_contract():
     assert "__call__" not in AbstractSimpleTool.__abstractmethods__
 
 
-def test_every_core_tool_acall_is_a_coroutine_function():
+async def test_every_core_tool_acall_is_a_coroutine_function():
     """Не просто имя `acall`, а именно корутина.
 
     Синхронная функция с таким именем прошла бы диспетчер и вернула бы результат
     без `await` — тихо и неправильно.
     """
-    from gc_core.tools import build_tools_data
+    from gc_core.tools import abuild_tools_data
 
-    tools_data, _spec, _desc, _status = build_tools_data({})
+    tools_data, _spec, _desc, _status = await abuild_tools_data({})
     not_coroutines = []
     for name, entry in tools_data.items():
         fabric = entry.get("tool_fabric")

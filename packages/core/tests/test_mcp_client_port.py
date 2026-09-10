@@ -13,52 +13,82 @@ def test_port_has_no_lifecycle_hook():
     assert not hasattr(McpClientPort, "close")
 
 
-def test_call_tool_does_not_coerce_a_non_dict_answer(monkeypatch):
-    """call_mcp_tool has a branch for legacy non-dict answers; keep it reachable."""
+async def test_call_tool_does_not_coerce_a_non_dict_answer(monkeypatch):
+    """У ответа легаси-формы (не dict) ветка есть — она обязана оставаться живой."""
     from gc_core.tools.connect_mcp import client_port as cp
 
-    monkeypatch.setattr(
-        cp, "call_tool_stream_http",
-        lambda **kw: ["legacy", "list", "answer"],
-    )
+    async def _fake(**_kw):
+        return ["legacy", "list", "answer"]
+
+    monkeypatch.setattr(cp, "acall_tool_stream_http", _fake)
     client = cp.AgentRuntimeClient(
         "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
     )
-    assert client.call_tool("t", {}, timeout=1.0) == ["legacy", "list", "answer"]
+    assert await client.acall_tool("t", {}, timeout=1.0) == ["legacy", "list", "answer"]
 
 
-def test_list_tools_routes_stream_http(monkeypatch):
+async def test_list_tools_routes_stream_http(monkeypatch):
+    """Маршрут SDK-транспорта проверяем на КОРУТИННОЙ форме.
+
+    Синхронные `list_tools_stream_*` сняты вместе с маршрутом, который их звал
+    (шаги A1–A2): дискавери SDK-транспортов идёт нативно.
+    """
     seen = {}
 
-    def fake_list(*, url, server_cfg, token, timeout):
+    async def fake_list(*, url, server_cfg, token, timeout):
         seen["url"] = url
         seen["timeout"] = timeout
         return [{"name": "ask_user"}]
 
-    # conftest replaces sys.modules["tools"], so a string target can resolve to a
-    # different module object than the class was imported from. Use one object.
+    # conftest подменяет sys.modules["tools"], поэтому строковая цель может
+    # разрешиться в ДРУГОЙ объект модуля. Патчим по объекту.
     from gc_core.tools.connect_mcp import client_port as cp
 
-    monkeypatch.setattr(cp, "list_tools_stream_http", fake_list)
+    monkeypatch.setattr(cp, "alist_tools_stream_http", fake_list)
     client = cp.AgentRuntimeClient(
         "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
     )
-    assert client.list_tools(timeout=5.0) == [{"name": "ask_user"}]
-    assert seen == {"url": "http://x:8000/mcp", "timeout": 5.0}
+
+    assert await client.alist_tools(timeout=3.0) == [{"name": "ask_user"}]
+    assert seen == {"url": "http://x:8000/mcp", "timeout": 3.0}
 
 
-def test_call_tool_routes_stream_http(monkeypatch):
-    def fake_call(*, url, server_cfg, token, timeout, tool_name, arguments):
-        return {"result": {"content": [{"type": "text", "text": tool_name}]}}
+async def test_call_tool_routes_stream_http(monkeypatch):
+    seen = {}
+
+    async def fake_call(*, url, server_cfg, token, timeout, tool_name, arguments):
+        seen["tool"] = tool_name
+        return {"ok": True}
 
     from gc_core.tools.connect_mcp import client_port as cp
 
-    monkeypatch.setattr(cp, "call_tool_stream_http", fake_call)
+    monkeypatch.setattr(cp, "acall_tool_stream_http", fake_call)
     client = cp.AgentRuntimeClient(
         "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
     )
-    out = client.call_tool("ask_user", {"question": "q"}, timeout=5.0)
-    assert out["result"]["content"][0]["text"] == "ask_user"
+
+    assert await client.acall_tool("echo", {"a": 1}, timeout=2.0) == {"ok": True}
+    assert seen == {"tool": "echo"}
+
+
+def test_sync_port_refuses_sdk_transports_loudly():
+    """Синхронный путь для SDK-транспортов обязан отказывать ГРОМКО.
+
+    Попасть туда больше нельзя: дискавери таких серверов идёт нативно. Но
+    молчаливый возврат означал бы, что маршрут снова уводит SDK-транспорт в
+    поток, — а это и есть дефект, который чинил шаг A1.
+    """
+    import pytest as _pytest
+
+    from gc_core.tools.connect_mcp import client_port as cp
+
+    client = cp.AgentRuntimeClient(
+        "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
+    )
+    with _pytest.raises(RuntimeError, match="асинхронной формой"):
+        client.list_tools(timeout=1.0)
+    with _pytest.raises(RuntimeError, match="асинхронной формой"):
+        client.call_tool("echo", {}, timeout=1.0)
 
 
 def test_unsupported_transport_raises():

@@ -339,79 +339,6 @@ def _prepare_mcp_call(
     )
 
 
-def call_mcp_tool(
-    full_tool_name: str,
-    arguments: Dict[str, Any] | str,
-    servers_cfg: Dict[str, Dict[str, Any]],
-    tools_registry: Dict[str, Dict[str, Any]] | None = None,
-    timeout: float = 10.0,
-    default_use_retry: bool = False,
-    *,
-    os_backend: Any = None,
-) -> Any:
-    """
-    Вызвать инструмент на соответствующем MCP-сервере.
-
-    full_tool_name: имя вида "<mcp_key>_<tool_name>" (как в get_all_tools).
-    arguments: словарь аргументов ИЛИ JSON-строка с аргументами (как в OpenAI tool_call).
-
-    tools_registry:
-        результат get_all_tools(servers_cfg) — словарь всех инструментов.
-        Если None — будет получен заново.
-
-    Поведение:
-    - валидирует arguments против JSON Schema из tools_registry[full_tool_name]['parameters'];
-      при ошибке бросает ValueError с подробным описанием путей и сообщений;
-    - если всё валидно — вызывает соответствующий MCP tool через tools/call
-      и возвращает result (data['result'] из MCP-ответа).
-    """
-    target = _prepare_mcp_call(
-        full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry,
-        os_backend=os_backend,
-    )
-    server_key = target.server_key
-    server_cfg = target.server_cfg
-    base_tool_name = target.base_tool_name
-    arguments_obj = target.arguments_obj
-    url = target.url
-    token = target.token
-    transport = target.transport
-    effective_transport = target.effective_transport
-    use_retry = target.use_retry
-
-    @retry_with_backoff(
-        operation_name=f"MCP tool call ({server_key}:{base_tool_name})",
-        retry_log_level=logging.ERROR,
-        no_more_retries_log_level=logging.ERROR,
-    )
-    def _do_mcp_call() -> Any:
-        return client.call_tool(base_tool_name, arguments_obj, timeout=timeout)
-
-    data = _do_mcp_call(
-        use_retry=use_retry,
-        logger=logger,
-    )
-
-    if not isinstance(data, dict):
-        # Unknown/legacy transport returned non-dict; still normalize
-        return _wrap_mcp_result(
-            full_tool_name=full_tool_name,
-            server_key=server_key,
-            base_tool_name=base_tool_name,
-            arguments=arguments_obj,
-            raw=data,
-        )
-
-    result = data.get("result", data)
-    return _wrap_mcp_result(
-        full_tool_name=full_tool_name,
-        server_key=server_key,
-        base_tool_name=base_tool_name,
-        arguments=arguments_obj,
-        raw=result,
-    )
-
-
 async def acall_mcp_tool(
     full_tool_name: str,
     arguments: Dict[str, Any] | str,
@@ -491,5 +418,4 @@ async def acall_mcp_tool(
 
 __all__ = [
     "acall_mcp_tool",
-    "call_mcp_tool",
 ]

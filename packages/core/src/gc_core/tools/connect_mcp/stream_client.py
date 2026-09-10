@@ -522,18 +522,6 @@ async def alist_tools_stream_sse(
     )
 
 
-def list_tools_stream_sse(
-    url: str,
-    server_cfg: Dict[str, Any],
-    token: Optional[str],
-    timeout: float = 10.0,
-) -> List[Dict[str, Any]]:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    return run_coro_blocking(
-        alist_tools_stream_sse(url, server_cfg, token, timeout)
-    )
-
-
 async def _call_tool_stream_sse_async(
     base_url: str,
     token: Optional[str],
@@ -588,7 +576,6 @@ async def _call_tool_stream_sse_async(
             "content": content_items,
             "isError": is_error,
         }
-
 
 
 async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
@@ -730,20 +717,6 @@ async def acall_tool_stream_sse(
     )
 
 
-def call_tool_stream_sse(
-    url: str,
-    server_cfg: Dict[str, Any],
-    token: Optional[str],
-    timeout: float,
-    tool_name: str,
-    arguments: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    return run_coro_blocking(
-        acall_tool_stream_sse(url, server_cfg, token, timeout, tool_name, arguments)
-    )
-
-
 async def _list_tools_stream_http_async(
     base_url: str,
     token: Optional[str],
@@ -825,18 +798,6 @@ async def alist_tools_stream_http(
         timeout=timeout,
         verify=verify,
         cert=cert,
-    )
-
-
-def list_tools_stream_http(
-    url: str,
-    server_cfg: Dict[str, Any],
-    token: Optional[str],
-    timeout: float = 10.0,
-) -> List[Dict[str, Any]]:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    return run_coro_blocking(
-        alist_tools_stream_http(url, server_cfg, token, timeout)
     )
 
 
@@ -1045,20 +1006,6 @@ async def acall_tool_stream_http(
         return await _stateless()
 
 
-def call_tool_stream_http(
-    url: str,
-    server_cfg: Dict[str, Any],
-    token: Optional[str],
-    timeout: float,
-    tool_name: str,
-    arguments: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    return run_coro_blocking(
-        acall_tool_stream_http(url, server_cfg, token, timeout, tool_name, arguments)
-    )
-
-
 async def _list_tools_stream_stdio_async(
     server_cfg: Dict[str, Any],
     timeout: float,
@@ -1110,14 +1057,6 @@ async def alist_tools_stream_stdio(
         server_cfg=server_cfg,
         timeout=timeout,
     )
-
-
-def list_tools_stream_stdio(
-    server_cfg: Dict[str, Any],
-    timeout: float = 10.0,
-) -> List[Dict[str, Any]]:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    return run_coro_blocking(alist_tools_stream_stdio(server_cfg, timeout))
 
 
 async def _call_tool_stream_stdio_async(
@@ -1249,18 +1188,6 @@ async def acall_tool_stream_stdio(
     )
 
 
-def call_tool_stream_stdio(
-    server_cfg: Dict[str, Any],
-    timeout: float,
-    tool_name: str,
-    arguments: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Синхронный двойник. Реализация одна — асинхронная."""
-    return run_coro_blocking(
-        acall_tool_stream_stdio(server_cfg, timeout, tool_name, arguments)
-    )
-
-
 __all__ = [
     "acall_tool_stream_http",
     "acall_tool_stream_sse",
@@ -1268,12 +1195,6 @@ __all__ = [
     "alist_tools_stream_http",
     "alist_tools_stream_sse",
     "alist_tools_stream_stdio",
-    "list_tools_stream_sse",
-    "call_tool_stream_sse",
-    "list_tools_stream_http",
-    "call_tool_stream_http",
-    "list_tools_stream_stdio",
-    "call_tool_stream_stdio",
 ]
 
 

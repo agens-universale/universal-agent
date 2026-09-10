@@ -155,6 +155,9 @@ def test_context_assembly_has_exactly_one_form():
     for helper in ("_prepare_run_context", "_finish_run_context"):
         assert helper in calls, f"acreate_run_context не зовёт {helper}"
     assert "abuild_tools_data" in calls, "дискавери снова не ждётся"
+    # Синхронной сборки тулов больше нет вовсе (шаг A2), но гейт остаётся:
+    # он сторожит, чтобы она не вернулась. Слепое переименование однажды уже
+    # превратило его в проверку наоборот.
     assert "build_tools_data" not in calls
 
 

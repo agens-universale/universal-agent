@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from gc_core.tools import build_tools_data
+from gc_core.tools import abuild_tools_data
 from gc_core.tools.schema_optional import resolve_optional_property_keys
 from gc_core.utils.connect_backend import normalize_chat_completions_tools
 
@@ -22,13 +22,13 @@ CONFIG = {
 
 
 @pytest.fixture(scope="module")
-def specs() -> list:
+async def specs() -> list:
     """The registry exactly as it ships — the payload we care about is the real one.
 
-    Module-scoped: build_tools_data walks the skills registry and MCP discovery, so
+    Module-scoped: abuild_tools_data walks the skills registry and MCP discovery, so
     build it once for the whole file rather than per test.
     """
-    _, built, *_ = build_tools_data(CONFIG)
+    _, built, *_ = await abuild_tools_data(CONFIG)
     return built
 
 

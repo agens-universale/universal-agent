@@ -10,7 +10,7 @@
 что ребёнок получает родительский набор — то есть тулы, которые ему запрещены.
 Тихо, без ошибки, с полным доступом.
 
-Сегодня этого не происходит: ``get_mcp_tools_data`` кладёт в кэш СЫРОЙ набор
+Сегодня этого не происходит: ``aget_mcp_tools_data_for_config`` кладёт в кэш СЫРОЙ набор
 MCP-тулов, а ``apply_subagent_tools_filter`` работает уже над собранным
 ``tools_data`` и читает allow/stop из ПЕРЕДАННОГО ``config_dict``
 (``tools/__init__.py``: дискавери, потом фильтр). Тест закрепляет этот порядок.
@@ -38,11 +38,13 @@ def shared_discovery(monkeypatch):
         }
     }
 
-    def fake_get_mcp(config_dict, on_progress=None, **_kw):
+    async def fake_get_mcp(config_dict, on_progress=None, **_kw):
         calls["n"] += 1
         return (dict(payload), {})
 
-    monkeypatch.setattr(tools_pkg, "get_mcp_tools_data", fake_get_mcp)
+    from gc_core.tools.connect_mcp import agent_tools as _at
+
+    monkeypatch.setattr(_at, "aget_mcp_tools_data_for_config", fake_get_mcp)
     return calls
 
 
@@ -56,10 +58,10 @@ def _cfg(**extra: Any) -> Dict[str, Any]:
     return cfg
 
 
-def test_child_stop_list_still_applies_with_a_shared_cache(shared_discovery):
+async def test_child_stop_list_still_applies_with_a_shared_cache(shared_discovery):
     """Родитель видит MCP-тул, ребёнок с stop-списком — нет."""
-    parent_tools, *_ = tools_pkg.build_tools_data(_cfg())
-    child_tools, *_ = tools_pkg.build_tools_data(
+    parent_tools, *_ = await tools_pkg.abuild_tools_data(_cfg())
+    child_tools, *_ = await tools_pkg.abuild_tools_data(
         _cfg(**{SUBAGENT_TOOLS_STOP_KEY: [_MCP_TOOL]})
     )
 
@@ -70,10 +72,10 @@ def test_child_stop_list_still_applies_with_a_shared_cache(shared_discovery):
     )
 
 
-def test_child_allow_list_narrows_the_set(shared_discovery):
+async def test_child_allow_list_narrows_the_set(shared_discovery):
     """allow-список сужает набор ребёнка, не трогая родительский."""
-    parent_tools, *_ = tools_pkg.build_tools_data(_cfg())
-    child_tools, *_ = tools_pkg.build_tools_data(
+    parent_tools, *_ = await tools_pkg.abuild_tools_data(_cfg())
+    child_tools, *_ = await tools_pkg.abuild_tools_data(
         _cfg(**{SUBAGENT_TOOLS_ALLOW_KEY: ["session_think"]})
     )
 
@@ -91,7 +93,7 @@ def test_filter_runs_after_mcp_assembly():
     набор, который ему запрещён.
 
     Смотрим ``_finish_tools_data``: досборка живёт там с тех пор, как у
-    ``build_tools_data`` появился асинхронный двойник — тело у них общее, и
+    ``abuild_tools_data`` появился асинхронный двойник — тело у них общее, и
     порядок достаточно закрепить в одном месте.
     """
     import ast
@@ -130,8 +132,15 @@ def test_filter_runs_after_mcp_assembly():
     )
 
 
-def test_both_build_forms_share_the_finish():
-    """Обе формы сборки обязаны звать одну досборку — иначе порядок разъедется."""
+def test_the_single_build_form_calls_the_shared_finish():
+    """Сборка тулов одна, и досборку она обязана звать общую.
+
+    Тест назывался «обе формы делят досборку» и сверял синхронную с
+    асинхронной. Синхронной больше нет — она была тонкой обёрткой через свой
+    loop и после перехода дискавери на нативный путь осталась без вызывающих.
+    Проверяемое свойство осталось: фильтр набора живёт в `_finish_tools_data`,
+    и сборка не имеет права собирать набор мимо него.
+    """
     import ast
 
     from gc_testkit.paths import REPO
@@ -139,16 +148,16 @@ def test_both_build_forms_share_the_finish():
     src = (REPO / "packages/core/src/gc_core/tools/__init__.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
 
-    for name, kind in (
-        ("build_tools_data", ast.FunctionDef),
-        ("abuild_tools_data", ast.AsyncFunctionDef),
-    ):
-        fn = next(n for n in ast.walk(tree) if isinstance(n, kind) and n.name == name)
-        calls = {
-            getattr(c.func, "id", None) or getattr(c.func, "attr", None)
-            for c in ast.walk(fn) if isinstance(c, ast.Call)
-        }
-        assert "_finish_tools_data" in calls, (
-            f"{name} не зовёт общую досборку — фильтр и спеки разъедутся между "
-            f"синхронной и асинхронной формами"
-        )
+    forms = [n for n in ast.walk(tree)
+             if isinstance(n, ast.FunctionDef) and n.name == "build_tools_data"]
+    assert forms == [], "вернулась синхронная сборка тулов"
+
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "abuild_tools_data")
+    calls = {
+        getattr(c.func, "id", None) or getattr(c.func, "attr", None)
+        for c in ast.walk(fn) if isinstance(c, ast.Call)
+    }
+    assert "_finish_tools_data" in calls, (
+        "сборка собирает набор мимо общей досборки — фильтр субагента разъедется"
+    )

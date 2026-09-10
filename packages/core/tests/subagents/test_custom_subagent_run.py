@@ -87,9 +87,9 @@ class TestChildConfig:
         assert child["stop_tools"] == ["exec_python"]
         assert child[SUBAGENT_TOOLS_STOP_KEY] == ["exec_command"]
 
-        from gc_core.tools import build_tools_data
+        from gc_core.tools import abuild_tools_data
 
-        data, _spec, _descr, _mcp = build_tools_data(child)
+        data, _spec, _descr, _mcp = await abuild_tools_data(child)
         assert "exec_python" not in data   # глобальный запрет
         assert "exec_command" not in data  # запрет из файла
 

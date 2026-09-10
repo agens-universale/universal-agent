@@ -25,9 +25,16 @@ _SDK_CFG = {"srv": {"transport": "stream_http", "url": "http://srv.invalid/mcp"}
 _LEGACY_CFG = {"srv": {"transport": "http", "url": "http://srv.invalid/mcp"}}
 
 
-def test_async_entry_exists_and_is_a_coroutine():
+def test_the_only_entry_is_a_coroutine():
+    """Вход ОДИН и корутинный: синхронный снят вместе с мёртвым маршрутом.
+
+    `call_mcp_tool` был тонкой обёрткой над корутиной через свой loop. После
+    того как дискавери пошла нативно, его не звал никто.
+    """
     assert inspect.iscoroutinefunction(api.acall_mcp_tool)
-    assert not inspect.iscoroutinefunction(api.call_mcp_tool)
+    assert not hasattr(api, "call_mcp_tool"), (
+        "вернулся синхронный вход — значит вернулся и маршрут, который его звал"
+    )
 
 
 async def test_sdk_transport_runs_without_spawning_a_thread(monkeypatch):
@@ -121,11 +128,13 @@ async def test_persistent_stdio_still_goes_to_an_abandonable_thread(monkeypatch)
     )
 
 
-async def test_both_entries_share_preparation(monkeypatch):
-    """Ошибки валидации одинаковы у обоих входов — подготовка общая."""
-    with pytest.raises(ValueError, match="Unknown tool"):
-        api.call_mcp_tool("mcp_srv_missing", {}, _SDK_CFG, _REGISTRY)
+async def test_validation_errors_come_from_the_shared_preparation(monkeypatch):
+    """Разбор аргументов вынесен в `_prepare_mcp_call` и общий для всех путей.
 
+    Раньше тест сверял ОБА входа между собой; синхронного больше нет, но
+    свойство осталось: сообщение приходит из общей подготовки, а не из
+    транспорта.
+    """
     with pytest.raises(ValueError, match="Unknown tool"):
         await api.acall_mcp_tool("mcp_srv_missing", {}, _SDK_CFG, _REGISTRY)
 

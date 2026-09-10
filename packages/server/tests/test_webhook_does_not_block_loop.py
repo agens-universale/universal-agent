@@ -38,7 +38,6 @@ def blocking_ctx(monkeypatch):
         time.sleep(_BUILD_SEC)
         return {}, {}
 
-    monkeypatch.setattr(tools_pkg, "get_mcp_tools_data", _slow)
 
     async def _aslow(config_dict, on_progress=None, **kwargs):
         import asyncio as _a

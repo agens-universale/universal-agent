@@ -121,7 +121,16 @@ class TestSidecarPersistCallResult:
 
     def test_error_kind_on_wrong_arguments(self, tmp_path, monkeypatch):
         from gc_core import processing_responses as pr
-        from gc_core.tools import WrongFunctionArgumentsException
+        # Берём класс У МОДУЛЯ, который его и ловит.
+        #
+        # `from gc_core.tools import ...` здесь ненадёжно: конфтесты тестов
+        # подменяют `sys.modules["gc_core.tools"]` заглушкой и восстанавливают
+        # обратно, и при неудачном порядке сборки получаются ДВА объекта класса
+        # под одним именем — `except` перестаёт ловить, а тест падает на ровном
+        # месте. Про эту опасность прямо написано в `subagents/conftest.py`.
+        # Проверяем поведение цикла, а не устройство импортов, поэтому берём
+        # класс оттуда, где он используется.
+        WrongFunctionArgumentsException = pr.WrongFunctionArgumentsException
 
         async def _boom(**kw):
             raise WrongFunctionArgumentsException("bad args", received_args="{}")

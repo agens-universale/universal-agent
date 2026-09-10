@@ -31,12 +31,6 @@ from gc_core.tools.connect_mcp.stream_client import (
     alist_tools_stream_http,
     alist_tools_stream_sse,
     alist_tools_stream_stdio,
-    call_tool_stream_http,
-    call_tool_stream_sse,
-    call_tool_stream_stdio,
-    list_tools_stream_http,
-    list_tools_stream_sse,
-    list_tools_stream_stdio,
 )
 
 _SUPPORTED_TRANSPORTS = (
@@ -131,17 +125,15 @@ class AgentRuntimeClient(McpClientPort):
         url = self._url()
         token = self._token()
 
-        if effective == "stream_sse":
-            return list_tools_stream_sse(
-                url=url, server_cfg=self.server_cfg, token=token, timeout=timeout
-            )
-        if effective == "stream_http":
-            return list_tools_stream_http(
-                url=url, server_cfg=self.server_cfg, token=token, timeout=timeout
-            )
-        if transport == "stream_stdio":
-            return list_tools_stream_stdio(
-                server_cfg=self.server_cfg, timeout=timeout
+        if effective in ("stream_sse", "stream_http", "stream_stdio"):
+            # Сюда попасть больше нельзя, и это проверено маршрутом: транспорты
+            # SDK идут нативной веткой `_adiscover_one_sdk`, а синхронный путь
+            # остаётся только для легаси и persistent stdio. Отказ громкий
+            # намеренно: молчаливое возвращение сюда означало бы, что дискавери
+            # снова уводит SDK-транспорт в поток, — а именно это и чинил шаг A1.
+            raise RuntimeError(
+                f"MCP server '{self.server_name}': транспорт {effective!r} "
+                "обслуживается только асинхронной формой (alist_tools/acall_tool)"
             )
         if is_persistent_stdio(self.server_cfg):
             session = PersistentStdioRegistry.instance().get_or_create(
@@ -185,30 +177,15 @@ class AgentRuntimeClient(McpClientPort):
         url = self._url()
         token = self._token()
 
-        if effective == "stream_sse":
-            return call_tool_stream_sse(
-                url=url,
-                server_cfg=self.server_cfg,
-                token=token,
-                timeout=timeout,
-                tool_name=tool_name,
-                arguments=arguments,
-            )
-        if effective == "stream_http":
-            return call_tool_stream_http(
-                url=url,
-                server_cfg=self.server_cfg,
-                token=token,
-                timeout=timeout,
-                tool_name=tool_name,
-                arguments=arguments,
-            )
-        if transport == "stream_stdio":
-            return call_tool_stream_stdio(
-                server_cfg=self.server_cfg,
-                timeout=timeout,
-                tool_name=tool_name,
-                arguments=arguments,
+        if effective in ("stream_sse", "stream_http", "stream_stdio"):
+            # Сюда попасть больше нельзя, и это проверено маршрутом: транспорты
+            # SDK идут нативной веткой `_adiscover_one_sdk`, а синхронный путь
+            # остаётся только для легаси и persistent stdio. Отказ громкий
+            # намеренно: молчаливое возвращение сюда означало бы, что дискавери
+            # снова уводит SDK-транспорт в поток, — а именно это и чинил шаг A1.
+            raise RuntimeError(
+                f"MCP server '{self.server_name}': транспорт {effective!r} "
+                "обслуживается только асинхронной формой (alist_tools/acall_tool)"
             )
         if is_persistent_stdio(self.server_cfg):
             session = PersistentStdioRegistry.instance().get_or_create(

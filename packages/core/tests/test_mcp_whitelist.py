@@ -104,24 +104,27 @@ def test_filter_warns_on_unknown_names(caplog):
     assert "srv" in warns[0].getMessage()
 
 
-def test_discover_one_applies_whitelist(monkeypatch):
-    # Transport dispatch lives in client_port now; registry only resolves and
-    # normalises. conftest swaps sys.modules["tools"], so neither a string target
-    # nor a fresh import reliably names the module object the resolver returns a
-    # client from — walk the live chain registry itself uses.
-    resolve = reg._discover_one.__globals__["resolve_mcp_client"]
-    client = resolve("srv", {"transport": "stream_stdio", "command": "x"})
+async def test_discover_one_applies_whitelist(monkeypatch):
+    """Предмет теста — ФИЛЬТР, а не транспорт.
+
+    Берём корутинный путь: SDK-транспорты после шага A1 ходят нативно, а
+    синхронный вход для них теперь громко отказывает.
+    """
+    # Подменяем ЗАБОР тулов у SDK-ветки — фильтр стоит сразу после него.
+    # conftest подменяет sys.modules["tools"], поэтому строковая цель может
+    # разрешиться в другой объект модуля: патчим по globals самой функции.
+    async def _fake(*_a, **_kw):
+        return list(_RAW)
+
     monkeypatch.setitem(
-        type(client).list_tools.__globals__,
-        "list_tools_stream_stdio",
-        lambda **kw: list(_RAW),
+        reg._adiscover_one_sdk.__globals__, "_afetch_tools_sdk", _fake
     )
     server_cfg = {
         "transport": "stream_stdio",
         "command": "x",
         "whitelist": {"enabled": True, "tools": ["create"]},
     }
-    tools, status = reg._discover_one("srv", server_cfg, timeout=5)
+    tools, status = await reg._adiscover_one("srv", server_cfg, timeout=5)
     assert [t["name"] for t in tools] == ["create"]
     assert status["status"] == "connected"
     assert status["tool_count"] == 1
@@ -159,7 +162,7 @@ def test_apply_tool_blocks_tool_outside_tools_data(monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        mcp_api, "call_mcp_tool", lambda *a, **kw: calls.append(a) or "never"
+        mcp_api, "acall_mcp_tool", lambda *a, **kw: calls.append(a) or "never"
     )
     out = run_coro(tools_pkg.aapply_tool("mcp_srv_delete", "{}", tools_data_={}))
     assert "mcp_srv_delete" in out

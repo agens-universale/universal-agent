@@ -102,9 +102,26 @@ class TestAgentExecutorRoutesToChild:
     def test_add_message_goes_to_child_when_active(self):
         from gc_core.agent_executor import AgentExecutor
 
+        # Активатор берём У ТОГО ЖЕ МОДУЛЯ, что и исполнитель.
+        #
+        # Конфтесты подменяют `sys.modules["gc_core.tools"]` заглушкой и
+        # возвращают обратно; при неудачном порядке сборки
+        # `subagents.active_scope` оказывается загружен ДВАЖДЫ. Тогда у теста
+        # и у `agent_executor` разные `ContextVar`: исполнитель пишет в один,
+        # тест читает другой, и сообщение «теряется» на ровном месте. Причём
+        # устареть может ЛЮБАЯ из сторон — зависит от порядка сборки.
+        #
+        # Поэтому берём активатор из ОКРУЖЕНИЯ той функции, которую держит
+        # исполнитель. Не через `sys.modules`: выброшенный модуль оттуда уже
+        # удалён, и поиск по имени падает с `KeyError`, — а `__globals__`
+        # живут вместе с самой функцией.
+        import gc_core.agent_executor as _ae
+
+        _activate = _ae.try_enqueue_user_message.__globals__["activate_child_input"]
+
         ctx = MagicMock()
         ex = AgentExecutor(ctx)
-        with activate_child_input(parent_call_id="call_sub_1") as scope:
+        with _activate(parent_call_id="call_sub_1") as scope:
             ex.add_message({"role": "user", "content": "to child", "id": "m1"})
             assert scope.drain()[0]["content"] == "to child"
             with ex.get_lock():

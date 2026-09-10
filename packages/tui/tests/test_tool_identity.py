@@ -55,7 +55,7 @@ def test_find_in_files_summary_keeps_the_pattern():
             "query_mode": "text",
             "file_pattern": "*.py",
             "path": "/proj",
-            "pattern": "def build_tools_data",
+            "pattern": "def abuild_tools_data",
         },
     )
-    assert "def build_tools_data" in summary
+    assert "def abuild_tools_data" in summary

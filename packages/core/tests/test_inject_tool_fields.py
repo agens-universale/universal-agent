@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from gc_core import tools as tools_pkg
-from gc_core.tools import aapply_tool, build_tools_data, WrongFunctionArgumentsException
+from gc_core.tools import aapply_tool, abuild_tools_data, WrongFunctionArgumentsException
 from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec, resolve_inject_tool_fields, strip_injected_tool_args
 
 _REASON = "reason"
@@ -126,30 +126,30 @@ class TestStripInjectedToolArgs:
 
 
 class TestBuildToolsData:
-    def test_disabled_leaves_spec_unchanged(self):
-        tools_data, _, _, _ = build_tools_data(_base_config(inject_tool_fields={}))
+    async def test_disabled_leaves_spec_unchanged(self):
+        tools_data, _, _, _ = await abuild_tools_data(_base_config(inject_tool_fields={}))
         entry = tools_data["fs_write_file"]
         assert _REASON not in entry["spec"]["parameters"]["properties"]
         assert entry.get("injected_fields", []) == []
 
-    def test_enabled_injects_from_config_dict(self):
-        tools_data, _, _, _ = build_tools_data(_base_config(inject_tool_fields=_reason_fields()))
+    async def test_enabled_injects_from_config_dict(self):
+        tools_data, _, _, _ = await abuild_tools_data(_base_config(inject_tool_fields=_reason_fields()))
         entry = tools_data["fs_write_file"]
         props = entry["spec"]["parameters"]["properties"]
         assert list(props.keys())[0] == _REASON
         assert entry["injected_fields"] == [_REASON]
 
-    def test_subagent_with_native_reason_not_injected(self):
+    async def test_subagent_with_native_reason_not_injected(self):
         cfg = _base_config(
             inject_tool_fields=_reason_fields(),
             use_local_subagents=True,
             backend_api_mode="chat_completions",
         )
-        tools_data, _, _, _ = build_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(cfg)
         assert tools_data["subagent_worker"]["injected_fields"] == []
 
-    def test_strict_plus_inject_makes_all_required(self):
-        tools_data, _, _, _ = build_tools_data(
+    async def test_strict_plus_inject_makes_all_required(self):
+        tools_data, _, _, _ = await abuild_tools_data(
             _base_config(
                 inject_tool_fields=_reason_fields(),
                 openai_strict_tools_schema=True,
@@ -240,7 +240,7 @@ class TestApplyTool:
 
     async def test_missing_reason_is_accepted(self):
         """Omitted injected reason no longer rejects the call (it is semantically optional)."""
-        tools_data, _, _, _ = build_tools_data(
+        tools_data, _, _, _ = await abuild_tools_data(
             _base_config(inject_tool_fields=_reason_fields())
         )
 
@@ -359,25 +359,25 @@ class TestApplyTool:
 
 
 class TestSubagentChildBuild:
-    def test_child_config_inherits_decoration(self):
+    async def test_child_config_inherits_decoration(self):
         parent = _base_config(inject_tool_fields=_reason_fields())
         child = {**parent, "use_local_subagents": False}
-        tools_data, _, _, _ = build_tools_data(child)
+        tools_data, _, _, _ = await abuild_tools_data(child)
         assert tools_data["fs_read_file"]["injected_fields"] == [_REASON]
 
 
 class TestInjectDoesNotPolluteClassSchema:
-    def test_second_build_still_tracks_injected_fields(self):
+    async def test_second_build_still_tracks_injected_fields(self):
         """Regression: inject must not mutate shared class-level parameters.
 
         Without a deepcopy in the registry/tool_description, the first
-        build_tools_data() leaves ``reason`` on the class schema; the second
+        abuild_tools_data() leaves ``reason`` on the class schema; the second
         build then skips inject (field already present) and leaves
         injected_fields empty — apply_tool forwards reason → TypeError.
         """
         cfg = _base_config(inject_tool_fields=_reason_fields())
-        first, _, _, _ = build_tools_data(cfg)
-        second, _, _, _ = build_tools_data(cfg)
+        first, _, _, _ = await abuild_tools_data(cfg)
+        second, _, _, _ = await abuild_tools_data(cfg)
 
         for name in ("fs_find_in_files", "fs_write_file", "fs_read_file"):
             assert first[name]["injected_fields"] == [_REASON]
@@ -389,8 +389,8 @@ class TestInjectDoesNotPolluteClassSchema:
 
     async def test_second_build_strips_reason_on_apply(self):
         cfg = _base_config(inject_tool_fields=_reason_fields())
-        build_tools_data(cfg)  # first build (pollution attempt)
-        tools_data, _, _, _ = build_tools_data(cfg)  # second — must still strip
+        await abuild_tools_data(cfg)  # first build (pollution attempt)
+        tools_data, _, _, _ = await abuild_tools_data(cfg)  # second — must still strip
 
         received = {}
 

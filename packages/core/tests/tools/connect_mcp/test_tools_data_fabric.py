@@ -107,10 +107,13 @@ async def test_acall_passes_os_backend_down_to_the_client(monkeypatch):
     assert seen.get("os_backend") is backend, seen
 
 
-def test_sync_entry_builds_a_working_fabric_too():
-    """Синхронный вход собирает тот же tools_data — фабрика обязана работать."""
-    tools_data, _ = agent_tools.get_mcp_tools_data_for_config(
-        _CONFIG, tools_cache=_FakeCache()
-    )
+def test_no_sync_entry_remains():
+    """Синхронного входа у сборки tools_data больше нет.
 
-    assert isinstance(tools_data[_TOOL_NAME]["tool_fabric"](), MCPToolWrapper)
+    Здесь стоял тест «синхронный вход собирает тот же tools_data». Он проверял
+    вторую форму, которая была тонкой обёрткой над корутиной через свой loop, и
+    после перехода дискавери на нативный путь осталась без вызывающих. Проверка
+    самой фабрики никуда не делась — она в тесте выше, на корутинной форме.
+    """
+    assert not hasattr(agent_tools, "get_mcp_tools_data_for_config")
+    assert hasattr(agent_tools, "aget_mcp_tools_data_for_config")

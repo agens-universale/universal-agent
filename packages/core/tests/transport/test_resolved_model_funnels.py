@@ -975,7 +975,7 @@ _GLOBAL_ONLY = {
     "api_mode": "режим прогона: responses/chat_completions выбирается один раз на ран",
     "stream": "флаг TUI-стрима, к модели отношения не имеет",
     "openai_strict_tools_schema": "спека тулов собирается один раз на RunContext",
-    "send_tool_strict": "то же: build_tools_data не знает resolved (бэклог «tools-схема per-model»)",
+    "send_tool_strict": "то же: abuild_tools_data не знает resolved (бэклог «tools-схема per-model»)",
 }
 
 
