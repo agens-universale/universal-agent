@@ -81,9 +81,20 @@ async def test_inline_scan_yields_the_loop_between_files(tmp_path, _probe):
     assert yields, "за весь разбор loop не получил управление ни разу"
 
 
-async def test_parallel_branch_reads_off_the_loop_thread(tmp_path, monkeypatch, _probe):
-    """Редкая ветка (от 20 000 кандидатов) читает файлы в потоках."""
-    opened, _yields, threads = _probe
+async def test_parallel_branch_also_yields_the_loop(tmp_path, monkeypatch, _probe):
+    """Редкая ветка (от 20 000 кандидатов): несколько разборщиков, но не потоки.
+
+    Потоки отсюда ушли вместе с синхронной формой файлового порта: чтение
+    файла у бэкенда теперь корутина, а поток её ждать не умеет. Для
+    ЛОКАЛЬНОГО бэкенда потери нет — там чтение инлайн и GIL никто не
+    отпускает, два потока разбирали ровно столько же (замерено 124 мс против
+    129 мс). Для бэкенда по сети выигрыш наоборот появился: ожидания
+    накладываются, чего поток на ``run_coroutine_threadsafe`` не умел.
+
+    Сторожим то, что осталось важным: разбор идёт на loop-потоке и при этом
+    уступает управление.
+    """
+    opened, yields, threads = _probe
     root = _tree(tmp_path)
     orig = fif.parse_find_in_files_config
     monkeypatch.setattr(
@@ -100,7 +111,8 @@ async def test_parallel_branch_reads_off_the_loop_thread(tmp_path, monkeypatch, 
 
     assert '"search_backend": "python"' in raw
     assert len(opened) >= 100
-    assert "MainThread" not in threads, f"читали на loop-потоке: {threads}"
+    assert threads == {"MainThread"}, f"разбор ушёл в поток: {threads}"
+    assert yields, "за весь разбор loop не получил управление ни разу"
 
 
 def test_the_python_path_opens_no_thread_pool_of_its_own():

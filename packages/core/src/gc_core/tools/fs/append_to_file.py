@@ -197,7 +197,7 @@ Usage:
                 },
             )
 
-        exists = self._backend.exists(path)
+        exists = await self._backend.exists(path)
         if not exists:
             if not create_if_missing:
                 return self._result(
@@ -207,10 +207,10 @@ Usage:
                     error={"type": "not_found"},
                 )
             parent = os.path.dirname(path) or "."
-            if not self._backend.is_dir(parent):
+            if not await self._backend.is_dir(parent):
                 if make_dirs:
                     try:
-                        self._backend.makedirs(parent)
+                        await self._backend.makedirs(parent)
                     except Exception as e:
                         return self._result(
                             ok=False,
@@ -233,7 +233,7 @@ Usage:
         is_create = not exists  # size==0 handled below
         if exists:
             try:
-                size = self._backend.getsize(path)
+                size = await self._backend.getsize(path)
             except OSError as e:
                 return self._result(
                     ok=False,
@@ -258,7 +258,7 @@ Usage:
 
         try:
             if not is_create:
-                head = self._backend.read_head_bytes(path, APPEND_HEAD_SAMPLE_BYTES)
+                head = await self._backend.read_head_bytes(path, APPEND_HEAD_SAMPLE_BYTES)
                 head_err = check_encoding_on_file_head(
                     head,
                     encoding_used,
@@ -278,10 +278,10 @@ Usage:
                     chunk = (
                         chunk.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
                     )
-                self._backend.append(path, chunk, encoding=encoding_used)
+                await self._backend.append(path, chunk, encoding=encoding_used)
             else:
-                self._backend.write_bytes(path, payload_bytes)
-            content_sha256 = self._backend.sha256_bytes(path)
+                await self._backend.write_bytes(path, payload_bytes)
+            content_sha256 = await self._backend.sha256_bytes(path)
         except Exception as e:
             return self._result(
                 ok=False,

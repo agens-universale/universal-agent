@@ -74,7 +74,7 @@ async def arun(
     )
 
 
-def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
+async def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     """Resolve the -s/--skill flag deterministically (pack-aware).
 
     Returns the exact canonical skill id when resolved; the raw name as a
@@ -91,7 +91,7 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     from gc_core.tools.skills.registry import get_skills_registry
 
     try:
-        catalog = get_skills_registry(config_dict).skill_catalog()
+        catalog = await get_skills_registry(config_dict).skill_catalog()
     except Exception as exc:  # noqa: BLE001 - surface as warning, not traceback
         print(
             f"warning: не удалось построить каталог скиллов для -s ({exc}); "
@@ -452,7 +452,7 @@ async def amain() -> int:
     # Стамп — только на полноценном запуске: хинт-путь выше не должен «сжигать»
     # notice «агент обновлён» (ревью Task 4).
     upgrade_gate.mark_current_run()
-    forced_skill_id = _resolve_forced_skill(
+    forced_skill_id = await _resolve_forced_skill(
         arg_parser.run_args.skill, config_dict
     )
 

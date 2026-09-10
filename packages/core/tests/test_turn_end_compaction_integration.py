@@ -430,7 +430,7 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
     from gc_core import agent_executor as ae
 
     class _SkillsRegistryStub:
-        def list_skills(self):
+        async def list_skills(self):
             return []
 
     async def _raise_validation(*_args, **_kwargs):

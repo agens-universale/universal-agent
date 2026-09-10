@@ -28,8 +28,14 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
             pass
 
     class _FakeState:
-        # Мокаем State, чтобы НЕ дёргать реальный конструктор (он зовёт
-        # get_project_data → WMI-хэнг на Windows). Capture messages.
+        # Мокаем State, чтобы НЕ дёргать реальный конструктор. Прежняя причина
+        # («он зовёт get_project_data → WMI-хэнг на Windows») ушла: сбор данных
+        # о проекте переехал в `acreate`, конструктор в файловую систему не
+        # ходит. Мок остаётся ради перехвата сообщений.
+        @classmethod
+        async def acreate(cls, **kw):
+            return cls(**kw)
+
         def __init__(self, **kw):
             self.messages = []
             self.backend_api_mode = "responses"
@@ -108,6 +114,10 @@ def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, s
 
 
 class _UsageState:
+    @classmethod
+    async def acreate(cls, **kw):
+        return cls(**kw)
+
     """State-заглушка с .usage (реальный конструктор State тяжёл/WMI-хэнг)."""
     def __init__(self, **kw):
         from gc_core.usage.account import UsageAccount

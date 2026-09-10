@@ -82,8 +82,10 @@ def costly_walk(monkeypatch):
     def _slow(name):
         real = getattr(LocalFsBackend, name)
 
-        def wrapper(self, *a, **kw):
-            for item in real(self, *a, **kw):
+        async def wrapper(self, *a, **kw):
+            # Обходчики порта — АСИНХРОННЫЕ генераторы; обёртка обязана быть
+            # такой же, иначе она подменяет форму, а не цену записи.
+            async for item in real(self, *a, **kw):
                 time.sleep(_COST_PER_ENTRY_SEC)
                 yield item
 

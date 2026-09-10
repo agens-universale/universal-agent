@@ -164,7 +164,7 @@ Usage:
         обошёл бы политику. ``aexec_port`` вместо прямого ``backend.arun_python``
         оставляет рабочими бэкенды без нативного запуска (harbor, TUI).
         """
-        early, plan = self._plan(code, timeout_seconds, cwd, env_vars, **kwargs)
+        early, plan = await self._plan(code, timeout_seconds, cwd, env_vars, **kwargs)
         if early is not None:
             return early
         try:
@@ -187,7 +187,7 @@ Usage:
             error={"type": "execution_failed", "message": str(exc)},
         )
 
-    def _plan(
+    async def _plan(
         self,
         code: str,
         timeout_seconds: Optional[int],
@@ -244,7 +244,7 @@ Usage:
 
         if self._backend.is_sandbox:
             cwd_used = cwd  # None → container default workdir
-            if cwd_used is not None and not self._backend.is_dir(cwd_used):
+            if cwd_used is not None and not await self._backend.is_dir(cwd_used):
                 return self._result(
                     ok=False,
                     return_code=None,

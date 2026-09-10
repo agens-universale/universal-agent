@@ -79,7 +79,7 @@ def test_inner_skills_do_not_reference_sibling_inners(skill_id):
     )
 
 
-def test_registry_default_list_returns_only_bootstrap(tmp_path):
+async def test_registry_default_list_returns_only_bootstrap(tmp_path):
     from gc_core.tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent
@@ -89,7 +89,7 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
         project_root=str(tmp_path / "p_empty"),
     )
     items = {
-        i["id"]: i for i in reg.list_skills() if i.get("pack_id") == "default-coworker"
+        i["id"]: i for i in await reg.list_skills() if i.get("pack_id") == "default-coworker"
     }
     assert set(items.keys()) == {"default-coworker:using-default-coworker"}
     bootstrap = items["default-coworker:using-default-coworker"]
@@ -97,7 +97,7 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
     assert bootstrap["pack_size"] == 6
 
 
-def test_registry_pack_param_returns_all_internals(tmp_path):
+async def test_registry_pack_param_returns_all_internals(tmp_path):
     from gc_core.tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent
@@ -106,6 +106,6 @@ def test_registry_pack_param_returns_all_internals(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = reg.list_skills(pack="default-coworker")
+    items = await reg.list_skills(pack="default-coworker")
     canonical_ids = {f"default-coworker:{sid}" for sid in EXPECTED_SKILL_IDS}
     assert {i["id"] for i in items} == canonical_ids

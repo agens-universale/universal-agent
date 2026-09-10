@@ -51,7 +51,7 @@ async def acompact_thread(
     meta = getattr(thread_session, "meta", None) or {}
     thread_shared = ThreadMetaMapper.shared_from_meta(meta)
 
-    state = State(
+    state = await State.acreate(
         verbose=bool(config_dict.get("verbose", False)),
         model=config_dict["model"],
         tools_spec=ctx.tools_spec,

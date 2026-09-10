@@ -48,19 +48,19 @@ class FakeBackend:
         return bool(self._cap_overrides.get("grep_include", False))
 
     # stat primitives
-    def exists(self, p):
+    async def exists(self, p):
         # A path "exists" if it is a tracked file OR an implicit directory
         # (has tracked files under it) — mirrors os.path.exists() for dirs,
         # matching LocalFsBackend.exists() semantics for directory-based tools.
-        return p in self.files or self.is_dir(p)
+        return p in self.files or await self.is_dir(p)
 
-    def is_file(self, p):
+    async def is_file(self, p):
         return p in self.files
 
-    def is_dir(self, p):
+    async def is_dir(self, p):
         return any(k != p and k.startswith(p.rstrip("/") + "/") for k in self.files)
 
-    def getsize(self, p):
+    async def getsize(self, p):
         return len(self.files[p].encode("utf-8"))
 
     def sha256(self, p):
@@ -74,9 +74,9 @@ class FakeBackend:
             "is_file": True, "is_dir": False, "is_symlink": False,
         }
 
-    def walk(self, p):
+    async def walk(self, p):
         """[(relpath, is_dir)] under p, recursively — mirrors `find -mindepth 1`."""
-        if not self.is_dir(p):
+        if not await self.is_dir(p):
             raise FileNotFoundError(p)
         base = p.rstrip("/") + "/"
         files, dirs = [], set()
@@ -90,7 +90,7 @@ class FakeBackend:
             files.append(rel)
         return [(d, True) for d in sorted(dirs)] + [(f, False) for f in sorted(files)]
 
-    def walk_entries(self, p, *, prune_names=(), prune_dot_dirs=False):
+    async def walk_entries(self, p, *, prune_names=(), prune_dot_dirs=False):
         """Sized rows like `find -printf %s`; prune like `( -type d -name … ) -prune`."""
         base = p.rstrip("/") + "/"
         entries = [
@@ -99,98 +99,102 @@ class FakeBackend:
                 is_dir,
                 None if is_dir else len(self.files[base + rel].encode("utf-8")),
             )
-            for rel, is_dir in self.walk(p)
+            for rel, is_dir in await self.walk(p)
         ]
         return prune_flat_entries(entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
 
-    def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
-        yield from iter_walk_entries_from_flat(
-            self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
+    async def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+        for _item in iter_walk_entries_from_flat(
+            await self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
             should_descend=should_descend,
             join=self.join,
             root=path,
-        )
+        ):
+            yield _item
 
-    def iter_walk(self, path, *, should_descend=None):
-        yield from iter_walk_from_flat(
-            self.walk(path),
+    async def iter_walk(self, path, *, should_descend=None):
+        for _item in iter_walk_from_flat(
+            await self.walk(path),
             should_descend=should_descend,
             join=self.join,
             root=path,
-        )
+        ):
+            yield _item
 
-    def iter_files(self, path, *, should_descend=None):
-        yield from iter_files_from_flat(
-            self.walk(path),
+    async def iter_files(self, path, *, should_descend=None):
+        for _item in iter_files_from_flat(
+            await self.walk(path),
             should_descend=should_descend,
             join=self.join,
             root=path,
-        )
+        ):
+            yield _item
 
     # read / write
-    def read(self, p):
+    async def read(self, p):
         if p not in self.files:
             raise FileNotFoundError(p)
         return self.files[p]
 
-    def read_bytes(self, p):
+    async def read_bytes(self, p):
         if p not in self.files:
             raise FileNotFoundError(p)
         return self.files[p].encode("utf-8")
 
-    def write(self, p, content, encoding="utf-8"):
+    async def write(self, p, content, encoding="utf-8"):
         self.files[p] = content
 
-    def write_bytes(self, p, data):
+    async def write_bytes(self, p, data):
         self.files[p] = data.decode("utf-8")
 
-    def lexists(self, p):
-        return self.exists(p)
+    async def lexists(self, p):
+        return await self.exists(p)
 
-    def is_symlink(self, p):
+    async def is_symlink(self, p):
         return False
 
-    def realpath(self, p):
+    async def realpath(self, p):
         return p
 
-    def readable(self, p):
+    async def readable(self, p):
         return True
 
-    def writable(self, p):
+    async def writable(self, p):
         return True
 
-    def is_hidden(self, p):
+    async def is_hidden(self, p):
         return p.rsplit("/", 1)[-1].startswith(".")
 
-    def stat_info(self, p, follow_symlinks=False):
+    async def stat_info(self, p, follow_symlinks=False):
         st = self.stat(p)
         return {
             "size": st["size"], "mtime": st["mtime"], "mode": int(str(st["mode"]), 8),
             "is_file": st["is_file"], "is_dir": st["is_dir"], "is_symlink": st["is_symlink"],
         }
 
-    def iter_lines(self, p):
-        return iter(self.read(p).splitlines(keepends=True))
+    async def iter_lines(self, p):
+        for line in (await self.read(p)).splitlines(keepends=True):
+            yield line
 
-    def read_head_bytes(self, p, n):
-        return self.read_bytes(p)[:n]
+    async def read_head_bytes(self, p, n):
+        return (await self.read_bytes(p))[:n]
 
-    def sha256_bytes(self, p):
+    async def sha256_bytes(self, p):
         return self.sha256(p)
 
-    def append(self, p, content, encoding="utf-8"):
+    async def append(self, p, content, encoding="utf-8"):
         self.files[p] = self.files.get(p, "") + content
 
-    def copy(self, src, dst):
+    async def copy(self, src, dst):
         self.files[dst] = self.files[src]
 
-    def makedirs(self, p):
+    async def makedirs(self, p):
         pass  # dict-modeled fs: dirs are implicit
 
-    def listdir(self, p):
+    async def listdir(self, p):
         base = p.rstrip("/") + "/"
         names = {}
-        for rel, is_d in self.walk(p):
+        for rel, is_d in await self.walk(p):
             if "/" not in rel:
                 names[rel] = is_d
         return sorted(names.items())

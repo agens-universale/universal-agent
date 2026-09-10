@@ -59,21 +59,21 @@ def test_exec_bridges_sync_to_async(loop_in_thread):
     assert env.calls == ["echo hi"]
 
 
-def test_write_uses_upload(loop_in_thread):
+async def test_write_uses_upload(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
-    backend.write("/work/new.txt", "hello")
+    await backend.write("/work/new.txt", "hello")
     assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
 
 
-def test_is_file_is_dir_use_native_env_handles(loop_in_thread):
+async def test_is_file_is_dir_use_native_env_handles(loop_in_thread):
     # is_file/is_dir must delegate to Harbor's BaseEnvironment, not shell `test`.
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
-    assert backend.is_file("/work/a.txt") is True
-    assert backend.is_file("/work/dir") is False
-    assert backend.is_dir("/work/dir/") is True
-    assert backend.is_dir("/work/a.txt") is False
+    assert await backend.is_file("/work/a.txt") is True
+    assert await backend.is_file("/work/dir") is False
+    assert await backend.is_dir("/work/dir/") is True
+    assert await backend.is_dir("/work/a.txt") is False
     # delegation goes through env.is_file/is_dir, NOT exec → no shell `test` calls
     assert not any("test -" in c for c in env.calls)
 
@@ -136,23 +136,23 @@ def test_implements_full_fsbackend_protocol(loop_in_thread):
     assert isinstance(backend, FsBackend)
 
 
-def test_listdir_parses_find_output(loop_in_thread):
+async def test_listdir_parses_find_output(loop_in_thread):
     env = FakeEnv()
     env.exec = _make_exec_returning(env, "b\td\na\tf\n")
     backend = HarborBackend(env, loop_in_thread)
-    result = backend.listdir("/work")
+    result = await backend.listdir("/work")
     assert result == [("a", False), ("b", True)]
 
 
-def test_listdir_raises_file_not_found_on_nonzero_rc(loop_in_thread):
+async def test_listdir_raises_file_not_found_on_nonzero_rc(loop_in_thread):
     env = FakeEnv()
     env.exec = _make_exec_returning(env, "", return_code=1)
     backend = HarborBackend(env, loop_in_thread)
     with pytest.raises(FileNotFoundError):
-        backend.listdir("/missing")
+        await backend.listdir("/missing")
 
 
-def test_append_creates_file_if_missing(loop_in_thread):
+async def test_append_creates_file_if_missing(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     # exists() -> exec("test -e ...") returns rc 0 by default FakeEnv.exec, so
@@ -164,12 +164,12 @@ def test_append_creates_file_if_missing(loop_in_thread):
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
     env.exec = fake_exec
-    backend.append("/work/new.txt", "hello")
+    await backend.append("/work/new.txt", "hello")
     assert env.uploaded and ".gc-append-tmp." in env.uploaded[0][1]
     assert env.uploaded[0][1].startswith("/work/new.txt.gc-append-tmp.")
     assert any(">>" in c and "/work/new.txt" in c for c in env.calls)
 
-def test_append_concatenates_existing_content(loop_in_thread):
+async def test_append_concatenates_existing_content(loop_in_thread):
     env = FakeEnv()
     uploaded_payloads = []
 
@@ -185,7 +185,7 @@ def test_append_concatenates_existing_content(loop_in_thread):
     env.exec = fake_exec
     env.upload_file = fake_upload_file
     backend = HarborBackend(env, loop_in_thread)
-    backend.append("/work/f.txt", "more")
+    await backend.append("/work/f.txt", "more")
     assert len(uploaded_payloads) == 1
     remote_tmp, payload = uploaded_payloads[0]
     assert remote_tmp.startswith("/work/f.txt.gc-append-tmp.")
@@ -230,22 +230,22 @@ def test_every_impl_signature_accepts_protocol_parameters():
             pytest.fail(f"HarborBackend.{name}{impl} rejects protocol call {proto}: {e}")
 
 
-def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
-    # Regression guard: unified fs tools call backend.write(..., encoding=...)
+async def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
+    # Regression guard: unified fs tools call await backend.write(..., encoding=...)
     # (e.g. fs_write_file); must not TypeError against the container backend.
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
-    backend.write("/work/a.txt", "data", encoding="utf-8")
-    backend.append("/work/a.txt", "more", encoding="utf-8")
+    await backend.write("/work/a.txt", "data", encoding="utf-8")
+    await backend.append("/work/a.txt", "more", encoding="utf-8")
     assert any(dst == "/work/a.txt" for _, dst in env.uploaded)
     assert any(".gc-append-tmp." in dst for _, dst in env.uploaded)
 
-def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
+async def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
     """Harbor text-write must encode on host and upload raw bytes (not force utf-8)."""
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     text = "Привет"
-    backend.write("/work/ru.txt", text, encoding="cp1251")
+    await backend.write("/work/ru.txt", text, encoding="cp1251")
     assert env.uploaded_bytes[-1] == text.encode("cp1251")
     assert env.uploaded_bytes[-1] != text.encode("utf-8")
 
@@ -273,7 +273,7 @@ def test_exec_propagates_timed_out_from_environment(loop_in_thread):
     assert result.stdout == "partial"
 
 
-def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
+async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     import base64
 
     env = FakeEnv()
@@ -290,14 +290,14 @@ def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
 
     env.exec = head_exec
     backend = HarborBackend(env, loop_in_thread)
-    sample = backend.read_head_bytes("/work/a.bin", 3)
+    sample = await backend.read_head_bytes("/work/a.bin", 3)
     assert sample == raw
     assert any(
         c.startswith("head -c 3 ") and "| base64" in c for c in env.calls
     )
 
 
-def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread):
+async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread):
     """fs_append samples 100KiB; base64 (~137k) exceeds tool-exec 60k."""
     import base64
 
@@ -317,7 +317,7 @@ def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread):
 
     env.exec = head_exec
     backend = HarborBackend(env, loop_in_thread)
-    sample = backend.read_head_bytes("/work/big.txt", APPEND_HEAD_SAMPLE_BYTES)
+    sample = await backend.read_head_bytes("/work/big.txt", APPEND_HEAD_SAMPLE_BYTES)
     assert sample == raw
 
     async def huge_tool(command, **kw):
@@ -329,7 +329,7 @@ def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread):
     assert tool.stdout_hit_capture_cap is True
 
 
-def test_read_head_bytes_raises_if_capture_ceiling_hit(loop_in_thread):
+async def test_read_head_bytes_raises_if_capture_ceiling_hit(loop_in_thread):
     import base64
 
     env = FakeEnv()
@@ -344,10 +344,10 @@ def test_read_head_bytes_raises_if_capture_ceiling_hit(loop_in_thread):
     env.exec = head_exec
     backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=50)
     with pytest.raises(OSError, match="capture ceiling"):
-        backend.read_head_bytes("/work/a.bin", 200)
+        await backend.read_head_bytes("/work/a.bin", 200)
 
 
-def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
+async def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
     """D: raw bytes must survive exec (no utf-8/surrogateescape mangling)."""
     import base64
 
@@ -366,7 +366,7 @@ def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
 
     env.exec = head_exec
     backend = HarborBackend(env, loop_in_thread)
-    sample = backend.read_head_bytes("/work/legacy.txt", len(raw))
+    sample = await backend.read_head_bytes("/work/legacy.txt", len(raw))
     assert sample == raw
     assert b"\x00" in sample
     assert sample[0] == 0xCF
@@ -374,12 +374,12 @@ def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
 
 # --- walk_entries: prune внутри find, размер из -printf %s ----------------------
 
-def test_walk_entries_prunes_in_find_and_parses_sizes(loop_in_thread):
+async def test_walk_entries_prunes_in_find_and_parses_sizes(loop_in_thread):
     env = FakeEnv()
     env.exec = _make_exec_returning(env, "src\td\t4096\nsrc/a.py\tf\t12\n")
     backend = HarborBackend(env, loop_in_thread)
 
-    entries = backend.walk_entries("/work", prune_names=("node_modules",), prune_dot_dirs=True)
+    entries = await backend.walk_entries("/work", prune_names=("node_modules",), prune_dot_dirs=True)
 
     assert [(e.rel, e.is_dir, e.size) for e in entries] == [("src", True, None), ("src/a.py", False, 12)]
     cmd = env.calls[-1]
@@ -389,23 +389,23 @@ def test_walk_entries_prunes_in_find_and_parses_sizes(loop_in_thread):
     assert cmd.endswith(r"-printf '%P\t%y\t%s\n'")
 
 
-def test_walk_keeps_tuples_and_never_prunes(loop_in_thread):
+async def test_walk_keeps_tuples_and_never_prunes(loop_in_thread):
     env = FakeEnv()
     env.exec = _make_exec_returning(env, "src\td\t4096\nsrc/a.py\tf\t12\n")
     backend = HarborBackend(env, loop_in_thread)
 
-    assert backend.walk("/work") == [("src", True), ("src/a.py", False)]
+    assert await backend.walk("/work") == [("src", True), ("src/a.py", False)]
     assert "-prune" not in env.calls[-1]
 
 
-def test_walk_entries_hit_ceiling_raises(loop_in_thread):
+async def test_walk_entries_hit_ceiling_raises(loop_in_thread):
     from gc_core.backends.protocol import WalkOutputTooLargeError
 
     env = FakeEnv()
     env.exec = _make_exec_returning(env, "x\tf\t1\n" * 200)
     backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=500)
     with pytest.raises(WalkOutputTooLargeError):
-        backend.walk_entries("/work")
+        await backend.walk_entries("/work")
 
 
 def test_normpath_collapses_dot_and_double_slash(loop_in_thread):

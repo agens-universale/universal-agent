@@ -3,7 +3,7 @@ import pytest
 
 
 class _FakeReg:
-    def list_skills(self, *, pack=None, include_all=False):
+    async def list_skills(self, *, pack=None, include_all=False):
         return [
             {"id": "supercoder:planner"},
             {"id": "supercoder:coder"},
@@ -217,7 +217,7 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path, monkeypat
     pytest.importorskip("textual")
 
     class _BigReg:
-        def list_skills(self, *, pack=None, include_all=False):
+        async def list_skills(self, *, pack=None, include_all=False):
             return [{"id": f"pack:skill{i:03d}"} for i in range(45)]
 
     from gc_core.tools.skills import registry as reg_mod

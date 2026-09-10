@@ -15,25 +15,25 @@ class RecordingSandboxBackend(FsBackend):
         self.files: dict[str, str] = {}
 
     # --- stat ---
-    def exists(self, path):
+    async def exists(self, path):
         return path in self.files or path == "/testbed"
 
-    def lexists(self, path):
+    async def lexists(self, path):
         return self.exists(path)
 
-    def is_file(self, path):
+    async def is_file(self, path):
         return path in self.files
 
-    def is_dir(self, path):
+    async def is_dir(self, path):
         return path == "/testbed"
 
-    def is_symlink(self, path):
+    async def is_symlink(self, path):
         return False
 
-    def getsize(self, path):
+    async def getsize(self, path):
         return len(self.files.get(path, ""))
 
-    def stat_info(self, path, follow_symlinks=False):
+    async def stat_info(self, path, follow_symlinks=False):
         return {
             "size": self.getsize(path),
             "mtime": 0,
@@ -43,61 +43,61 @@ class RecordingSandboxBackend(FsBackend):
             "is_symlink": False,
         }
 
-    def readable(self, path):
+    async def readable(self, path):
         return True
 
-    def writable(self, path):
+    async def writable(self, path):
         return True
 
-    def realpath(self, path):
+    async def realpath(self, path):
         return path
 
-    def is_hidden(self, path):
+    async def is_hidden(self, path):
         return path.rsplit("/", 1)[-1].startswith(".")
 
     # --- read ---
-    def read(self, path):
+    async def read(self, path):
         return self.files[path]
 
-    def read_bytes(self, path):
+    async def read_bytes(self, path):
         return self.files[path].encode("utf-8")
 
-    def iter_lines(self, path):
+    async def iter_lines(self, path):
         return iter(self.read(path).splitlines(keepends=True))
 
-    def read_head_bytes(self, path, n):
+    async def read_head_bytes(self, path, n):
         return self.read(path).encode()[:n]
 
-    def sha256_bytes(self, path):
+    async def sha256_bytes(self, path):
         return ""
 
     # --- write ---
-    def write(self, path, content, encoding="utf-8"):
+    async def write(self, path, content, encoding="utf-8"):
         self.files[path] = content
 
-    def write_bytes(self, path, data):
+    async def write_bytes(self, path, data):
         self.files[path] = data.decode()
 
-    def append(self, path, content, encoding="utf-8"):
+    async def append(self, path, content, encoding="utf-8"):
         self.files[path] = self.files.get(path, "") + content
 
-    def copy(self, src, dst):
+    async def copy(self, src, dst):
         self.files[dst] = self.files[src]
 
-    def makedirs(self, path):
+    async def makedirs(self, path):
         return None
 
     # --- traverse ---
-    def listdir(self, path):
+    async def listdir(self, path):
         return []
 
-    def walk(self, path):
+    async def walk(self, path):
         return []
 
-    def iter_walk(self, path, *, should_descend=None):
+    async def iter_walk(self, path, *, should_descend=None):
         return iter(())
 
-    def iter_files(self, path, *, should_descend=None):
+    async def iter_files(self, path, *, should_descend=None):
         return iter(())
 
     # --- path semantics ---

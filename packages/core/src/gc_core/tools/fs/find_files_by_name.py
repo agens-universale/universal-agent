@@ -283,7 +283,7 @@ class FindFilesByName(AbstractSimpleTool):
 
         return _match_sub
 
-    def _probe_file_meta(
+    async def _probe_file_meta(
         self, filepath: str, size_bytes: Optional[int] = None
     ) -> Dict[str, Any]:
         """size / binary for a matched file; never raises.
@@ -294,11 +294,11 @@ class FindFilesByName(AbstractSimpleTool):
         is_binary: Optional[bool] = None
         if size_bytes is None:
             try:
-                size_bytes = int(self._backend.getsize(filepath))
+                size_bytes = int(await self._backend.getsize(filepath))
             except OSError:
                 size_bytes = None
         try:
-            sample = self._backend.read_head_bytes(filepath, BINARY_SAMPLE_BYTES)
+            sample = await self._backend.read_head_bytes(filepath, BINARY_SAMPLE_BYTES)
             classification = classify_content_from_sample(filepath, sample)
             is_binary = classification.is_binary
         except OSError:
@@ -308,7 +308,7 @@ class FindFilesByName(AbstractSimpleTool):
             meta["is_binary"] = True
         return meta
 
-    def _entry(
+    async def _entry(
         self, filepath: str, is_dir: bool, size: Optional[int] = None
     ) -> Dict[str, Any]:
         # Default match is a visible text file: omit type/is_hidden/is_binary
@@ -319,10 +319,10 @@ class FindFilesByName(AbstractSimpleTool):
         }
         if is_dir:
             entry["type"] = "directory"
-        if self._backend.is_hidden(filepath):
+        if await self._backend.is_hidden(filepath):
             entry["is_hidden"] = True
         if not is_dir:
-            entry.update(self._probe_file_meta(filepath, size))
+            entry.update(await self._probe_file_meta(filepath, size))
         return entry
 
 
@@ -394,9 +394,9 @@ class FindFilesByName(AbstractSimpleTool):
             max_matches=max_matches,
         )
 
-        if not self._backend.exists(path):
+        if not await self._backend.exists(path):
             return _result(ok=False, error={"type": "not_found"})
-        if not self._backend.is_dir(path):
+        if not await self._backend.is_dir(path):
             return _result(ok=False, error={"type": "not_a_directory"})
 
         matcher = self._build_matcher(query, case_insensitive=ci)
@@ -434,7 +434,7 @@ class FindFilesByName(AbstractSimpleTool):
                 prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
             )
             yielder = LoopYielder()
-            for entry in walk_iter:
+            async for entry in walk_iter:
                 # Обход идёт инлайн на loop вызывающего и ограничен ЧИСЛОМ
                 # записей, а не временем: на 24 тысячах он съедает весь бюджет
                 # приёмки одной операцией. Уступаем по времени — см. модуль.
@@ -456,7 +456,7 @@ class FindFilesByName(AbstractSimpleTool):
                     continue
                 if not matcher(rel, base):
                     continue
-                matches.append(self._entry(abs_path, is_d, size=entry.size))
+                matches.append(await self._entry(abs_path, is_d, size=entry.size))
                 if len(matches) >= max_matches:
                     truncated = True
                     stop_reason = "max_matches"

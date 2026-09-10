@@ -33,10 +33,10 @@ class SandboxBackend:
     def join(self, base: str, name: str) -> str:
         return base.rstrip("/") + "/" + name
 
-    def exists(self, path: str) -> bool:
+    async def exists(self, path: str) -> bool:
         return False
 
-    def listdir(self, path: str):
+    async def listdir(self, path: str):
         return []
 
 
@@ -72,10 +72,10 @@ def test_sandbox_config_root_overrides_pwd():
     assert root == "/testbed"
 
 
-def test_project_data_and_tool_paths_share_workspace_root():
+async def test_project_data_and_tool_paths_share_workspace_root():
     be = SandboxBackend(cwd=None, pwd="/testbed")
     ws = ExecutionWorkspace(root="/testbed", backend=be, shell="sh", os_name="Linux", root_writable=True)
-    data = get_project_data(workspace=ws)
+    data = await get_project_data(workspace=ws)
     assert data["projectDir"] == "/testbed"
     assert data["shell"] == "sh"
     assert data["OS"] == "Linux"

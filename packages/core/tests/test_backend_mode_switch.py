@@ -71,12 +71,14 @@ def _stub_tools_modules() -> None:
 
 
 class _SkillsRegistryStub:
-    def list_skills(self):
+    async def list_skills(self):
         return []
 
 
-class BackendModeSwitchTest(unittest.TestCase):
-    def test_switch_responses_completions_responses_same_thread(self):
+class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
+    # Корутинные тесты: `unittest.TestCase` их не запускает — метод
+    # просто возвращает корутину, и проверка молча не выполняется.
+    async def test_switch_responses_completions_responses_same_thread(self):
         _stub_tools_modules()
         try:
             from gc_core import agent_executor as agent_executor_module

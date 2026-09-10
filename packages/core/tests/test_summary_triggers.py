@@ -91,12 +91,14 @@ def _stub_tools_modules() -> None:
 
 
 class _SkillsRegistryStub:
-    def list_skills(self):
+    async def list_skills(self):
         return []
 
 
-class SummaryTriggersTest(unittest.TestCase):
-    def _make_ctx(self, tmp_dir: str, backend_api_mode: str) -> SimpleNamespace:
+class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
+    # Корутинные тесты: `unittest.TestCase` их не запускает — метод
+    # просто возвращает корутину, и проверка молча не выполняется.
+    async def _make_ctx(self, tmp_dir: str, backend_api_mode: str) -> SimpleNamespace:
         prompt_path = os.path.join(tmp_dir, "chat_completions_system_prompt.md")
         with open(prompt_path, "w", encoding="utf-8") as fd:
             fd.write("SYSTEM PROMPT")
@@ -136,9 +138,9 @@ class SummaryTriggersTest(unittest.TestCase):
             skills_registry=_SkillsRegistryStub(),
         )
 
-    def test_chat_completions_calls_pre_run_and_pre_backend_summary(self):
+    async def test_chat_completions_calls_pre_run_and_pre_backend_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             call_order: list[str] = []
             truth = deque([True, False, True])
 
@@ -191,9 +193,9 @@ class SummaryTriggersTest(unittest.TestCase):
             self.assertIn("run_agent", call_order)
             self.assertIn("summary:pre_backend", call_order)
 
-    def test_chat_completions_in_memory_calls_pre_run_and_pre_backend_summary(self):
+    async def test_chat_completions_in_memory_calls_pre_run_and_pre_backend_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             calls: list[str] = []
             truth = deque([True, False, True])
 
@@ -241,9 +243,9 @@ class SummaryTriggersTest(unittest.TestCase):
 
             self.assertEqual(calls, ["pre_run", "pre_backend"])
 
-    def test_responses_mode_does_not_call_summary(self):
+    async def test_responses_mode_does_not_call_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="responses")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="responses")
 
             with patch.object(
                 agent_executor_module, "arun_agent", return_value="ok"
@@ -256,10 +258,10 @@ class SummaryTriggersTest(unittest.TestCase):
 
             compaction_mock.assert_not_called()
 
-    def test_chat_completions_passes_pre_backend_hook_to_run_agent(self):
+    async def test_chat_completions_passes_pre_backend_hook_to_run_agent(self):
         """Wiring: chat/completions должен передавать pre_backend_compaction_hook в run_agent (spec Step 0)."""
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             captured: dict = {}
 
             async def _fake_run_agent(messages, state, _ctx, **kwargs):
@@ -282,9 +284,9 @@ class SummaryTriggersTest(unittest.TestCase):
             turn_end_hook = captured.get("turn_end_compaction_hook")
             self.assertTrue(callable(turn_end_hook))
 
-    def test_thread_history_not_readded_into_current_user_intent(self):
+    async def test_thread_history_not_readded_into_current_user_intent(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             thread_id = "thr_hist"
             data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
             meta_path = os.path.join(tmp_dir, f"meta_cli_{thread_id}.json")

@@ -137,7 +137,7 @@ class FileInfo(AbstractSimpleTool):
             )
 
         report_path = tool_report_abspath(path, workspace=self._workspace)
-        if not self._backend.lexists(path):
+        if not await self._backend.lexists(path):
             return self._result(
                 ok=True,
                 path=report_path,
@@ -162,10 +162,10 @@ class FileInfo(AbstractSimpleTool):
                 message="Path does not exist.",
             )
 
-        is_symlink = self._backend.is_symlink(path)
-        stat_path = self._backend.realpath(path) if follow_symlinks and is_symlink else path
+        is_symlink = await self._backend.is_symlink(path)
+        stat_path = await self._backend.realpath(path) if follow_symlinks and is_symlink else path
         try:
-            info = self._backend.stat_info(stat_path, follow_symlinks=follow_symlinks)
+            info = await self._backend.stat_info(stat_path, follow_symlinks=follow_symlinks)
         except OSError as e:
             return self._error(
                 path=path,
@@ -184,8 +184,8 @@ class FileInfo(AbstractSimpleTool):
         else:
             entry_type = "other"
 
-        readable = self._backend.readable(stat_path)
-        writable = self._backend.writable(stat_path)
+        readable = await self._backend.readable(stat_path)
+        writable = await self._backend.writable(stat_path)
         size_bytes = info["size"]
         permissions = self._format_permissions(info["mode"]) if info["mode"] is not None else None
         modified_time = (
@@ -203,7 +203,7 @@ class FileInfo(AbstractSimpleTool):
         hash_skipped_reason: Optional[str] = None
 
         if is_file and readable:
-            sample = self._backend.read_head_bytes(stat_path, BINARY_SAMPLE_BYTES)
+            sample = await self._backend.read_head_bytes(stat_path, BINARY_SAMPLE_BYTES)
             classification = classify_content_from_sample(stat_path, sample)
             is_binary = classification.is_binary
             binary_detection_reason = classification.binary_detection_reason
@@ -218,7 +218,7 @@ class FileInfo(AbstractSimpleTool):
 
             if include_line_count and not is_binary:
                 try:
-                    raw = self._backend.read_bytes(stat_path)
+                    raw = await self._backend.read_bytes(stat_path)
                     decoded = decode_text_bytes(raw, encoding=encoding_guess)
                     if decoded.ok and decoded.text is not None:
                         line_count = count_lines_in_text(decoded.text)
@@ -236,7 +236,7 @@ class FileInfo(AbstractSimpleTool):
                     hash_skipped_reason = "file_too_large"
                 else:
                     try:
-                        sha256 = self._backend.sha256_bytes(stat_path)
+                        sha256 = await self._backend.sha256_bytes(stat_path)
                         hash_mode = "bytes"
                     except OSError as e:
                         return self._error(

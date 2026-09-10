@@ -22,83 +22,83 @@ def test_implements_protocol(be):
     assert be.default_exec_timeout is None
 
 
-def test_stat_group(be, tmp_path):
+async def test_stat_group(be, tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("hello\n", encoding="utf-8")
     p = str(f)
-    assert be.exists(p) and be.lexists(p) and be.is_file(p)
-    assert not be.is_dir(p) and be.is_dir(str(tmp_path))
-    assert be.getsize(p) == 6
-    info = be.stat_info(p, follow_symlinks=False)
+    assert await be.exists(p) and await be.lexists(p) and await be.is_file(p)
+    assert not await be.is_dir(p) and await be.is_dir(str(tmp_path))
+    assert await be.getsize(p) == 6
+    info = await be.stat_info(p, follow_symlinks=False)
     assert info["size"] == 6 and info["is_file"] and not info["is_dir"]
     assert isinstance(info["mode"], int)
-    assert be.readable(p) and be.writable(p)
-    assert be.realpath(p) == os.path.realpath(p)
-    assert not be.is_hidden(p)
-    assert be.is_hidden(str(tmp_path / ".hidden"))
+    assert await be.readable(p) and await be.writable(p)
+    assert await be.realpath(p) == os.path.realpath(p)
+    assert not await be.is_hidden(p)
+    assert await be.is_hidden(str(tmp_path / ".hidden"))
 
 
-def test_read_group(be, tmp_path):
+async def test_read_group(be, tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("l1\nl2\n", encoding="utf-8")
     p = str(f)
-    assert be.read(p) == "l1\nl2\n"
-    assert list(be.iter_lines(p)) == ["l1\n", "l2\n"]
-    assert be.read_head_bytes(p, 2) == b"l1"
+    assert await be.read(p) == "l1\nl2\n"
+    assert [line async for line in be.iter_lines(p)] == ["l1\n", "l2\n"]
+    assert await be.read_head_bytes(p, 2) == b"l1"
     import hashlib
-    assert be.sha256_bytes(p) == hashlib.sha256(b"l1\nl2\n").hexdigest()
+    assert await be.sha256_bytes(p) == hashlib.sha256(b"l1\nl2\n").hexdigest()
 
 
-def test_write_group_atomic_and_append(be, tmp_path):
+async def test_write_group_atomic_and_append(be, tmp_path):
     p = str(tmp_path / "w.txt")
-    be.write(p, "v1")
-    assert be.read(p) == "v1"
+    await be.write(p, "v1")
+    assert await be.read(p) == "v1"
     assert not os.path.exists(p + ".tmp")          # atomic: no tmp residue
-    be.append(p, "-v2")
-    assert be.read(p) == "v1-v2"
+    await be.append(p, "-v2")
+    assert await be.read(p) == "v1-v2"
     bp = str(tmp_path / "raw.bin")
-    be.write_bytes(bp, b"\x00\xff")
+    await be.write_bytes(bp, b"\x00\xff")
     with open(bp, "rb") as fd:
         assert fd.read() == b"\x00\xff"
     cp = str(tmp_path / "copy.bin")
-    be.copy(bp, cp)
+    await be.copy(bp, cp)
     with open(cp, "rb") as fd:
         assert fd.read() == b"\x00\xff"
     nd = str(tmp_path / "n1" / "n2")
-    be.makedirs(nd)
+    await be.makedirs(nd)
     assert os.path.isdir(nd)
 
 
-def test_read_write_cp1251_round_trip(be, tmp_path):
+async def test_read_write_cp1251_round_trip(be, tmp_path):
     p = str(tmp_path / "legacy.txt")
     text = (
         "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
         "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"
     ) * 3
-    be.write(p, text, encoding="cp1251")
+    await be.write(p, text, encoding="cp1251")
     assert open(p, "rb").read() == text.encode("cp1251")
-    assert be.read(p) == text
+    assert await be.read(p) == text
 
 
-def test_write_unsupported_encoding_raises(be, tmp_path):
+async def test_write_unsupported_encoding_raises(be, tmp_path):
     p = str(tmp_path / "x.txt")
     with pytest.raises(ValueError, match="Unsupported encoding"):
-        be.write(p, "hi", encoding="ibm866")
+        await be.write(p, "hi", encoding="ibm866")
 
 
-def test_write_encode_failed_raises(be, tmp_path):
+async def test_write_encode_failed_raises(be, tmp_path):
     p = str(tmp_path / "x.txt")
     with pytest.raises(ValueError, match="Cannot encode"):
-        be.write(p, "Привет", encoding="latin-1")
+        await be.write(p, "Привет", encoding="latin-1")
 
 
-def test_traverse_and_paths(be, tmp_path):
+async def test_traverse_and_paths(be, tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "f.txt").write_text("x", encoding="utf-8")
     (tmp_path / "top.md").write_text("y", encoding="utf-8")
     root = str(tmp_path)
-    assert be.listdir(root) == [("sub", True), ("top.md", False)]
-    assert sorted(be.walk(root)) == [("sub", True), ("sub/f.txt", False), ("top.md", False)]
+    assert await be.listdir(root) == [("sub", True), ("top.md", False)]
+    assert sorted(await be.walk(root)) == [("sub", True), ("sub/f.txt", False), ("top.md", False)]
     assert be.normpath(root + "/") == os.path.normpath(root + "/")
     assert be.join(root, "x") == os.path.join(root, "x")
 
@@ -141,7 +141,7 @@ async def test_tool_backend_resolution():
     assert t2._backend is sentinel
 
 
-def test_walk_symlink_to_dir_is_file_entry(be, tmp_path):
+async def test_walk_symlink_to_dir_is_file_entry(be, tmp_path):
     """Symlink to a directory must be is_dir=False in walk (lstat parity with listdir)."""
     sub = tmp_path / "sub"
     sub.mkdir()
@@ -149,22 +149,22 @@ def test_walk_symlink_to_dir_is_file_entry(be, tmp_path):
     link = tmp_path / "linkdir"
     link.symlink_to(sub)
     root = str(tmp_path)
-    walked = dict(be.walk(root))
+    walked = dict(await be.walk(root))
     assert walked.get("linkdir") is False
     assert walked.get("sub") is True
     assert "sub/inner.txt" in walked
 
 
-def test_walk_symlink_to_file(be, tmp_path):
+async def test_walk_symlink_to_file(be, tmp_path):
     real = tmp_path / "real.txt"
     real.write_text("x", encoding="utf-8")
     link = tmp_path / "link.txt"
     link.symlink_to(real)
-    walked = dict(be.walk(str(tmp_path)))
+    walked = dict(await be.walk(str(tmp_path)))
     assert walked.get("link.txt") is False
 
 
-def test_write_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
+async def test_write_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
     p = str(tmp_path / "target.txt")
     (tmp_path / "target.txt").write_text("keep", encoding="utf-8")
     calls = {"n": 0}
@@ -176,26 +176,26 @@ def test_write_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "replace", flaky_replace)
     with pytest.raises(OSError, match="simulated"):
-        be.write(p, "new content")
+        await be.write(p, "new content")
     assert not os.path.exists(p + ".tmp")
     assert (tmp_path / "target.txt").read_text(encoding="utf-8") == "keep"
 
 
-def test_write_bytes_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
+async def test_write_bytes_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
     p = str(tmp_path / "bin.dat")
     monkeypatch.setattr(os, "replace", lambda _s, _d: (_ for _ in ()).throw(OSError("nope")))
     with pytest.raises(OSError):
-        be.write_bytes(p, b"\xff\xfe")
+        await be.write_bytes(p, b"\xff\xfe")
     assert not os.path.exists(p + ".tmp")
     assert not os.path.exists(p)
 
 
-def test_read_head_bytes_binary(be, tmp_path):
+async def test_read_head_bytes_binary(be, tmp_path):
     p = str(tmp_path / "raw.bin")
     data = b"hello\x00world\xff"
     with open(p, "wb") as fd:
         fd.write(data)
-    assert be.read_head_bytes(p, 8) == data[:8]
+    assert await be.read_head_bytes(p, 8) == data[:8]
 
 
 # --- bounded exec runner (spec D1/D2/D9/D10) ---

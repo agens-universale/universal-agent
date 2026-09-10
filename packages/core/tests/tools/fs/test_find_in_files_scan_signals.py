@@ -504,9 +504,9 @@ def test_walk_sizes_spare_the_per_file_stat():
             super().__init__(files)
             self.getsize_calls = 0
 
-        def getsize(self, p):
+        async def getsize(self, p):
             self.getsize_calls += 1
-            return super().getsize(p)
+            return await super().getsize(p)
 
     backend = _Counting({"/work/a.py": "needle here\n", "/work/b.py": "needle there\n"})
     tool = FindInFiles.__new__(FindInFiles)
@@ -571,13 +571,18 @@ def test_missing_grep_is_named_before_a_non_native_pattern(tmp_path, monkeypatch
     assert data["fallback_reason"] == "no_grep"
 
 
-def test_prefiltered_entries_respect_the_path_boundary(tmp_path):
+async def test_prefiltered_entries_respect_the_path_boundary(tmp_path):
     root = tmp_path / "app"
     sibling = tmp_path / "app2" / "x.py"
     inside = root / "y.py"
     tool = _tool(tmp_path)
 
-    rels = [e.rel for e in tool._prefiltered_entries(str(root), [str(sibling), str(inside)])]
+    rels = [
+        e.rel
+        async for e in tool._prefiltered_entries(
+            str(root), [str(sibling), str(inside)]
+        )
+    ]
 
     assert rels == ["x.py", "y.py"]  # сосед с общим префиксом имени — не «2/x.py»
 
@@ -673,13 +678,15 @@ def test_files_too_large_makes_the_scan_incomplete(tmp_path, monkeypatch):
 def _skip_files(monkeypatch, *, binary=(), encoding=()):
     original = FindInFiles._open_decode_text
 
-    def fake_open(self, abs_path, *args, **kwargs):
+    async def fake_open(self, abs_path, *args, **kwargs):
+        # Чтение файла у порта корутинное — подмена обязана быть такой же,
+        # иначе разбор получит корутину вместо текста и молча ничего не найдёт.
         name = abs_path.replace("\\", "/").rsplit("/", 1)[-1]
         if name in binary:
             return None, 0, "binary"
         if name in encoding:
             return None, 0, "encoding"
-        return original(self, abs_path, *args, **kwargs)
+        return await original(self, abs_path, *args, **kwargs)
 
     monkeypatch.setattr(FindInFiles, "_open_decode_text", fake_open)
 

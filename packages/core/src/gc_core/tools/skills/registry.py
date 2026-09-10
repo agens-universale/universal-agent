@@ -66,13 +66,13 @@ def _project_skills_root() -> str:
     return str(project_gc_dir() / "skills")
 
 
-def _parse_skill_markdown(backend: FsBackend, path: str) -> tuple[Dict[str, Any], str]:
+async def _parse_skill_markdown(backend: FsBackend, path: str) -> tuple[Dict[str, Any], str]:
     """
     Разобрать SKILL.md на frontmatter (YAML) и тело инструкции.
     Если frontmatter отсутствует или сломан — метаданные пустые, тело = весь файл.
     """
     try:
-        text = backend.read(path)
+        text = await backend.read(path)
     except FileNotFoundError:
         return {}, ""
 
@@ -103,7 +103,7 @@ def _parse_skill_markdown(backend: FsBackend, path: str) -> tuple[Dict[str, Any]
     return metadata, body
 
 
-def _walk_resource_dir(backend: FsBackend, base_dir: str) -> Dict[str, str]:
+async def _walk_resource_dir(backend: FsBackend, base_dir: str) -> Dict[str, str]:
     """
     Построить словарь slug -> абсолютный путь для ресурсов в указанной папке.
 
@@ -112,10 +112,10 @@ def _walk_resource_dir(backend: FsBackend, base_dir: str) -> Dict[str, str]:
     - разделитель каталогов всегда "/", независимо от ОС
     """
     mapping: Dict[str, str] = {}
-    if not backend.is_dir(base_dir):
+    if not await backend.is_dir(base_dir):
         return mapping
 
-    for rel_path in backend.iter_files(base_dir):
+    async for rel_path in backend.iter_files(base_dir):
         rel_no_ext, _ = os.path.splitext(rel_path)
         slug = rel_no_ext.replace("\\", "/")
         mapping[slug] = backend.join(base_dir, rel_path)
@@ -135,7 +135,7 @@ def _guess_content_type(filename: str) -> str:
     return "text/plain"
 
 
-def _load_pack_manifest(
+async def _load_pack_manifest(
     backend: FsBackend, pack_dir: str, dir_name: str
 ) -> Dict[str, Any]:
     """
@@ -157,11 +157,11 @@ def _load_pack_manifest(
         "bootstrap_skill": None,
     }
     manifest_path = backend.join(pack_dir, "pack.yaml")
-    if not backend.is_file(manifest_path):
+    if not await backend.is_file(manifest_path):
         return defaults
 
     try:
-        raw = yaml.safe_load(backend.read(manifest_path)) or {}
+        raw = yaml.safe_load(await backend.read(manifest_path)) or {}
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
         # decode — подкласс `ValueError`, а не `OSError`: `backend.read`
         # поднимает его на действительно бинарном `pack.yaml`, и пакет ронял
@@ -279,10 +279,10 @@ class SkillsRegistry:
         self._packs_by_id: Dict[str, Dict[str, Any]] = {}
         self._loaded: bool = False
 
-    def _ensure_loaded(self) -> None:
+    async def _ensure_loaded(self) -> None:
         if self._loaded:
             return
-        self._load_all_skills()
+        await self._load_all_skills()
         self._loaded = True
 
     def reload(self) -> None:
@@ -290,7 +290,7 @@ class SkillsRegistry:
         Нужно, чтобы созданный посреди прогона скилл стал виден без рестарта."""
         self._loaded = False
 
-    def _load_all_skills(self) -> None:
+    async def _load_all_skills(self) -> None:
         self._skills_by_id.clear()
         self._packs_by_id.clear()
         # Идём СНИЗУ ВВЕРХ: system → user → project.
@@ -300,14 +300,14 @@ class SkillsRegistry:
             ("user", self._user_root),
             ("project", self._project_root),
         ):
-            if not root or not self._backend.is_dir(root):
+            if not root or not await self._backend.is_dir(root):
                 continue
-            for entry, is_dir in self._backend.listdir(root):
+            for entry, is_dir in await self._backend.listdir(root):
                 entry_path = self._backend.join(root, entry)
                 if not is_dir:
                     continue
-                has_pack_yaml = self._backend.is_file(self._backend.join(entry_path, "pack.yaml"))
-                has_skill_md = self._backend.is_file(self._backend.join(entry_path, "SKILL.md"))
+                has_pack_yaml = await self._backend.is_file(self._backend.join(entry_path, "pack.yaml"))
+                has_skill_md = await self._backend.is_file(self._backend.join(entry_path, "SKILL.md"))
                 if has_pack_yaml and self._walk_packs_enabled:
                     if has_skill_md:
                         logger.warning(
@@ -315,14 +315,14 @@ class SkillsRegistry:
                             "Treating as a pack; the root-level SKILL.md is ignored.",
                             entry_path,
                         )
-                    self._load_pack_contents(entry_path, dir_name=entry, source=source)
+                    await self._load_pack_contents(entry_path, dir_name=entry, source=source)
                 elif has_skill_md:
-                    skill = self._load_skill_dir(entry_path, dir_name=entry, source=source)
+                    skill = await self._load_skill_dir(entry_path, dir_name=entry, source=source)
                     if skill is not None and skill.id not in self._disabled:
                         self._skills_by_id[skill.id] = skill
                 # else: пусто, скип
 
-    def _load_skill_dir(
+    async def _load_skill_dir(
         self,
         skill_dir: str,
         dir_name: str,
@@ -330,10 +330,10 @@ class SkillsRegistry:
         pack_id: Optional[str] = None,
     ) -> Optional[Skill]:
         skill_md = self._backend.join(skill_dir, "SKILL.md")
-        if not self._backend.is_file(skill_md):
+        if not await self._backend.is_file(skill_md):
             return None
 
-        metadata, instructions = _parse_skill_markdown(self._backend, skill_md)
+        metadata, instructions = await _parse_skill_markdown(self._backend, skill_md)
 
         meta_id = metadata.get("id") if isinstance(metadata.get("id"), str) else None
         skill_id_segment = meta_id or dir_name
@@ -358,14 +358,18 @@ class SkillsRegistry:
             version = None
 
         scripts_dir = self._backend.join(skill_dir, "scripts")
-        scripts = sorted(self._backend.iter_files(scripts_dir)) if self._backend.is_dir(scripts_dir) else []
+        scripts = (
+            sorted([_p async for _p in self._backend.iter_files(scripts_dir)])
+            if await self._backend.is_dir(scripts_dir)
+            else []
+        )
         has_scripts = bool(scripts)
 
         references_dir = self._backend.join(skill_dir, "references")
         assets_dir = self._backend.join(skill_dir, "assets")
 
-        references = _walk_resource_dir(self._backend, references_dir)
-        assets = _walk_resource_dir(self._backend, assets_dir)
+        references = await _walk_resource_dir(self._backend, references_dir)
+        assets = await _walk_resource_dir(self._backend, assets_dir)
 
         return Skill(
             id=canonical_id,
@@ -382,14 +386,14 @@ class SkillsRegistry:
             pack_id=pack_id,
         )
 
-    def _load_pack_contents(self, pack_dir: str, dir_name: str, source: str) -> None:
+    async def _load_pack_contents(self, pack_dir: str, dir_name: str, source: str) -> None:
         """
         Загрузить пакет: pack.yaml → canonical pack_id, inner-скиллы из подпапок.
         Каждый inner-скилл регистрируется в self._skills_by_id с canonical
         '<pack-id>:<inner-id>'. Pack-manifest регистрируется в self._packs_by_id
         под manifest['id'].
         """
-        manifest = _load_pack_manifest(self._backend, pack_dir, dir_name=dir_name)
+        manifest = await _load_pack_manifest(self._backend, pack_dir, dir_name=dir_name)
         manifest["source"] = source
         canonical_pack_id = manifest["id"]
         # Disable целого пакета: ни manifest, ни inner-скиллы не регистрируем.
@@ -397,13 +401,13 @@ class SkillsRegistry:
             return
         self._packs_by_id[canonical_pack_id] = manifest
 
-        for inner_entry, is_dir in self._backend.listdir(pack_dir):
+        for inner_entry, is_dir in await self._backend.listdir(pack_dir):
             inner_path = self._backend.join(pack_dir, inner_entry)
             if not is_dir:
                 continue
-            if not self._backend.is_file(self._backend.join(inner_path, "SKILL.md")):
+            if not await self._backend.is_file(self._backend.join(inner_path, "SKILL.md")):
                 continue
-            skill = self._load_skill_dir(
+            skill = await self._load_skill_dir(
                 inner_path,
                 dir_name=inner_entry,
                 source=source,
@@ -414,7 +418,7 @@ class SkillsRegistry:
 
     # Публичный API реестра
 
-    def list_skills(
+    async def list_skills(
         self,
         *,
         pack: Optional[str] = None,
@@ -431,7 +435,7 @@ class SkillsRegistry:
         Если оба заданы — pack имеет приоритет.
         """
         self.reload()
-        self._ensure_loaded()
+        await self._ensure_loaded()
 
         bootstrap_ids: Dict[str, str] = {}  # pack_id -> canonical bootstrap skill id
         pack_sizes: Dict[str, int] = {}
@@ -516,15 +520,15 @@ class SkillsRegistry:
                 return skill
         return None
 
-    def _get_skill(self, skill_id: str) -> Skill:
+    async def _get_skill(self, skill_id: str) -> Skill:
         try:
-            return self._lookup_skill(skill_id)
+            return await self._lookup_skill(skill_id)
         except KeyError:
             # Промах id — возможно, скилл создан только что: один rescan и
             # повтор. Второго reload в этом вызове нет → цикла нет.
             # AmbiguousSkillId сюда не попадает (не KeyError) — не ретраим.
             self.reload()
-            return self._lookup_skill(skill_id)
+            return await self._lookup_skill(skill_id)
 
     def _candidate_ids_for(self, skill_id: str) -> List[str]:
         """Кандидаты по совпадению хвоста — для подсказки в not-found ошибке."""
@@ -541,8 +545,8 @@ class SkillsRegistry:
         base = f"Skill '{skill_id}' not found"
         return f"{base}. Did you mean: {cands}?" if cands else base
 
-    def _lookup_skill(self, skill_id: str) -> Skill:
-        self._ensure_loaded()
+    async def _lookup_skill(self, skill_id: str) -> Skill:
+        await self._ensure_loaded()
         if not isinstance(skill_id, str):
             raise KeyError(f"Skill '{skill_id}' not found")
         skill_id = skill_id.strip()
@@ -590,11 +594,11 @@ class SkillsRegistry:
             )
         return candidates[0]
 
-    def load_skill_detail(self, skill_id: str) -> Dict[str, Any]:
+    async def load_skill_detail(self, skill_id: str) -> Dict[str, Any]:
         """
         Подробное описание скилла, включая инструкции и списки slug-ов ресурсов.
         """
-        skill = self._get_skill(skill_id)
+        skill = await self._get_skill(skill_id)
         return {
             "id": skill.id,
             "name": skill.name,
@@ -611,7 +615,7 @@ class SkillsRegistry:
             "pack_id": skill.pack_id,
         }
 
-    def skill_catalog(self) -> "SkillCatalog":
+    async def skill_catalog(self) -> "SkillCatalog":
         """Read-only snapshot for the CLI -s resolver (skill_arg_resolver).
 
         Built from the public list_skills(include_all=True); does not expose
@@ -620,7 +624,7 @@ class SkillsRegistry:
         """
         from gc_core.tools.skills.skill_arg_resolver import SkillCatalog
 
-        entries = self.list_skills(include_all=True)
+        entries = await self.list_skills(include_all=True)
         canonical = frozenset(e["id"] for e in entries)
         bare: dict[str, list[str]] = {}
         for e in entries:
@@ -638,11 +642,11 @@ class SkillsRegistry:
             pack_bootstrap=pack_bootstrap,
         )
 
-    def load_reference(self, skill_id: str, slug: str) -> Dict[str, Any]:
+    async def load_reference(self, skill_id: str, slug: str) -> Dict[str, Any]:
         """
         Загрузить reference по slug.
         """
-        skill = self._get_skill(skill_id)
+        skill = await self._get_skill(skill_id)
         path = skill.references.get(slug)
         if not path:
             available = ", ".join(sorted(skill.references)) or "(no references)"
@@ -651,7 +655,7 @@ class SkillsRegistry:
                 f"Available references: {available}"
             )
 
-        content = self._backend.read(path)
+        content = await self._backend.read(path)
 
         filename = _basename(path)
         content_type = _guess_content_type(filename)
@@ -664,12 +668,12 @@ class SkillsRegistry:
             "content": content,
         }
 
-    def load_asset(self, skill_id: str, slug: str) -> Dict[str, Any]:
+    async def load_asset(self, skill_id: str, slug: str) -> Dict[str, Any]:
         """
         Загрузить asset по slug.
         В минимальной версии считаем, что все ассеты текстовые.
         """
-        skill = self._get_skill(skill_id)
+        skill = await self._get_skill(skill_id)
         path = skill.assets.get(slug)
         if not path:
             available = ", ".join(sorted(skill.assets)) or "(no assets)"
@@ -678,7 +682,7 @@ class SkillsRegistry:
                 f"Available assets: {available}"
             )
 
-        content = self._backend.read(path)
+        content = await self._backend.read(path)
 
         filename = _basename(path)
         content_type = _guess_content_type(filename)
@@ -691,9 +695,9 @@ class SkillsRegistry:
             "content": content,
         }
 
-    def resolve_script(self, skill_id: str, script_name: str) -> Dict[str, Any]:
+    async def resolve_script(self, skill_id: str, script_name: str) -> Dict[str, Any]:
         """Resolve an explicitly named script on the backend filesystem."""
-        skill = self._get_skill(skill_id)
+        skill = await self._get_skill(skill_id)
         available_scripts = skill.scripts
         normalized = (script_name or "").strip().replace("\\", "/")
         if normalized.startswith("scripts/"):
@@ -704,7 +708,7 @@ class SkillsRegistry:
                 f"Available scripts: {available_scripts}"
             )
         path = self._backend.join(self._backend.join(skill.root_path, "scripts"), normalized)
-        if not self._backend.is_file(path):
+        if not await self._backend.is_file(path):
             raise FileNotFoundError(
                 f"Script '{script_name}' not found for skill '{skill_id}'. "
                 f"Available scripts: {available_scripts}"

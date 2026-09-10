@@ -55,6 +55,7 @@ class State:
         agentsmd_override: bool = False,
         workspace: Optional[ExecutionWorkspace] = None,
         os_backend: Optional[Any] = None,
+        initial_project_data: Optional[Dict[str, Any]] = None,
     ):
         self.logger = logger
         self.parent_state_id = parent_state_id
@@ -66,9 +67,14 @@ class State:
         if workspace is None and os_backend is not None:
             workspace = build_execution_workspace(os_backend, workspace_config)
         self.workspace = workspace
-        self.initial_project_data = get_project_data(
-            workspace_config, workspace=workspace, backend=os_backend
-        )
+        # Данные о проекте ПРИХОДЯТ готовыми, а не собираются здесь.
+        #
+        # Сбор — это файловый ввод-вывод (``.git``, листинг каталога), а у
+        # файлового порта одна форма, корутинная. Конструктор ждать не умеет,
+        # и «синхронная форма ради конструктора» — ровно та пара, которую
+        # снимала эта ветка. Кому данные нужны, тот строит состояние через
+        # ``acreate`` — он их и соберёт.
+        self.initial_project_data = dict(initial_project_data or {})
         if limit_project_metadata:
             # В серверном режиме не передаём чувствительные данные о файловой системе.
             # Оставляем только дату, остальные поля будут добавлены в set_call_metadata.
@@ -153,6 +159,29 @@ class State:
         self.run_start_usage_meta: Optional[dict] = None
         # Чек-лист субагента: собственный, эфемерный (см. property session_todo).
         self.subagent_todo: List[Dict[str, str]] = []
+
+    @classmethod
+    async def acreate(cls, *, workspace_config=None, workspace=None,
+                      os_backend=None, **kwargs) -> "State":
+        """Собрать данные о проекте и построить состояние.
+
+        Единственный вход для прода: файловый ввод-вывод происходит ЗДЕСЬ, до
+        конструктора. Тесты, которым метаданные проекта безразличны, строят
+        ``State(...)`` напрямую и получают пустой словарь — без похода в
+        файловую систему за спиной.
+        """
+        from gc_core.utils.project_data import get_project_data
+
+        data = await get_project_data(
+            workspace_config, workspace=workspace, backend=os_backend
+        )
+        return cls(
+            workspace_config=workspace_config,
+            workspace=workspace,
+            os_backend=os_backend,
+            initial_project_data=data,
+            **kwargs,
+        )
 
     @property
     def session_todo(self) -> List[Dict[str, str]]:

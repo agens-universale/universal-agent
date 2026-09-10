@@ -56,27 +56,27 @@ stop_folders = {
     }
 
 
-def get_listing(dir_path: str) -> str:
-    def _listdir(p: str) -> list[tuple[str, bool]]:
+async def get_listing(dir_path: str) -> str:
+    async def _listdir(p: str) -> list[tuple[str, bool]]:
         return [(f, os.path.isdir(os.path.join(p, f))) for f in os.listdir(p)]
 
     def _join(base: str, name: str) -> str:
         return os.path.join(base, name)
 
-    return _build_listing(_listdir, _join, dir_path)
+    return await _build_listing(_listdir, _join, dir_path)
 
 
-def get_listing_from_backend(backend: Any, dir_path: str) -> str:
-    def _listdir(p: str) -> list[tuple[str, bool]]:
-        return list(backend.listdir(p))
+async def get_listing_from_backend(backend: Any, dir_path: str) -> str:
+    async def _listdir(p: str) -> list[tuple[str, bool]]:
+        return list(await backend.listdir(p))
 
     def _join(base: str, name: str) -> str:
         return backend.join(base, name)
 
-    return _build_listing(_listdir, _join, dir_path)
+    return await _build_listing(_listdir, _join, dir_path)
 
 
-def _build_listing(
+async def _build_listing(
     listdir_fn,
     join_fn,
     dir_path: str,
@@ -90,7 +90,7 @@ def _build_listing(
     - Final hint: one tool-agnostic line at end of listing,
       present ONLY when at least one level was truncated (D5).
     """
-    raw_entries = listdir_fn(dir_path)
+    raw_entries = await listdir_fn(dir_path)
 
     filtered: list[tuple[str, bool]] = [
         (n, d) for n, d in raw_entries if n not in stop_folders
@@ -103,7 +103,7 @@ def _build_listing(
     for name, is_dir in shown:
         if is_dir:
             sub_path = join_fn(dir_path, name)
-            raw_sub = listdir_fn(sub_path)
+            raw_sub = await listdir_fn(sub_path)
             filtered_sub: list[tuple[str, bool]] = [
                 (n, d) for n, d in raw_sub if n not in stop_folders
             ]
@@ -190,7 +190,7 @@ def _coerce_workspace(
     return build_execution_workspace(LocalFsBackend(), workspace_config)
 
 
-def get_project_data(
+async def get_project_data(
     workspace_config: Optional[Dict[str, Any]] = None,
     workspace: Optional[Any] = None,
     backend: Optional[Any] = None,
@@ -222,10 +222,10 @@ def get_project_data(
     be = ws.backend
     current_date = datetime.now().strftime("%Y-%m-%d")
     is_git_project = (
-        "true" if be.exists(be.join(project_dir, ".git")) else "false"
+        "true" if await be.exists(be.join(project_dir, ".git")) else "false"
     )
     try:
-        project_dir_listing = get_listing_from_backend(be, project_dir)
+        project_dir_listing = await get_listing_from_backend(be, project_dir)
     except OSError:
         project_dir_listing = ""
     root_writable = "true" if ws.root_writable else "false"
@@ -250,7 +250,7 @@ def get_project_data(
             "true" if os.path.exists(os.path.join(project_dir, ".git")) else "false"
         )
         try:
-            project_dir_listing = get_listing(project_dir)
+            project_dir_listing = await get_listing(project_dir)
         except OSError:
             project_dir_listing = ""
 

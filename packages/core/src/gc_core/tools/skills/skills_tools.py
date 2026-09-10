@@ -74,7 +74,7 @@ class SkillsListTool:
     async def acall(self, pack: Optional[str] = None, **kwargs: Any) -> str:
         pack = coalesce_optional_string(pack)
         try:
-            skills = self._registry.list_skills(pack=pack)
+            skills = await self._registry.list_skills(pack=pack)
             return _wrap(tool="skills_list", ok=True, result={"skills": skills})
         except Exception as exc:  # noqa: BLE001
             logger.error("skills_list failed: %s", exc, exc_info=True)
@@ -94,7 +94,7 @@ class LoadSkillTool:
 
     async def acall(self, skill_id: str, **kwargs: Any) -> str:
         try:
-            detail = self._registry.load_skill_detail(skill_id)
+            detail = await self._registry.load_skill_detail(skill_id)
             return _wrap(
                 tool="skills_load",
                 ok=True,
@@ -154,7 +154,7 @@ class RunSkillScriptTool:
         **kwargs: Any,
     ) -> str:
         try:
-            resolved = self._registry.resolve_script(
+            resolved = await self._registry.resolve_script(
                 skill_id=skill_id, script_name=script_name or ""
             )
             if self._ctx is None or not hasattr(self._ctx, "os_backend"):
@@ -269,7 +269,7 @@ class LoadReferenceTool:
 
     async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
-            res = self._registry.load_reference(skill_id=skill_id, slug=slug)
+            res = await self._registry.load_reference(skill_id=skill_id, slug=slug)
             return _wrap(
                 tool="skills_read_reference",
                 ok=True,
@@ -319,7 +319,7 @@ class LoadAssetTool:
 
     async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
-            res = self._registry.load_asset(skill_id=skill_id, slug=slug)
+            res = await self._registry.load_asset(skill_id=skill_id, slug=slug)
             return _wrap(
                 tool="skills_read_asset",
                 ok=True,

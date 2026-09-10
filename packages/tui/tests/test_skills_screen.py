@@ -87,7 +87,7 @@ async def test_enter_opens_skill_viewer(monkeypatch):
     from gc_tui.screens.viewer import ViewerScreen
 
     class _Reg:
-        def load_skill_detail(self, sid):
+        async def load_skill_detail(self, sid):
             return {"id": sid, "name": sid, "source": "user",
                     "root_path": "/usr/" + sid, "description": "d", "instructions": "i"}
 

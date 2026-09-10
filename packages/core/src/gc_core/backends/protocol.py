@@ -6,7 +6,7 @@ import shlex
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any, AsyncIterator, Callable, Iterable, Optional, Sequence
 
 from gc_core.backends.capture import CapturedStream, captured_stream_from_text
 from gc_core.backends.walk_util import WalkEntry, iter_walk_entries_from_flat, prune_flat_entries
@@ -147,165 +147,32 @@ def argv_to_posix_command(argv: list, *, stdin: Optional[str] = None) -> str:
         command = f"printf '%s' {shlex.quote(stdin)} | {command}"
     return command
 
+class FsBackend(ABC):
+    """Физический порт ввода-вывода. Файловые операции — КОРУТИНЫ.
 
-class AsyncFileOps:
-    """Асинхронные двойники файловых операций — примесь, а не тело порта.
+    Форма одна. Раньше их было две: синхронные методы порта и примесь
+    ``AsyncFileOps`` с двадцатью восемью двойниками поверх них. Двойников не
+    звал никто, кроме их собственного теста, — а тулы шли синхронным путём.
 
-    Примесью, потому что носителей ДВА: сам ``FsBackend`` и обёртки вокруг
-    него (``gc_tui.diff_tui.TrackingFsBackend``), которые порт не наследуют,
-    но обязаны повторять его поверхность. Копия двадцати пяти методов в
-    обёртке разъехалась бы с оригиналом первой же правкой.
+    Для ``LocalFsBackend`` это было безобидно: у файла нет нативной
+    асинхронной формы, и работа идёт инлайн, за микросекунды. Но «файл» у
+    бэкенда не обязан быть файлом. У ``HarborBackend`` ``exists()`` — это
+    ``test -e`` по сети, а ``read()`` — скачивание, и синхронная форма ждала
+    их через ``run_coroutine_threadsafe(...).result()``, то есть блокировала
+    поток. Позови такой метод инлайн с loop самого Harbor — поток заблокирует
+    сам себя навсегда (проверено зависанием). Именно поэтому критерий
+    «разрыв < 150 мс» под Harbor файловыми тулами не выполнялся: каждая
+    проверка пути была сетевым roundtrip'ом на замороженном loop.
 
-    Двойники зовут ``self.<метод>``, а не внутренний бэкенд: у обёртки это её
-    собственный, отслеживающий метод.
+    Теперь у Harbor те же методы ждут нативно (``_aawait``: корутина уходит на
+    loop владельца, результат — обычным ``await``, без потока), а у локального
+    бэкенда тело осталось прежним, инлайн. Расплата — ``await`` на вызове
+    даже там, где работа занимает микросекунды; она дешевле двух форм.
 
-    Зачем они вообще. Тулы зовут файловые методы ИНЛАЙН внутри ``acall`` — у
-    файлов нет нативной асинхронной формы, и поход в пул стоит дороже самой
-    работы (40 мкс против микросекунд). Для ``LocalFsBackend`` это так и
-    остаётся.
-
-    Но «файл» у бэкенда не обязан быть файлом. У ``HarborBackend``
-    ``exists()`` — это ``test -e`` по сети, ``read()`` — ``env.download_file``,
-    и оба ЖДУТ корутину ЧУЖОГО loop через
-    ``run_coroutine_threadsafe(...).result()``. Позови такой метод инлайн с
-    того же loop — поток заблокирует сам себя навсегда. Проверено зависанием,
-    когда агента попробовали вести на loop Harbor.
-
-    Отсюда развилка в ОДНОМ месте (``_afile``), а не в двадцати пяти:
-    мостящий бэкенд поднимает флаг и получает поток, локальный идёт инлайн.
-    Чужой бэкенд не делает ничего — дефолт зовёт его синхронный метод инлайн,
-    то есть ровно то, что происходит сегодня.
-
-    ОГРАНИЧЕНИЕ, о котором надо знать до того, как на эти двойники
-    рассчитывать: **их пока никто не зовёт**. Все тулы обращаются к
-    синхронным методам порта, поэтому под ``HarborBackend`` файловая операция
-    в туле — это по-прежнему ``run_coroutine_threadsafe(...).result()`` на
-    заблокированном loop агента, то есть сетевой roundtrip на каждую проверку
-    пути. Критерий приёмки «разрыв < 150 мс» под Harbor файловыми тулами НЕ
-    выполняется, и раньше эта докстрока умалчивала об этом.
-
-    Почему не переведены разом: 93 обращения к порту в тулах, 35 из них — в
-    синхронных вспомогательных функциях, которые пришлось бы делать
-    корутинными каскадом. Проверить результат нечем — стенда с Harbor нет,
-    а менять 93 места вслепую хуже, чем назвать ограничение. Локального
-    бэкенда (CLI, TUI, сервер по умолчанию) это не касается вовсе: у него
-    ``bridges_to_loop = False``, и инлайн там правильный.
+    Обходчики (``iter_lines``, ``iter_walk``, ``iter_files``,
+    ``iter_walk_entries``) — асинхронные генераторы: ``async for``.
     """
 
-    #: Бэкенд мостит операции на ЧУЖОЙ event loop (Harbor). Синхронный метод у
-    #: такого блокирует поток, поэтому двойники обязаны уходить с текущего
-    #: потока — иначе дедлок на собственном loop.
-    bridges_to_loop: bool = False
-
-    async def _afile(self, fn, *args, **kwargs):
-        """Исполнить файловую операцию, не заблокировав СВОЙ loop."""
-        if self.bridges_to_loop:
-            import asyncio
-
-            return await asyncio.to_thread(lambda: fn(*args, **kwargs))
-        return fn(*args, **kwargs)
-
-    async def aexists(self, path):
-        return await self._afile(self.exists, path)
-
-    async def alexists(self, path):
-        return await self._afile(self.lexists, path)
-
-    async def ais_file(self, path):
-        return await self._afile(self.is_file, path)
-
-    async def ais_dir(self, path):
-        return await self._afile(self.is_dir, path)
-
-    async def ais_symlink(self, path):
-        return await self._afile(self.is_symlink, path)
-
-    async def agetsize(self, path):
-        return await self._afile(self.getsize, path)
-
-    async def astat_info(self, path, follow_symlinks=False):
-        return await self._afile(self.stat_info, path, follow_symlinks)
-
-    async def areadable(self, path):
-        return await self._afile(self.readable, path)
-
-    async def awritable(self, path):
-        return await self._afile(self.writable, path)
-
-    async def arealpath(self, path):
-        return await self._afile(self.realpath, path)
-
-    async def ais_hidden(self, path):
-        return await self._afile(self.is_hidden, path)
-
-    async def aread(self, path):
-        return await self._afile(self.read, path)
-
-    async def aread_bytes(self, path):
-        return await self._afile(self.read_bytes, path)
-
-    async def aiter_lines(self, path):
-        return await self._afile(self.iter_lines, path)
-
-    async def aread_head_bytes(self, path, n):
-        return await self._afile(self.read_head_bytes, path, n)
-
-    async def asha256_bytes(self, path):
-        return await self._afile(self.sha256_bytes, path)
-
-    async def awrite(self, path, content, encoding='utf-8'):
-        return await self._afile(self.write, path, content, encoding)
-
-    async def awrite_bytes(self, path, data):
-        return await self._afile(self.write_bytes, path, data)
-
-    async def aappend(self, path, content, encoding='utf-8'):
-        return await self._afile(self.append, path, content, encoding)
-
-    async def acopy(self, src, dst):
-        return await self._afile(self.copy, src, dst)
-
-    async def amakedirs(self, path):
-        return await self._afile(self.makedirs, path)
-
-    async def alistdir(self, path):
-        return await self._afile(self.listdir, path)
-
-    async def awalk(self, path):
-        return await self._afile(self.walk, path)
-
-    async def _aiter(self, fn, *args, **kwargs):
-        """То же, что ``_afile``, но для ГЕНЕРАТОРНЫХ методов.
-
-        Отдельная ветка нужна не для красоты. ``_afile`` уводил в поток вызов
-        генераторной функции — а тот возвращается МГНОВЕННО, отдав генератор:
-        настоящая работа шла потом, при итерации, на loop вызывающего. Для
-        мостящего бэкенда это ровно та блокировка, которую примесь обещает
-        снять (``walk`` у Harbor внутри делает ``run_coroutine_threadsafe(...)
-        .result()``). Поэтому здесь генератор МАТЕРИАЛИЗУЕТСЯ в потоке, и
-        наружу уходит готовый список.
-
-        Цена — память под весь обход; она приемлема ровно там, где эта ветка
-        и включается: у мостящего бэкенда каждый шаг обхода стоит сетевого
-        обращения, и по сравнению с ним список в памяти ничего не стоит.
-        Локальный бэкенд по-прежнему отдаёт ленивый генератор инлайн.
-        """
-        if self.bridges_to_loop:
-            import asyncio
-
-            return await asyncio.to_thread(lambda: list(fn(*args, **kwargs)))
-        return fn(*args, **kwargs)
-
-    async def aiter_walk(self, path, *, should_descend=None):
-        return await self._aiter(self.iter_walk, path, should_descend=should_descend)
-
-    async def aiter_files(self, path, *, should_descend=None):
-        return await self._aiter(self.iter_files, path, should_descend=should_descend)
-
-    async def aiter_walk_entries(self, path, **kwargs):
-        return await self._aiter(self.iter_walk_entries, path, **kwargs)
-
-class FsBackend(AsyncFileOps, ABC):
     # Self-isolated sandbox (task container); tools use it to skip host-only
     # affordances. Security guards do NOT read this flag.
     is_sandbox: bool = False
@@ -461,57 +328,60 @@ class FsBackend(AsyncFileOps, ABC):
 
     # --- stat ---
     @abstractmethod
-    def exists(self, path: str) -> bool: ...
+    async def exists(self, path: str) -> bool: ...
     @abstractmethod
-    def lexists(self, path: str) -> bool: ...
+    async def lexists(self, path: str) -> bool: ...
     @abstractmethod
-    def is_file(self, path: str) -> bool: ...
+    async def is_file(self, path: str) -> bool: ...
     @abstractmethod
-    def is_dir(self, path: str) -> bool: ...
+    async def is_dir(self, path: str) -> bool: ...
     @abstractmethod
-    def is_symlink(self, path: str) -> bool: ...
+    async def is_symlink(self, path: str) -> bool: ...
     @abstractmethod
-    def getsize(self, path: str) -> int: ...
+    async def getsize(self, path: str) -> int: ...
     @abstractmethod
-    def stat_info(self, path: str, follow_symlinks: bool = False) -> dict: ...
+    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict: ...
     @abstractmethod
-    def readable(self, path: str) -> bool: ...
+    async def readable(self, path: str) -> bool: ...
     @abstractmethod
-    def writable(self, path: str) -> bool: ...
+    async def writable(self, path: str) -> bool: ...
     @abstractmethod
-    def realpath(self, path: str) -> str: ...
+    async def realpath(self, path: str) -> str: ...
     @abstractmethod
-    def is_hidden(self, path: str) -> bool: ...
+    async def is_hidden(self, path: str) -> bool: ...
 
     # --- read ---
     @abstractmethod
-    def read(self, path: str) -> str: ...
+    async def read(self, path: str) -> str: ...
     @abstractmethod
-    def read_bytes(self, path: str) -> bytes: ...
+    async def read_bytes(self, path: str) -> bytes: ...
     @abstractmethod
-    def iter_lines(self, path: str) -> Iterable[str]: ...
+    # Обходчики объявлены обычным `def`: асинхронный генератор — НЕ корутина,
+    # его вызов не ждут, по нему идут `async for`. Реализации пишут
+    # `async def` с `yield`; сигнатура порта обещает ровно это.
+    def iter_lines(self, path: str) -> AsyncIterator[str]: ...
     @abstractmethod
-    def read_head_bytes(self, path: str, n: int) -> bytes: ...
+    async def read_head_bytes(self, path: str, n: int) -> bytes: ...
     @abstractmethod
-    def sha256_bytes(self, path: str) -> str: ...
+    async def sha256_bytes(self, path: str) -> str: ...
 
     # --- write ---
     @abstractmethod
-    def write(self, path: str, content: str, encoding: str = "utf-8") -> None: ...
+    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None: ...
     @abstractmethod
-    def write_bytes(self, path: str, data: bytes) -> None: ...
+    async def write_bytes(self, path: str, data: bytes) -> None: ...
     @abstractmethod
-    def append(self, path: str, content: str, encoding: str = "utf-8") -> None: ...
+    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None: ...
     @abstractmethod
-    def copy(self, src: str, dst: str) -> None: ...
+    async def copy(self, src: str, dst: str) -> None: ...
     @abstractmethod
-    def makedirs(self, path: str) -> None: ...
+    async def makedirs(self, path: str) -> None: ...
 
     # --- traverse ---
     @abstractmethod
-    def listdir(self, path: str) -> list: ...
+    async def listdir(self, path: str) -> list: ...
     @abstractmethod
-    def walk(self, path: str) -> list: ...
+    async def walk(self, path: str) -> list: ...
 
     @abstractmethod
     def iter_walk(
@@ -519,7 +389,7 @@ class FsBackend(AsyncFileOps, ABC):
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
-    ) -> Iterable[tuple[str, bool]]: ...
+    ) -> AsyncIterator[tuple[str, bool]]: ...
 
     @abstractmethod
     def iter_files(
@@ -527,9 +397,9 @@ class FsBackend(AsyncFileOps, ABC):
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
-    ) -> Iterable[str]: ...
+    ) -> AsyncIterator[str]: ...
 
-    def walk_entries(
+    async def walk_entries(
         self,
         path: str,
         *,
@@ -542,26 +412,29 @@ class FsBackend(AsyncFileOps, ABC):
         Default: from ``walk()`` — no sizes (tools fall back to ``getsize``) and
         host-side prune, so every backend yields the same tree for the same rules.
         """
-        entries = [WalkEntry(rel, is_dir) for rel, is_dir in self.walk(path)]
+        entries = [WalkEntry(rel, is_dir) for rel, is_dir in await self.walk(path)]
         return prune_flat_entries(
             entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
         )
 
-    def iter_walk_entries(
+    async def iter_walk_entries(
         self,
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
         prune_names: Sequence[str] = (),
         prune_dot_dirs: bool = False,
-    ) -> Iterable[WalkEntry]:
+    ) -> AsyncIterator[WalkEntry]:
         """``iter_walk`` order over ``walk_entries`` (sizes preserved)."""
-        yield from iter_walk_entries_from_flat(
-            self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
+        for entry in iter_walk_entries_from_flat(
+            await self.walk_entries(
+                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+            ),
             should_descend=should_descend,
             join=self.join,
             root=path,
-        )
+        ):
+            yield entry
 
     # --- path semantics ---
     @abstractmethod

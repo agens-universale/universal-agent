@@ -191,7 +191,7 @@ class AgentExecutor:
         effective_verbose = (
             verbose if verbose is not None else config_dict.get("verbose", False)
         )
-        skills_list = self._ctx.skills_registry.list_skills()
+        skills_list = await self._ctx.skills_registry.list_skills()
 
         thread_session: ThreadSession | None = None
         thread_shared: SharedStateData | None = None
@@ -343,7 +343,7 @@ class AgentExecutor:
         }
         if subagents_enabled(config_dict.get("use_local_subagents", False)):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
-        state = State(**state_data)
+        state = await State.acreate(**state_data)
         # Старт рана — первая из двух точек начала хода (спека §6.4): фиксируем
         # модель этого хода через Router, дальше внутри хода не перечитываем.
         # Открытый активный алиас (trip прошлого хода / персист breaker при attach)

@@ -15,7 +15,6 @@ from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
-    AsyncFileOps,
 )
 from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 
@@ -108,12 +107,13 @@ def attach_to_context(ctx: Any, config_dict: dict) -> None:
     ctx.workspace = build_execution_workspace(wrapped, config_dict)
 
 
-class TrackingFsBackend(AsyncFileOps):
+class TrackingFsBackend:
     """Декоратор LocalFsBackend: DiffStore snapshot + TouchedJournal.
 
-    Наследует ``AsyncFileOps`` ради асинхронных двойников: они зовут
-    ``self.<метод>``, то есть отслеживающий метод обёртки, а не внутренний.
-    Копия двадцати пяти двойников здесь разъехалась бы с портом.
+    Порт не наследуется (обёртка повторяет его поверхность, а не является
+    им), но форма методов обязана совпадать: файловые операции корутинные,
+    обходчики — асинхронные генераторы. Примеси ``AsyncFileOps`` с
+    двойниками больше нет: у порта одна форма, дублировать нечего.
     """
 
     def __init__(self, inner: Any, ctx: Any) -> None:
@@ -339,24 +339,24 @@ class TrackingFsBackend(AsyncFileOps):
             lambda: self._inner.arun_python(code, cwd=cwd, timeout=timeout, env=env)
         )
 
-    def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
         self._track_text_mutation(path)
-        self._inner.write(path, content, encoding=encoding)
+        await self._inner.write(path, content, encoding=encoding)
 
-    def write_bytes(self, path: str, data: bytes) -> None:
+    async def write_bytes(self, path: str, data: bytes) -> None:
         if not classify_content_from_sample(path, data[:BINARY_SAMPLE_BYTES]).is_binary:
             self._track_text_mutation(path)
-        self._inner.write_bytes(path, data)
+        await self._inner.write_bytes(path, data)
 
-    def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
         self._track_text_mutation(path)
-        self._inner.append(path, content, encoding=encoding)
+        await self._inner.append(path, content, encoding=encoding)
 
-    def copy(self, src: str, dst: str) -> None:
-        self._inner.copy(src, dst)
+    async def copy(self, src: str, dst: str) -> None:
+        await self._inner.copy(src, dst)
 
-    def makedirs(self, path: str) -> None:
-        self._inner.makedirs(path)
+    async def makedirs(self, path: str) -> None:
+        await self._inner.makedirs(path)
 
     @property
     def bridges_to_loop(self) -> bool:
@@ -434,74 +434,76 @@ class TrackingFsBackend(AsyncFileOps):
     def default_cwd(self) -> Optional[str]:
         return self._inner.default_cwd()
 
-    def exists(self, path: str) -> bool:
-        return self._inner.exists(path)
+    async def exists(self, path: str) -> bool:
+        return await self._inner.exists(path)
 
-    def lexists(self, path: str) -> bool:
-        return self._inner.lexists(path)
+    async def lexists(self, path: str) -> bool:
+        return await self._inner.lexists(path)
 
-    def is_file(self, path: str) -> bool:
-        return self._inner.is_file(path)
+    async def is_file(self, path: str) -> bool:
+        return await self._inner.is_file(path)
 
-    def is_dir(self, path: str) -> bool:
-        return self._inner.is_dir(path)
+    async def is_dir(self, path: str) -> bool:
+        return await self._inner.is_dir(path)
 
-    def is_symlink(self, path: str) -> bool:
-        return self._inner.is_symlink(path)
+    async def is_symlink(self, path: str) -> bool:
+        return await self._inner.is_symlink(path)
 
-    def getsize(self, path: str) -> int:
-        return self._inner.getsize(path)
+    async def getsize(self, path: str) -> int:
+        return await self._inner.getsize(path)
 
-    def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
-        return self._inner.stat_info(path, follow_symlinks=follow_symlinks)
+    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
+        return await self._inner.stat_info(path, follow_symlinks=follow_symlinks)
 
-    def readable(self, path: str) -> bool:
-        return self._inner.readable(path)
+    async def readable(self, path: str) -> bool:
+        return await self._inner.readable(path)
 
-    def writable(self, path: str) -> bool:
-        return self._inner.writable(path)
+    async def writable(self, path: str) -> bool:
+        return await self._inner.writable(path)
 
-    def realpath(self, path: str) -> str:
-        return self._inner.realpath(path)
+    async def realpath(self, path: str) -> str:
+        return await self._inner.realpath(path)
 
-    def is_hidden(self, path: str) -> bool:
-        return self._inner.is_hidden(path)
+    async def is_hidden(self, path: str) -> bool:
+        return await self._inner.is_hidden(path)
 
-    def read(self, path: str) -> str:
-        return self._inner.read(path)
+    async def read(self, path: str) -> str:
+        return await self._inner.read(path)
 
-    def read_bytes(self, path: str) -> bytes:
-        return self._inner.read_bytes(path)
+    async def read_bytes(self, path: str) -> bytes:
+        return await self._inner.read_bytes(path)
 
-    def iter_lines(self, path: str) -> Iterable[str]:
-        return self._inner.iter_lines(path)
+    async def iter_lines(self, path: str) -> Iterable[str]:
+        async for line in self._inner.iter_lines(path):
+            yield line
 
-    def read_head_bytes(self, path: str, n: int) -> bytes:
-        return self._inner.read_head_bytes(path, n)
+    async def read_head_bytes(self, path: str, n: int) -> bytes:
+        return await self._inner.read_head_bytes(path, n)
 
-    def sha256_bytes(self, path: str) -> str:
-        return self._inner.sha256_bytes(path)
+    async def sha256_bytes(self, path: str) -> str:
+        return await self._inner.sha256_bytes(path)
 
-    def listdir(self, path: str) -> list:
-        return self._inner.listdir(path)
+    async def listdir(self, path: str) -> list:
+        return await self._inner.listdir(path)
 
-    def walk(self, path: str) -> list:
-        return self._inner.walk(path)
+    async def walk(self, path: str) -> list:
+        return await self._inner.walk(path)
 
-    def iter_walk(
+    async def iter_walk(
         self,
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
-        return self._inner.iter_walk(path, should_descend=should_descend)
+        async for item in self._inner.iter_walk(path, should_descend=should_descend):
+            yield item
 
-    def walk_entries(self, path: str, *, prune_names=(), prune_dot_dirs: bool = False) -> list:
-        return self._inner.walk_entries(
+    async def walk_entries(self, path: str, *, prune_names=(), prune_dot_dirs: bool = False) -> list:
+        return await self._inner.walk_entries(
             path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
         )
 
-    def iter_walk_entries(
+    async def iter_walk_entries(
         self,
         path: str,
         *,
@@ -509,20 +511,22 @@ class TrackingFsBackend(AsyncFileOps):
         prune_names=(),
         prune_dot_dirs: bool = False,
     ):
-        return self._inner.iter_walk_entries(
+        async for entry in self._inner.iter_walk_entries(
             path,
             should_descend=should_descend,
             prune_names=prune_names,
             prune_dot_dirs=prune_dot_dirs,
-        )
+        ):
+            yield entry
 
-    def iter_files(
+    async def iter_files(
         self,
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[str]:
-        return self._inner.iter_files(path, should_descend=should_descend)
+        async for item in self._inner.iter_files(path, should_descend=should_descend):
+            yield item
 
     def normpath(self, path: str) -> str:
         return self._inner.normpath(path)

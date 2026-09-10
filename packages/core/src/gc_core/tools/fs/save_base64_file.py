@@ -101,11 +101,11 @@ class SaveBase64File(AbstractSimpleTool):
             return self._result(ok=False, path=path, error={"type": "decode_failed", "message": str(e)})
 
         parent = os.path.dirname(path) or "."
-        if not self._backend.is_dir(parent):
+        if not await self._backend.is_dir(parent):
             return self._result(ok=False, path=path, error={"type": "parent_not_found"})
 
         try:
-            self._backend.write_bytes(path, raw)
+            await self._backend.write_bytes(path, raw)
         except Exception as e:
             return self._result(ok=False, path=path, error={"type": "write_failed", "message": str(e)})
 

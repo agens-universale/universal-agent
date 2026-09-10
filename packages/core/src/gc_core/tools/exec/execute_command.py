@@ -160,7 +160,7 @@ Important Usage Rules:
             error=error,
         )
 
-    def _plan(
+    async def _plan(
         self,
         command: str,
         timeout_seconds: int | None,
@@ -228,7 +228,7 @@ Important Usage Rules:
                     stderr="",
                     error={"type": "invalid_argument", "field": "cwd"},
                 ), {}
-            if not self._backend.is_dir(cwd_used):
+            if not await self._backend.is_dir(cwd_used):
                 return self._result(
                     ok=False,
                     command=command,
@@ -340,7 +340,7 @@ Important Usage Rules:
         ``call``, поэтому здесь мы её и зовём — но в потоке, а не на loop, и
         только ради разбора. Сам запуск ждётся через ``await``.
         """
-        early, plan = self._plan(command, timeout_seconds, cwd, env_vars)
+        early, plan = await self._plan(command, timeout_seconds, cwd, env_vars)
         if early is not None:
             return early
         try:

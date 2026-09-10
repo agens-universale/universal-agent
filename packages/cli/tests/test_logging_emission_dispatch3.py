@@ -88,7 +88,7 @@ def test_build_run_usage_dict_empty_account_returns_none():
 
 
 class _SkillsRegistryStub:
-    def list_skills(self):
+    async def list_skills(self):
         return []
 
 

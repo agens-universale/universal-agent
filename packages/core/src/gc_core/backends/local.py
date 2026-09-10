@@ -50,25 +50,25 @@ class LocalFsBackend(FsBackend):
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
 
     # --- stat ---
-    def exists(self, path: str) -> bool:
+    async def exists(self, path: str) -> bool:
         return os.path.exists(path)
 
-    def lexists(self, path: str) -> bool:
+    async def lexists(self, path: str) -> bool:
         return os.path.lexists(path)
 
-    def is_file(self, path: str) -> bool:
+    async def is_file(self, path: str) -> bool:
         return os.path.isfile(path)
 
-    def is_dir(self, path: str) -> bool:
+    async def is_dir(self, path: str) -> bool:
         return os.path.isdir(path)
 
-    def is_symlink(self, path: str) -> bool:
+    async def is_symlink(self, path: str) -> bool:
         return os.path.islink(path)
 
-    def getsize(self, path: str) -> int:
+    async def getsize(self, path: str) -> int:
         return os.path.getsize(path)
 
-    def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
+    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
         st = os.stat(path, follow_symlinks=follow_symlinks)
         return {
             "size": st.st_size,
@@ -79,16 +79,16 @@ class LocalFsBackend(FsBackend):
             "is_symlink": os.path.islink(path),
         }
 
-    def readable(self, path: str) -> bool:
+    async def readable(self, path: str) -> bool:
         return os.access(path, os.R_OK)
 
-    def writable(self, path: str) -> bool:
+    async def writable(self, path: str) -> bool:
         return os.access(path, os.W_OK)
 
-    def realpath(self, path: str) -> str:
+    async def realpath(self, path: str) -> str:
         return os.path.realpath(path)
 
-    def is_hidden(self, path: str) -> bool:
+    async def is_hidden(self, path: str) -> bool:
         """Точка в имени ИЛИ скрытый атрибут Windows.
 
         Поле информационное (метка в выдаче list/by-name), и его значение обязано
@@ -108,23 +108,24 @@ class LocalFsBackend(FsBackend):
         return False
 
     # --- read ---
-    def read(self, path: str) -> str:
+    async def read(self, path: str) -> str:
         return read_text_for_edit(path)
 
-    def read_bytes(self, path: str) -> bytes:
+    async def read_bytes(self, path: str) -> bytes:
         with open(path, "rb") as f:
             return f.read()
 
-    def iter_lines(self, path: str) -> Iterable[str]:
+    async def iter_lines(self, path: str) -> Iterable[str]:
         # Preserve raw line endings; same codec as read_text_for_edit.
-        text = self.read(path)
-        yield from text.splitlines(keepends=True)
+        text = await self.read(path)
+        for _item in text.splitlines(keepends=True):
+            yield _item
 
-    def read_head_bytes(self, path: str, n: int) -> bytes:
+    async def read_head_bytes(self, path: str, n: int) -> bytes:
         with open(path, "rb") as f:
             return f.read(n)
 
-    def sha256_bytes(self, path: str) -> str:
+    async def sha256_bytes(self, path: str) -> str:
         digest = hashlib.sha256()
         with open(path, "rb") as f:
             for block in iter(lambda: f.read(65536), b""):
@@ -132,11 +133,11 @@ class LocalFsBackend(FsBackend):
         return digest.hexdigest()
 
     # --- write ---
-    def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
         # Allowlist + strict encode → atomic bytes write (no errors=replace).
-        self.write_bytes(path, encode_text_for_write(content, encoding))
+        await self.write_bytes(path, encode_text_for_write(content, encoding))
 
-    def write_bytes(self, path: str, data: bytes) -> None:
+    async def write_bytes(self, path: str, data: bytes) -> None:
         tmp_path = f"{path}.tmp"
         try:
             with open(tmp_path, "wb") as fd:
@@ -150,21 +151,21 @@ class LocalFsBackend(FsBackend):
                 pass
             raise
 
-    def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
         # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
         # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
         with open(path, "ab") as fd:
             fd.write(encode_text_for_append(content, encoding))
 
-    def copy(self, src: str, dst: str) -> None:
+    async def copy(self, src: str, dst: str) -> None:
         with open(src, "rb") as s, open(dst, "wb") as d:
             d.write(s.read())
 
-    def makedirs(self, path: str) -> None:
+    async def makedirs(self, path: str) -> None:
         os.makedirs(path, exist_ok=True)
 
     # --- traverse ---
-    def listdir(self, path: str) -> list:
+    async def listdir(self, path: str) -> list:
         entries = []
         for name in sorted(os.listdir(path)):
             full = os.path.join(path, name)
@@ -176,17 +177,17 @@ class LocalFsBackend(FsBackend):
             entries.append((name, is_dir))
         return entries
 
-    def iter_walk(
+    async def iter_walk(
         self,
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
         """``iter_walk_entries`` without sizes (dirs first, then files per level)."""
-        for entry in self.iter_walk_entries(path, should_descend=should_descend):
+        async for entry in self.iter_walk_entries(path, should_descend=should_descend):
             yield entry.rel, entry.is_dir
 
-    def iter_files(
+    async def iter_files(
         self,
         path: str,
         *,
@@ -207,10 +208,10 @@ class LocalFsBackend(FsBackend):
                     if should_descend(os.path.join(dirpath, d))
                 ]
 
-    def walk(self, path: str) -> list:
-        return list(self.iter_walk(path))
+    async def walk(self, path: str) -> list:
+        return [_item async for _item in self.iter_walk(path)]
 
-    def iter_walk_entries(
+    async def iter_walk_entries(
         self,
         path: str,
         *,
@@ -246,20 +247,20 @@ class LocalFsBackend(FsBackend):
                 full = os.path.join(abs_dir, d.name)
                 if should_descend is not None and not should_descend(full):
                     continue
-                yield from _level(full, prefix + d.name + "/")
+                for _item in _level(full, prefix + d.name + "/"):
+                    yield _item
 
-        yield from _level(path, "")
+        for _item in _level(path, ""):
+            yield _item
 
-    def walk_entries(
+    async def walk_entries(
         self,
         path: str,
         *,
         prune_names: Sequence[str] = (),
         prune_dot_dirs: bool = False,
     ) -> list:
-        return list(
-            self.iter_walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
-        )
+        return [_item async for _item in self.iter_walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)]
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:

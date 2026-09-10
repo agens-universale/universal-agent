@@ -812,7 +812,7 @@ class SubagentRunner:
         child_system_prompt = self._resolve_subagent_system_prompt()
 
         parent = self._orchestrator_state
-        child_state = State(
+        child_state = await State.acreate(
             parent_state_id=parent.state_id,
             verbose=parent.verbose,
             model=parent.default_model,

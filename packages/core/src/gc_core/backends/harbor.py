@@ -331,11 +331,11 @@ class HarborBackend(FsBackend):
         )
 
     # --- file read (shell / download) ---
-    def read(self, path: str) -> str:
+    async def read(self, path: str) -> str:
         # Raw bytes via download, then same codec as local ``read_text_for_edit``.
-        if not self.exists(path):
+        if not await self.exists(path):
             raise FileNotFoundError(path)
-        text = decode_text_best_effort(self.read_bytes(path))
+        text = decode_text_best_effort(await self.read_bytes(path))
         if text is not None:
             return text
         raise UnicodeDecodeError(
@@ -346,19 +346,20 @@ class HarborBackend(FsBackend):
             f"undecodable or binary file: {path}",
         )
 
-    def read_bytes(self, path: str) -> bytes:
+    async def read_bytes(self, path: str) -> bytes:
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
-            self._await(self._env.download_file(path, tmp_path))
+            await self._aawait(self._env.download_file(path, tmp_path))
             return tmp_path.read_bytes()
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    def iter_lines(self, path: str) -> Iterable[str]:
-        return iter(self.read(path).splitlines(keepends=True))
+    async def iter_lines(self, path: str) -> Iterable[str]:
+        for line in (await self.read(path)).splitlines(keepends=True):
+            yield line
 
-    def read_head_bytes(self, path: str, n: int) -> bytes:
+    async def read_head_bytes(self, path: str, n: int) -> bytes:
         """Raw file prefix. ``exec`` stdout is text — pipe via base64 to avoid mangling."""
         n = max(0, int(n))
         if n == 0:
@@ -375,39 +376,39 @@ class HarborBackend(FsBackend):
         except Exception as exc:
             raise OSError(f"base64 decode failed for head of {path}") from exc
 
-    def sha256_bytes(self, path: str) -> str:
+    async def sha256_bytes(self, path: str) -> str:
         return self.sha256(path)
 
     # --- stat: native BaseEnvironment handles where they exist, shell otherwise ---
-    def exists(self, path: str) -> bool:
+    async def exists(self, path: str) -> bool:
         return self._fs_exec(f"test -e {shlex.quote(path)}").return_code == 0
 
-    def lexists(self, path: str) -> bool:
+    async def lexists(self, path: str) -> bool:
         return self._fs_exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}").return_code == 0
 
-    def is_file(self, path: str) -> bool:
-        return self._await(self._env.is_file(path))
+    async def is_file(self, path: str) -> bool:
+        return await self._aawait(self._env.is_file(path))
 
-    def is_dir(self, path: str) -> bool:
-        return self._await(self._env.is_dir(path))
+    async def is_dir(self, path: str) -> bool:
+        return await self._aawait(self._env.is_dir(path))
 
-    def is_symlink(self, path: str) -> bool:
+    async def is_symlink(self, path: str) -> bool:
         return self._fs_exec(f"test -L {shlex.quote(path)}").return_code == 0
 
-    def realpath(self, path: str) -> str:
+    async def realpath(self, path: str) -> str:
         res = self._fs_exec(f"readlink -f {shlex.quote(path)}")
         return res.stdout.strip() if res.return_code == 0 else path
 
-    def readable(self, path: str) -> bool:
+    async def readable(self, path: str) -> bool:
         return True   # container-root perspective (current harbor pack behavior)
 
-    def writable(self, path: str) -> bool:
+    async def writable(self, path: str) -> bool:
         return True
 
-    def is_hidden(self, path: str) -> bool:
+    async def is_hidden(self, path: str) -> bool:
         return path.rstrip("/").rsplit("/", 1)[-1].startswith(".")
 
-    def getsize(self, path: str) -> int:
+    async def getsize(self, path: str) -> int:
         res = self._fs_exec(f"stat -c %s {shlex.quote(path)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"stat failed: {path}")
@@ -430,7 +431,7 @@ class HarborBackend(FsBackend):
             "is_symlink": "symbolic link" in kind,
         }
 
-    def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
+    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
         st = self.stat(path)  # existing stat -c '%s|%Y|%a|%F' wrapper
         return {
             "size": st["size"], "mtime": st["mtime"],
@@ -438,7 +439,7 @@ class HarborBackend(FsBackend):
             "is_file": st["is_file"], "is_dir": st["is_dir"], "is_symlink": st["is_symlink"],
         }
 
-    def walk_entries(
+    async def walk_entries(
         self,
         path: str,
         *,
@@ -463,11 +464,11 @@ class HarborBackend(FsBackend):
             )
         return parse_find_printf_entries(res.stdout or "")
 
-    def walk(self, path: str) -> list:
+    async def walk(self, path: str) -> list:
         """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path)."""
-        return [(e.rel, e.is_dir) for e in self.walk_entries(path)]
+        return [(e.rel, e.is_dir) for e in await self.walk_entries(path)]
 
-    def listdir(self, path: str) -> list:
+    async def listdir(self, path: str) -> list:
         """Immediate children via private traverse channel (same ceiling as walk)."""
         # Тот же общий рецепт, что у обхода: без -H find не идёт по ссылке-аргументу,
         # и каталог-ссылка выглядел пустым (пустой stdout при коде возврата 0).
@@ -490,32 +491,34 @@ class HarborBackend(FsBackend):
             out.append((name, kind[:1] == "d" if kind else False))
         return sorted(out)
 
-    def iter_walk(
+    async def iter_walk(
         self,
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
         """DFS from flat ``find`` listing (materialized ``walk()``)."""
-        yield from iter_walk_from_flat(
-            self.walk(path),
+        for _item in iter_walk_from_flat(
+            await self.walk(path),
             should_descend=should_descend,
             join=self.join,
             root=path,
-        )
+        ):
+            yield _item
 
-    def iter_files(
+    async def iter_files(
         self,
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[str]:
-        yield from iter_files_from_flat(
-            self.walk(path),
+        for _item in iter_files_from_flat(
+            await self.walk(path),
             should_descend=should_descend,
             join=self.join,
             root=path,
-        )
+        ):
+            yield _item
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:
@@ -534,21 +537,21 @@ class HarborBackend(FsBackend):
         return None  # container's own workdir
 
     # --- file write/edit (native transfer) ---
-    def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
         # Allowlist + strict encode on host → bytes upload (same path as write_bytes).
-        self.write_bytes(path, encode_text_for_write(content, encoding))
+        await self.write_bytes(path, encode_text_for_write(content, encoding))
 
-    def write_bytes(self, path: str, data: bytes) -> None:
+    async def write_bytes(self, path: str, data: bytes) -> None:
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp.write(data)
             tmp_path = Path(tmp.name)
         try:
-            self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
-            self._await(self._env.upload_file(tmp_path, path))
+            await self._aawait(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
+            await self._aawait(self._env.upload_file(tmp_path, path))
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
         # Upload only the new chunk, then shell-append (no full-file download).
         # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
         # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
@@ -558,8 +561,8 @@ class HarborBackend(FsBackend):
             local_tmp = Path(tmp.name)
         remote_tmp = f"{path}.gc-append-tmp.{uuid.uuid4().hex}"
         try:
-            self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
-            self._await(self._env.upload_file(local_tmp, remote_tmp))
+            await self._aawait(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
+            await self._aawait(self._env.upload_file(local_tmp, remote_tmp))
             res = self._fs_exec(
                 f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; "
                 f"rm -f {shlex.quote(remote_tmp)}"
@@ -574,12 +577,12 @@ class HarborBackend(FsBackend):
             except Exception:
                 pass
 
-    def copy(self, src: str, dst: str) -> None:
+    async def copy(self, src: str, dst: str) -> None:
         res = self._fs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"cp failed: {src} -> {dst}")
 
-    def makedirs(self, path: str) -> None:
+    async def makedirs(self, path: str) -> None:
         res = self._fs_exec(f"mkdir -p {shlex.quote(path)}")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"mkdir failed: {path}")

@@ -15,7 +15,7 @@ class _FakeReg:
     def __init__(self, cat):
         self._cat = cat
 
-    def skill_catalog(self):
+    async def skill_catalog(self):
         return self._cat
 
 

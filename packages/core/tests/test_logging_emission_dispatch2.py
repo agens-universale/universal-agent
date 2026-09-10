@@ -136,7 +136,7 @@ def test_log_path_event_emitted_at_end_of_run(tmp_path):
 
     with tempfile.TemporaryDirectory() as thread_dir:
         class _SkillsRegistryStub:
-            def list_skills(self):
+            async def list_skills(self):
                 return []
 
         ctx = SimpleNamespace(

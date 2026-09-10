@@ -310,12 +310,12 @@ class ApplyFileEdits(AbstractSimpleTool):
             if not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256):
                 return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", error={"type": "invalid_argument", "field": "expected_file_sha256"})
 
-        if not self._backend.exists(path):
+        if not await self._backend.exists(path):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="File not found.", error={"type": "not_found"})
-        if not self._backend.is_file(path):
+        if not await self._backend.is_file(path):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Path is not a file.", error={"type": "not_a_file"})
         try:
-            file_size = self._backend.getsize(path)
+            file_size = await self._backend.getsize(path)
         except Exception as e:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to get file size.", error={"type": "stat_failed", "message": str(e)})
         size_err = check_file_size(
@@ -327,7 +327,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=size_err["message"], error=size_err)
 
         try:
-            raw = self._backend.read_bytes(path)
+            raw = await self._backend.read_bytes(path)
         except Exception as e:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to read file.", error={"type": "read_failed", "message": str(e)})
         decoded = decode_text_bytes(raw, encoding=encoding)
@@ -464,7 +464,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         if backup:
             backup_path = f"{path}.bak"
             try:
-                self._backend.copy(path, backup_path)
+                await self._backend.copy(path, backup_path)
             except Exception as e:
                 return _result(
                     ok=False,
@@ -496,7 +496,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                     error=encode_err,
                 )
             assert out_bytes is not None
-            self._backend.write_bytes(path, out_bytes)
+            await self._backend.write_bytes(path, out_bytes)
         except Exception as e:
             return _result(
                 ok=False,

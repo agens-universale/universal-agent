@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 
-def build_skill_delivery(skill_id: str, registry: Any) -> str:
+async def build_skill_delivery(skill_id: str, registry: Any) -> str:
     """Собрать текст доставки скилла для wire-сообщения агенту.
 
     Директива + инлайн-инструкция SKILL.md + имена references/assets + «замок».
@@ -18,7 +18,7 @@ def build_skill_delivery(skill_id: str, registry: Any) -> str:
     """
     directive = f"Use skill `{skill_id}`."
     try:
-        detail = registry.load_skill_detail(skill_id)
+        detail = await registry.load_skill_detail(skill_id)
     except Exception:
         return directive
 
@@ -56,12 +56,12 @@ def build_skill_delivery(skill_id: str, registry: Any) -> str:
     return "\n".join(parts)
 
 
-def skill_is_available(skill_id: str, registry: Any) -> bool:
+async def skill_is_available(skill_id: str, registry: Any) -> bool:
     """True, если скилл реально загрузим — для честного маркера «загружен»/«не
     найден». Критерий тот же, что у build_skill_delivery: detail грузится ⟺
     инструкция инжектнута (fallback ⟺ не найден)."""
     try:
-        registry.load_skill_detail(skill_id)
+        await registry.load_skill_detail(skill_id)
         return True
     except Exception:
         return False

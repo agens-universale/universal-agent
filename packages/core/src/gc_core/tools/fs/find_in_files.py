@@ -407,11 +407,11 @@ class FindInFiles(AbstractSimpleTool):
         limit_capped = limit_requested > config.max_total_matches
 
         backend = self._backend
-        if not backend.exists(path):
+        if not await backend.exists(path):
             return self._error("not_found")
 
-        if backend.is_file(path):
-            return self._search_single_file(
+        if await backend.is_file(path):
+            return await self._search_single_file(
                 path,
                 compiled,
                 pattern,
@@ -425,7 +425,7 @@ class FindInFiles(AbstractSimpleTool):
                 max_bytes,
                 config,
             )
-        if backend.is_dir(path):
+        if await backend.is_dir(path):
             return await self._search_directory(
                 path,
                 compiled,
@@ -694,7 +694,7 @@ class FindInFiles(AbstractSimpleTool):
             if size is not None:
                 m["size_bytes"] = size
 
-    def _attach_native_match_contexts(
+    async def _attach_native_match_contexts(
         self,
         shown: List[Dict[str, Any]],
         max_bytes: int,
@@ -707,7 +707,7 @@ class FindInFiles(AbstractSimpleTool):
         backend = self._backend
         for abs_path, hits in by_file.items():
             try:
-                size = backend.getsize(abs_path)
+                size = await backend.getsize(abs_path)
             except OSError:
                 self._omit_native_context(hits, "read_error")
                 continue
@@ -715,7 +715,7 @@ class FindInFiles(AbstractSimpleTool):
                 self._omit_native_context(hits, "file_too_large", size)
                 continue
             try:
-                raw = backend.read_bytes(abs_path)
+                raw = await backend.read_bytes(abs_path)
             except OSError:
                 self._omit_native_context(hits, "read_error", size)
                 continue
@@ -913,7 +913,7 @@ class FindInFiles(AbstractSimpleTool):
     # ------------------------------------------------------------------
     # per-file funnel (§6.2)
     # ------------------------------------------------------------------
-    def _open_decode_text(
+    async def _open_decode_text(
         self,
         abs_path: str,
         file_size: Optional[int] = None,
@@ -925,7 +925,7 @@ class FindInFiles(AbstractSimpleTool):
         """
         backend = self._backend
         try:
-            head = backend.read_head_bytes(abs_path, BINARY_SAMPLE_BYTES)
+            head = await backend.read_head_bytes(abs_path, BINARY_SAMPLE_BYTES)
         except OSError:
             return None, 0, "read_error"
         bytes_read = len(head)
@@ -937,7 +937,7 @@ class FindInFiles(AbstractSimpleTool):
         size = file_size
         if size is None:
             try:
-                size = backend.getsize(abs_path)
+                size = await backend.getsize(abs_path)
             except OSError:
                 size = None
 
@@ -945,7 +945,7 @@ class FindInFiles(AbstractSimpleTool):
             raw = head
         else:
             try:
-                raw = backend.read_bytes(abs_path)
+                raw = await backend.read_bytes(abs_path)
             except OSError:
                 return None, bytes_read, "read_error"
             bytes_read = len(raw)
@@ -997,7 +997,7 @@ class FindInFiles(AbstractSimpleTool):
     # ------------------------------------------------------------------
     # single file (§7)
     # ------------------------------------------------------------------
-    def _search_single_file(
+    async def _search_single_file(
         self,
         path: str,
         compiled: re.Pattern,
@@ -1018,7 +1018,7 @@ class FindInFiles(AbstractSimpleTool):
         guidance: Optional[str] = None
 
         try:
-            size = backend.getsize(path)
+            size = await backend.getsize(path)
         except OSError as e:
             return self._error("stat_failed", message=str(e))
 
@@ -1044,7 +1044,7 @@ class FindInFiles(AbstractSimpleTool):
                 effective_ci=effective_ci,
             )
 
-        text, _bytes_read, skip = self._open_decode_text(path, file_size=size)
+        text, _bytes_read, skip = await self._open_decode_text(path, file_size=size)
         if skip == "read_error":
             return self._error("read_failed", message="Failed to read file")
         if skip in ("binary", "encoding"):
@@ -1162,7 +1162,7 @@ class FindInFiles(AbstractSimpleTool):
     # ------------------------------------------------------------------
     # exclude_dirs normalize (§2)
     # ------------------------------------------------------------------
-    def _normalize_exclude_dirs(
+    async def _normalize_exclude_dirs(
         self,
         exclude_dirs: Optional[List[str]],
         *,
@@ -1187,12 +1187,12 @@ class FindInFiles(AbstractSimpleTool):
             if not backend.isabs(raw):
                 return None, [], f"exclude_dirs entry must be absolute: {raw!r}"
             norm = backend.normpath(raw)
-            if not backend.exists(norm):
+            if not await backend.exists(norm):
                 soft.append({"path": norm, "reason": "missing"})
                 continue
-            if backend.is_file(norm):
+            if await backend.is_file(norm):
                 return None, [], f"exclude_dirs entry is a file, not a directory: {norm}"
-            if not backend.is_dir(norm):
+            if not await backend.is_dir(norm):
                 return None, [], f"exclude_dirs entry is not a directory: {norm}"
             if norm not in seen:
                 seen.add(norm)
@@ -1452,8 +1452,14 @@ class FindInFiles(AbstractSimpleTool):
             exclude_paths=accepted_excludes,
         )
 
-    def _prefiltered_entries(self, root: str, abs_paths: List[str]):
-        """Prefilter hits as walk entries ``(relpath, is_dir=False)``."""
+    async def _prefiltered_entries(self, root: str, abs_paths: List[str]):
+        """Prefilter hits as walk entries ``(relpath, is_dir=False)``.
+
+        Асинхронный генератор — не ради работы внутри (её тут нет, одни
+        строки), а ради ОДНОРОДНОСТИ: вызывающий выбирает между этим
+        источником и ``backend.iter_walk_entries``, и обходить их обязан
+        одним и тем же ``async for``.
+        """
         backend = self._backend
         root_n = backend.normpath(root).rstrip("/\\")
         for abs_path in abs_paths:
@@ -1613,7 +1619,7 @@ class FindInFiles(AbstractSimpleTool):
         for m in shown:
             m["line_content"] = self._clip_line_content(m["line_content"])
             m.pop("context", None)
-        self._attach_native_match_contexts(shown, max_bytes)
+        await self._attach_native_match_contexts(shown, max_bytes)
         for m in shown:
             m["file"] = tool_report_abspath(m["file"], workspace=self._workspace)
 
@@ -1724,7 +1730,7 @@ class FindInFiles(AbstractSimpleTool):
         backend = self._backend
         report_path = tool_report_abspath(path, workspace=self._workspace)
 
-        accepted_excludes, exclude_soft_errors, excl_err = self._normalize_exclude_dirs(
+        accepted_excludes, exclude_soft_errors, excl_err = await self._normalize_exclude_dirs(
             exclude_dirs,
             start_path=path,
             config=config,
@@ -1872,7 +1878,7 @@ class FindInFiles(AbstractSimpleTool):
                 )
             )
             yielder = LoopYielder()
-            for entry in entries:
+            async for entry in entries:
                 # Питоновский фоллбек читает КАЖДЫЙ файл и гоняет по нему
                 # regex — самая дорогая инлайн-операция из всех файловых.
                 await yielder.tick()
@@ -1890,7 +1896,7 @@ class FindInFiles(AbstractSimpleTool):
                 fsize = entry.size
                 if fsize is None:
                     try:
-                        fsize = backend.getsize(abs_path)
+                        fsize = await backend.getsize(abs_path)
                     except OSError:
                         continue
                 if fsize > max_bytes:
@@ -2015,7 +2021,7 @@ class FindInFiles(AbstractSimpleTool):
 
         shared = _ScanShared()
 
-        def _process_one(item: Tuple[str, int, str, int]) -> None:
+        async def _process_one(item: Tuple[str, int, str, int]) -> None:
             abs_path, _depth, _rel, fsize = item
             with shared.lock:
                 if shared.stop:
@@ -2030,7 +2036,7 @@ class FindInFiles(AbstractSimpleTool):
                     return
                 shared.content_paths_touched += 1
 
-            text, br, skip = self._open_decode_text(abs_path, file_size=fsize)
+            text, br, skip = await self._open_decode_text(abs_path, file_size=fsize)
             with shared.lock:
                 shared.bytes_read += br
                 if skip == "binary":
@@ -2104,37 +2110,44 @@ class FindInFiles(AbstractSimpleTool):
                 if shared.stop:
                     break
                 await yielder.tick()
-                _process_one(item)
+                await _process_one(item)
 
         async def _scan_in_parallel() -> None:
-            """Разбор файлов в потоках, но БЕЗ своего пула и без блокировки loop.
+            """Несколько разборщиков сразу — корутинами, не потоками.
 
-            Пул жил внутри корутины и ждали его синхронным ``as_completed``:
-            loop стоял всё время обхода (замерено — 114 мс против 31 мс).
+            Потоки отсюда ушли вместе с синхронной формой файлового порта:
+            чтение файла у бэкенда теперь корутина, а поток её ждать не умеет.
+            Потери в параллельности нет — есть уточнение, где она вообще была.
 
-            Потоков ровно ``workers``, а не по одному на файл: ``to_thread`` на
-            каждый файл стоит дороже самого разбора (замерено — 192 мс против
-            139 мс на том же дереве). Балансировку даёт общая очередь: поток
-            берёт следующего кандидата, как только освободился, — ровно то,
-            что делал пул.
+            Для ЛОКАЛЬНОГО бэкенда её и не было: чтение идёт инлайн, GIL никто
+            не отпускает, и два потока разбирали ровно так же долго, как один
+            (замерено — 124 мс против 129 мс). А вот для бэкенда по сети
+            (Harbor) каждое чтение — это roundtrip, и вот они теперь
+            накладываются: ``workers`` разборщиков ждут ответа одновременно.
+            Именно этого прежняя форма и не умела — поток там блокировался на
+            ``run_coroutine_threadsafe(...).result()``.
+
+            Балансировку даёт общая очередь: разборщик берёт следующего
+            кандидата, как только освободился.
             """
             pending = iter(candidates)
-            pending_lock = threading.Lock()
+            yielder = LoopYielder()
 
-            def _worker() -> None:
+            async def _worker() -> None:
                 while not shared.stop:
-                    with pending_lock:
-                        item = next(pending, None)
+                    # Локом не огорожено намеренно: разборщики — корутины на
+                    # ОДНОМ loop, между `next()` и следующей точкой ожидания
+                    # переключений нет.
+                    item = next(pending, None)
                     if item is None:
                         return
-                    _process_one(item)
+                    await yielder.tick()
+                    await _process_one(item)
 
             results = await asyncio.gather(
-                *(asyncio.to_thread(_worker) for _ in range(workers)),
-                return_exceptions=True,
+                *(_worker() for _ in range(workers)), return_exceptions=True
             )
-            # Ждём всех и только потом бросаем: прежний `with pool` на выходе
-            # тоже дожидался запущенных. Иначе оставшиеся дописывали бы
+            # Ждём всех и только потом бросаем: иначе оставшиеся дописывали бы
             # `shared` уже после того, как мы вернули ошибку.
             for res in results:
                 if isinstance(res, BaseException):

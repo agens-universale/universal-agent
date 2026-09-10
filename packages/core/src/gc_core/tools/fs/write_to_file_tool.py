@@ -208,7 +208,7 @@ Usage:
                 },
             )
 
-        exists = self._backend.exists(path)
+        exists = await self._backend.exists(path)
         if mode == "create_only" and exists:
             return self._result(
                 ok=False, path=path, mode=mode, error={"type": "already_exists"}
@@ -219,10 +219,10 @@ Usage:
             )
 
         parent = os.path.dirname(path) or "."
-        if not self._backend.is_dir(parent):
+        if not await self._backend.is_dir(parent):
             if make_dirs:
                 try:
-                    self._backend.makedirs(parent)
+                    await self._backend.makedirs(parent)
                 except Exception as e:
                     return self._result(
                         ok=False,
@@ -248,7 +248,7 @@ Usage:
         if backup and exists:
             backup_path = f"{path}.bak"
             try:
-                self._backend.copy(path, backup_path)
+                await self._backend.copy(path, backup_path)
             except Exception as e:
                 return self._result(
                     ok=False,
@@ -268,7 +268,7 @@ Usage:
                     error=encode_err,
                 )
             assert out_bytes is not None
-            self._backend.write_bytes(path, out_bytes)
+            await self._backend.write_bytes(path, out_bytes)
         except Exception as e:
             return self._result(
                 ok=False,

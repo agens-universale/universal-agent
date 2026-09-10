@@ -129,7 +129,7 @@ class SkillsScreen(Screen):
             self._filter = event.value.strip()
             self._reload()
 
-    def on_key(self, event: events.Key) -> None:
+    async def on_key(self, event: events.Key) -> None:
         if event.key == "up":
             if self._skills:   # круговой: с первой строки ↑ → на последнюю
                 self._selected_idx = (self._selected_idx - 1) % len(self._skills)
@@ -147,19 +147,19 @@ class SkillsScreen(Screen):
             event.stop()
         elif event.key == "enter":
             if self._skills and 0 <= self._selected_idx < len(self._skills):
-                self._open_selected()
+                await self._open_selected()
             event.stop()
         elif event.key == "escape":
             self.app.pop_screen()
             event.stop()
 
-    def _open_selected(self) -> None:
+    async def _open_selected(self) -> None:
         skill = self._skills[self._selected_idx]
         sid = skill.get("id")
         try:
             from gc_core.tools.skills.registry import get_skills_registry
             reg = get_skills_registry(self._config)
-            detail = reg.load_skill_detail(sid)
+            detail = await reg.load_skill_detail(sid)
         except Exception as exc:
             self.app.notify(f"/skill: {exc}", severity="error")
             return

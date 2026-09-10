@@ -278,7 +278,7 @@ def test_skills_debug_artifact_marks_collision_source_as_task(tmp_path, monkeypa
     assert payload["skipped"] == ["threat-model"]
 
 
-def test_skills_debug_artifact_failure_does_not_raise(tmp_path, monkeypatch):
+async def test_skills_debug_artifact_failure_does_not_raise(tmp_path, monkeypatch):
     agent = GcCliExternal(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",

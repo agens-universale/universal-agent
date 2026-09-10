@@ -173,7 +173,7 @@ async def test_backend_result_without_stream_structure_still_builds_envelope():
                 stdout="hi", stderr="", return_code=0, timed_out=False
             )
 
-        def is_dir(self, path):
+        async def is_dir(self, path):
             return True
 
         def default_cwd(self):
