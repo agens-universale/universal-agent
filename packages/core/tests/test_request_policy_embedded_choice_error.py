@@ -119,6 +119,21 @@ def test_finish_reason_error_with_content_accepted(monkeypatch):
     assert res["choices"][0]["message"]["content"] == "partial"
 
 
+def test_finish_reason_error_with_whitespace_content_accepted(monkeypatch):
+    # «\n» — payload: не embedded-empty, не ретрай.
+    calls = _patch_transport(
+        monkeypatch,
+        lambda _n: {
+            "choices": [
+                {"finish_reason": "error", "message": {"content": "\n"}}
+            ]
+        },
+    )
+    res, _payload = _run_policy()
+    assert calls["n"] == 1
+    assert res["choices"][0]["message"]["content"] == "\n"
+
+
 def test_finish_reason_error_with_reasoning_alias_accepted(monkeypatch):
     calls = _patch_transport(
         monkeypatch,

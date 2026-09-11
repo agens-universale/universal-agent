@@ -111,7 +111,17 @@ def nonempty_reasoning_text(msg) -> str | None:
     return None
 
 
-def _nonempty_reasoning_content(msg: dict) -> bool:
+def has_payload(msg) -> bool:
+    """True, если в message есть нагрузка: content, tool_calls или reasoning.
+
+    content — truthiness как у транспорта (пробел/перевод строки — не пустой
+    стрим: цикл bounce «нужна тула», не ретрай completion). Reasoning —
+    nonempty после strip: пустой CoT не salvage.
+    """
+    if not isinstance(msg, dict):
+        return False
+    if msg.get("content") or msg.get("tool_calls"):
+        return True
     return nonempty_reasoning_text(msg) is not None
 
 
@@ -119,7 +129,8 @@ def is_empty_completion(dct: dict) -> bool:
     """True, если ответ бэкенда генуинно пуст: нет content, нет tool_calls, нет
     reasoning_content, нет finish_reason, нет error (ни top-level, ни choice-level).
     Напр. оборванный SSE-стрим, отдавший 0 токенов. Такой ответ → retriable
-    (см. connect_backend). Непустой reasoning — не пустой стрим (salvage, не ретрай)."""
+    (см. connect_backend). Непустой reasoning — не пустой стрим (salvage, не ретрай).
+    Пробельный content — не пустой: payload есть, ретрай не нужен."""
     if not isinstance(dct, dict):
         return False
     if dct.get("error") is not None:
@@ -130,14 +141,7 @@ def is_empty_completion(dct: dict) -> bool:
     ch0 = choices[0] if isinstance(choices[0], dict) else {}
     if ch0.get("error") is not None or ch0.get("finish_reason"):
         return False
-    msg = ch0.get("message") or {}
-    if msg.get("content"):
-        return False
-    if msg.get("tool_calls"):
-        return False
-    if _nonempty_reasoning_content(msg):
-        return False
-    return True
+    return not has_payload(ch0.get("message") or {})
 
 
 class FinishDecision(NamedTuple):

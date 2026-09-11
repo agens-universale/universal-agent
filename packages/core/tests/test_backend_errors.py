@@ -1,6 +1,14 @@
 import requests
 
-from gc_core.utils.backend_errors import EmbeddedChoiceError, is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
+from gc_core.utils.backend_errors import (
+    EmbeddedChoiceError,
+    has_payload,
+    is_auth_error,
+    is_context_overflow_error,
+    is_empty_completion,
+    is_retriable_backend_error,
+    normalize_finish_reason,
+)
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 
@@ -47,6 +55,18 @@ def test_empty_whitespace_reasoning_without_finish_is_empty():
     dct = _resp()
     dct["choices"][0]["message"]["reasoning_content"] = "  \n"
     assert is_empty_completion(dct) is True
+
+
+def test_whitespace_content_is_payload_not_empty_stream():
+    # «\n» — состоявшийся ответ (bounce), не оборванный стрим.
+    assert has_payload({"content": "\n"}) is True
+    assert has_payload({"content": ""}) is False
+    assert has_payload({"content": None}) is False
+    assert has_payload({"tool_calls": [{"id": "c1"}]}) is True
+    assert has_payload({"reasoning_content": "think"}) is True
+    assert has_payload({"reasoning_content": "  \n"}) is False
+    assert is_empty_completion(_resp(content="\n")) is False
+    assert is_empty_completion(_resp(content="")) is True
 
 def test_not_empty_with_finish_reason():
     assert is_empty_completion(_resp(finish_reason="stop")) is False

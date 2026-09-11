@@ -5,8 +5,11 @@ import hashlib
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
-from gc_core.message_projection import project_text_for_model
-from gc_core.utils.backend_errors import nonempty_reasoning_text, normalize_finish_reason
+from gc_core.utils.backend_errors import (
+    has_payload,
+    nonempty_reasoning_text,
+    normalize_finish_reason,
+)
 
 _MAX_BACKEND_LOG_CHARS = 8000
 
@@ -64,23 +67,6 @@ def get_md5_hash(obj):
     return hashlib.md5(s.encode('utf-8')).hexdigest()
 
 
-def _message_content_as_text(content) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if not isinstance(item, dict):
-                continue
-            text = item.get("text")
-            if isinstance(text, str) and text:
-                parts.append(text)
-        return "\n\n".join(parts)
-    return str(content)
-
-
 def _canonical_message_item(dct_choice, *, text, role, reasoning=None):
     item = {
         "id": "msg_" + get_md5_hash(dct_choice),
@@ -120,15 +106,13 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
         fr = dct_choice.get("finish_reason")
         msg_obj = dct_choice.get("message") or {}
         content = msg_obj.get("content")
-        raw_text = _message_content_as_text(content)
-        visible = project_text_for_model(raw_text, strip_think=True)
         reasoning_text = nonempty_reasoning_text(msg_obj)
         has_tools = bool(msg_obj.get("tool_calls"))
         _decision = normalize_finish_reason(
             fr,
-            has_content=bool(raw_text.strip()),
-            has_tool_calls=has_tools,
-            has_reasoning=reasoning_text is not None,
+            has_content=has_payload(msg_obj),
+            has_tool_calls=False,
+            has_reasoning=False,
         )
         if not _decision.accept:
             # Нет полезной нагрузки и неизвестный finish — не транспортный
@@ -160,9 +144,9 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
             # Случай A: tools. Salvage не трогает. Носитель CoT — только persist.
             if content is not None or item_reasoning is not None:
                 text_out = "" if content is None else content
-        elif visible or raw_text.strip():
-            # Видимая проза или think-only в content — как пришло, без обёртки.
-            text_out = content if content is not None else raw_text
+        elif content:
+            # Пробельный content («\n») — payload: кладём ход, цикл bounce.
+            text_out = content
         elif reasoning_text is not None:
             if persist_reasoning_content:
                 text_out = "" if content is None else content

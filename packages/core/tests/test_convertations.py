@@ -98,6 +98,18 @@ def test_get_output_list_empty_unknown_finish_is_empty_batch():
     assert get_output_list(_dct("stop", content=None)) == []
 
 
+def test_get_output_list_whitespace_content_is_kept_for_bounce():
+    # Не strip: «\n» — payload, assistant-item в историю, цикл шлёт bounce.
+    out = get_output_list(_dct("stop", content="\n"))
+    assert len(out) == 1
+    assert out[0]["type"] == "message"
+    assert out[0]["content"][0]["text"] == "\n"
+
+    unknown = get_output_list(_dct(None, content="\n"))
+    assert len(unknown) == 1
+    assert unknown[0]["content"][0]["text"] == "\n"
+
+
 def test_get_output_list_empty_unknown_finish_logs_error():
     log = MagicMock()
     assert get_output_list(_dct(None, content=""), logger_override=log) == []

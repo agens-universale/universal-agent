@@ -7,8 +7,8 @@ from gc_core.runtime_notices import maybe_push_llm_failure_notice
 from gc_core.utils.connect_backend import request_backend_chat_completions
 from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
+    has_payload,
     is_retriable_backend_error,
-    nonempty_reasoning_text,
 )
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
@@ -58,8 +58,7 @@ def _raise_on_embedded_choice_error(response: Dict[str, Any]) -> None:
         fr = ch0.get("finish_reason")
         if isinstance(fr, str) and fr.lower() == "error":
             msg = ch0.get("message") or {}
-            has_reasoning = nonempty_reasoning_text(msg) is not None
-            if not (msg.get("content") or msg.get("tool_calls") or has_reasoning):
+            if not has_payload(msg):
                 raise EmbeddedChoiceError(
                     "provider returned finish_reason='error' with empty choice"
                 )
