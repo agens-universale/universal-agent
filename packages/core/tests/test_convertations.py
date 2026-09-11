@@ -170,7 +170,7 @@ def test_get_output_list_default_drops_reasoning_content():
     out = get_output_list(_dct_with_reasoning())
     msg = next(o for o in out if o["type"] == "message")
     assert "reasoning_content" not in msg
-    assert msg["content"][0]["text"] == "<think>t</think>ok"
+    assert msg["content"][0]["text"] == "ok"
 
 
 def test_get_output_list_persist_copies_reasoning_content():
@@ -275,6 +275,13 @@ def test_get_output_list_salvages_reasoning_only_unknown_finish():
     assert text == "<think>try another approach</think>"
 
 
+def test_get_output_list_unknown_finish_tools_only_accepted():
+    # has_tool_calls в гейт — не через has_payload→has_content.
+    payload = _dct(None, content=None, tool_calls=[_tool_call()])
+    out = get_output_list(payload)
+    assert [o["type"] for o in out] == ["function_call"]
+
+
 def test_get_output_list_keeps_think_only_content_verbatim():
     out = get_output_list(_dct("stop", content="<think>план</think>"))
     msg, text = _message_text(out)
@@ -291,13 +298,41 @@ def test_get_output_list_think_plus_reasoning_field_does_not_merge():
     assert "reasoning_content" not in msg
 
 
+def test_get_output_list_tools_mixed_content_keeps_only_prose():
+    payload = _dct(
+        "tool_calls",
+        content="<think>почему тул</think>коротко",
+        tool_calls=[_tool_call()],
+    )
+    out = get_output_list(payload)
+    msg, text = _message_text(out)
+    assert text == "коротко"
+    assert "reasoning_content" not in msg
+
+
 def test_get_output_list_visible_prose_not_salvaged():
     payload = _dct("stop", content="<think>план</think>\nсделаю вывод")
     payload["choices"][0]["message"]["reasoning_content"] = "secret"
     out = get_output_list(payload)
     msg, text = _message_text(out)
-    assert text == "<think>план</think>\nсделаю вывод"
+    assert text == "сделаю вывод"
     assert "reasoning_content" not in msg
+
+
+def test_get_output_list_mixed_think_prose_in_content_keeps_only_prose():
+    """strip_think: think в канон не кладётся, если есть видимая проза."""
+    out = get_output_list(_dct("stop", content="<think>огромная мысль</think>короткая проза"))
+    _, text = _message_text(out)
+    assert text == "короткая проза"
+
+
+def test_get_output_list_persist_keeps_mixed_think_prose():
+    out = get_output_list(
+        _dct("stop", content="<think>огромная мысль</think>короткая проза"),
+        persist_reasoning_content=True,
+    )
+    _, text = _message_text(out)
+    assert text == "<think>огромная мысль</think>короткая проза"
 
 
 def test_get_output_list_persist_reasoning_only_does_not_wrap_think():
