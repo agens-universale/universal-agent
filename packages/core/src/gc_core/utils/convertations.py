@@ -140,11 +140,16 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
         if not _decision.accept:
             # Нет полезной нагрузки и неизвестный finish — не транспортный
             # ValueError: пустой батч, цикл сам bounce. Choice error уже выше.
+            if logger_override is not None:
+                logger_override.error(
+                    "Empty choice discarded (unknown/empty finish_reason=%r): payload=%s",
+                    fr, _safe_json_for_log(dct),
+                )
             continue
         if _decision.unknown and logger_override is not None:
             logger_override.warning(
-                "Unknown finish_reason=%r accepted permissively (content/tool_calls "
-                "present): payload=%s",
+                "Unknown finish_reason=%r accepted permissively "
+                "(content/tool_calls/reasoning present): payload=%s",
                 fr, _safe_json_for_log(dct),
             )
         if fr == "length" and logger_override is not None:

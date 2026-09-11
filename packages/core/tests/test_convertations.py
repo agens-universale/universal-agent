@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import MagicMock
 
 from gc_core.utils.convertations import output_chat_completion_to_response, get_output_list
 
@@ -95,6 +96,40 @@ def test_get_output_list_empty_unknown_finish_is_empty_batch():
     assert get_output_list(_dct(None, content="")) == []
     assert get_output_list(_dct("stop", content="")) == []
     assert get_output_list(_dct("stop", content=None)) == []
+
+
+def test_get_output_list_empty_unknown_finish_logs_error():
+    log = MagicMock()
+    assert get_output_list(_dct(None, content=""), logger_override=log) == []
+    log.error.assert_called_once()
+    msg = log.error.call_args[0][0] % log.error.call_args[0][1:]
+    assert "Empty choice discarded" in msg
+    assert "finish_reason=None" in msg
+    log.warning.assert_not_called()
+
+
+def test_get_output_list_unknown_finish_with_content_logs_warning():
+    log = MagicMock()
+    out = get_output_list(_dct("content_filter", content="текст"), logger_override=log)
+    assert any(o["type"] == "message" for o in out)
+    log.warning.assert_called_once()
+    msg = log.warning.call_args[0][0] % log.warning.call_args[0][1:]
+    assert "content/tool_calls/reasoning present" in msg
+    assert "content_filter" in msg
+    log.error.assert_not_called()
+
+
+def test_get_output_list_unknown_finish_reasoning_only_logs_warning_not_error():
+    log = MagicMock()
+    payload = _dct(None, content=None)
+    payload["choices"][0]["message"]["reasoning_content"] = "try another approach"
+    out = get_output_list(payload, logger_override=log)
+    _, text = _message_text(out)
+    assert text == "<think>try another approach</think>"
+    log.warning.assert_called_once()
+    msg = log.warning.call_args[0][0] % log.warning.call_args[0][1:]
+    assert "content/tool_calls/reasoning present" in msg
+    log.error.assert_not_called()
 
 
 def _dct_with_reasoning(content="<think>t</think>ok", reasoning="secret"):
