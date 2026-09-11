@@ -11,17 +11,19 @@ import pytest
 
 from gc_core.message_policy.user_message_policy import wrap_technical_user_content
 from gc_core.states import SharedStateData, State
-from gc_core.tools.subagents.active_scope import activate_child_input, active_parent_call_id, is_child_input_active, reset_active_scope_for_tests, try_enqueue_user_message
+from gc_core.tools.subagents.active_scope import (
+    activate_child_input,
+    active_parent_call_id,
+    is_child_input_active,
+    try_enqueue_user_message,
+)
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.thread_store import read_subagent_trace
 
 
-@pytest.fixture(autouse=True)
-def _clean_scope():
-    reset_active_scope_for_tests()
-    yield
-    reset_active_scope_for_tests()
+# Уборщика глобали больше нет: скоуп живёт в контексте прогона и не может
+# пережить тест — переживать негде.
 
 
 def _make_orchestrator_state():
@@ -78,22 +80,27 @@ def _make_ctx(cfg=None, **extra):
 
 class TestActiveScopeRegistry:
     def test_inactive_try_enqueue_false(self):
-        assert try_enqueue_user_message({"role": "user", "content": "hi"}) is False
-        assert is_child_input_active() is False
-        assert active_parent_call_id() is None
+        ctx = SimpleNamespace()
+        assert try_enqueue_user_message(ctx, {"role": "user", "content": "hi"}) is False
+        assert is_child_input_active(ctx) is False
+        assert active_parent_call_id(ctx) is None
 
     def test_activate_enqueues_and_drains(self):
-        with activate_child_input(parent_call_id="call_sub_1") as scope:
-            assert is_child_input_active() is True
-            assert active_parent_call_id() == "call_sub_1"
-            assert try_enqueue_user_message({"role": "user", "content": "steer"}) is True
+        ctx = SimpleNamespace()
+        with activate_child_input(ctx, parent_call_id="call_sub_1") as scope:
+            assert is_child_input_active(ctx) is True
+            assert active_parent_call_id(ctx) == "call_sub_1"
+            assert try_enqueue_user_message(
+                ctx, {"role": "user", "content": "steer"}
+            ) is True
             assert scope.drain() == [{"role": "user", "content": "steer"}]
             assert scope.drain() == []
-        assert is_child_input_active() is False
+        assert is_child_input_active(ctx) is False
 
     def test_on_enqueue_callback(self):
         seen: list = []
-        with activate_child_input(parent_call_id="p1") as scope:
+        ctx = SimpleNamespace()
+        with activate_child_input(ctx, parent_call_id="p1") as scope:
             scope.set_on_enqueue(lambda m: seen.append(m["content"]))
             scope.enqueue({"role": "user", "content": "x"})
         assert seen == ["x"]
@@ -121,8 +128,11 @@ class TestAgentExecutorRoutesToChild:
         _activate = _ae.try_enqueue_user_message.__globals__["activate_child_input"]
 
         ctx = MagicMock()
+        # У MagicMock любой атрибут «есть», поэтому пустой скоуп задаём явно:
+        # иначе адресат окажется мок-объектом, а не None.
+        ctx.child_input_scope = None
         ex = AgentExecutor(ctx)
-        with _activate(parent_call_id="call_sub_1") as scope:
+        with _activate(ctx, parent_call_id="call_sub_1") as scope:
             ex.add_message({"role": "user", "content": "to child", "id": "m1"})
             assert scope.drain()[0]["content"] == "to child"
             with ex.get_lock():
@@ -132,6 +142,7 @@ class TestAgentExecutorRoutesToChild:
         from gc_core.agent_executor import AgentExecutor
 
         ctx = MagicMock()
+        ctx.child_input_scope = None
         ex = AgentExecutor(ctx)
         ex.add_message({"role": "user", "content": "to parent"})
         with ex.get_lock():
@@ -150,8 +161,8 @@ class TestRunnerWiresPending:
 
         def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["get_pending"] = kwargs.get("get_pending_messages")
-            captured["active_during"] = is_child_input_active()
-            captured["parent_call_id"] = active_parent_call_id()
+            captured["active_during"] = is_child_input_active(ctx)
+            captured["parent_call_id"] = active_parent_call_id(ctx)
             barrier.set()
             release.wait(timeout=2)
             pending = kwargs["get_pending_messages"]()
@@ -186,12 +197,13 @@ class TestRunnerWiresPending:
         assert captured["parent_call_id"] == "call_parent_9"
         assert callable(captured["get_pending"])
         try_enqueue_user_message(
+            ctx,
             {"role": "user", "content": "look at auth", "id": "m_steer"}
         )
         release.set()
         t.join(timeout=2)
         assert captured["drained"][0]["content"] == "look at auth"
-        assert is_child_input_active() is False
+        assert is_child_input_active(ctx) is False
 
     def test_enqueue_emits_progress_and_sidecar_user(self, tmp_path):
         orch = _make_orchestrator_state()
@@ -230,10 +242,12 @@ class TestRunnerWiresPending:
         t.start()
         assert barrier.wait(timeout=5)
         try_enqueue_user_message(
+            ctx,
             {"role": "user", "content": "check auth next", "id": "m_u1"}
         )
         # technical must enqueue but not emit nested user row
         try_enqueue_user_message(
+            ctx,
             {
                 "role": "user",
                 "content": wrap_technical_user_content("attachment meta"),
@@ -265,7 +279,11 @@ class TestParentPendingUnchangedWithoutChild:
         """Regression: no active child → parent pending as before."""
         from gc_core.agent_executor import AgentExecutor
 
-        ex = AgentExecutor(MagicMock())
+        ctx = MagicMock()
+        # Скоуп задаём явно: у MagicMock «есть» любой атрибут, и без этой
+        # строки адресатом окажется мок-объект, а не отсутствие субагента.
+        ctx.child_input_scope = None
+        ex = AgentExecutor(ctx)
         msg = {"role": "user", "content": "hello"}
         ex.add_message(msg)
         with ex.get_lock():

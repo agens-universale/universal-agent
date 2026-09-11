@@ -36,7 +36,11 @@ from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_report, build_run_usage_dict
 from gc_core.thread_store import ThreadSession, make_message_key, resolve_threads_dir
 from gc_core.trace_id import trace_id_from_config
-from gc_core.tools.subagents.active_scope import try_enqueue_user_message
+from gc_core.tools.subagents.active_scope import (
+    active_parent_call_id,
+    is_child_input_active,
+    try_enqueue_user_message,
+)
 from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
@@ -667,10 +671,25 @@ class AgentExecutor:
 
         Executing subagent → child pending; иначе → parent pending.
         """
-        if try_enqueue_user_message(message):
+        # Адресат берётся из СВОЕГО контекста: сообщение этого прогона не может
+        # уехать субагенту чужой сессии — до её контекста отсюда нет ссылки.
+        if try_enqueue_user_message(self._ctx, message):
             return
         with self._lock:
             self._pending_messages.append(message)
+
+    def is_child_input_active(self) -> bool:
+        """Работает ли сейчас субагент, которому уйдёт ввод пользователя.
+
+        Фронтенду нужно спрашивать СВОЕГО исполнителя, а не модуль ядра:
+        модульная функция отвечала за весь процесс и в многосессионном сервере
+        говорила о чужом прогоне.
+        """
+        return is_child_input_active(self._ctx)
+
+    def active_parent_call_id(self) -> str | None:
+        """``call_id`` вызова субагента, который сейчас принимает ввод."""
+        return active_parent_call_id(self._ctx)
 
     def get_state(self) -> State | None:
         """

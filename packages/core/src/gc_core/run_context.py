@@ -68,6 +68,12 @@ class RunContext:
     ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    # Активный скоуп ввода субагента ЭТОГО прогона: сюда уходит сообщение
+    # пользователя, пришедшее посреди работы ребёнка. Живёт здесь, а не в
+    # глобали модуля, потому что процесс ведёт МНОГО прогонов сразу (сервер) —
+    # и глобаль отдавала сообщение тому, кто зарегистрировался последним, чужой
+    # сессии в том числе. Подробности — в `tools/subagents/active_scope`.
+    child_input_scope: Optional[Any] = None
     # Хранилище тредов. None — файловое по умолчанию (прежнее поведение).
     # Передав своё (например поверх базы), встраивающий уводит туда всю историю:
     # ни ThreadSession, ни ядро больше диска не касаются.
