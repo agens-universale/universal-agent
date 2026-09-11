@@ -42,7 +42,7 @@ def _load_config():
         return yaml.safe_load(f)
 
 
-def main():
+async def amain():
     config = _load_config()
     servers_cfg = config.get("mcp-servers") or {}
     mcp_meta = config.get("mcp-meta") or {}
@@ -70,11 +70,13 @@ def main():
     print(f"SSE-сервер: {server_key} @ {url}")
     print(f"Timeout: {timeout}s\n")
 
-    # Импорты после добавления path
+    # Импорты после добавления path. Формы корутинные: синхронные близнецы
+    # сняты вместе с синхронной дискавери — они уводили сетевой обмен в
+    # `run_coro_blocking` и морозили loop вызывающего.
     from gc_core.tools.connect_mcp.client import (
-        _init_mcp_session,
-        _tools_list_request,
-        _call_mcp_tool,
+        _ainit_mcp_session,
+        _atools_list_request,
+        _acall_mcp_tool,
         _MCP_SESSIONS,
     )
 
@@ -83,7 +85,7 @@ def main():
 
     # 1) initialize
     print("1. initialize ...")
-    session_id = _init_mcp_session(url, server_cfg, token=token, timeout=timeout)
+    session_id = await _ainit_mcp_session(url, server_cfg, token=token, timeout=timeout)
     if not session_id:
         print("   Ошибка: не получен mcp-session-id")
         sys.exit(2)
@@ -91,7 +93,7 @@ def main():
 
     # 2) tools/list
     print("2. tools/list ...")
-    tools = _tools_list_request(
+    tools = await _atools_list_request(
         url, session_id=session_id, server_cfg=server_cfg, token=token, timeout=timeout
     )
     print(f"   Получено тулов: {len(tools)}")
@@ -104,7 +106,7 @@ def main():
     arguments = {"query": "python MCP protocol"}
     print(f"3. tools/call name={tool_name!r} arguments={json.dumps(arguments)} ...")
     try:
-        raw = _call_mcp_tool(
+        raw = await _acall_mcp_tool(
             url=url,
             session_id=session_id,
             tool_name=tool_name,
@@ -127,6 +129,13 @@ def main():
         sys.exit(3)
 
     print("\nГотово.")
+
+
+def main() -> None:
+    """Точка входа: один прогон, один loop."""
+    import asyncio
+
+    asyncio.run(amain())
 
 
 if __name__ == "__main__":

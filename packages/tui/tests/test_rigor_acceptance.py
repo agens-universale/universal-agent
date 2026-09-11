@@ -268,7 +268,13 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
     сабагента, без спецкейса по имени тула."""
     from types import SimpleNamespace
     from gc_core import processing_responses as pr
-    from gc_core.tools import WrongFunctionArgumentsException
+
+    # Класс исключения берём ОТТУДА, где его ловят. Соседние тесты подменяют
+    # `sys.modules["gc_core.tools"]`, и свежий импорт по строковому пути даёт
+    # ДРУГОЙ объект модуля: `except` в проде тогда не совпадает с тем, что
+    # бросил дабл, и отказ одного вызова рвёт весь батч. В изоляции тест это
+    # не показывает — только на всём файле.
+    WrongFunctionArgumentsException = pr.WrongFunctionArgumentsException
 
     async def _boom(**kw):
         raise WrongFunctionArgumentsException("bad args", "{}", tool_name=kw["tool_name"])

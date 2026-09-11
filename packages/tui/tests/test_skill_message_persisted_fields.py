@@ -6,6 +6,13 @@ display_query и skill_loaded, — вместо реального прогон�
 """
 import pytest
 
+def _as_coro(fn):
+    """Обернуть синхронный двойник в корутину."""
+    async def _wrapped(*a, **kw):
+        return fn(*a, **kw)
+
+    return _wrapped
+
 
 @pytest.mark.asyncio
 async def test_skill_prompt_start_gets_display_and_skill(tmp_path, monkeypatch):
@@ -16,8 +23,18 @@ async def test_skill_prompt_start_gets_display_and_skill(tmp_path, monkeypatch):
     from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
-    monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
-    monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: True)
+    monkeypatch.setattr(
+        sd,
+        "build_skill_delivery",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: "WIRE"),
+    )
+    monkeypatch.setattr(
+        sd,
+        "skill_is_available",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: True),
+    )
 
     captured_start: dict = {}
 
@@ -41,7 +58,7 @@ async def test_skill_prompt_start_gets_display_and_skill(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "qa-x"}]
-        scr._handle_command("skill qa-x давай обсудим")
+        await scr._handle_command("skill qa-x давай обсудим")
         await pilot.pause(0.4)
 
     assert captured_start.get("display_contents") is not None, \
@@ -61,8 +78,18 @@ async def test_skill_continuation_start_gets_display_and_skill(tmp_path, monkeyp
     from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
-    monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
-    monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: True)
+    monkeypatch.setattr(
+        sd,
+        "build_skill_delivery",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: "WIRE"),
+    )
+    monkeypatch.setattr(
+        sd,
+        "skill_is_available",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: True),
+    )
 
     run_calls: list = []
 
@@ -89,10 +116,10 @@ async def test_skill_continuation_start_gets_display_and_skill(tmp_path, monkeyp
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "qa-x"}]
         # первый message — auto-create, run стартует и тут же завершается
-        scr._handle_command("skill qa-x первый запрос")
+        await scr._handle_command("skill qa-x первый запрос")
         await pilot.pause(0.4)
         # второй message — continuation (задача есть, run уже завершён)
-        scr._handle_command("skill qa-x второй запрос")
+        await scr._handle_command("skill qa-x второй запрос")
         await pilot.pause(0.4)
 
     assert len(run_calls) >= 2, f"ожидали 2 run_calls, получили {len(run_calls)}"
@@ -113,8 +140,18 @@ async def test_skill_inline_during_run_add_message_gets_fields(tmp_path, monkeyp
     from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
-    monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
-    monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: True)
+    monkeypatch.setattr(
+        sd,
+        "build_skill_delivery",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: "WIRE"),
+    )
+    monkeypatch.setattr(
+        sd,
+        "skill_is_available",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: True),
+    )
 
     added: list = []
 
@@ -137,10 +174,10 @@ async def test_skill_inline_during_run_add_message_gets_fields(tmp_path, monkeyp
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "qa-x"}]
         # запустить run
-        scr._handle_command("skill qa-x стартовое сообщение")
+        await scr._handle_command("skill qa-x стартовое сообщение")
         await pilot.pause(0.3)
         # во время run — inline skill c промптом
-        scr._handle_command("skill qa-x добавь тест")
+        await scr._handle_command("skill qa-x добавь тест")
         await pilot.pause(0.3)
 
     skill_msgs = [m for m in added if m.get("role") == "user"]

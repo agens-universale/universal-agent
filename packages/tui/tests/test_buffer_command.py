@@ -107,7 +107,7 @@ async def test_dispatch_command_buffer(tmp_path):
         store = _MockStore(existing_buffer="")
         pilot.app.screen._store = store
         pilot.app.screen._active_task_id = "T3"
-        pilot.app.screen._dispatch_command("buffer")
+        await pilot.app.screen._dispatch_command("buffer")
         await pilot.pause()
         assert isinstance(pilot.app.screen, CopyBufferScreen)
 

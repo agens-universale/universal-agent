@@ -73,7 +73,7 @@ async def test_diff_command_opens_screen(tmp_path, launch_root):
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
-        pilot.app.screen._handle_command("diff")
+        await pilot.app.screen._handle_command("diff")
         await pilot.pause()
         assert isinstance(pilot.app.screen, DiffScreen)
 

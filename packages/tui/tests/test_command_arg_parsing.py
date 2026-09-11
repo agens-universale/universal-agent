@@ -11,6 +11,6 @@ async def test_arg_preserves_backslashes_and_spaces(tmp_path):
     async with app.run_test() as pilot:
         # Прямой вызов диспетчера — фокус на парсинге остатка строки,
         # без UI skill-picker'а (он открывается на "/skill <текст>").
-        pilot.app.screen._handle_command(r"skill my skill\with spaces")
+        await pilot.app.screen._handle_command(r"skill my skill\with spaces")
         await pilot.pause(0.1)
         assert app.tui_state.pending_skill_id == r"my skill\with spaces"

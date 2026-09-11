@@ -25,6 +25,12 @@ def test_cost_survives_meta_write_and_read():
 
 
 class _UsageState:
+    # Прод строит состояние фабрикой: сбор данных о проекте — файловый
+    # ввод-вывод, а конструктор ждать не умеет. Дабл повторяет форму.
+    @classmethod
+    async def acreate(cls, **kw):
+        return cls(**kw)
+
     """State-заглушка с .usage (реальный конструктор State тяжёл/WMI-хэнг)."""
 
     def __init__(self, **kw):
