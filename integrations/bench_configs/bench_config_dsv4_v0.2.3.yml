@@ -40,7 +40,7 @@ agent_kwargs:
         reasoning_effort: high
       tool_choice: auto
     chat_completions_params:
-      llm:
+      auxiliary_llm:
         max_tokens: 8192                 # aux LLM: summary / intent-scope
         judge_max_tokens: 10000          # finish-gate / command_moderation
         completion_kwargs: {}

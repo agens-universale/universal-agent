@@ -554,7 +554,7 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
                 "last_dialog_step_message_max_chars": 5000,
             },
             "chat_completions_params": {
-                "llm": {"max_tokens": 8192, "completion_kwargs": {}},
+                "auxiliary_llm": {"max_tokens": 8192, "completion_kwargs": {}},
             },
         },
         logger=None,

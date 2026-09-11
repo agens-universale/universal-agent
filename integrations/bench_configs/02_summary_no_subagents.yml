@@ -23,7 +23,7 @@ backend:
   request_timeout_sec: 600
 
 chat_completions:
-  llm:
+  auxiliary_llm:
     max_tokens: 8192
     completion_kwargs:
       separate_reasoning: false

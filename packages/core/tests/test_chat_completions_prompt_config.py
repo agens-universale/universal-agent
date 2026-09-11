@@ -124,6 +124,44 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(cfg["chat_completions_llm"].judge_max_tokens, 10000)
             self.assertEqual(cfg["chat_completions_llm"].completion_kwargs, {})
 
+    def test_auxiliary_llm_loaded_from_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "chat_completions:\n"
+                    "  auxiliary_llm:\n"
+                    "    max_tokens: 4096\n"
+                    "    judge_max_tokens: 5000\n"
+                    "    completion_kwargs:\n"
+                    "      enable_thinking: false\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(cfg["chat_completions_llm"].max_tokens, 4096)
+            self.assertEqual(cfg["chat_completions_llm"].judge_max_tokens, 5000)
+            self.assertEqual(
+                cfg["chat_completions_llm"].completion_kwargs, {"enable_thinking": False}
+            )
+            self.assertEqual(
+                cfg["chat_completions_params"]["auxiliary_llm"]["max_tokens"], 4096
+            )
+
+    def test_legacy_llm_alias_still_loads(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "chat_completions:\n"
+                    "  llm:\n"
+                    "    max_tokens: 1111\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(cfg["chat_completions_llm"].max_tokens, 1111)
+            self.assertIn("auxiliary_llm", cfg["chat_completions_params"])
+            self.assertNotIn("llm", cfg["chat_completions_params"])
+
     def test_summary_params_normalization(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")

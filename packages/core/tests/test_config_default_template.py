@@ -124,10 +124,10 @@ EXPERT_ONLY_KEYS: set = {
 
     # --- chat_completions: вспомогательный LLM (summary / finish gate / intent scope) ---
     # Тюнинг вспомогательных вызовов; публичный шаблон не нацелен на chat_completions.
-    "chat_completions.llm.max_tokens",
-    "chat_completions.llm.completion_kwargs",
-    "chat_completions.llm.judge_max_tokens",  # запас под CoT судей; секции нет в шаблоне
-    "chat_completions.llm.subagent_role_max_tokens",  # лимит генерации роли special_agent
+    "chat_completions.auxiliary_llm.max_tokens",
+    "chat_completions.auxiliary_llm.completion_kwargs",
+    "chat_completions.auxiliary_llm.judge_max_tokens",  # запас под CoT судей; секции нет в шаблоне
+    "chat_completions.auxiliary_llm.subagent_role_max_tokens",  # лимит генерации роли special_agent
     # --- backend mTLS: корп-сценарий, справочник — demo_config.yml ---
     "backend.cert_path",
     "backend.key_path",

@@ -162,11 +162,14 @@ summary:
   last_dialog_steps_count: 5
   last_dialog_step_message_max_chars: 1500
 
-# tags — extra-теги, которые режут в derived (саммари, intent, digest…), не в messages.
-# strip_think: true (дефолт) — ризонинг в messages не класть.
-# strip_think: false — сохранить reasoning_content в messages как пришло с бэкенда
-#   и в следующем запросе отдать как есть. DeepSeek / часть strict-бэкендов → 400.
-# Трейс в бэкенд = то, что лежит в messages. Остальной state — без ризонинга всегда.
+# tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
+# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
+#   Если модель ответила одной мыслью без текста и без тулов, её кладём в историю как
+#   <think>…</think> и в следующем запросе модель её снова видит.
+#   Из саммари, intent, судей и памяти <think> вырезается всегда.
+# strip_think: false — копировать скрытое поле мысли в историю как есть
+#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
+# В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
   strip_think: true
   tags: []

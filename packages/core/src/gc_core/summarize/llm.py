@@ -20,7 +20,7 @@ def _require_chat_completions_llm(ctx: Any) -> Any:
 def auxiliary_llm_completion_kwargs(ctx: Any) -> Dict[str, Any]:
     """
     Единый профиль chat/completions для вспомогательных LLM-вызовов:
-    thread summary, finish gate, intent scope (см. ``chat_completions.llm`` в config).
+    thread summary, finish gate, intent scope (см. ``chat_completions.auxiliary_llm`` в config).
     """
     chat_completions_llm = _require_chat_completions_llm(ctx)
     completion_kwargs = getattr(chat_completions_llm, "completion_kwargs", None)
@@ -35,7 +35,7 @@ def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
     """
     Лимит ответа для LLM-судей (command_moderation, finish gate / text_answer).
 
-    Читает ``chat_completions.llm.judge_max_tokens`` (отдельно от summary ``max_tokens``).
+    Читает ``chat_completions.auxiliary_llm.judge_max_tokens`` (отдельно от summary ``max_tokens``).
     """
     from gc_core.config_modules.chat_completions import DEFAULT_JUDGE_MAX_TOKENS
 

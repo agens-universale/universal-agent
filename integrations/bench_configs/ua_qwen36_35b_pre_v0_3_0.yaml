@@ -35,16 +35,23 @@ agent_kwargs:
     proxy: null
     stream: true                             # legacy; CLI/harbor non-stream, канон — tui_stream
     chat_completion_headers: {}
-    chat_completion_kwargs:                  # dict deep-merge: ключи ниже плюс bench enable_thinking/tool_choice
+    # Основной агент (tool-цикл). Уходит в payload chat/completions как есть.
+    chat_completion_kwargs:
+      separate_reasoning: true               # мысль модели → reasoning_content, не в content
       chat_template_kwargs:
-        enable_thinking: false
+        enable_thinking: true                # чат-шаблон Qwen: генерировать thinking
       tool_choice: auto
+    # Вспомогательные LLM (summary, finish-gate, command_moderation, intent-scope).
+    # completion_kwargs мержится ПОВЕРХ chat_completion_kwargs агента.
     chat_completions_params:
-      llm:
-        max_tokens: 8192                     # aux LLM: summary / intent-scope
-        judge_max_tokens: 10000              # finish-gate / command_moderation
-        subagent_role_max_tokens: 4096       # special_agent role draft; субагенты выкл
-        completion_kwargs: {}
+      auxiliary_llm:
+        max_tokens: 8192                     # лимит ответа: summary / intent-scope
+        judge_max_tokens: 10000              # лимит ответа: finish-gate / command_moderation
+        subagent_role_max_tokens: 4096       # лимит ответа: special_agent role draft; субагенты выкл
+        completion_kwargs:
+          separate_reasoning: false          # aux: не ждать reasoning_content
+          chat_template_kwargs:
+            enable_thinking: false           # aux: thinking выкл, даже если у агента вкл
 
     # --- agent loop ---
     system_prompt_id: v1

@@ -155,7 +155,7 @@ backend:
 
 # Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:
-  llm:
+  auxiliary_llm:
     max_tokens: 8192
     # Судьи (command_moderation, finish_gate / text_answer): запас под обязательный CoT/<think>.
     judge_max_tokens: 10000
@@ -367,18 +367,21 @@ project_memory:
   # Лимит ответа LLM при append-overflow компакции project_memory.md.
   compaction_max_tokens: 4000
 
-# tags — extra-теги, которые режут в derived (саммари, intent, digest…), не в messages.
-# strip_think: true (дефолт) — ризонинг в messages не класть.
-# strip_think: false — сохранить reasoning_content в messages как пришло с бэкенда
-#   и в следующем запросе отдать как есть. DeepSeek / часть strict-бэкендов → 400.
-# Трейс в бэкенд = то, что лежит в messages. Остальной state — без ризонинга всегда.
+# tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
+# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
+#   Если модель ответила одной мыслью без текста и без тулов, её кладём в историю как
+#   <think>…</think> и в следующем запросе модель её снова видит.
+#   Из саммари, intent, судей и памяти <think> вырезается всегда.
+# strip_think: false — копировать скрытое поле мысли в историю как есть
+#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
+# В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
   strip_think: true
   tags:
     - redacted_thinking
 
 # Intent scope: LLM post-hook после human-facing tools (только chat_completions).
-# tools: [] — выключить. Параметры LLM — chat_completions.llm.
+# tools: [] — выключить. Параметры LLM — chat_completions.auxiliary_llm.
 intent_scope:
   # tools.<name>.record:
   # - aggregated: хранить только текстовую сводку (без arguments/output полей)

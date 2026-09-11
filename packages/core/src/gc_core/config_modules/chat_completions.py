@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from gc_core.config_modules.backend import parse_chat_completions_max_tokens
 
@@ -57,15 +57,29 @@ class ChatCompletionsLlmConfig(BaseModel):
 
 
 class ChatCompletionsConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    llm: ChatCompletionsLlmConfig = Field(default_factory=ChatCompletionsLlmConfig)
+    auxiliary_llm: ChatCompletionsLlmConfig = Field(
+        default_factory=ChatCompletionsLlmConfig,
+        validation_alias=AliasChoices("auxiliary_llm", "llm"),
+    )
+
+
+def _auxiliary_llm_from_params(cc_params: dict[str, Any]) -> ChatCompletionsLlmConfig | None:
+    llm_raw = cc_params.get("auxiliary_llm")
+    if llm_raw is None:
+        llm_raw = cc_params.get("llm")  # legacy YAML-ключ
+    if isinstance(llm_raw, ChatCompletionsLlmConfig):
+        return llm_raw
+    if isinstance(llm_raw, dict):
+        return ChatCompletionsLlmConfig.model_validate(llm_raw)
+    return None
 
 
 def chat_completions_llm_from_config_dict(
     config_dict: dict[str, Any] | None,
 ) -> ChatCompletionsLlmConfig:
-    """Собрать LLM-профиль из ``chat_completions.llm`` в config."""
+    """Собрать LLM-профиль из ``chat_completions.auxiliary_llm`` в config."""
     cfg = config_dict if isinstance(config_dict, dict) else {}
     raw = cfg.get("chat_completions_llm")
     if isinstance(raw, ChatCompletionsLlmConfig):
@@ -73,17 +87,15 @@ def chat_completions_llm_from_config_dict(
 
     cc_params = cfg.get("chat_completions_params")
     if isinstance(cc_params, dict):
-        llm_raw = cc_params.get("llm")
-        if isinstance(llm_raw, ChatCompletionsLlmConfig):
-            return llm_raw
-        if isinstance(llm_raw, dict):
-            return ChatCompletionsLlmConfig.model_validate(llm_raw)
+        parsed = _auxiliary_llm_from_params(cc_params)
+        if parsed is not None:
+            return parsed
 
     return ChatCompletionsLlmConfig()
 
 
 def subagent_role_max_tokens_from_ctx(ctx: Any) -> int:
-    """``chat_completions.llm.subagent_role_max_tokens`` — лимит ответа для
+    """``chat_completions.auxiliary_llm.subagent_role_max_tokens`` — лимит ответа для
     LLM-генерации роли special_agent (``ctx.chat_completions_llm``, с фоллбэком
     на ``ctx.config_dict`` для двойников без готового профиля)."""
     chat_completions_llm = getattr(ctx, "chat_completions_llm", None)

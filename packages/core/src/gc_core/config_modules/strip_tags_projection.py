@@ -14,11 +14,13 @@ _TAG_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 
 
 class StripTagsProjectionConfig(BaseModel):
-    """``tags`` — extra-теги derived-сторов. ``strip_think`` — только канон messages.
+    """``tags`` — extra-теги для саммари/intent/digest. ``strip_think`` — история.
 
-    ``strip_think: true`` (дефолт) — не класть ``reasoning_content`` в messages.
-    ``strip_think: false`` — сохранить поле как пришло; исходящий трейс отдаёт
-    канон as-is. Intent / WM / саммари / digest ризонинг режут всегда.
+    ``strip_think: true`` (дефолт) — скрытое поле мысли бэкенда в историю не
+    копировать. Если модель ответила одной мыслью без текста и без тулов, её кладём в
+    историю как ``<think>…</think>``; в следующем запросе модель её видит.
+    ``strip_think: false`` — копировать поле как пришло и отдать as-is.
+    Из саммари, intent, судей и памяти ``<think>`` вырезается всегда.
     """
 
     model_config = ConfigDict(extra="forbid")
