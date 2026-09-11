@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import re
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
@@ -151,7 +152,10 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
             if persist_reasoning_content:
                 text_out = "" if content is None else content
             else:
-                text_out = f"<think>{reasoning_text.strip()}</think>"
+                # Литеральный </think> внутри мысли иначе закрывает обёртку
+                # раньше времени: нежадный strip оставляет хвост как прозу.
+                body = re.sub(r"</think>", "", reasoning_text.strip(), flags=re.IGNORECASE)
+                text_out = f"<think>{body}</think>"
                 item_reasoning = None
 
         if text_out is not None:

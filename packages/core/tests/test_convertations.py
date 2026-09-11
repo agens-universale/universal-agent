@@ -229,6 +229,19 @@ def test_get_output_list_salvages_reasoning_only_into_think_tags():
     assert all(o["type"] != "function_call" for o in out)
 
 
+def test_get_output_list_salvage_neutralizes_literal_think_close():
+    payload = _dct("stop", content=None)
+    payload["choices"][0]["message"]["reasoning_content"] = (
+        "про </think> теги и ещё </THINK> хвост"
+    )
+    out = get_output_list(payload)
+    msg, text = _message_text(out)
+    assert text == "<think>про  теги и ещё  хвост</think>"
+    assert text.count("<think>") == 1
+    assert text.count("</think>") == 1
+    assert "reasoning_content" not in msg
+
+
 def test_get_output_list_salvages_openrouter_reasoning_alias():
     """Нестрим (бенч) должен спасать reasoning-only так же, как стрим/TUI."""
     payload = _dct("stop", content=None)
