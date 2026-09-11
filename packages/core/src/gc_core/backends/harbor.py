@@ -59,11 +59,10 @@ def _build_find_walk_command(
 class HarborBackend(FsBackend):
     is_sandbox = True
     # Файлы живут в контейнере: `exists()` это `test -e` по сети, `read()` —
-    # `env.download_file`. Синхронные методы ждут корутину ЧУЖОГО loop через
-    # `run_coroutine_threadsafe(...).result()`, то есть блокируют поток.
-    # Инлайн с того же loop — вечный дедлок (проверено зависанием), поэтому
-    # асинхронные двойники уходят с текущего потока.
-    bridges_to_loop = True
+    # `env.download_file`. Прежний флаг `bridges_to_loop` снят вместе с
+    # примесью `AsyncFileOps`, которая его читала: развилки «инлайн или поток»
+    # больше нет — операции корутинные и ждут через `_aawait`, то есть на loop
+    # владельца и без потока.
     # Дефолт берётся из agent.exec_timeout_sec (harbor bench_defaults → 600).
     default_exec_timeout = None
 

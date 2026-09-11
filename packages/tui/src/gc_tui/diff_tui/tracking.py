@@ -172,6 +172,23 @@ class TrackingFsBackend:
         except ValueError:
             return None
 
+    async def _atrack_text_mutation(self, path: str) -> None:
+        """Снимок и journal перед записью — в потоке, не на loop.
+
+        Внутри ``_track_text_mutation`` живёт ``git_ops.check_ignore``, то есть
+        ЗАПУСК git, и копирование файла в ``DiffStore``. Пока запись тула была
+        синхронной, агента вёл демон-поток TUI, и loop это не касалось. После
+        перехода на async-only агент работает НА loop, и та же проба стала
+        морозить его на каждой записи файла — код не менялся, изменилось, где
+        он исполняется.
+
+        Сосед ``_atrack_shell_delta`` уводит свои ``git status`` в поток с тем
+        же обоснованием; здесь ровно оно.
+        """
+        import asyncio
+
+        await asyncio.to_thread(self._track_text_mutation, path)
+
     def _track_text_mutation(self, path: str) -> None:
         """Перед write/append: cache snapshot при необходимости + journal.add."""
         if not self._active() or not isinstance(path, str) or not path:
@@ -307,22 +324,32 @@ class TrackingFsBackend:
         cwd: Optional[str] = None,
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
     ) -> Any:
+        # `capture_max_chars` доезжает до внутреннего бэкенда, как у `aexec` и
+        # `aexec_argv` этой же обёртки. Без него потолок захвата молча
+        # подменялся дефолтом бэкенда: вызывающий просил один, получал другой.
         return await self._atrack_shell_delta(
-            lambda: self._inner.arun_python(code, cwd=cwd, timeout=timeout, env=env)
+            lambda: self._inner.arun_python(
+                code,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
+            )
         )
 
     async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        self._track_text_mutation(path)
+        await self._atrack_text_mutation(path)
         await self._inner.write(path, content, encoding=encoding)
 
     async def write_bytes(self, path: str, data: bytes) -> None:
         if not classify_content_from_sample(path, data[:BINARY_SAMPLE_BYTES]).is_binary:
-            self._track_text_mutation(path)
+            await self._atrack_text_mutation(path)
         await self._inner.write_bytes(path, data)
 
     async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        self._track_text_mutation(path)
+        await self._atrack_text_mutation(path)
         await self._inner.append(path, content, encoding=encoding)
 
     async def copy(self, src: str, dst: str) -> None:
@@ -330,12 +357,6 @@ class TrackingFsBackend:
 
     async def makedirs(self, path: str) -> None:
         await self._inner.makedirs(path)
-
-    @property
-    def bridges_to_loop(self) -> bool:
-        # Обёртка мостит ровно настолько, насколько мостит внутренний бэкенд:
-        # свой флаг здесь означал бы, что журнал diff решает за него.
-        return bool(getattr(self._inner, "bridges_to_loop", False))
 
     async def awarm_capabilities(self) -> None:
         # Пробы — свойство ВНУТРЕННЕГО бэкенда: журналу diff тут отслеживать

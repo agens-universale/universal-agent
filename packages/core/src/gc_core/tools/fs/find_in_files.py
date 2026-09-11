@@ -859,7 +859,17 @@ class FindInFiles(AbstractSimpleTool):
                 "the candidates inside the sandbox"
             ), False
         backend = self._backend
-        if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
+        # Пробы читаются ИЗ КЭША и отказывают, если прогрева не было
+        # (`CapabilitiesNotWarmedError`). Непрогретый бэкенд для префильтра —
+        # это «нативного пути нет», а не отказ инструмента: та же защита стоит
+        # ниже, на маршруте нативного grep.
+        try:
+            native_ok = getattr(backend, "has_grep", False) and getattr(
+                backend, "has_find", False
+            )
+        except Exception:
+            native_ok = False
+        if not native_ok:
             return "grep or find is unavailable in the sandbox, so no prefilter is possible", False
         from gc_core.utils.native_fs_search import prefilter_terms
 

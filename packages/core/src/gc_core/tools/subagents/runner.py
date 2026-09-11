@@ -94,17 +94,41 @@ async def _drain_trace_writes(futures: List[Any], lock: "threading.Lock") -> Non
     позже пришло сообщение. Отказ каждой записи логируется отдельно: возврат
     ``apersist_subagent_trace`` не читает ни один вызывающий, и другого следа
     у ошибки нет.
+
+    Цикл, а не один снимок. Первая редакция снимала список ОДИН раз, и этого
+    мало по двум причинам: колбэк всё ещё вооружён (его снимает вызывающий
+    перед дренажом), а чужой поток мог добавить future между снимком и
+    `clear()`. Выходим, когда список пуст, — тогда добавлять больше некому.
+
+    Про отмену. Если нас отменили, каждое следующее ожидание бросит сразу, и
+    дожидаться нечем: записи уже стоят на ЭТОМ loop и могут доехать сами, а
+    могут быть сняты вместе с ним. Гарантии тут нет — поэтому остаток
+    пересчитывается и попадает в лог ЧИСЛОМ. Молчаливая потеря — ровно то, от
+    чего дренаж и вводился.
     """
-    with lock:
-        pending = futures[:]
-        futures.clear()
-    for future in pending:
-        try:
-            await asyncio.wrap_future(future)
-        except Exception:
-            logging.getLogger("gc_core.subagents").warning(
-                "subagent_trace_write_failed", exc_info=True
-            )
+    logger = logging.getLogger("gc_core.subagents")
+    while True:
+        with lock:
+            pending = futures[:]
+            futures.clear()
+        if not pending:
+            return
+        for index, future in enumerate(pending):
+            try:
+                await asyncio.wrap_future(future)
+            except asyncio.CancelledError:
+                left = len(pending) - index
+                with lock:
+                    left += len(futures)
+                logger.warning(
+                    "subagent_trace_writes_unconfirmed left=%d: прогон отменён "
+                    "во время дренажа; записи поставлены на loop, но их "
+                    "завершение не подтверждено",
+                    left,
+                )
+                raise
+            except Exception:
+                logger.warning("subagent_trace_write_failed", exc_info=True)
 
 
 class SubagentRunner:
@@ -565,6 +589,9 @@ class SubagentRunner:
                     get_pending_messages=scope.drain,
                 )
             finally:
+                # Колбэк снимается ПЕРВЫМ делом: пока он вооружён, чужой поток
+                # добавляет futures, и дренаж гонялся бы за собственным хвостом.
+                scope.set_on_enqueue(None)
                 await _drain_trace_writes(trace_writes, trace_writes_lock)
 
     def _maybe_pin_fallback(
