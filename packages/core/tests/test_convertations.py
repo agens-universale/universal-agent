@@ -217,6 +217,25 @@ def test_get_output_list_salvages_reasoning_only_into_think_tags():
     assert all(o["type"] != "function_call" for o in out)
 
 
+def test_get_output_list_salvages_openrouter_reasoning_alias():
+    """Нестрим (бенч) должен спасать reasoning-only так же, как стрим/TUI."""
+    payload = _dct("stop", content=None)
+    payload["choices"][0]["message"]["reasoning"] = "search the leaderboard"
+    out = get_output_list(payload)
+    msg, text = _message_text(out)
+    assert text == "<think>search the leaderboard</think>"
+    assert "reasoning_content" not in msg
+
+
+def test_get_output_list_reasoning_alias_does_not_double_count():
+    payload = _dct("stop", content=None)
+    payload["choices"][0]["message"]["reasoning_content"] = "канон"
+    payload["choices"][0]["message"]["reasoning"] = "дубль"
+    out = get_output_list(payload)
+    _, text = _message_text(out)
+    assert text == "<think>канон</think>"
+
+
 def test_get_output_list_salvages_reasoning_only_unknown_finish():
     payload = _dct(None, content=None)
     payload["choices"][0]["message"]["reasoning_content"] = "try another approach"
@@ -253,6 +272,15 @@ def test_get_output_list_visible_prose_not_salvaged():
 def test_get_output_list_persist_reasoning_only_does_not_wrap_think():
     payload = _dct("stop", content=None)
     payload["choices"][0]["message"]["reasoning_content"] = "secret"
+    out = get_output_list(payload, persist_reasoning_content=True)
+    msg, text = _message_text(out)
+    assert text == ""
+    assert msg["reasoning_content"] == "secret"
+
+
+def test_get_output_list_persist_copies_openrouter_reasoning_alias():
+    payload = _dct("stop", content=None)
+    payload["choices"][0]["message"]["reasoning"] = "secret"
     out = get_output_list(payload, persist_reasoning_content=True)
     msg, text = _message_text(out)
     assert text == ""

@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
 from gc_core.message_projection import project_text_for_model
-from gc_core.utils.backend_errors import normalize_finish_reason
+from gc_core.utils.backend_errors import nonempty_reasoning_text, normalize_finish_reason
 
 _MAX_BACKEND_LOG_CHARS = 8000
 
@@ -81,13 +81,6 @@ def _message_content_as_text(content) -> str:
     return str(content)
 
 
-def _nonempty_reasoning_text(msg_obj) -> str | None:
-    reasoning = msg_obj.get("reasoning_content")
-    if isinstance(reasoning, str) and reasoning.strip():
-        return reasoning
-    return None
-
-
 def _canonical_message_item(dct_choice, *, text, role, reasoning=None):
     item = {
         "id": "msg_" + get_md5_hash(dct_choice),
@@ -129,7 +122,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
         content = msg_obj.get("content")
         raw_text = _message_content_as_text(content)
         visible = project_text_for_model(raw_text, strip_think=True)
-        reasoning_text = _nonempty_reasoning_text(msg_obj)
+        reasoning_text = nonempty_reasoning_text(msg_obj)
         has_tools = bool(msg_obj.get("tool_calls"))
         _decision = normalize_finish_reason(
             fr,
@@ -159,9 +152,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                 _safe_json_for_log(dct),
             )
 
-        persist_field = None
-        if persist_reasoning_content:
-            persist_field = msg_obj.get("reasoning_content")
+        persist_field = nonempty_reasoning_text(msg_obj) if persist_reasoning_content else None
 
         text_out = None
         item_reasoning = persist_field if persist_reasoning_content else None

@@ -37,6 +37,12 @@ def test_not_empty_with_reasoning_content():
     assert is_empty_completion(dct) is False
 
 
+def test_not_empty_with_openrouter_reasoning_alias():
+    dct = _resp()
+    dct["choices"][0]["message"]["reasoning"] = "search the leaderboard"
+    assert is_empty_completion(dct) is False
+
+
 def test_empty_whitespace_reasoning_without_finish_is_empty():
     dct = _resp()
     dct["choices"][0]["message"]["reasoning_content"] = "  \n"

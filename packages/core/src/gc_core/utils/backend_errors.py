@@ -96,9 +96,23 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
         return False
 
 
+def nonempty_reasoning_text(msg) -> str | None:
+    """Канон ``reasoning_content`` или алиас OpenRouter ``reasoning``.
+
+    Берём ОДНО из двух, не сумму — как стрим-ассемблер. Иначе нестрим
+    (бенч/CLI/server) теряет reasoning-only ответ, который TUI спасает.
+    """
+    if not isinstance(msg, dict):
+        return None
+    for key in ("reasoning_content", "reasoning"):
+        value = msg.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
 def _nonempty_reasoning_content(msg: dict) -> bool:
-    reasoning = msg.get("reasoning_content")
-    return isinstance(reasoning, str) and bool(reasoning.strip())
+    return nonempty_reasoning_text(msg) is not None
 
 
 def is_empty_completion(dct: dict) -> bool:
