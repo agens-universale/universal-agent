@@ -14,6 +14,12 @@ NO_TOOL_CALL_BOUNCE_MESSAGE = (
     "Choose a tool call that brings you closer to solving the task."
 )
 
+CONTENT_FILTER_BOUNCE_MESSAGE = (
+    "The provider blocked this response (content_filter). "
+    "Rephrase: avoid the blocked wording, take a different approach, "
+    "and continue with a tool call that brings you closer to solving the task."
+)
+
 
 def extract_last_assistant_text(
     messages: List[Dict[str, Any]],
@@ -41,11 +47,22 @@ def extract_last_assistant_text(
     return ""
 
 
-def format_no_tool_call_bounce(assistant_text: str = "") -> str:
+def is_content_filter_finish(finish_reason: str | None) -> bool:
+    return isinstance(finish_reason, str) and finish_reason.strip().lower() == "content_filter"
+
+
+def format_no_tool_call_bounce(
+    assistant_text: str = "",
+    *,
+    finish_reason: str | None = None,
+) -> str:
     """Return the static no-tool-call nudge.
 
     Assistant prose is already in history (committed before the bounce), so
-    it is not inlined here.
+    it is not inlined here. ``content_filter`` gets a rewrite nudge: the
+    provider blocked the completion, repeating the same wording will loop.
     """
     del assistant_text
+    if is_content_filter_finish(finish_reason):
+        return CONTENT_FILTER_BOUNCE_MESSAGE
     return NO_TOOL_CALL_BOUNCE_MESSAGE

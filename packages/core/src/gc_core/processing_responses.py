@@ -64,7 +64,12 @@ from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
-from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text
+from gc_core.message_policy.no_tool_call_bounce import (
+    NO_TOOL_CALL_BOUNCE_MESSAGE,
+    extract_last_assistant_text,
+    format_no_tool_call_bounce,
+    is_content_filter_finish,
+)
 from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
 
@@ -1126,7 +1131,9 @@ def run_agent(
             tool_error_cnt += 1
             messages = [
                 _make_technical_feedback_user_message(
-                    NO_TOOL_CALL_BOUNCE_MESSAGE,
+                    format_no_tool_call_bounce(
+                        finish_reason=getattr(state, "last_finish_reason", None)
+                    ),
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
@@ -1279,7 +1286,9 @@ def run_agent(
             tool_error_cnt += 1
             messages = [
                 _make_technical_feedback_user_message(
-                    NO_TOOL_CALL_BOUNCE_MESSAGE,
+                    format_no_tool_call_bounce(
+                        finish_reason=getattr(state, "last_finish_reason", None)
+                    ),
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
@@ -1491,8 +1500,19 @@ def run_agent(
                     assistant_text = extract_last_assistant_text(
                         messages, tags=_proj_tags, strip_think=True
                     )
-                    decision = should_return_text_answer(ctx, state, assistant_text)
-                    if decision.accept:
+                    last_finish = getattr(state, "last_finish_reason", None)
+                    bounce_msg = format_no_tool_call_bounce(finish_reason=last_finish)
+                    # content_filter — отказ провайдера, не ответ модели: даже
+                    # text_answer_mode=allow не принимает его финалом, иначе
+                    # тот же промпт крутится до no_tool_call_max_count.
+                    if is_content_filter_finish(last_finish):
+                        decision_accept = False
+                        decision_reject_feedback = None
+                    else:
+                        decision = should_return_text_answer(ctx, state, assistant_text)
+                        decision_accept = decision.accept
+                        decision_reject_feedback = decision.reject_feedback
+                    if decision_accept:
                         # Финальная проза принята → TUI-индикатор «✓ завершаю…»
                         # на время записи/саммари/flush (mark_finalizing пишет
                         # runtime.finalizing в meta; снимаем строго в finally).
@@ -1519,8 +1539,13 @@ def run_agent(
                         return assistant_text
                     # === reject ===
                     tool_error_cnt += 1
-                    if decision.reject_feedback is not None:      # judge-reject c причиной
-                        bounce_msg = decision.reject_feedback
+                    if decision_reject_feedback is not None:      # judge-reject c причиной
+                        bounce_msg = decision_reject_feedback
+                    elif is_content_filter_finish(last_finish):
+                        run_logger.warning(
+                            "Provider blocked the completion (content_filter); "
+                            "requesting a rephrased attempt"
+                        )
                     else:                                         # deny / пусто / нет гейта / ошибка
                         run_logger.warning(
                             "Agent returned text response without tool call, requesting tool call"

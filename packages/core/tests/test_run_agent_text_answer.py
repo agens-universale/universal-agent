@@ -190,3 +190,55 @@ def test_run_agent_judge_accept_returns_text(monkeypatch):
     monkeypatch.setattr(taj, "judge_text_answer", lambda ctx, state, text: SimpleNamespace(action="accept"))
     result = pr.run_agent(_text_msgs(), _state(), _run_ctx("judge"))
     assert result == "Привет! Чем помочь?"
+
+
+def test_run_agent_content_filter_bounces_even_in_allow(monkeypatch):
+    """content_filter — отказ провайдера, не финальный текст; allow не принимает."""
+    from gc_core import processing_responses as pr
+    from gc_core.message_policy.no_tool_call_bounce import CONTENT_FILTER_BOUNCE_MESSAGE
+
+    captured = {}
+
+    def _fake_make_feedback(content, technical_type=None, call_id=None):
+        captured["content"] = content
+        return {"role": "user", "id": "m_tech", "content": content}
+
+    def _fake_process_user_ask(messages, state, ctx):
+        state.last_finish_reason = "stop"
+        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+
+    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+    monkeypatch.setattr(pr, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(pr, "maybe_record_final_answer_intent", lambda **_kw: None)
+
+    state = _state()
+    state.last_finish_reason = "content_filter"
+    result = pr.run_agent(_text_msgs(), state, _run_ctx("allow"))
+    assert result == "ok"
+    assert captured["content"] == CONTENT_FILTER_BOUNCE_MESSAGE
+
+
+def test_run_agent_empty_batch_content_filter_uses_filter_nudge(monkeypatch):
+    """Пустой output после content_filter — тот же rewrite-надж, не «нет tool call»."""
+    from gc_core import processing_responses as pr
+    from gc_core.message_policy.no_tool_call_bounce import CONTENT_FILTER_BOUNCE_MESSAGE
+
+    captured = {}
+
+    def _fake_make_feedback(content, technical_type=None, call_id=None):
+        captured["content"] = content
+        return {"role": "user", "id": "m_tech", "content": content}
+
+    def _fake_process_user_ask(messages, state, ctx):
+        state.last_finish_reason = "stop"
+        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+
+    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+    monkeypatch.setattr(pr, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(pr, "maybe_record_final_answer_intent", lambda **_kw: None)
+
+    state = _state()
+    state.last_finish_reason = "content_filter"
+    result = pr.run_agent([], state, _run_ctx("allow"))
+    assert result == "ok"
+    assert captured["content"] == CONTENT_FILTER_BOUNCE_MESSAGE

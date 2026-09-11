@@ -1,4 +1,10 @@
-from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text, format_no_tool_call_bounce
+from gc_core.message_policy.no_tool_call_bounce import (
+    CONTENT_FILTER_BOUNCE_MESSAGE,
+    NO_TOOL_CALL_BOUNCE_MESSAGE,
+    extract_last_assistant_text,
+    format_no_tool_call_bounce,
+    is_content_filter_finish,
+)
 
 
 # --- extract_last_assistant_text ---
@@ -80,6 +86,21 @@ def test_format_does_not_inline_assistant_prose():
     assert "Here is my plan." not in msg
     assert "<<<" not in msg
     assert "VERBATIM" not in msg
+
+
+def test_format_uses_content_filter_nudge():
+    msg = format_no_tool_call_bounce("blocked prose", finish_reason="content_filter")
+    assert msg == CONTENT_FILTER_BOUNCE_MESSAGE
+    assert "blocked prose" not in msg
+    assert "content_filter" in msg
+    assert "Rephrase" in msg
+
+
+def test_format_content_filter_is_case_insensitive():
+    assert format_no_tool_call_bounce(finish_reason="Content_Filter") == CONTENT_FILTER_BOUNCE_MESSAGE
+    assert is_content_filter_finish("CONTENT_FILTER")
+    assert not is_content_filter_finish("stop")
+    assert not is_content_filter_finish(None)
 
 
 def test_bounce_asks_for_a_tool_call():
