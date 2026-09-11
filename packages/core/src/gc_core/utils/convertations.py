@@ -168,8 +168,9 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                 )
             )
 
-        if dct_choice['message'].get("tool_calls", None) is not None:
-            for tool_call_dict in dct_choice['message']['tool_calls']:
+        tool_calls = msg_obj.get("tool_calls")
+        if tool_calls is not None:
+            for tool_call_dict in tool_calls:
                 if tool_call_dict['type'] != 'function':
                     raise ValueError("Unknown logic")
 

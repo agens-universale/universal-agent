@@ -469,6 +469,7 @@ def _request_backend_canonical_once(
             cert=cert,
             use_retry=use_retry,
             retry_embedded_choice_errors=retry_embedded_choice_errors,
+            salvage_reasoning=True,
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,
             request_label="main_agent",

@@ -98,6 +98,12 @@ def test_get_output_list_empty_unknown_finish_is_empty_batch():
     assert get_output_list(_dct("stop", content=None)) == []
 
 
+def test_get_output_list_null_message_with_known_finish_is_empty_batch():
+    # message: None / нет ключа — не KeyError/AttributeError на dct_choice['message'].
+    assert get_output_list({"choices": [{"finish_reason": "stop", "message": None}]}) == []
+    assert get_output_list({"choices": [{"finish_reason": "stop"}]}) == []
+
+
 def test_get_output_list_whitespace_content_is_kept_for_bounce():
     # Не strip: «\n» — payload, assistant-item в историю, цикл шлёт bounce.
     out = get_output_list(_dct("stop", content="\n"))

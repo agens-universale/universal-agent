@@ -103,6 +103,7 @@ def capture_outbound(monkeypatch):
         cert=None,
         use_retry,
         retry_embedded_choice_errors=True,
+        salvage_reasoning=False,
         logger=None,
         on_delta=None,
         request_label=None,
