@@ -17,7 +17,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
-from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
+from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS, run_backend_exec_raw
 from gc_core.utils.find_in_files_scan_mode import Needles
 from gc_core.utils.fs_search_walk import effective_exclude_dir_names
 from gc_core.utils.pattern_native_gate import NativeGrepPlan, is_safe_grep_include
@@ -503,7 +503,8 @@ def native_prefilter_candidates(
         exclude_paths=exclude_paths,
     )
     try:
-        res = backend.exec(
+        res = run_backend_exec_raw(
+            backend,
             cmd,
             timeout=PREFILTER_TIMEOUT_SEC,
             env=dict(_PREFILTER_ENV),
@@ -591,7 +592,8 @@ def run_native_grep(
                 exclude_paths=exclude_paths,
                 grep_env=env,
             )
-            res = backend.exec(
+            res = run_backend_exec_raw(
+                backend,
                 cmd,
                 timeout=120,
                 env=env,

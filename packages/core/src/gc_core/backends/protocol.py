@@ -382,6 +382,21 @@ class FsBackend(ABC):
              env: Optional[dict] = None,
              capture_max_chars: Optional[int] = None) -> ExecResult: ...
 
+    def exec_raw(self, command: str, *, cwd: Optional[str] = None,
+                 timeout: Optional[int] = None,
+                 env: Optional[dict] = None,
+                 capture_max_chars: Optional[int] = None) -> ExecResult:
+        """Mechanical POSIX exec: no image login / profile.
+
+        User-facing ``exec`` may initialise the image environment (Harbor).
+        Internal FS / search / capability / MCP callers must use this channel.
+        Host backends have no separate profile — default is ``exec``.
+        """
+        kwargs = {"cwd": cwd, "timeout": timeout, "env": env}
+        if capture_max_chars is not None:
+            kwargs["capture_max_chars"] = capture_max_chars
+        return self.exec(command, **kwargs)
+
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
                   timeout: Optional[int] = None,
@@ -394,6 +409,8 @@ class FsBackend(ABC):
         POSIX (e.g. local Windows cmd.exe) must override with a shell-less
         implementation.
 
+        Goes through ``exec_raw``: argv is a program, not a model shell command.
+
         ``capture_max_chars=None`` → ``exec_output_capture_max_chars`` (tool
         trace, 40k/поток). Internal post-processed calls (native grep, walk) pass
         the walk ceiling (~50M).
@@ -401,15 +418,10 @@ class FsBackend(ABC):
         command = " ".join(shlex.quote(str(a)) for a in argv)
         if stdin is not None:
             command = f"printf '%s' {shlex.quote(stdin)} | {command}"
-        if capture_max_chars is None:
-            return self.exec(command, cwd=cwd, timeout=timeout, env=env)
-        return self.exec(
-            command,
-            cwd=cwd,
-            timeout=timeout,
-            env=env,
-            capture_max_chars=capture_max_chars,
-        )
+        kwargs = {"cwd": cwd, "timeout": timeout, "env": env}
+        if capture_max_chars is not None:
+            kwargs["capture_max_chars"] = capture_max_chars
+        return self.exec_raw(command, **kwargs)
 
     @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,
@@ -418,3 +430,14 @@ class FsBackend(ABC):
                    capture_max_chars: Optional[int] = None) -> ExecResult: ...
     @abstractmethod
     def default_cwd(self) -> Optional[str]: ...
+
+
+def run_backend_exec_raw(backend: Any, command: str, **kwargs) -> ExecResult:
+    """POSIX channel for internal callers.
+
+    ``FsBackend.exec_raw`` when present; test stubs without it fall back to ``exec``.
+    """
+    fn = getattr(backend, "exec_raw", None)
+    if fn is None:
+        fn = backend.exec
+    return fn(command, **kwargs)
