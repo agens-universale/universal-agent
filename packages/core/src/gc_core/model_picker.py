@@ -133,7 +133,7 @@ def _requests_get_ex(
         )
         try:
             payload = _payload_dict(resp.json())
-        except (ValueError, json.JSONDecodeError):
+        except ValueError:
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
     # UnicodeEncodeError — не сеть: заголовки кодируются в latin-1, и токен с
@@ -167,7 +167,7 @@ def _requests_post_ex(
         )
         try:
             payload = _payload_dict(resp.json())
-        except (ValueError, json.JSONDecodeError):
+        except ValueError:
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
     # см. комментарий в _requests_get_ex: кириллица в токене — ValueError, не сеть
@@ -181,7 +181,6 @@ def _requests_post_ex(
 
 def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
     """Legacy urllib GET (без proxy). Оставлен для unit-тестов транспорта."""
-    import socket
     import ssl
     import urllib.error
     import urllib.request
@@ -191,13 +190,23 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
         with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
             try:
                 payload = json.loads(resp.read().decode("utf-8"))
-            except (ValueError, UnicodeDecodeError):
+            except ValueError:
                 payload = None
             return HttpReply(status=resp.status, payload=payload)
     except urllib.error.HTTPError as exc:
         return HttpReply(status=exc.code, payload=None)
-    except (urllib.error.URLError, socket.timeout, ssl.SSLError, OSError) as exc:
+    except OSError as exc:
         return HttpReply(status=None, payload=None, network_error=str(exc) or exc.__class__.__name__)
+
+
+def _parse_reply_models(reply: HttpReply, parser: Callable) -> list:
+    """Список моделей из ответа с кодом и телом; пусто, если ответа нет или парсер упал."""
+    if reply.status is None or reply.payload is None:
+        return []
+    try:
+        return parser(reply.payload)
+    except Exception:
+        return []
 
 
 def probe_fetch(completions_url: str, auth_header: Optional[str], *,
@@ -219,14 +228,10 @@ def probe_fetch(completions_url: str, auth_header: Optional[str], *,
     net_errors: list = []
     for path, parser in (("/config", parse_config_models), ("/models", parse_models_list)):
         reply = get_ex(base + path, headers, verify)
-        if reply.status is not None and reply.payload is not None:
-            try:
-                parsed = parser(reply.payload)
-            except Exception:
-                parsed = []
-            if parsed:
-                return FetchOutcome(parsed, reply.status, "",
-                                    int((time.monotonic() - t0) * 1000))
+        parsed = _parse_reply_models(reply, parser)
+        if parsed:
+            return FetchOutcome(parsed, reply.status, "",
+                                int((time.monotonic() - t0) * 1000))
         if reply.status is not None:
             statuses.append(reply.status)
         else:

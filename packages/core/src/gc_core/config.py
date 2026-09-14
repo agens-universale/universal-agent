@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+CONFIG_FILE_NAME = "config.yml"
+
 import urllib3
 
 from gc_core.config_modules.auth import build_auth_connector
@@ -111,7 +113,7 @@ def _xdg_config_path() -> Optional[str]:
     пакетные дефолты (project-local <cwd>/.gc/config.yml по-прежнему
     мерджится поверх выбранной базы).
     """
-    candidate = os.path.abspath(os.path.join(str(env_vars.effective_config_dir()), "config.yml"))
+    candidate = os.path.abspath(os.path.join(str(env_vars.effective_config_dir()), CONFIG_FILE_NAME))
     if os.path.isfile(candidate):
         return candidate
     return None
@@ -120,7 +122,7 @@ def _xdg_config_path() -> Optional[str]:
 def user_config_path() -> Path:
     """Путь дефолтного пользовательского конфига: <gc config>/config.yml.
     На залоченном ~/.config (корп-Mac/Linux) автоматически уезжает в ~/.gc."""
-    return env_vars.effective_config_dir() / "config.yml"
+    return env_vars.effective_config_dir() / CONFIG_FILE_NAME
 
 
 def _bootstrap_user_config() -> bool:
@@ -155,6 +157,37 @@ def resolve_base_config_path(config_path: Optional[str] = None) -> str:
     return config_path or _xdg_config_path() or _default_config_path()
 
 
+def _apply_models_override(config_dict: Dict[str, Any], resolved: Dict[str, Any]) -> None:
+    if "models" not in resolved:
+        return
+    # `--models` задаёт весь реестр строкой и идёт мимо схемы (плоский
+    # config_dict заполняется уже после валидации), поэтому здесь руками
+    # повторяется то, что файловому пути делает flatten_app_config: правило
+    # пары и приведение записей к СЕРИАЛИЗОВАННОЙ форме. Без второго Router
+    # читал бы сырой словарь, где нет `authorization_header`, и `token` из
+    # CLI молча пропадал бы — запись уходила на свой адрес с общим ключом.
+    validate_registry_pairs({"models": resolved["models"]}, source="--models")
+    if isinstance(resolved["models"], dict):
+        config_dict["models"] = {
+            alias: _serialize_model_entry(ModelEntry.model_validate(entry))
+            for alias, entry in resolved["models"].items()
+        }
+
+
+def _normalize_trace_id_key(config_dict: Dict[str, Any], trace_id: Optional[str]) -> None:
+    # Внешний trace_id: значение могло приехать и настоящим флагом, и generic
+    # `--param`-оверрайдом (там оно прошло через yaml.safe_load и может быть не
+    # строкой). Нормализуем в одной точке; пусто → ключа нет вовсе, чтобы
+    # «отсутствует» было отсутствием ключа, а не пустой строкой.
+    if trace_id is not None:
+        config_dict["trace_id"] = trace_id
+    normalized_trace_id = normalize_trace_id(config_dict.get("trace_id"))
+    if normalized_trace_id:
+        config_dict["trace_id"] = normalized_trace_id
+    else:
+        config_dict.pop("trace_id", None)
+
+
 def apply_cli_overrides(
     config_dict: Dict[str, Any],
     *,
@@ -171,19 +204,7 @@ def apply_cli_overrides(
     if extra_overrides:
         resolved = resolve_env_placeholders(extra_overrides)
         config_dict.update(resolved)
-        if "models" in resolved:
-            # `--models` задаёт весь реестр строкой и идёт мимо схемы (плоский
-            # config_dict заполняется уже после валидации), поэтому здесь руками
-            # повторяется то, что файловому пути делает flatten_app_config: правило
-            # пары и приведение записей к СЕРИАЛИЗОВАННОЙ форме. Без второго Router
-            # читал бы сырой словарь, где нет `authorization_header`, и `token` из
-            # CLI молча пропадал бы — запись уходила на свой адрес с общим ключом.
-            validate_registry_pairs({"models": resolved["models"]}, source="--models")
-            if isinstance(resolved["models"], dict):
-                config_dict["models"] = {
-                    alias: _serialize_model_entry(ModelEntry.model_validate(entry))
-                    for alias, entry in resolved["models"].items()
-                }
+        _apply_models_override(config_dict, resolved)
         # Признак «ключ пришёл именно из CLI» (спека §2): нужен, среди прочего,
         # для детекта легаси-форса (см. cli_forces_legacy_model ниже).
         explicit = set(config_dict.get("cli_explicit_keys") or ())
@@ -203,13 +224,7 @@ def apply_cli_overrides(
     # `--param`-оверрайдом (там оно прошло через yaml.safe_load и может быть не
     # строкой). Нормализуем в одной точке; пусто → ключа нет вовсе, чтобы
     # «отсутствует» было отсутствием ключа, а не пустой строкой.
-    if trace_id is not None:
-        config_dict["trace_id"] = trace_id
-    normalized_trace_id = normalize_trace_id(config_dict.get("trace_id"))
-    if normalized_trace_id:
-        config_dict["trace_id"] = normalized_trace_id
-    else:
-        config_dict.pop("trace_id", None)
+    _normalize_trace_id_key(config_dict, trace_id)
     sync_logging_flat_and_params(config_dict)
 
 
@@ -434,7 +449,7 @@ def _build_mtime_set(
 ) -> Dict[str, Optional[float]]:
     """Снимок mtime базового/managed/проектного конфига + обоих кандидатных путей
     активного профиля (спека §3.3): отсутствующий файл — ключ есть, значение None."""
-    project_config_path = Path(project_path) if project_path is not None else project_gc_dir() / "config.yml"
+    project_config_path = Path(project_path) if project_path is not None else project_gc_dir() / CONFIG_FILE_NAME
     mtime_set: Dict[str, Optional[float]] = {
         str(base_path): mtime_or_none(base_path),
         str(managed_path): mtime_or_none(managed_path),
@@ -502,7 +517,7 @@ def load_config_ex(
     # «блокнотом» в UTF-16), и без отдельного перехвата уходил голой жалобой кодека
     # мимо этой обёртки и мимо классового сторожа (ревью MR #80, L40).
     try:
-        raw_config = _layer_document(base_path, "config.yml")
+        raw_config = _layer_document(base_path, CONFIG_FILE_NAME)
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(unreadable_reason(base_path, exc)) from exc
     # Дорезолвный вид держим для отказа правила пары: после подстановки от `${ENV:X}`

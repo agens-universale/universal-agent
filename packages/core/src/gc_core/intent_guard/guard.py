@@ -74,6 +74,24 @@ class FinishGateDecision:
     feedback_text: str = ""
 
 
+def _finish_gate_skip_reason(cfg: dict, backend: str) -> str:
+    if not bool(cfg.get("strict_turn_finish_validation", True)):
+        return "strict_turn_finish_validation=false"
+    if backend != "chat_completions":
+        return f"backend_api_mode={backend}"
+    if cfg.get("finish_gate_smart"):
+        return "finish_gate_smart_no_tool_calls"
+    return "disabled"
+
+
+def _finish_gate_digest_chars(state: Any, cfg: dict) -> int:
+    try:
+        digest = build_finish_gate_trace_digest(state=state, cfg=cfg)
+        return len(digest.trace_digest_text or "")
+    except Exception:
+        return 0
+
+
 class FinishGateGuard:
     """Оркестратор finish gate (quality gate) на один (ctx, state) — см. SPEC §5.6."""
 
@@ -116,13 +134,7 @@ class FinishGateGuard:
         agent_kind = "subagent" if parent_state_id is not None else "main"
 
         if not self.enabled:
-            reason = "disabled"
-            if not bool(cfg.get("strict_turn_finish_validation", True)):
-                reason = "strict_turn_finish_validation=false"
-            elif backend != "chat_completions":
-                reason = f"backend_api_mode={backend}"
-            elif cfg.get("finish_gate_smart"):
-                reason = "finish_gate_smart_no_tool_calls"
+            reason = _finish_gate_skip_reason(cfg, backend)
             log_finish_gate_skipped(
                 self._logger,
                 reason=reason,
@@ -165,12 +177,7 @@ class FinishGateGuard:
             deserialize_list(getattr(self._state, "user_intent_log", []) or [])
         )
 
-        digest_chars = 0
-        try:
-            digest = build_finish_gate_trace_digest(state=self._state, cfg=cfg)
-            digest_chars = len(digest.trace_digest_text or "")
-        except Exception:
-            digest_chars = 0
+        digest_chars = _finish_gate_digest_chars(self._state, cfg)
 
         log_finish_gate_validate_start(
             self._logger,

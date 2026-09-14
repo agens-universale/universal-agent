@@ -22,6 +22,8 @@ from gc_core.tools.exec.redirect_policy import (
     stream_validating_redirects,
 )
 
+_HTML_EXT = ".html"
+
 
 #: Псевдоним общего исключения — см. ``tools/exec/redirect_policy``.
 _RedirectBlocked = _SharedRedirectBlocked
@@ -164,21 +166,24 @@ class DownloadFile(AbstractSimpleTool):
             return body.startswith(b"PK\x03\x04")
         if ext in {".xls", ".msg"}:
             return body.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")
-        if ext in {".csv", ".txt", ".md", ".html", ".json"}:
+        if ext in {".csv", ".txt", ".md", _HTML_EXT, ".json"}:
             if b"\x00" in body[:4096]:
                 return False
-            if ext != ".html":
-                return True
-            payload = body
-            for bom in cls._BOM_PREFIXES:
-                if payload.startswith(bom):
-                    payload = payload[len(bom):]
-                    break
-            for byte in payload:
-                if byte in (9, 10, 13, 32):
-                    continue
-                return byte == ord("<")
-            return False
+            return ext != _HTML_EXT or cls._looks_like_html(body)
+        return False
+
+    @classmethod
+    def _looks_like_html(cls, body: bytes) -> bool:
+        """Первый значащий байт после BOM/пробелов — '<'."""
+        payload = body
+        for bom in cls._BOM_PREFIXES:
+            if payload.startswith(bom):
+                payload = payload[len(bom):]
+                break
+        for byte in payload:
+            if byte in (9, 10, 13, 32):
+                continue
+            return byte == ord("<")
         return False
 
     def _check_write_guard(self, dest: str) -> Optional[Dict[str, Any]]:

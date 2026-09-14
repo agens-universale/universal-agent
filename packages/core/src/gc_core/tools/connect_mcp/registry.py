@@ -276,6 +276,46 @@ async def _adiscover_one(
         }
 
 
+def _discovery_timeout_status(discovery_timeout_sec: float) -> Dict[str, Any]:
+    return {
+        "status": "failed",
+        "reason": "таймаут подключения",
+        "tool_count": 0,
+        "elapsed_ms": int(discovery_timeout_sec * 1000),
+    }
+
+
+async def _adiscover_all(
+    items: list,
+    *,
+    timeout: float,
+    on_progress,
+    os_backend: Any,
+) -> Dict[str, tuple]:
+    """Параллельный дискавери всех серверов под общим дедлайном; не успевших в результате нет."""
+    results: Dict[str, tuple] = {}
+
+    async def _one(name: str, cfg: Dict[str, Any]) -> None:
+        # Нужен ли поток, решает КЛИЕНТ, а не дискавери: у долгоживущего
+        # stdio обмен блокирующий, и он сам уводит вызов в брошенный поток.
+        result = await _adiscover_one(name, cfg, timeout=timeout, os_backend=os_backend)
+        results[name] = result
+        if on_progress is not None:
+            on_progress(name, result[1])
+
+    # Общий дедлайн на весь веер — как и был. Не успевшие попадают в ветку
+    # «таймаут подключения» у вызывающего: их просто нет в results.
+    try:
+        async with asyncio.timeout(timeout):
+            await asyncio.gather(
+                *(_one(name, cfg) for name, cfg in items),
+                return_exceptions=True,
+            )
+    except TimeoutError:
+        pass
+    return results
+
+
 async def _abuild_tools_registry(
     servers_cfg: Dict[str, Dict[str, Any]],
     *,
@@ -309,42 +349,15 @@ async def _abuild_tools_registry(
     if not items:
         return all_tools, status_map
 
-    results: Dict[str, tuple] = {}
-
-    async def _one(name: str, cfg: Dict[str, Any]) -> None:
-        # Нужен ли поток, решает КЛИЕНТ, а не дискавери: у долгоживущего
-        # stdio обмен блокирующий, и он сам уводит вызов в брошенный поток.
-        result = await _adiscover_one(
-            name, cfg, timeout=discovery_timeout_sec, os_backend=os_backend
-        )
-        results[name] = result
-        if on_progress is not None:
-            on_progress(name, result[1])
-
-    async def _all() -> None:
-        # Общий дедлайн на весь веер — как и был. Не успевшие попадают в ветку
-        # «таймаут подключения» ниже: их просто нет в results.
-        try:
-            async with asyncio.timeout(discovery_timeout_sec):
-                await asyncio.gather(
-                    *(_one(name, cfg) for name, cfg in items),
-                    return_exceptions=True,
-                )
-        except TimeoutError:
-            pass
-
-    await _all()
+    results = await _adiscover_all(
+        items, timeout=discovery_timeout_sec, on_progress=on_progress, os_backend=os_backend
+    )
 
     for name, cfg in items:
         if name in results:
             tools, status = results[name]
         else:
-            tools, status = [], {
-                "status": "failed",
-                "reason": "таймаут подключения",
-                "tool_count": 0,
-                "elapsed_ms": int(discovery_timeout_sec * 1000),
-            }
+            tools, status = [], _discovery_timeout_status(discovery_timeout_sec)
             if on_progress is not None:
                 on_progress(name, status)
         status_map[name] = status

@@ -227,30 +227,33 @@ class LocalFsBackend(FsBackend):
         Symlinks are never followed (``os.walk(followlinks=False)`` parity).
         """
         pruned = pruned_dir_predicate(prune_names, prune_dot_dirs)
-
-        def _level(abs_dir: str, prefix: str) -> Iterable[WalkEntry]:
-            try:
-                with os.scandir(abs_dir) as it:
-                    children = sorted(it, key=lambda e: e.name)
-            except OSError:
-                return
-            dirs = [e for e in children if _is_real_dir(e)]
-            files = [e for e in children if not _is_real_dir(e)]
-            for d in dirs:
-                yield WalkEntry(prefix + d.name, True)
-            for f in files:
-                yield WalkEntry(prefix + f.name, False, _size_without_following(f))
-            for d in dirs:
-                if pruned(d.name):
-                    continue
-                full = os.path.join(abs_dir, d.name)
-                if should_descend is not None and not should_descend(full):
-                    continue
-                for _item in _level(full, prefix + d.name + "/"):
-                    yield _item
-
-        for _item in _level(path, ""):
+        async for _item in self._walk_level(path, "", pruned, should_descend):
             yield _item
+
+    async def _walk_level(
+        self,
+        abs_dir: str,
+        prefix: str,
+        pruned: Callable[[str], bool],
+        should_descend: Optional[Callable[[str], bool]],
+    ) -> Iterable[WalkEntry]:
+        children = _scandir_sorted(abs_dir)
+        if children is None:
+            return
+        dirs = [e for e in children if _is_real_dir(e)]
+        files = [e for e in children if not _is_real_dir(e)]
+        for d in dirs:
+            yield WalkEntry(prefix + d.name, True)
+        for f in files:
+            yield WalkEntry(prefix + f.name, False, _size_without_following(f))
+        for d in dirs:
+            if pruned(d.name):
+                continue
+            full = os.path.join(abs_dir, d.name)
+            if should_descend is not None and not should_descend(full):
+                continue
+            async for _item in self._walk_level(full, prefix + d.name + "/", pruned, should_descend):
+                yield _item
 
     async def walk_entries(
         self,
@@ -376,6 +379,15 @@ class _Capture:
         self.stream = self.acc.result()
 
 
+def _scandir_sorted(abs_dir: str) -> "Optional[list]":
+    """Дети каталога по имени; None, если каталог не читается."""
+    try:
+        with os.scandir(abs_dir) as it:
+            return sorted(it, key=lambda e: e.name)
+    except OSError:
+        return None
+
+
 async def _adrain_stream(stream, sink: "_Capture") -> None:
     """Прочитать поток ДО EOF в ограниченный накопитель ``sink``.
 
@@ -492,45 +504,23 @@ async def _arun_bounded_process(
         _adrain_stream(proc.stderr, err_sink)
     )
 
-    async def _feed_stdin() -> None:
-        try:
-            proc.stdin.write(stdin_text.encode("utf-8"))
-            await proc.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
-        finally:
-            try:
-                proc.stdin.close()
-            except Exception:
-                pass
-
     # Запись держим под ТЕМ ЖЕ дедлайном, что и сам процесс: ребёнок, который
     # не читает свой stdin вовсе, иначе снова подвесил бы шаг без предохранителя.
     stdin_task = (
-        asyncio.ensure_future(_feed_stdin())
+        asyncio.ensure_future(_afeed_stdin(proc, stdin_text))
         if stdin_text is not None and proc.stdin is not None
         else None
     )
 
-    timed_out = False
     try:
         try:
-            await _await_process_exit(proc, timeout)
-            return_code = proc.returncode
-        except asyncio.TimeoutError:
-            timed_out = True
-            return_code = None
-            _kill_quietly(proc)
-            try:
-                await _await_process_exit(proc, 5)
-            except Exception:
-                pass
+            return_code, timed_out = await _await_exit_or_kill(proc, timeout)
         finally:
             # Ребёнок мёртв или дочитан — писать больше некому и незачем.
             if stdin_task is not None and not stdin_task.done():
                 stdin_task.cancel()
 
-        # Хвост pipe дочитываем ограниченно: долгий discard не должен удерживать
+        # Хвост pipe дочитываем ограниченно
         # tool-call — тот же приём, что у синхронного join с таймаутом.
         _done, pending = await asyncio.wait(
             {out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC
@@ -613,6 +603,33 @@ def _release_drain(proc, tasks) -> None:
 
     for task in live:
         task.add_done_callback(_done)
+
+
+async def _afeed_stdin(proc, stdin_text: str) -> None:
+    try:
+        proc.stdin.write(stdin_text.encode("utf-8"))
+        await proc.stdin.drain()
+    except OSError:
+        pass
+    finally:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+
+
+async def _await_exit_or_kill(proc, timeout: Optional[int]) -> tuple:
+    """Дождаться процесса; по таймауту — убить и дать 5 с на выход. → (return_code, timed_out)."""
+    try:
+        await _await_process_exit(proc, timeout)
+        return proc.returncode, False
+    except asyncio.TimeoutError:
+        _kill_quietly(proc)
+        try:
+            await _await_process_exit(proc, 5)
+        except Exception:
+            pass
+        return None, True
 
 
 def _kill_quietly(proc) -> None:

@@ -53,6 +53,8 @@ _VERDICT_DANGEROUS_RE = re.compile(
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = bundled_root()
 
+_CONFIDENCE_NOT_NUMERIC = "judge result confidence must be numeric"
+
 
 def effective_command_cwd(
     tool_name: str,
@@ -230,6 +232,55 @@ def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
     )
 
 
+def _decide_without_judge(normalized_mode: str, user_confirmation: bool | None, ctx: Any) -> ExecutionDecision:
+    if normalized_mode == "ask":
+        if user_confirmation is True:
+            return ExecutionDecision(
+                allowed=True,
+                decision="executed",
+                reason_code="user_confirmation",
+                reason="User confirmed execution after judge was unavailable.",
+            )
+        if user_confirmation is False:
+            return ExecutionDecision(
+                allowed=False,
+                decision="cancelled",
+                reason_code="user_confirmation",
+                reason="User declined the command.",
+                error_type="unsafe_command_cancelled_by_user",
+            )
+        return ExecutionDecision(
+            allowed=False,
+            decision="asked",
+            reason_code="judge_unavailable",
+            reason="Judge is unavailable; user confirmation is required.",
+            requires_confirmation=True,
+        )
+    # C1 Часть 2: при недоступности судьи в deny — пробуем confirm-порт.
+    if confirm_available(ctx):
+        confirmed = request_confirm(
+            title="Проверка команды",
+            question="Судья недоступен. Выполнить команду?",
+            fields=[("mode", normalized_mode)],
+            ctx=ctx,
+        )
+        if confirmed:
+            return ExecutionDecision(
+                allowed=True,
+                decision="executed",
+                reason_code="judge_unavailable_user_confirmed",
+                reason="User confirmed execution after judge was unavailable.",
+            )
+    # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
+    return ExecutionDecision(
+        allowed=False,
+        decision="blocked",
+        reason_code="judge_unavailable",
+        reason="Judge is unavailable; fail-closed policy blocks execution.",
+        error_type="unsafe_command_blocked",
+    )
+
+
 def decide_command_execution(
     mode: str,
     judge_result: JudgeResult | None,
@@ -247,52 +298,7 @@ def decide_command_execution(
             reason="command_moderation.mode=allow",
         )
     if not judge_available or judge_result is None:
-        if normalized_mode == "ask":
-            if user_confirmation is True:
-                return ExecutionDecision(
-                    allowed=True,
-                    decision="executed",
-                    reason_code="user_confirmation",
-                    reason="User confirmed execution after judge was unavailable.",
-                )
-            if user_confirmation is False:
-                return ExecutionDecision(
-                    allowed=False,
-                    decision="cancelled",
-                    reason_code="user_confirmation",
-                    reason="User declined the command.",
-                    error_type="unsafe_command_cancelled_by_user",
-                )
-            return ExecutionDecision(
-                allowed=False,
-                decision="asked",
-                reason_code="judge_unavailable",
-                reason="Judge is unavailable; user confirmation is required.",
-                requires_confirmation=True,
-            )
-        # C1 Часть 2: при недоступности судьи в deny — пробуем confirm-порт.
-        if confirm_available(ctx):
-            confirmed = request_confirm(
-                title="Проверка команды",
-                question="Судья недоступен. Выполнить команду?",
-                fields=[("mode", normalized_mode)],
-                ctx=ctx,
-            )
-            if confirmed:
-                return ExecutionDecision(
-                    allowed=True,
-                    decision="executed",
-                    reason_code="judge_unavailable_user_confirmed",
-                    reason="User confirmed execution after judge was unavailable.",
-                )
-        # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
-        return ExecutionDecision(
-            allowed=False,
-            decision="blocked",
-            reason_code="judge_unavailable",
-            reason="Judge is unavailable; fail-closed policy blocks execution.",
-            error_type="unsafe_command_blocked",
-        )
+        return _decide_without_judge(normalized_mode, user_confirmation, ctx)
     if judge_result.verdict == SAFE_VERDICT:
         return ExecutionDecision(
             allowed=True,
@@ -585,13 +591,13 @@ def _parse_judge_confidence(raw: Any) -> float:
     elif isinstance(raw, str):
         stripped = raw.strip()
         if not stripped:
-            raise ValueError("judge result confidence must be numeric")
+            raise ValueError(_CONFIDENCE_NOT_NUMERIC)
         try:
             confidence_float = float(stripped)
         except ValueError as exc:
-            raise ValueError("judge result confidence must be numeric") from exc
+            raise ValueError(_CONFIDENCE_NOT_NUMERIC) from exc
     else:
-        raise ValueError("judge result confidence must be numeric")
+        raise ValueError(_CONFIDENCE_NOT_NUMERIC)
     if confidence_float < 0.0 or confidence_float > 1.0:
         raise ValueError("judge result confidence must be between 0.0 and 1.0")
     return confidence_float

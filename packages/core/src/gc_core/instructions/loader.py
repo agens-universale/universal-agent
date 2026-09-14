@@ -33,6 +33,40 @@ def _wrap(sections: list[str]) -> str:
     return _PREAMBLE + "\n\n" + "\n\n".join(sections)
 
 
+def _load_l0(agent_md_path: str, *, is_tui: bool, agentsmd_override: bool,
+             logger: Any | None, verbose: bool) -> LoadedInstructions:
+    warnings: list[str] = []
+    if is_tui and agentsmd_override:
+        warnings.append(AGENTSMD_OVERRIDE_IGNORED_WARNING)
+    body = _read(Path(agent_md_path))
+    if body is None:
+        # agent_md_path is the caller-supplied override — unlike the optional
+        # global/project layers, its absence/unreadability is worth surfacing
+        # (verbose only), since the caller explicitly asked for it.
+        if logger is not None and verbose:
+            logger.warning(
+                "agent_md_read_failed",
+                extra={"event": "agent_md_read_failed", "path": str(agent_md_path)},
+            )
+        return LoadedInstructions(text="", loaded_ids=[], warnings=warnings)
+    text = _wrap([f"## {_L0_TITLE}\n{body.rstrip()}"])
+    return LoadedInstructions(text=text, loaded_ids=["L0"], warnings=warnings)
+
+
+def _load_layers(specs) -> LoadedInstructions:
+    sections: list[str] = []
+    loaded: list[str] = []
+    for spec in specs:
+        body = _read(spec.path)
+        if body is None:
+            continue
+        loaded.append(spec.id)
+        sections.append(f"## {spec.title}\n{body.rstrip()}")
+    if not sections:
+        return LoadedInstructions(text="", loaded_ids=[], warnings=[])
+    return LoadedInstructions(text=_wrap(sections), loaded_ids=loaded, warnings=[])
+
+
 def build_instructions(
     *,
     agent_md_path: str | None,
@@ -44,39 +78,15 @@ def build_instructions(
 ) -> LoadedInstructions:
     # 1. agent_md_path задан → ТОЛЬКО L0 (замена), в любом режиме. Путь > флаг.
     if agent_md_path:
-        warnings: list[str] = []
-        if is_tui and agentsmd_override:
-            warnings.append(AGENTSMD_OVERRIDE_IGNORED_WARNING)
-        body = _read(Path(agent_md_path))
-        if body is None:
-            # agent_md_path is the caller-supplied override — unlike the optional
-            # global/project layers, its absence/unreadability is worth surfacing
-            # (verbose only), since the caller explicitly asked for it.
-            if logger is not None and verbose:
-                logger.warning(
-                    "agent_md_read_failed",
-                    extra={"event": "agent_md_read_failed", "path": str(agent_md_path)},
-                )
-            return LoadedInstructions(text="", loaded_ids=[], warnings=warnings)
-        text = _wrap([f"## {_L0_TITLE}\n{body.rstrip()}"])
-        return LoadedInstructions(text=text, loaded_ids=["L0"], warnings=warnings)
+        return _load_l0(agent_md_path, is_tui=is_tui, agentsmd_override=agentsmd_override,
+                        logger=logger, verbose=verbose)
 
     # 2. TUI без L0 → собрать L1–L3 (или только L3 при override).
     if is_tui:
         specs = instruction_layer_specs(cwd=cwd)
         if agentsmd_override:
             specs = [s for s in specs if s.id == "L3"]
-        sections: list[str] = []
-        loaded: list[str] = []
-        for spec in specs:
-            body = _read(spec.path)
-            if body is None:
-                continue
-            loaded.append(spec.id)
-            sections.append(f"## {spec.title}\n{body.rstrip()}")
-        if not sections:
-            return LoadedInstructions(text="", loaded_ids=[], warnings=[])
-        return LoadedInstructions(text=_wrap(sections), loaded_ids=loaded, warnings=[])
+        return _load_layers(specs)
 
     # 3. CLI/server/swarm без L0 → пусто.
     return LoadedInstructions(text="", loaded_ids=[], warnings=[])

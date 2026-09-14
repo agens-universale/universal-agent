@@ -22,26 +22,28 @@ def serialize(records: Iterable[IntentRecord | Mapping[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _parse_legacy_raw_body(body: str) -> tuple[str, "str | dict[str, Any]"]:
+    """«tool: json» → (tool, content); без разделителя — ("unknown", body)."""
+    if ": " not in body:
+        return "unknown", body
+    tool_name, rest = body.split(": ", 1)
+    tool_name = tool_name.strip() or "unknown"
+    try:
+        parsed = json.loads(rest)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return tool_name, (parsed if "arguments" in parsed else {"arguments": parsed})
+    return tool_name, {"arguments": {}, "output": rest}
+
+
 def _legacy_string_to_record(text: str, *, turn: int = 1) -> IntentRecord | None:
     """Best-effort: old meta stored intent lines as plain strings."""
     line = str(text or "").strip()
     if not line:
         return None
     if line.startswith("[intent_scope:raw] "):
-        body = line[len("[intent_scope:raw] ") :].strip()
-        tool_name = "unknown"
-        content: str | dict[str, Any] = body
-        if ": " in body:
-            tool_name, rest = body.split(": ", 1)
-            tool_name = tool_name.strip() or "unknown"
-            try:
-                parsed = json.loads(rest)
-            except json.JSONDecodeError:
-                parsed = None
-            if isinstance(parsed, dict):
-                content = parsed if "arguments" in parsed else {"arguments": parsed}
-            else:
-                content = {"arguments": {}, "output": rest}
+        tool_name, content = _parse_legacy_raw_body(line[len("[intent_scope:raw] ") :].strip())
         return validate_record(
             IntentRecord(
                 turn=turn,

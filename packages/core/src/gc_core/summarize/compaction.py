@@ -65,6 +65,52 @@ def _intent_log_preview_chars_from_ctx(ctx: Any | None) -> int:
     return resolve_intent_log_preview_chars(summary_params)
 
 
+def _ensure_shared(state: Any):
+    shared = getattr(state, "shared", None)
+    if shared is None:
+        from gc_core.states import SharedStateData
+
+        shared = SharedStateData()
+        state.shared = shared
+    return shared
+
+
+def _patched_snapshot(snapshot, memory_append_deltas, memory_replace_deltas,
+                      memory_append_touched, memory_replace_touched):
+    """Снимок памяти после патча summary: replace-патч приоритетнее append-патча."""
+    append_deltas = coerce_working_memory_deltas(memory_append_deltas)
+    replace_deltas = coerce_working_memory_deltas(memory_replace_deltas)
+    append_touched_f = frozenset(memory_append_touched or ())
+    replace_touched_f = frozenset(memory_replace_touched or ())
+    if replace_touched_f or not replace_deltas.is_empty():
+        return apply_summary_memory_patch(
+            snapshot,
+            replace_deltas,
+            replace_touched=replace_touched_f or None,
+        )
+    if append_touched_f or not append_deltas.is_empty():
+        return apply_memory_patch(
+            snapshot,
+            append_deltas,
+            replace_deltas,
+            append_touched=append_touched_f or None,
+            replace_touched=replace_touched_f or None,
+        )
+    return snapshot
+
+
+def _previous_messages(state: Any) -> list:
+    messages = getattr(state, "messages", [])
+    return list(messages) if isinstance(messages, list) else []
+
+
+def _first_system_message(messages: list):
+    for msg in messages:
+        if isinstance(msg, dict) and str(msg.get("role", "")).strip().lower() == "system":
+            return msg
+    return None
+
+
 def apply_summary_state_patch(
     *,
     state: Any,
@@ -77,32 +123,15 @@ def apply_summary_state_patch(
     summarized_messages_count: int,
     intent_log_preview_chars: int | None = None,
 ) -> str:
-    shared = getattr(state, "shared", None)
-    if shared is None:
-        from gc_core.states import SharedStateData
+    shared = _ensure_shared(state)
 
-        shared = SharedStateData()
-        state.shared = shared
-
-    snapshot = read_snapshot_from_state(state)
-    append_deltas = coerce_working_memory_deltas(memory_append_deltas)
-    replace_deltas = coerce_working_memory_deltas(memory_replace_deltas)
-    append_touched_f = frozenset(memory_append_touched or ())
-    replace_touched_f = frozenset(memory_replace_touched or ())
-    if replace_touched_f or not replace_deltas.is_empty():
-        snapshot = apply_summary_memory_patch(
-            snapshot,
-            replace_deltas,
-            replace_touched=replace_touched_f or None,
-        )
-    elif append_touched_f or not append_deltas.is_empty():
-        snapshot = apply_memory_patch(
-            snapshot,
-            append_deltas,
-            replace_deltas,
-            append_touched=append_touched_f or None,
-            replace_touched=replace_touched_f or None,
-        )
+    snapshot = _patched_snapshot(
+        read_snapshot_from_state(state),
+        memory_append_deltas,
+        memory_replace_deltas,
+        memory_append_touched,
+        memory_replace_touched,
+    )
 
     wm_dict = {name: snapshot.to_dict().get(name, "") for name in REGISTER_ORDER}
     shared.working_memory = wm_dict
@@ -143,18 +172,8 @@ def apply_summary_state_patch(
         ),
         "id": generate_message_id_func("m_sum"),
     }
-    previous_messages = (
-        list(getattr(state, "messages", []))
-        if isinstance(getattr(state, "messages", []), list)
-        else []
-    )
-    system_message = None
-    for msg in previous_messages:
-        if not isinstance(msg, dict):
-            continue
-        if str(msg.get("role", "")).strip().lower() == "system":
-            system_message = msg
-            break
+    previous_messages = _previous_messages(state)
+    system_message = _first_system_message(previous_messages)
     dropped = [m for m in previous_messages if m is not system_message]
     _emit_messages_evicted(state, dropped)
     if isinstance(system_message, dict):
@@ -180,6 +199,41 @@ def history_exceeds_summary_trigger(
         )
         > summary_trigger_chars
     )
+
+
+def _fill_trace_final_output(trace: Dict[str, Any], **fields: Any) -> None:
+    final_out = trace.get("final_output")
+    if isinstance(final_out, dict):
+        final_out.update(fields)
+
+
+def _archive_suffix_of(summary_event: Dict[str, Any]) -> Optional[str]:
+    archive_suffix = summary_event.get("archive_suffix")
+    if isinstance(archive_suffix, str):
+        return archive_suffix.strip() or None
+    return None
+
+
+def _build_summary_payload(state: Any, summary_message_content: str) -> Dict[str, Any]:
+    # nested: cycle with persistence → states → tools → summarize
+    from gc_core.persistence.schema import serialize_shared_block
+
+    return {
+        "summary_message_content": summary_message_content,
+        # Весь shared-блок целиком, а не выборка полей: thread_store этим объектом
+        # ПОЛНОСТЬЮ заменяет meta["shared"], поэтому ручной список терял остальные
+        # поля (confirm_rules, fetch_url_cache, …) — детерминированно при ручном
+        # /compact (там нет post-run heal) и при обрыве рана.
+        "shared": serialize_shared_block(getattr(state, "shared", None)),
+        "user_intent_log": serialize_for_meta(
+            list(getattr(state, "user_intent_log", []) or [])
+        ),
+        "current_user_intent": serialize_for_meta(
+            list(getattr(state, "current_user_intent", []) or [])
+        ),
+        "user_turn_seq": int(getattr(state, "user_turn_seq", 0) or 0),
+        "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
+    }
 
 
 async def arun_summary_compaction(
@@ -282,34 +336,16 @@ async def arun_summary_compaction(
         intent_log_preview_chars=preview_chars,
     )
     if isinstance(trace, dict):
-        final_out = trace.get("final_output")
-        if isinstance(final_out, dict):
-            final_out["raw_summary"] = raw_summary
-            final_out["agent_summary_slice"] = agent_slice
-            final_out["agent_summary_text"] = agent_summary_text
-            final_out["summary_message_content"] = summary_message_content
+        _fill_trace_final_output(
+            trace,
+            raw_summary=raw_summary,
+            agent_summary_slice=agent_slice,
+            agent_summary_text=agent_summary_text,
+            summary_message_content=summary_message_content,
+        )
     log_summary_message_body(logger, log_ctx, summary_message_content)
 
-    # nested: cycle with persistence → states → tools → summarize
-    from gc_core.persistence.schema import serialize_shared_block
-
-    _shared = getattr(state, "shared", None)
-    summary_payload = {
-        "summary_message_content": summary_message_content,
-        # Весь shared-блок целиком, а не выборка полей: thread_store этим объектом
-        # ПОЛНОСТЬЮ заменяет meta["shared"], поэтому ручной список терял остальные
-        # поля (confirm_rules, fetch_url_cache, …) — детерминированно при ручном
-        # /compact (там нет post-run heal) и при обрыве рана.
-        "shared": serialize_shared_block(_shared),
-        "user_intent_log": serialize_for_meta(
-            list(getattr(state, "user_intent_log", []) or [])
-        ),
-        "current_user_intent": serialize_for_meta(
-            list(getattr(state, "current_user_intent", []) or [])
-        ),
-        "user_turn_seq": int(getattr(state, "user_turn_seq", 0) or 0),
-        "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
-    }
+    summary_payload = _build_summary_payload(state, summary_message_content)
     summary_event: Dict[str, Any] = {
         "trigger_reason": trigger_reason,
         "summary_payload": summary_payload,
@@ -323,11 +359,7 @@ async def arun_summary_compaction(
     if on_summary_applied is not None:
         await await_callback(on_summary_applied(summary_event))
 
-    archive_suffix = summary_event.get("archive_suffix")
-    if isinstance(archive_suffix, str):
-        archive_suffix = archive_suffix.strip() or None
-    else:
-        archive_suffix = None
+    archive_suffix = _archive_suffix_of(summary_event)
 
     new_serialized = calc_messages_chars_total(
         without_system_messages(getattr(state, "messages", [])),

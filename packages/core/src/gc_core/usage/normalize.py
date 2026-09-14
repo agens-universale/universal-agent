@@ -101,12 +101,12 @@ def _pick_cost(raw: dict) -> Optional[float]:
     return float(value)
 
 
-def normalize_usage(raw: Any, backend_mode: str | None = None) -> Optional[UsageSample]:
+def normalize_usage(raw: Any) -> Optional[UsageSample]:
     """Вернуть ``UsageSample`` с токенами и стоимостью или None, если usage не пришёл.
 
     ``cached`` — часть ``input`` (доля, попавшая в кэш-ставку); ограничена сверху input.
-    ``backend_mode`` сейчас не обязателен: оба набора ключей пробуются
-    одновременно, что устойчиво к расхождениям прокси/провайдеров.
+    Режим бэкенда не нужен: оба набора ключей пробуются одновременно, что
+    устойчиво к расхождениям прокси/провайдеров.
     """
     if not isinstance(raw, dict) or not raw:
         return None

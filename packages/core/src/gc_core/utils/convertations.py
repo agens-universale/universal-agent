@@ -32,26 +32,26 @@ def sanitize_messages_for_chat_completions(
     for message in messages:
         if not isinstance(message, dict):
             continue
-        if message.get("type") != "function_call":
+        if message.get("type") != "function_call" or _has_valid_json_arguments(message):
             sanitized.append(message)
             continue
-
-        raw_args = message.get("arguments")
-        is_valid_json_str = isinstance(raw_args, str) and bool(raw_args.strip())
-        if is_valid_json_str:
-            try:
-                json.loads(raw_args)
-                sanitized.append(message)
-                continue
-            except Exception:  # noqa: BLE001
-                pass
-
         if callable(invalid_tool_call_factory):
             replaced = invalid_tool_call_factory(message)
             if isinstance(replaced, dict):
                 sanitized.append(replaced)
         # Без фабрики просто не отправляем невалидный function_call.
     return sanitized
+
+
+def _has_valid_json_arguments(message: Dict) -> bool:
+    raw_args = message.get("arguments")
+    if not isinstance(raw_args, str) or not raw_args.strip():
+        return False
+    try:
+        json.loads(raw_args)
+    except Exception:  # noqa: BLE001
+        return False
+    return True
 
 
 def get_md5_hash(obj):
@@ -77,81 +77,96 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                 "Chat completion provider returned choice error: "
                 f"code={err_code!r} message={err_message!r} metadata={err_metadata!r}"
             )
-        fr = dct_choice.get("finish_reason")
+        _check_choice_finish_reason(dct, dct_choice, logger_override)
         msg_obj = dct_choice.get("message") or {}
-        _decision = normalize_finish_reason(
-            fr,
-            has_content=bool(msg_obj.get("content")),
-            has_tool_calls=bool(msg_obj.get("tool_calls")),
-        )
-        if not _decision.accept:
-            if logger_override is not None:
-                logger_override.error(
-                    "Empty/unusable chat/completions response (finish_reason=%r, "
-                    "no content/tool_calls): payload=%s",
-                    fr, _safe_json_for_log(dct),
-                )
-            raise ValueError(
-                f"Backend returned empty/unusable response (finish_reason={fr!r})"
-            )
-        if _decision.unknown and logger_override is not None:
-            logger_override.warning(
-                "Unknown finish_reason=%r accepted permissively (content/tool_calls "
-                "present): payload=%s",
-                fr, _safe_json_for_log(dct),
-            )
-        if fr == "length" and logger_override is not None:
-            logger_override.warning(
-                "chat/completions choice finished with length (output may be truncated; "
-                "tool JSON may be incomplete). payload=%s",
-                _safe_json_for_log(dct),
-            )
 
         # Message-item: есть проза, либо persist_reasoning_content и есть
         # reasoning_content при content=None — носитель CoT на tool-only такте.
         # Пустой message без ризонинга не плодим.
-        content = msg_obj.get("content")
-        reasoning = None
-        if persist_reasoning_content:
-            reasoning = msg_obj.get("reasoning_content")
-        if content is not None or reasoning is not None:
-            id_choice = get_md5_hash(dct_choice)
-            item = {
-                "id": "msg_" + id_choice,
-                "type": "message",
-                "status": "completed",
-                "content": [{
-                    "type": "output_text",
-                    "annotations": [],
-                    "logprobs": [],
-                    "text": "" if content is None else content
-                }],
-                "role": msg_obj.get("role")
-            }
-            if reasoning is not None:
-                item["reasoning_content"] = reasoning
+        item = _message_item(dct_choice, msg_obj, persist_reasoning_content)
+        if item is not None:
             output_list.append(item)
 
         # --- FIX 2: Generate a unique ID for each tool call ---
 
         if dct_choice['message'].get("tool_calls", None) is not None:
             for tool_call_dict in dct_choice['message']['tool_calls']:
-                if tool_call_dict['type'] != 'function':
-                    raise ValueError("Unknown logic")
-
-                # Generate a unique hash for THIS specific tool call
-                id_tool_call = get_md5_hash(tool_call_dict)
-
-                output_list.append({
-                    "arguments": tool_call_dict['function']['arguments'],
-                    "call_id": tool_call_dict['id'],
-                    "name": tool_call_dict['function']['name'],
-                    "type": "function_call",
-                    "id": "fc_" + id_tool_call,  # Use the new unique ID
-                    "status": "completed"
-                })
+                output_list.append(_function_call_item(tool_call_dict))
 
     return output_list
+
+
+def _check_choice_finish_reason(dct, dct_choice, logger_override) -> None:
+    """Отвергнуть пустой/непригодный choice (ValueError); спорные finish_reason — в лог."""
+    fr = dct_choice.get("finish_reason")
+    msg_obj = dct_choice.get("message") or {}
+    _decision = normalize_finish_reason(
+        fr,
+        has_content=bool(msg_obj.get("content")),
+        has_tool_calls=bool(msg_obj.get("tool_calls")),
+    )
+    if not _decision.accept:
+        if logger_override is not None:
+            logger_override.error(
+                "Empty/unusable chat/completions response (finish_reason=%r, "
+                "no content/tool_calls): payload=%s",
+                fr, _safe_json_for_log(dct),
+            )
+        raise ValueError(
+            f"Backend returned empty/unusable response (finish_reason={fr!r})"
+        )
+    if logger_override is None:
+        return
+    if _decision.unknown:
+        logger_override.warning(
+            "Unknown finish_reason=%r accepted permissively (content/tool_calls "
+            "present): payload=%s",
+            fr, _safe_json_for_log(dct),
+        )
+    if fr == "length":
+        logger_override.warning(
+            "chat/completions choice finished with length (output may be truncated; "
+            "tool JSON may be incomplete). payload=%s",
+            _safe_json_for_log(dct),
+        )
+
+
+def _message_item(dct_choice, msg_obj, persist_reasoning_content: bool):
+    """Message-item канона либо None (пустой message без ризонинга не плодим)."""
+    content = msg_obj.get("content")
+    reasoning = msg_obj.get("reasoning_content") if persist_reasoning_content else None
+    if content is None and reasoning is None:
+        return None
+    item = {
+        "id": "msg_" + get_md5_hash(dct_choice),
+        "type": "message",
+        "status": "completed",
+        "content": [{
+            "type": "output_text",
+            "annotations": [],
+            "logprobs": [],
+            "text": "" if content is None else content
+        }],
+        "role": msg_obj.get("role")
+    }
+    if reasoning is not None:
+        item["reasoning_content"] = reasoning
+    return item
+
+
+def _function_call_item(tool_call_dict) -> dict:
+    if tool_call_dict['type'] != 'function':
+        raise ValueError("Unknown logic")
+    # Generate a unique hash for THIS specific tool call
+    id_tool_call = get_md5_hash(tool_call_dict)
+    return {
+        "arguments": tool_call_dict['function']['arguments'],
+        "call_id": tool_call_dict['id'],
+        "name": tool_call_dict['function']['name'],
+        "type": "function_call",
+        "id": "fc_" + id_tool_call,  # Use the new unique ID
+        "status": "completed"
+    }
 
 
 def output_chat_completion_to_response(

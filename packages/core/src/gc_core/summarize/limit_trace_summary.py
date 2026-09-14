@@ -74,6 +74,28 @@ def _build_message(state: Any, reason: str, config_dict: dict[str, Any]) -> str:
     return f"Agent stopped: {label}."
 
 
+def _trace_line(m: dict[str, Any]) -> str:
+    mtype = m.get("type", "")
+    # --- Tool call: {name, arguments, type:"function_call"} ---
+    if mtype == "function_call":
+        args = m.get("arguments", "")
+        text = str(args) if args is not None else ""
+        return f"[tool_call:{m.get('name', '?')}] {text}"
+    # --- Tool output: {output, type:"function_call_output"} ---
+    if mtype == "function_call_output":
+        output = m.get("output", "")
+        text = str(output) if output is not None else ""
+        return f"[tool_output] {text}"
+    # --- Text message: {role, content, type:"message"} ---
+    role = m.get("role", "?")
+    content = m.get("content", "")
+    name = m.get("name", "")
+    # Компактное представление: role + content (и name если есть).
+    tag = f"{role}/{name}" if name else role
+    text = str(content) if content is not None else ""
+    return f"[{tag}] {text}"
+
+
 def _serialize_trace(state_messages: list[dict[str, Any]]) -> str:
     """Сериализует активный трейс (messages после system) в текст для промпта.
 
@@ -90,33 +112,7 @@ def _serialize_trace(state_messages: list[dict[str, Any]]) -> str:
 
     lines: list[str] = []
     for m in trace_msgs:
-        mtype = m.get("type", "")
-
-        # --- Tool call: {name, arguments, type:"function_call"} ---
-        if mtype == "function_call":
-            name = m.get("name", "?")
-            args = m.get("arguments", "")
-            text = str(args) if args is not None else ""
-            lines.append(f"[tool_call:{name}] {text}")
-            continue
-
-        # --- Tool output: {output, type:"function_call_output"} ---
-        if mtype == "function_call_output":
-            output = m.get("output", "")
-            text = str(output) if output is not None else ""
-            lines.append(f"[tool_output] {text}")
-            continue
-
-        # --- Text message: {role, content, type:"message"} ---
-        role = m.get("role", "?")
-        content = m.get("content", "")
-        name = m.get("name", "")
-        # Компактное представление: role + content (и name если есть).
-        tag = role
-        if name:
-            tag = f"{role}/{name}"
-        text = str(content) if content is not None else ""
-        lines.append(f"[{tag}] {text}")
+        lines.append(_trace_line(m))
 
     return "\n".join(lines)
 

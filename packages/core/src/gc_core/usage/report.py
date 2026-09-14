@@ -63,17 +63,9 @@ def format_parts(parts: list[CostPart], unpriced: bool = False, mark_tariff: boo
 
 
 def render_cost_report(report: CostReport, *, model_name: str | None = None, title: str = "Run usage") -> str:
-    lines: list[str] = []
-    header = title
-    if model_name:
-        header = f"{title}    model: {model_name}"
-    lines.append(header)
-
+    lines: list[str] = [_report_header(title, model_name)]
     show_cost = report.has_cost
-    if show_cost:
-        lines.append(f"{'category':<20}{'input':>10}{'output':>10}{'cost':>22}")
-    else:
-        lines.append(f"{'category':<20}{'input':>10}{'output':>10}")
+    lines.append(_columns_header(show_cost))
 
     # Тильда осмысленна только когда в отчёте есть ОБЕ стороны — факт и тариф;
     # чисто тарифный (или чисто фактический) отчёт её не ставит нигде.
@@ -82,10 +74,7 @@ def render_cost_report(report: CostReport, *, model_name: str | None = None, tit
     mark_tariff = has_provider_part and has_tariff_part
 
     for c in report.categories:
-        row = f"{c.category:<20}{format_tokens(c.input):>10}{format_tokens(c.output):>10}"
-        if show_cost:
-            row += f"{format_parts(c.parts, c.unpriced, mark_tariff):>22}"
-        lines.append(row)
+        lines.append(_category_row(c, show_cost=show_cost, mark_tariff=mark_tariff))
 
     lines.append("─" * (62 if show_cost else 40))
     total_row = (
@@ -93,54 +82,88 @@ def render_cost_report(report: CostReport, *, model_name: str | None = None, tit
         f"{format_tokens(report.total_output):>10}"
     )
     if show_cost:
-        suffix = "?" if report.has_unpriced else ""
-        if report.multi_currency:
-            # >1 валюты: единого total нет — выводим сабтоталы отдельной секцией ниже.
-            total_row += f"{'—' + suffix:>22}"
-        else:
-            cur, amount = next(iter(report.by_currency.items()), (None, 0.0))
-            cell = (format_money(amount, cur) if cur else "—") + suffix
-            total_row += f"{cell:>22}"
+        total_row += f"{_total_cost_cell(report):>22}"
     lines.append(total_row)
 
     if show_cost and report.multi_currency:
-        # Метка подытога — из фактических источников частей, попавших в эту
-        # валюту, а не из самой валюты (валюта факта и валюта тарифа могут совпасть).
-        sources_by_currency: dict[str, set] = {}
-        for c in report.categories:
-            for p in c.parts:
-                sources_by_currency.setdefault(p.currency, set()).add(p.source)
-        lines.append("subtotals by currency:")
-        for cur, amount in report.by_currency.items():
-            sources = sources_by_currency.get(cur, set())
-            if sources == {"provider"}:
-                label = "факт провайдера"
-            elif sources == {"tariff"}:
-                label = "расчёт по тарифу"
-            else:
-                label = "факт + расчёт"
-            lines.append(f"  {format_money(amount, cur)} ({label})")
+        lines.extend(_currency_subtotal_lines(report))
 
+    lines.extend(_usage_caveat_lines(report))
+
+    if show_cost:
+        lines.extend(_legend_lines(report, mark_tariff))
+
+    return "\n".join(lines)
+
+
+def _columns_header(show_cost: bool) -> str:
+    base = f"{'category':<20}{'input':>10}{'output':>10}"
+    return base + f"{'cost':>22}" if show_cost else base
+
+
+def _legend_lines(report: CostReport, mark_tariff: bool) -> list[str]:
+    lines: list[str] = []
+    if mark_tariff:
+        lines.append("~ — расчёт по тарифу")
+    if report.has_unpriced:
+        lines.append("? — часть вызовов без цены, итог неполный")
+    return lines
+
+
+def _report_header(title: str, model_name: str | None) -> str:
+    return f"{title}    model: {model_name}" if model_name else title
+
+
+def _category_row(c: Any, *, show_cost: bool, mark_tariff: bool) -> str:
+    row = f"{c.category:<20}{format_tokens(c.input):>10}{format_tokens(c.output):>10}"
+    if show_cost:
+        row += f"{format_parts(c.parts, c.unpriced, mark_tariff):>22}"
+    return row
+
+
+def _usage_caveat_lines(report: CostReport) -> list[str]:
+    lines: list[str] = []
     if report.total_cached > 0:
         share = report.total_cached / report.total_input * 100 if report.total_input else 0
         lines.append(
             f"из них cached input: {format_tokens(report.total_cached)} "
             f"({share:.0f}% — по cache-ставке)"
         )
-
     if report.total_missing_usage_calls > 0:
         lines.append(
             f"⚠ {report.total_missing_usage_calls} вызов(ов) без usage не учтены "
             f"(итог — нижняя граница)"
         )
+    return lines
 
-    if show_cost:
-        if mark_tariff:
-            lines.append("~ — расчёт по тарифу")
-        if report.has_unpriced:
-            lines.append("? — часть вызовов без цены, итог неполный")
 
-    return "\n".join(lines)
+def _total_cost_cell(report: CostReport) -> str:
+    suffix = "?" if report.has_unpriced else ""
+    if report.multi_currency:
+        # >1 валюты: единого total нет — выводим сабтоталы отдельной секцией ниже.
+        return "—" + suffix
+    cur, amount = next(iter(report.by_currency.items()), (None, 0.0))
+    return (format_money(amount, cur) if cur else "—") + suffix
+
+
+def _currency_subtotal_lines(report: CostReport) -> list[str]:
+    # Метка подытога — из фактических источников частей, попавших в эту
+    # валюту, а не из самой валюты (валюта факта и валюта тарифа могут совпасть).
+    sources_by_currency: dict[str, set] = {}
+    for c in report.categories:
+        for p in c.parts:
+            sources_by_currency.setdefault(p.currency, set()).add(p.source)
+    lines = ["subtotals by currency:"]
+    for cur, amount in report.by_currency.items():
+        sources = sources_by_currency.get(cur, set())
+        if sources == {"provider"}:
+            label = "факт провайдера"
+        elif sources == {"tariff"}:
+            label = "расчёт по тарифу"
+        else:
+            label = "факт + расчёт"
+        lines.append(f"  {format_money(amount, cur)} ({label})")
+    return lines
 
 
 def build_run_usage_report(
@@ -176,21 +199,7 @@ def build_run_usage_dict(
 
     categories: dict[str, dict[str, Any]] = {}
     for c in report.categories:
-        entry: dict[str, Any] = {"input": c.input, "output": c.output}
-        if c.cached:
-            entry["cached"] = c.cached
-        if c.missing_usage_calls:
-            entry["missing_usage_calls"] = c.missing_usage_calls
-        if report.has_cost:
-            entry["cost_source"] = c.cost_source
-            entry["cost_parts"] = [
-                {"amount": p.amount, "currency": p.currency, "source": p.source} for p in c.parts
-            ]
-            entry["unpriced"] = c.unpriced
-            if len(c.parts) == 1:
-                entry["cost"] = c.parts[0].amount
-                entry["currency"] = c.parts[0].currency
-        categories[c.category] = entry
+        categories[c.category] = _category_usage_entry(c, has_cost=report.has_cost)
 
     total: dict[str, Any] = {"input": report.total_input, "output": report.total_output}
     if report.total_cached:
@@ -206,3 +215,21 @@ def build_run_usage_dict(
     if report.has_cost:
         out["cost"] = {"by_currency": dict(report.by_currency)}
     return out
+
+
+def _category_usage_entry(c: Any, *, has_cost: bool) -> dict[str, Any]:
+    entry: dict[str, Any] = {"input": c.input, "output": c.output}
+    if c.cached:
+        entry["cached"] = c.cached
+    if c.missing_usage_calls:
+        entry["missing_usage_calls"] = c.missing_usage_calls
+    if has_cost:
+        entry["cost_source"] = c.cost_source
+        entry["cost_parts"] = [
+            {"amount": p.amount, "currency": p.currency, "source": p.source} for p in c.parts
+        ]
+        entry["unpriced"] = c.unpriced
+        if len(c.parts) == 1:
+            entry["cost"] = c.parts[0].amount
+            entry["currency"] = c.parts[0].currency
+    return entry

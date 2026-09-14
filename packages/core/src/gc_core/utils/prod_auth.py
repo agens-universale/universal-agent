@@ -7,6 +7,10 @@ from gc_core.utils.http_proxy import resolve_proxies
 from gc_core.utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION
 
 
+class AuthEntryPointError(RuntimeError):
+    """Точка входа авторизации ответила не так, как ожидает протокол."""
+
+
 class AuthConnector:
 
     def __init__(self, entry_point: str, env_name: str, env_version: str, plugin_name: str,
@@ -33,11 +37,11 @@ class AuthConnector:
         proxies = resolve_proxies(config_proxy, os.environ, url)
         resp = _NO_NETRC_SESSION.get(url, timeout=10, verify=verify, proxies=proxies)
         if resp.status_code != 401:
-            raise Exception(f'Incorrect status code from entry point: {resp.status_code}')
+            raise AuthEntryPointError(f'Incorrect status code from entry point: {resp.status_code}')
 
         auth_url = resp.headers.get('X-Authorization-Url', None)
         if auth_url is None:
-            raise Exception('Auth url is incorrect. Check entry point')
+            raise AuthEntryPointError('Auth url is incorrect. Check entry point')
         return auth_url
 
     @staticmethod

@@ -231,6 +231,16 @@ class Skill:
         return sorted(self.assets.keys())
 
 
+def _skill_listed(skill: Skill, *, pack: Optional[str], include_all: bool, bootstrap_ids: Dict[str, str]) -> bool:
+    """Фильтр list_skills: pack → только его internal; include_all → все; иначе flat + bootstraps."""
+    if pack is not None:
+        return skill.pack_id == pack
+    if include_all:
+        return True
+    # default: flat + bootstraps; internal — показываем только если это bootstrap
+    return skill.pack_id is None or bootstrap_ids.get(skill.pack_id) == skill.id
+
+
 class SkillsRegistry:
     """
     Простой реестр скиллов, основанный только на файловой структуре skills_data/.
@@ -290,6 +300,24 @@ class SkillsRegistry:
         Нужно, чтобы созданный посреди прогона скилл стал виден без рестарта."""
         self._loaded = False
 
+    async def _load_root_entry(self, root: str, entry: str, source: str) -> None:
+        """Каталог в корне слоя: пак (pack.yaml) либо одиночный скилл (SKILL.md)."""
+        entry_path = self._backend.join(root, entry)
+        has_pack_yaml = await self._backend.is_file(self._backend.join(entry_path, "pack.yaml"))
+        has_skill_md = await self._backend.is_file(self._backend.join(entry_path, "SKILL.md"))
+        if has_pack_yaml and self._walk_packs_enabled:
+            if has_skill_md:
+                logger.warning(
+                    "Directory '%s' has both pack.yaml and SKILL.md on its root. "
+                    "Treating as a pack; the root-level SKILL.md is ignored.",
+                    entry_path,
+                )
+            await self._load_pack_contents(entry_path, dir_name=entry, source=source)
+        elif has_skill_md:
+            skill = await self._load_skill_dir(entry_path, dir_name=entry, source=source)
+            if skill is not None and skill.id not in self._disabled:
+                self._skills_by_id[skill.id] = skill
+
     async def _load_all_skills(self) -> None:
         self._skills_by_id.clear()
         self._packs_by_id.clear()
@@ -303,23 +331,8 @@ class SkillsRegistry:
             if not root or not await self._backend.is_dir(root):
                 continue
             for entry, is_dir in await self._backend.listdir(root):
-                entry_path = self._backend.join(root, entry)
-                if not is_dir:
-                    continue
-                has_pack_yaml = await self._backend.is_file(self._backend.join(entry_path, "pack.yaml"))
-                has_skill_md = await self._backend.is_file(self._backend.join(entry_path, "SKILL.md"))
-                if has_pack_yaml and self._walk_packs_enabled:
-                    if has_skill_md:
-                        logger.warning(
-                            "Directory '%s' has both pack.yaml and SKILL.md on its root. "
-                            "Treating as a pack; the root-level SKILL.md is ignored.",
-                            entry_path,
-                        )
-                    await self._load_pack_contents(entry_path, dir_name=entry, source=source)
-                elif has_skill_md:
-                    skill = await self._load_skill_dir(entry_path, dir_name=entry, source=source)
-                    if skill is not None and skill.id not in self._disabled:
-                        self._skills_by_id[skill.id] = skill
+                if is_dir:
+                    await self._load_root_entry(root, entry, source)
                 # else: пусто, скип
 
     async def _load_skill_dir(
@@ -418,6 +431,55 @@ class SkillsRegistry:
 
     # Публичный API реестра
 
+    def _bootstrap_index(self) -> tuple:
+        """(pack_id → canonical id bootstrap-скилла, pack_id → размер пака)."""
+        bootstrap_ids: Dict[str, str] = {}
+        pack_sizes: Dict[str, int] = {}
+        for pid, manifest in self._packs_by_id.items():
+            pack_sizes[pid] = sum(
+                1 for s in self._skills_by_id.values() if s.pack_id == pid
+            )
+            bs = manifest.get("bootstrap_skill")
+            if not (isinstance(bs, str) and bs.strip()):
+                continue
+            bootstrap_id = self._resolve_bootstrap_id(pid, bs)
+            if bootstrap_id is not None:
+                bootstrap_ids[pid] = bootstrap_id
+        return bootstrap_ids, pack_sizes
+
+    def _resolve_bootstrap_id(self, pid: str, bs: str) -> Optional[str]:
+        # 1) Direct canonical lookup: bootstrap_skill matches frontmatter id.
+        bootstrap_canonical = f"{pid}:{bs}"
+        if bootstrap_canonical in self._skills_by_id:
+            return bootstrap_canonical
+        # 2) Fallback: bootstrap_skill matches the folder name of an inner skill.
+        # Allows pack authors to write the inner skill's directory name (intuitive)
+        # even when the SKILL.md frontmatter overrides id. Without this, a folder
+        # named "entry/" with frontmatter id "actual-entry" plus
+        # bootstrap_skill: entry in pack.yaml would silently make the pack invisible.
+        for skill in self._skills_by_id.values():
+            if skill.pack_id == pid and _basename(skill.root_path) == bs:
+                return skill.id
+        return None
+
+    @staticmethod
+    def _skill_entry(skill: Skill, bootstrap_ids: Dict[str, str], pack_sizes: Dict[str, int]) -> Dict[str, Any]:
+        entry: Dict[str, Any] = {
+            "id": skill.id,
+            "name": skill.name,
+            "description": skill.description,
+            "source": skill.source,
+            "root_path": skill.root_path,
+            "location": skill.root_path,
+            "scripts": skill.scripts,
+            "pack_id": skill.pack_id,
+            "is_pack_bootstrap": False,
+        }
+        if skill.pack_id and bootstrap_ids.get(skill.pack_id) == skill.id:
+            entry["is_pack_bootstrap"] = True
+            entry["pack_size"] = pack_sizes[skill.pack_id]
+        return entry
+
     async def list_skills(
         self,
         *,
@@ -437,60 +499,13 @@ class SkillsRegistry:
         self.reload()
         await self._ensure_loaded()
 
-        bootstrap_ids: Dict[str, str] = {}  # pack_id -> canonical bootstrap skill id
-        pack_sizes: Dict[str, int] = {}
-        for pid, manifest in self._packs_by_id.items():
-            pack_sizes[pid] = sum(
-                1 for s in self._skills_by_id.values() if s.pack_id == pid
-            )
-            bs = manifest.get("bootstrap_skill")
-            if not (isinstance(bs, str) and bs.strip()):
-                continue
-            # 1) Direct canonical lookup: bootstrap_skill matches frontmatter id.
-            bootstrap_canonical = f"{pid}:{bs}"
-            if bootstrap_canonical in self._skills_by_id:
-                bootstrap_ids[pid] = bootstrap_canonical
-                continue
-            # 2) Fallback: bootstrap_skill matches the folder name of an inner skill.
-            # Allows pack authors to write the inner skill's directory name (intuitive)
-            # even when the SKILL.md frontmatter overrides id. Without this, a folder
-            # named "entry/" with frontmatter id "actual-entry" plus
-            # bootstrap_skill: entry in pack.yaml would silently make the pack invisible.
-            for skill in self._skills_by_id.values():
-                if skill.pack_id == pid and _basename(skill.root_path) == bs:
-                    bootstrap_ids[pid] = skill.id
-                    break
+        bootstrap_ids, pack_sizes = self._bootstrap_index()
 
         result: List[Dict[str, Any]] = []
         for skill in self._skills_by_id.values():
-            # Решаем, попадает ли скилл в фильтр
-            if pack is not None:
-                if skill.pack_id != pack:
-                    continue
-            elif include_all:
-                pass  # все
-            else:
-                # default: flat + bootstraps
-                if skill.pack_id is not None:
-                    # internal — показываем только если это bootstrap
-                    if bootstrap_ids.get(skill.pack_id) != skill.id:
-                        continue
-
-            entry: Dict[str, Any] = {
-                "id": skill.id,
-                "name": skill.name,
-                "description": skill.description,
-                "source": skill.source,
-                "root_path": skill.root_path,
-                "location": skill.root_path,
-                "scripts": skill.scripts,
-                "pack_id": skill.pack_id,
-                "is_pack_bootstrap": False,
-            }
-            if skill.pack_id and bootstrap_ids.get(skill.pack_id) == skill.id:
-                entry["is_pack_bootstrap"] = True
-                entry["pack_size"] = pack_sizes[skill.pack_id]
-            result.append(entry)
+            if not _skill_listed(skill, pack=pack, include_all=include_all, bootstrap_ids=bootstrap_ids):
+                continue
+            result.append(self._skill_entry(skill, bootstrap_ids, pack_sizes))
         return result
 
     def _resolve_pack_bootstrap(self, pack_id: str) -> Optional[Skill]:
@@ -502,12 +517,11 @@ class SkillsRegistry:
         not a known pack or the pack declares no resolvable bootstrap.
         """
         normalized = pack_id.replace("_", "-")
-        canonical_pid = (
-            pack_id if pack_id in self._packs_by_id
-            else normalized if normalized in self._packs_by_id
-            else None
-        )
-        if canonical_pid is None:
+        if pack_id in self._packs_by_id:
+            canonical_pid = pack_id
+        elif normalized in self._packs_by_id:
+            canonical_pid = normalized
+        else:
             return None
         bs = self._packs_by_id[canonical_pid].get("bootstrap_skill")
         if not (isinstance(bs, str) and bs.strip()):
@@ -545,6 +559,30 @@ class SkillsRegistry:
         base = f"Skill '{skill_id}' not found"
         return f"{base}. Did you mean: {cands}?" if cands else base
 
+    def _lookup_canonical(self, skill_id: str) -> Optional[Skill]:
+        """Lookup по canonical id 'pack:skill' с нормализацией skill-сегмента."""
+        skill = self._skills_by_id.get(skill_id)
+        if skill is not None:
+            return skill
+        # Нормализация только skill-сегмента (часть после ':').
+        pack_part, _, tail = skill_id.partition(":")
+        normalized_tail = tail.replace("_", "-")
+        skill = self._skills_by_id.get(f"{pack_part}:{normalized_tail}")
+        if skill is None and pack_part in (tail, normalized_tail):
+            # Удвоённый namespace (pack==skill, напр. 'x:x') — модель угадала
+            # форму pack:skill для flat-скилла. Безопасный bare-lookup по хвосту.
+            skill = (self._skills_by_id.get(tail)
+                     or self._skills_by_id.get(normalized_tail))
+        return skill
+
+    def _alias_candidates(self, normalized: str) -> List[Skill]:
+        candidates: List[Skill] = []
+        for canonical, s in self._skills_by_id.items():
+            tail = canonical.split(":", 1)[1] if ":" in canonical else canonical
+            if tail == normalized or tail.replace("-", "_") == normalized.replace("-", "_"):
+                candidates.append(s)
+        return candidates
+
     async def _lookup_skill(self, skill_id: str) -> Skill:
         await self._ensure_loaded()
         if not isinstance(skill_id, str):
@@ -555,28 +593,14 @@ class SkillsRegistry:
 
         # 1) Прямой canonical lookup (если содержит ':').
         if ":" in skill_id:
-            skill = self._skills_by_id.get(skill_id)
-            if skill is None:
-                # Нормализация только skill-сегмента (часть после ':').
-                pack_part, _, tail = skill_id.partition(":")
-                normalized_tail = tail.replace("_", "-")
-                skill = self._skills_by_id.get(f"{pack_part}:{normalized_tail}")
-                if skill is None and pack_part in (tail, normalized_tail):
-                    # Удвоённый namespace (pack==skill, напр. 'x:x') — модель угадала
-                    # форму pack:skill для flat-скилла. Безопасный bare-lookup по хвосту.
-                    skill = (self._skills_by_id.get(tail)
-                             or self._skills_by_id.get(normalized_tail))
+            skill = self._lookup_canonical(skill_id)
             if skill is None:
                 raise KeyError(self._not_found_message(skill_id))
             return skill
 
         # 2) Short alias — собрать кандидатов по skill-сегменту.
         normalized = skill_id.replace("_", "-")
-        candidates: List[Skill] = []
-        for canonical, s in self._skills_by_id.items():
-            tail = canonical.split(":", 1)[1] if ":" in canonical else canonical
-            if tail == normalized or tail.replace("-", "_") == normalized.replace("-", "_"):
-                candidates.append(s)
+        candidates = self._alias_candidates(normalized)
 
         if len(candidates) == 0:
             # Bare pack-id (e.g. "science-article-creator") → resolve to the

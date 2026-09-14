@@ -11,6 +11,38 @@ from gc_core.security.command_moderation import moderate_command_execution
 from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
 
 
+def _parse_env_vars(env_vars) -> "tuple[dict[str, str], dict | None]":
+    """Список {'name','value'} → dict; (пусто, error) при первой невалидной записи."""
+    if env_vars is None:
+        return {}, None
+    if not isinstance(env_vars, list):
+        return {}, {
+            "type": "invalid_argument",
+            "field": "env_vars",
+            "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
+        }
+    env_from_pairs: dict[str, str] = {}
+    for idx, item in enumerate(env_vars):
+        if not isinstance(item, dict):
+            return {}, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}]",
+                "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
+            }
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return {}, {"type": "invalid_argument", "field": f"env_vars[{idx}].name"}
+        value = item.get("value")
+        if not isinstance(value, str):
+            return {}, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}].value",
+                "message": "env_vars value must be a string",
+            }
+        env_from_pairs[name.strip()] = value
+    return env_from_pairs, None
+
+
 class ExecuteCommand(AbstractSimpleTool):
     """
     Tool to execute a CLI command on the system and return its output.
@@ -160,6 +192,15 @@ Important Usage Rules:
             error=error,
         )
 
+    async def _cwd_error(self, cwd_used) -> "dict | None":
+        if cwd_used is None:
+            return None
+        if not isinstance(cwd_used, str) or not cwd_used.strip():
+            return {"type": "invalid_argument", "field": "cwd"}
+        if not await self._backend.is_dir(cwd_used):
+            return {"type": "invalid_argument", "field": "cwd", "message": "Not a directory"}
+        return None
+
     async def _plan(
         self,
         command: str,
@@ -176,134 +217,36 @@ Important Usage Rules:
         """
         cwd_used = cwd if cwd is not None else self._backend.default_cwd()
 
-        # Input validation
-        if not isinstance(command, str):
+        def reject(error: dict, *, cmd: str = command, cwd_val: "str | None" = None) -> "tuple[str, dict]":
             return self._result(
                 ok=False,
-                command=str(command),
-                cwd=cwd_used or "",
+                command=cmd,
+                cwd=(cwd_used or "") if cwd_val is None else cwd_val,
                 exit_code=None,
                 timed_out=False,
                 stdout="",
                 stderr="",
-                error={"type": "invalid_argument", "field": "command"},
+                error=error,
             ), {}
 
+        # Input validation
+        if not isinstance(command, str):
+            return reject({"type": "invalid_argument", "field": "command"}, cmd=str(command))
         if not command.strip():
-            return self._result(
-                ok=False,
-                command=command,
-                cwd=cwd_used or "",
-                exit_code=None,
-                timed_out=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "command", "message": "Empty command"},
-            ), {}
+            return reject({"type": "invalid_argument", "field": "command", "message": "Empty command"})
 
         if timeout_seconds is None:
             timeout_seconds = exec_timeout_from_config_dict(self._config_dict)
         if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
-            return self._result(
-                ok=False,
-                command=command,
-                cwd=cwd_used or "",
-                exit_code=None,
-                timed_out=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "timeout_seconds"},
-            ), {}
+            return reject({"type": "invalid_argument", "field": "timeout_seconds"})
 
+        cwd_error = await self._cwd_error(cwd_used)
+        if cwd_error is not None:
+            return reject(cwd_error, cwd_val=str(cwd_used))
 
-        if cwd_used is not None:
-            if not isinstance(cwd_used, str) or not cwd_used.strip():
-                return self._result(
-                    ok=False,
-                    command=command,
-                    cwd=str(cwd_used),
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={"type": "invalid_argument", "field": "cwd"},
-                ), {}
-            if not await self._backend.is_dir(cwd_used):
-                return self._result(
-                    ok=False,
-                    command=command,
-                    cwd=cwd_used,
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={"type": "invalid_argument", "field": "cwd", "message": "Not a directory"},
-                ), {}
-
-        env_sanitized: dict[str, str] = {}
-        if env_vars is not None:
-            if not isinstance(env_vars, list):
-                return self._result(
-                    ok=False,
-                    command=command,
-                    cwd=cwd_used or "",
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={
-                        "type": "invalid_argument",
-                        "field": "env_vars",
-                        "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
-                    },
-                ), {}
-            env_from_pairs: dict[str, str] = {}
-            for idx, item in enumerate(env_vars):
-                if not isinstance(item, dict):
-                    return self._result(
-                        ok=False,
-                        command=command,
-                        cwd=cwd_used or "",
-                        exit_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={
-                            "type": "invalid_argument",
-                            "field": f"env_vars[{idx}]",
-                            "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
-                        },
-                    ), {}
-                name = item.get("name")
-                if not isinstance(name, str) or not name.strip():
-                    return self._result(
-                        ok=False,
-                        command=command,
-                        cwd=cwd_used or "",
-                        exit_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
-                    ), {}
-                value = item.get("value")
-                if not isinstance(value, str):
-                    return self._result(
-                        ok=False,
-                        command=command,
-                        cwd=cwd_used or "",
-                        exit_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={
-                            "type": "invalid_argument",
-                            "field": f"env_vars[{idx}].value",
-                            "message": "env_vars value must be a string",
-                        },
-                    ), {}
-                env_from_pairs[name.strip()] = value
-            env_sanitized = env_from_pairs
+        env_sanitized, env_error = _parse_env_vars(env_vars)
+        if env_error is not None:
+            return reject(env_error)
 
         return None, {
             "command": command,

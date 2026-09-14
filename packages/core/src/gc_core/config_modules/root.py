@@ -136,14 +136,71 @@ def _asset_default(config_dir: str, rel_path: str) -> str:
     return local
 
 
+def _to_abs(config_dir: str, path_value: str | None) -> str | None:
+    if path_value is None or not str(path_value).strip():
+        return None
+    path_value = str(path_value).strip()
+    if os.path.isabs(path_value):
+        return path_value
+    return os.path.abspath(os.path.join(config_dir, path_value))
+
+
+def _normalize_summary_limits(cfg: AppConfig) -> None:
+    """Нули/отрицательные лимиты summary → дефолты; производные триггеры — от основного."""
+    if cfg.summary.intent_log_preview_chars <= 0:
+        cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    if cfg.summary.chat_completions_summary_trigger_chars < 0:
+        cfg.summary.chat_completions_summary_trigger_chars = 0
+    trigger = cfg.summary.chat_completions_summary_trigger_chars
+    turn_end_raw = cfg.summary.chat_completions_summary_turn_end_trigger_chars
+    if turn_end_raw is None:
+        cfg.summary.chat_completions_summary_turn_end_trigger_chars = (
+            max(1, int(trigger * DEFAULT_TURN_END_TRIGGER_RATIO))
+            if trigger > 0
+            else 0
+        )
+    elif turn_end_raw <= 0:
+        cfg.summary.chat_completions_summary_turn_end_trigger_chars = 0
+    if cfg.summary.last_dialog_steps_count <= 0:
+        cfg.summary.last_dialog_steps_count = DEFAULT_LAST_DIALOG_STEPS_COUNT
+    if cfg.summary.last_dialog_step_message_max_chars <= 0:
+        cfg.summary.last_dialog_step_message_max_chars = (
+            DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+        )
+    if cfg.summary.max_message_chars <= 0:
+        cfg.summary.max_message_chars = DEFAULT_MAX_MESSAGE_CHARS
+    if cfg.summary.max_dialogue_chars <= 0:
+        cfg.summary.max_dialogue_chars = DEFAULT_MAX_DIALOGUE_CHARS
+    if cfg.summary.max_accumulated_summary_chars <= 0:
+        cfg.summary.max_accumulated_summary_chars = DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
+    if cfg.summary.incremental_batch_chars is None or cfg.summary.incremental_batch_chars <= 0:
+        cfg.summary.incremental_batch_chars = (
+            int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
+        )
+
+
+def _normalize_finish_gate_limits(cfg: AppConfig) -> None:
+    if cfg.agent.finish_gate_max_iterations < 1:
+        logging.getLogger(__name__).warning(
+            "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",
+            cfg.agent.finish_gate_max_iterations,
+            DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+        )
+        cfg.agent.finish_gate_max_iterations = DEFAULT_FINISH_GATE_MAX_ITERATIONS
+    if cfg.agent.subagent_finish_gate_max_iterations < 1:
+        logging.getLogger(__name__).warning(
+            "finish_gate_reject_limit_invalid subagent_finish_gate_max_iterations=%s; using %s",
+            cfg.agent.subagent_finish_gate_max_iterations,
+            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+        )
+        cfg.agent.subagent_finish_gate_max_iterations = (
+            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
+        )
+
+
 def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     def to_abs(path_value: str | None) -> str | None:
-        if path_value is None or not str(path_value).strip():
-            return None
-        path_value = str(path_value).strip()
-        if os.path.isabs(path_value):
-            return path_value
-        return os.path.abspath(os.path.join(config_dir, path_value))
+        return _to_abs(config_dir, path_value)
 
     paths = env_vars.gc_paths()
     slug = env_vars.project_slug()
@@ -172,37 +229,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.summary.chat_completions_memory_patch_replace_prompt_path = to_abs(
         cfg.summary.chat_completions_memory_patch_replace_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_memory_patch_replace.md")
-    if cfg.summary.intent_log_preview_chars <= 0:
-        cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
-    if cfg.summary.chat_completions_summary_trigger_chars < 0:
-        cfg.summary.chat_completions_summary_trigger_chars = 0
-    turn_end_raw = cfg.summary.chat_completions_summary_turn_end_trigger_chars
-    if turn_end_raw is None:
-        trigger = cfg.summary.chat_completions_summary_trigger_chars
-        cfg.summary.chat_completions_summary_turn_end_trigger_chars = (
-            max(1, int(trigger * DEFAULT_TURN_END_TRIGGER_RATIO))
-            if trigger > 0
-            else 0
-        )
-    elif turn_end_raw <= 0:
-        cfg.summary.chat_completions_summary_turn_end_trigger_chars = 0
-    if cfg.summary.last_dialog_steps_count <= 0:
-        cfg.summary.last_dialog_steps_count = DEFAULT_LAST_DIALOG_STEPS_COUNT
-    if cfg.summary.last_dialog_step_message_max_chars <= 0:
-        cfg.summary.last_dialog_step_message_max_chars = (
-            DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
-        )
-    if cfg.summary.max_message_chars <= 0:
-        cfg.summary.max_message_chars = DEFAULT_MAX_MESSAGE_CHARS
-    if cfg.summary.max_dialogue_chars <= 0:
-        cfg.summary.max_dialogue_chars = DEFAULT_MAX_DIALOGUE_CHARS
-    if cfg.summary.max_accumulated_summary_chars <= 0:
-        cfg.summary.max_accumulated_summary_chars = DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
-    if cfg.summary.incremental_batch_chars is None or cfg.summary.incremental_batch_chars <= 0:
-        trigger = cfg.summary.chat_completions_summary_trigger_chars
-        cfg.summary.incremental_batch_chars = (
-            int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
-        )
+    _normalize_summary_limits(cfg)
     normalize_quality_gate_config(cfg.quality_gate)
     normalize_working_memory_config(cfg.working_memory)
     normalize_todo_config(cfg.todo)
@@ -213,22 +240,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
         cfg.intent_scope.intent_scope_tool_summary_prompt_path
     ) or _prompt_default(config_dir, "intent_scope_tool_summary_prompt.md")
-    if cfg.agent.finish_gate_max_iterations < 1:
-        logging.getLogger(__name__).warning(
-            "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",
-            cfg.agent.finish_gate_max_iterations,
-            DEFAULT_FINISH_GATE_MAX_ITERATIONS,
-        )
-        cfg.agent.finish_gate_max_iterations = DEFAULT_FINISH_GATE_MAX_ITERATIONS
-    if cfg.agent.subagent_finish_gate_max_iterations < 1:
-        logging.getLogger(__name__).warning(
-            "finish_gate_reject_limit_invalid subagent_finish_gate_max_iterations=%s; using %s",
-            cfg.agent.subagent_finish_gate_max_iterations,
-            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
-        )
-        cfg.agent.subagent_finish_gate_max_iterations = (
-            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
-        )
+    _normalize_finish_gate_limits(cfg)
     (
         cfg.agent.tool_output_inline_max_chars,
         cfg.agent.stored_tool_outputs_max_entries,

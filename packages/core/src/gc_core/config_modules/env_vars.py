@@ -38,6 +38,10 @@ class EnvVars(BaseSettings):
 
     @field_validator(
         "gc_home", "gc_state_dir", "gc_config_dir", "gc_cache_dir", "gc_data_dir",
+        "server_config_path",
+        "swarm_agentmd_path",
+        "swarm_threads_dir",
+        "swarm_skills_dir",
         mode="before",
     )
     @classmethod
@@ -74,19 +78,6 @@ class EnvVars(BaseSettings):
     swarm_agentmd_path: Path | None = None
     swarm_threads_dir: Path | None = None
     swarm_skills_dir: Path | None = None
-
-    @field_validator(
-        "server_config_path",
-        "swarm_agentmd_path",
-        "swarm_threads_dir",
-        "swarm_skills_dir",
-        mode="before",
-    )
-    @classmethod
-    def _optional_path_empty_means_none(cls, v):
-        if isinstance(v, str) and not v.strip():
-            return None
-        return v
 
 
 try:
@@ -218,7 +209,7 @@ def ensure_project_gc_dir(cwd: str | None = None) -> None:
     project skills, long memory)."""
     try:
         os.makedirs(project_gc_dir(cwd), exist_ok=True)
-    except (PermissionError, OSError):
+    except OSError:
         pass
 
 

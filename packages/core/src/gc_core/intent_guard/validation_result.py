@@ -47,13 +47,9 @@ def fail_open_validation_result() -> ValidationResult:
 
 
 def expected_action_for_axes(*, trace_ok: bool, report_ok: bool) -> str:
-    if trace_ok and report_ok:
-        return "accept"
-    if trace_ok and not report_ok:
-        return "fix_report"
-    if not trace_ok and report_ok:
-        return "continue_work"
-    return "fix_report_and_continue"
+    if trace_ok:
+        return "accept" if report_ok else "fix_report"
+    return "continue_work" if report_ok else "fix_report_and_continue"
 
 
 def _str_list(value: Any) -> list[str]:
@@ -73,6 +69,34 @@ def _parse_coverage(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _warn_if_ok_disagrees(parsed: dict, ok: bool, trace_ok: bool, report_ok: bool) -> None:
+    if "ok" not in parsed:
+        return
+    json_ok = _parse_bool(parsed.get("ok"))
+    if json_ok is not None and json_ok != ok:
+        _logger.warning(
+            "finish_gate validator JSON ok=%s disagrees with trace_ok=%s report_ok=%s; using runtime ok=%s",
+            json_ok,
+            trace_ok,
+            report_ok,
+            ok,
+        )
+
+
+def _normalized_action(action_token: str, trace_ok: bool, report_ok: bool) -> str:
+    """Действие по осям; расхождение с ответом валидатора — в лог, побеждают оси."""
+    expected = expected_action_for_axes(trace_ok=trace_ok, report_ok=report_ok)
+    if action_token != expected:
+        _logger.warning(
+            "finish_gate validator action=%r normalized to %r (trace_ok=%s report_ok=%s)",
+            action_token,
+            expected,
+            trace_ok,
+            report_ok,
+        )
+    return expected
 
 
 def parse_validator_response(raw: str) -> ValidationResult | None:
@@ -101,27 +125,8 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
         return None
 
     ok = trace_ok and report_ok
-    if "ok" in parsed:
-        json_ok = _parse_bool(parsed.get("ok"))
-        if json_ok is not None and json_ok != ok:
-            _logger.warning(
-                "finish_gate validator JSON ok=%s disagrees with trace_ok=%s report_ok=%s; using runtime ok=%s",
-                json_ok,
-                trace_ok,
-                report_ok,
-                ok,
-            )
-
-    expected = expected_action_for_axes(trace_ok=trace_ok, report_ok=report_ok)
-    action = expected
-    if action_token != expected:
-        _logger.warning(
-            "finish_gate validator action=%r normalized to %r (trace_ok=%s report_ok=%s)",
-            action_token,
-            expected,
-            trace_ok,
-            report_ok,
-        )
+    _warn_if_ok_disagrees(parsed, ok, trace_ok, report_ok)
+    action = _normalized_action(action_token, trace_ok, report_ok)
 
     trace_gaps = _str_list(parsed.get("trace_gaps"))
     if not trace_gaps:

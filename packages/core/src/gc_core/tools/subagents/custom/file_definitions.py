@@ -109,6 +109,47 @@ def _split_frontmatter(path: str, text: str) -> Tuple[str, str]:
     return "".join(fm_lines), "".join(lines[idx + 1:])
 
 
+def _require_name(path: str, meta: Dict[str, Any]) -> str:
+    name = str(meta.get("name") or "").strip()
+    if not name:
+        raise SubagentDefinitionError(path, "обязательное поле 'name' отсутствует или пусто")
+    if not NAME_RE.match(name):
+        raise SubagentDefinitionError(
+            path,
+            f"'name' должен матчить {NAME_RE.pattern} (нижний регистр, префикс subagent_): {name!r}",
+        )
+    if len(name) > MAX_NAME_LEN:
+        raise SubagentDefinitionError(
+            path,
+            f"'name' длиннее {MAX_NAME_LEN} символов ({len(name)}): лимит имени функции "
+            "у OpenAI-совместимых бэкендов и защита имени лог-файла",
+        )
+    return name
+
+
+def _require_description(path: str, meta: Dict[str, Any]) -> str:
+    description = str(meta.get("description") or "").strip()
+    if not description:
+        raise SubagentDefinitionError(path, "обязательное поле 'description' отсутствует или пусто")
+    if len(description) > MAX_DESCRIPTION_LEN:
+        raise SubagentDefinitionError(
+            path,
+            f"'description' длиннее {MAX_DESCRIPTION_LEN} символов ({len(description)}): "
+            "описание уходит в схему тулов на каждом запросе к модели",
+        )
+    return description
+
+
+def _parse_list_key(path: str, meta: Dict[str, Any], key: str) -> Optional[Tuple[str, ...]]:
+    """Список имён из ключа frontmatter; None — ключа нет или он null."""
+    raw = meta.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise SubagentDefinitionError(path, f"'{key}' должен быть списком строк")
+    return _normalize_names(raw)
+
+
 def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
     """Разобрать содержимое файла-определения либо бросить SubagentDefinitionError."""
     fm_text, body = _split_frontmatter(path, text)
@@ -130,47 +171,14 @@ def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
             + "; допустимы: " + ", ".join(sorted(_ALLOWED_KEYS)),
         )
 
-    name = str(meta.get("name") or "").strip()
-    if not name:
-        raise SubagentDefinitionError(path, "обязательное поле 'name' отсутствует или пусто")
-    if not NAME_RE.match(name):
-        raise SubagentDefinitionError(
-            path,
-            f"'name' должен матчить {NAME_RE.pattern} (нижний регистр, префикс subagent_): {name!r}",
-        )
-    if len(name) > MAX_NAME_LEN:
-        raise SubagentDefinitionError(
-            path,
-            f"'name' длиннее {MAX_NAME_LEN} символов ({len(name)}): лимит имени функции "
-            "у OpenAI-совместимых бэкендов и защита имени лог-файла",
-        )
-
-    description = str(meta.get("description") or "").strip()
-    if not description:
-        raise SubagentDefinitionError(path, "обязательное поле 'description' отсутствует или пусто")
-    if len(description) > MAX_DESCRIPTION_LEN:
-        raise SubagentDefinitionError(
-            path,
-            f"'description' длиннее {MAX_DESCRIPTION_LEN} символов ({len(description)}): "
-            "описание уходит в схему тулов на каждом запросе к модели",
-        )
+    name = _require_name(path, meta)
+    description = _require_description(path, meta)
 
     role = body.strip()
     if not role:
         raise SubagentDefinitionError(path, "тело файла пусто — сабагент без роли бессмысленен")
 
-    parsed: Dict[str, Optional[Tuple[str, ...]]] = {}
-    for key in _LIST_KEYS:
-        if key not in meta:
-            parsed[key] = None
-            continue
-        raw = meta.get(key)
-        if raw is None:
-            parsed[key] = None
-            continue
-        if not isinstance(raw, list):
-            raise SubagentDefinitionError(path, f"'{key}' должен быть списком строк")
-        parsed[key] = _normalize_names(raw)
+    parsed = {key: _parse_list_key(path, meta, key) for key in _LIST_KEYS}
 
     return SubagentDefinition(
         name=name,

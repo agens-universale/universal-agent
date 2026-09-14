@@ -149,24 +149,24 @@ def trim_original_user_messages_to_max_chars(messages: List[str], max_chars: int
     return _tail_by_limit(messages, max_chars, len)
 
 
-def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-    def _is_tool_call(msg: Dict[str, Any]) -> bool:
-        return msg.get("type") in {"function_call", "tool_call"}
+def _is_tool_call(msg: Dict[str, Any]) -> bool:
+    return msg.get("type") in {"function_call", "tool_call"}
 
-    def _is_tool_call_output(msg: Dict[str, Any]) -> bool:
-        return msg.get("type") in {"function_call_output", "tool_call_output"}
 
-    def _is_technical_user(m: Dict[str, Any]) -> bool:
-        if str(m.get("role", "")).strip().lower() != "user":
-            return False
-        return is_technical_user_message_text(user_content_to_text(m.get("content")))
+def _is_tool_call_output(msg: Dict[str, Any]) -> bool:
+    return msg.get("type") in {"function_call_output", "tool_call_output"}
 
-    if not messages:
-        return []
-    turns: List[List[Dict[str, Any]]] = []
+
+def _is_technical_user(m: Dict[str, Any]) -> bool:
+    if str(m.get("role", "")).strip().lower() != "user":
+        return False
+    return is_technical_user_message_text(user_content_to_text(m.get("content")))
+
+
+def _pair_tool_calls(messages: List[Dict[str, Any]]) -> Dict[int, int]:
+    """Индекс tool_call → индекс его output (по call_id, каждый output — один раз)."""
     consumed: set[int] = set()
     fc_to_fco: Dict[int, int] = {}
-
     for i, msg in enumerate(messages):
         if not _is_tool_call(msg):
             continue
@@ -178,15 +178,54 @@ def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]
                 fc_to_fco[i] = j
                 consumed.add(j)
                 break
+    return fc_to_fco
+
+
+def _collect_user_turn(messages: List[Dict[str, Any]], i: int, consumed: set[int]) -> tuple:
+    """Ход пользователя с позиции i: user (+технические user) до ответа assistant → (turn, next_i)."""
+    turn: List[Dict[str, Any]] = [messages[i]]
+    j = i + 1
+    while j < len(messages):
+        nxt = messages[j]
+        if j in consumed:
+            j += 1
+            continue
+        nxt_type = nxt.get("type", "message")
+        nxt_role = nxt.get("role")
+        if nxt_role == "assistant" and nxt_type == "message":
+            turn.append(nxt)
+            consumed.add(j)
+            j += 1
+            break
+        if nxt_role == "user" and _is_technical_user(nxt):
+            turn.append(nxt)
+            consumed.add(j)
+            j += 1
+            continue
+        if nxt_role == "user" or nxt_type in {
+            "function_call",
+            "tool_call",
+            "function_call_output",
+            "tool_call_output",
+        }:
+            break
+        j += 1
+    return turn, j
+
+
+def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    if not messages:
+        return []
+    turns: List[List[Dict[str, Any]]] = []
+    fc_to_fco = _pair_tool_calls(messages)
 
     i = 0
-    consumed.clear()
+    consumed: set[int] = set()
     while i < len(messages):
         if i in consumed:
             i += 1
             continue
         msg = messages[i]
-        role = msg.get("role")
 
         if _is_tool_call(msg):
             if i in fc_to_fco:
@@ -203,36 +242,9 @@ def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]
             i += 1
             continue
 
-        if role == "user":
-            turn: List[Dict[str, Any]] = [msg]
-            j = i + 1
-            while j < len(messages):
-                nxt = messages[j]
-                if j in consumed:
-                    j += 1
-                    continue
-                nxt_type = nxt.get("type", "message")
-                nxt_role = nxt.get("role")
-                if nxt_role == "assistant" and nxt_type == "message":
-                    turn.append(nxt)
-                    consumed.add(j)
-                    j += 1
-                    break
-                if nxt_role == "user" and _is_technical_user(nxt):
-                    turn.append(nxt)
-                    consumed.add(j)
-                    j += 1
-                    continue
-                if nxt_role == "user" or nxt_type in {
-                    "function_call",
-                    "tool_call",
-                    "function_call_output",
-                    "tool_call_output",
-                }:
-                    break
-                j += 1
+        if msg.get("role") == "user":
+            turn, i = _collect_user_turn(messages, i, consumed)
             turns.append(turn)
-            i = j
             continue
 
         turns.append([msg])

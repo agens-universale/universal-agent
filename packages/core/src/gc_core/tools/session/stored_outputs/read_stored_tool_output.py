@@ -97,39 +97,10 @@ Behavior:
         return get_tool_output_inline_max_chars(self._config_dict or {})
 
     @classmethod
-    def _payload(
-        cls,
-        *,
-        ok: bool,
-        stored: bool,
-        output_ref: str,
-        source_tool: Optional[str],
-        from_original_call_id: Optional[str],
-        offset: int,
-        limit: int,
-        total_chars: Optional[int] = None,
-        total_bytes: Optional[int] = None,
-        truncated: bool,
-        next_offset: int,
-        content: str,
-        error: Optional[Dict[str, Any]],
-        hint: str,
-    ) -> str:
+    def _payload(cls, **fields: Any) -> str:
+        """Конверт stored-output с полями этого тула; набор полей — см. envelope."""
         return dumps_stored_tool_output_payload(
-            ok=ok,
-            stored=stored,
-            output_ref=output_ref,
-            from_original_call_id=from_original_call_id,
-            source_tool=source_tool,
-            offset=offset,
-            limit=limit,
-            total_chars=total_chars,
-            total_bytes=total_bytes,
-            truncated=truncated,
-            next_offset=next_offset,
-            content=content,
-            error=error,
-            hint=hint,
+            **fields,
             tool=cls.registered_tool_name(),
             read_via=cls.registered_tool_name(),
         )
@@ -188,7 +159,7 @@ Behavior:
                 output_ref=output_ref,
                 source_tool=None,
                 from_original_call_id=None,
-                offset=max(0, offset) if isinstance(offset, int) else 0,
+                offset=max(0, offset),
                 limit=inline_limit,
                 total_chars=None,
                 truncated=False,

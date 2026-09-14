@@ -276,16 +276,26 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 lang = html_lib.unescape(re.sub(r"\s+", " ", lang_match.group(2))).strip()
                 meta["lang"] = lang or None
 
-        desc_match = re.search(
-            r"""<meta\b(?=[^>]*\bname\s*=\s*(['"])description\1)(?=[^>]*\bcontent\s*=\s*(['"])(.*?)\2)[^>]*>""",
-            html,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if desc_match:
-            description = html_lib.unescape(re.sub(r"\s+", " ", desc_match.group(3))).strip()
+        description_raw = cls._find_meta_description(html)
+        if description_raw is not None:
+            description = html_lib.unescape(re.sub(r"\s+", " ", description_raw)).strip()
             meta["description"] = description or None
 
         return cls._normalize_meta(meta)
+
+    @staticmethod
+    def _find_meta_description(html: str) -> Optional[str]:
+        """Сырое значение ``content`` первого ``<meta name="description">``."""
+        for tag_match in re.finditer(r"<meta\b([^>]*)>", html, flags=re.IGNORECASE | re.DOTALL):
+            attrs = tag_match.group(1)
+            if not re.search(r"""\bname\s*=\s*(['"])description\1""", attrs, flags=re.IGNORECASE):
+                continue
+            content_match = re.search(
+                r"""\bcontent\s*=\s*(['"])(.*?)\1""", attrs, flags=re.IGNORECASE | re.DOTALL
+            )
+            if content_match:
+                return content_match.group(2)
+        return None
 
     @staticmethod
     def _is_binary_content_type(content_type: str) -> bool:
@@ -444,6 +454,145 @@ class SimpleFetchUrl(AbstractSimpleTool):
         )
 
 
+    def _fetch_arg_error(self, timeout_seconds, max_preview_chars, offset, limit) -> "Optional[Dict[str, Any]]":
+        if timeout_seconds is not None and not isinstance(timeout_seconds, int):
+            return {"type": "invalid_argument", "field": "timeout_seconds"}
+        if not isinstance(max_preview_chars, int) or max_preview_chars <= 0:
+            return {"type": "invalid_argument", "field": "max_preview_chars"}
+        if not isinstance(offset, int) or offset < 0:
+            return {"type": "invalid_argument", "field": "offset"}
+        if not isinstance(limit, int) or limit <= 0:
+            return {"type": "invalid_argument", "field": "limit"}
+        return None
+
+    def _url_or_timeout_error(self, normalized_url: str, timeout_seconds) -> "Optional[Dict[str, Any]]":
+        if not normalized_url:
+            return {"type": "invalid_argument", "field": "url", "message": "URL cannot be empty."}
+        if not normalized_url.startswith(("http://", "https://")):
+            return {"type": "invalid_argument", "field": "url", "message": "URL must start with http:// or https://."}
+        if (timeout_seconds or self.timeout_seconds) <= 0:
+            return {"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."}
+        return None
+
+    def _cached_payload(self, cached, normalized_url: str, offset: int, limit: int) -> Dict[str, Any]:
+        cached_content, cached_meta = cached
+        sliced = self._slice_content(cached_content, offset, limit)
+        return dict(
+            ok=True,
+            final_url=normalized_url,
+            status_code=200,
+            content_type="text/plain; charset=utf-8",
+            is_binary=False,
+            result_type="content",
+            extracted_source="cache",
+            content=sliced["content"],
+            truncated=sliced["has_more"],
+            offset=offset,
+            limit=limit,
+            returned_chars=sliced["returned_chars"],
+            total_chars=sliced["total_chars"],
+            has_more=sliced["has_more"],
+            cache_hit=True,
+            meta=cached_meta,
+            error=None,
+        )
+
+    async def _arequest_with_retries(self, normalized_url: str, headers: Dict[str, str], effective_timeout, normalized_proxy):
+        """(response, None) либо (None, kwargs ошибки для _result)."""
+        attempts = 1 + self.max_retries
+        # Политику берём ТЕМ ЖЕ путём, что и гвард `enforce_url_policy`, —
+        # через `resolve_tool_context`. Политика лежит на ВЕРХНЕМ уровне
+        # (`path_policy.resolve_tool_context`); чтение config_dict напрямую давало
+        # пустой чёрный список и per-hop проверка ничего не проверяла.
+        _policy = resolve_tool_context(self, ctx=self._ctx, state=self._state)
+        _allowed_schemes = list(_policy.url_allowed_schemes or ["http", "https"])
+        _url_blacklist = list(_policy.url_blacklist or [])
+        # Потолок ОБЩИЙ: три тула не должны расходиться в том, сколько
+        # переходов считается петлёй.
+        _max_redirects = DEFAULT_MAX_REDIRECTS
+
+        # Клиент общий и переиспользуемый (пул соединений), закрывать его здесь
+        # нельзя — он принадлежит loop, а не одному вызову.
+        session = get_async_client(
+            # Явный `proxy` тула — первым аргументом, иначе он молча
+            # игнорируется (тот же промах, что был в fetch_url).
+            proxies=resolve_proxies(normalized_proxy, os.environ, normalized_url)
+        )
+        for attempt in range(1, attempts + 1):
+            try:
+                # Общая петля из ``redirect_policy``: одно правило на три тула.
+                response = await fetch_validating_redirects(
+                    session, normalized_url, headers, effective_timeout,
+                    allowed_schemes=_allowed_schemes,
+                    url_blacklist=_url_blacklist,
+                    max_redirects=_max_redirects,
+                )
+                response.raise_for_status()
+                return response, None
+            except _TooManyRedirects as loop_exc:
+                # Петля редиректов — сетевая проблема, а не запрет политики.
+                return None, dict(
+                    ok=False,
+                    final_url=loop_exc.url,
+                    status_code=None,
+                    content_type=None,
+                    result_type="error",
+                    error={
+                        "type": "too_many_redirects",
+                        "reason": str(loop_exc),
+                        "limit": loop_exc.limit,
+                    },
+                )
+            except _RedirectBlocked as redirect_exc:
+                _decision = redirect_exc.decision
+                return None, dict(
+                    ok=False,
+                    final_url=_decision.url,
+                    status_code=None,
+                    content_type=None,
+                    result_type="error",
+                    error={
+                        "type": _decision.error_type or "url_blocked_by_policy",
+                        "reason": _decision.reason,
+                        "matched_rule": _decision.matched_rule,
+                        "blocked_on_redirect": True,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                retryable = status is None or status in (429,) or status >= 500
+                if (not retryable) or attempt == attempts:
+                    return None, dict(
+                        ok=False,
+                        final_url=_response_url(exc),
+                        status_code=status,
+                        content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
+                        if getattr(exc, "response", None) is not None
+                        else None,
+                        result_type="error",
+                        error={
+                            "type": "request_failed",
+                            "message": str(exc),
+                            "attempt": attempt,
+                            "attempts_total": attempts,
+                            "retryable": retryable,
+                        },
+                    )
+                await asyncio.sleep(self.retry_backoff_seconds * attempt)
+        return None, dict(ok=False, result_type="error", error={"type": "request_failed", "message": "Unknown request failure."})
+
+    def _preview_from_html(self, text: str, max_preview_chars: int) -> "tuple[str, bool]":
+        preview_content = re.sub(r"\s+", " ", self._strip_tags(text)).strip()
+        truncated = len(preview_content) > max_preview_chars
+        if truncated:
+            preview_content = preview_content[:max_preview_chars]
+        header = (
+            f"Content with removed HTML tags (truncated to {max_preview_chars} characters)"
+            if truncated
+            else "Content with removed HTML tags"
+        )
+        return f"{header}:\n\n{preview_content}", truncated
+
     @enforce_url_policy(url_arg="url")
     async def acall(
         self,
@@ -460,60 +609,26 @@ class SimpleFetchUrl(AbstractSimpleTool):
 
         _result = functools.partial(self._result, url=url)
 
-        if timeout_seconds is not None and not isinstance(timeout_seconds, int):
-            return _result(ok=False, error={"type": "invalid_argument", "field": "timeout_seconds"})
-        if not isinstance(max_preview_chars, int) or max_preview_chars <= 0:
-            return _result(ok=False, error={"type": "invalid_argument", "field": "max_preview_chars"})
-        if not isinstance(offset, int) or offset < 0:
-            return _result(ok=False, error={"type": "invalid_argument", "field": "offset"})
         if limit is None:
             limit = self.max_content_chars
-        if not isinstance(limit, int) or limit <= 0:
-            return _result(ok=False, error={"type": "invalid_argument", "field": "limit"})
-
+        arg_error = self._fetch_arg_error(timeout_seconds, max_preview_chars, offset, limit)
+        if arg_error is not None:
+            return _result(ok=False, error=arg_error)
         normalized_proxy, proxy_error = self._normalize_proxy(proxy)
         if proxy_error is not None:
             return _result(ok=False, error=proxy_error)
-
         normalized_url = url.strip()
-        if not normalized_url:
-            return _result(ok=False, error={"type": "invalid_argument", "field": "url", "message": "URL cannot be empty."})
-        if not normalized_url.startswith(("http://", "https://")):
-            return _result(ok=False, error={"type": "invalid_argument", "field": "url", "message": "URL must start with http:// or https://."})
-
+        url_error = self._url_or_timeout_error(normalized_url, timeout_seconds)
+        if url_error is not None:
+            return _result(ok=False, error=url_error)
         effective_timeout = timeout_seconds or self.timeout_seconds
-        if effective_timeout <= 0:
-            return _result(
-                ok=False,
-                error={"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."},
-            )
 
         cache_key = self._cache_key(normalized_url, normalized_proxy)
         proxies = self._proxies_dict(normalized_proxy)
 
         cached = self._get_from_cache(cache_key)
         if cached is not None:
-            cached_content, cached_meta = cached
-            sliced = self._slice_content(cached_content, offset, limit)
-            return _result(
-                ok=True,
-                final_url=normalized_url,
-                status_code=200,
-                content_type="text/plain; charset=utf-8",
-                is_binary=False,
-                result_type="content",
-                extracted_source="cache",
-                content=sliced["content"],
-                truncated=sliced["has_more"],
-                offset=offset,
-                limit=limit,
-                returned_chars=sliced["returned_chars"],
-                total_chars=sliced["total_chars"],
-                has_more=sliced["has_more"],
-                cache_hit=True,
-                meta=cached_meta,
-                error=None,
-            )
+            return _result(**self._cached_payload(cached, normalized_url, offset, limit))
 
         headers = {
             "User-Agent": self.default_user_agent,
@@ -536,106 +651,9 @@ class SimpleFetchUrl(AbstractSimpleTool):
             "sec-ch-ua-platform": '"Linux"',
         }
 
-        response = None
-        attempts = 1 + self.max_retries
-        # Политику берём ТЕМ ЖЕ путём, что и гвард `enforce_url_policy`, —
-        # через `resolve_tool_context`.
-        #
-        # Комментарий выше это и обещал («тот же путь»), а код читал
-        # `config_dict["command_moderation"]["url_policy"]`. Политика лежит на
-        # ВЕРХНЕМ уровне (`path_policy.resolve_tool_context`), поэтому чёрный
-        # список всегда получался пустым, и per-hop проверка, ради которой всё
-        # писалось, ничего не проверяла: редирект на запрещённый адрес
-        # проходил. Поймано сторожем `test_redirect_policy_shared`.
-        _policy = resolve_tool_context(self, ctx=self._ctx, state=self._state)
-        _allowed_schemes = list(_policy.url_allowed_schemes or ["http", "https"])
-        _url_blacklist = list(_policy.url_blacklist or [])
-        # Потолок ОБЩИЙ: три тула не должны расходиться в том, сколько
-        # переходов считается петлёй. Было 5 / 10 / 5 — разноголосица ровно
-        # того сорта, ради устранения которой петлю и свели в одну.
-        _max_redirects = DEFAULT_MAX_REDIRECTS
-
-        async def _fetch_with_redirect_validation(session, start_url, headers, timeout):
-            """Общая петля из ``redirect_policy``: одно правило на три тула.
-
-            Копий было две, а у ``fetch_url`` её не было вовсе — он доверял
-            всей цепочке. Две реализации одного правила расходятся молча,
-            третья дырявая; теперь петля одна.
-            """
-            return await fetch_validating_redirects(
-                session, start_url, headers, timeout,
-                allowed_schemes=_allowed_schemes,
-                url_blacklist=_url_blacklist,
-                max_redirects=_max_redirects,
-            )
-
-        # Клиент общий и переиспользуемый (пул соединений), закрывать его здесь
-        # нельзя — он принадлежит loop, а не одному вызову.
-        session = get_async_client(
-            # Явный `proxy` тула — первым аргументом, иначе он молча
-            # игнорируется (тот же промах, что был в fetch_url).
-            proxies=resolve_proxies(normalized_proxy, os.environ, normalized_url)
-        )
-        for attempt in range(1, attempts + 1):
-            try:
-                response = await _fetch_with_redirect_validation(
-                    session, normalized_url, headers, effective_timeout
-                )
-                response.raise_for_status()
-                break
-            except _TooManyRedirects as loop_exc:
-                # Петля редиректов — сетевая проблема, а не запрет политики.
-                return _result(
-                    ok=False,
-                    final_url=loop_exc.url,
-                    status_code=None,
-                    content_type=None,
-                    result_type="error",
-                    error={
-                        "type": "too_many_redirects",
-                        "reason": str(loop_exc),
-                        "limit": loop_exc.limit,
-                    },
-                )
-            except _RedirectBlocked as redirect_exc:
-                _decision = redirect_exc.decision
-                return _result(
-                    ok=False,
-                    final_url=_decision.url,
-                    status_code=None,
-                    content_type=None,
-                    result_type="error",
-                    error={
-                        "type": _decision.error_type or "url_blocked_by_policy",
-                        "reason": _decision.reason,
-                        "matched_rule": _decision.matched_rule,
-                        "blocked_on_redirect": True,
-                    },
-                )
-            except httpx.HTTPError as exc:
-                status = getattr(getattr(exc, "response", None), "status_code", None)
-                retryable = status is None or status in (429,) or status >= 500
-                if (not retryable) or attempt == attempts:
-                    return _result(
-                        ok=False,
-                        final_url=_response_url(exc),
-                        status_code=status,
-                        content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
-                        if getattr(exc, "response", None) is not None
-                        else None,
-                        result_type="error",
-                        error={
-                            "type": "request_failed",
-                            "message": str(exc),
-                            "attempt": attempt,
-                            "attempts_total": attempts,
-                            "retryable": retryable,
-                        },
-                    )
-                await asyncio.sleep(self.retry_backoff_seconds * attempt)
-
-        if response is None:
-            return _result(ok=False, result_type="error", error={"type": "request_failed", "message": "Unknown request failure."})
+        response, request_error = await self._arequest_with_retries(normalized_url, headers, effective_timeout, normalized_proxy)
+        if request_error is not None:
+            return _result(**request_error)
 
         content_type = response.headers.get("Content-Type", "")
         final_url = str(response.url)
@@ -692,16 +710,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 error=None,
             )
 
-        preview_content = re.sub(r"\s+", " ", self._strip_tags(text)).strip()
-        truncated = len(preview_content) > max_preview_chars
-        if truncated:
-            preview_content = preview_content[:max_preview_chars]
-        header = (
-            f"Content with removed HTML tags (truncated to {max_preview_chars} characters)"
-            if truncated
-            else "Content with removed HTML tags"
-        )
-        preview = f"{header}:\n\n{preview_content}"
+        preview, truncated = self._preview_from_html(text, max_preview_chars)
         return _result(
             ok=True,
             final_url=final_url,

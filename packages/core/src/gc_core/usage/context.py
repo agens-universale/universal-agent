@@ -83,7 +83,7 @@ def record_usage(raw_usage: Any, endpoint_url: str | None = None) -> None:
         )
         _orphan_account.add_record(raw_usage, endpoint_url)
         return
-    parsed = normalize_usage(raw_usage, ctx.backend_mode)
+    parsed = normalize_usage(raw_usage)
     if parsed is None:
         ctx.account.add_missing(ctx.category)
     else:

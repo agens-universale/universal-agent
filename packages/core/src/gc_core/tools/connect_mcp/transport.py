@@ -72,21 +72,25 @@ def _parse_http_response(resp: "httpx.Response") -> Tuple[Dict[str, str], Dict[s
 
     content_type = (out_headers.get("content-type") or "").lower()
     if "text/event-stream" in content_type:
-        if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):
-            resp.encoding = "utf-8"
-        for line in resp.text.splitlines():
-            line = line.strip()
-            if not line.startswith("data:"):
-                continue
-            parsed = _try_parse_json_rpc(line[len("data:"):].strip())
-            if parsed is not None:
-                return out_headers, parsed
-        return out_headers, {}
+        return out_headers, _first_json_rpc_from_sse_body(resp)
 
     try:
         return out_headers, resp.json()
-    except (ValueError, json.JSONDecodeError):
+    except ValueError:
         return out_headers, {}
+
+
+def _first_json_rpc_from_sse_body(resp: "httpx.Response") -> Dict[str, Any]:
+    """Первый JSON-RPC ответ из уже полученного (не потокового) SSE-тела; иначе {}."""
+    _fix_sse_encoding(resp)
+    for line in resp.text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        parsed = _try_parse_json_rpc(line[len("data:"):].strip())
+        if parsed is not None:
+            return parsed
+    return {}
 
 
 async def _arequest_http(
@@ -150,30 +154,36 @@ class _SseFirstJson:
         if self._debug:
             print(f"[MCP_DEBUG SSE] {line[:200]!r}" + ("..." if len(line) > 200 else ""))
         stripped = line.strip()
-
         if not stripped:
-            if self._in_data and self._buffer:
-                parsed = _try_parse_json_rpc("\n".join(self._buffer))
-                if parsed is not None:
-                    return parsed
-                self._buffer = []
-            self._in_data = False
-            return None
-
+            return self._on_blank_line()
         if stripped.lower().startswith("data:"):
-            part = stripped[len("data:"):].strip()
-            if part:
-                self._buffer.append(part)
-                self._in_data = True
-                return _try_parse_json_rpc("\n".join(self._buffer))
-            if not self._in_data:
-                self._buffer = []
-            self._in_data = True
-            return None
-
+            return self._on_data_line(stripped[len("data:"):].strip())
         if self._in_data and self._buffer:
             self._buffer.append(stripped)
-            return _try_parse_json_rpc("\n".join(self._buffer))
+            return self._parse_buffer()
+        return None
+
+    def _parse_buffer(self) -> "Dict[str, Any] | None":
+        return _try_parse_json_rpc("\n".join(self._buffer))
+
+    def _on_blank_line(self) -> "Dict[str, Any] | None":
+        """Конец события: последняя попытка разбора, затем сброс состояния."""
+        if self._in_data and self._buffer:
+            parsed = self._parse_buffer()
+            if parsed is not None:
+                return parsed
+            self._buffer = []
+        self._in_data = False
+        return None
+
+    def _on_data_line(self, part: str) -> "Dict[str, Any] | None":
+        if part:
+            self._buffer.append(part)
+            self._in_data = True
+            return self._parse_buffer()
+        if not self._in_data:
+            self._buffer = []
+        self._in_data = True
         return None
 
     def flush(self) -> "Dict[str, Any] | None":
@@ -202,7 +212,7 @@ def _sse_headers_for(headers: Dict[str, str]) -> Dict[str, str]:
     return headers
 
 
-async def _aread_sse_first_json(resp: "httpx.Response", timeout: float) -> Dict[str, Any]:
+async def _aread_sse_first_json(resp: "httpx.Response") -> Dict[str, Any]:
     """Асинхронный двойник :func:`_read_sse_first_json`; разбор общий."""
     reader = _SseFirstJson(_sse_debug())
     async for line in resp.aiter_lines():
@@ -231,7 +241,7 @@ async def _arequest_sse(
         resp.raise_for_status()
         _fix_sse_encoding(resp)
         out_headers = {k.lower(): v for k, v in resp.headers.items()}
-        body = await _aread_sse_first_json(resp, timeout)
+        body = await _aread_sse_first_json(resp)
     return out_headers, body
 
 
@@ -478,24 +488,27 @@ async def _aread_response(proc, timeout: float, want_id: Any) -> Dict[str, Any]:
             return {}
         try:
             raw = await asyncio.wait_for(proc.stdout.readline(), left)
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             return {}
         if not raw:
             return {}                     # EOF: процесс закрыл вывод
         line_in = raw.decode("utf-8", "replace").strip()
-        if not line_in:
-            continue
-        try:
-            message = json.loads(line_in)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(message, dict):
-            continue
-        if message.get("method") is not None:
-            continue                      # встречный запрос или уведомление
-        if want_id is not None and message.get("id") != want_id:
-            continue                      # ответ на чужой запрос
-        return message
+        message = _parse_rpc_response_line(line_in, want_id) if line_in else None
+        if message is not None:
+            return message
+
+
+def _parse_rpc_response_line(line_in: str, want_id: Any) -> Dict[str, Any] | None:
+    """JSON-RPC ответ на наш запрос из строки stdout; None — мусор, встречный запрос или чужой id."""
+    try:
+        message = json.loads(line_in)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(message, dict) or message.get("method") is not None:
+        return None                       # встречный запрос или уведомление
+    if want_id is not None and message.get("id") != want_id:
+        return None                       # ответ на чужой запрос
+    return message
 
 
 async def _astdio_exchange(
@@ -550,7 +563,7 @@ async def _akill_process(proc) -> None:
         return
     try:
         proc.terminate()
-    except (ProcessLookupError, OSError):
+    except OSError:
         return
     deadline = time.monotonic() + 5.0
     while proc.returncode is None and time.monotonic() < deadline:
@@ -558,7 +571,7 @@ async def _akill_process(proc) -> None:
     if proc.returncode is None:
         try:
             proc.kill()
-        except (ProcessLookupError, OSError):
+        except OSError:
             pass
 
 

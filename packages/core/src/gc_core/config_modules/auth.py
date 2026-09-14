@@ -10,7 +10,9 @@ def build_auth_connector(config_dict: Dict[str, Any]) -> Optional[AuthConnector]
     if not auth_cfg:
         return None
 
-    entry_point = auth_cfg["auth_endpoint"]
+    entry_point = auth_cfg.get("auth_endpoint")
+    if not entry_point:
+        raise ValueError("agent_auth.auth_endpoint is required when agent_auth is configured")
     env_name = auth_cfg.get("env_name", "surface_cli")
     env_version = auth_cfg.get("env_version", "0.0.1")
     plugin_name = auth_cfg.get("plugin_name", "surf-cli-plugin")

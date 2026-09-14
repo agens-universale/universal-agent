@@ -180,6 +180,175 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
     )
 
 
+def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_result_factory):
+    """Floor carve-out (Spec B §6): блок записи в защищённый путь или None (можно писать)."""
+    from gc_core.security.protected_paths import protected_decision, protection_enabled
+    from gc_core.security.confirm_port import request_confirm
+    _cfg = getattr(context.ctx, "config_dict", None) or {}
+    if not protection_enabled(_cfg):
+        return None
+    _decision = protected_decision(candidate_path, cwd=context.launch_root)
+    if _decision == "deny":
+        _err = {
+            "type": "protected_path_denied",
+            "path": candidate_path,
+            "message": "Path is protected (operational .gc / config).",
+        }
+        audit_policy_decision(
+            context,
+            tool_name=_tool_name(func, args),
+            decision="blocked",
+            reason_code="protected_deny",
+        )
+        return _blocked_result(
+            func, _err, args, kwargs,
+            blocked_result_factory=blocked_result_factory,
+        )
+    if _decision == "ask":
+        _ok = request_confirm(
+            title="Защита записи",
+            question=f"Разрешить запись в {candidate_path}?",
+            fields=[("path", candidate_path)],
+            ctx=context.ctx,
+            decision_key=f"write:{candidate_path}",
+        )
+        if not _ok:
+            _err = {
+                "type": "protected_path_denied",
+                "path": candidate_path,
+                "message": "Write to instruction file not confirmed.",
+            }
+            return _blocked_result(
+                func, _err, args, kwargs,
+                blocked_result_factory=blocked_result_factory,
+            )
+        # confirmed → fall through
+    return None
+
+
+def _resolve_write_violation(exc, context, candidate_path, operation, func, args, kwargs, blocked_result_factory):
+    """Нарушение периметра по режиму: (True, None) — писать можно; (False, blocked) — отказ."""
+    tool_name = _tool_name(func, args)
+    wg_mode = (context.write_guard.mode or "deny").strip().lower()
+    if wg_mode == "allow":
+        # Документированный пропуск: помечаем в audit, но даём
+        # write пройти. Используется для baseline-тестов.
+        audit_policy_decision(
+            context,
+            tool_name=tool_name,
+            decision="executed",
+            reason_code="policy_allow_out_of_perimeter",
+            risk_flags=["out_of_perimeter"],
+        )
+        return True, None
+    if wg_mode == "ask":
+        confirmed = _ask_user_confirmation_for_write(
+            tool_name=tool_name,
+            path=candidate_path,
+            operation=operation,
+            error=exc.error,
+            ctx=context.ctx,
+            decision_key=f"write:{candidate_path}",
+        )
+        if confirmed:
+            audit_policy_decision(
+                context,
+                tool_name=tool_name,
+                decision="executed",
+                reason_code="policy_ask_confirmed",
+                risk_flags=["out_of_perimeter"],
+            )
+            return True, None
+        # cancelled — продолжаем в стандартный blocked-flow ниже,
+        # но помечаем error.type для отличимости в логах.
+        exc.error["type"] = "write_guard_cancelled_by_user"
+        exc.error["message"] = (
+            f"User declined the write to '{candidate_path}'. Do NOT retry the same "
+            "write, and do NOT silently write somewhere else — ask the user how to "
+            "proceed, or stop and report that it was declined."
+        )
+    audit_policy_decision(
+        context,
+        tool_name=tool_name,
+        decision="blocked",
+        reason_code="policy_deny" if wg_mode == "deny" else "policy_ask_cancelled",
+        error_type=exc.error.get("type"),
+    )
+    return False, _blocked_result(
+        func,
+        exc.error,
+        args,
+        kwargs,
+        blocked_result_factory=blocked_result_factory,
+    )
+
+
+def _write_guard_flow(func, args, kwargs, path_arg, path_extractor, operation, blocked_result_factory):
+    """Тело декоратора — генератор: `(yield)` — точка вызова самого тула."""
+    context = resolve_tool_context(*args, **kwargs)
+    # Floor carve-out: runs BEFORE the write_guard.enabled gate so it
+    # applies unconditionally (Spec B §6).
+    try:
+        candidate_path = _extract_named_value(
+            func,
+            args,
+            kwargs,
+            path_arg,
+            path_extractor,
+            "path",
+        )
+    except ValueError:
+        candidate_path = None
+    if candidate_path is not None:
+        blocked = _protected_write_block(
+            candidate_path, context, func, args, kwargs, blocked_result_factory,
+        )
+        if blocked is not None:
+            return blocked
+    if not context.write_guard.enabled:
+        audit_policy_decision(
+            context,
+            tool_name=_tool_name(func, args),
+            decision="executed",
+            reason_code="policy_disabled",
+        )
+        return (yield)
+    if candidate_path is None:
+        try:
+            candidate_path = _extract_named_value(
+                func,
+                args,
+                kwargs,
+                path_arg,
+                path_extractor,
+                "path",
+            )
+        except ValueError:
+            return (yield)
+    try:
+        check_write_path_allowed(
+            candidate_path,
+            context.launch_root,
+            context.write_guard.extra_paths,
+            base_dir=context.launch_root,
+            operation=operation,
+        )
+    except WriteGuardViolation as exc:
+        allowed, blocked = _resolve_write_violation(
+            exc, context, candidate_path, operation, func, args, kwargs, blocked_result_factory,
+        )
+        if allowed:
+            return (yield)
+        return blocked
+    audit_policy_decision(
+        context,
+        tool_name=_tool_name(func, args),
+        decision="executed",
+        reason_code="policy_allow",
+    )
+    return (yield)
+
+
 def enforce_write_guard(
     path_arg: str | None = None,
     path_extractor: Callable[..., str] | None = None,
@@ -188,149 +357,9 @@ def enforce_write_guard(
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
         def _flow(*args: Any, **kwargs: Any):
-            context = resolve_tool_context(*args, **kwargs)
-            # Floor carve-out: runs BEFORE the write_guard.enabled gate so it
-            # applies unconditionally (Spec B §6).
-            try:
-                candidate_path = _extract_named_value(
-                    func,
-                    args,
-                    kwargs,
-                    path_arg,
-                    path_extractor,
-                    "path",
-                )
-            except ValueError:
-                candidate_path = None
-            if candidate_path is not None:
-                from gc_core.security.protected_paths import protected_decision, protection_enabled
-                from gc_core.security.confirm_port import request_confirm
-                _cfg = getattr(context.ctx, "config_dict", None) or {}
-                if protection_enabled(_cfg):
-                    _decision = protected_decision(candidate_path, cwd=context.launch_root)
-                    if _decision == "deny":
-                        _err = {
-                            "type": "protected_path_denied",
-                            "path": candidate_path,
-                            "message": "Path is protected (operational .gc / config).",
-                        }
-                        audit_policy_decision(
-                            context,
-                            tool_name=_tool_name(func, args),
-                            decision="blocked",
-                            reason_code="protected_deny",
-                        )
-                        return _blocked_result(
-                            func, _err, args, kwargs,
-                            blocked_result_factory=blocked_result_factory,
-                        )
-                    if _decision == "ask":
-                        _ok = request_confirm(
-                            title="Защита записи",
-                            question=f"Разрешить запись в {candidate_path}?",
-                            fields=[("path", candidate_path)],
-                            ctx=context.ctx,
-                            decision_key=f"write:{candidate_path}",
-                        )
-                        if not _ok:
-                            _err = {
-                                "type": "protected_path_denied",
-                                "path": candidate_path,
-                                "message": "Write to instruction file not confirmed.",
-                            }
-                            return _blocked_result(
-                                func, _err, args, kwargs,
-                                blocked_result_factory=blocked_result_factory,
-                            )
-                        # confirmed → fall through
-            if not context.write_guard.enabled:
-                audit_policy_decision(
-                    context,
-                    tool_name=_tool_name(func, args),
-                    decision="executed",
-                    reason_code="policy_disabled",
-                )
-                return (yield)
-            if candidate_path is None:
-                try:
-                    candidate_path = _extract_named_value(
-                        func,
-                        args,
-                        kwargs,
-                        path_arg,
-                        path_extractor,
-                        "path",
-                    )
-                except ValueError:
-                    return (yield)
-            try:
-                check_write_path_allowed(
-                    candidate_path,
-                    context.launch_root,
-                    context.write_guard.extra_paths,
-                    base_dir=context.launch_root,
-                    operation=operation,
-                )
-            except WriteGuardViolation as exc:
-                wg_mode = (context.write_guard.mode or "deny").strip().lower()
-                if wg_mode == "allow":
-                    # Документированный пропуск: помечаем в audit, но даём
-                    # write пройти. Используется для baseline-тестов.
-                    audit_policy_decision(
-                        context,
-                        tool_name=_tool_name(func, args),
-                        decision="executed",
-                        reason_code="policy_allow_out_of_perimeter",
-                        risk_flags=["out_of_perimeter"],
-                    )
-                    return (yield)
-                if wg_mode == "ask":
-                    confirmed = _ask_user_confirmation_for_write(
-                        tool_name=_tool_name(func, args),
-                        path=candidate_path,
-                        operation=operation,
-                        error=exc.error,
-                        ctx=context.ctx,
-                        decision_key=f"write:{candidate_path}",
-                    )
-                    if confirmed:
-                        audit_policy_decision(
-                            context,
-                            tool_name=_tool_name(func, args),
-                            decision="executed",
-                            reason_code="policy_ask_confirmed",
-                            risk_flags=["out_of_perimeter"],
-                        )
-                        return (yield)
-                    # cancelled — продолжаем в стандартный blocked-flow ниже,
-                    # но помечаем error.type для отличимости в логах.
-                    exc.error["type"] = "write_guard_cancelled_by_user"
-                    exc.error["message"] = (
-                        f"User declined the write to '{candidate_path}'. Do NOT retry the same "
-                        "write, and do NOT silently write somewhere else — ask the user how to "
-                        "proceed, or stop and report that it was declined."
-                    )
-                audit_policy_decision(
-                    context,
-                    tool_name=_tool_name(func, args),
-                    decision="blocked",
-                    reason_code="policy_deny" if wg_mode == "deny" else "policy_ask_cancelled",
-                    error_type=exc.error.get("type"),
-                )
-                return _blocked_result(
-                    func,
-                    exc.error,
-                    args,
-                    kwargs,
-                    blocked_result_factory=blocked_result_factory,
-                )
-            audit_policy_decision(
-                context,
-                tool_name=_tool_name(func, args),
-                decision="executed",
-                reason_code="policy_allow",
-            )
-            return (yield)
+            return (yield from _write_guard_flow(
+                func, args, kwargs, path_arg, path_extractor, operation, blocked_result_factory,
+            ))
 
         return dual_wrap(func, _flow)
 

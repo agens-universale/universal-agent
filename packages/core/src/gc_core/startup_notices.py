@@ -139,57 +139,82 @@ def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
 
     out: List[Notice] = []
     for rec in records:
-        code = str(rec.get("code") or "")
-        if code == "subagent_definition_invalid":
-            name = _basename(rec.get("path"))
-            out.append(Notice(
-                "warning", code,
-                f"Файл сабагента пропущен: {name} — {rec.get('reason')}",
-                highlights=(name,),
-            ))
-        elif code == "subagent_name_collision":
-            name = _basename(rec.get("path"))
-            taken = str(rec.get("subagent_name") or "")
-            winner = rec.get("winner")
-            by = "встроенным" if winner == "builtin" else f"файлом {_basename(winner)}"
-            out.append(Notice(
-                "warning", code,
-                f"Имя {taken} уже занято {by} — файл {name} пропущен.",
-                highlights=(taken, name),
-            ))
-        elif code == "use_local_subagents_unknown":
-            names = [str(x) for x in (rec.get("names") or [])]
-            out.append(Notice(
-                "warning", code,
-                "use_local_subagents: имена не найдены ни среди встроенных, ни в папке "
-                f"и проигнорированы: {', '.join(names)}.",
-                highlights=("use_local_subagents", *names),
-            ))
-        elif code == "subagents_max_count_exceeded":
-            dropped = [str(x) for x in (rec.get("dropped") or [])]
-            out.append(Notice(
-                "warning", code,
-                f"Превышен subagents_max_count={rec.get('limit')} — не загружены: "
-                f"{', '.join(dropped)}.",
-                highlights=("subagents_max_count", *dropped),
-            ))
-        elif code == "subagent_required_tools_kept":
-            name = _basename(rec.get("path"))
-            names = [str(x) for x in (rec.get("names") or [])]
-            out.append(Notice(
-                "warning", code,
-                f"{name}: служебные инструменты выдаются всегда, stop_tools их не "
-                f"отбирает — запрет проигнорирован: {', '.join(names)}.",
-                highlights=(name, *names),
-            ))
-        elif code in ("subagents_dir_missing", "subagents_dir_unreadable"):
-            out.append(Notice(
-                "warning", code,
-                f"Папка кастомных сабагентов недоступна: {rec.get('dir')} — "
-                "загружены только встроенные.",
-                highlights=("subagents_dir",),
-            ))
+        build = _SUBAGENT_NOTICE_BUILDERS.get(str(rec.get("code") or ""))
+        if build is not None:
+            out.append(build(rec))
     return out
+
+
+def _notice_definition_invalid(rec: Dict[str, Any]) -> Notice:
+    name = _basename(rec.get("path"))
+    return Notice(
+        "warning", "subagent_definition_invalid",
+        f"Файл сабагента пропущен: {name} — {rec.get('reason')}",
+        highlights=(name,),
+    )
+
+
+def _notice_name_collision(rec: Dict[str, Any]) -> Notice:
+    name = _basename(rec.get("path"))
+    taken = str(rec.get("subagent_name") or "")
+    winner = rec.get("winner")
+    by = "встроенным" if winner == "builtin" else f"файлом {_basename(winner)}"
+    return Notice(
+        "warning", "subagent_name_collision",
+        f"Имя {taken} уже занято {by} — файл {name} пропущен.",
+        highlights=(taken, name),
+    )
+
+
+def _notice_unknown_names(rec: Dict[str, Any]) -> Notice:
+    names = [str(x) for x in (rec.get("names") or [])]
+    return Notice(
+        "warning", "use_local_subagents_unknown",
+        "use_local_subagents: имена не найдены ни среди встроенных, ни в папке "
+        f"и проигнорированы: {', '.join(names)}.",
+        highlights=("use_local_subagents", *names),
+    )
+
+
+def _notice_max_count(rec: Dict[str, Any]) -> Notice:
+    dropped = [str(x) for x in (rec.get("dropped") or [])]
+    return Notice(
+        "warning", "subagents_max_count_exceeded",
+        f"Превышен subagents_max_count={rec.get('limit')} — не загружены: "
+        f"{', '.join(dropped)}.",
+        highlights=("subagents_max_count", *dropped),
+    )
+
+
+def _notice_required_tools_kept(rec: Dict[str, Any]) -> Notice:
+    name = _basename(rec.get("path"))
+    names = [str(x) for x in (rec.get("names") or [])]
+    return Notice(
+        "warning", "subagent_required_tools_kept",
+        f"{name}: служебные инструменты выдаются всегда, stop_tools их не "
+        f"отбирает — запрет проигнорирован: {', '.join(names)}.",
+        highlights=(name, *names),
+    )
+
+
+def _notice_dir_unavailable(rec: Dict[str, Any]) -> Notice:
+    return Notice(
+        "warning", str(rec.get("code") or ""),
+        f"Папка кастомных сабагентов недоступна: {rec.get('dir')} — "
+        "загружены только встроенные.",
+        highlights=("subagents_dir",),
+    )
+
+
+_SUBAGENT_NOTICE_BUILDERS = {
+    "subagent_definition_invalid": _notice_definition_invalid,
+    "subagent_name_collision": _notice_name_collision,
+    "use_local_subagents_unknown": _notice_unknown_names,
+    "subagents_max_count_exceeded": _notice_max_count,
+    "subagent_required_tools_kept": _notice_required_tools_kept,
+    "subagents_dir_missing": _notice_dir_unavailable,
+    "subagents_dir_unreadable": _notice_dir_unavailable,
+}
 
 
 def _basename(path: Any) -> str:

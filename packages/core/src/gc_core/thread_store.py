@@ -343,6 +343,23 @@ def read_subagent_trace(
     return records
 
 
+def _parse_message_record(row: str) -> Optional[Dict[str, Any]]:
+    """Запись типа message из строки jsonl (в т.ч. в строковой обёртке) или None."""
+    try:
+        record = json.loads(row)
+    except json.JSONDecodeError:
+        return None
+    # Допускаем строковую обёртку (двойной json.dumps строки записи).
+    if isinstance(record, str):
+        try:
+            record = json.loads(record)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(record, dict) or record.get("type") != "message":
+        return None
+    return record
+
+
 def load_thread_messages(
     threads_dir: str, system_id: str, thread_id: str
 ) -> Tuple[List[Dict[str, Any]], Set[str], int]:
@@ -359,19 +376,8 @@ def load_thread_messages(
     with open(data_path, "r", encoding="utf-8") as f:
         for line in f:
             row = line.strip()
-            if len(row) == 0:
-                continue
-            try:
-                record = json.loads(row)
-            except json.JSONDecodeError:
-                continue
-            # Допускаем строковую обёртку (двойной json.dumps строки записи).
-            if isinstance(record, str):
-                try:
-                    record = json.loads(record)
-                except json.JSONDecodeError:
-                    continue
-            if not isinstance(record, dict) or record.get("type") != "message":
+            record = _parse_message_record(row) if row else None
+            if record is None:
                 continue
             seq = record.get("seq")
             if isinstance(seq, int) and seq > max_seq:
@@ -490,6 +496,39 @@ def patch_runtime_flag(
     save_thread_meta(threads_dir, sys_norm, thread_id, disk)
 
 
+def _carry_meta_string(new_meta: Dict[str, Any], existing_meta: Dict[str, Any], key: str) -> None:
+    """Перенести непустое строковое поле из прежней meta."""
+    value = existing_meta.get(key)
+    if isinstance(value, str) and value.strip():
+        new_meta[key] = value
+
+
+def _is_message_record_with_id(rec: Any, message_id: str) -> bool:
+    if not isinstance(rec, dict) or rec.get("type") != "message":
+        return False
+    payload = rec.get("payload")
+    return isinstance(payload, dict) and payload.get("id") == message_id
+
+
+def _lines_without_message(data_path: str, message_id: str) -> Tuple[List[str], int]:
+    """Строки data_*.jsonl без message-записей с данным id и число удалённых."""
+    kept: List[str] = []
+    removed = 0
+    with open(data_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                rec = None
+            if _is_message_record_with_id(rec, message_id):
+                removed += 1
+                continue
+            kept.append(line.rstrip("\n"))
+    return kept, removed
+
+
 def discard_message_by_id(
     threads_dir: str,
     system_id: str,
@@ -513,27 +552,7 @@ def discard_message_by_id(
     if not os.path.exists(data_path):
         return False
 
-    kept: List[str] = []
-    removed = 0
-    with open(data_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                kept.append(line.rstrip("\n"))
-                continue
-            payload = rec.get("payload") if isinstance(rec, dict) else None
-            if (
-                isinstance(rec, dict)
-                and rec.get("type") == "message"
-                and isinstance(payload, dict)
-                and payload.get("id") == message_id
-            ):
-                removed += 1
-                continue
-            kept.append(line.rstrip("\n"))
+    kept, removed = _lines_without_message(data_path, message_id)
 
     if removed == 0:
         return False
@@ -886,6 +905,21 @@ class ThreadSession:
         base_meta["previous_response_id"] = self.previous_response_id
         base_meta["backend_api_mode"] = self.backend_api_mode
         base_meta["messages_count"] = self.persisted_messages_count
+        self._copy_session_meta_fields(base_meta)
+        # Persist rendered chat/completions system prompt for transparency/debugging.
+        # Must stay identical to актуальным данным: when we are in `responses`
+        # mode, there is no system prompt in messages, so it must not be present in meta.
+        if self.backend_api_mode == "chat_completions":
+            prompt = self.meta.get("chat_completions_system_prompt_rendered")
+            if isinstance(prompt, str) and prompt.strip():
+                base_meta["chat_completions_system_prompt_rendered"] = prompt
+        else:
+            base_meta.pop("chat_completions_system_prompt_rendered", None)
+        merge_tool_usage_notice_meta_to_base(base_meta, self.meta)
+        return base_meta
+
+    def _copy_session_meta_fields(self, base_meta: Dict[str, Any]) -> None:
+        """Перенести в base_meta поля сессии, которые есть в self.meta в валидной форме."""
         if isinstance(self.meta.get("shared"), dict):
             base_meta["shared"] = self.meta["shared"]
         if isinstance(self.meta.get("last_backend_response_id"), str):
@@ -904,17 +938,6 @@ class ThreadSession:
             base_meta["dialog_steps_offset"] = int(self.meta.get("dialog_steps_offset") or 0)
         if isinstance(self.meta.get("token_usage"), dict):
             base_meta["token_usage"] = self.meta["token_usage"]
-        # Persist rendered chat/completions system prompt for transparency/debugging.
-        # Must stay identical to актуальным данным: when we are in `responses`
-        # mode, there is no system prompt in messages, so it must not be present in meta.
-        if self.backend_api_mode == "chat_completions":
-            prompt = self.meta.get("chat_completions_system_prompt_rendered")
-            if isinstance(prompt, str) and prompt.strip():
-                base_meta["chat_completions_system_prompt_rendered"] = prompt
-        else:
-            base_meta.pop("chat_completions_system_prompt_rendered", None)
-        merge_tool_usage_notice_meta_to_base(base_meta, self.meta)
-        return base_meta
 
     async def apersist_batch(
         self,
@@ -999,32 +1022,10 @@ class ThreadSession:
             effective_steps_offset = int(dialog_steps_offset)
         except (TypeError, ValueError):
             effective_steps_offset = int(existing_meta.get("dialog_steps_offset", 0) or 0)
-        if effective_steps_offset < 0:
-            effective_steps_offset = 0
-        new_meta["dialog_steps_offset"] = effective_steps_offset
-        if isinstance(user_intent_log, list):
-            new_meta["user_intent_log"] = serialize_for_meta(
-                deserialize_list(user_intent_log)
-            )
-        elif isinstance(existing_meta.get("user_intent_log"), list):
-            new_meta["user_intent_log"] = serialize_for_meta(
-                deserialize_list(existing_meta.get("user_intent_log"))
-            )
-        if isinstance(existing_meta.get("current_user_intent"), list):
-            new_meta["current_user_intent"] = serialize_for_meta(
-                deserialize_list(existing_meta.get("current_user_intent"))
-            )
-        user_turn_seq = summary_payload.get("user_turn_seq")
-        if user_turn_seq is not None:
-            new_meta["user_turn_seq"] = int(user_turn_seq or 0)
-        elif "user_turn_seq" in existing_meta:
-            new_meta["user_turn_seq"] = int(existing_meta.get("user_turn_seq") or 0)
-        prompt = existing_meta.get("chat_completions_system_prompt_rendered")
-        if isinstance(prompt, str) and prompt.strip():
-            new_meta["chat_completions_system_prompt_rendered"] = prompt
-        last_backend_response_id = existing_meta.get("last_backend_response_id")
-        if isinstance(last_backend_response_id, str) and last_backend_response_id.strip():
-            new_meta["last_backend_response_id"] = last_backend_response_id
+        new_meta["dialog_steps_offset"] = max(0, effective_steps_offset)
+        self._carry_intent_fields(new_meta, existing_meta, user_intent_log, summary_payload.get("user_turn_seq"))
+        _carry_meta_string(new_meta, existing_meta, "chat_completions_system_prompt_rendered")
+        _carry_meta_string(new_meta, existing_meta, "last_backend_response_id")
         # meta.tui: disk wins (TUI-owned). meta.runtime: merge + live_* пересчёт.
         session_tui = dict(existing_meta.get("tui") or {})
         new_meta["tui"] = {**session_tui, **disk_tui}
@@ -1039,6 +1040,29 @@ class ThreadSession:
         )
         new_meta["runtime"] = merged_runtime
         return new_meta
+
+    @staticmethod
+    def _carry_intent_fields(
+        new_meta: Dict[str, Any],
+        existing_meta: Dict[str, Any],
+        user_intent_log: Any,
+        user_turn_seq: Any,
+    ) -> None:
+        """intent-поля после компакции: из summary_payload, иначе из прежней meta."""
+        if isinstance(user_intent_log, list):
+            new_meta["user_intent_log"] = serialize_for_meta(deserialize_list(user_intent_log))
+        elif isinstance(existing_meta.get("user_intent_log"), list):
+            new_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(existing_meta.get("user_intent_log"))
+            )
+        if isinstance(existing_meta.get("current_user_intent"), list):
+            new_meta["current_user_intent"] = serialize_for_meta(
+                deserialize_list(existing_meta.get("current_user_intent"))
+            )
+        if user_turn_seq is not None:
+            new_meta["user_turn_seq"] = int(user_turn_seq or 0)
+        elif "user_turn_seq" in existing_meta:
+            new_meta["user_turn_seq"] = int(existing_meta.get("user_turn_seq") or 0)
 
     def _compact_apply(
         self,

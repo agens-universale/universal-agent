@@ -1,5 +1,6 @@
 """Shared chat/completions client helpers for controller-level modules."""
 
+import functools
 import json
 from typing import Any, Dict, List, Optional
 
@@ -54,21 +55,20 @@ def _positive_int(raw: object, *, default: int) -> int:
         n = int(raw)
         return n if n >= 1 else default
     if isinstance(raw, str):
-        s = raw.strip().lower().replace(" ", "").replace("_", "")
-        if not s:
-            return default
-        if s.endswith("k"):
-            try:
-                n = int(float(s[:-1]) * 1000)
-            except ValueError:
-                return default
-            return n if n >= 1 else default
-        try:
-            n = int(float(s))
-        except ValueError:
-            return default
-        return n if n >= 1 else default
+        return _positive_int_from_str(raw, default)
     return default
+
+
+def _positive_int_from_str(raw: str, default: int) -> int:
+    """Строковая форма: "8192", "32_768", "16k"; пусто/не число/< 1 → default."""
+    s = raw.strip().lower().replace(" ", "").replace("_", "")
+    if not s:
+        return default
+    try:
+        n = int(float(s[:-1]) * 1000) if s.endswith("k") else int(float(s))
+    except ValueError:
+        return default
+    return n if n >= 1 else default
 
 
 def _deep_merge_dicts(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
@@ -291,16 +291,17 @@ async def arequest_chat_completion_text(
         raise ValueError("max_tokens must be >= 1")
 
     router = getattr(ctx, "model_router", None)
+    send = functools.partial(
+        _asend_chat_completion_text,
+        ctx=ctx,
+        state=state,
+        messages=messages,
+        max_tokens=max_tokens,
+        request_label=request_label,
+        payload_overrides=payload_overrides,
+    )
     if router is None:
-        return await _asend_chat_completion_text(
-            ctx=ctx,
-            state=state,
-            messages=messages,
-            max_tokens=max_tokens,
-            request_label=request_label,
-            payload_overrides=payload_overrides,
-            resolved=None,
-        )
+        return await send(resolved=None)
 
     failed_alias: Optional[str] = None
     primary_exc: Optional[Exception] = None
@@ -313,15 +314,7 @@ async def arequest_chat_completion_text(
         primary_exc = exc
     else:
         try:
-            return await _asend_chat_completion_text(
-                ctx=ctx,
-                state=state,
-                messages=messages,
-                max_tokens=max_tokens,
-                request_label=request_label,
-                payload_overrides=payload_overrides,
-                resolved=resolved,
-            )
+            return await send(resolved=resolved)
         except Exception as exc:
             if resolved.alias is None or not is_model_unavailable_error(exc):
                 raise
@@ -332,14 +325,9 @@ async def arequest_chat_completion_text(
     # Определяем активную модель ДО trip() свежего провала: иначе, если консьюмер
     # без привязки уже резолвился в ту же самую активную модель, резолв "main" для
     # сравнения ниже упал бы AliasCircuitOpenError раньше времени.
-    try:
-        active_resolved = router.resolve("main")
-    except AliasCircuitOpenError as open_exc:
-        active_resolved = open_exc.resolved
+    active_resolved = _resolve_active_model(router)
     if newly_failed_alias is not None:
-        router.breaker.trip(
-            newly_failed_alias, str(primary_exc).strip()[:300] or primary_exc.__class__.__name__
-        )
+        router.breaker.trip(newly_failed_alias, _breaker_reason(primary_exc))
 
     if active_resolved.alias == failed_alias:
         # Деградировать некуда: привязка и есть активная модель — то же самое
@@ -358,20 +346,19 @@ async def arequest_chat_completion_text(
         enabled=bool(getattr(ctx, "is_tui", False)),
     )
     try:
-        return await _asend_chat_completion_text(
-            ctx=ctx,
-            state=state,
-            messages=messages,
-            max_tokens=max_tokens,
-            request_label=request_label,
-            payload_overrides=payload_overrides,
-            resolved=active_resolved,
-        )
+        return await send(resolved=active_resolved)
     except Exception as exc:
         if active_resolved.alias is not None and is_model_unavailable_error(exc):
-            router.breaker.trip(
-                active_resolved.alias, str(exc).strip()[:300] or exc.__class__.__name__
-            )
+            router.breaker.trip(active_resolved.alias, _breaker_reason(exc))
         raise
 
 
+def _resolve_active_model(router: Any):
+    try:
+        return router.resolve("main")
+    except AliasCircuitOpenError as open_exc:
+        return open_exc.resolved
+
+
+def _breaker_reason(exc: BaseException) -> str:
+    return str(exc).strip()[:300] or exc.__class__.__name__

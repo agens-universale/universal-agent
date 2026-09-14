@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import asyncio
@@ -536,7 +538,15 @@ async def _call_tool_stream_sse_async(
         }
 
 
-async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
+_SESSION_TERMINATED_MARKER = "Session terminated"
+
+
+def _is_session_terminated(exc: BaseException) -> bool:
+    """Сервер закрыл сессию (404 «Session terminated») — можно пробовать fallback-endpoint."""
+    return _SESSION_TERMINATED_MARKER in str(exc)
+
+
+async def _enter_session(transport_cm: Any, *, read_timeout: Optional[float] = None) -> Tuple[Any, Any]:
     """Войти в транспорт и ``ClientSession``, откатив всё при ошибке.
 
     ``initialize()`` падает не в теории: сервер отвечает не тем протоколом,
@@ -548,7 +558,11 @@ async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
     Возвращает ``(session, cm_stack)``; стек в порядке открытия.
     """
     read_stream, write_stream = await transport_cm.__aenter__()
-    session = ClientSession(read_stream, write_stream)
+    session = ClientSession(
+        read_stream,
+        write_stream,
+        read_timeout_seconds=None if read_timeout is None else timedelta(seconds=read_timeout),
+    )
     try:
         await session.__aenter__()
     except BaseException:
@@ -675,6 +689,17 @@ async def acall_tool_stream_sse(
     )
 
 
+def _tool_to_dict(tool: Any) -> Dict[str, Any]:
+    if hasattr(tool, "model_dump"):
+        return tool.model_dump(by_alias=True, mode="json", exclude_unset=True)
+    if isinstance(tool, dict):
+        return tool
+    return {
+        "name": getattr(tool, "name", ""),
+        "description": getattr(tool, "description", "") or "",
+    }
+
+
 async def _list_tools_stream_http_async(
     base_url: str,
     token: Optional[str],
@@ -709,23 +734,12 @@ async def _list_tools_stream_http_async(
                 await session.initialize()
                 tools_result = await session.list_tools()
 
-                tools: List[Dict[str, Any]] = []
-                for tool in tools_result.tools:
-                    if hasattr(tool, "model_dump"):
-                        tool_dict = tool.model_dump(by_alias=True, mode="json", exclude_unset=True)
-                    elif isinstance(tool, dict):
-                        tool_dict = tool
-                    else:
-                        tool_dict = {
-                            "name": getattr(tool, "name", ""),
-                            "description": getattr(tool, "description", "") or "",
-                        }
-                    tools.append(tool_dict)
+                tools = [_tool_to_dict(tool) for tool in tools_result.tools]
 
                 return tools
         except McpError as exc:
             last_error = exc
-            is_session_terminated = "Session terminated" in str(exc)
+            is_session_terminated = _is_session_terminated(exc)
             has_fallback = endpoint != endpoints[-1]
             if is_session_terminated and has_fallback:
                 continue
@@ -811,7 +825,7 @@ async def _call_tool_stream_http_async(
                 }
         except McpError as exc:
             last_error = exc
-            is_session_terminated = "Session terminated" in str(exc)
+            is_session_terminated = _is_session_terminated(exc)
             has_fallback = endpoint != endpoints[-1]
             if is_session_terminated and has_fallback:
                 continue
@@ -820,6 +834,59 @@ async def _call_tool_stream_http_async(
     if last_error is not None:
         raise last_error
     return {"content": [], "isError": True}
+
+
+async def _aopen_persistent_http_session(
+    server_key: str,
+    endpoint: str,
+    *,
+    token: Optional[str],
+    extra_headers: Optional[Dict[str, str]],
+    timeout: float,
+    verify: Union[bool, str],
+    cert: Optional[Tuple[str, str]],
+    base_url: str,
+) -> ClientSession:
+    http_client = _make_stream_http_client(
+        token=token,
+        extra_headers=extra_headers,
+        timeout=timeout,
+        verify=verify,
+        cert=cert,
+        base_url=base_url,
+    )
+    # У stream_http стек на один менеджер длиннее: сначала httpx-клиент.
+    # Откат тот же — всё, во что успели войти, закрываем здесь, а не
+    # оставляем сборщику мусора (см. `_enter_session`).
+    await http_client.__aenter__()
+    transport = streamable_http_client(endpoint, http_client=http_client)
+    try:
+        read_stream, write_stream, _ = await transport.__aenter__()
+    except BaseException:
+        await _exit_quietly(http_client)
+        raise
+    new_session = ClientSession(read_stream, write_stream)
+    try:
+        await new_session.__aenter__()
+        await new_session.initialize()
+    except BaseException:
+        await _exit_quietly(new_session)
+        await _exit_quietly(transport)
+        await _exit_quietly(http_client)
+        raise
+    _SESSION_MANAGER.set_session(server_key, new_session, (http_client, transport, new_session))
+    return new_session
+
+
+async def _acall_tool_on_session(s: ClientSession, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    result = await s.call_tool(tool_name, arguments or {})
+    content_items: List[Any] = []
+    for item in getattr(result, "content", []) or []:
+        if hasattr(item, "model_dump"):
+            content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+        else:
+            content_items.append(item)
+    return {"content": content_items, "isError": bool(getattr(result, "isError", False))}
 
 
 async def _call_tool_stream_http_persistent(
@@ -839,8 +906,12 @@ async def _call_tool_stream_http_persistent(
     """
     session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
 
+    endpoints = _stream_http_endpoints(base_url)
+
     async def _open_session(endpoint: str) -> ClientSession:
-        http_client = _make_stream_http_client(
+        return await _aopen_persistent_http_session(
+            server_key,
+            endpoint,
             token=token,
             extra_headers=extra_headers,
             timeout=timeout,
@@ -848,39 +919,9 @@ async def _call_tool_stream_http_persistent(
             cert=cert,
             base_url=base_url,
         )
-        # У stream_http стек на один менеджер длиннее: сначала httpx-клиент.
-        # Откат тот же — всё, во что успели войти, закрываем здесь, а не
-        # оставляем сборщику мусора (см. `_enter_session`).
-        await http_client.__aenter__()
-        transport = streamable_http_client(endpoint, http_client=http_client)
-        try:
-            read_stream, write_stream, _ = await transport.__aenter__()
-        except BaseException:
-            await _exit_quietly(http_client)
-            raise
-        new_session = ClientSession(read_stream, write_stream)
-        try:
-            await new_session.__aenter__()
-            await new_session.initialize()
-        except BaseException:
-            await _exit_quietly(new_session)
-            await _exit_quietly(transport)
-            await _exit_quietly(http_client)
-            raise
-        _SESSION_MANAGER.set_session(server_key, new_session, (http_client, transport, new_session))
-        return new_session
-
-    endpoints = _stream_http_endpoints(base_url)
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await s.call_tool(tool_name, arguments or {})
-        content_items: List[Any] = []
-        for item in getattr(result, "content", []) or []:
-            if hasattr(item, "model_dump"):
-                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
-            else:
-                content_items.append(item)
-        return {"content": content_items, "isError": bool(getattr(result, "isError", False))}
+        return await _acall_tool_on_session(s, tool_name, arguments)
 
     # Try with cached session first
     if session is not None:
@@ -899,7 +940,7 @@ async def _call_tool_stream_http_persistent(
         except McpError as exc:
             last_error = exc
             await _SESSION_MANAGER.ainvalidate(server_key)
-            if "Session terminated" in str(exc) and endpoint != endpoints[-1]:
+            if _is_session_terminated(exc) and endpoint != endpoints[-1]:
                 continue
             raise
         except Exception as exc:
@@ -985,7 +1026,7 @@ async def _list_tools_stream_stdio_async(
 
     async with (
         stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream) as session,
+        ClientSession(read_stream, write_stream, read_timeout_seconds=timedelta(seconds=timeout)) as session,
     ):
         await session.initialize()
         tools_result = await session.list_tools()
@@ -1040,7 +1081,7 @@ async def _call_tool_stream_stdio_async(
 
     async with (
         stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream) as session,
+        ClientSession(read_stream, write_stream, read_timeout_seconds=timedelta(seconds=timeout)) as session,
     ):
         await session.initialize()
 
@@ -1086,7 +1127,7 @@ async def _call_tool_stream_stdio_persistent(
             cwd=server_cfg.get("cwd") or None,
         )
         transport_cm = stdio_client(params)
-        new_session, cm_stack = await _enter_session(transport_cm)
+        new_session, cm_stack = await _enter_session(transport_cm, read_timeout=timeout)
         _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session
 

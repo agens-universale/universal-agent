@@ -248,6 +248,74 @@ def _generate_readme(
     )
 
 
+def _skill_folder_ready(skill_path):
+    """Папка скилла существует, содержит SKILL.md и проходит валидацию (иначе печатает причину)."""
+    if not skill_path.exists():
+        print(f"❌ Error: Skill folder not found: {skill_path}")
+        return False
+    if not skill_path.is_dir():
+        print(f"❌ Error: Path is not a directory: {skill_path}")
+        return False
+    skill_md = skill_path / "SKILL.md"
+    if not skill_md.exists():
+        print(f"❌ Error: SKILL.md not found in {skill_path}")
+        return False
+    # Run validation before packaging
+    print("🔍 Validating skill...")
+    valid, message = validate_skill(skill_path)
+    if not valid:
+        print(f"❌ Validation failed: {message}")
+        print("   Please fix the validation errors before packaging.")
+        return False
+    print(f"✅ {message}\n")
+    return True
+
+
+def _report_incomplete_dev(missing):
+    print("❌ Refusing to package: _dev/ is incomplete.\n", file=sys.stderr)
+    print(
+        "Found:    intent_brief.md (self-check flow was started)",
+        file=sys.stderr,
+    )
+    print("Missing:", file=sys.stderr)
+    for rel in missing:
+        print(f"  - _dev/{rel}", file=sys.stderr)
+    print("\nRequired artifacts when _dev/ exists:", file=sys.stderr)
+    for rel in REQUIRED_DEV_ARTIFACTS:
+        print(f"  - _dev/{rel}", file=sys.stderr)
+    print(
+        "\nДоделай self-check flow или удали _dev/intent_brief.md\n"
+        "(тогда упаковка пройдёт без demo/).",
+        file=sys.stderr,
+    )
+
+
+def _add_tree(zipf, root, arc_root, *, skip_label):
+    """Добавить файлы дерева root в архив под arc_root/..., пропуская исключённые."""
+    for file_path in root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        rel = file_path.relative_to(root)
+        if should_exclude(rel):
+            print(f"  {skip_label}: {rel}")
+            continue
+        arcname = str(arc_root / rel).replace("\\", "/")
+        zipf.write(file_path, arcname)
+        print(f"  Added: {arcname}")
+
+
+def _cleanup_dev_dir(dev_dir):
+    try:
+        import shutil
+        shutil.rmtree(dev_dir)
+        print(f"  Cleaned up: {dev_dir}")
+    except OSError as e:
+        print(
+            f"⚠️  Warning: _dev/ remains at {dev_dir}; clean up manually if needed. ({e})",
+            file=sys.stderr,
+        )
+
+
 def package_skill(skill_path, output_dir=None, source_layer=None):
     """
     Package a skill folder into a skill-<id>.zip archive.
@@ -264,48 +332,13 @@ def package_skill(skill_path, output_dir=None, source_layer=None):
     skill_path = Path(skill_path).resolve()
 
     # Validate skill folder exists
-    if not skill_path.exists():
-        print(f"❌ Error: Skill folder not found: {skill_path}")
+    if not _skill_folder_ready(skill_path):
         return None
-
-    if not skill_path.is_dir():
-        print(f"❌ Error: Path is not a directory: {skill_path}")
-        return None
-
-    # Validate SKILL.md exists
-    skill_md = skill_path / "SKILL.md"
-    if not skill_md.exists():
-        print(f"❌ Error: SKILL.md not found in {skill_path}")
-        return None
-
-    # Run validation before packaging
-    print("🔍 Validating skill...")
-    valid, message = validate_skill(skill_path)
-    if not valid:
-        print(f"❌ Validation failed: {message}")
-        print("   Please fix the validation errors before packaging.")
-        return None
-    print(f"✅ {message}\n")
 
     # Validate _dev/ artifacts (if flow was started)
     missing = _validate_dev_artifacts(skill_path)
     if missing:
-        print("❌ Refusing to package: _dev/ is incomplete.\n", file=sys.stderr)
-        print(
-            "Found:    intent_brief.md (self-check flow was started)",
-            file=sys.stderr,
-        )
-        print("Missing:", file=sys.stderr)
-        for rel in missing:
-            print(f"  - _dev/{rel}", file=sys.stderr)
-        print("\nRequired artifacts when _dev/ exists:", file=sys.stderr)
-        for rel in REQUIRED_DEV_ARTIFACTS:
-            print(f"  - _dev/{rel}", file=sys.stderr)
-        print(
-            "\nДоделай self-check flow или удали _dev/intent_brief.md\n"
-            "(тогда упаковка пройдёт без demo/).",
-            file=sys.stderr,
-        )
+        _report_incomplete_dev(missing)
         return None
 
     # Determine output location
@@ -334,43 +367,16 @@ def package_skill(skill_path, output_dir=None, source_layer=None):
             )
             zipf.writestr("README.md", readme_content)
 
-            for file_path in skill_path.rglob("*"):
-                if not file_path.is_file():
-                    continue
-                rel_in_skill = file_path.relative_to(skill_path)
-                if should_exclude(rel_in_skill):
-                    print(f"  Skipped: {rel_in_skill}")
-                    continue
-                arcname = str(Path(skill_id) / rel_in_skill).replace("\\", "/")
-                zipf.write(file_path, arcname)
-                print(f"  Added: {arcname}")
-
+            _add_tree(zipf, skill_path, Path(skill_id), skip_label="Skipped")
             # Bundle _dev/ as demo/ in archive
             if dev_dir.is_dir():
-                for file_path in dev_dir.rglob("*"):
-                    if not file_path.is_file():
-                        continue
-                    rel_in_dev = file_path.relative_to(dev_dir)
-                    if should_exclude(rel_in_dev):
-                        print(f"  Skipped (demo): {rel_in_dev}")
-                        continue
-                    arcname = str(Path("demo") / rel_in_dev).replace("\\", "/")
-                    zipf.write(file_path, arcname)
-                    print(f"  Added: {arcname}")
+                _add_tree(zipf, dev_dir, Path("demo"), skip_label="Skipped (demo)")
 
         print(f"\nSuccessfully packaged skill to: {skill_filename}")
 
         # Cleanup _dev/ after successful packaging (transient workspace)
         if dev_dir.is_dir():
-            try:
-                import shutil
-                shutil.rmtree(dev_dir)
-                print(f"  Cleaned up: {dev_dir}")
-            except (PermissionError, OSError) as e:
-                print(
-                    f"⚠️  Warning: _dev/ remains at {dev_dir}; clean up manually if needed. ({e})",
-                    file=sys.stderr,
-                )
+            _cleanup_dev_dir(dev_dir)
 
         return skill_filename
 

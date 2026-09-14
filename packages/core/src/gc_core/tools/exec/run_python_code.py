@@ -26,6 +26,47 @@ def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
     return ordered
 
 
+def _cwd_invalid_error(cwd_used: Optional[str], allowed_write_paths: list) -> dict:
+    return {
+        "type": "cwd_invalid",
+        "message": f"Working directory is not an existing directory: {cwd_used}",
+        "cwd": cwd_used,
+        "allowed_write_paths": allowed_write_paths,
+        "hint": (
+            "Pass cwd pointing to an existing directory. If allowed_write_paths is present above, "
+            "use one of those paths — they are the writable locations allowed for this agent run."
+        ),
+    }
+
+
+def _parse_env_vars(env_vars) -> "tuple[Optional[Dict[str, str]], Optional[dict]]":
+    """Список {'name','value'} → dict (None, если не задан); (None, error) при невалидной записи."""
+    if env_vars is None:
+        return None, None
+    if not isinstance(env_vars, list):
+        return None, {
+            "type": "invalid_argument",
+            "field": "env_vars",
+            "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
+        }
+    parsed: Dict[str, str] = {}
+    for idx, item in enumerate(env_vars):
+        if not isinstance(item, dict):
+            return None, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}]",
+                "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
+            }
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return None, {"type": "invalid_argument", "field": f"env_vars[{idx}].name"}
+        value = item.get("value")
+        if not isinstance(value, str):
+            return None, {"type": "invalid_argument", "field": f"env_vars[{idx}].value"}
+        parsed[name.strip()] = value
+    return parsed, None
+
+
 class RunPythonCode(AbstractSimpleTool):
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
@@ -187,6 +228,32 @@ Usage:
             error={"type": "execution_failed", "message": str(exc)},
         )
 
+    async def _resolve_cwd(self, cwd: Optional[str], kwargs: dict) -> "tuple[Optional[str], Optional[dict]]":
+        """Рабочий каталог запуска или ошибка cwd_invalid (с подсказкой, куда можно писать)."""
+        if self._backend.is_sandbox:
+            cwd_used = cwd  # None → container default workdir
+            if cwd_used is not None and not await self._backend.is_dir(cwd_used):
+                return cwd_used, _cwd_invalid_error(cwd_used, [])
+            return cwd_used, None
+        security_context = resolve_tool_context(self, **kwargs)
+        cwd_used = effective_command_cwd(EXEC_PYTHON_NAME, {"cwd": cwd}, security_context)
+        if Path(cwd_used).is_dir():
+            return cwd_used, None
+        launch_abs = os.path.abspath(str(security_context.launch_root))
+        candidate_roots = _dedupe_abs_paths_ordered(
+            [
+                launch_abs,
+                *[
+                    os.path.abspath(str(extra))
+                    for extra in (security_context.write_guard.extra_paths or [])
+                ],
+            ]
+        )
+        allowed_write_paths = [
+            p for p in candidate_roots if Path(p).is_dir() and directory_allows_probe_write(p)
+        ]
+        return cwd_used, _cwd_invalid_error(cwd_used, allowed_write_paths)
+
     async def _plan(
         self,
         code: str,
@@ -196,25 +263,20 @@ Usage:
         **kwargs,
     ) -> "tuple[str | None, dict]":
         """Разобрать и проверить аргументы. Общее для обоих входов."""
-        if not isinstance(code, str):
+        def reject(error: dict) -> "tuple[str, dict]":
             return self._result(
                 ok=False,
                 return_code=None,
                 timed_out=False,
                 stdout="",
                 stderr="",
-                error={"type": "invalid_argument", "field": "code"},
+                error=error,
             ), {}
 
+        if not isinstance(code, str):
+            return reject({"type": "invalid_argument", "field": "code"})
         if not code.strip():
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "code", "message": "Code is empty"},
-            ), {}
+            return reject({"type": "invalid_argument", "field": "code", "message": "Code is empty"})
 
         effective_timeout = (
             timeout_seconds
@@ -222,134 +284,18 @@ Usage:
             else exec_timeout_from_config_dict(self._config_dict)
         )
         if not isinstance(effective_timeout, int) or effective_timeout <= 0:
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "timeout_seconds"},
-            ), {}
-
+            return reject({"type": "invalid_argument", "field": "timeout_seconds"})
 
         if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "cwd"},
-            ), {}
+            return reject({"type": "invalid_argument", "field": "cwd"})
 
-        if self._backend.is_sandbox:
-            cwd_used = cwd  # None → container default workdir
-            if cwd_used is not None and not await self._backend.is_dir(cwd_used):
-                return self._result(
-                    ok=False,
-                    return_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={
-                        "type": "cwd_invalid",
-                        "message": f"Working directory is not an existing directory: {cwd_used}",
-                        "cwd": cwd_used,
-                        "allowed_write_paths": [],
-                        "hint": (
-                            "Pass cwd pointing to an existing directory. If allowed_write_paths is present above, "
-                            "use one of those paths — they are the writable locations allowed for this agent run."
-                        ),
-                    },
-                ), {}
-        else:
-            security_context = resolve_tool_context(self, **kwargs)
-            cwd_used = effective_command_cwd(EXEC_PYTHON_NAME, {"cwd": cwd}, security_context)
+        cwd_used, cwd_error = await self._resolve_cwd(cwd, kwargs)
+        if cwd_error is not None:
+            return reject(cwd_error)
 
-            if not Path(cwd_used).is_dir():
-                launch_abs = os.path.abspath(str(security_context.launch_root))
-                candidate_roots = _dedupe_abs_paths_ordered(
-                    [
-                        launch_abs,
-                        *[
-                            os.path.abspath(str(extra))
-                            for extra in (security_context.write_guard.extra_paths or [])
-                        ],
-                    ]
-                )
-                allowed_write_paths = [
-                    p for p in candidate_roots if Path(p).is_dir() and directory_allows_probe_write(p)
-                ]
-                return self._result(
-                    ok=False,
-                    return_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={
-                        "type": "cwd_invalid",
-                        "message": f"Working directory is not an existing directory: {cwd_used}",
-                        "cwd": cwd_used,
-                        "allowed_write_paths": allowed_write_paths,
-                        "hint": (
-                            "Pass cwd pointing to an existing directory. If allowed_write_paths is present above, "
-                            "use one of those paths — they are the writable locations allowed for this agent run."
-                        ),
-                    },
-                ), {}
-
-        env_map: Optional[Dict[str, str]] = None
-        if env_vars is not None:
-            if not isinstance(env_vars, list):
-                return self._result(
-                    ok=False,
-                    return_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={
-                        "type": "invalid_argument",
-                        "field": "env_vars",
-                        "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
-                    },
-                ), {}
-            parsed: Dict[str, str] = {}
-            for idx, item in enumerate(env_vars):
-                if not isinstance(item, dict):
-                    return self._result(
-                        ok=False,
-                        return_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={
-                            "type": "invalid_argument",
-                            "field": f"env_vars[{idx}]",
-                            "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
-                        },
-                    ), {}
-                name = item.get("name")
-                if not isinstance(name, str) or not name.strip():
-                    return self._result(
-                        ok=False,
-                        return_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
-                    ), {}
-                value = item.get("value")
-                if not isinstance(value, str):
-                    return self._result(
-                        ok=False,
-                        return_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={"type": "invalid_argument", "field": f"env_vars[{idx}].value"},
-                    ), {}
-                parsed[name.strip()] = value
-            env_map = parsed
+        env_map, env_error = _parse_env_vars(env_vars)
+        if env_error is not None:
+            return reject(env_error)
 
         return None, {
             "code": code,

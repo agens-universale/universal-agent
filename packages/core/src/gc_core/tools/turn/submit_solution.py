@@ -8,6 +8,8 @@ if TYPE_CHECKING:
     from gc_core.intent_guard.guard import FinishGateDecision
 
 
+_VALIDATION_FAILED = "Validation failed."
+
 SOLUTION_TYPES = (
     "full_solution",
     "partial_solution",
@@ -281,7 +283,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -294,7 +296,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -309,7 +311,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -322,7 +324,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -336,7 +338,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -353,7 +355,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -372,7 +374,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
                 return self._result(
                     ok=False,
                     status="rejected",
-                    message="Validation failed.",
+                    message=_VALIDATION_FAILED,
                     task=None,
                     task_report="",
                     error={
@@ -385,7 +387,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
                 return self._result(
                     ok=False,
                     status="rejected",
-                    message="Validation failed.",
+                    message=_VALIDATION_FAILED,
                     task=None,
                     task_report="",
                     error={

@@ -62,7 +62,7 @@ class NoOpSubagentProgressSink:
     """Default sink outside TUI — emit is a no-op."""
 
     def emit(self, event: SubagentProgressEvent) -> None:
-        return None
+        """Intentionally does nothing: progress is dropped outside the TUI."""
 
 
 NOOP_SUBAGENT_PROGRESS_SINK = NoOpSubagentProgressSink()
@@ -155,16 +155,24 @@ def todo_items_from_arguments(arguments: Any) -> Optional[List[Dict[str, str]]]:
         return None
     out: List[Dict[str, str]] = []
     for item in todos:
-        if not isinstance(item, dict) or set(item) - {"content", "status"}:
+        normalized = _todo_item_from(item)
+        if normalized is None:
             return None
-        content = item.get("content")
-        status = item.get("status")
-        if not isinstance(content, str) or not content.strip():
-            return None
-        if status not in _TODO_ITEM_STATUSES:
-            return None
-        out.append({"content": content.strip(), "status": status})
+        out.append(normalized)
     return out
+
+
+def _todo_item_from(item: Any) -> Optional[Dict[str, str]]:
+    """Валидный пункт {content, status} или None (зеркалит проверку тула)."""
+    if not isinstance(item, dict) or set(item) - {"content", "status"}:
+        return None
+    content = item.get("content")
+    status = item.get("status")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    if status not in _TODO_ITEM_STATUSES:
+        return None
+    return {"content": content.strip(), "status": status}
 
 
 def brief_args_summary(
@@ -185,21 +193,22 @@ def brief_args_summary(
         # битые аргументы — генерик-превью, «чек-лист очищен» не врём
     if not isinstance(data, dict) or not data:
         return ""
-    pairs: list[str] = []
-    for key, value in list(data.items())[:3]:
-        if isinstance(value, str):
-            preview = " ".join(value.split())
-            if len(preview) > 40:
-                preview = preview[:40].rstrip() + "…"
-            pairs.append(f"{key}={preview!r}")
-        elif isinstance(value, (int, float, bool)) or value is None:
-            pairs.append(f"{key}={value!r}")
-        elif isinstance(value, list):
-            pairs.append(f"{key}=<list {len(value)}>")
-        else:
-            pairs.append(f"{key}=<?>")
+    pairs = [_arg_pair_preview(key, value) for key, value in list(data.items())[:3]]
     text = ", ".join(pairs)
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _arg_pair_preview(key: str, value: Any) -> str:
+    if isinstance(value, str):
+        preview = " ".join(value.split())
+        if len(preview) > 40:
+            preview = preview[:40].rstrip() + "…"
+        return f"{key}={preview!r}"
+    if isinstance(value, (int, float, bool)) or value is None:
+        return f"{key}={value!r}"
+    if isinstance(value, list):
+        return f"{key}=<list {len(value)}>"
+    return f"{key}=<?>"
 
 
 def _truncate_error_brief(message: str) -> str:
@@ -222,17 +231,20 @@ def parse_tool_result_status(output: Any) -> tuple[Optional[bool], Optional[str]
     ok = data.get("ok")
     if not isinstance(ok, bool):
         ok = None
-    brief: Optional[str] = None
-    if ok is False:
-        err = data.get("error")
-        if isinstance(err, dict):
-            msg = err.get("message") or err.get("code") or ""
-            brief = _truncate_error_brief(str(msg)) if msg else None
-        elif isinstance(err, str) and err.strip():
-            brief = _truncate_error_brief(err)
-        elif isinstance(data.get("message"), str) and data["message"].strip():
-            brief = _truncate_error_brief(data["message"])
+    brief = _error_brief_from_payload(data) if ok is False else None
     return ok, brief
+
+
+def _error_brief_from_payload(data: Dict[str, Any]) -> Optional[str]:
+    err = data.get("error")
+    if isinstance(err, dict):
+        msg = err.get("message") or err.get("code") or ""
+        return _truncate_error_brief(str(msg)) if msg else None
+    if isinstance(err, str) and err.strip():
+        return _truncate_error_brief(err)
+    if isinstance(data.get("message"), str) and data["message"].strip():
+        return _truncate_error_brief(data["message"])
+    return None
 
 
 def extract_intermediate_prose(arguments: Any, output: Any) -> Optional[str]:

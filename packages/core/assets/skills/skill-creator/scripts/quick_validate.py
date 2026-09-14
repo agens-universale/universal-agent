@@ -9,6 +9,59 @@ import re
 import yaml
 from pathlib import Path
 
+def _check_name(frontmatter):
+    name = frontmatter.get('name', '')
+    if not isinstance(name, str):
+        return f"Name must be a string, got {type(name).__name__}"
+    name = name.strip()
+    # Name is human-readable; only enforce length, not kebab-case (UTF/spaces allowed).
+    if name and len(name) > 64:
+        return f"Name is too long ({len(name)} characters). Maximum is 64 characters."
+    return None
+
+
+def _check_id(frontmatter):
+    # id (если присутствует) — должен быть kebab-case
+    skill_id = frontmatter.get('id', '')
+    if not skill_id:
+        return None
+    if not isinstance(skill_id, str):
+        return f"id must be a string, got {type(skill_id).__name__}"
+    if not re.match(r'^[a-z0-9-]+$', skill_id):
+        return f"id '{skill_id}' should be kebab-case (lowercase letters, digits, and hyphens only)"
+    if skill_id.startswith('-') or skill_id.endswith('-') or '--' in skill_id:
+        return f"id '{skill_id}' cannot start/end with hyphen or contain consecutive hyphens"
+    return None
+
+
+def _check_description(frontmatter):
+    description = frontmatter.get('description', '')
+    if not isinstance(description, str):
+        return f"Description must be a string, got {type(description).__name__}"
+    description = description.strip()
+    if not description:
+        return None
+    # Check for angle brackets
+    if '<' in description or '>' in description:
+        return "Description cannot contain angle brackets (< or >)"
+    # Check description length (max 1024 characters per spec)
+    if len(description) > 1024:
+        return f"Description is too long ({len(description)} characters). Maximum is 1024 characters."
+    return None
+
+
+def _check_compatibility(frontmatter):
+    # Validate compatibility field if present (optional)
+    compatibility = frontmatter.get('compatibility', '')
+    if not compatibility:
+        return None
+    if not isinstance(compatibility, str):
+        return f"Compatibility must be a string, got {type(compatibility).__name__}"
+    if len(compatibility) > 500:
+        return f"Compatibility is too long ({len(compatibility)} characters). Maximum is 500 characters."
+    return None
+
+
 def validate_skill(skill_path):
     """Basic validation of a skill"""
     skill_path = Path(skill_path)
@@ -55,46 +108,10 @@ def validate_skill(skill_path):
     if 'description' not in frontmatter:
         return False, "Missing 'description' in frontmatter"
 
-    # Extract name for validation
-    name = frontmatter.get('name', '')
-    if not isinstance(name, str):
-        return False, f"Name must be a string, got {type(name).__name__}"
-    name = name.strip()
-    if name:
-        # Name is human-readable; only enforce length, not kebab-case (UTF/spaces allowed).
-        if len(name) > 64:
-            return False, f"Name is too long ({len(name)} characters). Maximum is 64 characters."
-
-    # id (если присутствует) — должен быть kebab-case
-    skill_id = frontmatter.get('id', '')
-    if skill_id:
-        if not isinstance(skill_id, str):
-            return False, f"id must be a string, got {type(skill_id).__name__}"
-        if not re.match(r'^[a-z0-9-]+$', skill_id):
-            return False, f"id '{skill_id}' should be kebab-case (lowercase letters, digits, and hyphens only)"
-        if skill_id.startswith('-') or skill_id.endswith('-') or '--' in skill_id:
-            return False, f"id '{skill_id}' cannot start/end with hyphen or contain consecutive hyphens"
-
-    # Extract and validate description
-    description = frontmatter.get('description', '')
-    if not isinstance(description, str):
-        return False, f"Description must be a string, got {type(description).__name__}"
-    description = description.strip()
-    if description:
-        # Check for angle brackets
-        if '<' in description or '>' in description:
-            return False, "Description cannot contain angle brackets (< or >)"
-        # Check description length (max 1024 characters per spec)
-        if len(description) > 1024:
-            return False, f"Description is too long ({len(description)} characters). Maximum is 1024 characters."
-
-    # Validate compatibility field if present (optional)
-    compatibility = frontmatter.get('compatibility', '')
-    if compatibility:
-        if not isinstance(compatibility, str):
-            return False, f"Compatibility must be a string, got {type(compatibility).__name__}"
-        if len(compatibility) > 500:
-            return False, f"Compatibility is too long ({len(compatibility)} characters). Maximum is 500 characters."
+    for check in (_check_name, _check_id, _check_description, _check_compatibility):
+        error = check(frontmatter)
+        if error is not None:
+            return False, error
 
     return True, "Skill is valid!"
 

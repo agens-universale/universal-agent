@@ -412,18 +412,24 @@ def apply_replace_deltas(
         name for name in REGISTER_ORDER if REGISTER_MERGE_MODES.get(name) == "replace"
     )
     for name in REGISTER_ORDER:
-        if name not in replace_names:
+        if name not in replace_names or not _replace_applies(name, deltas, delta_map, touched):
             continue
-        if touched is not None:
-            if name not in touched:
-                continue
-        elif isinstance(deltas, Mapping) and name not in deltas:
-            continue
-        elif touched is None and not isinstance(deltas, Mapping):
-            if not _normalize_register_text(delta_map.get(name)):
-                continue
         merged[name] = _normalize_register_text(delta_map.get(name, ""))
     return _snapshot_from_mapping(merged)
+
+
+def _replace_applies(
+    name: str,
+    deltas: Any,
+    delta_map: Mapping[str, str],
+    touched: frozenset[str] | None,
+) -> bool:
+    """Заменять ли регистр: по touched, по явному ключу в Mapping, иначе по непустому тексту."""
+    if touched is not None:
+        return name in touched
+    if isinstance(deltas, Mapping):
+        return name in deltas
+    return bool(_normalize_register_text(delta_map.get(name)))
 
 
 def apply_memory_patch(

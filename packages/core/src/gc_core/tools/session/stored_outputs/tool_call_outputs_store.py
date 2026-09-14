@@ -15,6 +15,34 @@ class ToolCallOutputRecord:
     truncated_in_message: bool = True
 
 
+def _record_from_item(item: Any) -> "Optional[ToolCallOutputRecord]":
+    """Запись из сериализованного словаря; None — форма не та (запись пропускается)."""
+    if not isinstance(item, dict):
+        return None
+    output_ref = item.get("output_ref")
+    source_tool = item.get("source_tool")
+    call_id = item.get("call_id")
+    total_chars = item.get("total_chars")
+    text = item.get("text")
+    truncated_in_message = item.get("truncated_in_message", True)
+    if not isinstance(output_ref, str) or not output_ref:
+        return None
+    if not isinstance(source_tool, str) or not isinstance(call_id, str):
+        return None
+    if not isinstance(total_chars, int) or not isinstance(text, str):
+        return None
+    if not isinstance(truncated_in_message, bool):
+        truncated_in_message = True
+    return ToolCallOutputRecord(
+        output_ref=output_ref,
+        source_tool=source_tool,
+        call_id=call_id,
+        total_chars=total_chars,
+        text=text,
+        truncated_in_message=truncated_in_message,
+    )
+
+
 @dataclass
 class ToolCallOutputsStore:
     max_entries: int = 10
@@ -118,32 +146,9 @@ class ToolCallOutputsStore:
 
         reconstructed: "OrderedDict[str, ToolCallOutputRecord]" = OrderedDict()
         for item in records_raw:
-            if not isinstance(item, dict):
-                continue
-            output_ref = item.get("output_ref")
-            source_tool = item.get("source_tool")
-            call_id = item.get("call_id")
-            total_chars = item.get("total_chars")
-            text = item.get("text")
-            truncated_in_message = item.get("truncated_in_message", True)
-            if not isinstance(output_ref, str) or not output_ref:
-                continue
-            if not isinstance(source_tool, str) or not isinstance(call_id, str):
-                continue
-            if not isinstance(total_chars, int):
-                continue
-            if not isinstance(text, str):
-                continue
-            if not isinstance(truncated_in_message, bool):
-                truncated_in_message = True
-            reconstructed[output_ref] = ToolCallOutputRecord(
-                output_ref=output_ref,
-                source_tool=source_tool,
-                call_id=call_id,
-                total_chars=total_chars,
-                text=text,
-                truncated_in_message=truncated_in_message,
-            )
+            record = _record_from_item(item)
+            if record is not None:
+                reconstructed[record.output_ref] = record
 
         store._records = reconstructed
         return store

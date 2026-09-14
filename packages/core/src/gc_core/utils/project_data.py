@@ -51,7 +51,7 @@ stop_folders = {
         '$RECYCLE.BIN', 'System Volume Information',
         '.Trash-*', '.local/share/Trash',
         'patchwork', '.verdaccio', '.pnp', '.pnpify',
-        'Cargo.lock', 'target', 'target_debug', 'target_release',
+        'Cargo.lock', 'target_debug', 'target_release',
         'vendor'
     }
 
@@ -101,23 +101,12 @@ async def _build_listing(
 
     res: List[tuple[str, List[str]]] = []
     for name, is_dir in shown:
-        if is_dir:
-            sub_path = join_fn(dir_path, name)
-            raw_sub = await listdir_fn(sub_path)
-            filtered_sub: list[tuple[str, bool]] = [
-                (n, d) for n, d in raw_sub if n not in stop_folders
-            ]
-            shown_sub, sub_trunc, sub_shown, sub_total = _slice_level(filtered_sub, cut_second)
-            if sub_trunc:
-                any_trunc = True
-            sub_items = [n + "/" if d else n for n, d in shown_sub]
-            if sub_trunc:
-                sub_items.append(
-                    "..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total)
-                )
-            res.append((name + "/", sub_items))
-        else:
+        if not is_dir:
             res.append((name, []))
+            continue
+        sub_items, sub_trunc = await _sub_level_items(listdir_fn, join_fn(dir_path, name))
+        any_trunc = any_trunc or sub_trunc
+        res.append((name + "/", sub_items))
 
     if root_trunc:
         res.append((
@@ -125,15 +114,31 @@ async def _build_listing(
             [],
         ))
 
+    return _render_listing(res, any_trunc)
+
+
+async def _sub_level_items(listdir_fn, sub_path: str) -> tuple[List[str], bool]:
+    """Имена второго уровня (с маркером усечения) и флаг усечения."""
+    filtered_sub: list[tuple[str, bool]] = [
+        (n, d) for n, d in await listdir_fn(sub_path) if n not in stop_folders
+    ]
+    shown_sub, sub_trunc, sub_shown, sub_total = _slice_level(filtered_sub, cut_second)
+    sub_items = [n + "/" if d else n for n, d in shown_sub]
+    if sub_trunc:
+        sub_items.append(
+            "..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total)
+        )
+    return sub_items, sub_trunc
+
+
+def _render_listing(res: List[tuple[str, List[str]]], any_trunc: bool) -> str:
     tpl = ""
     for name, sub_items in res:
         tpl += "\n" + name
         for sub in sub_items:
             tpl += "\n    " + sub
-
     if any_trunc:
         tpl += "\n" + _FINAL_HINT
-
     return tpl.strip()
 
 

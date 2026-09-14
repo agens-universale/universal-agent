@@ -34,22 +34,23 @@ def _current_has_raw(
     output: Any,
 ) -> bool:
     name = str(tool_name or "").strip()
-    for record in current:
-        if record.action != ACTION_TOOL_RAW or record.tool_name != name:
-            continue
-        if not isinstance(record.content, dict):
-            continue
-        expected_args = None if arguments is None else dict(arguments)
-        got_args = record.content.get("arguments")
-        if expected_args is None:
-            if "arguments" in record.content:
-                continue
-        elif dict(got_args or {}) != expected_args:
-            continue
-        if record.content.get("output") != output:
-            continue
-        return True
-    return False
+    expected_args = None if arguments is None else dict(arguments)
+    return any(
+        _raw_record_matches(record, name, expected_args, output) for record in current
+    )
+
+
+def _raw_record_matches(record: Any, name: str, expected_args: dict | None, output: Any) -> bool:
+    if record.action != ACTION_TOOL_RAW or record.tool_name != name:
+        return False
+    if not isinstance(record.content, dict):
+        return False
+    if expected_args is None:
+        if "arguments" in record.content:
+            return False
+    elif dict(record.content.get("arguments") or {}) != expected_args:
+        return False
+    return record.content.get("output") == output
 
 
 def append_tool_aggregated_to_current(

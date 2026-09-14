@@ -13,7 +13,7 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-_ENV_MARKER = re.compile(r"\$\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}")
+_ENV_MARKER = re.compile(r"\$\{ENV:([A-Za-z_]\w*)\}", re.ASCII)
 _FILE_MARKER = re.compile(r"\$\{FILE:([^}]+)\}")
 _MAX_FILE_BYTES = 65536  # креды маленькие; защита от указания на большой файл
 

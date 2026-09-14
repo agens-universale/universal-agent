@@ -81,7 +81,7 @@ def is_internal_tool_error_output(output: str) -> bool:
         return False
     try:
         parsed = json.loads(output)
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return False
     if not isinstance(parsed, dict):
         return False
@@ -124,7 +124,7 @@ def is_unknown_tool_output(output: str) -> bool:
         return True
     try:
         parsed = json.loads(output)
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return False
     if not isinstance(parsed, dict):
         return False
@@ -165,6 +165,33 @@ SUBAGENT_TOOLS_ALLOW_KEY = "subagent_tools_allow"
 SUBAGENT_TOOLS_STOP_KEY = "subagent_tools_stop"
 
 
+def _warn_unknown_filter_names(tools_data: Dict[str, Any], allow, stop, logger: Any) -> None:
+    unknown = sorted(((allow or set()) | stop) - set(tools_data))
+    if not unknown:
+        return
+    # Опечатка в имени тула не должна ронять ран: определение уже прошло
+    # проверку обязательных тулов, а остальное — предпочтения оператора.
+    subagent_names = [name for name in unknown if name.startswith("subagent_")]
+    rest = [name for name in unknown if not name.startswith("subagent_")]
+    log = logger or _fallback_logger
+    if subagent_names:
+        # Глубина всегда 1: ребёнку сабагенты не выдаются в принципе.
+        log.warning(
+            "subagent_tools_filter_nested_ignored names=%s",
+            ", ".join(subagent_names),
+            extra={
+                "event": "subagent_tools_filter_nested_ignored",
+                "names": subagent_names,
+            },
+        )
+    if rest:
+        log.warning(
+            "subagent_tools_filter_unknown names=%s",
+            ", ".join(rest),
+            extra={"event": "subagent_tools_filter_unknown", "names": rest},
+        )
+
+
 def apply_subagent_tools_filter(
     tools_data: Dict[str, Dict[str, Any]],
     config_dict: Dict[str, Any],
@@ -192,30 +219,7 @@ def apply_subagent_tools_filter(
 
     from gc_core.tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES
 
-    known = set(tools_data)
-    unknown = sorted(((allow or set()) | stop) - known)
-    if unknown:
-        # Опечатка в имени тула не должна ронять ран: определение уже прошло
-        # проверку обязательных тулов, а остальное — предпочтения оператора.
-        subagent_names = [name for name in unknown if name.startswith("subagent_")]
-        rest = [name for name in unknown if not name.startswith("subagent_")]
-        log = logger or _fallback_logger
-        if subagent_names:
-            # Глубина всегда 1: ребёнку сабагенты не выдаются в принципе.
-            log.warning(
-                "subagent_tools_filter_nested_ignored names=%s",
-                ", ".join(subagent_names),
-                extra={
-                    "event": "subagent_tools_filter_nested_ignored",
-                    "names": subagent_names,
-                },
-            )
-        if rest:
-            log.warning(
-                "subagent_tools_filter_unknown names=%s",
-                ", ".join(rest),
-                extra={"event": "subagent_tools_filter_unknown", "names": rest},
-            )
+    _warn_unknown_filter_names(tools_data, allow, stop, logger)
 
     filtered = {
         name: entry
@@ -286,6 +290,25 @@ async def abuild_tools_data(
     )
 
 
+def _normalize_tool_spec(
+    spec: Dict[str, Any],
+    entry: Dict[str, Any],
+    *,
+    inject_tool_fields,
+    openai_strict: bool,
+    send_tool_strict: bool,
+) -> None:
+    _ensure_spec_has_required(spec)
+    if inject_tool_fields:
+        injected = apply_injected_fields_to_spec(spec, inject_tool_fields)
+        entry["injected_fields"].extend(injected)
+    if openai_strict:
+        _apply_openai_strict_tools_schema(spec)
+    augment_optional_property_descriptions(spec, openai_strict=openai_strict)
+    if not send_tool_strict:
+        spec.pop("strict", None)
+
+
 def _finish_tools_data(
     tools_data: Dict[str, Dict[str, Any]],
     mcp_tools_data: Dict[str, Dict[str, Any]],
@@ -332,15 +355,10 @@ def _finish_tools_data(
         v.setdefault("injected_fields", [])
         spec = v.get("spec")
         if isinstance(spec, dict):
-            _ensure_spec_has_required(spec)
-            if inject_tool_fields:
-                injected = apply_injected_fields_to_spec(spec, inject_tool_fields)
-                v["injected_fields"].extend(injected)
-            if openai_strict:
-                _apply_openai_strict_tools_schema(spec)
-            augment_optional_property_descriptions(spec, openai_strict=openai_strict)
-            if not send_tool_strict:
-                spec.pop("strict", None)
+            _normalize_tool_spec(
+                spec, v, inject_tool_fields=inject_tool_fields,
+                openai_strict=openai_strict, send_tool_strict=send_tool_strict,
+            )
 
     tools_spec = [v["spec"] for v in tools_data.values()]
     tools_description = [v["description"] for v in tools_data.values()]
@@ -402,6 +420,61 @@ def tool_arguments_valid(
     return True
 
 
+def _config_dict_for_call(ctx: Optional[Any], kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    if ctx is not None and hasattr(ctx, "config_dict"):
+        cfg = getattr(ctx, "config_dict") or {}
+    else:
+        cfg = kwargs.get("config_dict")
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _logger_for_call(ctx: Optional[Any]) -> logging.Logger:
+    if ctx is not None and hasattr(ctx, "logger"):
+        candidate = getattr(ctx, "logger")
+        if isinstance(candidate, logging.Logger):
+            return candidate
+    return _fallback_logger
+
+
+def _prepare_subagent_call(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Dict[str, Dict[str, Any]],
+    ctx: Optional[Any],
+    config_dict: Dict[str, Any],
+    kwargs: Dict[str, Any],
+) -> "tuple[Any, Dict[str, Any]] | str":
+    from gc_core.tools.subagents.runner import SubagentRunner
+    orchestrator_state = kwargs.get("state")
+    run_agent_func = kwargs.get("run_agent_func")
+    if orchestrator_state is None or run_agent_func is None:
+        return f"Subagent {tool_name}: missing state or run_agent_func"
+    entry = tools_data_.get(tool_name) or {}
+    tool_spec = entry.get("spec", {}) or {}
+    parsed_args = parse_and_validate_tool_arguments(
+        tool_name=tool_name,
+        arguments=arguments,
+        tool_spec=tool_spec,
+        allow_empty_for_empty_schema=False,
+        tool_fabric=entry.get("tool_fabric"),
+    )
+    prepare = getattr(entry.get("tool_fabric"), "prepare_args_before_strip", None)
+    if callable(prepare):
+        parsed_args = prepare(parsed_args)
+    parsed_args = strip_injected_tool_args(
+        parsed_args,
+        injected_fields=entry.get("injected_fields") or [],
+    )
+    runner = SubagentRunner(ctx, orchestrator_state, config_dict)
+    return _SubagentTool(
+        runner,
+        tool_name=tool_name,
+        arguments=parsed_args,
+        run_agent_func=run_agent_func,
+        parent_call_id=kwargs.get("call_id"),
+    ), {}
+
+
 def _prepare_tool_call(
     tool_name: str,
     arguments: str | Dict[str, Any],
@@ -428,19 +501,7 @@ def _prepare_tool_call(
         tools_data_ = ctx.tools_data
 
     # Настройки server subagents
-    use_server_subagents = False
-    server_tool_prefix: Optional[str] = None
-    config_dict: Dict[str, Any] = {}
-
-    if ctx is not None and hasattr(ctx, "config_dict"):
-        cfg = getattr(ctx, "config_dict") or {}
-        if isinstance(cfg, dict):
-            config_dict = cfg
-    else:
-        cfg = kwargs.get("config_dict")
-        if isinstance(cfg, dict):
-            config_dict = cfg
-
+    config_dict = _config_dict_for_call(ctx, kwargs)
     use_server_subagents = config_dict.get("use_server_subagents", False)
     server_tool_prefix = config_dict.get("server_tool_prefix")
 
@@ -455,42 +516,10 @@ def _prepare_tool_call(
     if subagents_enabled(local_subagents_cfg) and is_subagent_tool(
         tool_name, config_dict
     ):
-        from gc_core.tools.subagents.runner import SubagentRunner
-        orchestrator_state = kwargs.get("state")
-        run_agent_func = kwargs.get("run_agent_func")
-        if orchestrator_state is None or run_agent_func is None:
-            return f"Subagent {tool_name}: missing state or run_agent_func"
-        entry = tools_data_.get(tool_name) or {}
-        tool_spec = entry.get("spec", {}) or {}
-        parsed_args = parse_and_validate_tool_arguments(
-            tool_name=tool_name,
-            arguments=arguments,
-            tool_spec=tool_spec,
-            allow_empty_for_empty_schema=False,
-            tool_fabric=entry.get("tool_fabric"),
-        )
-        prepare = getattr(entry.get("tool_fabric"), "prepare_args_before_strip", None)
-        if callable(prepare):
-            parsed_args = prepare(parsed_args)
-        parsed_args = strip_injected_tool_args(
-            parsed_args,
-            injected_fields=entry.get("injected_fields") or [],
-        )
-        runner = SubagentRunner(ctx, orchestrator_state, config_dict)
-        return _SubagentTool(
-            runner,
-            tool_name=tool_name,
-            arguments=parsed_args,
-            run_agent_func=run_agent_func,
-            parent_call_id=kwargs.get("call_id"),
-        ), {}
+        return _prepare_subagent_call(tool_name, arguments, tools_data_, ctx, config_dict, kwargs)
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
-    log = _fallback_logger
-    if ctx is not None and hasattr(ctx, "logger"):
-        candidate = getattr(ctx, "logger")
-        if isinstance(candidate, logging.Logger):
-            log = candidate
+    log = _logger_for_call(ctx)
 
     try:
         tool_fabric = tools_data_[tool_name]["tool_fabric"]

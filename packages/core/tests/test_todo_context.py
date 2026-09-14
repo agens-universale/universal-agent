@@ -29,10 +29,13 @@ def test_no_static_checklist_snapshot_in_system_prompt():
     # Сборка системного промпта живёт в run() — чек-листа там быть не должно.
     # Раньше срез по ПЕРВОМУ вхождению «render_system_prompt» попадал в строку
     # импорта, и проверка не смотрела на реальный вызов вовсе.
-    # Тело прогона живёт в arun; run — трёхстрочный шим через портал.
+    # Тело прогона живёт в arun; сборка state и рендер промпта вынесены
+    # в _abuild_run_state.
     run_src = inspect.getsource(agent_executor.AgentExecutor.arun)
-    assert "render_system_prompt(" in run_src, "сборка промпта уехала — обновить тест"
+    state_src = inspect.getsource(agent_executor.AgentExecutor._abuild_run_state)
+    assert "render_system_prompt(" in state_src, "сборка промпта уехала — обновить тест"
     assert "todo" not in run_src.lower()
+    assert "todo" not in state_src.lower()
 
 
 def test_persistent_state_block_empty_when_no_checklist():

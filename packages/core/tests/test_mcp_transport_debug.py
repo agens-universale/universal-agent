@@ -28,7 +28,7 @@ async def test_mcp_debug_off_does_not_print(monkeypatch, capsys):
         "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}",
         "",
     ])
-    result = await _aread_sse_first_json(resp, timeout=1.0)
+    result = await _aread_sse_first_json(resp)
     assert result.get("result") == {"ok": True}
     captured = capsys.readouterr()
     assert "[MCP_DEBUG SSE]" not in captured.out
@@ -43,6 +43,6 @@ async def test_mcp_debug_on_prints_lines(monkeypatch, capsys):
         "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}",
         "",
     ])
-    await _aread_sse_first_json(resp, timeout=1.0)
+    await _aread_sse_first_json(resp)
     captured = capsys.readouterr()
     assert "[MCP_DEBUG SSE]" in captured.out

@@ -8,6 +8,40 @@ from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.security.path_policy import enforce_write_guard
 
 
+def _validate_write_args(path, content, mode, make_dirs, encoding, newline, backup) -> "tuple[str | None, dict | None]":
+    """(encoding_used, None) либо (None, error) на первом невалидном аргументе."""
+    if not isinstance(content, str):
+        return None, {"type": "invalid_argument", "field": "content"}
+    if not isinstance(mode, str) or mode not in ("overwrite", "create_only", "fail_if_missing"):
+        return None, {"type": "invalid_argument", "field": "mode"}
+    if not isinstance(make_dirs, bool):
+        return None, {"type": "invalid_argument", "field": "make_dirs"}
+    if not isinstance(encoding, str) or not encoding:
+        return None, {"type": "invalid_argument", "field": "encoding"}
+    encoding_used, enc_err = resolve_encoding_arg(encoding)
+    if enc_err is not None:
+        return None, enc_err
+    if not isinstance(newline, str) or newline not in ("preserve", "lf", "crlf"):
+        return None, {"type": "invalid_argument", "field": "newline"}
+    if not isinstance(backup, bool):
+        return None, {"type": "invalid_argument", "field": "backup"}
+    if not os.path.isabs(path):
+        return None, {
+            "type": "invalid_argument",
+            "field": "path",
+            "message": "path must be absolute",
+        }
+    return encoding_used, None
+
+
+def _normalize_newlines(content: str, newline: str) -> str:
+    if newline == "lf":
+        return content.replace("\r\n", "\n").replace("\r", "\n")
+    if newline == "crlf":
+        return content.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+    return content
+
+
 class WriteToFile(AbstractSimpleTool):
 
     @classmethod
@@ -128,6 +162,18 @@ Usage:
         return self._result(ok=False, path=path, mode=mode, error=error)
 
 
+    async def _ensure_parent_dir(self, path: str, make_dirs: bool) -> "dict | None":
+        parent = os.path.dirname(path) or "."
+        if await self._backend.is_dir(parent):
+            return None
+        if not make_dirs:
+            return {"type": "parent_not_found"}
+        try:
+            await self._backend.makedirs(parent)
+        except Exception as e:
+            return {"type": "mkdir_failed", "message": str(e)}
+        return None
+
     @enforce_write_guard(path_arg="path", operation="write")
     async def acall(
         self,
@@ -147,66 +193,9 @@ Usage:
                 mode=mode,
                 error={"type": "invalid_argument", "field": "path"},
             )
-
-        if not isinstance(content, str):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "content"},
-            )
-
-        if not isinstance(mode, str) or mode not in ("overwrite", "create_only", "fail_if_missing"):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "mode"},
-            )
-        if not isinstance(make_dirs, bool):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "make_dirs"},
-            )
-        if not isinstance(encoding, str) or not encoding:
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "encoding"},
-            )
-        encoding_used, enc_err = resolve_encoding_arg(encoding)
-        if enc_err is not None:
-            return self._result(ok=False, path=path, mode=mode, error=enc_err)
-        assert encoding_used is not None
-        if not isinstance(newline, str) or newline not in ("preserve", "lf", "crlf"):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "newline"},
-            )
-        if not isinstance(backup, bool):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "backup"},
-            )
-
-        if not os.path.isabs(path):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={
-                    "type": "invalid_argument",
-                    "field": "path",
-                    "message": "path must be absolute",
-                },
-            )
+        encoding_used, arg_error = _validate_write_args(path, content, mode, make_dirs, encoding, newline, backup)
+        if arg_error is not None:
+            return self._result(ok=False, path=path, mode=mode, error=arg_error)
 
         exists = await self._backend.exists(path)
         if mode == "create_only" and exists:
@@ -218,31 +207,12 @@ Usage:
                 ok=False, path=path, mode=mode, error={"type": "not_found"}
             )
 
-        parent = os.path.dirname(path) or "."
-        if not await self._backend.is_dir(parent):
-            if make_dirs:
-                try:
-                    await self._backend.makedirs(parent)
-                except Exception as e:
-                    return self._result(
-                        ok=False,
-                        path=path,
-                        mode=mode,
-                        error={"type": "mkdir_failed", "message": str(e)},
-                    )
-            else:
-                return self._result(
-                    ok=False,
-                    path=path,
-                    mode=mode,
-                    error={"type": "parent_not_found"},
-                )
+        parent_error = await self._ensure_parent_dir(path, make_dirs)
+        if parent_error is not None:
+            return self._result(ok=False, path=path, mode=mode, error=parent_error)
 
-        normalized = content
-        if newline == "lf":
-            normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
-        elif newline == "crlf":
-            normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        normalized = _normalize_newlines(content, newline)
+
 
         backup_path = None
         if backup and exists:

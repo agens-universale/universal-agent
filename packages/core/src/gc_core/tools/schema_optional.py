@@ -186,29 +186,8 @@ def _rewrite_semantic_required(schema: Any) -> None:
         else:
             schema["required"] = []
 
-    props = schema.get("properties")
-    if isinstance(props, dict):
-        for sub in props.values():
-            _rewrite_semantic_required(sub)
-
-    items = schema.get("items")
-    if isinstance(items, dict):
-        _rewrite_semantic_required(items)
-    elif isinstance(items, list):
-        for item in items:
-            _rewrite_semantic_required(item)
-
-    for key in ("anyOf", "oneOf", "allOf"):
-        branches = schema.get(key)
-        if isinstance(branches, list):
-            for branch in branches:
-                _rewrite_semantic_required(branch)
-
-    for defs_key in ("$defs", "definitions"):
-        defs = schema.get(defs_key)
-        if isinstance(defs, dict):
-            for def_schema in defs.values():
-                _rewrite_semantic_required(def_schema)
+    for sub in _nested_schemas(schema):
+        _rewrite_semantic_required(sub)
 
 
 def _has_optional_markers(schema: Any) -> bool:
@@ -217,28 +196,27 @@ def _has_optional_markers(schema: Any) -> bool:
         return False
     if schema.get("x-openai-strict") or isinstance(schema.get("x-optional-keys"), list):
         return True
+    return any(_has_optional_markers(sub) for sub in _nested_schemas(schema))
 
+
+def _nested_schemas(schema: dict):
+    """Direct subschemas: properties, items, anyOf/oneOf/allOf branches, $defs/definitions."""
     props = schema.get("properties")
-    if isinstance(props, dict) and any(_has_optional_markers(sub) for sub in props.values()):
-        return True
-
+    if isinstance(props, dict):
+        yield from props.values()
     items = schema.get("items")
-    if isinstance(items, dict) and _has_optional_markers(items):
-        return True
-    if isinstance(items, list) and any(_has_optional_markers(item) for item in items):
-        return True
-
+    if isinstance(items, dict):
+        yield items
+    elif isinstance(items, list):
+        yield from items
     for key in ("anyOf", "oneOf", "allOf"):
         branches = schema.get(key)
-        if isinstance(branches, list) and any(_has_optional_markers(b) for b in branches):
-            return True
-
+        if isinstance(branches, list):
+            yield from branches
     for defs_key in ("$defs", "definitions"):
         defs = schema.get(defs_key)
-        if isinstance(defs, dict) and any(_has_optional_markers(d) for d in defs.values()):
-            return True
-
-    return False
+        if isinstance(defs, dict):
+            yield from defs.values()
 
 
 def parameters_schema_for_local_validation(params: dict[str, Any]) -> dict[str, Any]:

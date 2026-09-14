@@ -33,26 +33,8 @@ def normalize_strip_tags_projection_config(cfg: StripTagsProjectionConfig) -> No
     cleaned: list[str] = []
     seen: set[str] = set()
     for item in raw:
-        if not isinstance(item, str):
-            _logger.warning(
-                "strip_tags_projection.tags: non-string entry %r dropped", item
-            )
-            continue
-        name = item.strip()
-        if name.startswith("<") and name.endswith(">") and len(name) >= 2:
-            name = name[1:-1].strip()
-        if not name:
-            _logger.warning("strip_tags_projection.tags: empty/whitespace tag dropped")
-            continue
-        if "/" in name or any(ch.isspace() for ch in name):
-            _logger.warning(
-                "strip_tags_projection.tags: invalid tag %r dropped", item
-            )
-            continue
-        if not _TAG_NAME_RE.match(name):
-            _logger.warning(
-                "strip_tags_projection.tags: invalid tag %r dropped", item
-            )
+        name = _clean_tag_name(item)
+        if name is None:
             continue
         key = name.lower()
         if key in seen:
@@ -91,3 +73,28 @@ def persist_reasoning_content_from_config(config: object) -> bool:
     if section is None:
         return False
     return not bool(section.get("strip_think", True))
+def _clean_tag_name(item: object) -> str | None:
+    """Очищенное имя тега или ``None`` (с warning), если запись невалидна."""
+    if not isinstance(item, str):
+        _logger.warning(
+            "strip_tags_projection.tags: non-string entry %r dropped", item
+        )
+        return None
+    name = item.strip()
+    if name.startswith("<") and name.endswith(">") and len(name) >= 2:
+        name = name[1:-1].strip()
+    if not name:
+        _logger.warning("strip_tags_projection.tags: empty/whitespace tag dropped")
+        return None
+    if _is_invalid_tag_name(name):
+        _logger.warning(
+            "strip_tags_projection.tags: invalid tag %r dropped", item
+        )
+        return None
+    return name
+
+
+def _is_invalid_tag_name(name: str) -> bool:
+    if "/" in name or any(ch.isspace() for ch in name):
+        return True
+    return not _TAG_NAME_RE.match(name)

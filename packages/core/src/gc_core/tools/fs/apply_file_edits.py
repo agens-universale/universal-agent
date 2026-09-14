@@ -23,6 +23,109 @@ from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
+class _LoadError:
+    def __init__(self, message: str, error: Dict[str, Any]) -> None:
+        self.message = message
+        self.error = error
+
+
+class _EditBatch:
+    """Результат последовательного применения правок к тексту (без записи)."""
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.edit_results: list[Dict[str, Any]] = []
+        self.edits_would_apply = 0
+        self.total_would_replace = 0
+        self.any_eol_adapted = False
+        self.failure: "tuple[int, str, Dict[str, Any] | None] | None" = None
+
+
+def _batch_arg_error(edits, atomic, dry_run, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256) -> "tuple[str, Dict[str, Any]] | None":
+    """(message, error) для первого невалидного аргумента батча либо None."""
+    if not isinstance(edits, list) or len(edits) == 0:
+        return "Argument 'edits' must be a non-empty array.", {"type": "invalid_argument", "field": "edits"}
+    if not isinstance(atomic, bool) or not atomic:
+        return "Argument 'atomic' must be true.", {"type": "invalid_argument", "field": "atomic"}
+    if not isinstance(dry_run, bool):
+        return "Argument 'dry_run' must be a boolean.", {"type": "invalid_argument", "field": "dry_run"}
+    if not isinstance(backup, bool):
+        return "Argument 'backup' must be a boolean.", {"type": "invalid_argument", "field": "backup"}
+    if not isinstance(return_diff, bool):
+        return "Argument 'return_diff' must be a boolean.", {"type": "invalid_argument", "field": "return_diff"}
+    if not isinstance(diff_context_lines, int) or diff_context_lines < 0:
+        return "Argument 'diff_context_lines' must be a non-negative integer.", {"type": "invalid_argument", "field": "diff_context_lines"}
+    if not isinstance(max_diff_chars, int) or max_diff_chars < 1:
+        return "Argument 'max_diff_chars' must be a positive integer.", {"type": "invalid_argument", "field": "max_diff_chars"}
+    if expected_file_sha256 is not None and (
+        not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256)
+    ):
+        return "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", {"type": "invalid_argument", "field": "expected_file_sha256"}
+    return None
+
+
+def _edit_arg_error(i: int, edit: Any) -> "tuple[str, Dict[str, Any]] | None":
+    if not isinstance(edit, dict):
+        return f"Edit #{i} must be an object.", {"type": "invalid_argument", "field": "edits"}
+    if "search" not in edit or "replace" not in edit:
+        return f"Edit #{i} must include 'search' and 'replace'.", {"type": "invalid_argument", "field": "edits"}
+    if not isinstance(edit["search"], str) or edit["search"] == "":
+        return f"Edit #{i} has invalid 'search'.", {"type": "invalid_argument", "field": "search"}
+    if not isinstance(edit["replace"], str):
+        return f"Edit #{i} has invalid 'replace'.", {"type": "invalid_argument", "field": "replace"}
+    return None
+
+
+def _edit_failure_message(i: int, err: "Dict[str, Any] | None", meta: Dict[str, Any]) -> str:
+    if not (err and err.get("type") == "not_found"):
+        return f"Edit #{i} failed. No changes applied."
+    suggestions = meta.get("suggestions") or []
+    if suggestions:
+        tops = ", ".join(f"line {s['line']} ({s['score']})" for s in suggestions)
+        return f"Edit #{i} failed: search not found. Top matches: {tops}."
+    return f"Edit #{i} failed: search not found. No changes applied."
+
+
+def _select_matches(matches: list, occurrence: Any) -> tuple:
+    """Выбранные вхождения по occurrence либо (None, (meta, error)) при ошибке."""
+    match_count = len(matches)
+    if occurrence == "all":
+        return matches, None
+    if occurrence == "first":
+        return [matches[0]], None
+    if occurrence == "last":
+        return [matches[-1]], None
+    if isinstance(occurrence, int):
+        i = occurrence - 1
+        if i < 0 or i >= match_count:
+            return None, ({
+                "matched": True,
+                "replaced": 0,
+                "match_count": match_count,
+                "line_numbers": [],
+                "match_ranges": [],
+            }, {"type": "occurrence_out_of_range"})
+        return [matches[i]], None
+    return None, ({
+        "matched": False,
+        "replaced": 0,
+        "match_count": 0,
+        "line_numbers": [],
+        "match_ranges": [],
+    }, {"type": "invalid_argument", "field": "occurrence"})
+
+
+def _splice_replacements(content: str, selected: list, search: str, replace: str) -> str:
+    parts: list[str] = []
+    prev_end = 0
+    for idx, _, _ in sorted(selected, key=lambda x: x[0]):
+        parts.append(content[prev_end:idx])
+        parts.append(replace)
+        prev_end = idx + len(search)
+    parts.append(content[prev_end:])
+    return "".join(parts)
+
+
 class ApplyFileEdits(AbstractSimpleTool):
     default_diff_context_lines = 3
     default_max_diff_chars = 12000
@@ -227,40 +330,11 @@ class ApplyFileEdits(AbstractSimpleTool):
                 "match_ranges": ranges,
             }, {"type": "match_count_mismatch"}, False
 
-        if occurrence == "all":
-            selected = matches
-        elif occurrence == "first":
-            selected = [matches[0]]
-        elif occurrence == "last":
-            selected = [matches[-1]]
-        elif isinstance(occurrence, int):
-            i = occurrence - 1
-            if i < 0 or i >= match_count:
-                return False, content, {
-                    "matched": True,
-                    "replaced": 0,
-                    "match_count": match_count,
-                    "line_numbers": [],
-                    "match_ranges": [],
-                }, {"type": "occurrence_out_of_range"}, False
-            selected = [matches[i]]
-        else:
-            return False, content, {
-                "matched": False,
-                "replaced": 0,
-                "match_count": 0,
-                "line_numbers": [],
-                "match_ranges": [],
-            }, {"type": "invalid_argument", "field": "occurrence"}, False
+        selected, select_error = _select_matches(matches, occurrence)
+        if select_error is not None:
+            return False, content, select_error[0], select_error[1], False
 
-        parts: list[str] = []
-        prev_end = 0
-        for idx, _, _ in sorted(selected, key=lambda x: x[0]):
-            parts.append(content[prev_end:idx])
-            parts.append(replace)
-            prev_end = idx + len(search)
-        parts.append(content[prev_end:])
-        new_content = "".join(parts)
+        new_content = _splice_replacements(content, selected, search, replace)
         ranges = [{"start_line": m[1], "end_line": m[2]} for m in selected]
         meta: Dict[str, Any] = {
             "matched": True,
@@ -271,6 +345,65 @@ class ApplyFileEdits(AbstractSimpleTool):
         }
         return True, new_content, meta, None, resolved.eol_adapted
 
+
+    async def _load_source(self, path: str, encoding: "str | None", expected_file_sha256: "str | None"):
+        """(original_text, encoding_used) либо _LoadError с готовыми message/error."""
+        try:
+            file_size = await self._backend.getsize(path)
+        except Exception as e:
+            return _LoadError("Failed to get file size.", {"type": "stat_failed", "message": str(e)})
+        size_err = check_file_size(
+            file_size,
+            fs_mutate_max_bytes(self._config_dict),
+            operation="apply_file_edits",
+        )
+        if size_err is not None:
+            return _LoadError(size_err["message"], size_err)
+        try:
+            raw = await self._backend.read_bytes(path)
+        except Exception as e:
+            return _LoadError("Failed to read file.", {"type": "read_failed", "message": str(e)})
+        decoded = decode_text_bytes(raw, encoding=encoding)
+        if not decoded.ok:
+            err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
+            return _LoadError(err.get("message", "Failed to decode file."), err)
+        stale_error = check_expected_file_sha256(sha256_hex_of_bytes(raw), expected_file_sha256)
+        if stale_error is not None:
+            return _LoadError(stale_error["message"], stale_error)
+        return decoded.text or "", decoded.encoding_used
+
+    def _apply_edit_batch(self, edits: list, original: str) -> _EditBatch:
+        batch = _EditBatch(original)
+        for i, edit in enumerate(edits):
+            arg_error = _edit_arg_error(i, edit)
+            if arg_error is not None:
+                batch.failure = (i, arg_error[0], arg_error[1])
+                return batch
+            ok_edit, next_content, meta, err, eol_adapted = self._apply_one_edit(
+                content=batch.content, edit=edit
+            )
+            meta["index"] = i
+            batch.edit_results.append(meta)
+            batch.any_eol_adapted = batch.any_eol_adapted or eol_adapted
+            if not ok_edit:
+                batch.failure = (i, _edit_failure_message(i, err, meta), err)
+                return batch
+            batch.content = next_content
+            batch.edits_would_apply += 1
+            batch.total_would_replace += meta["replaced"]
+        return batch
+
+    async def _encode_and_write(self, path: str, current: str, encoding_used: "str | None"):
+        """(bytes, None) либо (None, (message, error))."""
+        try:
+            out_bytes, encode_err = try_encode_text_bytes(current, encoding_used or "utf-8")
+            if encode_err is not None:
+                return None, (encode_err.get("message", "Failed to encode file."), encode_err)
+            assert out_bytes is not None
+            await self._backend.write_bytes(path, out_bytes)
+        except Exception as e:
+            return None, ("Failed to write file.", {"type": "write_failed", "message": str(e)})
+        return out_bytes, None
 
     @enforce_write_guard(path_arg="path", operation="write")
     async def acall(
@@ -290,120 +423,47 @@ class ApplyFileEdits(AbstractSimpleTool):
         expected_file_sha256 = coalesce_optional_string(expected_file_sha256)
         encoding = coalesce_optional_string(encoding)
         _result = functools.partial(self._result, path=path)
+        fail = functools.partial(
+            _result, ok=False, applied=False, edits_would_apply=0, total_would_replace=0,
+            edits_applied=0, total_replaced=0, edit_results=[],
+        )
+        arg_error = _batch_arg_error(
+            edits, atomic, dry_run, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256
+        )
         if not isinstance(path, str):
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'path' must be a string.", error={"type": "invalid_argument", "field": "path"})
-        if not isinstance(edits, list) or len(edits) == 0:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'edits' must be a non-empty array.", error={"type": "invalid_argument", "field": "edits"})
-        if not isinstance(atomic, bool) or not atomic:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'atomic' must be true.", error={"type": "invalid_argument", "field": "atomic"})
-        if not isinstance(dry_run, bool):
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'dry_run' must be a boolean.", error={"type": "invalid_argument", "field": "dry_run"})
-        if not isinstance(backup, bool):
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'backup' must be a boolean.", error={"type": "invalid_argument", "field": "backup"})
-        if not isinstance(return_diff, bool):
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'return_diff' must be a boolean.", error={"type": "invalid_argument", "field": "return_diff"})
-        if not isinstance(diff_context_lines, int) or diff_context_lines < 0:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'diff_context_lines' must be a non-negative integer.", error={"type": "invalid_argument", "field": "diff_context_lines"})
-        if not isinstance(max_diff_chars, int) or max_diff_chars < 1:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'max_diff_chars' must be a positive integer.", error={"type": "invalid_argument", "field": "max_diff_chars"})
-        if expected_file_sha256 is not None:
-            if not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256):
-                return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", error={"type": "invalid_argument", "field": "expected_file_sha256"})
+            return fail(message="Argument 'path' must be a string.", error={"type": "invalid_argument", "field": "path"})
+        if arg_error is not None:
+            return fail(message=arg_error[0], error=arg_error[1])
 
         if not await self._backend.exists(path):
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="File not found.", error={"type": "not_found"})
+            return fail(message="File not found.", error={"type": "not_found"})
         if not await self._backend.is_file(path):
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Path is not a file.", error={"type": "not_a_file"})
-        try:
-            file_size = await self._backend.getsize(path)
-        except Exception as e:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to get file size.", error={"type": "stat_failed", "message": str(e)})
-        size_err = check_file_size(
-            file_size,
-            fs_mutate_max_bytes(self._config_dict),
-            operation="apply_file_edits",
-        )
-        if size_err is not None:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=size_err["message"], error=size_err)
+            return fail(message="Path is not a file.", error={"type": "not_a_file"})
+        loaded = await self._load_source(path, encoding, expected_file_sha256)
+        if isinstance(loaded, _LoadError):
+            return fail(message=loaded.message, error=loaded.error)
+        original, encoding_used = loaded
 
-        try:
-            raw = await self._backend.read_bytes(path)
-        except Exception as e:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to read file.", error={"type": "read_failed", "message": str(e)})
-        decoded = decode_text_bytes(raw, encoding=encoding)
-        if not decoded.ok:
-            err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=err.get("message", "Failed to decode file."), error=err)
-        original = decoded.text or ""
-        encoding_used = decoded.encoding_used
-        actual_sha256 = sha256_hex_of_bytes(raw)
-        stale_error = check_expected_file_sha256(actual_sha256, expected_file_sha256)
-        if stale_error is not None:
+        batch = self._apply_edit_batch(edits, original)
+        edit_results = batch.edit_results
+        edits_would_apply = batch.edits_would_apply
+        total_would_replace = batch.total_would_replace
+        if batch.failure is not None:
+            failed_index, message, err = batch.failure
             return _result(
                 ok=False,
                 applied=False,
-                edits_would_apply=0,
-                total_would_replace=0,
+                edits_would_apply=edits_would_apply,
+                total_would_replace=total_would_replace,
                 edits_applied=0,
                 total_replaced=0,
-                edit_results=[],
-                message=stale_error["message"],
-                error=stale_error,
+                edit_results=edit_results,
+                failed_edit_index=failed_index,
+                message=message,
+                error=err,
             )
-
-        current = original
-        edit_results: list[Dict[str, Any]] = []
-        edits_would_apply = 0
-        total_would_replace = 0
-        any_eol_adapted = False
-        for i, edit in enumerate(edits):
-            if not isinstance(edit, dict):
-                return _result(ok=False, applied=False, edits_would_apply=edits_would_apply, total_would_replace=total_would_replace, edits_applied=0, total_replaced=0, edit_results=edit_results, failed_edit_index=i, message=f"Edit #{i} must be an object.", error={"type": "invalid_argument", "field": "edits"})
-            if "search" not in edit or "replace" not in edit:
-                return _result(ok=False, applied=False, edits_would_apply=edits_would_apply, total_would_replace=total_would_replace, edits_applied=0, total_replaced=0, edit_results=edit_results, failed_edit_index=i, message=f"Edit #{i} must include 'search' and 'replace'.", error={"type": "invalid_argument", "field": "edits"})
-            if not isinstance(edit["search"], str) or edit["search"] == "":
-                return _result(ok=False, applied=False, edits_would_apply=edits_would_apply, total_would_replace=total_would_replace, edits_applied=0, total_replaced=0, edit_results=edit_results, failed_edit_index=i, message=f"Edit #{i} has invalid 'search'.", error={"type": "invalid_argument", "field": "search"})
-            if not isinstance(edit["replace"], str):
-                return _result(ok=False, applied=False, edits_would_apply=edits_would_apply, total_would_replace=total_would_replace, edits_applied=0, total_replaced=0, edit_results=edit_results, failed_edit_index=i, message=f"Edit #{i} has invalid 'replace'.", error={"type": "invalid_argument", "field": "replace"})
-
-            ok_edit, next_content, meta, err, eol_adapted = self._apply_one_edit(
-                content=current, edit=edit
-            )
-            meta["index"] = i
-            edit_results.append(meta)
-            any_eol_adapted = any_eol_adapted or eol_adapted
-            if not ok_edit:
-                message = f"Edit #{i} failed. No changes applied."
-                if err and err.get("type") == "not_found":
-                    suggestions = meta.get("suggestions") or []
-                    if suggestions:
-                        tops = ", ".join(
-                            f"line {s['line']} ({s['score']})" for s in suggestions
-                        )
-                        message = (
-                            f"Edit #{i} failed: search not found. "
-                            f"Top matches: {tops}."
-                        )
-                    else:
-                        message = (
-                            f"Edit #{i} failed: search not found. "
-                            "No changes applied."
-                        )
-                return _result(
-                    ok=False,
-                    applied=False,
-                    edits_would_apply=edits_would_apply,
-                    total_would_replace=total_would_replace,
-                    edits_applied=0,
-                    total_replaced=0,
-                    edit_results=edit_results,
-                    failed_edit_index=i,
-                    message=message,
-                    error=err,
-                )
-            current = next_content
-            edits_would_apply += 1
-            total_would_replace += meta["replaced"]
+        current = batch.content
+        any_eol_adapted = batch.any_eol_adapted
 
         diff_text = None
         diff_truncated = False
@@ -460,57 +520,35 @@ class ApplyFileEdits(AbstractSimpleTool):
                 error=None,
             )
 
+        partial = functools.partial(
+            _result,
+            ok=False,
+            applied=False,
+            edits_would_apply=edits_would_apply,
+            total_would_replace=total_would_replace,
+            edits_applied=0,
+            total_replaced=0,
+            edit_results=edit_results,
+        )
         backup_path = None
         if backup:
             backup_path = f"{path}.bak"
             try:
                 await self._backend.copy(path, backup_path)
             except Exception as e:
-                return _result(
-                    ok=False,
-                    applied=False,
-                    edits_would_apply=edits_would_apply,
-                    total_would_replace=total_would_replace,
-                    edits_applied=0,
-                    total_replaced=0,
-                    edit_results=edit_results,
+                return partial(
                     message="Failed to create backup file.",
                     error={"type": "backup_failed", "message": str(e)},
                 )
 
-        try:
-            out_bytes, encode_err = try_encode_text_bytes(current, encoding_used or "utf-8")
-            if encode_err is not None:
-                return _result(
-                    ok=False,
-                    applied=False,
-                    edits_would_apply=edits_would_apply,
-                    total_would_replace=total_would_replace,
-                    edits_applied=0,
-                    total_replaced=0,
-                    edit_results=edit_results,
-                    message=encode_err.get("message", "Failed to encode file."),
-                    backup_path=backup_path,
-                    diff=diff_text,
-                    diff_truncated=diff_truncated,
-                    error=encode_err,
-                )
-            assert out_bytes is not None
-            await self._backend.write_bytes(path, out_bytes)
-        except Exception as e:
-            return _result(
-                ok=False,
-                applied=False,
-                edits_would_apply=edits_would_apply,
-                total_would_replace=total_would_replace,
-                edits_applied=0,
-                total_replaced=0,
-                edit_results=edit_results,
-                message="Failed to write file.",
+        out_bytes, write_error = await self._encode_and_write(path, current, encoding_used)
+        if write_error is not None:
+            return partial(
+                message=write_error[0],
                 backup_path=backup_path,
                 diff=diff_text,
                 diff_truncated=diff_truncated,
-                error={"type": "write_failed", "message": str(e)},
+                error=write_error[1],
             )
 
         content_sha256 = sha256_hex_of_bytes(out_bytes)

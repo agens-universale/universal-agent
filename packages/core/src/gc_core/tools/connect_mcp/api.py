@@ -24,6 +24,20 @@ from gc_core.utils.retry import retry_with_backoff
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_dict(value: Dict[Any, Any]) -> Dict[str, Any]:
+    ctype = value.get("type")
+    strip_data = ctype in ("image", "audio") and isinstance(value.get("data"), str)
+    out: Dict[str, Any] = {}
+    for k, v in value.items():
+        # JSON keys must be strings
+        key = k if isinstance(k, str) else str(k)
+        if strip_data and k == "data":
+            out[key] = f"<{ctype} data stripped: {len(value['data'])} base64 chars>"
+        else:
+            out[key] = _json_sanitize(v)
+    return out
+
+
 def _json_sanitize(value: Any) -> Any:
     """
     Convert arbitrary MCP result to JSON-serializable structure.
@@ -41,26 +55,8 @@ def _json_sanitize(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         return "binary data"
     if isinstance(value, dict):
-        ctype = value.get("type")
-        if ctype in ("image", "audio") and isinstance(value.get("data"), str):
-            size = len(value["data"])
-            out: Dict[str, Any] = {}
-            for k, v in value.items():
-                key = k if isinstance(k, str) else str(k)
-                if k == "data":
-                    out[key] = f"<{ctype} data stripped: {size} base64 chars>"
-                else:
-                    out[key] = _json_sanitize(v)
-            return out
-        out = {}
-        for k, v in value.items():
-            # JSON keys must be strings
-            key = k if isinstance(k, str) else str(k)
-            out[key] = _json_sanitize(v)
-        return out
-    if isinstance(value, list):
-        return [_json_sanitize(v) for v in value]
-    if isinstance(value, tuple):
+        return _sanitize_dict(value)
+    if isinstance(value, (list, tuple)):
         return [_json_sanitize(v) for v in value]
     # Try to keep primitive JSON types as-is
     if isinstance(value, (str, int, float, bool)):
@@ -241,6 +237,39 @@ class _McpCallTarget:
     use_retry: bool
 
 
+def _coerce_mcp_arguments(full_tool_name: str, arguments: Dict[str, Any] | str) -> Any:
+    # Поддержка случая, когда arguments приходит как JSON-строка
+    if not isinstance(arguments, str):
+        return arguments or {}
+    try:
+        return json.loads(arguments) if arguments.strip() else {}
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Arguments for tool '{full_tool_name}' are not valid JSON: {e}"
+        ) from e
+
+
+def _split_legacy_tool_name(full_tool_name: str) -> tuple[str, str]:
+    # Фоллбек на старый формат имени, если метаданных нет
+    if "_" not in full_tool_name:
+        raise ValueError(
+            f"Tool name '{full_tool_name}' does not contain server prefix '<server>_<tool>'."
+        )
+    server_key, base_tool_name = full_tool_name.split("_", 1)
+    return server_key, base_tool_name
+
+
+def _check_server_cfg(server_key: str, server_cfg: Dict[str, Any]) -> None:
+    transport = server_cfg.get("transport")
+    stdio_like = transport in ("stdio", "stream_stdio")
+    if not stdio_like and not (server_cfg.get("url") or ""):
+        raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
+    if stdio_like and not server_cfg.get("command"):
+        raise ValueError(
+            f"MCP server '{server_key}' ({transport}) has no 'command' in config"
+        )
+
+
 def _prepare_mcp_call(
     full_tool_name: str,
     arguments: Dict[str, Any] | str,
@@ -267,16 +296,7 @@ def _prepare_mcp_call(
     if full_tool_name not in tools_registry:
         raise ValueError(f"Unknown tool '{full_tool_name}'")
 
-    # Поддержка случая, когда arguments приходит как JSON-строка
-    if isinstance(arguments, str):
-        try:
-            arguments_obj = json.loads(arguments) if arguments.strip() else {}
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Arguments for tool '{full_tool_name}' are not valid JSON: {e}"
-            ) from e
-    else:
-        arguments_obj = arguments or {}
+    arguments_obj = _coerce_mcp_arguments(full_tool_name, arguments)
 
     # Берём описание тулы и метаданные.
     # Ожидаемый формат: {"tool": {...}, "metadata": {...}}.
@@ -293,12 +313,7 @@ def _prepare_mcp_call(
     base_tool_name = metadata.get("mcp_tool_name") or full_tool_name
 
     if not server_key:
-        # Фоллбек на старый формат имени, если метаданных нет
-        if "_" not in full_tool_name:
-            raise ValueError(
-                f"Tool name '{full_tool_name}' does not contain server prefix '<server>_<tool>'."
-            )
-        server_key, base_tool_name = full_tool_name.split("_", 1)
+        server_key, base_tool_name = _split_legacy_tool_name(full_tool_name)
 
     server_cfg = servers_cfg.get(server_key)
     if not isinstance(server_cfg, dict):
@@ -307,13 +322,7 @@ def _prepare_mcp_call(
     transport = server_cfg.get("transport")
     url = server_cfg.get("url") or ""
     token = server_cfg.get("token")
-    stdio_like = transport in ("stdio", "stream_stdio")
-    if not stdio_like and not url:
-        raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
-    if stdio_like and not server_cfg.get("command"):
-        raise ValueError(
-            f"MCP server '{server_key}' ({transport}) has no 'command' in config"
-        )
+    _check_server_cfg(server_key, server_cfg)
 
     # Схема параметров тулы (JSON Schema)
     tool_schema = tool_entry.get("parameters") or {}

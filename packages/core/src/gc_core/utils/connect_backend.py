@@ -120,6 +120,19 @@ def resolve_network_params(
     return verify, cert, use_retry, timeout_sec, proxy, bool(retry_embedded)
 
 
+def _function_body_of_flat_tool(tool: Dict) -> Dict:
+    fn: Dict = {}
+    if "name" in tool:
+        fn["name"] = tool.get("name")
+    if "description" in tool:
+        fn["description"] = tool.get("description")
+    if "parameters" in tool:
+        fn["parameters"] = schema_without_internal_markers(tool.get("parameters"))
+    if "strict" in tool:
+        fn["strict"] = tool.get("strict")
+    return fn
+
+
 def normalize_chat_completions_tools(
     tools: Optional[List],
 ) -> List[Dict]:
@@ -141,20 +154,9 @@ def normalize_chat_completions_tools(
             continue
 
         if tool.get("type") == "function" and "function" not in tool:
-            fn: Dict = {}
-            if "name" in tool:
-                fn["name"] = tool.get("name")
-            if "description" in tool:
-                fn["description"] = tool.get("description")
-            if "parameters" in tool:
-                fn["parameters"] = schema_without_internal_markers(tool.get("parameters"))
-            if "strict" in tool:
-                fn["strict"] = tool.get("strict")
-
-            normalized.append({"type": "function", "function": fn})
-            continue
-
-        normalized.append(schema_without_internal_markers(tool))
+            normalized.append({"type": "function", "function": _function_body_of_flat_tool(tool)})
+        else:
+            normalized.append(schema_without_internal_markers(tool))
 
     return normalized
 
@@ -389,6 +391,54 @@ async def arequest_backend_responses(
     no_more_retries_log_level=logging.ERROR,
     operation_name="Backend chat completion request",
 )
+async def _astream_chat_completions(client, url: str, data: Dict, headers: Dict, *, timeout: float, logger, on_delta: OnDelta):
+    stream_data = dict(data)
+    stream_data["stream"] = True
+    # OpenAI-совместимые провайдеры отдают usage в стриме только по явному
+    # запросу — иначе финального usage-чанка нет и токены основного цикла
+    # (он всегда стримится) не учитываются.
+    stream_data["stream_options"] = {"include_usage": True}
+    _log_backend_request(logger, "chat_completions", url, stream_data)
+
+    async with client.stream(
+        "POST", url, json=stream_data, headers=headers, timeout=timeout
+    ) as r:
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError:
+            # Диагностика тела сохраняется как в блокирующем пути.
+            err_text = await _aread_error_text(r)
+            if logger is not None:
+                logger.error(
+                    "Backend chat/completions (stream) HTTP error status=%s url=%s body=%s",
+                    getattr(r, "status_code", None), url, err_text,
+                )
+            print(
+                "=== backend chat/completions (stream) error ===\n"
+                f"url={url}\nstatus={getattr(r, 'status_code', None)}\n"
+                f"response_body={(err_text or '')[:4000]}\n"
+            )
+            raise
+        on_delta("reset", "")
+
+        assembler = StreamAssembler(on_delta=on_delta)
+        async for line in _aiter_utf8_lines(r):
+            assembler.feed_line(line)
+        assembler.flush()
+        assembled = assembler.result()
+
+        if is_empty_completion(assembled):
+            raise BackendStreamError(
+                "Backend returned empty stream response (no content, tool_calls, "
+                "finish_reason, or error)",
+                status_code=None,
+            )
+        if isinstance(assembled, dict):
+            record_usage(assembled.get("usage"), url)
+        _log_backend_response(logger, "chat_completions", assembled)
+        return assembled
+
+
 async def arequest_backend_chat_completions(
     data: Dict,
     headers: Dict,
@@ -411,51 +461,9 @@ async def arequest_backend_chat_completions(
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 
     if on_delta is not None:
-        stream_data = dict(data)
-        stream_data["stream"] = True
-        # OpenAI-совместимые провайдеры отдают usage в стриме только по явному
-        # запросу — иначе финального usage-чанка нет и токены основного цикла
-        # (он всегда стримится) не учитываются.
-        stream_data["stream_options"] = {"include_usage": True}
-        _log_backend_request(logger, "chat_completions", url, stream_data)
-
-        async with client.stream(
-            "POST", url, json=stream_data, headers=headers, timeout=timeout
-        ) as r:
-            try:
-                r.raise_for_status()
-            except httpx.HTTPStatusError:
-                # Диагностика тела сохраняется как в блокирующем пути.
-                err_text = await _aread_error_text(r)
-                if logger is not None:
-                    logger.error(
-                        "Backend chat/completions (stream) HTTP error status=%s url=%s body=%s",
-                        getattr(r, "status_code", None), url, err_text,
-                    )
-                print(
-                    "=== backend chat/completions (stream) error ===\n"
-                    f"url={url}\nstatus={getattr(r, 'status_code', None)}\n"
-                    f"response_body={(err_text or '')[:4000]}\n"
-                )
-                raise
-            on_delta("reset", "")
-
-            assembler = StreamAssembler(on_delta=on_delta)
-            async for line in _aiter_utf8_lines(r):
-                assembler.feed_line(line)
-            assembler.flush()
-            assembled = assembler.result()
-
-            if is_empty_completion(assembled):
-                raise BackendStreamError(
-                    "Backend returned empty stream response (no content, tool_calls, "
-                    "finish_reason, or error)",
-                    status_code=None,
-                )
-            if isinstance(assembled, dict):
-                record_usage(assembled.get("usage"), url)
-            _log_backend_response(logger, "chat_completions", assembled)
-            return assembled
+        return await _astream_chat_completions(
+            client, url, data, headers, timeout=timeout, logger=logger, on_delta=on_delta
+        )
 
     _log_backend_request(logger, "chat_completions", url, data)
     r = await client.post(url, json=data, headers=headers, timeout=timeout)
@@ -533,6 +541,66 @@ async def acreate_call_headers(
     return build_call_headers(state, ctx, resolved, token=token)
 
 
+def _authorization_header(authorization_override, auth_connector, token: Optional[str]) -> Optional[str]:
+    # authorization: None=наследовать эффективный заголовок, ""=явно без Authorization,
+    # значение=использовать как есть (уже Bearer-нормализовано).
+    if authorization_override == "":
+        return None
+    if authorization_override:
+        return authorization_override
+    if auth_connector is None:
+        return None
+    # Токен добывает ТОЛЬКО `acreate_call_headers`, и вне loop. Здесь его
+    # брать нечем: `AuthConnector.get_token()` — два блокирующих HTTP-вызова
+    # по 10 с, и снятая синхронная форма морозила loop ровно на них.
+    # `token is None` при живом коннекторе — это незаполненный аргумент, а
+    # не «явно без авторизации»; молча уйти без Authorization хуже всего:
+    # backend ответит 401, и искать причину будут в конфиге.
+    if token is None:
+        raise ValueError(
+            "build_call_headers: ctx.auth_connector задан, а token не передан. "
+            "Заголовки с авторизацией собирает acreate_call_headers — она "
+            "берёт токен вне loop."
+        )
+    return f"Bearer {token}"
+
+
+def _apply_chat_completion_headers(call_headers: Dict[str, str], config_dict: Dict, resolved_for_headers, authorization_override) -> None:
+    """Оверлей backend.chat_completion_headers (per-model приоритетнее глобальных)."""
+    extra_headers = backend_override_value(resolved_for_headers, "chat_completion_headers")
+    headers_from_model = extra_headers is not NO_BACKEND_OVERRIDE
+    if not headers_from_model:
+        extra_headers = config_dict.get("chat_completion_headers")
+    if not isinstance(extra_headers, dict):
+        return
+    for key, raw_val in extra_headers.items():
+        if not isinstance(key, str):
+            continue
+        k = key.strip()
+        if not k:
+            continue
+        # ОБЩИЙ Authorization не перебивает решение модели: боевой конфиг
+        # держит корп-токен в backend.chat_completion_headers, и без этой
+        # ветки `token: sk-or-...` уехал бы под корп-заголовком на чужой
+        # хост, а `token: ""` («явно без авторизации») воскрес бы. Оверлей
+        # заголовков С ТОЙ ЖЕ модели — тоже per-model решение, и более
+        # конкретное: он уточняет token и проходит дальше. Сравнение
+        # регистронезависимое: иначе `authorization:` строчными не перебивал
+        # бы, а ДОБАВЛЯЛСЯ вторым заголовком к нашему.
+        if (
+            not headers_from_model
+            and authorization_override is not None
+            and k.lower() == "authorization"
+        ):
+            continue
+        if raw_val is None:
+            continue
+        v = str(raw_val).strip()
+        if not v:
+            continue
+        call_headers[k] = v
+
+
 def build_call_headers(
     state,
     ctx,
@@ -569,59 +637,16 @@ def build_call_headers(
     authorization_override = (
         resolved_for_headers.authorization if resolved_for_headers is not None else None
     )
-    if authorization_override == "":
-        pass
-    elif authorization_override:
-        call_headers["Authorization"] = authorization_override
-    elif auth_connector is not None:
-        # Токен добывает ТОЛЬКО `acreate_call_headers`, и вне loop. Здесь его
-        # брать нечем: `AuthConnector.get_token()` — два блокирующих HTTP-вызова
-        # по 10 с, и снятая синхронная форма морозила loop ровно на них.
-        # `token is None` при живом коннекторе — это незаполненный аргумент, а
-        # не «явно без авторизации»; молча уйти без Authorization хуже всего:
-        # backend ответит 401, и искать причину будут в конфиге.
-        if token is None:
-            raise ValueError(
-                "build_call_headers: ctx.auth_connector задан, а token не передан. "
-                "Заголовки с авторизацией собирает acreate_call_headers — она "
-                "берёт токен вне loop."
-            )
-        call_headers["Authorization"] = f"Bearer {token}"
+    authorization = _authorization_header(authorization_override, auth_connector, token)
+    if authorization is not None:
+        call_headers["Authorization"] = authorization
 
     # Дополнительные заголовки для chat/completions передаются
     # универсально через backend.chat_completion_headers.
     if backend_mode == "chat_completions":
-        extra_headers = backend_override_value(resolved_for_headers, "chat_completion_headers")
-        headers_from_model = extra_headers is not NO_BACKEND_OVERRIDE
-        if not headers_from_model:
-            extra_headers = config_dict.get("chat_completion_headers")
-        if isinstance(extra_headers, dict):
-            for key, raw_val in extra_headers.items():
-                if not isinstance(key, str):
-                    continue
-                k = key.strip()
-                if not k:
-                    continue
-                # ОБЩИЙ Authorization не перебивает решение модели: боевой конфиг
-                # держит корп-токен в backend.chat_completion_headers, и без этой
-                # ветки `token: sk-or-...` уехал бы под корп-заголовком на чужой
-                # хост, а `token: ""` («явно без авторизации») воскрес бы. Оверлей
-                # заголовков С ТОЙ ЖЕ модели — тоже per-model решение, и более
-                # конкретное: он уточняет token и проходит дальше. Сравнение
-                # регистронезависимое: иначе `authorization:` строчными не перебивал
-                # бы, а ДОБАВЛЯЛСЯ вторым заголовком к нашему.
-                if (
-                    not headers_from_model
-                    and authorization_override is not None
-                    and k.lower() == "authorization"
-                ):
-                    continue
-                if raw_val is None:
-                    continue
-                v = str(raw_val).strip()
-                if not v:
-                    continue
-                call_headers[k] = v
+        _apply_chat_completion_headers(
+            call_headers, config_dict, resolved_for_headers, authorization_override
+        )
 
     # Внешний trace_id — строго opt-in через agent.trace_header_enabled: без
     # флага заголовок не уходит, даже если трейс у рана есть (в лог-файл и в
@@ -670,49 +695,82 @@ def create_call_data_responses(
     return call_data
 
     
+def _safe_positive_int(raw: object) -> Optional[int]:
+    try:
+        value = int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 1 else None
+
+
+def _message_key(message: Dict) -> str:
+    msg_id = message.get("id")
+    if isinstance(msg_id, str) and msg_id:
+        return f"id:{msg_id}"
+    return "payload:" + json.dumps(message, ensure_ascii=False, sort_keys=True)
+
+
+def _merge_state_messages(state_messages: Any, messages) -> List[Dict]:
+    """История state + новые сообщения без дублей (по id либо по payload)."""
+    if not (isinstance(state_messages, list) and len(state_messages) > 0):
+        return [m for m in messages if isinstance(m, dict)]
+    to_send_messages = state_messages
+    msgs_ids = set((_message_key(m) for m in state_messages if isinstance(m, dict)))
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        msg_key = _message_key(m)
+        if msg_key not in msgs_ids:
+            to_send_messages.append(m)
+            msgs_ids.add(msg_key)
+    return to_send_messages
+
+
+def _config_value(resolved: Optional[ResolvedModel], cfg: Dict, key: str, default: Any = None) -> Any:
+    """Per-model override из ResolvedModel, иначе значение из config_dict."""
+    value = backend_override_value(resolved, key)
+    if value is NO_BACKEND_OVERRIDE:
+        return cfg.get(key, default)
+    return value
+
+
+def _apply_chat_completion_kwargs(data: Dict, extra: Any, *, prompt_cache_on: bool) -> None:
+    if not (isinstance(extra, dict) and extra):
+        return
+    protected = {
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "max_tokens",
+        "max_completion_tokens",
+    }
+    if prompt_cache_on:
+        protected.add("cache_control")
+    for key, value in extra.items():
+        if key in protected:
+            if key == "cache_control":
+                logger.debug(
+                    "chat_completion_kwargs.cache_control игнорируется: разметка prompt cache "
+                    "включена (backend.claude_prompt_cache)"
+                )
+            continue
+        data[key] = value
+
+
 def create_call_data_completions(
     messages,
     state: Optional = None,
     tools: Optional[List] = None,
     model: Optional[str] = None,
-    *args,
+    *,
     max_tokens: Optional[int] = None,
     config_dict: Optional[Dict] = None,
     resolved: Optional[ResolvedModel] = None,
-    **kwargs,
 ) -> Dict:
-    def _safe_positive_int(raw: object) -> Optional[int]:
-        try:
-            value = int(raw)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return None
-        return value if value >= 1 else None
-
-    def _message_key(message: Dict) -> str:
-        msg_id = message.get("id")
-        if isinstance(msg_id, str) and msg_id:
-            return f"id:{msg_id}"
-        return "payload:" + json.dumps(message, ensure_ascii=False, sort_keys=True)
-
-    if state is not None:
-        state_messages = deepcopy(state.messages)
-        state_tools = deepcopy(state.tools)
-    else:
-        state_messages = []
-        state_tools = []
-
-    if isinstance(state_messages, list) and len(state_messages) > 0:
-        to_send_messages = state_messages
-        msgs_ids = set((_message_key(m) for m in state_messages if isinstance(m, dict)))
-        for m in messages:
-            if not isinstance(m, dict):
-                continue
-            msg_key = _message_key(m)
-            if msg_key not in msgs_ids:
-                to_send_messages.append(m)
-                msgs_ids.add(msg_key)
-    else:
-        to_send_messages = [m for m in messages if isinstance(m, dict)]
+    state_messages = deepcopy(state.messages) if state is not None else []
+    state_tools = deepcopy(state.tools) if state is not None else []
+    to_send_messages = _merge_state_messages(state_messages, messages)
 
     to_send_tools = tools if tools is not None else state_tools
     to_send_tools = normalize_chat_completions_tools(to_send_tools)
@@ -734,14 +792,10 @@ def create_call_data_completions(
 
     cfg = config_dict if isinstance(config_dict, dict) else {}
 
-    _max_tokens_override = backend_override_value(resolved, "chat_completions_max_tokens")
     configured_max_tokens = _safe_positive_int(
-        cfg.get("chat_completions_max_tokens")
-        if _max_tokens_override is NO_BACKEND_OVERRIDE
-        else _max_tokens_override
+        _config_value(resolved, cfg, "chat_completions_max_tokens")
     )
-    explicit_max_tokens = _safe_positive_int(max_tokens)
-    effective_max_tokens = explicit_max_tokens or configured_max_tokens or 8096
+    effective_max_tokens = _safe_positive_int(max_tokens) or configured_max_tokens or 8096
 
     data = {
         "model": effective_model,
@@ -749,9 +803,7 @@ def create_call_data_completions(
         "tools": to_send_tools,
         "tool_choice": "auto",
     }
-    _use_max_tokens_param = backend_override_value(resolved, "use_max_tokens_param")
-    if _use_max_tokens_param is NO_BACKEND_OVERRIDE:
-        _use_max_tokens_param = cfg.get("use_max_tokens_param", False)
+    _use_max_tokens_param = _config_value(resolved, cfg, "use_max_tokens_param", False)
     # Key selection is provider-driven; explicit max_tokens only sets the VALUE.
     if bool(_use_max_tokens_param):
         data["max_tokens"] = effective_max_tokens
@@ -765,34 +817,12 @@ def create_call_data_completions(
     # claude-моделей отвечает 400); при выключенной разметке это рабочая настройка
     # пользователя и уходит как задана. Для остальных моделей payload не трогаем — байт в
     # байт как раньше.
-    _prompt_cache = backend_override_value(resolved, "claude_prompt_cache")
-    if _prompt_cache is NO_BACKEND_OVERRIDE:
-        _prompt_cache = cfg.get("claude_prompt_cache")
+    _prompt_cache = _config_value(resolved, cfg, "claude_prompt_cache")
     prompt_cache_on = prompt_cache_enabled(_prompt_cache, effective_model)
 
-    extra = backend_override_value(resolved, "chat_completion_kwargs")
-    if extra is NO_BACKEND_OVERRIDE:
-        extra = cfg.get("chat_completion_kwargs")
-    if isinstance(extra, dict) and extra:
-        protected = {
-            "model",
-            "messages",
-            "tools",
-            "tool_choice",
-            "max_tokens",
-            "max_completion_tokens",
-        }
-        if prompt_cache_on:
-            protected.add("cache_control")
-        for key, value in extra.items():
-            if key in protected:
-                if key == "cache_control":
-                    logger.debug(
-                        "chat_completion_kwargs.cache_control игнорируется: разметка prompt cache "
-                        "включена (backend.claude_prompt_cache)"
-                    )
-                continue
-            data[key] = value
+    _apply_chat_completion_kwargs(
+        data, _config_value(resolved, cfg, "chat_completion_kwargs"), prompt_cache_on=prompt_cache_on
+    )
 
     if prompt_cache_on:
         data = apply_prompt_cache(data)

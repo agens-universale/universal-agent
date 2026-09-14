@@ -2,6 +2,20 @@ import json
 import re
 from typing import Any
 
+_FENCE_OPEN = re.compile(r"```(?:json)?[ \t]*\r?\n?", re.IGNORECASE)
+
+
+def _fenced_json_object(raw: str) -> str | None:
+    """Первый fenced-блок, содержимое которого выглядит как JSON-объект."""
+    for opening in _FENCE_OPEN.finditer(raw):
+        close = raw.find("```", opening.end())
+        if close == -1:
+            return None
+        body = raw[opening.end():close].strip()
+        if body.startswith("{") and body.endswith("}"):
+            return body
+    return None
+
 
 def extract_json_candidate(text: str) -> str:
     """
@@ -16,13 +30,9 @@ def extract_json_candidate(text: str) -> str:
     raw = (text or "").strip()
     if not raw:
         return ""
-    fenced = re.search(
-        r"```(?:json)?\s*(\{.*?\})\s*```",
-        raw,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if fenced:
-        return fenced.group(1).strip()
+    fenced = _fenced_json_object(raw)
+    if fenced is not None:
+        return fenced
     if raw.startswith("{"):
         return raw
     start = raw.find("{")
