@@ -9,7 +9,6 @@ from gc_core.config_modules.strip_tags_projection import (
     persist_reasoning_content_from_config,
     projection_tags_from_config,
 )
-from gc_core.intent_guard.feedback import build_finish_gate_feedback, build_finish_gate_reject_technical_user_content
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME, FINISH_TOOL_NAME, INTERMEDIATE_REPLY_TOOL_NAME, SESSION_COMPACT_TOOL_NAME, SESSION_TODO_TOOL_NAME, TURN_FINALIZING_TOOLS
 from gc_core.run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from gc_core.intent_guard.guard import FinishGateGuard
@@ -1397,19 +1396,10 @@ def run_agent(
                                     _maybe_persist(
                                         persist_messages_callback, tail_new, state
                                     )
-                                feedback = (decision.feedback_text or "").strip()
-                                if not feedback and decision.validation is not None:
-                                    feedback = build_finish_gate_feedback(
-                                        decision.validation
-                                    )
-                                messages = [
-                                    _make_technical_feedback_user_message(
-                                        build_finish_gate_reject_technical_user_content(
-                                            feedback
-                                        ),
-                                        technical_type=TECHNICAL_TYPE_TECHNICAL,
-                                    )
-                                ]
+                                # Вердикт уже в output turn_finish (ok: false +
+                                # message). Не подменяем батч technical-user:
+                                # следующий шаг цикла сам уйдёт в
+                                # function_call_output и позовёт модель.
                                 # Finish-reject — завершённый ход (batch + gate).
                                 # Work уже в трейсе, не откатываем.
                                 count_completed_step = True
