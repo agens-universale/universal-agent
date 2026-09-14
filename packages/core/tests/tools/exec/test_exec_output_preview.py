@@ -146,7 +146,7 @@ def test_timeout_returns_observed_edges():
         "import sys, time; sys.stdout.write('A'*500); sys.stdout.flush(); time.sleep(30)"
     )
     r = json.loads(
-        _tool(ExecuteCommand)(command=f'"{sys.executable}" -c "{code}"', timeout_seconds=1)
+        _tool(ExecuteCommand)(command=f'"{sys.executable}" -c "{code}"', timeout=1)
     )
 
     assert r["timed_out"] is True

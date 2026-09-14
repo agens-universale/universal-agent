@@ -63,7 +63,7 @@ def test_default_timeout_flows_from_exec_timeout_sec_config():
 
 def test_explicit_timeout_forwarded():
     b = _RecordingFakeBackend()
-    _tool(b)(code="x=1", timeout_seconds=42)
+    _tool(b)(code="x=1", timeout=42)
     assert b.calls[0]["timeout"] == 42
 
 
@@ -98,8 +98,8 @@ def test_invalid_code_rejected():
 
 
 def test_invalid_timeout_rejected():
-    env = json.loads(_tool(_RecordingFakeBackend())(code="x", timeout_seconds=0))
-    assert env["ok"] is False and env["error"]["field"] == "timeout_seconds"
+    env = json.loads(_tool(_RecordingFakeBackend())(code="x", timeout=0))
+    assert env["ok"] is False and env["error"]["field"] == "timeout"
 
 
 def test_max_output_chars_argument_no_longer_exists():
@@ -159,7 +159,7 @@ def test_non_zero_exit_sets_error():
 
 def test_backend_timed_out_sets_timeout_envelope():
     b = _RecordingFakeBackend(timed_out=True)
-    env = json.loads(_tool(b)(code="x", timeout_seconds=1))
+    env = json.loads(_tool(b)(code="x", timeout=1))
     assert env["ok"] is False
     assert env["timed_out"] is True
     assert env["return_code"] is None
