@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from gc_core.config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
 from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, chat_completions_llm_from_config_dict
@@ -58,6 +58,9 @@ class RunContext:
     # (create_run_context), чтобы значения не разъехались.
     trace_id: str = ""
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Имена тулов до вычитания stop_tools. Валидатор сверяется с этим набором:
+    # успешно снятый skills_*/mcp_* не опечатка.
+    registered_tool_names: Set[str] = field(default_factory=set)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
@@ -116,12 +119,14 @@ def create_run_context(
     run_logger, logging_path, summary_trace_path = create_run_logger(
         config_dict, run_id=effective_run_id, agent_kind="main"
     )
+    registered: list[str] = []
     tools_data, tools_spec, tools_description, mcp_status = build_tools_data(
         config_dict,
         on_progress=on_progress,
         os_backend=backend,
         skills_registry=skills_registry,
         logger=run_logger,
+        registered_names=registered,
     )
 
     run_logger.info(
@@ -188,6 +193,7 @@ def create_run_context(
         tools_spec=tools_spec,
         tools_description=tools_description,
         mcp_status=mcp_status,
+        registered_tool_names=set(registered),
         project_gc_dir=_resolve_project_gc_dir(),
         environment=environment,
         os_backend=backend,

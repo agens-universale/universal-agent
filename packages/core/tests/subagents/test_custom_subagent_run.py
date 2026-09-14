@@ -77,8 +77,8 @@ class TestChildConfig:
         assert SUBAGENT_TOOLS_ALLOW_KEY not in child
 
     def test_file_stop_tools_add_to_global_not_replace(self, tmp_path):
-        # Глобальный вычитается внутри get_builtin_tools_data, файловый — поверх
-        # полного набора. Снять глобальный запрет из файла нельзя.
+        # Глобальный stop_tools режет слитый набор в build_tools_data, файловый —
+        # поверх. Снять глобальный запрет из файла нельзя.
         agents = _agent_file(tmp_path, stop_tools=("exec_command",))
         cfg = _config(tmp_path, agents, stop_tools=["exec_python"])
         _ctx, runner = _runner(tmp_path, cfg)

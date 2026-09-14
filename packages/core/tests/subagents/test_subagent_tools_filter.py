@@ -53,9 +53,9 @@ class TestStopList:
         assert "exec_python" not in out
         assert "exec_command" in out
 
-    def test_cuts_mcp_unlike_global_stop_tools(self):
-        # Глобальный agent.stop_tools применяется внутри get_builtin_tools_data и
-        # до MCP не дотягивается; этот фильтр обязан дотягиваться.
+    def test_cuts_mcp(self):
+        # Сабагентский stop режет MCP, не только builtin. Глобальный stop_tools
+        # делает то же отдельным проходом в build_tools_data.
         cfg = {SUBAGENT_TOOLS_STOP_KEY: ("mcp_jira_create_issue",)}
         out = apply_subagent_tools_filter(dict(BASE), cfg)
         assert "mcp_jira_create_issue" not in out

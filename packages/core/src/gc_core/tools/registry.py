@@ -148,7 +148,11 @@ def _collect_builtin_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str
 
 
 def all_builtin_tool_names(config_dict: Dict[str, Any]) -> set[str]:
-    """Имена всех встроенных тулов (до stop_tools) — для валидации stop_tools."""
+    """Имена всех встроенных тулов (до stop_tools).
+
+    Для валидации stop_tools этого мало: скиллы и MCP живут в слитом реестре.
+    Полный каталог — ``registered_tool_names`` после ``build_tools_data``.
+    """
     return set(_collect_builtin_registry(config_dict).keys())
 
 
@@ -157,6 +161,10 @@ def get_builtin_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, A
     Собрать словарь builtin tools в формате tools_data.
 
     Инструменты из stop_tools исключаются из результата.
+
+    Скиллы, MCP и сабагенты этот срез не видит — их режет ``build_tools_data``
+    повторным проходом по слитому набору. Прямые вызывающие по-прежнему
+    получают builtin уже без ``stop_tools``.
     """
     return _apply_stop_tools(_collect_builtin_registry(config_dict), config_dict)
 

@@ -161,6 +161,7 @@ class TuiApp(App):
         self._mcp_progress = None
         self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
         self._mcp_status = None        # per-server status dict — для startup_notices
+        self._registered_tool_names = None  # имена тулов до stop_tools — валидатор notices
         self.active_runner = None      # AgentRunner | None
         self._runner_stale = False   # конфиг изменился при живом run → пересборка после завершения
         self.last_runner_error: Optional[str] = None
@@ -1121,6 +1122,7 @@ class TuiApp(App):
         from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
         self._mcp_snapshot = build_mcp_tools_snapshot(cfg, ctx.tools_data, ctx.mcp_status)
         self._mcp_status = ctx.mcp_status
+        self._registered_tool_names = getattr(ctx, "registered_tool_names", None)
         # Проводка confirm-канала: TUI-раннер умеет показывать баннер; CLI/server — нет.
         runner = self.active_runner
         if runner is not None and hasattr(runner, "make_tui_confirm"):
@@ -1188,6 +1190,7 @@ class TuiApp(App):
             all_builtin_tool_names(cfg),
             self._mcp_status,
             is_tui=True,
+            known_tool_names=getattr(self, "_registered_tool_names", None),
             extra=voice_notices(cfg),
             deprecated_keys_used=cfg.get("deprecated_keys_used"),
             upgrade_info=self._upgrade_info,

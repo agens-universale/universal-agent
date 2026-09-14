@@ -10,7 +10,7 @@ from gc_core.tools.connect_mcp import get_mcp_tools_data
 from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
-from gc_core.tools.registry import get_builtin_tools_data
+from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.backends.protocol import FsBackend
 from gc_core.tools.skills.registry import SkillsRegistry
@@ -177,10 +177,11 @@ def apply_subagent_tools_filter(
     ``build_tools_data``. Фильтр в раннере пришлось бы дублировать, и два
     call-site'а обязаны были бы оставаться синхронными.
 
-    Применяется ПОСЛЕ подмешивания скиллов и MCP (иначе ``mcp_*`` было бы не
-    отфильтровать, как это происходит с глобальным ``stop_tools``) и ДО сборки
-    ``tools_spec`` — иначе модель увидела бы в схеме тул, который не сможет
-    вызвать.
+    Применяется ПОСЛЕ подмешивания скиллов и MCP, ПОСЛЕ глобального
+    ``stop_tools`` по слитому набору и ДО сборки ``tools_spec`` — иначе модель
+    увидела бы в схеме тул, который не сможет вызвать. Глобальный stop идёт
+    раньше: служебное ядро возвращается только если оно ещё есть во входящем
+    наборе, снятое им не восстанавливаем.
     """
     allow_raw = config_dict.get(SUBAGENT_TOOLS_ALLOW_KEY)
     stop_raw = config_dict.get(SUBAGENT_TOOLS_STOP_KEY)
@@ -238,10 +239,19 @@ def build_tools_data(
     os_backend: FsBackend | None = None,
     skills_registry: SkillsRegistry | None = None,
     logger: Any = None,
+    registered_names: Optional[list] = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """
     Собрать единый словарь tools_data и производные списки spec/description
     на основе config_dict.
+
+    ``stop_tools`` режет уже слитый набор (builtin + скиллы + MCP + сабагенты),
+    до сабагентского фильтра: тот возвращает служебное ядро только из входящего
+    набора и не должен восстанавливать глобально снятое.
+
+    ``registered_names`` — опциональный out-список. Если передан, в него
+    записываются имена до вычитания ``stop_tools`` (для валидатора: успешно
+    снятый тул не опечатка).
     """
     tools_data: Dict[str, Dict[str, Any]] = {}
 
@@ -274,6 +284,12 @@ def build_tools_data(
         # Host-only: writes to local disk; not available in harbor/sandbox mode.
         tools_data.pop("download_file", None)
 
+    # Каталог до вычитания: валидатор stop_tools сверяется с ним, а не с уже
+    # отфильтрованным словарём (снятый skills_list иначе снова «опечатка»).
+    if registered_names is not None:
+        registered_names[:] = list(tools_data)
+
+    tools_data = _apply_stop_tools(tools_data, config_dict)
     tools_data = apply_subagent_tools_filter(tools_data, config_dict, logger=logger)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
