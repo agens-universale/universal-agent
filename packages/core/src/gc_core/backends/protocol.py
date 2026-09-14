@@ -421,7 +421,7 @@ class FsBackend(ABC):
         kwargs = {"cwd": cwd, "timeout": timeout, "env": env}
         if capture_max_chars is not None:
             kwargs["capture_max_chars"] = capture_max_chars
-        return self.exec_raw(command, **kwargs)
+        return run_backend_exec_raw(self, command, **kwargs)
 
     @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,
