@@ -274,6 +274,27 @@ class TrackingFsBackend:
             )
         )
 
+    def exec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> Any:
+        """Raw-канал тоже мутирует дерево (mkdir/mktemp/rm внутренних хелперов),
+        поэтому дельта журналируется так же, как у `exec`."""
+        return self._track_shell_delta(
+            lambda: self._inner.exec_raw(
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
+            )
+        )
+
     def exec_argv(
         self,
         argv: list,

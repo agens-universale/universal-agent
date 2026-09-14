@@ -35,6 +35,54 @@ from gc_core.utils.file_text import (
 )
 from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
 
+# Built-in ``harbor_exec_init: bashrc`` policy. Non-interactive ``bash -c``
+# otherwise skips bashrc (``[ -z "$PS1" ] && return``). Profile streams are
+# discarded so conda hooks never leak into the command's stdout/stderr;
+# ``set +e`` after source so ``set -e`` / ``return`` in rc cannot replace the
+# user command's exit code. Not a SWE/conda hardcoded env name.
+_BASHRC_EXEC_INIT = """\
+PS1=${PS1-dummy}
+. /etc/profile >/dev/null 2>&1 || true
+[ -f "${HOME}/.bashrc" ] && . "${HOME}/.bashrc" >/dev/null 2>&1 || true
+set +e
+"""
+
+
+def _env_assignment_prefix(env: Optional[dict]) -> str:
+    if not env:
+        return ""
+    assignments = " ".join(
+        f"{k}={shlex.quote(str(v))}" for k, v in env.items()
+    )
+    return f"env {assignments} "
+
+
+def build_harbor_shell_command(
+    command: str,
+    *,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+    exec_init: Optional[str] = None,
+) -> str:
+    """Assemble the string Harbor ``environment.exec`` will wrap in ``bash -c``.
+
+    With init: ``cd cwd && env K=V bash -c <init+command>``. Without init the
+    command stays raw. ``cd`` stays outside ``env`` so ``env_vars`` cannot
+    swallow a backend cwd (R7).
+    """
+    if exec_init:
+        init = _BASHRC_EXEC_INIT if exec_init == "bashrc" else exec_init.rstrip() + "\n"
+        inner = init + command
+        body = "bash -c " + shlex.quote(inner)
+    else:
+        body = command
+    prefix = _env_assignment_prefix(env)
+    if prefix:
+        body = prefix + body
+    if cwd:
+        return f"cd {shlex.quote(cwd)} && {body}"
+    return body
+
 
 def _build_find_walk_command(
     path: str,
@@ -67,11 +115,13 @@ class HarborBackend(FsBackend):
         *,
         exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
+        exec_init: Optional[str] = None,
     ) -> None:
         self._env = environment
         self._loop = loop
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
+        self.exec_init = exec_init
 
     def _await(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
@@ -129,15 +179,12 @@ class HarborBackend(FsBackend):
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
+        exec_init: Optional[str] = None,
     ) -> ExecResult:
-        """Internal exec. ``capture_max_chars=None`` → tool-trace cap (40k/поток)."""
-        # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
-        if env:
-            prefix = "env " + " ".join(
-                f"{k}={shlex.quote(str(v))}" for k, v in env.items()
-            )
-            command = f"{prefix} {command}"
-        full = f"cd {shlex.quote(cwd)} && {command}" if cwd else command
+        """Transport. ``exec_init`` is only for the model-facing ``exec`` channel."""
+        full = build_harbor_shell_command(
+            command, cwd=cwd, env=env, exec_init=exec_init
+        )
         cap = self._capture_cap(capture_max_chars)
         scope, streamed = self._output_capture(cap)
         try:
@@ -176,17 +223,38 @@ class HarborBackend(FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
+        """User-facing shell with the configured optional environment init."""
         return self._exec(
             command,
             cwd=cwd,
             timeout=timeout,
             env=env,
             capture_max_chars=capture_max_chars,
+            exec_init=self.exec_init,
+        )
+
+    def exec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        """POSIX without profile. FS helpers, grep, capabilities, MCP, argv."""
+        return self._exec(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
+            capture_max_chars=capture_max_chars,
+            exec_init=None,
         )
 
     def _fs_exec(self, command: str) -> ExecResult:
         """Internal FS helper (stat/head/mkdir). Walk ceiling, not the tool-trace cap."""
-        return self._exec(command, capture_max_chars=self.walk_output_max_chars)
+        return self.exec_raw(command, capture_max_chars=self.walk_output_max_chars)
 
     def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
                     env: Optional[dict] = None,
@@ -194,7 +262,9 @@ class HarborBackend(FsBackend):
         # Quoted heredoc → code body taken literally. Tool-trace cap: this is
         # the model-facing python tool, not an internal FS helper.
         command = f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
-        return self.exec(
+        # Same transport as before this change: login wrapping is for exec_command,
+        # not the heredoc python path (out of scope / stop_tools on the bench profile).
+        return self.exec_raw(
             command, cwd=cwd, timeout=timeout, env=env, capture_max_chars=capture_max_chars
         )
 
@@ -317,7 +387,7 @@ class HarborBackend(FsBackend):
         traverse channel (50M chars). Pruned dirs are cut inside ``find`` so the
         channel is not spent on junk trees. Hit ceiling → fail-closed.
         """
-        res = self._exec(
+        res = self.exec_raw(
             _build_find_walk_command(
                 path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
             ),
@@ -340,7 +410,7 @@ class HarborBackend(FsBackend):
         # Тот же общий рецепт, что у обхода: без -H find не идёт по ссылке-аргументу,
         # и каталог-ссылка выглядел пустым (пустой stdout при коде возврата 0).
         head = " ".join(shlex.quote(a) for a in find_walk_head(path))
-        res = self._exec(
+        res = self.exec_raw(
             f"{head} -maxdepth 1 -printf '%f\\t%y\\n'",
             capture_max_chars=self.walk_output_max_chars,
         )

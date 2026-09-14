@@ -14,6 +14,7 @@ agent_kwargs:
     # --- backend ---
     backend_api_mode: chat_completions
     os_backend: harbor
+    harbor_exec_init: bashrc              # model-facing exec читает profile/bashrc (SWE testbed); null = raw
     chat_completions_max_tokens: 32768
     chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
     use_max_tokens_param: true
