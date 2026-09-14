@@ -236,7 +236,11 @@ class HarborBackend(FsBackend):
             return b""
         # GNU coreutils in harbor images (same assumption as ``stat -c`` / ``find -printf``).
         # Capture at walk ceiling: append samples 100KiB (~137k base64) > tool cap.
-        res = self._fs_exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
+        # Do not pass ``-w 0``: Harbor's streamed exec reads stdout with
+        # ``StreamReader`` readline (64 KiB). An unwrapped blob is one line and
+        # raises LimitOverrunError before we see stdout. Default wrap is 76
+        # columns; ``b64decode(validate=False)`` ignores the newlines.
+        res = self._fs_exec(f"head -c {n} {shlex.quote(path)} | base64")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"head failed: {path}")
         if res.stdout_hit_capture_cap:

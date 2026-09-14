@@ -325,10 +325,10 @@ def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     async def head_exec(command, **kw):
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
-            return FakeExecResult(
-                stdout=base64.b64encode(raw).decode("ascii"),
-                return_code=0,
-            )
+            # Default GNU wrap (76 cols). ``-w 0`` is a one-line blob and
+            # trips Harbor's 64 KiB readline.
+            wrapped = base64.encodebytes(raw).decode("ascii")
+            return FakeExecResult(stdout=wrapped, return_code=0)
         return FakeExecResult(stdout="", return_code=1)
 
     env.exec = head_exec
@@ -336,7 +336,7 @@ def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     sample = backend.read_head_bytes("/work/a.bin", 3)
     assert sample == raw
     assert any(
-        c.startswith("head -c 3 ") and "| base64" in c for c in env.calls
+        c.startswith("head -c 3 ") and c.endswith("| base64") for c in env.calls
     )
 
 
