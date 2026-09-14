@@ -46,6 +46,10 @@ dev = [
     "pytest-rerunfailures>=16.4",
     { include-group = "test" },
 ]
+lint = [
+    "complexipy>=4",
+    "ruff>=0.14",
+]
 test = [
     # Раньше жили в runtime-dependencies и приезжали каждому пользователю.
     "gc-testkit",
@@ -119,4 +123,41 @@ filterwarnings = [
     "error::pytest.PytestUnraisableExceptionWarning",
     "error::RuntimeWarning",
 ]
+
+# --- Локальный аналог правил Sonar (см. scripts/lint.sh) ---------------------
+# ruff закрывает «мелкие» правила из отчёта Sonar; порог cognitive complexity
+# считает complexipy (тот же алгоритм, что у Sonar); дубли литералов и
+# regex-подсказки — scripts/sonar_like_check.py.
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["external", ".venv", "packages/*/external"]
+
+[tool.ruff.lint]
+select = [
+    "ARG",      # неиспользуемые параметры (Sonar S1172)
+    "F841",     # неиспользуемые локальные переменные (S1481)
+    "B014",     # лишний класс в except, уже перекрытый родителем (S1044)
+    "SIM102",   # merge nested if (S1066)
+    "PLR0913",  # слишком много параметров (S107)
+    "PLR1714",  # повторные сравнения одной переменной
+    "PLR5501",  # collapsible else-if
+    "PLW0120",  # else на цикле без break
+    "S501",     # request с verify=False (S4830/S5527)
+    "E711", "E712", "E721",
+    "PIE790",   # unnecessary pass (S1116)
+    "PIE794",   # duplicate class field
+]
+ignore = [
+    "ARG002",   # неиспользуемые параметры методов: интерфейсы/протоколы
+    "ARG003",   # то же для classmethod (prompt_description(cls, config_dict) и т.п.)
+    "ARG005",   # неиспользуемые параметры lambda
+]
+
+[tool.ruff.lint.pylint]
+max-args = 13   # порог Sonar S107 в проекте
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["ARG", "PLR0913", "F841", "SIM102"]
+"**/conftest.py" = ["ARG"]
 

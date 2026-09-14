@@ -102,3 +102,21 @@ test_project_data_backend import FakeSandboxBackend`): pytest кладёт ка�
 доезжает, а тест при этом ЗЕЛЁНЫЙ — просто читает настоящий `~/.gc/config.local.yml`
 запускающего. Десять таких подмен так и жили, пока реэкспорт в `mcp_runtime.paths`
 не убрали и они не упали громко.
+
+## Локальный аналог Sonar
+
+Замечания Sonar для gc-core можно ловить до пуша:
+
+```
+uv sync --group lint
+scripts/lint.sh                      # весь gc-core
+scripts/lint.sh packages/core/src/gc_core/tools/fs   # точечно
+```
+
+Что внутри: `ruff` с правилами из отчёта Sonar (неиспользуемые параметры и
+переменные, лишние классы в `except`, вложенные `if`, лимит 13 параметров,
+`verify=False`), `complexipy` для cognitive complexity с порогом 15 (тот же
+алгоритм, что у Sonar) и `scripts/sonar_like_check.py` для дублей строковых
+литералов (S1192) и regex-подсказок (`\w`, `\d`, ленивый квантификатор).
+Набор правил живёт в `[tool.ruff]` в корневом `pyproject.toml`.
+
