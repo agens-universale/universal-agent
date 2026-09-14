@@ -56,6 +56,14 @@ def _partial_prefix_len(buf: str, tag: str) -> int:
     return 0
 
 
+def _first_choice(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    choices = chunk.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    ch0 = choices[0]
+    return ch0 if isinstance(ch0, dict) else None
+
+
 class _InlineThinkSplitter:
     """Route streamed `content` into think/answer segments, tracking
     `<think>...</think>` across chunk boundaries. Tags split between chunks are
@@ -65,25 +73,33 @@ class _InlineThinkSplitter:
         self._in_think = False
         self._buf = ""
 
+    def _kind(self) -> str:
+        return "think" if self._in_think else "answer"
+
+    def _switch_at(self, idx: int, tag: str, emit: OnDelta) -> None:
+        before = self._buf[:idx]
+        if before:
+            emit(self._kind(), before)
+        self._buf = self._buf[idx + len(tag):]
+        self._in_think = not self._in_think
+
+    def _flush_keeping_partial(self, tag: str, emit: OnDelta) -> None:
+        keep = _partial_prefix_len(self._buf, tag)
+        cut = len(self._buf) - keep
+        flush_now = self._buf[:cut]
+        if flush_now:
+            emit(self._kind(), flush_now)
+        self._buf = self._buf[cut:]
+
     def feed(self, text: str, emit: OnDelta) -> None:
         self._buf += text
         while self._buf:
             tag = _THINK_CLOSE if self._in_think else _THINK_OPEN
             idx = self._buf.find(tag)
-            if idx != -1:
-                before = self._buf[:idx]
-                if before:
-                    emit("think" if self._in_think else "answer", before)
-                self._buf = self._buf[idx + len(tag):]
-                self._in_think = not self._in_think
-                continue
-            keep = _partial_prefix_len(self._buf, tag)
-            cut = len(self._buf) - keep
-            flush_now = self._buf[:cut]
-            if flush_now:
-                emit("think" if self._in_think else "answer", flush_now)
-            self._buf = self._buf[cut:]
-            break
+            if idx == -1:
+                self._flush_keeping_partial(tag, emit)
+                return
+            self._switch_at(idx, tag, emit)
 
     def flush(self, emit: OnDelta) -> None:
         if self._buf:
@@ -146,6 +162,21 @@ class StreamAssembler:
         # Провайдер вернул error-событие внутри 200-стрима — не глотать: поднять
         # с реальным сообщением, иначе сборка выйдет пустой и downstream даст
         # загадочное «Unknown finish reason».
+        self._absorb_chunk_meta(chunk)
+        ch0 = _first_choice(chunk)
+        if ch0 is None:
+            return
+        choice_err = ch0.get("error")
+        if choice_err is not None:
+            _raise_stream_error(choice_err)
+        if ch0.get("finish_reason"):
+            self._finish_reason = ch0["finish_reason"]
+        delta = ch0.get("delta") or {}
+        if not isinstance(delta, dict):
+            return
+        self._absorb_delta(delta)
+
+    def _absorb_chunk_meta(self, chunk: Dict[str, Any]) -> None:
         stream_err = chunk.get("error")
         if stream_err is not None:
             _raise_stream_error(stream_err)
@@ -156,34 +187,12 @@ class StreamAssembler:
         if self._resp_id is None and chunk.get("id"):
             self._resp_id = chunk["id"]
 
-        choices = chunk.get("choices")
-        if not isinstance(choices, list) or not choices:
-            return
-        ch0 = choices[0]
-        if not isinstance(ch0, dict):
-            return
-        choice_err = ch0.get("error")
-        if choice_err is not None:
-            _raise_stream_error(choice_err)
-        if ch0.get("finish_reason"):
-            self._finish_reason = ch0["finish_reason"]
-        delta = ch0.get("delta") or {}
-        if not isinstance(delta, dict):
-            return
+    def _absorb_delta(self, delta: Dict[str, Any]) -> None:
         if delta.get("role"):
             self._role = delta["role"]
 
         rc = delta.get("reasoning_content")
         if not (isinstance(rc, str) and rc):
-            # Второе имя того же поля: OpenRouter шлёт рассуждение как `reasoning`
-            # (проверено живой пробой 27.08.2026 на anthropic/claude-opus-5). Берём
-            # ОДНО из двух, а не сумму: провайдер, приславший оба, удвоил бы и текст
-            # рассуждения, и счётчик прогресса.
-            #
-            # Правка приехала с develop, где сборка потока ещё была инлайн-циклом в
-            # chat_completions_stream. Здесь она попала бы под нож мержа: async-ветка
-            # вынесла сборку в этот класс, и git сопоставил хвост одного файла с телом
-            # цикла другого. Перенесено руками.
             rc = delta.get("reasoning")
         if isinstance(rc, str) and rc:
             self._reasoning_parts.append(rc)
@@ -197,34 +206,27 @@ class StreamAssembler:
                 self._splitter.feed(c, self._on_delta)
 
         for tc in (delta.get("tool_calls") or []):
-            if not isinstance(tc, dict):
-                continue
-            # OpenAI-compatible providers always send index; fallback 0 collapses
-            # all tool calls into one slot for non-compliant providers (accepted
-            # for OpenAI-compatible transport).
-            idx = tc.get("index", 0)
-            slot = self._tool_calls.setdefault(
-                idx,
-                {"id": None, "type": "function",
-                 "function": {"name": "", "arguments": ""}},
-            )
-            if tc.get("id"):
-                slot["id"] = tc["id"]
-            if tc.get("type"):
-                slot["type"] = tc["type"]
-            fn = tc.get("function") or {}
-            if fn.get("name"):
-                slot["function"]["name"] = fn["name"]
-            if fn.get("arguments"):
-                slot["function"]["arguments"] += fn["arguments"]
-                if self._on_delta is not None:
-                    # Отдельный вид, а не "answer": аргументы — не текст ответа, в
-                    # блок потока им нельзя (иначе на экран полезет сырой JSON).
-                    # Но это ЕДИНСТВЕННОЕ, что модель генерирует на шаге с вызовом
-                    # инструмента, и без этой дельты счётчик прогресса на таком шаге
-                    # оставался нулём. У агента же почти каждый шаг такой — включая
-                    # финальный ответ, который едет в аргументе turn_finish.
-                    self._on_delta("tool", fn["arguments"])
+            if isinstance(tc, dict):
+                self._absorb_tool_call(tc)
+
+    def _absorb_tool_call(self, tc: Dict[str, Any]) -> None:
+        idx = tc.get("index", 0)
+        slot = self._tool_calls.setdefault(
+            idx,
+            {"id": None, "type": "function",
+             "function": {"name": "", "arguments": ""}},
+        )
+        if tc.get("id"):
+            slot["id"] = tc["id"]
+        if tc.get("type"):
+            slot["type"] = tc["type"]
+        fn = tc.get("function") or {}
+        if fn.get("name"):
+            slot["function"]["name"] = fn["name"]
+        if fn.get("arguments"):
+            slot["function"]["arguments"] += fn["arguments"]
+            if self._on_delta is not None:
+                self._on_delta("tool", fn["arguments"])
 
     # --- выход --------------------------------------------------------------
 

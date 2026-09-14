@@ -70,7 +70,7 @@ def _split_share(share: float) -> tuple[float, int]:
 _CARRIER_CACHE_ATTR = "_gc_mcp_has_python3"
 
 
-def _tools_from_body(body: Any, server_name: str) -> List[Dict[str, Any]]:
+def _tools_from_body(body: Any) -> List[Dict[str, Any]]:
     """Тело tools/list → список тулов. Общее для синхронной и асинхронной форм."""
     result = body.get("result") if isinstance(body, dict) else None
     tools = result.get("tools", []) if isinstance(result, dict) else []
@@ -290,7 +290,7 @@ class OsBackendStatelessClient(McpClientPort):
 
     async def alist_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
         body = await self._aoperation("tools/list", {}, timeout=timeout)
-        return _tools_from_body(body, self.server_name)
+        return _tools_from_body(body)
 
     async def acall_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float

@@ -29,7 +29,9 @@ _IDENTIFIER_LIKE = re.compile(r"[\w-]*")
 
 _WORD_CLASS = re.compile(r"\[(?=[^\]]*A-Z)(?=[^\]]*a-z)(?=[^\]]*0-9)(?=[^\]]*_)(?:A-Z|a-z|0-9|_){4}\]")
 _DIGIT_CLASS = re.compile(r"\[0-9\]")
-_RELUCTANT = re.compile(r"\.[*+]\?(\\?[^\\()\[\]{}|^$*+?.])(?![*+?{])")
+# Как у Sonar: ленивый квантификатор перед ОДНИМ символом, которым и заканчивается
+# паттерн/группа — только тогда замена на [^x]* эквивалентна.
+_RELUCTANT = re.compile(r"\.[*+]\?(\\?[^\\()\[\]{}|^$*+?.])(?=$|\)|\$)")
 
 
 def _docstring_nodes(tree: ast.AST) -> set[int]:
@@ -119,6 +121,20 @@ def iter_py_files(paths: list[str]):
             yield p
 
 
+def _nosonar_lines(path: Path) -> set[int]:
+    """Строки с ``NOSONAR`` — как у самого Sonar, замечания на них не считаются."""
+    return {
+        i for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1) if "NOSONAR" in line
+    }
+
+
+def _line_of(finding: str) -> int:
+    try:
+        return int(finding.split(":", 2)[1])
+    except (IndexError, ValueError):
+        return 0
+
+
 def main(argv: list[str]) -> int:
     findings: list[str] = []
     for path in iter_py_files(argv or ["."]):
@@ -127,8 +143,9 @@ def main(argv: list[str]) -> int:
         except (SyntaxError, UnicodeDecodeError) as exc:
             findings.append(f"{path}: cannot parse: {exc}")
             continue
-        findings += check_duplicate_literals(path, tree)
-        findings += check_regex_hints(path, tree)
+        nosonar = _nosonar_lines(path)
+        findings += [f for f in check_duplicate_literals(path, tree) if _line_of(f) not in nosonar]
+        findings += [f for f in check_regex_hints(path, tree) if _line_of(f) not in nosonar]
     for line in findings:
         print(line)
     print(f"{len(findings)} finding(s)")

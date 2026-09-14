@@ -288,8 +288,6 @@ def _finish_run_context(
     logging_path = prep.logging_path
     summary_trace_path = prep.summary_trace_path
     mcp_session_owner = prep.mcp_session_owner
-    run_id = effective_run_id
-    os_backend = backend
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",

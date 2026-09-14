@@ -146,6 +146,19 @@ class _Failed:
 _INITIAL = object()
 
 
+async def _aserve_request(flow: Generator, request: Any) -> Any:
+    """Выполнить запрос тела (корутина или off-loop вызов); сбой — как ``_Failed``."""
+    try:
+        if isinstance(request, AwaitOnCaller):
+            return await request.make_coro()
+        return await _off_loop(request.fn, *request.args, on_abandoned=lambda: _close_quietly(flow))
+    except asyncio.CancelledError:
+        _close_quietly(flow)
+        raise
+    except Exception as exc:  # noqa: BLE001 — отдаём в точку запроса
+        return _Failed(exc)
+
+
 async def _drive_async(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
     """Крутить тело, обслуживая его запросы, до точки вызова тула или конца.
 
@@ -157,28 +170,8 @@ async def _drive_async(flow: Generator, first: Any = _INITIAL) -> tuple[bool, An
             request = next(flow) if outcome is _INITIAL else _step(flow, outcome)
         except StopIteration as stop:
             return False, stop.value
-        if isinstance(request, AwaitOnCaller):
-            try:
-                outcome = await request.make_coro()
-            except asyncio.CancelledError:
-                # Отмену в тело НЕ бросаем: его `except Exception` её не
-                # поймает, но проглотить её могло бы чужое `except
-                # BaseException`, и вызов остался бы неотменяемым.
-                _close_quietly(flow)
-                raise
-            except Exception as exc:  # noqa: BLE001 — отдаём в точку запроса
-                outcome = _Failed(exc)
-            continue
-        if isinstance(request, OffLoop):
-            try:
-                outcome = await _off_loop(
-                    request.fn, *request.args, on_abandoned=lambda: _close_quietly(flow)
-                )
-            except asyncio.CancelledError:
-                _close_quietly(flow)
-                raise
-            except Exception as exc:  # noqa: BLE001
-                outcome = _Failed(exc)
+        if isinstance(request, (AwaitOnCaller, OffLoop)):
+            outcome = await _aserve_request(flow, request)
             continue
         return True, None
 

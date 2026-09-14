@@ -16,6 +16,9 @@ from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
 
 
+_SSE_DATA_PREFIX = "data:"
+
+
 def _normalize_url(url: str) -> str:
     if not url.startswith("http://") and not url.startswith("https://"):
         return f"http://{url}"
@@ -85,9 +88,9 @@ def _first_json_rpc_from_sse_body(resp: "httpx.Response") -> Dict[str, Any]:
     _fix_sse_encoding(resp)
     for line in resp.text.splitlines():
         line = line.strip()
-        if not line.startswith("data:"):
+        if not line.startswith(_SSE_DATA_PREFIX):
             continue
-        parsed = _try_parse_json_rpc(line[len("data:"):].strip())
+        parsed = _try_parse_json_rpc(line[len(_SSE_DATA_PREFIX):].strip())
         if parsed is not None:
             return parsed
     return {}
@@ -156,8 +159,8 @@ class _SseFirstJson:
         stripped = line.strip()
         if not stripped:
             return self._on_blank_line()
-        if stripped.lower().startswith("data:"):
-            return self._on_data_line(stripped[len("data:"):].strip())
+        if stripped.lower().startswith(_SSE_DATA_PREFIX):
+            return self._on_data_line(stripped[len(_SSE_DATA_PREFIX):].strip())
         if self._in_data and self._buffer:
             self._buffer.append(stripped)
             return self._parse_buffer()
@@ -588,8 +591,8 @@ def _arequest_stdio(
     cfg = server_cfg
 
     async def arequest_fn(
-        url: str,
-        headers: Dict[str, str],
+        _url: str,
+        _headers: Dict[str, str],
         json_payload: Dict[str, Any],
         timeout: float,
     ) -> Tuple[Dict[str, str], Dict[str, Any]]:

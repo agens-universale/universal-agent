@@ -14,8 +14,13 @@ echo "== ruff (мелкие правила Sonar)"
 uv run --group lint ruff check "${TARGETS[@]}" || rc=1
 echo "== complexipy (cognitive complexity > 15)"
 # --failed печатает только нарушения, но всегда выходит с 0; код возврата даёт --quiet.
-uv run --group lint complexipy "${TARGETS[@]}" --max-complexity-allowed 15 --failed --color no
-uv run --group lint complexipy "${TARGETS[@]}" --max-complexity-allowed 15 --quiet || rc=1
+# tools/deprecated — мёртвый код (не импортируется), из проверки сложности исключён.
+CX_FILES=()
+while IFS= read -r f; do CX_FILES+=("$f"); done < <(
+  find "${TARGETS[@]}" -name '*.py' -not -path '*/deprecated/*' -not -path '*/.venv/*' | sort
+)
+uv run --group lint complexipy "${CX_FILES[@]}" --max-complexity-allowed 15 --failed --color no
+uv run --group lint complexipy "${CX_FILES[@]}" --max-complexity-allowed 15 --quiet || rc=1
 echo "== sonar_like_check (дубли литералов, regex-подсказки)"
 uv run python scripts/sonar_like_check.py "${TARGETS[@]}" || rc=1
 exit $rc

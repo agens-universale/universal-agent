@@ -82,6 +82,42 @@ def default_slot_required(models, slots) -> bool:
     )
 
 
+def _slot_errors(cfg: AppConfig, prefix: str) -> list[str]:
+    models = cfg.models
+    errors: list[str] = []
+    for slot_name in ("light", "default", "max"):
+        alias = getattr(cfg.slots, slot_name)
+        if alias is not None and alias not in models:
+            errors.append(f'{prefix}slots.{slot_name}: алиас "{alias}" не найден в merged-реестре models')
+    if default_slot_required(models, cfg.slots):
+        errors.append(
+            f"{prefix}slots.default: моделей в реестре ≥2 — укажите slots.default "
+            "(или любой другой слот — default резолвится по матрице фоллбэков)"
+        )
+    return errors
+
+
+def _assign_errors(cfg: AppConfig, prefix: str) -> tuple[list[str], bool]:
+    """Ошибки привязок assign.* и признак «привязки вообще заданы»."""
+    models = cfg.models
+    errors: list[str] = []
+    assign_touched = False
+    for field in _ASSIGN_SCALAR_FIELDS:
+        value = getattr(cfg.assign, field)
+        if value is not None:
+            assign_touched = True
+            _check_assign_value(models, f"assign.{field}", value, prefix, errors)
+    for subagent_name, value in cfg.assign.subagents.items():
+        assign_touched = True
+        if subagent_name != "*" and subagent_name not in _SUBAGENT_NAMES:
+            errors.append(
+                f'{prefix}assign.subagents.{subagent_name}: неизвестный субагент — '
+                f'канонический реестр: {", ".join(sorted(_SUBAGENT_NAMES))}, или "*"'
+            )
+        _check_assign_value(models, f"assign.subagents.{subagent_name}", value, prefix, errors)
+    return errors, assign_touched
+
+
 def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[str]:
     """Ссылочная целостность models/slots/assign на итоговом merged-конфиге.
 
@@ -94,33 +130,10 @@ def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[st
     prefix = f"{source_hint}: " if source_hint else ""
     models = cfg.models
     errors: list[str] = []
-    assign_touched = False
 
-    for slot_name in ("light", "default", "max"):
-        alias = getattr(cfg.slots, slot_name)
-        if alias is not None and alias not in models:
-            errors.append(f'{prefix}slots.{slot_name}: алиас "{alias}" не найден в merged-реестре models')
-
-    if default_slot_required(models, cfg.slots):
-        errors.append(
-            f"{prefix}slots.default: моделей в реестре ≥2 — укажите slots.default "
-            "(или любой другой слот — default резолвится по матрице фоллбэков)"
-        )
-
-    for field in _ASSIGN_SCALAR_FIELDS:
-        value = getattr(cfg.assign, field)
-        if value is not None:
-            assign_touched = True
-            _check_assign_value(models, f"assign.{field}", value, prefix, errors)
-
-    for subagent_name, value in cfg.assign.subagents.items():
-        assign_touched = True
-        if subagent_name != "*" and subagent_name not in _SUBAGENT_NAMES:
-            errors.append(
-                f'{prefix}assign.subagents.{subagent_name}: неизвестный субагент — '
-                f'канонический реестр: {", ".join(sorted(_SUBAGENT_NAMES))}, или "*"'
-            )
-        _check_assign_value(models, f"assign.subagents.{subagent_name}", value, prefix, errors)
+    errors += _slot_errors(cfg, prefix)
+    assign_errors, assign_touched = _assign_errors(cfg, prefix)
+    errors += assign_errors
 
     if errors:
         raise ValueError("; ".join(errors))

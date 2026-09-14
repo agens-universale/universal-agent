@@ -188,6 +188,9 @@ async def _aterminate_process_tree(
         pass
 
 
+_NOT_RUNNING_MSG = "persistent stdio MCP process is not running"
+
+
 class PersistentStdioSession:
     """
     Одна долгоживущая stdio-сессия с MCP-сервером.
@@ -407,7 +410,7 @@ class PersistentStdioSession:
     def _write_line(self, payload: Dict[str, Any]) -> None:
         proc = self._proc
         if proc is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         self._write_line_on(proc, payload)
 
     @staticmethod
@@ -418,7 +421,7 @@ class PersistentStdioSession:
         обращаться к ``self._proc`` дальше нельзя — там уже ``None``.
         """
         if proc.stdin is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         line = json.dumps(payload) + "\n"
         proc.stdin.write(line)
         proc.stdin.flush()
@@ -453,7 +456,7 @@ class PersistentStdioSession:
     ) -> Dict[str, Any]:
         """Асинхронный двойник чтения ответа — ожидание очереди без потока."""
         if proc.stdout is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
             done, obj = self._match_line(
                 await _areadline_with_timeout(proc.stdout, timeout), req_id
@@ -467,7 +470,7 @@ class PersistentStdioSession:
     ) -> Dict[str, Any]:
         """Чтение ответа из УЖЕ ИЗВЕСТНОГО процесса (после ``_detach``)."""
         if proc.stdout is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
             done, obj = self._match_line(
                 _readline_with_timeout(proc.stdout, timeout), req_id
@@ -484,7 +487,7 @@ class PersistentStdioSession:
         """
         proc = self._proc
         if proc is None or proc.stdout is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
             line = _readline_with_timeout(proc.stdout, timeout)
             if line is None:

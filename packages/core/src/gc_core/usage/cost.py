@@ -90,6 +90,33 @@ def _tariff_cost(
     return input_cost + output_tokens / per * tariff.output
 
 
+def _billed_parts(bucket: dict, legacy_currency: str) -> list[CostPart]:
+    """Факт провайдера по валютам (старая запись без валюты — в валюте бэкенда)."""
+    billed: Dict[str, float] = {}
+    for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
+        key = legacy_currency if cur == LEGACY_CURRENCY else cur
+        billed[key] = billed.get(key, 0.0) + float(amount or 0.0)
+    return [CostPart(amount, cur, "provider") for cur, amount in billed.items()]
+
+
+def _category_parts(bucket: dict, pricing_cfg, tariff, legacy_currency: str) -> tuple[list[CostPart], bool]:
+    """``(parts, unpriced)`` одной категории; без ``pricing.enabled`` — пусто."""
+    if not pricing_cfg.enabled:
+        return [], False
+    parts: list[CostPart] = []
+    if int(bucket.get("billed_calls", 0) or 0):
+        parts.extend(_billed_parts(bucket, legacy_currency))
+    rest_in = int(bucket.get("input", 0) or 0) - int(bucket.get("billed_input", 0) or 0)
+    rest_out = int(bucket.get("output", 0) or 0) - int(bucket.get("billed_output", 0) or 0)
+    rest_cached = int(bucket.get("cached", 0) or 0) - int(bucket.get("billed_cached", 0) or 0)
+    if not (rest_in > 0 or rest_out > 0):
+        return parts, False
+    if tariff is None:
+        return parts, True
+    parts.append(CostPart(_tariff_cost(tariff, rest_in, rest_out, rest_cached), tariff.currency, "tariff"))
+    return parts, False
+
+
 def compute_cost(
     account: UsageAccount,
     pricing: object,
@@ -129,44 +156,10 @@ def compute_cost(
         if calls == 0:
             continue
 
-        parts: list[CostPart] = []
-        unpriced = False
-        if pricing_cfg.enabled:
-            # Денежная сторона — только при включённом pricing (по умолчанию
-            # выключен). Токены/вызовы выше считаются в любом случае.
-            billed_calls = int(bucket.get("billed_calls", 0) or 0)
-            billed_input = int(bucket.get("billed_input", 0) or 0)
-            billed_output = int(bucket.get("billed_output", 0) or 0)
-            if billed_calls:
-                # По части на валюту факта. Суммы без записанной валюты (старые
-                # meta) сливаются с legacy-валютой — в одну часть, а не в две
-                # одинаковых.
-                billed: Dict[str, float] = {}
-                for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
-                    key = legacy_currency if cur == LEGACY_CURRENCY else cur
-                    billed[key] = billed.get(key, 0.0) + float(amount or 0.0)
-                for cur, amount in billed.items():
-                    parts.append(CostPart(amount, cur, "provider"))
-
-            rest_in = inp - billed_input
-            rest_out = out - billed_output
-            rest_cached = cached - int(bucket.get("billed_cached", 0) or 0)
-            # Остаток считаем по токенам, а не по вызовам: вызов без usage
-            # (``add_missing``) увеличивает ``calls``, не давая ни одного токена —
-            # по вызовам он выглядел бы как «остаток есть», хотя тарифить нечего,
-            # и создавал бы фантомную нулевую сумму во второй валюте.
-            has_rest = rest_in > 0 or rest_out > 0
-            if has_rest:
-                if tariff is not None:
-                    parts.append(CostPart(
-                        _tariff_cost(tariff, rest_in, rest_out, rest_cached),
-                        tariff.currency, "tariff"))
-                else:
-                    unpriced = True
-
-            for part in parts:
-                report.by_currency[part.currency] = report.by_currency.get(part.currency, 0.0) + part.amount
-            report.has_unpriced = report.has_unpriced or unpriced
+        parts, unpriced = _category_parts(bucket, pricing_cfg, tariff, legacy_currency)
+        for part in parts:
+            report.by_currency[part.currency] = report.by_currency.get(part.currency, 0.0) + part.amount
+        report.has_unpriced = report.has_unpriced or unpriced
 
         report.categories.append(
             CategoryCost(

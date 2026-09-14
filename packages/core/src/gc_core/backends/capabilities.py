@@ -140,11 +140,36 @@ async def aprobe_has_find(backend: "FsBackend") -> bool:
     return await aprobe_find_xargs_grep(backend)
 
 
-async def aprobe_has_grep(backend: "FsBackend") -> bool:
-    """Smoke the production argv: -E pipe, -R tree, and the -F/-i single file."""
-    grep_bin = await _awhich_bin(backend, "grep")
-    if not grep_bin:
-        return False
+async def _acleanup_probe(backend: "FsBackend", tmp_remote: Optional[str], host_tmp: Optional[str]) -> None:
+    try:
+        if tmp_remote:
+            await _aexec(backend, f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
+    except Exception:
+        pass
+    if host_tmp:
+        try:
+            import shutil
+
+            shutil.rmtree(host_tmp, ignore_errors=True)
+        except Exception:
+            pass
+
+
+async def _amake_sandbox_tmp(backend: "FsBackend") -> Optional[str]:
+    """Временный каталог в песочнице (mktemp, иначе mkdir по нашему имени); None при отказе."""
+    res = await _aexec(backend, "mktemp -d -t gc_probe_XXXXXX", timeout=10)
+    if res.return_code != 0 or not (res.stdout or "").strip():
+        tmp_remote = f"/tmp/{_probe_tmp_name()}"
+        mk = await _aexec(backend, f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
+        return tmp_remote if mk.return_code == 0 else None
+    return (res.stdout or "").strip().splitlines()[0].strip()
+
+
+def _has_line_numbers(text: str) -> bool:
+    return bool(re.search(r"[:\x00]\d+:", text))
+
+
+async def _aprobe_pipe(backend: "FsBackend", grep_bin: str) -> bool:
     try:
         res = await _arun_argv(
             backend,
@@ -152,81 +177,65 @@ async def aprobe_has_grep(backend: "FsBackend") -> bool:
             stdin="alpha\nbeta\n",
             timeout=10,
         )
-        out = res.stdout or ""
-        # -H labels stdin ``(standard input)``; accept labelled and bare rows.
-        if "beta" not in out or not re.search(r"(?:^|:|\x00)\d+:", out, re.M):
-            return False
     except Exception:
         return False
+    out = res.stdout or ""
+    return "beta" in out and bool(re.search(r"(?:^|:|\x00)\d+:", out, re.M))
 
-    tmp_remote: Optional[str] = None
-    host_tmp: Optional[str] = None
+
+async def _amake_beta_file(backend: "FsBackend") -> tuple:
+    """(root, fpath, tmp_remote, host_tmp); root=None — создать не удалось."""
+    if getattr(backend, "is_sandbox", False):
+        tmp_remote = await _amake_sandbox_tmp(backend)
+        if tmp_remote is None:
+            return None, None, None, None
+        fpath = f"{tmp_remote.rstrip('/')}/beta.txt"
+        w = await _aexec(backend, f"printf 'alpha\\nbeta\\n' > {shlex.quote(fpath)}", timeout=10)
+        if w.return_code != 0:
+            return None, None, tmp_remote, None
+        return tmp_remote, fpath, tmp_remote, None
+    host_tmp = tempfile.mkdtemp(prefix="gc_probe_")
+    fpath = os.path.join(host_tmp, "beta.txt")
+    with open(fpath, "w", encoding="utf-8") as fh:
+        fh.write("alpha\nbeta\n")
+    return host_tmp, fpath, None, host_tmp
+
+
+async def _aprobe_tree_and_file(backend: "FsBackend", grep_bin: str, root: str, fpath: str) -> bool:
+    res = await _arun_argv(
+        backend,
+        build_grep_argv_flags(grep_bin=grep_bin, recursive=True) + ["--", "b[ae]ta", root],
+        timeout=15,
+    )
+    text = res.stdout or ""
+    if res.return_code not in (0, 1) or "beta" not in text or not _has_line_numbers(text):
+        return False
+    res = await _arun_argv(
+        backend,
+        build_grep_argv_flags(grep_bin=grep_bin, fixed=True, case_insensitive=True)
+        + ["--", "BETA", fpath],
+        timeout=15,
+    )
+    if res.return_code != 0:
+        return False
+    text = res.stdout or ""
+    return "beta" in text and _has_line_numbers(text)
+
+
+async def aprobe_has_grep(backend: "FsBackend") -> bool:
+    """Smoke the production argv: -E pipe, -R tree, and the -F/-i single file."""
+    grep_bin = await _awhich_bin(backend, "grep")
+    if not grep_bin or not await _aprobe_pipe(backend, grep_bin):
+        return False
+    root, fpath, tmp_remote, host_tmp = await _amake_beta_file(backend)
     try:
-        if getattr(backend, "is_sandbox", False):
-            res = await _aexec(backend, "mktemp -d -t gc_probe_XXXXXX", timeout=10)
-            if res.return_code != 0 or not (res.stdout or "").strip():
-                tmp_remote = f"/tmp/{_probe_tmp_name()}"
-                mk = await _aexec(backend, f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
-                if mk.return_code != 0:
-                    return False
-            else:
-                tmp_remote = (res.stdout or "").strip().splitlines()[0].strip()
-            fpath = f"{tmp_remote.rstrip('/')}/beta.txt"
-            w = await _aexec(backend, 
-                f"printf 'alpha\\nbeta\\n' > {shlex.quote(fpath)}", timeout=10
-            )
-            if w.return_code != 0:
-                return False
-            root = tmp_remote
-        else:
-            host_tmp = tempfile.mkdtemp(prefix="gc_probe_")
-            fpath = os.path.join(host_tmp, "beta.txt")
-            with open(fpath, "w", encoding="utf-8") as fh:
-                fh.write("alpha\nbeta\n")
-            root = host_tmp
-
-        res = await _arun_argv(
-            backend,
-            build_grep_argv_flags(grep_bin=grep_bin, recursive=True)
-            + ["--", "b[ae]ta", root],
-            timeout=15,
-        )
-        if res.return_code not in (0, 1):
+        if not root:
             return False
-        text = res.stdout or ""
-        if "beta" not in text:
-            return False
-        # Expect path<sep>line:text shape (--null: NUL after the name)
-        if not re.search(r"[:\x00]\d+:", text):
-            return False
-
-        # Production takes -F for every literal/text-mode call and -i whenever
-        # the call is case-insensitive: smoke both on the single-file recipe.
-        res = await _arun_argv(
-            backend,
-            build_grep_argv_flags(grep_bin=grep_bin, fixed=True, case_insensitive=True)
-            + ["--", "BETA", fpath],
-            timeout=15,
-        )
-        if res.return_code != 0:
-            return False
-        text = res.stdout or ""
-        return "beta" in text and bool(re.search(r"[:\x00]\d+:", text))
+        return await _aprobe_tree_and_file(backend, grep_bin, root, fpath)
     except Exception:
         return False
     finally:
-        try:
-            if tmp_remote:
-                await _aexec(backend, f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
-        except Exception:
-            pass
-        if host_tmp:
-            try:
-                import shutil
-
-                shutil.rmtree(host_tmp, ignore_errors=True)
-            except Exception:
-                pass
+        await _acleanup_probe(backend, tmp_remote, host_tmp)
 
 
 async def _amake_probe_tree(backend: "FsBackend"):
@@ -235,28 +244,12 @@ async def _amake_probe_tree(backend: "FsBackend"):
     host_tmp: Optional[str] = None
 
     async def acleanup() -> None:
-        try:
-            if tmp_remote:
-                await _aexec(backend, f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
-        except Exception:
-            pass
-        if host_tmp:
-            try:
-                import shutil
-
-                shutil.rmtree(host_tmp, ignore_errors=True)
-            except Exception:
-                pass
+        await _acleanup_probe(backend, tmp_remote, host_tmp)
 
     if getattr(backend, "is_sandbox", False):
-        res = await _aexec(backend, "mktemp -d -t gc_probe_XXXXXX", timeout=10)
-        if res.return_code != 0 or not (res.stdout or "").strip():
-            tmp_remote = f"/tmp/{_probe_tmp_name()}"
-            mk = await _aexec(backend, f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
-            if mk.return_code != 0:
-                return None, acleanup
-        else:
-            tmp_remote = (res.stdout or "").strip().splitlines()[0].strip()
+        tmp_remote = await _amake_sandbox_tmp(backend)
+        if tmp_remote is None:
+            return None, acleanup
         root = tmp_remote
         cmds = (
             f"mkdir -p {shlex.quote(root + '/skip')} {shlex.quote(root + '/keep')} && "
@@ -279,6 +272,16 @@ async def _amake_probe_tree(backend: "FsBackend"):
     return host_tmp, acleanup
 
 
+def _lists_skip_dir(text: str) -> bool:
+    if "skip" not in text.replace("\\", "/"):
+        return False
+    for line in text.splitlines():
+        norm = line.replace("\\", "/")
+        if "/skip/" in norm or norm.startswith("skip/") or re.search(r"(^|/)skip/", norm):
+            return True
+    return False
+
+
 async def aprobe_grep_exclude_dir(backend: "FsBackend") -> bool:
     grep_bin = await _awhich_bin(backend, "grep")
     if not grep_bin:
@@ -294,16 +297,8 @@ async def aprobe_grep_exclude_dir(backend: "FsBackend") -> bool:
             timeout=15,
         )
         text = res.stdout or ""
-        if "skip" in text.replace("\\", "/"):
-            # path component skip should not appear
-            for line in text.splitlines():
-                if "/skip/" in line.replace("\\", "/") or line.replace(
-                    "\\", "/"
-                ).startswith("skip/"):
-                    return False
-                # also basename-only path forms
-                if re.search(r"(^|/)skip/", line.replace("\\", "/")):
-                    return False
+        if _lists_skip_dir(text):
+            return False
         if "keep" not in text and "hit.txt" not in text:
             return False
         return res.return_code in (0, 1)

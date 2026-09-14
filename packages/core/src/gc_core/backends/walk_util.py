@@ -97,6 +97,18 @@ def prune_flat_entries(
     return [e for e in entries if not any(pruned(p) for p in e.rel.split("/")[:-1])]
 
 
+def _dfs_flat(dir_children: dict, parent_rel: str, should_descend, join, root: str) -> Iterable[str]:
+    subdirs: list[str] = []
+    for name, is_d in dir_children.get(parent_rel, []):
+        rel = (parent_rel + "/" + name) if parent_rel else name
+        if not is_d:
+            yield rel
+        elif should_descend is None or should_descend(_abs(join, root, rel)):
+            subdirs.append(rel)
+    for subdir_rel in subdirs:
+        yield from _dfs_flat(dir_children, subdir_rel, should_descend, join, root)
+
+
 def iter_files_from_flat(
     entries: list,
     *,
@@ -112,18 +124,7 @@ def iter_files_from_flat(
         files = sorted((n, False) for n, d in level if not d)
         dir_children[parent_rel] = files + dirs
 
-    def _dfs(parent_rel: str) -> Iterable[str]:
-        subdirs: list[str] = []
-        for name, is_d in dir_children.get(parent_rel, []):
-            rel = (parent_rel + "/" + name) if parent_rel else name
-            if not is_d:
-                yield rel
-            elif should_descend is None or should_descend(_abs(join, root, rel)):
-                subdirs.append(rel)
-        for subdir_rel in subdirs:
-            yield from _dfs(subdir_rel)
-
-    yield from _dfs("")
+    yield from _dfs_flat(dir_children, "", should_descend, join, root)
 
 
 def _group_by_parent(entries: list) -> dict:

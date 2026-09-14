@@ -326,6 +326,79 @@ class FindFilesByName(AbstractSimpleTool):
         return entry
 
 
+    def _arg_error(self, path: Any, query: Any, max_matches: Any, _result: Callable[..., str]) -> Optional[str]:
+        if not isinstance(path, str):
+            return _result(ok=False, error={"type": "invalid_argument", "field": "path"})
+        if not self._backend.isabs(path):
+            return _result(
+                ok=False,
+                error={
+                    "type": "invalid_argument",
+                    "field": "path",
+                    "message": "path must be absolute",
+                },
+            )
+        if not isinstance(query, str) or not query.strip():
+            return _result(
+                ok=False,
+                error={
+                    "type": "invalid_argument",
+                    "field": "query",
+                    "message": "query must be a non-empty string",
+                },
+            )
+        if not isinstance(max_matches, int) or max_matches < 1:
+            return _result(ok=False, error={"type": "invalid_argument", "field": "max_matches"})
+        return None
+
+    def _make_should_descend(self, root_norm: str, exclude_names: Any, rg: tuple) -> Callable[[str], bool]:
+        def _should_descend(abs_dir: str) -> bool:
+            name = os.path.basename(os.path.normpath(abs_dir))
+            if os.path.normpath(abs_dir) == root_norm:
+                return True
+            if is_agent_hidden(name):
+                return False
+            if should_skip_nested_dir_name(
+                name,
+                exclude_names=exclude_names,
+                exclude_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
+            ):
+                return False
+            return self._read_guard_pass(abs_dir, *rg)
+
+        return _should_descend
+
+    async def _awalk_matches(
+        self, path: str, matcher: Callable[[str, str], bool], rg: tuple, *, max_visited: int, max_matches: int
+    ) -> Tuple[List[Dict[str, Any]], int, str]:
+        """``(matches, visited, stop_reason)``; исключения обхода — наружу."""
+        exclude_names = effective_exclude_dir_names()
+        walk_iter = self._backend.iter_walk_entries(
+            path,
+            should_descend=self._make_should_descend(os.path.normpath(path), exclude_names, rg),
+            prune_names=tuple(sorted(exclude_names)),
+            prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
+        )
+        matches: List[Dict[str, Any]] = []
+        visited = 0
+        yielder = LoopYielder()
+        async for entry in walk_iter:
+            await yielder.tick()
+            rel, is_d = entry.rel, entry.is_dir
+            base = os.path.basename(rel)
+            if is_agent_hidden(base):
+                continue
+            visited += 1
+            if visited > max_visited:
+                return matches, visited, "max_visited"
+            abs_path = self._backend.join(path, rel)
+            if not self._read_guard_pass(abs_path, *rg) or not matcher(rel, base):
+                continue
+            matches.append(await self._entry(abs_path, is_d, size=entry.size))
+            if len(matches) >= max_matches:
+                return matches, visited, "max_matches"
+        return matches, visited, "completed"
+
     @enforce_read_guard(path_arg="path")
     async def acall(
         self,
@@ -359,30 +432,10 @@ class FindFilesByName(AbstractSimpleTool):
             max_matches=mm,
         )
 
-        if not isinstance(path, str):
-            return _result(ok=False, error={"type": "invalid_argument", "field": "path"})
-        if not self._backend.isabs(path):
-            return _result(
-                ok=False,
-                error={
-                    "type": "invalid_argument",
-                    "field": "path",
-                    "message": "path must be absolute",
-                },
-            )
-        if not isinstance(query, str) or not query.strip():
-            return _result(
-                ok=False,
-                error={
-                    "type": "invalid_argument",
-                    "field": "query",
-                    "message": "query must be a non-empty string",
-                },
-            )
-        if not isinstance(max_matches, int) or max_matches < 1:
-            return _result(ok=False, error={"type": "invalid_argument", "field": "max_matches"})
-        if max_matches > hard_max_matches:
-            max_matches = hard_max_matches
+        arg_error = self._arg_error(path, query, max_matches, _result)
+        if arg_error is not None:
+            return arg_error
+        max_matches = min(max_matches, hard_max_matches)
 
         query = query.strip()
         path = self._backend.normpath(path)
@@ -400,85 +453,19 @@ class FindFilesByName(AbstractSimpleTool):
             return _result(ok=False, error={"type": "not_a_directory"})
 
         matcher = self._build_matcher(query, case_insensitive=ci)
-        matches: List[Dict[str, Any]] = []
-        visited = 0
-        truncated = False
-        stop_reason = "completed"
-        root_norm = os.path.normpath(path)
-        # Enumeration via backend.iter_walk only (Harbor: private walk channel
-        # ~50M fail-closed; local: os.walk). No tool-exec find dump (60k).
-
-        exclude_names = effective_exclude_dir_names()
-
-        def _should_descend(abs_dir: str) -> bool:
-            name = os.path.basename(os.path.normpath(abs_dir))
-            if os.path.normpath(abs_dir) == root_norm:
-                return True
-            if is_agent_hidden(name):
-                return False
-            if should_skip_nested_dir_name(
-                name,
-                exclude_names=exclude_names,
-                exclude_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
-            ):
-                return False
-            if not self._read_guard_pass(abs_dir, _rg_cfg, _rg_root, _rg_extra):
-                return False
-            return True
-
+        rg = (_rg_cfg, _rg_root, _rg_extra)
         try:
-            walk_iter = self._backend.iter_walk_entries(
-                path,
-                should_descend=_should_descend,
-                prune_names=tuple(sorted(exclude_names)),
-                prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
+            matches, visited, stop_reason = await self._awalk_matches(
+                path, matcher, rg, max_visited=max_visited, max_matches=max_matches
             )
-            yielder = LoopYielder()
-            async for entry in walk_iter:
-                # Обход идёт инлайн на loop вызывающего и ограничен ЧИСЛОМ
-                # записей, а не временем: на 24 тысячах он съедает весь бюджет
-                # приёмки одной операцией. Уступаем по времени — см. модуль.
-                await yielder.tick()
-                rel, is_d = entry.rel, entry.is_dir
-                base = os.path.basename(rel)
-                if is_agent_hidden(base):
-                    continue
-                visited += 1
-                if visited > max_visited:
-                    truncated = True
-                    stop_reason = "max_visited"
-                    break
-
-                abs_path = self._backend.join(path, rel)
-                if not self._read_guard_pass(
-                    abs_path, _rg_cfg, _rg_root, _rg_extra
-                ):
-                    continue
-                if not matcher(rel, base):
-                    continue
-                matches.append(await self._entry(abs_path, is_d, size=entry.size))
-                if len(matches) >= max_matches:
-                    truncated = True
-                    stop_reason = "max_matches"
-                    break
         except WalkOutputTooLargeError as e:
-            return _result(
-                ok=False,
-                error={"type": "walk_too_large", "message": str(e)},
-            )
+            return _result(ok=False, error={"type": "walk_too_large", "message": str(e)})
         except PermissionError as e:
-            return _result(
-                ok=False,
-                error={"type": "permission_denied", "message": str(e)},
-            )
+            return _result(ok=False, error={"type": "permission_denied", "message": str(e)})
         except Exception as e:
-            return _result(
-                ok=False,
-                error={"type": "unexpected_error", "message": str(e)},
-            )
+            return _result(ok=False, error={"type": "unexpected_error", "message": str(e)})
 
-        if stop_reason == "completed":
-            truncated = False
+        truncated = stop_reason != "completed"
 
         return self._result_listing(
             path=path,

@@ -72,26 +72,31 @@ def collect_literal_matches(
     return entries
 
 
+def _find_search_any_eol(content: str, search: str, file_eol: str) -> tuple[str, int]:
+    """``(search_как_в_файле, idx)``: искать как есть, затем с переводами строк файла."""
+    idx = content.find(search)
+    if idx != -1:
+        return search, idx
+    styles = [file_eol]
+    if has_mixed_line_endings(content):
+        styles.append("\n" if file_eol == "\r\n" else "\r\n")
+    for eol in styles:
+        candidate = convert_line_endings(search, eol)
+        if candidate == search:
+            continue
+        found = content.find(candidate)
+        if found != -1:
+            return candidate, found
+    return search, -1
+
+
 def resolve_edit_line_endings(content: str, search: str, replace: str) -> EditLineEndings:
     file_eol = detect_line_ending(content)
     if file_eol is None:
         idx = content.find(search)
         return EditLineEndings(search, replace, None, idx, False)
 
-    resolved_search = search
-    idx = content.find(search)
-    if idx == -1:
-        styles = [file_eol]
-        if has_mixed_line_endings(content):
-            styles.append("\n" if file_eol == "\r\n" else "\r\n")
-        for eol in styles:
-            candidate = convert_line_endings(search, eol)
-            if candidate == search:
-                continue
-            found = content.find(candidate)
-            if found != -1:
-                resolved_search, idx = candidate, found
-                break
+    resolved_search, idx = _find_search_any_eol(content, search, file_eol)
     if idx == -1:
         # Miss in every style: hand the anchor back untouched for the miss report.
         return EditLineEndings(search, replace, file_eol, -1, False)

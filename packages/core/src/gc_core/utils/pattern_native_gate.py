@@ -18,7 +18,7 @@ _BAD_ESCAPES = re.compile(
 )
 
 # Quantifier braces — Python by default (ERE supports them but portability/semantics).
-_BRACES = re.compile(r"\{[0-9]+(?:,[0-9]*)?\}")
+_BRACES = re.compile(r"\{\d+(?:,\d*)?\}", re.ASCII)
 
 @dataclass(frozen=True)
 class NativeGrepPlan:

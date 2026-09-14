@@ -410,7 +410,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
     @classmethod
     def _extract_simple_html_text(cls, html: str) -> str:
         content = html or ""
-        content = re.sub(r"(?is)<(script|style|noscript|svg|head)\b.*?>.*?</\1>", " ", content)
+        content = re.sub(r"(?is)<(script|style|noscript|svg|head)\b[^>]*>.*?</\1>", " ", content)
         content = re.sub(r"(?i)<br\s*/?>", "\n", content)
         content = re.sub(r"(?i)</tr\s*>", "\n", content)
         content = re.sub(r"(?is)<(p|div)\b[^>]*>(.*?)</\1>", cls._html_block_to_text, content)
@@ -624,8 +624,6 @@ class SimpleFetchUrl(AbstractSimpleTool):
         effective_timeout = timeout_seconds or self.timeout_seconds
 
         cache_key = self._cache_key(normalized_url, normalized_proxy)
-        proxies = self._proxies_dict(normalized_proxy)
-
         cached = self._get_from_cache(cache_key)
         if cached is not None:
             return _result(**self._cached_payload(cached, normalized_url, offset, limit))

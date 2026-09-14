@@ -45,6 +45,47 @@ def builtin_subagent_names() -> set:
     return set(_SUBAGENT_MAP.keys())
 
 
+def _warn_unknown_allowlist(log: Any, ordered: List[str], by_name: Dict[str, Any], builtin_names: set, diagnostics) -> None:
+    unknown = [n for n in ordered if n not in by_name and n not in builtin_names]
+    if not unknown:
+        return
+    available = sorted(set(by_name) | set(builtin_names))
+    log.warning(
+        "use_local_subagents_unknown names=%s available=%s",
+        ", ".join(unknown),
+        ", ".join(available),
+        extra={
+            "event": "use_local_subagents_unknown",
+            "names": unknown,
+            "available": available,
+        },
+    )
+    if diagnostics is not None:
+        diagnostics.append({"code": "use_local_subagents_unknown", "names": unknown})
+
+
+def _limit_definitions(definitions: List[SubagentDefinition], max_count: int, log: Any, diagnostics) -> List[SubagentDefinition]:
+    if len(definitions) <= max_count:
+        return definitions
+    dropped = [d.name for d in definitions[max_count:]]
+    log.warning(
+        "subagents_max_count_exceeded limit=%s dropped=%s",
+        max_count, ", ".join(dropped),
+        extra={
+            "event": "subagents_max_count_exceeded",
+            "limit": max_count,
+            "dropped": dropped,
+        },
+    )
+    if diagnostics is not None:
+        diagnostics.append({
+            "code": "subagents_max_count_exceeded",
+            "limit": max_count,
+            "dropped": dropped,
+        })
+    return definitions[:max_count]
+
+
 def _apply_allowlist_and_limit(
     definitions: List[SubagentDefinition],
     config_dict: Dict[str, Any],
@@ -68,45 +109,10 @@ def _apply_allowlist_and_limit(
 
     if ordered is not None:
         by_name = {d.name: d for d in definitions}
-        unknown = [n for n in ordered if n not in by_name and n not in builtin_names]
-        if unknown:
-            log.warning(
-                "use_local_subagents_unknown names=%s available=%s",
-                ", ".join(unknown),
-                ", ".join(sorted(set(by_name) | set(builtin_names))),
-                extra={
-                    "event": "use_local_subagents_unknown",
-                    "names": unknown,
-                    "available": sorted(set(by_name) | set(builtin_names)),
-                },
-            )
-            if diagnostics is not None:
-                diagnostics.append(
-                    {"code": "use_local_subagents_unknown", "names": unknown}
-                )
+        _warn_unknown_allowlist(log, ordered, by_name, builtin_names, diagnostics)
         definitions = [by_name[n] for n in ordered if n in by_name]
 
-    max_count = resolve_max_count(config_dict)
-    if len(definitions) > max_count:
-        dropped = [d.name for d in definitions[max_count:]]
-        # Молчаливое усечение читалось бы как «все агенты подхватились».
-        log.warning(
-            "subagents_max_count_exceeded limit=%s dropped=%s",
-            max_count, ", ".join(dropped),
-            extra={
-                "event": "subagents_max_count_exceeded",
-                "limit": max_count,
-                "dropped": dropped,
-            },
-        )
-        if diagnostics is not None:
-            diagnostics.append({
-                "code": "subagents_max_count_exceeded",
-                "limit": max_count,
-                "dropped": dropped,
-            })
-        definitions = definitions[:max_count]
-    return definitions
+    return _limit_definitions(definitions, resolve_max_count(config_dict), log, diagnostics)
 
 
 def resolve_subagent_definitions(

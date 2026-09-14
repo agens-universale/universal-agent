@@ -40,6 +40,7 @@ from gc_core.utils.user_text import read_user_text_or_none, unreadable_reason
 # отмечается отдельным маркером: иначе подмена, вернувшая None, читалась бы как
 # «спроси владельца сам» — ровно та ошибка, из-за которой глушение слоёв в тестах
 # не действовало.
+_CONFIG_FILENAME = "config.yml"
 _UNSET = object()
 
 
@@ -146,6 +147,45 @@ def _candidate_profile_ref(pointer: str, roots: list, candidates: Dict[Path, Dic
     return None
 
 
+def _overlay_layer(raw_config: Dict[str, Any], layer_path, base_path: str, candidate_for,
+                   subject: str, *, require_file: bool) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Наложить один файловый слой (managed/project); ``(merged, слой_как_прочитан)``."""
+    if layer_path is None or os.path.abspath(str(layer_path)) == os.path.abspath(base_path):
+        return raw_config, {}
+    if require_file and not layer_path.is_file():
+        return raw_config, {}
+    cand = candidate_for(layer_path)
+    layer_raw = cand if cand is not _UNSET else _readable_layer_document(layer_path, subject)
+    before_env = layer_raw
+    layer_raw = resolve_env_placeholders(layer_raw)
+    validate_registry_pairs(layer_raw, source=str(layer_path) if require_file else layer_path,
+                            raw_source=before_env)
+    return deep_merge(raw_config, layer_raw), layer_raw
+
+
+def _overlay_profile(raw_config: Dict[str, Any], pointer: str, roots, candidates, candidate_for,
+                     notices: list[str]) -> tuple[Dict[str, Any], Optional[ProfileRef]]:
+    """Наложить профиль по указателю; ``(merged, ref)``, без указателя — как есть."""
+    if not pointer:
+        return raw_config, None
+    try:
+        ref = resolve_profile(pointer, roots, notices=notices)
+    except ValueError:
+        ref = _candidate_profile_ref(pointer, roots, candidates)
+        if ref is None:
+            raise
+    cand = candidate_for(ref.path)
+    profile_raw = (
+        cand if cand is not _UNSET
+        else load_profile_document(
+            ref.path,
+            warn_literal_tokens=(ref.root_kind == "project"),
+            notices=notices,
+        )
+    )
+    return deep_merge(raw_config, profile_raw), ref
+
+
 def _merge_layers(
     raw_config: Dict[str, Any],
     path: str,
@@ -221,32 +261,14 @@ def _merge_layers(
     # подмены — сьют тогда проверяет не то состояние, которое считает своим.
     if managed_path is _UNSET:
         managed_path = mcp_paths.managed_config_path()
-    managed_raw: Dict[str, Any] = {}
-    if (managed_path is not None and managed_path.is_file()
-            and os.path.abspath(str(managed_path)) != os.path.abspath(path)):
-        _cand = _candidate_for(managed_path)
-        managed_raw = (
-            _cand if _cand is not _UNSET
-            else _readable_layer_document(managed_path, "config.local.yml"))
-        managed_before_env = managed_raw
-        managed_raw = resolve_env_placeholders(managed_raw)
-        validate_registry_pairs(managed_raw, source=str(managed_path),
-                                raw_source=managed_before_env)
-        raw_config = deep_merge(raw_config, managed_raw)
+    raw_config, managed_raw = _overlay_layer(
+        raw_config, managed_path, path, _candidate_for, "config.local.yml", require_file=True)
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     if project_path is _UNSET:
         project_path = env_vars.project_local_config_path()
-    if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
-        _cand = _candidate_for(project_path)
-        project_raw = (
-            _cand if _cand is not _UNSET
-            else _readable_layer_document(project_path, "проектный config.yml"))
-        project_before_env = project_raw
-        project_raw = resolve_env_placeholders(project_raw)
-        validate_registry_pairs(project_raw, source=project_path,
-                                raw_source=project_before_env)
-        raw_config = deep_merge(raw_config, project_raw)
+    raw_config, _ = _overlay_layer(
+        raw_config, project_path, path, _candidate_for, "проектный config.yml", require_file=False)
 
     # Профиль (спека §3): указатель резолвится из пре-профильного мержа выше (ось 1,
     # анти-рекурсия — профиль не может выбрать профиль), либо из явного override
@@ -257,32 +279,14 @@ def _merge_layers(
         if profile_override is not None
         else str(raw_config.get("profile") or "").strip()
     )
-    ref: Optional[ProfileRef] = None
     active_name: Optional[str] = pointer or None
-    if pointer:
-        try:
-            ref = resolve_profile(pointer, roots, notices=notices)
-        except ValueError:
-            ref = _candidate_profile_ref(pointer, roots, _candidates)
-            if ref is None:
-                raise
-        _cand = _candidate_for(ref.path)
-        profile_raw = (
-            _cand if _cand is not _UNSET
-            else load_profile_document(
-                ref.path,
-                warn_literal_tokens=(ref.root_kind == "project"),
-                notices=notices,
-            )
-        )
-        # Контент профиля мержится ПОВЕРХ base/managed/project (ось 2).
-        raw_config = deep_merge(raw_config, profile_raw)
+    raw_config, ref = _overlay_profile(raw_config, pointer, roots, _candidates, _candidate_for, notices)
 
     return _Layers(raw_config, ref, active_name, roots, managed_path, project_path,
                    managed_raw, _base_voice)
 
 
-def _raw_from_text(text: str, subject: str = "config.yml") -> Dict[str, Any]:
+def _raw_from_text(text: str, subject: str = _CONFIG_FILENAME) -> Dict[str, Any]:
     """Текст → документ → ${ENV:VAR}. Отдельный шаг, потому что стековая фаза 2
     накладывает слои на СЫРОЙ документ и зовёт compat один раз на итог мержа —
     ровно как загрузчик; склеенный с ним `_app_config_from_text` compat применил
@@ -376,7 +380,7 @@ def _stack_assembles(base_path) -> bool:
     вторая редакция правила, и она уже разъехалась."""
     try:
         validate_model_sections(_app_config_from_raw(_merge_layers(
-            _raw_from_text(Path(base_path).read_text(encoding="utf-8"), "config.yml"),
+            _raw_from_text(Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME),
             str(base_path)).config))
     except (OSError, ValueError):
         return False
@@ -429,9 +433,9 @@ def _stacked_app_config(text: str, *, target=None, base_path, is_profile: bool =
                 _merge_layers(_raw_from_text(text), str(base_path),
                              candidates=candidates or None).config)
         base_raw = _raw_from_text(
-            Path(base_path).read_text(encoding="utf-8"), "config.yml")
+            Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME)
         if not is_profile:
-            candidates[Path(target)] = _raw_from_text(text, "config.yml")
+            candidates[Path(target)] = _raw_from_text(text, _CONFIG_FILENAME)
             layers = _merge_layers(
                 base_raw, str(base_path),
                 candidates=candidates,
@@ -473,7 +477,7 @@ def prospective_registry(text: str, *, base_path=None, is_profile: bool = False)
     его единственный исход — ответить, и виновник стека ничего в этом ответе не
     меняет. Отказ отсюда молча погасил бы подсказку («какая модель станет
     default») там, где показать её как раз и надо."""
-    subject = "профиль" if is_profile else "config.yml"
+    subject = "профиль" if is_profile else _CONFIG_FILENAME
     try:
         _raw_from_text(text, subject)
     except ValueError:
@@ -484,7 +488,7 @@ def prospective_registry(text: str, *, base_path=None, is_profile: bool = False)
                 merged = _merge_layers(_raw_from_text(text), str(base_path)).config
             else:
                 base_raw = _raw_from_text(
-                    Path(base_path).read_text(encoding="utf-8"), "config.yml")
+                    Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME)
                 # profile_override="" — пустой указатель: слой профиля из файлов НЕ
                 # берётся, его место занимает наш текст, чьим бы файлом он ни был.
                 layers = _merge_layers(base_raw, str(base_path), profile_override="")
@@ -670,7 +674,7 @@ def profile_pointer_write_target(base_path, *, project_doc=None) -> Path:
         path = env_vars.project_local_config_path()
         project_doc = (_safe_yaml_dict(path) if path else None) or {}
     if isinstance(project_doc, dict) and "profile" in project_doc:
-        return env_vars.project_gc_dir() / "config.yml"
+        return env_vars.project_gc_dir() / _CONFIG_FILENAME
     return Path(base_path)
 
 

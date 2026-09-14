@@ -33,14 +33,8 @@ def _json_sanitize(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         return "binary data"
     if isinstance(value, dict):
-        out: Dict[str, Any] = {}
-        for k, v in value.items():
-            key = k if isinstance(k, str) else str(k)
-            out[key] = _json_sanitize(v)
-        return out
-    if isinstance(value, list):
-        return [_json_sanitize(v) for v in value]
-    if isinstance(value, tuple):
+        return {(k if isinstance(k, str) else str(k)): _json_sanitize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
         return [_json_sanitize(v) for v in value]
     if isinstance(value, (str, int, float, bool)):
         return value

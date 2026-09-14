@@ -134,6 +134,31 @@ Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"t
         return raw if isinstance(raw, list) else []
 
 
+    def _validate_item(self, index: int, item: Any) -> tuple:
+        """``(ответ_с_ошибкой, None)`` либо ``(None, нормализованный_пункт)``."""
+        if not isinstance(item, dict):
+            return self._error("invalid_item", f"todos[{index}] must be an object."), None
+        extra = set(item) - {"content", "status"}
+        if extra:
+            return self._error(
+                "invalid_item",
+                f"todos[{index}] has unexpected fields: {', '.join(sorted(extra))}.",
+            ), None
+        content = item.get("content")
+        status = item.get("status")
+        if not isinstance(content, str) or not content.strip():
+            return self._error(
+                "invalid_item",
+                f"todos[{index}].content must be a non-empty string.",
+            ), None
+        if status not in _todo_statuses():
+            return self._error(
+                "invalid_item",
+                f"todos[{index}].status must be one of: "
+                f"{', '.join(_todo_statuses())}.",
+            ), None
+        return None, {"content": content.strip(), "status": status}
+
     async def acall(self, todos: Any = None, **kwargs: Any) -> str:
         if self._state is None or getattr(self._state, "shared", None) is None:
             return json.dumps({
@@ -156,30 +181,10 @@ Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"t
 
         normalized: List[Dict[str, str]] = []
         for index, item in enumerate(todos):
-            if not isinstance(item, dict):
-                return self._error(
-                    "invalid_item", f"todos[{index}] must be an object."
-                )
-            extra = set(item) - {"content", "status"}
-            if extra:
-                return self._error(
-                    "invalid_item",
-                    f"todos[{index}] has unexpected fields: {', '.join(sorted(extra))}.",
-                )
-            content = item.get("content")
-            status = item.get("status")
-            if not isinstance(content, str) or not content.strip():
-                return self._error(
-                    "invalid_item",
-                    f"todos[{index}].content must be a non-empty string.",
-                )
-            if status not in _todo_statuses():
-                return self._error(
-                    "invalid_item",
-                    f"todos[{index}].status must be one of: "
-                    f"{', '.join(_todo_statuses())}.",
-                )
-            normalized.append({"content": content.strip(), "status": status})
+            error, entry = self._validate_item(index, item)
+            if error is not None:
+                return error
+            normalized.append(entry)
 
         self._state.session_todo = normalized
         counts = _counts(normalized)

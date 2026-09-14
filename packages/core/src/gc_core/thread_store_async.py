@@ -351,6 +351,52 @@ def is_async_thread_store(store: Any) -> bool:
 _ADAPTERS: "weakref.WeakKeyDictionary[Any, Any]" = weakref.WeakKeyDictionary()
 
 
+def _adapt_sync_store(store: Any, warn: Optional[Any]) -> AsyncThreadStore:
+    """Обернуть полностью синхронное хранилище; смешанное — отказ."""
+    half_async = [
+        name for name in CONTRACT_METHODS
+        if inspect.iscoroutinefunction(getattr(store, name, None))
+    ]
+    if half_async:
+        raise ThreadStoreContractError(
+            f"{type(store).__name__}: часть методов объявлена async def "
+            f"под СИНХРОННЫМИ именами: {', '.join(half_async)}.\n"
+            "  Смешивать нельзя: синхронные вызывающие отбросят корутину без "
+            "ошибки,\n  и часть записей треда потеряется молча.\n"
+            "  Либо все методы синхронные (ThreadStoreBase), либо все "
+            "асинхронные с приставкой a (AsyncThreadStore)."
+        )
+    adapter = SyncThreadStoreAdapter(store, warn=warn)
+    try:
+        _ADAPTERS[store] = adapter
+    except TypeError:
+        pass                          # без weakref — просто без кэша
+    return adapter
+
+
+def _contract_error(store: Any, missing: list[str]) -> ThreadStoreContractError:
+    half_async_named = [
+        name for name in ASYNC_CONTRACT_METHODS
+        if inspect.iscoroutinefunction(getattr(store, name, None))
+    ]
+    if half_async_named:
+        detail = (
+            f"\n  Асинхронных методов найдено: {len(half_async_named)} из "
+            f"{len(ASYNC_CONTRACT_METHODS)} — реализация неполна.\n"
+            f"  Не хватает: "
+            f"{', '.join(n for n in ASYNC_CONTRACT_METHODS if n not in half_async_named)}"
+        )
+    else:
+        detail = f"\n  Не хватает синхронных методов: {', '.join(missing)}"
+    return ThreadStoreContractError(
+        f"{type(store).__name__} не годится как хранилище тредов.{detail}\n"
+        "  Нужен либо ThreadStoreBase (одиннадцать синхронных методов), либо "
+        "AsyncThreadStore\n  (те же одиннадцать с приставкой a, все корутинные). "
+        "Проверить себя:\n"
+        "  gc_testkit.thread_store_conformance.assert_conforms / assert_conforms_async"
+    )
+
+
 def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore:
     """Асинхронный порт для хранилища: свой, если он есть, иначе адаптер.
 
@@ -384,45 +430,9 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
         if not callable(getattr(store, name, None))
     ]
     if not missing:
-        half_async = [
-            name for name in CONTRACT_METHODS
-            if inspect.iscoroutinefunction(getattr(store, name, None))
-        ]
-        if half_async:
-            raise ThreadStoreContractError(
-                f"{type(store).__name__}: часть методов объявлена async def "
-                f"под СИНХРОННЫМИ именами: {', '.join(half_async)}.\n"
-                "  Смешивать нельзя: синхронные вызывающие отбросят корутину без "
-                "ошибки,\n  и часть записей треда потеряется молча.\n"
-                "  Либо все методы синхронные (ThreadStoreBase), либо все "
-                "асинхронные с приставкой a (AsyncThreadStore)."
-            )
-        adapter = SyncThreadStoreAdapter(store, warn=warn)
-        try:
-            _ADAPTERS[store] = adapter
-        except TypeError:
-            pass                          # без weakref — просто без кэша
-        return adapter
+        return _adapt_sync_store(store, warn)
 
-    half_async_named = [
-        name for name in ASYNC_CONTRACT_METHODS
-        if inspect.iscoroutinefunction(getattr(store, name, None))
-    ]
-    detail = (
-        f"\n  Асинхронных методов найдено: {len(half_async_named)} из "
-        f"{len(ASYNC_CONTRACT_METHODS)} — реализация неполна.\n"
-        f"  Не хватает: "
-        f"{', '.join(n for n in ASYNC_CONTRACT_METHODS if n not in half_async_named)}"
-        if half_async_named
-        else f"\n  Не хватает синхронных методов: {', '.join(missing)}"
-    )
-    raise ThreadStoreContractError(
-        f"{type(store).__name__} не годится как хранилище тредов.{detail}\n"
-        "  Нужен либо ThreadStoreBase (одиннадцать синхронных методов), либо "
-        "AsyncThreadStore\n  (те же одиннадцать с приставкой a, все корутинные). "
-        "Проверить себя:\n"
-        "  gc_testkit.thread_store_conformance.assert_conforms / assert_conforms_async"
-    )
+    raise _contract_error(store, missing)
 
 
 __all__ = [

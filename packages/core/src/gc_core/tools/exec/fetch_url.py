@@ -681,8 +681,6 @@ Usage:
         effective_timeout = timeout_seconds or self.timeout_seconds
 
         cache_key = self._cache_key(normalized_url, normalized_proxy)
-        proxies = self._proxies_dict(normalized_proxy)
-
         cached = self._get_from_cache(cache_key)
         if cached is not None:
             cached_content, cached_meta = cached

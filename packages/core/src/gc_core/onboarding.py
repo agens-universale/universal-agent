@@ -448,6 +448,43 @@ def overriding_layer_note(config: Dict[str, Any], config_path=None, *,
     return None
 
 
+def _configured_guide(stage: str, named: str, program: str, shown_path: str, profile_note: str) -> str:
+    if stage == REPAIR_STAGE_WITHOUT_PROFILE:
+        base = (f"[gc] Обязательные поля заполнены: {shown_path} — но "
+                f"профиль{named} сломан, и запуск с ним не поднимется: почините "
+                f"профиль или снимите указатель; запуск без него — "
+                f'{program} --profile "".')
+    elif stage == REPAIR_STAGE_TEMPLATE:
+        base = (f"[gc] config.yml не читается: {shown_path} — показан "
+                f"пакетный шаблон; поправьте файл руками или сбросьте его: "
+                f"gc-cli --reset-config.")
+    else:
+        base = f"[gc] Конфиг настроен: {shown_path} — можно запускать."
+    return f"{base}\n[gc] {profile_note}." if profile_note else base
+
+
+def _setup_notes(config: Dict[str, Any], stage: str, named: str, program: str) -> str:
+    note = ""
+    if _legacy_model_set(config):
+        note = (
+            f"\n  Модель по умолчанию уже задана (agent.model = {config.get('model')}) —\n"
+            f"  осталось указать для неё адрес и токен; либо укажите свою модель\n"
+            f"  и соответствующие адрес/токен.\n"
+        )
+    if stage == REPAIR_STAGE_WITHOUT_PROFILE:
+        note += (
+            f"\n  Профиль{named} сломан — запуск с ним не поднимется, пока он не\n"
+            f'  починен или не снят (запуск без него: {program} --profile "").\n'
+        )
+    elif stage == REPAIR_STAGE_TEMPLATE:
+        note += (
+            "\n  Ваш config.yml не читается — поля выше показаны по пакетному шаблону,\n"
+            "  а не по вашему файлу; сначала поправьте его руками или сбросьте:\n"
+            "  gc-cli --reset-config.\n"
+        )
+    return note
+
+
 def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli",
                 just_created: bool = False, *, repair: Optional["RepairLoad"] = None) -> str:
     """Подсказка по config_path.
@@ -494,39 +531,9 @@ def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli
         ignore_profile=repair.deactivate_profile if repair is not None else False)
     pending = pending_requirements(config)
     if not pending:
-        if stage == REPAIR_STAGE_WITHOUT_PROFILE:
-            base = (f"[gc] Обязательные поля заполнены: {_display_path(config_path)} — но "
-                    f"профиль{named} сломан, и запуск с ним не поднимется: почините "
-                    f"профиль или снимите указатель; запуск без него — "
-                    f'{program} --profile "".')
-        elif stage == REPAIR_STAGE_TEMPLATE:
-            base = (f"[gc] config.yml не читается: {_display_path(config_path)} — показан "
-                    f"пакетный шаблон; поправьте файл руками или сбросьте его: "
-                    f"gc-cli --reset-config.")
-        else:
-            base = f"[gc] Конфиг настроен: {_display_path(config_path)} — можно запускать."
-        return f"{base}\n[gc] {profile_note}." if profile_note else base
+        return _configured_guide(stage, named, program, _display_path(config_path), profile_note)
     fields = "\n".join(f"    • {r.hint}" for r in pending)
-    note = ""
-    if _legacy_model_set(config):
-        # Ремарка — про ПЛОСКИЙ ключ (её текст его и называет): при живом реестре
-        # с нетронутым плейсхолдером она печатала бы «agent.model = <ВПИШИТЕ_МОДЕЛЬ>».
-        note = (
-            f"\n  Модель по умолчанию уже задана (agent.model = {config.get('model')}) —\n"
-            f"  осталось указать для неё адрес и токен; либо укажите свою модель\n"
-            f"  и соответствующие адрес/токен.\n"
-        )
-    if stage == REPAIR_STAGE_WITHOUT_PROFILE:
-        note += (
-            f"\n  Профиль{named} сломан — запуск с ним не поднимется, пока он не\n"
-            f'  починен или не снят (запуск без него: {program} --profile "").\n'
-        )
-    elif stage == REPAIR_STAGE_TEMPLATE:
-        note += (
-            "\n  Ваш config.yml не читается — поля выше показаны по пакетному шаблону,\n"
-            "  а не по вашему файлу; сначала поправьте его руками или сбросьте:\n"
-            "  gc-cli --reset-config.\n"
-        )
+    note = _setup_notes(config, stage, named, program)
     if just_created:
         header = "  GigaCode — конфигурация создана, настройка не завершена\n\n"
         location = f"  Создан файл конфигурации:\n    {_display_path(config_path)}\n\n"
@@ -588,6 +595,75 @@ def _schema_error_keys(exc) -> List[str]:
     return keys
 
 
+def _participant_lines(participants, flagged: bool) -> list[str]:
+    import os
+
+    lines = []
+    for kind, path in participants:
+        suffix = ""
+        if kind.startswith("profile:"):
+            suffix = "   (активен: --profile)" if flagged else "   (активен)"
+        lines.append(f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{os.path.abspath(path)}{suffix}")
+    return lines
+
+
+def _broken_error_text_and_keys(exc: Exception) -> tuple[str, Any]:
+    """Текст ошибки (pydantic-дамп — в читаемом виде) и названные ею ключи."""
+    from pydantic import ValidationError as _ValidationError
+    from gc_core.config_modules.root import SCHEMA_ERROR_PREFIX, schema_error_details
+    from gc_core.config_origin import error_keys
+
+    if isinstance(exc, _ValidationError):
+        return f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}", _schema_error_keys(exc)
+    if isinstance(exc.__cause__, _ValidationError):
+        return str(exc), _schema_error_keys(exc.__cause__)
+    error_text = str(exc)
+    return error_text, error_keys(error_text)
+
+
+def _fix_targets(culprits, keys, config_path: str, participants, error_text: str, *,
+                 flagged_profile_missing: bool, active) -> tuple[list[str], bool]:
+    """Строки «что поправить» и признак «виновата база»."""
+    import os
+
+    if culprits:
+        return [
+            f"поправить {', '.join(culprit.keys)} в:  {os.path.abspath(culprit.path)}"
+            for culprit in culprits
+        ], any(culprit.kind == "base" for culprit in culprits)
+    if flagged_profile_missing and "profile" in keys:
+        return [f'профиль "{active}" задан флагом --profile — такого профиля нет, '
+                f"исправить имя во флаге"], False
+    named = config_path
+    for _, candidate in participants:
+        if error_text.startswith(f"{candidate}:"):
+            named = candidate
+            break
+    return [f"поправить файл:  {os.path.abspath(named)}"], named == config_path
+
+
+def _workaround_lines(config_path: str, active, program: str, base_to_blame: bool) -> list[str]:
+    """Обход (без профиля) и, если виновата база, откат к шаблону."""
+    import os
+    from gc_core.config import _default_config_path, user_config_path
+
+    def _same_path(a, b) -> bool:
+        return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(
+            os.path.abspath(str(b)))
+
+    config_flag = ("" if _same_path(config_path, user_config_path())
+                   else f' --config "{os.path.abspath(config_path)}"')
+    lines: list[str] = []
+    if active:
+        lines.append(f'запустить без профиля, ничего не потеряв:  '
+                     f'{program}{config_flag} --profile ""')
+    if base_to_blame and not (config_flag
+                              and _same_path(config_path, _default_config_path())):
+        lines.append(f"откатить конфиг к шаблону (старый уйдёт в бэкап):  "
+                     f"gc-cli{config_flag} --reset-config")
+    return lines
+
+
 def explain_broken_config(config_path: str, exc: Exception, *, program: str = "gc-cli",
                           profile_override: Optional[str] = None) -> str:
     """Человекочитаемое объяснение вместо трейсбека, когда `load_config_ex()` не
@@ -635,11 +711,8 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     без прогона через `os.path.abspath`)."""
     import os
 
-    from pydantic import ValidationError as _ValidationError
-
     from gc_core.config_modules.layers import resolve_profile_pointer
-    from gc_core.config_modules.root import SCHEMA_ERROR_PREFIX, schema_error_details
-    from gc_core.config_origin import _overlay_paths, error_keys, key_origins
+    from gc_core.config_origin import _overlay_paths, key_origins
 
     def _display_path(path) -> str:
         return os.path.abspath(path)
@@ -657,12 +730,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     # запрашивали, и «такого профиля нет» не про что.
     flagged_profile_missing = bool(flagged and active) and not any(
         kind.startswith("profile:") for kind, _ in participants)
-    participant_lines = [
-        f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{_display_path(path)}"
-        + (("   (активен: --profile)" if flagged else "   (активен)")
-           if kind.startswith("profile:") else "")
-        for kind, path in participants
-    ]
+    participant_lines = _participant_lines(participants, flagged)
 
     # Координаты названных ошибкой ключей — ОДИН разбор на всё объяснение: их
     # спрашивают и виновники, и совет про профиль из флага. Второе чтение той же
@@ -673,37 +741,12 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     # `__cause__`: его `loc` точнее текста (заходит в списки и не ограничен
     # закрытым списком подозреваемых `error_keys`), и виновники ищутся по нему.
     # Сырой `ValidationError` первым аргументом — страховка на прямых вызовах.
-    schema_exc = exc if isinstance(exc, _ValidationError) else (
-        exc.__cause__ if isinstance(exc.__cause__, _ValidationError) else None)
-    if schema_exc is not None:
-        error_text = (str(exc) if schema_exc is not exc
-                      else f"{SCHEMA_ERROR_PREFIX}{schema_error_details(schema_exc)}")
-        keys = _schema_error_keys(schema_exc)
-    else:
-        error_text = str(exc)
-        keys = error_keys(error_text)
+    error_text, keys = _broken_error_text_and_keys(exc)
     culprits = key_origins(config_path, keys, profile_override=profile_override)
 
-    fix_lines: list[str] = []
-    base_to_blame = any(culprit.kind == "base" for culprit in culprits)
-    if culprits:
-        for culprit in culprits:
-            fix_lines.append(
-                f"поправить {', '.join(culprit.keys)} в:  {_display_path(culprit.path)}")
-    elif flagged_profile_missing and "profile" in keys:
-        # Ошибка про сам указатель, а он пришёл из флага: файла-виновника нет
-        # (не найден или зарезервирован — в обоих случаях такого профиля нет).
-        fix_lines.append(
-            f'профиль "{active}" задан флагом --profile — такого профиля нет, '
-            f"исправить имя во флаге")
-    else:
-        named = config_path
-        for _, candidate in participants:
-            if error_text.startswith(f"{candidate}:"):
-                named = candidate
-                break
-        base_to_blame = named == config_path
-        fix_lines.append(f"поправить файл:  {_display_path(named)}")
+    fix_lines, base_to_blame = _fix_targets(
+        culprits, keys, config_path, participants, error_text,
+        flagged_profile_missing=flagged_profile_missing, active=active)
 
     # Советы-команды целятся в ФАЙЛ СЕССИИ, а не в дефолтный (ревью M9): при
     # `--config <путь>` фиксированный `gc-cli --reset-config` сбрасывал ЧУЖОЙ
@@ -711,23 +754,7 @@ def explain_broken_config(config_path: str, exc: Exception, *, program: str = "g
     # запускал не тот конфиг. Кавычки — пробелы в путях; сравнение — normcase от
     # абсолютного вида (`--config .\\config.yml` называет тот же файл, Windows
     # к регистру нечувствителен).
-    from gc_core.config import _default_config_path, user_config_path
-
-    def _same_path(a, b) -> bool:
-        return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(
-            os.path.abspath(str(b)))
-
-    config_flag = ("" if _same_path(config_path, user_config_path())
-                   else f' --config "{_display_path(config_path)}"')
-    if active:
-        fix_lines.append(f'запустить без профиля, ничего не потеряв:  '
-                         f'{program}{config_flag} --profile ""')
-    # Пакетному шаблону сброс не предлагается вовсе: `--reset-config` его не
-    # правит и честно откажет — совет вёл бы в тупик.
-    if base_to_blame and not (config_flag
-                              and _same_path(config_path, _default_config_path())):
-        fix_lines.append(f"откатить конфиг к шаблону (старый уйдёт в бэкап):  "
-                         f"gc-cli{config_flag} --reset-config")
+    fix_lines += _workaround_lines(config_path, active, program, base_to_blame)
 
     error_block = "\n".join(f"  {line}" for line in error_text.splitlines())
     fix_block = "\n".join(f"    • {line}" for line in fix_lines)

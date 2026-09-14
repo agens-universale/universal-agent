@@ -311,7 +311,6 @@ async def arequest_backend_responses(
     url: str,
     verify: bool = True,
     cert: Optional[Tuple[str, str]] = None,
-    use_retry: bool = True,
     logger: Optional[logging.Logger] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
     config_proxy: Optional[str] = None,
@@ -457,6 +456,7 @@ async def arequest_backend_chat_completions(
     TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None → всегда
     non-stream, независимо от cfg["stream"]. Флаг stream — TUI-only.
     """
+    del use_retry  # стрим не ретраится; параметр принимается ради единого интерфейса с responses
     proxies = resolve_proxies(config_proxy, os.environ, url)
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 

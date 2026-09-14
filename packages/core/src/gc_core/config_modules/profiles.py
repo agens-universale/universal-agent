@@ -86,6 +86,19 @@ def _profile_files(root: Path) -> list[Path]:
     return [path for path in sorted(root.glob("*.yml")) if path.is_file()]
 
 
+def _register_profile(result: dict, path: Path, root_kind, notices: Optional[list[str]]) -> None:
+    name = path.stem
+    if name in RESERVED_WORDS:
+        if notices is not None:
+            notices.append(
+                f'{path}: имя профиля "{name}" зарезервировано — файл проигнорирован'
+            )
+        return
+    if name in result:
+        return  # тёзка из менее приоритетного корня — проектный уже выиграл
+    result[name] = ProfileRef(name=name, path=path, root_kind=root_kind)
+
+
 def discover_profiles(
     roots: list[Path], *, notices: Optional[list[str]] = None
 ) -> dict[str, "ProfileRef"]:
@@ -101,16 +114,7 @@ def discover_profiles(
         if not root.is_dir():
             continue
         for path in _profile_files(root):
-            name = path.stem
-            if name in RESERVED_WORDS:
-                if notices is not None:
-                    notices.append(
-                        f'{path}: имя профиля "{name}" зарезервировано — файл проигнорирован'
-                    )
-                continue
-            if name in result:
-                continue  # тёзка из менее приоритетного корня — проектный уже выиграл
-            result[name] = ProfileRef(name=name, path=path, root_kind=root_kind)
+            _register_profile(result, path, root_kind, notices)
     return result
 
 

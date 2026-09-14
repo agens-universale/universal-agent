@@ -588,6 +588,7 @@ def append_new_thread_messages(
     tags: Sequence[str] = (),
     strip_think: bool = True,
 ) -> int:
+    del tags, strip_think  # в сигнатуре ради совместимости — см. комментарий в конце функции
     if len(messages) == 0:
         return 0
 

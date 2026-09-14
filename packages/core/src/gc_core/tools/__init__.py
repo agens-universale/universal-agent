@@ -286,7 +286,7 @@ async def abuild_tools_data(
     )
     return _finish_tools_data(
         tools_data, mcp_tools_data, mcp_status, config_dict,
-        os_backend=os_backend, logger=logger,
+        logger=logger,
     )
 
 
@@ -315,7 +315,6 @@ def _finish_tools_data(
     mcp_status: dict,
     config_dict: Dict[str, Any],
     *,
-    os_backend: FsBackend | None,
     logger: Any,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """Досборка после дискавери: субагенты, фильтры, спеки. Ни сети, ни ожидания.

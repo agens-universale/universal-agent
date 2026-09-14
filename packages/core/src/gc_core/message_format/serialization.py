@@ -8,7 +8,7 @@ from gc_core.message_policy.user_message_policy import is_dialog_summary_user_me
 from gc_core.message_projection import project_assistant_text
 
 _ORIGINAL_USER_MESSAGES_BLOCK_RE = re.compile(
-    r"<original_user_messages>.*?</original_user_messages>\s*",
+    r"<original_user_messages>.*?</original_user_messages>\s*",  # NOSONAR: внутри блока бывают '<'
     re.IGNORECASE | re.DOTALL,
 )
 

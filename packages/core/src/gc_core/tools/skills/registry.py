@@ -11,6 +11,8 @@ from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 from gc_core.bundled_assets import bundled_root
 
+SKILL_MD = "SKILL.md"
+
 if TYPE_CHECKING:
     from gc_core.tools.skills.skill_arg_resolver import SkillCatalog
 
@@ -304,7 +306,7 @@ class SkillsRegistry:
         """Каталог в корне слоя: пак (pack.yaml) либо одиночный скилл (SKILL.md)."""
         entry_path = self._backend.join(root, entry)
         has_pack_yaml = await self._backend.is_file(self._backend.join(entry_path, "pack.yaml"))
-        has_skill_md = await self._backend.is_file(self._backend.join(entry_path, "SKILL.md"))
+        has_skill_md = await self._backend.is_file(self._backend.join(entry_path, SKILL_MD))
         if has_pack_yaml and self._walk_packs_enabled:
             if has_skill_md:
                 logger.warning(
@@ -342,7 +344,7 @@ class SkillsRegistry:
         source: str,
         pack_id: Optional[str] = None,
     ) -> Optional[Skill]:
-        skill_md = self._backend.join(skill_dir, "SKILL.md")
+        skill_md = self._backend.join(skill_dir, SKILL_MD)
         if not await self._backend.is_file(skill_md):
             return None
 
@@ -418,7 +420,7 @@ class SkillsRegistry:
             inner_path = self._backend.join(pack_dir, inner_entry)
             if not is_dir:
                 continue
-            if not await self._backend.is_file(self._backend.join(inner_path, "SKILL.md")):
+            if not await self._backend.is_file(self._backend.join(inner_path, SKILL_MD)):
                 continue
             skill = await self._load_skill_dir(
                 inner_path,

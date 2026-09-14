@@ -25,9 +25,9 @@ from gc_core.utils.pattern_native_gate import NativeGrepPlan, is_safe_grep_inclu
 
 log = logging.getLogger(__name__)
 
-_GREP_LINE_RE = re.compile(r"^(?P<path>[^:]+):(?P<line>[0-9]+):(?P<text>.*)$")
+_GREP_LINE_RE = re.compile(r"^(?P<path>[^:]+):(?P<line>\d+):(?P<text>.*)$", re.ASCII)
 # Tail of a ``--null`` record: the file name is already split off at NUL.
-_GREP_REST_RE = re.compile(r"^(?P<line>[0-9]+):(?P<text>.*)$")
+_GREP_REST_RE = re.compile(r"^(?P<line>\d+):(?P<text>.*)$", re.ASCII)
 # One grep record, read straight from the buffer — no list of lines.
 _RECORD_RE = re.compile(r"[^\n]+")
 _GREP_CLEAN_ENV = {
@@ -77,6 +77,75 @@ class _ParseFailure(Exception):
     """A record that is neither a match line nor a torn tail: the buffer is invalid."""
 
 
+def _record_fields(raw: str, *, torn_tail: bool) -> Optional[Tuple[str, int, str]]:
+    """``(path, line_no, text)``; None — torn last record to drop; raises on garbage."""
+    rec = _split_grep_record(raw)
+    if rec is not None:
+        return rec
+    if "Binary file" in raw or "\x1b[" in raw:
+        raise _ParseFailure()
+    if torn_tail:
+        return None
+    raise _ParseFailure()
+
+
+def _winner_entries(winners: Any, report_path: Callable[[str], str], torn_tail: bool) -> List[Dict[str, Any]]:
+    matches: List[Dict[str, Any]] = []
+    for _key, _i, abs_p, line_no, text, is_last in winners:
+        entry: Dict[str, Any] = {
+            "file": report_path(abs_p),
+            "line": line_no,
+            "end_line": line_no,
+            "line_content": text,
+            "context": text + ("\n" if not text.endswith("\n") else ""),
+        }
+        if torn_tail and is_last:
+            entry["line_content_truncated"] = True
+        matches.append(entry)
+    return matches
+
+
+class _RecordScan:
+    """One pass over the grep buffer: yields ``(key, i, abs_path, line_no, text, is_last)``."""
+
+    def __init__(self, stdout: str, *, hit_cap: bool, root: str, backend: Any,
+                 allow_path: Optional[Callable[[str], bool]], rank_key: Optional[Callable[[str], Any]]) -> None:
+        self._stdout = stdout
+        self._hit_cap = hit_cap
+        self._root = root
+        self._backend = backend
+        self._allow_path = allow_path
+        self._rank_key = rank_key
+        self._key_cache: Dict[str, Any] = {}
+        self.total = 0
+        self.files_seen: Set[str] = set()
+
+    def _key_for(self, abs_p: str) -> Any:
+        if self._rank_key is None:
+            return 0
+        key = self._key_cache.get(abs_p)
+        if key is None:
+            key = self._rank_key(abs_p)
+            self._key_cache[abs_p] = key
+        return key
+
+    def records(self) -> Iterator[Tuple[Any, int, str, int, str, bool]]:
+        end = len(self._stdout)
+        for i, rm in enumerate(_RECORD_RE.finditer(self._stdout)):
+            raw = rm.group(0).rstrip("\r")
+            is_last = rm.end() == end
+            rec = _record_fields(raw, torn_tail=self._hit_cap and is_last)
+            if rec is None:
+                return  # torn prefix: drop the tail, keep what parsed
+            p, line_no, text = rec
+            abs_p = p if self._backend.isabs(p) else self._backend.join(self._root, p)
+            if self._allow_path is not None and not self._allow_path(abs_p):
+                continue
+            self.total += 1
+            self.files_seen.add(abs_p)
+            yield self._key_for(abs_p), i, abs_p, line_no, text, is_last
+
+
 def _stream_top_k(
     stdout: str,
     *,
@@ -100,66 +169,23 @@ def _stream_top_k(
     ``rank_key=None`` — the plain path: every record in disk order (the legacy
     full parse, same brain, no second parser to drift).
     """
-    end = len(stdout)
     torn_tail = hit_cap and not stdout.endswith("\n")
-    total = 0
-    files_seen: Set[str] = set()
-    key_cache: Dict[str, Any] = {}
-
-    def records() -> Iterator[Tuple[Any, int, str, int, str, bool]]:
-        nonlocal total
-        for i, rm in enumerate(_RECORD_RE.finditer(stdout)):
-            raw = rm.group(0).rstrip("\r")
-            is_last = rm.end() == end
-            rec = _split_grep_record(raw)
-            if rec is None:
-                if "Binary file" in raw or "\x1b[" in raw:
-                    raise _ParseFailure()
-                if hit_cap and is_last:
-                    return  # torn prefix: drop the tail, keep what parsed
-                raise _ParseFailure()
-            p, line_no, text = rec
-            abs_p = p if backend.isabs(p) else backend.join(root, p)
-            if allow_path is not None and not allow_path(abs_p):
-                continue
-            total += 1
-            files_seen.add(abs_p)
-            if rank_key is None:
-                yield 0, i, abs_p, line_no, text, is_last
-                continue
-            key = key_cache.get(abs_p)
-            if key is None:
-                key = rank_key(abs_p)
-                key_cache[abs_p] = key
-            yield key, i, abs_p, line_no, text, is_last
-
+    scan = _RecordScan(stdout, hit_cap=hit_cap, root=root, backend=backend, allow_path=allow_path, rank_key=rank_key)
     try:
         if rank_key is not None and top_k is not None:
-            winners = heapq.nsmallest(top_k, records(), key=lambda r: (r[0], r[1]))
+            winners = heapq.nsmallest(top_k, scan.records(), key=lambda r: (r[0], r[1]))
         else:
-            winners = list(records())
+            winners = list(scan.records())
     except _ParseFailure:
         return NativeGrepResult(
             matches=[], truncated=False, hit_capture_cap=hit_cap, failure="native_error"
         )
-    matches: List[Dict[str, Any]] = []
-    for _key, _i, abs_p, line_no, text, is_last in winners:
-        entry: Dict[str, Any] = {
-            "file": report_path(abs_p),
-            "line": line_no,
-            "end_line": line_no,
-            "line_content": text,
-            "context": text + ("\n" if not text.endswith("\n") else ""),
-        }
-        if torn_tail and is_last:
-            entry["line_content_truncated"] = True
-        matches.append(entry)
     return NativeGrepResult(
-        matches=matches,
+        matches=_winner_entries(winners, report_path, torn_tail),
         truncated=hit_cap,
         hit_capture_cap=hit_cap,
-        total_matches=total,
-        files_seen=files_seen,
+        total_matches=scan.total,
+        files_seen=scan.files_seen,
     )
 
 
@@ -186,6 +212,13 @@ class NativeGrepResult:
     files_seen: Optional[Set[str]] = None
 
 
+def _backend_flag(backend: Any, name: str) -> bool:
+    try:
+        return bool(getattr(backend, name, False))
+    except Exception:
+        return False
+
+
 def native_grep_refusal(
     backend: Any,
     *,
@@ -203,34 +236,19 @@ def native_grep_refusal(
     """
     if plan is None:
         return "pattern_not_native"
-    try:
-        if not getattr(backend, "has_grep", False):
-            return "no_grep"
-    except Exception:
+    if not _backend_flag(backend, "has_grep"):
         return "no_grep"
 
     names = [n for n in (exclude_dir_names or []) if n]
-    # Call-time absolute excludes ride the same recipe as ``find -path … -prune``.
     need_prune = bool(names) or bool(exclude_nested_dot_dirs) or bool(call_exclude_dirs)
-    if need_prune:
-        # Express hard/nested-dot/call-time skips via find -prune (needs usable find).
-        try:
-            if not getattr(backend, "has_find", False):
-                return "no_find"
-        except Exception:
-            return "no_find"
+    if need_prune and not _backend_flag(backend, "has_find"):
+        return "no_find"
 
     if file_pattern is not None:
         if not is_safe_grep_include(file_pattern):
             return "file_pattern_not_native"
-        # With find prune path we use find -name for include (no grep_include required).
-        # Plain grep -R path still needs grep_include when no find prune.
-        if not need_prune:
-            try:
-                if not getattr(backend, "grep_include", False):
-                    return "no_grep_include"
-            except Exception:
-                return "no_grep_include"
+        if not need_prune and not _backend_flag(backend, "grep_include"):
+            return "no_grep_include"
 
     return None
 
@@ -667,6 +685,23 @@ async def arun_native_grep(
     )
 
 
+def _grep_exit_outcome(rc: Any, stdout: str, stderr: str, hit_cap: bool) -> Optional[NativeGrepResult]:
+    """Итог по коду выхода grep без разбора вывода; None — вывод надо разбирать."""
+    def _failed(kind: str) -> NativeGrepResult:
+        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind)
+
+    empty = NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
+    if rc is not None and rc >= 2 and (rc != 123 or (stderr.strip() and "Binary" not in stderr)):
+        return _failed("native_error")
+    if rc == 1:
+        return _failed("native_error") if (stderr.strip() or stdout.strip()) else empty
+    if rc not in (0, 123, None):
+        return _failed("native_error")
+    if rc == 0 and not stdout.strip() and not hit_cap:
+        return empty
+    return None
+
+
 def _grep_result(
     res: Any,
     *,
@@ -694,26 +729,10 @@ def _grep_result(
     hit_cap = bool(getattr(res, "stdout_hit_capture_cap", False))
 
     # xargs may return 123 if grep returns 1 on some chunks — treat carefully.
-    if rc is not None and rc >= 2:
-        # 123 from xargs: some invocations failed
-        if rc not in (123,):
-            return _failed("native_error", hit_cap=hit_cap)
-        # still try parse if stdout looks clean
-        if stderr.strip() and "Binary" not in stderr:
-            return _failed("native_error", hit_cap=hit_cap)
+    early = _grep_exit_outcome(rc, stdout, stderr, hit_cap)
+    if early is not None:
+        return early
 
-    if rc == 1:
-        if stderr.strip():
-            return _failed("native_error", hit_cap=hit_cap)
-        if stdout.strip():
-            return _failed("native_error", hit_cap=hit_cap)
-        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
-
-    if rc not in (0, 123, None):
-        return _failed("native_error", hit_cap=hit_cap)
-    if rc == 0 and not stdout.strip() and not hit_cap:
-        # empty success — ok for xargs -r with zero files
-        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
 
     result = _stream_top_k(
         stdout,

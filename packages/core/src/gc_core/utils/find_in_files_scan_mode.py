@@ -156,6 +156,22 @@ def _pick_longer(a: str | None, b: str | None) -> str | None:
     return a if len(a) >= len(b) else b
 
 
+def _affix_or_pattern(body: str, effective_ci: bool) -> "ScanPattern | None":
+    """AFFIX_OR: литеральный префикс/суффикс вокруг одной группы альтернатив."""
+    grouped = _split_single_group(body)
+    if grouped is None:
+        return None
+    pre, inner, suf = grouped
+    if "|" in pre or "|" in suf:
+        return None
+    pre_ok = is_literal_string(pre) if pre else False
+    suf_ok = is_literal_string(suf) if suf else False
+    if not (pre_ok or suf_ok):
+        return None
+    req = _pick_longer(pre if pre_ok else None, suf if suf_ok else None)
+    return ScanPattern(PatternMode.AFFIX_OR, Needles(req, _pure_or_branches(inner), effective_ci))
+
+
 def classify_scan_pattern(
     pattern: str,
     *,
@@ -196,24 +212,9 @@ def classify_scan_pattern(
         )
 
     # 3. affix_or — exactly one (…); prefix and/or suffix is pure literal
-    grouped = _split_single_group(body)
-    if grouped is not None:
-        pre, inner, suf = grouped
-        # A top-level ``|`` outside the group has the lowest precedence:
-        # ``foo(bar|baz)|qux`` is ``(foo(bar|baz))|(qux)``, so no affix is
-        # required by the whole pattern. Disqualifying, not merely impure.
-        has_top_level_or = "|" in pre or "|" in suf
-        pre_ok = is_literal_string(pre) if pre else False
-        suf_ok = is_literal_string(suf) if suf else False
-        if not has_top_level_or and (pre_ok or suf_ok):
-            req = _pick_longer(pre if pre_ok else None, suf if suf_ok else None)
-            # or_group only when every inner branch is pure
-            inner_ors = _pure_or_branches(inner)
-            return ScanPattern(
-                PatternMode.AFFIX_OR,
-                Needles(req, inner_ors, effective_ci),
-            )
-
+    affix = _affix_or_pattern(body, effective_ci)
+    if affix is not None:
+        return affix
     # 4. everything else
     return ScanPattern(
         PatternMode.COMPLEX,

@@ -139,7 +139,6 @@ select = [
     "F841",     # неиспользуемые локальные переменные (S1481)
     "B014",     # лишний класс в except, уже перекрытый родителем (S1044)
     "SIM102",   # merge nested if (S1066)
-    "PLR0913",  # слишком много параметров (S107)
     "PLR1714",  # повторные сравнения одной переменной
     "PLR5501",  # collapsible else-if
     "PLW0120",  # else на цикле без break
@@ -154,10 +153,7 @@ ignore = [
     "ARG005",   # неиспользуемые параметры lambda
 ]
 
-[tool.ruff.lint.pylint]
-max-args = 13   # порог Sonar S107 в проекте
-
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["ARG", "PLR0913", "F841", "SIM102"]
+"**/tests/**" = ["ARG", "F841", "SIM102"]
 "**/conftest.py" = ["ARG"]
 

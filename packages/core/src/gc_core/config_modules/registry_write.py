@@ -72,7 +72,7 @@ class RemovalReport:
 # Ключ, который в YAML можно писать без кавычек. Всё прочее (wildcard `*`
 # привязок субагентов) — через `quote_scalar`: literal-сравнение записей в
 # writer'е идёт по тому же виду, в каком ключ лежит в файле.
-_PLAIN_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+\-]*$")
+_PLAIN_KEY_RE = re.compile(r"^\w[\w.+\-]*$", re.ASCII)
 
 
 def _yaml_key(key: str) -> str:

@@ -306,7 +306,6 @@ Usage:
 
     def _finish(self, res: "Any", plan: dict) -> str:
         """Разобрать результат запуска. Общий для обоих входов."""
-        cwd_used = plan["cwd"]
         effective_timeout = plan["timeout"]
 
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
