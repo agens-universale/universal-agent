@@ -131,12 +131,15 @@ class HarborBackend(FsBackend):
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
         """Internal exec. ``capture_max_chars=None`` → tool-trace cap (40k/поток)."""
-        # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
+        # docker exec не принимает словарь окружения. `env` — не шелл: он
+        # делает exec только первого слова, поэтому `env K=V cd x && foo`
+        # не меняет каталог и не отдаёт K хвосту. Вся команда — один аргумент
+        # bash -c, чтобы операторы, builtin'ы и раскрытия видели эти переменные.
         if env:
             prefix = "env " + " ".join(
                 f"{k}={shlex.quote(str(v))}" for k, v in env.items()
             )
-            command = f"{prefix} {command}"
+            command = f"{prefix} bash -c {shlex.quote(command)}"
         full = f"cd {shlex.quote(cwd)} && {command}" if cwd else command
         cap = self._capture_cap(capture_max_chars)
         scope, streamed = self._output_capture(cap)

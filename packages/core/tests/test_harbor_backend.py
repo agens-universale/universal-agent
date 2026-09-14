@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import threading
 import pytest
 from gc_core.backends.harbor import HarborBackend
@@ -198,14 +199,56 @@ def test_exec_env_prefix_quoting(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     backend.exec("echo hi", env={"FOO": "bar baz"})
-    assert env.calls == ["env FOO='bar baz' echo hi"]
+    assert env.calls == ["env FOO='bar baz' bash -c 'echo hi'"]
 
 
 def test_exec_env_prefix_with_cwd(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     backend.exec("echo hi", cwd="/work", env={"FOO": "bar"})
-    assert env.calls == ["cd /work && env FOO=bar echo hi"]
+    assert env.calls == ["cd /work && env FOO=bar bash -c 'echo hi'"]
+
+
+def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path):
+    """`env` must not swallow `cd`/`&&`: the user script runs inside bash -c."""
+    work = tmp_path / "proj"
+    work.mkdir()
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    backend.exec(
+        'cd sub && printf "%s\\n" "$FOO" && printf "%s\\n" "$(pwd)"',
+        cwd=str(work),
+        env={"FOO": "bar baz"},
+    )
+    script = env.calls[0]
+    assert script.startswith(f"cd {work} && env FOO='bar baz' bash -c ")
+    # cwd снаружи, скрипт агента — один закавыченный аргумент, не префикс env.
+    assert "cd sub &&" in script.split("bash -c ", 1)[1]
+
+    (work / "sub").mkdir()
+    proc = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == f"bar baz\n{work / 'sub'}\n"
+
+
+def test_run_python_env_survives_bash_c_wrap(loop_in_thread):
+    """Heredoc of run_python must still run after the env prefix is quoted."""
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    backend.run_python("import os\nprint(os.environ['FOO'])\n", env={"FOO": "it's"})
+    proc = subprocess.run(
+        ["bash", "-c", env.calls[0]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == "it's\n"
 
 
 def test_every_impl_signature_accepts_protocol_parameters():
