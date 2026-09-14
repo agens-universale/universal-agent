@@ -2,7 +2,14 @@ import pytest
 
 from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
-from gc_core.tools.schema_optional import resolve_optional_property_keys
+from gc_core.tools.schema_optional import (
+    OPTIONAL_EMPTY_AS_OMIT_HINT,
+    OPTIONAL_OMIT_HINT,
+    X_SUPPRESS_OPTIONAL_HINT,
+    apply_openai_strict_parameters,
+    augment_optional_property_descriptions,
+    resolve_optional_property_keys,
+)
 
 INJECT = {"reason": "One short sentence explaining the purpose of this call."}
 
@@ -54,6 +61,23 @@ def test_call_with_reason_still_validates():
         allow_empty_for_empty_schema=False,
     )
     assert args["reason"] == "read the module"
+
+
+@pytest.mark.parametrize("openai_strict", [False, True])
+def test_injected_reason_does_not_get_omit_hint(openai_strict):
+    spec = _spec()
+    apply_injected_fields_to_spec(spec, INJECT)
+    if openai_strict:
+        apply_openai_strict_parameters(spec["parameters"])
+    augment_optional_property_descriptions(spec, openai_strict=openai_strict)
+
+    prop = spec["parameters"]["properties"]["reason"]
+    assert prop[X_SUPPRESS_OPTIONAL_HINT] is True
+    assert prop["description"] == INJECT["reason"]
+    assert OPTIONAL_OMIT_HINT not in prop["description"]
+    assert OPTIONAL_EMPTY_AS_OMIT_HINT not in prop["description"]
+    assert spec["parameters"]["required"][0] == "reason"
+    assert "reason" in resolve_optional_property_keys(spec["parameters"])
 
 
 def test_real_required_field_still_enforced():

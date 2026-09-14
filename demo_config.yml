@@ -279,7 +279,7 @@ agent:
   # Каждый край front-loaded preview длинного потока (P ≤ L - floor(L/2)); 0 — без preview.
   exec_output_preview_edge_chars: 3000
   inject_tool_fields:
-    reason: "Brief rationale (1–2 sentences): goal, why now, expected outcome."
+    reason: "At most 10 words: why this call, what you expect."
   # Имя HTTP-заголовка для внешнего trace_id (флаг gc-cli --trace-id или поле
   # trace_id в теле вебхука). Не задано — заголовок к модели называется
   # x_trace_id, заголовок к MCP-серверам — trace_id.
