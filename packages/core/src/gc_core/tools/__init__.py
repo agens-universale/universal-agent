@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, Iterable, Tuple, Optional
 
 from gc_core.tools.connect_mcp import get_mcp_tools_data
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, annotate_output_with_dropped_arguments, parse_and_validate_tool_arguments
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
 from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
@@ -403,12 +403,14 @@ def apply_tool(
             return f"Subagent {tool_name}: missing state or run_agent_func"
         entry = tools_data_.get(tool_name) or {}
         tool_spec = entry.get("spec", {}) or {}
+        dropped_unknown: list[str] = []
         parsed_args = parse_and_validate_tool_arguments(
             tool_name=tool_name,
             arguments=arguments,
             tool_spec=tool_spec,
             allow_empty_for_empty_schema=False,
             tool_fabric=entry.get("tool_fabric"),
+            dropped_unknown=dropped_unknown,
         )
         prepare = getattr(entry.get("tool_fabric"), "prepare_args_before_strip", None)
         if callable(prepare):
@@ -418,11 +420,14 @@ def apply_tool(
             injected_fields=entry.get("injected_fields") or [],
         )
         runner = SubagentRunner(ctx, orchestrator_state, config_dict)
-        return runner.run(
-            tool_name,
-            parsed_args,
-            run_agent_func,
-            parent_call_id=kwargs.get("call_id"),
+        return annotate_output_with_dropped_arguments(
+            runner.run(
+                tool_name,
+                parsed_args,
+                run_agent_func,
+                parent_call_id=kwargs.get("call_id"),
+            ),
+            dropped_unknown,
         )
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
@@ -445,12 +450,14 @@ def apply_tool(
 
     # Определяем, ожидает ли инструмент пустую схему (нет параметров)
     spec = tools_data_[tool_name].get("spec", {}) or {}
+    dropped_unknown: list[str] = []
     arguments = parse_and_validate_tool_arguments(
         tool_name=tool_name,
         arguments=arguments,
         tool_spec=spec,
         allow_empty_for_empty_schema=True,
         tool_fabric=tool_fabric,
+        dropped_unknown=dropped_unknown,
     )
     entry = tools_data_[tool_name]
     prepare = getattr(tool_fabric, "prepare_args_before_strip", None)
@@ -492,10 +499,13 @@ def apply_tool(
             tool_name,
             call_id,
         )
-        return format_internal_tool_error_output(
-            tool_name=tool_name,
-            exc=e,
-            call_id=call_id,
+        return annotate_output_with_dropped_arguments(
+            format_internal_tool_error_output(
+                tool_name=tool_name,
+                exc=e,
+                call_id=call_id,
+            ),
+            dropped_unknown,
         )
 
     if isinstance(res, str):
@@ -507,7 +517,7 @@ def apply_tool(
     else:
         res_str = str(res)
 
-    return res_str
+    return annotate_output_with_dropped_arguments(res_str, dropped_unknown)
 
 
 __all__ = [
