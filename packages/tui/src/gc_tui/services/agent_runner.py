@@ -113,6 +113,11 @@ class AgentRunner:
         self._thread_kind: str = ""
         self._confirm_event = threading.Event()
         self._confirm_choice: str = "deny_once"
+        # Runner сняли (замена, сброс, выход приложения) — логгер его прогона
+        # надо отдать (см. `release`). Живые воркеры считаются под `_lock`:
+        # если поток ещё идёт, логгер отдаёт последний из них на выходе.
+        self._released = False
+        self._workers = 0
 
     def _emit_error(self, exc: BaseException) -> None:
         """Сообщить об ошибке в TUI, если runner ещё «актуальный».
@@ -194,7 +199,11 @@ class AgentRunner:
                 self._ensure_executor()
             except Exception as exc:
                 self._emit_error(exc)
+            finally:
+                self._worker_exit()
 
+        with self._lock:
+            self._workers += 1
         threading.Thread(target=_target, name="gc-ua-warm", daemon=True).start()
 
     def is_running(self) -> bool:
@@ -251,9 +260,12 @@ class AgentRunner:
                     asyncio.run(_compact_body(executor, thread_id, system))
                 except Exception as exc:
                     self._emit_error(exc)
+                finally:
+                    self._worker_exit()
 
             t = threading.Thread(target=_target, name="gc-ua-compact", daemon=True)
             self._thread = t
+            self._workers += 1
         t.start()
         return True
 
@@ -325,9 +337,12 @@ class AgentRunner:
                                 pass
                     except Exception as exc:
                         self._emit_error(exc)
+                    finally:
+                        self._worker_exit()
 
             t = threading.Thread(target=_target, name="gc-ua-agent", daemon=True)
             self._thread = t
+            self._workers += 1
         t.start()
         return True
 
@@ -348,6 +363,40 @@ class AgentRunner:
         # агента, а сокеты жили до конца процесса. Симметрия с
         # `cancel_confirm` здесь не косметика: оба ожидания блокирующие.
         self.cancel_ask_human()
+
+    def release(self) -> None:
+        """Runner больше не нужен — отдать логгер его прогона.
+
+        ``acreate_run_context`` заводит на ран свой логгер
+        (``agent_run_<kind>_<run_id>``) с файлом и хендлером на stderr, а
+        ``logging`` держит его в ``loggerDict`` до конца процесса. TUI его не
+        отдавал никогда: каждый снятый runner оставлял логгер, открытый
+        дескриптор и всё, до чего дотягивается stderr-хендлер. В тестах stderr —
+        перехват Textual, поэтому логгер держал приложение целиком (экран,
+        runner, executor, кэши отрисовки): около 0,6 МБ на тест, и полный
+        прогон TUI в одном процессе упирался в память.
+
+        Если поток ещё работает (стоп посреди HTTP), логгер отдаёт он сам на
+        выходе: отнимать хендлеры у пишущего прогона нельзя.
+        """
+        with self._lock:
+            self._released = True
+            idle = self._workers == 0
+        if idle:
+            self._release_logger()
+
+    def _worker_exit(self) -> None:
+        with self._lock:
+            self._workers -= 1
+            last = self._workers == 0 and self._released
+        if last:
+            self._release_logger()
+
+    def _release_logger(self) -> None:
+        from gc_core.utils.logging_module import release_run_logger
+
+        ctx = getattr(self._executor, "_ctx", None)
+        release_run_logger(getattr(ctx, "logger", None))
 
     def add_message(self, message: dict) -> None:
         # executor может ещё строиться — тогда буферизуем; worker-поток дольёт

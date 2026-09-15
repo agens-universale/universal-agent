@@ -57,6 +57,15 @@ def register_runtime_notices_listener(callback: Callable[[], None]) -> None:
             _listeners.append(callback)
 
 
+def unregister_runtime_notices_listener(callback: Callable[[], None]) -> None:
+    """Снять подписку. Список модульный, и подписчик в нём живёт до конца
+    процесса: TUI подписывает связанный метод приложения, и без отписки на
+    выходе каждое приложение оставалось в памяти целиком."""
+    with _lock:
+        if callback in _listeners:
+            _listeners.remove(callback)
+
+
 def clear_runtime_notices(*, listeners: bool = False) -> None:
     """Сброс (тесты / новая сессия). listeners=True — снять подписки TUI."""
     with _lock:

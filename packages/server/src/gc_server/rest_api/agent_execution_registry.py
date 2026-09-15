@@ -152,6 +152,12 @@ class AgentRunRegistry:
                         if run_ref is not None:
                             self._completed[key] = run_ref
                             self._cleanup_completed_locked()
+                    # Логгер прогона `logging` держит до конца процесса, а
+                    # сервер ведёт прогоны без счёта: без этого каждый запрос
+                    # оставлял по логгеру с открытым файлом.
+                    from gc_core.utils.logging_module import release_run_logger
+
+                    release_run_logger(getattr(ctx, "logger", None))
 
             # Таска, а не поток: эндпоинт уже на loop, а ядро больше не блокирует.
             t = asyncio.get_running_loop().create_task(

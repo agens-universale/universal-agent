@@ -49,6 +49,22 @@ def test_agent_run_closes_its_pool_in_finally():
     )
 
 
+def test_agent_run_releases_the_trial_logger_in_finally():
+    """Логгер трайла отдаётся в `finally`: Harbor ведёт трайлы без счёта в
+    одном процессе, а `logging` держит каждый логгер с открытым файлом до конца."""
+    run = _func(_adapter_tree(), "_agent_run")
+
+    tries = [n for n in ast.walk(run) if isinstance(n, ast.Try)]
+    released_in_finally = any(
+        isinstance(c.func, ast.Name) and c.func.id == "release_run_logger"
+        for t in tries for stmt in t.finalbody for c in ast.walk(stmt)
+        if isinstance(c, ast.Call)
+    )
+    assert released_in_finally, (
+        "release_run_logger() не в finally — логгер трайла живёт до конца процесса"
+    )
+
+
 def test_cancellation_is_recorded_before_the_executor_exists():
     """Флаг отмены обязан читаться ПЕРЕД `arun`, а ставиться в обработчике."""
     tree = _adapter_tree()

@@ -11,7 +11,7 @@ from textual.app import App
 from textual.binding import Binding
 from textual.screen import Screen
 
-from gc_core.runtime_notices import collect_runtime_notices, collect_unread_runtime_notices, push_runtime_notice, register_runtime_notices_listener
+from gc_core.runtime_notices import collect_runtime_notices, collect_unread_runtime_notices, push_runtime_notice, register_runtime_notices_listener, unregister_runtime_notices_listener
 from gc_core.startup_notices import Notice, collect_startup_notices
 from gc_tui.services.voice_notices import voice_notices
 from gc_tui import branding, palette
@@ -91,6 +91,16 @@ def _run_auto_check_safely(config: dict, state: dict, now: float, installed_comm
                           on_available=on_available, on_result=on_result)
     except Exception:
         pass
+
+
+def _release_runner(runner) -> None:
+    """Отдать логгер прогона снимаемого runner'а (см. `AgentRunner.release`).
+
+    Через getattr: тесты подставляют в ``active_runner`` двойников без него.
+    """
+    release = getattr(runner, "release", None)
+    if callable(release):
+        release()
 
 
 class TuiApp(App):
@@ -995,8 +1005,19 @@ class TuiApp(App):
         if runner is not None and runner.is_running():
             self._runner_stale = True
             return
+        _release_runner(runner)
         self.active_runner = None
         self._runner_stale = False
+
+    def on_unmount(self) -> None:
+        """Выход приложения — отпустить всё, что держит его из модулей ядра.
+
+        Логгер прогона (см. `AgentRunner.release`) и подписка на
+        runtime-уведомления: и то и другое живёт в модульных реестрах до конца
+        процесса и держит приложение целиком, если его не снять.
+        """
+        _release_runner(self.active_runner)
+        unregister_runtime_notices_listener(self._on_runtime_notice)
 
     def _finish_onboarding(self) -> None:
         """Финал онбординга (auto и review одинаково): reload_config + переход
@@ -1030,6 +1051,7 @@ class TuiApp(App):
         """
         if (self.active_runner is not None and self._runner_stale
                 and not self.active_runner.is_running()):
+            _release_runner(self.active_runner)
             self.active_runner = None
             self._runner_stale = False
         if self.active_runner is not None:

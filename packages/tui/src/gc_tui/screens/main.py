@@ -4814,6 +4814,10 @@ class TraceScreen(Screen):
                 self.app.last_stop_requested = True
             runner.stop()
             runner._marked_stopped = True
+            # Поток может ещё досиживать HTTP — тогда логгер отдаст он сам.
+            release = getattr(runner, "release", None)
+            if callable(release):
+                release()
         self.app.active_runner = None
 
     def _stop_for_ask_human(self) -> None:

@@ -1,8 +1,9 @@
-"""Synchronous FsBackend over an async Harbor BaseEnvironment.
+"""Coroutine FsBackend over an async Harbor BaseEnvironment.
 
-The gc-cli tool loop is synchronous; Harbor's environment is async and bound to the
-adapter's event loop. Every method marshals its coroutine onto that loop via
-run_coroutine_threadsafe and blocks the (worker-thread) caller until it completes.
+Harbor's environment is bound to the adapter's event loop. Every operation here is a
+coroutine: on that loop it awaits the environment directly, from any other loop (the
+agent's own ``asyncio.run``) it schedules the call there and awaits the result via
+``wrap_future`` — no thread is blocked either way (see ``_aawait``).
 File ops mirror deepagents' HarborSandbox: write/edit use native upload/download,
 read/list use shell through exec.
 """
