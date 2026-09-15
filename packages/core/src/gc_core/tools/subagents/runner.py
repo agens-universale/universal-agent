@@ -535,7 +535,9 @@ class SubagentRunner:
         Вынесено отдельно, чтобы класс-1 фоллбэк (спека §8, ``_maybe_pin_fallback``)
         мог вызвать его повторно (рестарт/деградация) со свежим scope — переиспользовать
         уже закрытый ``scope`` первой попытки небезопасно (его `__exit__` уже отработал)."""
-        with activate_child_input(parent_call_id=self._parent_call_id) as scope:
+        with activate_child_input(
+            self._ctx, parent_call_id=self._parent_call_id
+        ) as scope:
             # Колбэк enqueue приходит из ЧУЖОГО потока: его дёргает
             # `AgentExecutor.add_message`, которую зовёт TUI, и loop'а там нет.
             # Поэтому запись трассы уезжает на loop ЭТОГО прогона, а не делается

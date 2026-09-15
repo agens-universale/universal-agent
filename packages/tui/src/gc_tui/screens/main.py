@@ -4419,13 +4419,11 @@ class TraceScreen(Screen):
             return
 
         if runner.is_running():
-            from gc_core.tools.subagents.active_scope import is_child_input_active
-
             self._reset_thinking_timer()
             self._on_user_text_submitted(text)
             # Active subagent → nested under subagent_* (progress/sidecar); иначе
             # parent pending + обычная user-строка в трейсе.
-            if not is_child_input_active():
+            if not runner.is_child_input_active():
                 client_id = self._track_pending(display_text=text, wire_content=text)
                 self._mount_user_reply(text, state="pending", client_id=client_id)
             runner.add_message({"role": "user", "content": text, "id": msg_id})
@@ -5057,14 +5055,12 @@ class TraceScreen(Screen):
 
         runner = self.app.active_runner
         if runner is not None and runner.is_running():
-            from gc_core.tools.subagents.active_scope import is_child_input_active
-
             msg = {"role": "user", "content": full_query, "id": msg_id,
                    "display_content": prompt}
             if skill_loaded:
                 msg["skill_loaded"] = skill_loaded
             runner.add_message(msg)
-            if not is_child_input_active():
+            if not runner.is_child_input_active():
                 client_id = self._track_pending(
                     display_text=prompt, wire_content=full_query
                 )

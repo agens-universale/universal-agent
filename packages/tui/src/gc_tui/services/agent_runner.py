@@ -358,6 +358,21 @@ class AgentRunner:
         else:
             self._prebuild_messages.append(message)
 
+    def is_child_input_active(self) -> bool:
+        """Ждёт ли ввод субагент ЭТОГО прогона.
+
+        Спрашиваем СВОЙ executor, а не модуль ядра: модульная функция отвечала
+        за весь процесс, и в многосессионном сервере это был ответ про чужой
+        прогон. Executor ещё не собран — субагента нет и подавно.
+        """
+        ex = self._executor
+        if ex is None:
+            return False
+        try:
+            return bool(ex.is_child_input_active())
+        except Exception:
+            return False
+
     def submit_ask_human_reply(self, text: str) -> None:
         """TUI кладёт ответ юзера в queue. ask_human читает строки до пустой,
         поэтому шлём ответ + завершающую пустую строку (иначе read-loop виснет)."""
