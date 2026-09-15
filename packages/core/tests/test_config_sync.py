@@ -90,6 +90,65 @@ def test_sync_applies_renames(monkeypatch, tmp_path):
     assert report.renamed == 1
 
 
+def test_needs_sync_true_for_legacy_llm_section():
+    """Секционный RENAMES: лист chat_completions.llm.max_tokens тоже триггерит sync."""
+    user = "chat_completions:\n  llm:\n    max_tokens: 1111\n"
+    template = "backend:\n  completions_url: \"http://x\"\n"
+    assert config_sync.needs_sync(user, template) is True
+
+
+def test_sync_renames_legacy_llm_in_verbatim_section(tmp_path):
+    """chat_completions нет в шаблоне — verbatim + финальный rename llm → auxiliary_llm."""
+    import re
+    import yaml
+
+    user = (
+        "backend:\n"
+        "  completions_url: \"http://real/v1\"\n"
+        "chat_completions:\n"
+        "  llm:\n"
+        "    max_tokens: 1111\n"
+    )
+    cfg, report = _run_sync(tmp_path, user=user)
+    out = cfg.read_text(encoding="utf-8")
+    assert "auxiliary_llm:" in out
+    assert "max_tokens: 1111" in out
+    assert re.search(r"(?m)^\s+llm:", out) is None
+    parsed = yaml.safe_load(out)
+    assert "llm" not in parsed.get("chat_completions", {})
+    assert parsed["chat_completions"]["auxiliary_llm"]["max_tokens"] == 1111
+    assert report.renamed >= 1
+
+
+def test_sync_renames_legacy_llm_when_template_has_auxiliary(tmp_path):
+    """Шаблон уже с auxiliary_llm — line-copy с rename секции."""
+    import re
+    import yaml
+
+    template = (
+        "backend:\n"
+        "  completions_url: \"http://sentinel\"\n"
+        "chat_completions:\n"
+        "  auxiliary_llm:\n"
+        "    max_tokens: 8192\n"
+    )
+    user = (
+        "backend:\n"
+        "  completions_url: \"http://real/v1\"\n"
+        "chat_completions:\n"
+        "  llm:\n"
+        "    max_tokens: 1111\n"
+    )
+    cfg, report = _run_sync(tmp_path, user=user, template=template)
+    out = cfg.read_text(encoding="utf-8")
+    assert "auxiliary_llm:" in out
+    assert "max_tokens: 1111" in out
+    assert re.search(r"(?m)^\s+llm:", out) is None
+    parsed = yaml.safe_load(out)
+    assert "llm" not in parsed.get("chat_completions", {})
+    assert report.renamed >= 1
+
+
 def test_sync_removed_key_stays_only_in_backup(monkeypatch, tmp_path):
     monkeypatch.setattr(compat, "REMOVED", {"my_unknown_key": "удалён"})
     cfg, report = _run_sync(tmp_path)
