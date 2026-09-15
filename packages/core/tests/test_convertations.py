@@ -337,6 +337,14 @@ def test_get_output_list_mixed_think_prose_in_content_keeps_only_prose():
     assert text == "короткая проза"
 
 
+def test_get_output_list_literal_unclosed_think_in_prose_kept():
+    """Незакрытый ``<think>`` в прозе — литерал, канон не режем."""
+    raw = "Use the <think> tag carefully."
+    out = get_output_list(_dct("stop", content=raw))
+    _, text = _message_text(out)
+    assert text == raw
+
+
 def test_get_output_list_persist_keeps_mixed_think_prose():
     out = get_output_list(
         _dct("stop", content="<think>огромная мысль</think>короткая проза"),

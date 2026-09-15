@@ -67,17 +67,16 @@ def get_md5_hash(obj):
     return hashlib.md5(s.encode('utf-8')).hexdigest()
 
 
+# Только закрытая пара, нежадно. Незакрытый ``<think>`` в прозе не трогаем
+# (иначе «Use the <think> tag carefully.» → «Use the»).
 _THINK_CLOSED_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-_THINK_UNCLOSED_RE = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
 
 
 def _visible_prose_without_think(text: str) -> str:
-    """Проза после вырезания ``<think>`` (closed + незакрытый хвост). Без импорта projection."""
+    """Проза после вырезания закрытых ``<think>…</think>``. Без импорта projection."""
     if not isinstance(text, str) or not text:
         return ""
-    result = _THINK_CLOSED_RE.sub("", text)
-    result = _THINK_UNCLOSED_RE.sub("", result)
-    return result.strip()
+    return _THINK_CLOSED_RE.sub("", text).strip()
 
 
 def _canon_content_text(content, *, persist_reasoning: bool):
