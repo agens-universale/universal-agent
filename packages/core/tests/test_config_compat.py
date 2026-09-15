@@ -97,7 +97,10 @@ def test_layered_llm_and_auxiliary_llm_loads(tmp_path, monkeypatch):
     monkeypatch.chdir(proj)
 
     cfg = load_config(str(global_cfg))
-    assert cfg["chat_completions_llm"].max_tokens == 4096
+    from gc_core.config_modules.chat_completions import auxiliary_llm_from_config_dict
+
+    assert cfg["auxiliary_llm_params"]["max_tokens"] == 4096
+    assert auxiliary_llm_from_config_dict(cfg).max_tokens == 4096
     assert "llm" not in cfg["chat_completions_params"]
 
 

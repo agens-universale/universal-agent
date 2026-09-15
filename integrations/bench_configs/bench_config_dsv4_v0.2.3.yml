@@ -39,11 +39,10 @@ agent_kwargs:
         thinking: true
         reasoning_effort: high
       tool_choice: auto
-    chat_completions_params:
-      auxiliary_llm:
-        max_tokens: 8192                 # aux LLM: summary / intent-scope
-        judge_max_tokens: 10000          # finish-gate / command_moderation
-        completion_kwargs: {}
+    auxiliary_llm_params:
+      max_tokens: 8192                 # aux LLM: summary / intent-scope
+      judge_max_tokens: 10000          # finish-gate / command_moderation
+      completion_kwargs: {}
 
     # --- cybergym level0 content ---
     chat_completions_special_instructions_path: "/opt/gc-harbor-adapters/prompts/cybergym_special_instructions_honest_level0.md"

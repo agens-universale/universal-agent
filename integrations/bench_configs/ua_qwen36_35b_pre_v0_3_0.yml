@@ -42,16 +42,15 @@ agent_kwargs:
         enable_thinking: true                # чат-шаблон Qwen: генерировать thinking
       tool_choice: auto
     # Вспомогательные LLM (summary, finish-gate, command_moderation, intent-scope).
-    # completion_kwargs мержится ПОВЕРХ chat_completion_kwargs агента.
-    chat_completions_params:
-      auxiliary_llm:
-        max_tokens: 8192                     # лимит ответа: summary / intent-scope
-        judge_max_tokens: 10000              # лимит ответа: finish-gate / command_moderation
-        subagent_role_max_tokens: 4096       # лимит ответа: special_agent role draft; субагенты выкл
-        completion_kwargs:
-          separate_reasoning: false          # aux: не ждать reasoning_content
-          chat_template_kwargs:
-            enable_thinking: false           # aux: thinking выкл, даже если у агента вкл
+    # Плоский ключ рядом с chat_completion_kwargs; completion_kwargs мержится ПОВЕРХ агентских.
+    auxiliary_llm_params:
+      max_tokens: 8192                     # лимит ответа: summary / intent-scope
+      judge_max_tokens: 10000              # лимит ответа: finish-gate / command_moderation
+      subagent_role_max_tokens: 4096       # лимит ответа: special_agent role draft; субагенты выкл
+      completion_kwargs:
+        separate_reasoning: false          # aux: не ждать reasoning_content
+        chat_template_kwargs:
+          enable_thinking: false           # aux: thinking выкл, даже если у агента вкл
 
     # --- agent loop ---
     system_prompt_id: v1

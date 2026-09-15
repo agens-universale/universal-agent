@@ -231,8 +231,9 @@ def test_special_agent_role_generation_respects_configured_max_tokens_override(m
         config_dict={
             "completions_url": "http://backend.local/v1/chat/completions",
             "backend_request_timeout_sec": 600,
-            "chat_completions_llm": ChatCompletionsLlmConfig(subagent_role_max_tokens=222),
+            "auxiliary_llm_params": {"subagent_role_max_tokens": 222},
         },
+        auxiliary_llm=ChatCompletionsLlmConfig(subagent_role_max_tokens=222),
         auth_connector=None,
         model_router=None,
         logger=None,

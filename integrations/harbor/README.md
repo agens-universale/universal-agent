@@ -101,10 +101,15 @@ agent_kwargs:
   gc_cli_config:
     max_steps: 300                      # дефолт 200
     no_tool_call_max_count: 3           # дефолт 3 (0 = обрыв с первой ошибки тула)
-    chat_completion_kwargs:             # сэмплинг
+    chat_completion_kwargs:             # сэмплинг агента
       temperature: 1.0
       top_p: 0.95
       top_k: 40
+    auxiliary_llm_params:               # summary / finish-gate / judges (dict)
+      max_tokens: 8192
+      completion_kwargs:
+        chat_template_kwargs:
+          enable_thinking: false
     summary_params:                     # суммаризация (по умолчанию ВЫКЛ)
       chat_completions_summary_trigger_chars: 200000
 ```

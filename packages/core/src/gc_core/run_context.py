@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from gc_core.config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
-from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, chat_completions_llm_from_config_dict
+from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, auxiliary_llm_from_config_dict
 from gc_core.utils.prod_auth import AuthConnector
 from gc_core.utils.logging_module import create_run_logger
 from gc_core.utils.logging_module import generate_run_id
@@ -28,7 +28,7 @@ class RunContext:
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
-    - chat_completions_llm — LLM-профиль (chat_completions.auxiliary_llm): summary, finish gate, intent scope, judges;
+    - auxiliary_llm — профиль вспомогательных LLM (summary, finish gate, judges);
     - intent_scope — параметры intent-scope hook (из intent_scope в config);
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/);
@@ -44,7 +44,7 @@ class RunContext:
     logger: logging.Logger
     logging_path: str
     summary_trace_path: str
-    chat_completions_llm: ChatCompletionsLlmConfig
+    auxiliary_llm: ChatCompletionsLlmConfig
     intent_scope: IntentScopeConfig
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
@@ -161,7 +161,7 @@ def create_run_context(
             },
         )
 
-    chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
+    auxiliary_llm = auxiliary_llm_from_config_dict(config_dict)
     workspace = build_execution_workspace(backend, config_dict)
 
     effective_level_provider = level_provider or (
@@ -182,7 +182,7 @@ def create_run_context(
         logger=run_logger,
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
-        chat_completions_llm=chat_completions_llm,
+        auxiliary_llm=auxiliary_llm,
         intent_scope=intent_scope_from_config_dict(config_dict),
         tools_data=tools_data,
         tools_spec=tools_spec,

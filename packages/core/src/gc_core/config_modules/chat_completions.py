@@ -65,25 +65,40 @@ class ChatCompletionsConfig(BaseModel):
     )
 
 
-def _auxiliary_llm_from_params(cc_params: dict[str, Any]) -> ChatCompletionsLlmConfig | None:
-    llm_raw = cc_params.get("auxiliary_llm")
-    if llm_raw is None:
-        llm_raw = cc_params.get("llm")  # legacy YAML-ключ
-    if isinstance(llm_raw, ChatCompletionsLlmConfig):
-        return llm_raw
-    if isinstance(llm_raw, dict):
-        return ChatCompletionsLlmConfig.model_validate(llm_raw)
+def _parse_auxiliary_llm_raw(raw: Any) -> ChatCompletionsLlmConfig | None:
+    if isinstance(raw, ChatCompletionsLlmConfig):
+        return raw
+    if isinstance(raw, dict):
+        return ChatCompletionsLlmConfig.model_validate(raw)
     return None
 
 
-def chat_completions_llm_from_config_dict(
+def _auxiliary_llm_from_params(cc_params: dict[str, Any]) -> ChatCompletionsLlmConfig | None:
+    llm_raw = cc_params.get("auxiliary_llm")
+    if llm_raw is None:
+        llm_raw = cc_params.get("llm")  # legacy YAML-ключ внутри dump-секции
+    return _parse_auxiliary_llm_raw(llm_raw)
+
+
+def auxiliary_llm_from_config_dict(
     config_dict: dict[str, Any] | None,
 ) -> ChatCompletionsLlmConfig:
-    """Собрать LLM-профиль из ``chat_completions.auxiliary_llm`` в config."""
+    """Собрать typed aux-профиль из плоского config_dict.
+
+    Канон flat-ключа: ``auxiliary_llm_params`` (dict рядом с
+    ``chat_completion_kwargs``). YAML-схема по-прежнему
+    ``chat_completions.auxiliary_llm`` → flatten кладёт dump в
+    ``auxiliary_llm_params``.
+
+    Fallback (hand-rolled / старые бенч-оверлеи):
+    ``chat_completions_params.auxiliary_llm`` / ``llm``, затем legacy
+    ``chat_completions_llm``.
+    """
     cfg = config_dict if isinstance(config_dict, dict) else {}
-    raw = cfg.get("chat_completions_llm")
-    if isinstance(raw, ChatCompletionsLlmConfig):
-        return raw
+
+    parsed = _parse_auxiliary_llm_raw(cfg.get("auxiliary_llm_params"))
+    if parsed is not None:
+        return parsed
 
     cc_params = cfg.get("chat_completions_params")
     if isinstance(cc_params, dict):
@@ -91,16 +106,20 @@ def chat_completions_llm_from_config_dict(
         if parsed is not None:
             return parsed
 
+    parsed = _parse_auxiliary_llm_raw(cfg.get("chat_completions_llm"))
+    if parsed is not None:
+        return parsed
+
     return ChatCompletionsLlmConfig()
 
 
 def subagent_role_max_tokens_from_ctx(ctx: Any) -> int:
     """``chat_completions.auxiliary_llm.subagent_role_max_tokens`` — лимит ответа для
-    LLM-генерации роли special_agent (``ctx.chat_completions_llm``, с фоллбэком
+    LLM-генерации роли special_agent (``ctx.auxiliary_llm``, с фоллбэком
     на ``ctx.config_dict`` для двойников без готового профиля)."""
-    chat_completions_llm = getattr(ctx, "chat_completions_llm", None)
-    if not isinstance(chat_completions_llm, ChatCompletionsLlmConfig):
-        chat_completions_llm = chat_completions_llm_from_config_dict(
+    auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
+    if not isinstance(auxiliary_llm, ChatCompletionsLlmConfig):
+        auxiliary_llm = auxiliary_llm_from_config_dict(
             getattr(ctx, "config_dict", None)
         )
-    return chat_completions_llm.subagent_role_max_tokens
+    return auxiliary_llm.subagent_role_max_tokens
