@@ -101,13 +101,16 @@ def nonempty_reasoning_text(msg) -> str | None:
 
     Берём ОДНО из двух, не сумму — как стрим-ассемблер. Иначе нестрим
     (бенч/CLI/server) теряет reasoning-only ответ, который TUI спасает.
+    Пробельный CoT → None; иначе возвращаем уже strip'нутый текст.
     """
     if not isinstance(msg, dict):
         return None
     for key in ("reasoning_content", "reasoning"):
         value = msg.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
     return None
 
 

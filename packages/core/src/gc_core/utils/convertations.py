@@ -94,6 +94,15 @@ def _canon_content_text(content, *, persist_reasoning: bool):
     return content
 
 
+def _nonempty_content(content):
+    """Строковый content после strip; пробельный → None. Не-строки as-is."""
+    if content is None:
+        return None
+    if isinstance(content, str):
+        return content.strip() or None
+    return content
+
+
 def _canonical_message_item(dct_choice, *, text, role, reasoning=None):
     item = {
         "id": "msg_" + get_md5_hash(dct_choice),
@@ -133,7 +142,8 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
             )
         fr = dct_choice.get("finish_reason")
         msg_obj = dct_choice.get("message") or {}
-        content = msg_obj.get("content")
+        # Пробельный content/reasoning схлопываем до пустоты; дальше — те же ветки.
+        content = _nonempty_content(msg_obj.get("content"))
         reasoning_text = nonempty_reasoning_text(msg_obj)
         has_tools = bool(msg_obj.get("tool_calls"))
         # Три флага независимы: не схлопывать в has_payload.
@@ -167,7 +177,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                 _safe_json_for_log(dct),
             )
 
-        persist_field = nonempty_reasoning_text(msg_obj) if persist_reasoning_content else None
+        persist_field = reasoning_text if persist_reasoning_content else None
 
         text_out = None
         item_reasoning = persist_field if persist_reasoning_content else None
@@ -179,7 +189,6 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                     raw, persist_reasoning=persist_reasoning_content
                 )
         elif content:
-            # Пробельный content («\n») — payload: кладём ход, цикл bounce.
             # Think + проза при strip — только проза; think-only content — as-is.
             text_out = _canon_content_text(
                 content, persist_reasoning=persist_reasoning_content
@@ -190,7 +199,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
             else:
                 # Литеральный </think> внутри мысли иначе закрывает обёртку
                 # раньше времени: нежадный strip оставляет хвост как прозу.
-                body = re.sub(r"</think>", "", reasoning_text.strip(), flags=re.IGNORECASE)
+                body = re.sub(r"</think>", "", reasoning_text, flags=re.IGNORECASE)
                 text_out = f"<think>{body}</think>"
                 item_reasoning = None
 
