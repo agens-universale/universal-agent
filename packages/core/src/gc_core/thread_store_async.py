@@ -50,7 +50,6 @@
 from __future__ import annotations
 
 import inspect
-import weakref
 import time
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, runtime_checkable
 
@@ -240,6 +239,27 @@ class SyncThreadStoreAdapter:
 
     # --- чтение ------------------------------------------------------------
 
+    @property
+    def areplace_messages(self):
+        """Замена истории одной операцией — если хранилище её умеет.
+
+        Свойство, а не метод: ``ThreadSession`` решает по ``getattr(port,
+        "areplace_messages", None)``, идти ли заменой или парой ``areset`` +
+        ``aappend_messages``. А ``reset`` по контракту сносит ВЕСЬ тред вместе
+        с ``subagent_trace``: у синхронных хранилищ без ``archive_and_replace``
+        (SDK-встраивания, эталонное хранилище тест-кита) каждая компакция
+        стирала трассу субагентов. ``replace_messages`` из ``ThreadStoreBase``
+        её восстанавливает. Хранилищу без этого метода (структурная реализация
+        мимо базы) — ``None`` и прежний путь.
+        """
+        if not callable(getattr(self._store, "replace_messages", None)):
+            return None
+
+        async def _areplace(system_id: str, thread_id: str, messages: List[Dict[str, Any]]):
+            return self._call("replace_messages", system_id, thread_id, messages)
+
+        return _areplace
+
     async def aload_messages(
         self, system_id: str, thread_id: str
     ) -> List[Dict[str, Any]]:
@@ -348,7 +368,12 @@ def is_async_thread_store(store: Any) -> bool:
 #: «предупреждение один раз» превращалось в «раз за прогон», а медиана
 #: считалась по write-heavy прологу, где порог в 2 мс перешагивает и локальный
 #: файл.
-_ADAPTERS: "weakref.WeakKeyDictionary[Any, Any]" = weakref.WeakKeyDictionary()
+# Адаптер кэшируется НА САМОМ хранилище, а не в модульном WeakKeyDictionary.
+# Слабый ключ не спасал: значение (адаптер) держит хранилище сильной ссылкой в
+# `_store`, и запись из словаря не уходила никогда — из 1000 выброшенных
+# хранилищ в кэше оставались все 1000. Пара «хранилище ↔ адаптер» на атрибуте —
+# обычный цикл, его собирает сборщик мусора вместе с хранилищем.
+_ADAPTER_ATTR = "_gc_thread_store_async_adapter"
 
 
 def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore:
@@ -359,15 +384,17 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
     файла, куда ведёт нынешний ``TypeError: cannot unpack non-iterable
     coroutine object``.
 
-    Адаптер на одно хранилище ОДИН — см. ``_ADAPTERS``.
+    Адаптер на одно хранилище ОДИН — см. ``_ADAPTER_ATTR``.
     """
     if is_async_thread_store(store):
         return store
 
     try:
-        cached = _ADAPTERS.get(store)
-    except TypeError:
-        cached = None                     # не-хешируемое хранилище: без кэша
+        cached = getattr(store, _ADAPTER_ATTR, None)
+    except Exception:                     # экзотический __getattr__: без кэша
+        cached = None
+    if not isinstance(cached, SyncThreadStoreAdapter):
+        cached = None
     if cached is not None:
         # Кэш отдаёт ТОТ ЖЕ адаптер, но приёмник предупреждений мог смениться:
         # первый вызов часто идёт без него, а следующий приходит из контекста
@@ -399,9 +426,9 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
             )
         adapter = SyncThreadStoreAdapter(store, warn=warn)
         try:
-            _ADAPTERS[store] = adapter
-        except TypeError:
-            pass                          # без weakref — просто без кэша
+            setattr(store, _ADAPTER_ATTR, adapter)
+        except Exception:                 # __slots__ / frozen — просто без кэша
+            pass
         return adapter
 
     half_async_named = [

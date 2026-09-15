@@ -11,7 +11,11 @@ from gc_core.utils.logging_module import generate_run_id
 from gc_core.tools import abuild_tools_data
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
-from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
+from gc_core.execution_workspace import (
+    ExecutionWorkspace,
+    aprime_backend_cwd,
+    build_execution_workspace,
+)
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
@@ -175,6 +179,10 @@ async def acreate_run_context(
             logger=prep.run_logger,
             tools_cache=tools_cache,
         )
+    # Рабочий каталог песочницы спрашиваем у окружения ЗДЕСЬ, корутиной: сборка
+    # рабочей области ниже синхронная, а синхронного `exec` у Harbor нет —
+    # раньше отказ глотался, и корнем становился `/` вместо WORKDIR контейнера.
+    await aprime_backend_cwd(prep.backend)
     return _finish_run_context(
         config_dict, prep, tools,
         auth_connector=auth_connector, environment=environment,

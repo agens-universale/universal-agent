@@ -230,6 +230,12 @@ def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
     )
 
 
+#: Промежуточное решение режима deny при недоступном судье: нужен ответ
+#: ЧЕЛОВЕКА. Отдельный код — чтобы драйвер не подставил вместо человека
+#: экстрактор подтверждения из аргументов вызова, то есть от модели.
+JUDGE_UNAVAILABLE_CONFIRM_REQUIRED = "judge_unavailable_confirm_required"
+
+
 def decide_command_execution(
     mode: str,
     judge_result: JudgeResult | None,
@@ -270,21 +276,29 @@ def decide_command_execution(
                 reason="Judge is unavailable; user confirmation is required.",
                 requires_confirmation=True,
             )
-        # C1 Часть 2: при недоступности судьи в deny — пробуем confirm-порт.
-        if confirm_available(ctx):
-            confirmed = request_confirm(
-                title="Проверка команды",
-                question="Судья недоступен. Выполнить команду?",
-                fields=[("mode", normalized_mode)],
-                ctx=ctx,
+        # C1 Часть 2: при недоступности судьи в deny — спросить через confirm-порт.
+        #
+        # Сама функция человека НЕ спрашивает: решение здесь чистое, а ожидание
+        # человека — дело драйвера гарда (`yield OffLoop(...)` в теле ниже).
+        # Раньше `request_confirm` звался прямо отсюда, а функцию тело гарда
+        # зовёт инлайн — в асинхронном пути ожидание человека (в TUI до 600 с)
+        # шло прямо на event loop агента. Протокол теперь двухшаговый, как у
+        # режима ask: сначала «нужно подтверждение», потом решение по ответу.
+        if user_confirmation is True:
+            return ExecutionDecision(
+                allowed=True,
+                decision="executed",
+                reason_code="judge_unavailable_user_confirmed",
+                reason="User confirmed execution after judge was unavailable.",
             )
-            if confirmed:
-                return ExecutionDecision(
-                    allowed=True,
-                    decision="executed",
-                    reason_code="judge_unavailable_user_confirmed",
-                    reason="User confirmed execution after judge was unavailable.",
-                )
+        if user_confirmation is None and confirm_available(ctx):
+            return ExecutionDecision(
+                allowed=False,
+                decision="asked",
+                reason_code=JUDGE_UNAVAILABLE_CONFIRM_REQUIRED,
+                reason="Judge is unavailable; user confirmation is required.",
+                requires_confirmation=True,
+            )
         # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
         return ExecutionDecision(
             allowed=False,
@@ -452,7 +466,13 @@ def moderate_command_execution(
                     risk_flags=decision.risk_flags,
                     error_type=decision.error_type,
                 )
-                if user_confirmation_extractor is not None:
+                # Экстрактор — только для режима ask. В deny подтверждение даёт
+                # человек через порт: иначе подтверждение из аргументов вызова
+                # (то есть от модели) разрешало бы команду при недоступном судье.
+                if (
+                    user_confirmation_extractor is not None
+                    and decision.reason_code != JUDGE_UNAVAILABLE_CONFIRM_REQUIRED
+                ):
                     user_confirmation = user_confirmation_extractor(*args, **kwargs)
                 else:
                     # Единственное, что остаётся блокирующим по существу:

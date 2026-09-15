@@ -211,12 +211,33 @@ class AsyncAgent:
         if self._closed:
             return
         self._closed = True
-        await release_clients()
+        try:
+            await self._aclose_owned_mcp_sessions()
+        finally:
+            await release_clients()
         # Логгер прогона уникален по имени и остаётся в реестре `logging` до
         # конца процесса вместе с открытым файловым хендлером. Ветка объявляет
         # сценарий «много AsyncAgent в одном процессе» — там это линейный рост
         # дескрипторов. Хендлеры, переданные вызывающим, не трогаем.
         release_run_logger(getattr(getattr(self._executor, "_ctx", None), "logger", None))
+
+    async def _aclose_owned_mcp_sessions(self) -> None:
+        """Закрыть MCP-сессии, поднятые при ``create``.
+
+        Дискавери в ``acreate_run_context`` идёт под токеном владельца этого
+        агента, так что закрываем ровно свои — сосед на том же loop не
+        заденет. Без этого долгоживущий stdio (браузер под
+        ``@playwright/mcp``) гасил только ``finally`` прогона: агент без
+        прогона оставлял процессы жить до выхода из процесса.
+        """
+        ctx = getattr(self._executor, "_ctx", None)
+        owner = getattr(ctx, "mcp_session_owner", "") or None
+        if not owner:
+            return
+        from gc_core.agent_executor import _aclose_mcp_and_release
+        from gc_core.mcp_session_owner import set_owner
+
+        await _aclose_mcp_and_release(set_owner(owner))
 
     async def __aenter__(self) -> "AsyncAgent":
         return self

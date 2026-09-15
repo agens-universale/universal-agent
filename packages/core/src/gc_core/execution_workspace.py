@@ -52,6 +52,20 @@ def discover_backend_cwd(backend: FsBackend) -> str:
     return "/"
 
 
+
+async def aprime_backend_cwd(backend: Any) -> None:
+    """Прогреть рабочий каталог окружения до сборки рабочей области.
+
+    Песочнице (Harbor) рабочий каталог надо спросить у самого окружения, а это
+    сеть — корутина. Сборка рабочей области синхронная, поэтому ответ получаем
+    заранее: после прогрева ``default_cwd()`` отдаёт его из кэша. Бэкенду без
+    такого метода делать нечего.
+    """
+    prime = getattr(backend, "aprime_default_cwd", None)
+    if callable(prime):
+        await prime()
+
+
 def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:
     if not isinstance(config, dict):
         return None

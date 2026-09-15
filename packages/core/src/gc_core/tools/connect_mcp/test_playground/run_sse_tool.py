@@ -42,7 +42,7 @@ def _load_config():
         return yaml.safe_load(f)
 
 
-async def amain():
+async def arun_playground():
     config = _load_config()
     servers_cfg = config.get("mcp-servers") or {}
     mcp_meta = config.get("mcp-meta") or {}
@@ -135,7 +135,7 @@ def main() -> None:
     """Точка входа: один прогон, один loop."""
     import asyncio
 
-    asyncio.run(amain())
+    asyncio.run(arun_playground())
 
 
 if __name__ == "__main__":

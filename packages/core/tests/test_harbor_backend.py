@@ -581,3 +581,48 @@ async def test_every_exec_entry_funnels_through_one_command_builder(loop_in_thre
             backend._python_command("print(1)"), cwd=None, env=None
         )
     ]
+
+
+async def test_fs_helpers_use_raw_channel(loop_in_thread):
+    """Помощники ФС — сырым каналом, и их проверки возвращают bool.
+
+    Тест из develop; вошёл вместе с починкой #5 ревью: у `exists`, `lexists`
+    и `is_symlink` не хватало скобок у `await` — `.return_code` брался у
+    корутины, и любой прогон в Harbor падал на первой же проверке файла.
+    Ни один тест этих методов не исполнял: фейк тест-кита — отдельный класс.
+    """
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    assert await backend.exists("/work/a.txt") is True
+    assert env.calls == ["test -e /work/a.txt"]
+    assert await backend.lexists("/work/a.txt") is True
+    assert await backend.is_symlink("/work/a.txt") is True
+    env.calls.clear()
+    await backend.walk_entries("/work")
+    assert env.calls[-1].startswith("find -H /work")
+    assert not any(".bashrc" in c for c in env.calls)
+
+
+async def test_workspace_root_is_the_container_workdir(loop_in_thread):
+    """Корень рабочей папки — WORKDIR контейнера, а не `/`.
+
+    Синхронный `discover_backend_cwd` спрашивал `exec("pwd")`, а синхронного
+    `exec` у Harbor больше нет: отказ глотался, и корнем становился `/`.
+    Теперь WORKDIR прогревается корутиной при сборке контекста.
+    """
+    from gc_core.execution_workspace import aprime_backend_cwd, build_execution_workspace
+
+    class _PwdEnv(FakeEnv):
+        async def exec(self, command, **kw):
+            self.calls.append(command)
+            if command == "pwd":
+                return FakeExecResult(stdout="/testbed\n", return_code=0)
+            return FakeExecResult(stdout=f"ran:{command}", return_code=0)
+
+    env = _PwdEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    assert backend.default_cwd() is None
+    await aprime_backend_cwd(backend)
+    assert backend.default_cwd() == "/testbed"
+    assert env.calls == ["pwd"], "pwd — внутренний вызов: сырой канал, без профиля"
+    assert build_execution_workspace(backend, {}).root == "/testbed"

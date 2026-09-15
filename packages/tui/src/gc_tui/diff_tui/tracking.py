@@ -172,7 +172,7 @@ class TrackingFsBackend:
         except ValueError:
             return None
 
-    async def _atrack_text_mutation(self, path: str) -> None:
+    async def _journal_mutation_off_loop(self, path: str) -> None:
         """Снимок и journal перед записью — в потоке, не на loop.
 
         Внутри ``_track_text_mutation`` живёт ``git_ops.check_ignore``, то есть
@@ -364,16 +364,16 @@ class TrackingFsBackend:
         )
 
     async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        await self._atrack_text_mutation(path)
+        await self._journal_mutation_off_loop(path)
         await self._inner.write(path, content, encoding=encoding)
 
     async def write_bytes(self, path: str, data: bytes) -> None:
         if not classify_content_from_sample(path, data[:BINARY_SAMPLE_BYTES]).is_binary:
-            await self._atrack_text_mutation(path)
+            await self._journal_mutation_off_loop(path)
         await self._inner.write_bytes(path, data)
 
     async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        await self._atrack_text_mutation(path)
+        await self._journal_mutation_off_loop(path)
         await self._inner.append(path, content, encoding=encoding)
 
     async def copy(self, src: str, dst: str) -> None:
@@ -392,6 +392,10 @@ class TrackingFsBackend:
 
     def default_cwd(self) -> Optional[str]:
         return self._inner.default_cwd()
+
+    async def aprime_default_cwd(self) -> Optional[str]:
+        prime = getattr(self._inner, "aprime_default_cwd", None)
+        return await prime() if callable(prime) else None
 
     async def exists(self, path: str) -> bool:
         return await self._inner.exists(path)

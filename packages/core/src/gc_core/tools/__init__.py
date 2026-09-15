@@ -277,8 +277,12 @@ async def abuild_tools_data(
     tools_data = _collect_local_tools_data(
         config_dict, os_backend=os_backend, skills_registry=skills_registry
     )
+    # `os_backend` обязателен: без него `runs_in_agent_runtime` считает любой
+    # MCP-сервер «своим», и `execute_on: os_backend` молча исполнялся на хосте,
+    # мимо песочницы. develop передаёт его здесь же; при переводе аргумент
+    # потерялся.
     mcp_tools_data, mcp_status = await aget_mcp_tools_data_for_config(
-        config_dict, on_progress, tools_cache=tools_cache
+        config_dict, on_progress, tools_cache=tools_cache, os_backend=os_backend
     )
     return _finish_tools_data(
         tools_data, mcp_tools_data, mcp_status, config_dict,

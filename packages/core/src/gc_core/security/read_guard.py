@@ -10,12 +10,14 @@ path-policy). Контур 2 (sensitivity scan) и Контур 3 (anti-exfiltra
 """
 from __future__ import annotations
 
+import functools
 import fnmatch
 import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from gc_core.security.dual_wrapper import OffLoop
 from gc_core.security.confirm_port import request_confirm
 from gc_core.security.path_policy import audit_policy_decision, resolve_tool_context, _extract_named_value, _tool_name
 from gc_core.security.protected_paths import classify_path, protected_paths, protection_enabled
@@ -404,7 +406,8 @@ def enforce_read_guard(
                     return (yield)
                 if mode == "ask":
                     _rg_path = exc.error.get("path", candidate_path)
-                    confirmed = request_confirm(
+                    confirmed = (yield OffLoop(functools.partial(
+                        request_confirm,
                         title="Защита чтения",
                         question=f"Разрешить чтение вне периметра проекта: {_rg_path}?",
                         fields=[
@@ -415,7 +418,7 @@ def enforce_read_guard(
                         ],
                         ctx=context.ctx,
                         decision_key=f"read:{_rg_path}",
-                    )
+                    )))
                     if confirmed:
                         audit_policy_decision(
                             context,

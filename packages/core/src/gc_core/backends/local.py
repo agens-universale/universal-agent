@@ -598,12 +598,81 @@ def _close_transport(proc) -> None:
 
 
 def _release_drain(proc, tasks) -> None:
-    """Отпустить дренаж дочитывать в фоне и закрыть транспорт, когда дочитает."""
+    """Команда вернулась, а её трубы ещё держит фоновый потомок.
+
+    ``npm run dev &``, ``uvicorn … &``, ``python -m http.server … &`` —
+    потомок унаследовал stdout/stderr и пишет в них после того, как тул
+    вернул результат. Кто-то обязан читать эти трубы весь остаток его жизни:
+    непрочитанная труба встаёт на write примерно после 64 КиБ, а закрытая
+    роняет процесс на первой же записи (EPIPE).
+
+    Раньше дочитывали задачи на loop ЭТОГО хода. В TUI каждый ход — свой
+    ``asyncio.run``: на выходе loop отменял их и закрывал трубы, и сервер,
+    поднятый агентом, умирал на следующей записи в лог — агент говорит
+    «готово», а порт не отвечает. На develop трубы дочитывали daemon-потоки,
+    жившие весь процесс; здесь то же самое. Захваченное к этому моменту уже
+    опубликовано в результат, дочитываемое выбрасывается.
+
+    Механика: дублируем дескриптор трубы, отдаём копию daemon-потоку, а
+    транспорт закрываем — loop хода больше ничего не держит, а труба жива,
+    пока её читает поток. Прямой потомок к этому моменту завершён (его код
+    возврата известен), поэтому закрытие транспорта никого не убивает. На
+    Windows дескрипторы устроены иначе — там прежнее поведение.
+    """
     live = {t for t in tasks if not t.done()}
     if not live:
         _close_transport(proc)
         return
+    if os.name == "nt":
+        _release_drain_on_loop(proc, live)
+        return
+    for task in live:
+        task.cancel()
+    transport = getattr(proc, "_transport", None)
+    if transport is not None:
+        for fd_num in (1, 2):
+            try:
+                pipe_transport = transport.get_pipe_transport(fd_num)
+                pipe = pipe_transport.get_extra_info("pipe") if pipe_transport else None
+                dup_fd = os.dup(pipe.fileno()) if pipe is not None else None
+            except (AttributeError, OSError, ValueError):
+                dup_fd = None
+            if dup_fd is None:
+                continue
+            threading.Thread(
+                target=_drain_fd_to_eof,
+                args=(dup_fd,),
+                name="gc-bg-pipe-drain",
+                daemon=True,
+            ).start()
+    _close_transport(proc)
 
+
+def _drain_fd_to_eof(fd: int) -> None:
+    """Читать и выбрасывать, пока пишущий конец не закроется.
+
+    Сначала — блокирующий режим. asyncio переводит трубу в O_NONBLOCK, а этот
+    флаг принадлежит открытому описанию файла и ОБЩИЙ у копии после ``dup``:
+    без этой строки первый же ``os.read`` отдавал EAGAIN, поток принимал его
+    за конец и закрывал копию — труба снова оставалась без читателя.
+    Оригинал к этому моменту снят с чтения loop'а и закрывается, так что
+    смена режима его не касается.
+    """
+    try:
+        os.set_blocking(fd, True)
+        while os.read(fd, _READ_CHUNK):
+            pass
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def _release_drain_on_loop(proc, live) -> None:
+    """Прежний путь (Windows): дочитывают задачи на loop хода."""
     _BACKGROUND_DRAINS.update(live)
 
     def _done(task: "asyncio.Task") -> None:

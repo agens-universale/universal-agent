@@ -130,6 +130,8 @@ class HarborBackend(FsBackend):
         # Инициализация окружения для канала МОДЕЛИ (`aexec`): None — сырой
         # shell, "bashrc" — встроенный bootstrap, иначе свой префикс.
         self.exec_init = exec_init
+        # WORKDIR контейнера, узнанный `aprime_default_cwd`; до того — None.
+        self._discovered_cwd: Optional[str] = None
 
     async def _aawait(self, coro):
         """То же из асинхронного кода — не занимая ни поток, ни event loop.
@@ -390,10 +392,10 @@ class HarborBackend(FsBackend):
 
     # --- stat: native BaseEnvironment handles where they exist, shell otherwise ---
     async def exists(self, path: str) -> bool:
-        return await self._afs_exec(f"test -e {shlex.quote(path)}").return_code == 0
+        return (await self._afs_exec(f"test -e {shlex.quote(path)}")).return_code == 0
 
     async def lexists(self, path: str) -> bool:
-        return await self._afs_exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}").return_code == 0
+        return (await self._afs_exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}")).return_code == 0
 
     async def is_file(self, path: str) -> bool:
         return await self._aawait(self._env.is_file(path))
@@ -402,7 +404,7 @@ class HarborBackend(FsBackend):
         return await self._aawait(self._env.is_dir(path))
 
     async def is_symlink(self, path: str) -> bool:
-        return await self._afs_exec(f"test -L {shlex.quote(path)}").return_code == 0
+        return (await self._afs_exec(f"test -L {shlex.quote(path)}")).return_code == 0
 
     async def realpath(self, path: str) -> str:
         res = await self._afs_exec(f"readlink -f {shlex.quote(path)}")
@@ -543,7 +545,30 @@ class HarborBackend(FsBackend):
         return path.startswith("/")
 
     def default_cwd(self) -> Optional[str]:
-        return None  # container's own workdir
+        # WORKDIR контейнера: узнаётся один раз при сборке контекста
+        # (`aprime_default_cwd`), до того — None.
+        return self._discovered_cwd
+
+    async def aprime_default_cwd(self) -> Optional[str]:
+        """Узнать WORKDIR контейнера один раз — корутиной, сырым каналом.
+
+        Раньше рабочую папку спрашивал синхронный ``discover_backend_cwd``
+        через ``exec("pwd")``. Синхронного ``exec`` у Harbor больше нет,
+        умолчание порта отказывает, отказ глотался — и корнем рабочей папки
+        становился ``/`` вместо WORKDIR. Синхронных сборщиков рабочей области
+        восемь (включая конструктор ``State``), каскадом в корутины их не
+        переводим: как и пробы возможностей, значение прогревается один раз
+        при сборке контекста и дальше отдаётся из кэша.
+        """
+        if self._discovered_cwd is None:
+            try:
+                res = await self._aexec_impl("pwd")
+            except Exception:  # noqa: BLE001 — окружение может быть недоступно
+                return None
+            lines = (res.stdout or "").strip().splitlines()
+            if res.return_code == 0 and lines and lines[0].startswith("/"):
+                self._discovered_cwd = lines[0]
+        return self._discovered_cwd
 
     # --- file write/edit (native transfer) ---
     async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
