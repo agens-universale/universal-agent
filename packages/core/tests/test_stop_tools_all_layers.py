@@ -1,5 +1,10 @@
-"""stop_tools режет слитый набор, не только builtin."""
-from gc_core.tools import build_tools_data
+"""stop_tools режет слитый набор, не только builtin.
+
+build_tools_data импортируется внутри тестов: autouse-фикстура из
+test_builtin_tool_names.py чистит gc_core.tools* из sys.modules, поэтому
+модульный импорт держал бы устаревший объект, а monkeypatch по строке
+патчил бы заново импортированный модуль — фейк MCP не срабатывал.
+"""
 from gc_core.tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES
 
 
@@ -21,6 +26,8 @@ def test_stop_tools_removes_skills_and_mcp_from_spec(monkeypatch):
             {"jira": {"status": "connected"}},
         )
 
+    from gc_core.tools import build_tools_data
+
     monkeypatch.setattr("gc_core.tools.get_mcp_tools_data", fake_mcp)
     registered: list[str] = []
     cfg = {
@@ -41,6 +48,8 @@ def test_stop_tools_removes_skills_and_mcp_from_spec(monkeypatch):
 
 
 def test_global_stop_is_not_restored_by_subagent_core(monkeypatch):
+    from gc_core.tools import build_tools_data
+
     monkeypatch.setattr(
         "gc_core.tools.get_mcp_tools_data",
         lambda *_a, **_k: ({}, {}),
