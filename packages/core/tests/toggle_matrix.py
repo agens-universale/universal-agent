@@ -419,6 +419,7 @@ NOT_IN_MATRIX = {
     # Одиночные потолки, приехавшие с develop: меняют размер запроса, а не путь
     # исполнения. Асинхронность на них не завязана.
     "agent.walk_output_max_chars": "потолок обхода бэкенда; сценарий не обходит ФС",
+    "agent.harbor_exec_init": "только Harbor: префикс канала модели в песочнице; сценарии матрицы локальные, покрыт test_harbor_backend",
     "chat_completions.llm.subagent_role_max_tokens": "потолок запроса роли субагента",
     "project_memory.compaction_max_tokens": "потолок компакции проектной памяти",
 

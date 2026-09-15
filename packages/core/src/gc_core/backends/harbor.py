@@ -37,6 +37,54 @@ from gc_core.utils.file_text import (
 from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
 
 
+# Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
+# иначе пропускает bashrc (``[ -z "$PS1" ] && return``). Потоки профиля
+# глушатся, чтобы conda-хуки не попали в stdout/stderr команды; ``set +e``
+# после source — чтобы ``set -e`` / ``return`` в rc не подменили код возврата
+# пользовательской команды. Имя окружения не зашито. Из develop, как есть.
+_BASHRC_EXEC_INIT = """\
+PS1=${PS1-dummy}
+. /etc/profile >/dev/null 2>&1 || true
+[ -f "${HOME}/.bashrc" ] && . "${HOME}/.bashrc" >/dev/null 2>&1 || true
+set +e
+"""
+
+
+def _env_assignment_prefix(env: Optional[dict]) -> str:
+    if not env:
+        return ""
+    assignments = " ".join(
+        f"{k}={shlex.quote(str(v))}" for k, v in env.items()
+    )
+    return f"env {assignments} "
+
+
+def build_harbor_shell_command(
+    command: str,
+    *,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+    exec_init: Optional[str] = None,
+) -> str:
+    """Строка, которую Harbor ``environment.exec`` обернёт в ``bash -c``.
+
+    С инициализацией: ``cd cwd && env K=V bash -c <init+command>``. Без неё
+    команда остаётся сырой. ``cd`` стоит снаружи ``env``, чтобы ``env_vars`` не
+    проглотили cwd бэкенда (R7).
+    """
+    if exec_init:
+        init = _BASHRC_EXEC_INIT if exec_init == "bashrc" else exec_init.rstrip() + "\n"
+        body = "bash -c " + shlex.quote(init + command)
+    else:
+        body = command
+    prefix = _env_assignment_prefix(env)
+    if prefix:
+        body = prefix + body
+    if cwd:
+        return f"cd {shlex.quote(cwd)} && {body}"
+    return body
+
+
 def _build_find_walk_command(
     path: str,
     *,
@@ -73,11 +121,15 @@ class HarborBackend(FsBackend):
         *,
         exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
+        exec_init: Optional[str] = None,
     ) -> None:
         self._env = environment
         self._loop = loop
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
+        # Инициализация окружения для канала МОДЕЛИ (`aexec`): None — сырой
+        # shell, "bashrc" — встроенный bootstrap, иначе свой префикс.
+        self.exec_init = exec_init
 
     async def _aawait(self, coro):
         """То же из асинхронного кода — не занимая ни поток, ни event loop.
@@ -144,18 +196,6 @@ class HarborBackend(FsBackend):
         return scope(on_output), accumulators
 
     # --- shell ---
-    def _full_command(
-        self, command: str, *, cwd: Optional[str], env: Optional[dict]
-    ) -> str:
-        """Команда с env-префиксом и cd. Общая для обеих форм exec."""
-        # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
-        if env:
-            prefix = "env " + " ".join(
-                f"{k}={shlex.quote(str(v))}" for k, v in env.items()
-            )
-            command = f"{prefix} {command}"
-        return f"cd {shlex.quote(cwd)} && {command}" if cwd else command
-
     @staticmethod
     def _timed_out_result(streamed: dict, cap: int) -> ExecResult:
         """Таймаут = частичное выполнение: то, что команда успела напечатать.
@@ -193,15 +233,16 @@ class HarborBackend(FsBackend):
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
+        exec_init: Optional[str] = None,
     ) -> ExecResult:
-        """Асинхронный двойник :meth:`_exec`.
+        """Транспорт. ``exec_init`` — только для канала модели (``aexec``).
 
-        Отличается ровно ожиданием: сборка команды, захват вывода и разбор
-        результата общие. Второй копии этих правил быть не должно — иначе
-        синхронный и асинхронный вызовы начали бы запускать разные команды и
-        по-разному читать таймаут.
+        Сборка строки — ``build_harbor_shell_command``. Внутренние помощники,
+        обход, argv и python зовут транспорт без инициализации: сырой канал.
         """
-        full = self._full_command(command, cwd=cwd, env=env)
+        full = build_harbor_shell_command(
+            command, cwd=cwd, env=env, exec_init=exec_init
+        )
         cap = self._capture_cap(capture_max_chars)
         scope, streamed = self._output_capture(cap)
         try:
@@ -244,6 +285,23 @@ class HarborBackend(FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
+        """Shell модели: с инициализацией окружения, если она задана."""
+        return await self._aexec_impl(
+            command, cwd=cwd, timeout=timeout, env=env,
+            capture_max_chars=capture_max_chars,
+            exec_init=self.exec_init,
+        )
+
+    async def aexec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        """POSIX без профиля: помощники ФС, grep, пробы, MCP."""
         return await self._aexec_impl(
             command, cwd=cwd, timeout=timeout, env=env,
             capture_max_chars=capture_max_chars,

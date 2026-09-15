@@ -296,6 +296,30 @@ class TrackingFsBackend:
             )
         )
 
+    async def aexec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> Any:
+        """Сырой канал тоже меняет дерево (mkdir/mktemp/rm внутренних
+        помощников), поэтому дельта журналируется так же, как у ``aexec``."""
+        from gc_core.backends.async_protocol import arun_backend_exec_raw
+
+        return await self._atrack_shell_delta(
+            lambda: arun_backend_exec_raw(
+                self._inner,
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
+            )
+        )
+
     async def aexec_argv(
         self,
         argv: list,

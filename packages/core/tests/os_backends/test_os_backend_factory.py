@@ -42,8 +42,26 @@ def test_resolve_harbor_with_env_and_loop():
     env = object()
     loop = asyncio.new_event_loop()
     try:
-        be = resolve_os_backend({"os_backend": "harbor"}, environment=env, loop=loop)
+        be = resolve_os_backend(
+            {"os_backend": "harbor", "harbor_exec_init": "bashrc"},
+            environment=env,
+            loop=loop,
+        )
         assert isinstance(be, HarborBackend)
+        assert be.exec_init == "bashrc"
+    finally:
+        loop.close()
+
+
+def test_resolve_harbor_rejects_non_string_exec_init():
+    loop = asyncio.new_event_loop()
+    try:
+        with pytest.raises(ValueError, match="harbor_exec_init"):
+            resolve_os_backend(
+                {"os_backend": "harbor", "harbor_exec_init": ["bashrc"]},
+                environment=object(),
+                loop=loop,
+            )
     finally:
         loop.close()
 

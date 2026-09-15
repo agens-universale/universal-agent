@@ -57,7 +57,11 @@ async def _aexec(
     timeout: int,
     env: Optional[dict] = None,
 ):
-    return await _port(backend).aexec(command, timeout=timeout, env=env)
+    # Сырой канал: пробам профиль образа вреден — conda-хуки пишут в stdout, а
+    # `set -e` в rc подменяет код возврата. У develop так же.
+    from gc_core.backends.async_protocol import arun_backend_exec_raw
+
+    return await arun_backend_exec_raw(backend, command, timeout=timeout, env=env)
 
 
 async def _arun_argv(

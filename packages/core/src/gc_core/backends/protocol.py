@@ -473,6 +473,22 @@ class FsBackend(ABC):
              capture_max_chars: Optional[int] = None) -> ExecResult:
         raise SyncExecNotSupportedError(_sync_exec_message(self, "exec"))
 
+    def exec_raw(self, command: str, *, cwd: Optional[str] = None,
+                 timeout: Optional[int] = None,
+                 env: Optional[dict] = None,
+                 capture_max_chars: Optional[int] = None) -> ExecResult:
+        """Механический POSIX: без инициализации окружения образа.
+
+        Вход для ЧУЖИХ синхронных реализаций, как и ``exec``. Канал модели
+        может предварять команду профилем (Harbor); внутренние вызовы — пробы,
+        grep, обход, MCP — идут этим каналом. У хоста профиля нет, поэтому
+        умолчание — тот же ``exec``.
+        """
+        kwargs = {"cwd": cwd, "timeout": timeout, "env": env}
+        if capture_max_chars is not None:
+            kwargs["capture_max_chars"] = capture_max_chars
+        return self.exec(command, **kwargs)
+
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
                   timeout: Optional[int] = None,
@@ -485,20 +501,23 @@ class FsBackend(ABC):
         POSIX (e.g. local Windows cmd.exe) must override with a shell-less
         implementation.
 
+        Goes through ``exec_raw``: argv is a program, not a model shell command.
+
         ``capture_max_chars=None`` → ``exec_output_capture_max_chars`` (tool
         trace, 40k/поток). Internal post-processed calls (native grep, walk) pass
         the walk ceiling (~50M).
         """
         command = argv_to_posix_command(argv, stdin=stdin)
-        if capture_max_chars is None:
-            return self.exec(command, cwd=cwd, timeout=timeout, env=env)
-        return self.exec(
-            command,
-            cwd=cwd,
-            timeout=timeout,
-            env=env,
-            capture_max_chars=capture_max_chars,
-        )
+        kwargs = {"cwd": cwd, "timeout": timeout, "env": env}
+        if capture_max_chars is not None:
+            kwargs["capture_max_chars"] = capture_max_chars
+        # Откат на `exec`, как у develop: чужой бэкенд может не наследовать
+        # FsBackend (утиная реализация) и `exec_raw` не знать — у хоста профиля
+        # нет, каналы совпадают.
+        fn = getattr(self, "exec_raw", None)
+        if not callable(fn):
+            fn = self.exec
+        return fn(command, **kwargs)
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
