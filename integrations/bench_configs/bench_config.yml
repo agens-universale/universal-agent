@@ -31,8 +31,10 @@ agent_kwargs:
         enable_thinking: false
       tool_choice: auto
     auxiliary_llm_params:
-      max_tokens: 8192                 # aux LLM: summary / intent-scope
-      judge_max_tokens: 10000          # finish-gate / command_moderation
+      max_tokens: 24576                # aux LLM: summary / intent-scope (потолок)
+      judge_max_tokens: 24576          # finish-gate / command_moderation (запас под мысль модели)
+      # {} = schema default (без vendor-ключей). Не наследует и не гасит agent kwargs.
+      # Если у агента thinking вкл — задайте anti-thinking явно (см. ua_qwen / dsv4).
       completion_kwargs: {}
 
     # --- agent loop ---

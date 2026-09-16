@@ -17,7 +17,7 @@ Typical total size inside tags **2500–4000** characters; up to **~6000** if ma
 ## Output
 
 - **Only** one XML document: `<summary>` with **all** Required structure child tags (exact snake_case names). No fences, no prose headers, no text outside `<summary>`.
-- No chain-of-thought or transcript paste.
+- **No reasoning:** Do not write chain-of-thought, analysis prose, `<think>…</think>`, or step-by-step commentary. No transcript paste. Emit only the XML artifact.
 - Keep exact paths, URLs, commands, flags, names, dates when they matter.
 - For code/file references keep full absolute paths as in tool calls/results (e.g. `/home/.../src/backends/local.py:84`), never basename-only (`local.py`). Same for `recent_artifacts` and facts that name modules/files.
 - In `open_tasks`, first lines: `mode: planning-only` or `mode: execution` (default `planning-only` if unclear).

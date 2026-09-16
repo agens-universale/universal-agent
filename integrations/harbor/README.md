@@ -105,8 +105,10 @@ agent_kwargs:
       temperature: 1.0
       top_p: 0.95
       top_k: 40
-    auxiliary_llm_params:               # summary / finish-gate / judges (dict)
-      max_tokens: 8192
+    auxiliary_llm_params:               # summary / finish-gate / judges (отдельно от агента)
+      max_tokens: 24576
+      # Schema default — {}. Vendor-ключи (enable_thinking) только если бэкенд их знает;
+      # иначе OpenAI/Azure → 400. Когда у агента thinking вкл — гасите явно здесь.
       completion_kwargs:
         chat_template_kwargs:
           enable_thinking: false
@@ -118,6 +120,9 @@ agent_kwargs:
   в профиль не пишутся.
 - `completions_url`/`model` runtime-авторитетны (из `api_base`/`model`) — профильный override
   их не перебивает.
+- **Два профиля сэмплинга:** `chat_completion_kwargs` — tool-цикл агента (thinking обычно вкл);
+  `auxiliary_llm_params.completion_kwargs` — summary / finish-gate / judges (thinking обычно выкл).
+  В harbor пишите **плоский** `auxiliary_llm_params`, не `chat_completions_params.auxiliary_llm`.
 
 ## Замечания
 

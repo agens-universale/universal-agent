@@ -44,9 +44,9 @@ agent_kwargs:
     # Вспомогательные LLM (summary, finish-gate, command_moderation, intent-scope).
     # Плоский ключ рядом с chat_completion_kwargs; completion_kwargs мержится ПОВЕРХ агентских.
     auxiliary_llm_params:
-      max_tokens: 8192                     # лимит ответа: summary / intent-scope
-      judge_max_tokens: 10000              # лимит ответа: finish-gate / command_moderation
-      subagent_role_max_tokens: 4096       # лимит ответа: special_agent role draft; субагенты выкл
+      max_tokens: 24576                     # лимит ответа: summary / intent-scope (потолок)
+      judge_max_tokens: 24576              # лимит ответа: finish-gate / command_moderation
+      subagent_role_max_tokens: 24576       # лимит ответа: special_agent role draft; субагенты выкл
       completion_kwargs:
         separate_reasoning: false          # aux: не ждать reasoning_content
         chat_template_kwargs:

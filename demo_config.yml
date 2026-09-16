@@ -156,12 +156,13 @@ backend:
 # Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:
   auxiliary_llm:
-    max_tokens: 8192
-    # Судьи (command_moderation, finish_gate / text_answer): запас под обязательный CoT/<think>.
-    judge_max_tokens: 10000
+    max_tokens: 24576
+    # Судьи (command_moderation, finish_gate / text_answer): запас под мысль,
+    # если бэкенд думает без явного enable_thinking (TUI не умеет гасить aux).
+    judge_max_tokens: 24576
     # Генерация роли special_agent (subagent:subagent_special_agent) — одноразовый
-    # системный промпт, без бюджета под CoT.
-    subagent_role_max_tokens: 4096
+    # системный промпт; потолок с запасом под мысль модели.
+    subagent_role_max_tokens: 24576
     completion_kwargs:
       separate_reasoning: false
       chat_template_kwargs:
@@ -365,7 +366,7 @@ project_memory:
   max_chars: 10000
   max_append_chars: 3000
   # Лимит ответа LLM при append-overflow компакции project_memory.md.
-  compaction_max_tokens: 4000
+  compaction_max_tokens: 16384
 
 # tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
 # strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.

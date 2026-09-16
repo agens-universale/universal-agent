@@ -22,4 +22,6 @@ When naming files/modules in any register, keep full absolute paths as in the di
 
 ## Output
 
+**No reasoning:** Do not write chain-of-thought, analysis prose, `<think>…</think>`, or step-by-step commentary. Emit **only** the register update artifact below (no preface).
+
 {{MEMORY_PATCH_WM_REGISTERS}}

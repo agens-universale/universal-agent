@@ -148,7 +148,7 @@ def build_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     if _should_enable(config_dict):
         max_tokens = getattr(getattr(ctx, "auxiliary_llm", None), "max_tokens", None)
         if not isinstance(max_tokens, int) or max_tokens < 1:
-            max_tokens = 8192
+            max_tokens = 24576
 
         try:
             prompt_template = _load_limit_summary_prompt()

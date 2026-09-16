@@ -27,8 +27,8 @@ backend:
 # Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:
   auxiliary_llm:
-    max_tokens: 8192
-    judge_max_tokens: 10000
+    max_tokens: 24576
+    judge_max_tokens: 24576
     completion_kwargs:
       reasoning_effort: none
 
